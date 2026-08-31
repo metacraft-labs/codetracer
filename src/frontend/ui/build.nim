@@ -1,4 +1,5 @@
 import ui_imports, ../[types, communication], build_location_parser, auto_hide, errors
+import ../lib/ansi_html
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — IsoNim is the primary renderer.
@@ -280,13 +281,14 @@ proc autoDismissBuildPanel*() =
 
 # AnsiUp converts ANSI escape sequences (e.g. from GCC, cargo, Go) to HTML
 # <span> elements with inline styles. The library is already bundled via webpack.
-var newAnsiUp {.importcpp: "new AnsiUp".}: proc: js
-let buildAnsiUp {.exportc.} = newAnsiUp()
+# The instance comes from `lib/ansi_html` because that is where the escaping
+# this line depends on is stated and asserted.
+let buildAnsiUp {.exportc.} = ansi_html.newEscapingAnsiUp()
 
 proc ansiToHtml(raw: cstring): cstring =
   ## Convert a single line of build output from raw text (possibly containing
   ## ANSI color codes) to an HTML string safe for use with `verbatim`.
-  cast[cstring](buildAnsiUp.ansi_to_html(raw))
+  ansi_html.ansiToHtml(buildAnsiUp, raw)
 
 proc focusBuild*(self: BuildComponent) =
   ## Activate the build pane in the GL layout using the component mapping.

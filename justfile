@@ -1231,7 +1231,8 @@ test-frontend-js:
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test"' EXIT
+  html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$html_sinks_probe"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1286,6 +1287,18 @@ test-frontend-js:
   # The file itself is the answer; this line is what keeps it answered.
   echo "Running Monaco markdown sanitizer reachability tests..."
   node --no-warnings --experimental-loader ./src/frontend/tests/css-loader.mjs src/frontend/tests/monacoMarkdownSanitizer.test.mjs
+  echo ""
+  # The renderer's three non-Monaco `innerHTML` sinks: a workspace path in the
+  # file-conflict dialog, a context-menu label, and a recorded program's own
+  # output through ansi_up.  The probe is compiled WITHOUT `-d:nodejs` on
+  # purpose -- with it, karax's `kdom` binds to an in-memory DOM emulation and
+  # a test of what `innerHTML` does would be a test of the emulation.  Without
+  # it the code reaches for browser globals, which the `.mjs` supplies from
+  # jsdom, so the parser under test is a real one.
+  echo "Running renderer HTML sink tests..."
+  nim -d:chronicles_enabled=off -d:ctRenderer \
+    --out:"$html_sinks_probe" js src/frontend/tests/html_sinks_probe.nim
+  node --no-warnings src/frontend/tests/htmlSinks.test.mjs "$html_sinks_probe"
 
 test-e2e *args:
   #!/usr/bin/env bash

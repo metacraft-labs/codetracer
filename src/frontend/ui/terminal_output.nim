@@ -27,8 +27,12 @@ from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_terminal_output_view import
   mountIsoNimTerminalOutput
 
-var newAnsiUp* {.importcpp: "new AnsiUp".}: proc: js
-let ansiUp {.exportc.} = newAnsiUp()
+from ../lib/ansi_html import newEscapingAnsiUp, ansiToHtml
+
+# A program's stdout/stderr goes through this and into `innerHTML`.  The
+# escaping that makes that safe is stated in `lib/ansi_html`, not left to the
+# library's constructor default.
+let ansiUp {.exportc.} = newEscapingAnsiUp()
 
 # Module-level VM/store/component slots so the IsoNim mount and the
 # legacy event-bus handlers can find each other across calls. Mirrors
@@ -203,7 +207,7 @@ proc cacheAnsiToHtmlLines(self: TerminalOutputComponent, eventList: seq[ProgramE
     var lines: seq[cstring] = @[]
 
     if content.len > 0:
-      let html = cast[cstring](ansiUp.ansi_to_html(content))
+      let html = ansiToHtml(ansiUp, content)
       let matches = html.matchAll(regExPattern)
       var startIndex = 0
 

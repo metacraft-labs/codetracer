@@ -581,6 +581,24 @@ proc setupDragToPinListeners(layout: GoldenLayout) =
   """.}
 
 
+proc mountComponentContainer*(host: Element, componentId: cstring) =
+  ## Replace `host`'s children with the single `.component-container` div a
+  ## GoldenLayout component mounts into.
+  ##
+  ## Built with `createElement` + `setAttribute` rather than
+  ## `innerHTML = fmt"<div id={componentId} class=...>"`, which is what this
+  ## used to be.  `componentId` is a panel label, and the editor registration's
+  ## labels are native absolute paths — interpolated into an UNQUOTED `id=`
+  ## attribute, a path containing a space and `onmouseover=` became an event
+  ## handler on this div.  `setAttribute` cannot leave the attribute it is
+  ## given, whatever the value contains.
+  host.innerHTML = cstring""
+  let inner = kdom.document.createElement(cstring"div")
+  inner.setAttribute(cstring"id", componentId)
+  inner.setAttribute(cstring"class", cstring"component-container")
+  host.appendChild(inner)
+
+
 proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
   ## Build the GoldenLayout stack-header dropdown directly.
   ##
@@ -593,7 +611,7 @@ proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
   template appendDropdownItem(label: cstring, body: untyped) =
     let item = kdom.document.createElement("div")
     item.class = cstring"layout-dropdown-node ct-menu-item"
-    item.innerHTML = label
+    item.textContent = label
     item.addEventListener(cstring"click", proc(e {.inject.}: Event) =
       body
     )
@@ -605,10 +623,10 @@ proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
   appendDropdownItem(cstring"Maximise container"):
     if cast[bool](stackCreatedEvent.toJs.target.isMaximised):
       stackCreatedEvent.toJs.target.minimise()
-      e.toJs.target.innerHTML = cstring"Maximise container"
+      e.toJs.target.textContent = cstring"Maximise container"
     else:
       stackCreatedEvent.toJs.target.maximise()
-      e.toJs.target.innerHTML = cstring"Minimise container"
+      e.toJs.target.textContent = cstring"Minimise container"
 
   appendDropdownItem(cstring"Pin to Bottom"):
     pinActiveContentItem(layout, stackCreatedEvent.toJs.target, AutoHideEdge.Bottom)
@@ -974,7 +992,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       dispatchLayoutUpdated()
     else:
       cdebug "[EDITOR_REG] Regular mount (non-reparenting)"
-      element.innerHTML = cstring(fmt"<div id={componentLabel} class=" & "\"component-container\"></div>")
+      element.mountComponentContainer(componentLabel)
 
     container.on(cstring"tab") do (tab: GoldenTab):
       data.ui.saveLayout = true
@@ -1006,13 +1024,18 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       {.emit: """
       `labelTokens` = (`state`.label || "").split(/[\\/]/);
       """.}
+      # `textContent`, not `innerHTML`: the comment above says it — this label
+      # is a native absolute path, and a path is not markup.  Written as
+      # markup, a source file under a directory named
+      # `<img src=x onerror=...>` executes in the Electron renderer the moment
+      # its tab is drawn.
       if not ($state.label).startsWith("event:"):
-        tab.titleElement.innerHTML = if labelTokens.len > 1:
+        tab.titleElement.textContent = if labelTokens.len > 1:
             labelTokens[^2] & cstring"/" & labelTokens[^1]
           else:
             labelTokens[^1]
       else:
-        tab.titleElement.innerHTML = if labelTokens.len > 1:
+        tab.titleElement.textContent = if labelTokens.len > 1:
             labelTokens[0] & labelTokens[^1]
           else:
             state.label
@@ -1125,7 +1148,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       dispatchLayoutUpdated()
     else:
       cdebug "[GENERIC_REG] Regular mount (non-reparenting)"
-      element.innerHTML = cstring(fmt"<div id={editorLabel} class=" & "\"component-container\"></div>")
+      element.mountComponentContainer(editorLabel)
 
     container.on(cstring"tab") do (tab: GoldenTab):
       # prepare layout to be saved on upcoming stateChanged event

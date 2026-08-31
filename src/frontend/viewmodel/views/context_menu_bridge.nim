@@ -39,7 +39,12 @@ when defined(js):
       item.id = cstring(fmt"menu-item-{i}")
       let labelEl = kdom.document.createElement(cstring"span")
       labelEl.classList.add(cstring"ct-menu-item-label")
-      labelEl.innerHTML = option.name
+      # `textContent`, not `innerHTML`: a menu label is a label.  Most are
+      # literals, but not all — `isonim_state_view`'s "Switch process: <role>"
+      # carries a `role`/`recordingId` copied verbatim out of a session
+      # manifest that ships with the recording, and `panel_transfer`'s "Send
+      # to: <title>" carries a window title.  None of them is markup.
+      labelEl.textContent = option.name
       discard cast[dom.Element](item).append(cast[dom.Element](labelEl))
       item.onclick = proc(ev: kdom.Event) {.nimcall.} =
         let targetId = $ev.currentTargetId()
@@ -53,7 +58,7 @@ when defined(js):
         let hint = kdom.document.createElement(cstring"span")
         hint.classList.add(cstring"ct-menu-item-sublabel")
         hint.id = cstring(fmt"menu-hint-{i}")
-        hint.innerHTML = option.hint
+        hint.textContent = option.hint
         discard cast[dom.Element](item).append(cast[dom.Element](hint))
 
       discard cast[dom.Element](itemContainer).append(cast[dom.Element](item))
