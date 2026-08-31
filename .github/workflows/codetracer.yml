@@ -2788,7 +2788,14 @@ jobs:
         # omission is invisible in review because `nix develop` reads as
         # self-contained. `ci/test/nix-provisioning-test.sh` now fails when a
         # job runs nix without provisioning it.
-        if: ${{ startsWith(github.ref, 'refs/tags/') && !github.event['codetracer-ci'] }}
+        #
+        # This step (and Install AWS CLI below) used to be gated to `refs/tags/`
+        # while the Download AppImage + Smoke-test steps that DEPEND on them were
+        # not, so on every branch (main/dev) run those two ran without aws/nix
+        # installed and the job died at `aws: command not found` — the AppImage's
+        # off-nix portability went untested. Ungate them so the prerequisites
+        # match their consumers and the 5-distro smoke test actually runs against
+        # the `-<ref>-` AppImage that appimage-build just produced.
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
@@ -2796,7 +2803,6 @@ jobs:
           gh-token: ${{ github.token }}
 
       - name: Install AWS CLI
-        if: ${{ startsWith(github.ref, 'refs/tags/') && !github.event['codetracer-ci'] }}
         # nixpkgs' awscli2 into the runner's nix profile (on PATH for the
         # download step) — snap/apt are unavailable on the NixOS runner.
         run: nix profile install nixpkgs#awscli2
