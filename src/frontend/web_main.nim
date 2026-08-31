@@ -98,6 +98,19 @@ proc describe(boot: WebBoot): string =
   bootLinePrefix & " ok condition=" & $boot.condition &
     " platform=" & $running.profile.kind &
     " spawn=" & $running.can(capProcessSpawn) &
+    # WHAT THIS DEPLOYMENT ACTUALLY DELIVERED, and the reason the line grew a
+    # field. Every other clause here is a property of the BUILD, and a build is
+    # not a deployment: the same `web.js` reports an identical line whether it
+    # was served alongside 20 MB of Noir wasm or alongside nothing. So a page
+    # that had silently lost its modules was indistinguishable from a correct
+    # one, which is precisely how a sibling campaign shipped a replay engine no
+    # page referenced and read every dead session as "the engine is stale".
+    #
+    # `toolchain=(none)` is a legitimate and common value — most builds ship no
+    # modules and say so. What matters is that it is SAID, so "the deployment
+    # delivers no compiler" and "the compiler is broken" are different lines
+    # rather than the same shrug.
+    " toolchain=" & (if boot.toolchain.len > 0: boot.toolchain else: "(none)") &
     " announcement=" & (if boot.announcement.len > 0: boot.announcement
                         else: "(none)")
 

@@ -814,9 +814,14 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     check "renderer" in ids
     check "web-entry" in ids
     check "wasm-worker" in ids
+    # The document itself is required too, and it is the one that was missing:
+    # `renderRewriteConfig` has always emitted `/index.html` as the target of
+    # every prefix while nothing produced such a file, so a deployment would
+    # have served the rewrites and 404'd every one of them.
+    check "entry-document" in ids
     # Counted, so an asset silently losing `required` is caught. Asserting only
     # membership would pass over a manifest that had gained three more.
-    check required.len == 3
+    check required.len == 4
 
   test "the renderer is BUNDLED and the worker is a separate ASSET":
     # Not a stylistic distinction. `new Worker(url)` takes a URL and
@@ -867,10 +872,28 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     # They must land under the prefix whose cache rule is `immutable`, or a CDN
     # serves a 16 MB module with the entry document's 60-second TTL.
     for asset in webRuntimeAssets():
-      if asset.mode != damBundled:
+      if asset.mode notin {damBundled, damEntryDocument}:
         check asset.path.startsWith(staticAssetPrefix[1 .. ^1])
         check cacheClassFor("/" & asset.path) == ccStaticAsset
         check headerFor(cacheClassFor("/" & asset.path)) == immutableHeader
+
+  test "and the entry document is the one thing that must NOT be immutable":
+    # The mirror of the case above, and the reason `damEntryDocument` is its
+    # own mode rather than a `damAsset` that happens to sit at the root. Filing
+    # the document under `/assets/` would have earned it
+    # `max-age=31536000, immutable` — a year of a stale application shell, from
+    # a cache nobody can reach to purge. `cacheClassFor`'s header already
+    # records this exact mistake being made in the other direction.
+    var found = false
+    for asset in webRuntimeAssets():
+      if asset.mode != damEntryDocument: continue
+      found = true
+      check asset.path == entryDocumentPath
+      check not asset.path.startsWith(staticAssetPrefix[1 .. ^1])
+      check cacheClassFor("/" & asset.path) == ccEntryDocument
+      check headerFor(cacheClassFor("/" & asset.path)) == entryDocumentHeader
+      check headerFor(cacheClassFor("/" & asset.path)) != immutableHeader
+    check found
 
   test "no two assets claim the same path":
     # A duplicate path is a build step that overwrites its own output, and it
@@ -880,3 +903,122 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
       check asset.path notin seen
       check asset.path.len > 0
       seen.add asset.path
+
+# ---------------------------------------------------------------------------
+# What a deployment SAYS it delivered.
+#
+# The manifest above is INTENT — what a bundle must carry. These cases pin the
+# statement of FACT the entry document carries, which is what stops a page
+# deriving its capabilities from the manifest and thereby claiming a toolchain
+# on every build including the ones that ship none.
+# ---------------------------------------------------------------------------
+
+  test "the descriptor survives the document it travels in":
+    # It is rendered into HTML and read back out of HTML, so the round trip is
+    # the assertion — not `render` and `parse` agreeing in isolation, which
+    # they would even if the document swallowed the element.
+    let descriptor = DeploymentDescriptor(
+      origin: "https://ide.codetracer.com", revision: "abc1234",
+      modules: @[
+        DeployedModule(id: noirCompilerModuleId,
+                       url: "/" & noirCompilerWasmPath, bytes: 15862494,
+                       builtFrom: "noir@codetracer 6c590c7789 compiler/wasm")])
+    let document = renderEntryDocument(descriptor)
+    check document.contains("id=\"" & deploymentDescriptorElementId & "\"")
+    # The page must reference BOTH bundles, or it is a document that can never
+    # boot whatever else is right about it.
+    check document.contains("src=\"/" & webEntryBundlePath & "\"")
+    check document.contains("src=\"/" & rendererBundlePath & "\"")
+
+    let opened = document.find(">", document.find(
+      "id=\"" & deploymentDescriptorElementId & "\"")) + 1
+    let closed = document.find("</script>", opened)
+    let parsed = parseDeploymentDescriptor(document[opened ..< closed])
+    check parsed.origin == descriptor.origin
+    check parsed.revision == descriptor.revision
+    check parsed.modules.len == 1
+    check parsed.modules[0].id == noirCompilerModuleId
+    check parsed.modules[0].bytes == 15862494
+    check parsed.modules[0].builtFrom.len > 0
+
+  test "a document that could truncate itself does not":
+    # `</script>` inside the JSON would end the element early and take the rest
+    # of the page with it. The descriptor carries build-environment strings — a
+    # branch name reaches `revision` — so this is reachable, and a page that
+    # can be truncated by its own metadata fails with a syntax error naming
+    # nothing.
+    let hostile = DeploymentDescriptor(
+      origin: "https://ide.codetracer.com",
+      revision: "</script><script>alert(1)</script>")
+    let document = renderEntryDocument(hostile)
+    check not document.contains("<script>alert(1)")
+    # And it is still readable: escaping must not cost the round trip.
+    let opened = document.find(">", document.find(
+      "id=\"" & deploymentDescriptorElementId & "\"")) + 1
+    let closed = document.find("</script>", opened)
+    check parseDeploymentDescriptor(document[opened ..< closed]).revision ==
+      hostile.revision
+
+  test "an unreadable descriptor is an empty deployment, never a crash":
+    # A page that throws during boot is a blank screen; a page that reads no
+    # modules says, by name, that it ships no toolchain. The second is better
+    # AND true, so malformed input takes it.
+    check parseDeploymentDescriptor("").modules.len == 0
+    check parseDeploymentDescriptor("   ").modules.len == 0
+    check parseDeploymentDescriptor("{not json").modules.len == 0
+    check parseDeploymentDescriptor("[1,2,3]").modules.len == 0
+    check parseDeploymentDescriptor("{\"modules\":\"nope\"}").modules.len == 0
+
+  test "a module with no provenance is dropped rather than half-declared":
+    # `registrableModules` discards a module with an empty `builtFrom`, so a
+    # descriptor that kept one would advertise a module the tab then refuses —
+    # the deployment and the product disagreeing quietly.
+    let parsed = parseDeploymentDescriptor(
+      "{\"modules\":[" &
+      "{\"id\":\"noir-tracer\",\"url\":\"/a.wasm\",\"bytes\":1}," &
+      "{\"id\":\"noir-compiler\",\"url\":\"/b.wasm\",\"bytes\":2," &
+      "\"builtFrom\":\"noir@codetracer deadbeef compiler/wasm\"}]}")
+    check parsed.modules.len == 1
+    check parsed.modules[0].id == noirCompilerModuleId
+
+  test "the deploy guard fails in BOTH directions":
+    # The two failures a sibling campaign met in one day. A guard catching only
+    # one of them would have been green on the other, and which one it met was
+    # decided by which edit somebody made.
+    let compilerUrl = "/" & noirCompilerWasmPath
+    let tracerUrl = "/" & noirTracerWasmPath
+    let both = DeploymentDescriptor(modules: @[
+      DeployedModule(id: noirCompilerModuleId, url: compilerUrl, bytes: 10,
+                     builtFrom: "noir@codetracer deadbeef compiler/wasm"),
+      DeployedModule(id: noirTracerModuleId, url: tracerUrl, bytes: 20,
+                     builtFrom: "noir@codetracer deadbeef tooling/tracer_wasm")])
+
+    # Agreement is silence.
+    check deployGuardDefects(both, @[compilerUrl, tracerUrl]).len == 0
+
+    # Declared and not published: the worker's fetch would 404.
+    let missing = deployGuardDefects(both, @[compilerUrl])
+    check missing.len == 1
+    check missing[0].contains(tracerUrl)
+
+    # Published and not declared: bytes nothing can reach — the still frame.
+    let orphan = deployGuardDefects(DeploymentDescriptor(),
+                                    @[compilerUrl, tracerUrl])
+    check orphan.len == 2
+
+    # A deployment that ships nothing and declares nothing is CORRECT, and the
+    # guard must not invent a defect for the supported configuration.
+    check deployGuardDefects(DeploymentDescriptor(), @[]).len == 0
+
+  test "the worker is configured with the urls the descriptor declares":
+    # `declaredModuleUrls` is what reaches the worker's `configure` message.
+    # The worker looks its modules up by these exact ids, so a rename that did
+    # not reach both sides produces "no url declared for wasm module" in a
+    # browser and nothing at all before that.
+    let descriptor = DeploymentDescriptor(modules: @[
+      DeployedModule(id: noirTracerModuleId, url: "/" & noirTracerWasmPath,
+                     bytes: 1, builtFrom: "noir@codetracer deadbeef t")])
+    let urls = declaredModuleUrls(descriptor)
+    check urls.len == 1
+    check urls[0].id == noirTracerModuleId
+    check urls[0].url == "/" & noirTracerWasmPath

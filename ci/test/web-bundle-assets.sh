@@ -151,8 +151,16 @@ build() {
 }
 build renderer src/frontend/ui_js.nim "${out_dir}/ui.js" \
 	-d:chronicles_enabled=off -d:ctRenderer -d:ctWeb
+# NO `-d:nodejs`, and that is a correction rather than a tidy-up. This script
+# assembles the bundle that gets DEPLOYED, and `-d:nodejs` selects Nim's node
+# arm — the same define `ci/test/renderer-browser-build.sh` proves the renderer
+# cannot even compile under, and which `web-bundle-smoke.sh` passes for the one
+# legitimate reason that it then runs the result under `node`. Assembling the
+# shipped bundle with it meant the file uploaded to a CDN was a node build that
+# happened to contain no `require(`. The renderer arm beside it has always been
+# `js-browser`; this makes the pair agree.
 build web-entry src/frontend/web_main.nim "${out_dir}/web.js" \
-	-d:nodejs -d:ctWeb --path:src/frontend/viewmodel
+	-d:ctWeb --path:src/frontend/viewmodel
 echo
 
 # ---------------------------------------------------------------------------
@@ -192,6 +200,65 @@ place_module() {
 }
 place_module CT_NOIR_WASM_COMPILER noir-compiler
 place_module CT_NOIR_WASM_TRACER noir-tracer
+echo
+
+# ---------------------------------------------------------------------------
+echo "Step 3b: render the entry document and the host configuration"
+echo "    The asset nothing produced. renderRewriteConfig() has always emitted"
+echo "    '/index.html' as the target of every prefix, and no step ever made"
+echo "    such a file -- so a deployment would have served the rewrites and"
+echo "    404'd every one of them. The document also CARRIES the descriptor of"
+echo "    what this assembly actually placed, measured from the files on disk,"
+echo "    which is what the page reads instead of making a request."
+# ---------------------------------------------------------------------------
+origin="${CT_WEB_ORIGIN:-https://ide.codetracer.com}"
+revision="${CT_WEB_REVISION:-$(git -C "${repo_root}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+
+# The provenance strings. Read from the environment because only the caller
+# that BUILT the modules knows which `noir` ref they came from, and a module
+# that cannot say where it came from is dropped by `registrableModules` — so
+# an unset value here disables the module rather than shipping it anonymously.
+noir_ref="${CT_NOIR_WASM_REF:-}"
+
+modules_tsv="${cache}/declared-modules.tsv"
+: >"${modules_tsv}"
+declare_module() {
+	local id="$1" crate="$2"
+	local path
+	path="$(printf '%s\n' "${manifest}" | awk -F'\t' -v i="${id}" '$1==i{print $2}')"
+	local file="${out_dir}/${path}"
+	# MEASURED FROM THE FILE, never from the variable that was supposed to
+	# produce it. This is the "verify the artifact, not the workflow" rule at
+	# its smallest: the document declares a size a guard can compare against
+	# the bytes about to be uploaded, so a truncated copy is a failed deploy
+	# rather than a broken page.
+	[ -f "${file}" ] || return 0
+	if [ -z "${noir_ref}" ]; then
+		bad "${id}: placed, but CT_NOIR_WASM_REF is unset, so it has no provenance and the page would drop it"
+		return 0
+	fi
+	printf '%s\t/%s\t%s\t%s\n' "${id}" "${path}" \
+		"$(wc -c <"${file}" | tr -d ' ')" \
+		"noir@codetracer ${noir_ref} ${crate}" >>"${modules_tsv}"
+}
+declare_module noir-compiler "compiler/wasm"
+declare_module noir-tracer "tooling/tracer_wasm"
+
+if ! nim c --hints:off --warnings:off --nimcache:"${cache}/render" \
+	-o:"${cache}/render-bin" ci/test/web_deployment_render.nim \
+	>"${cache}/render.log" 2>&1; then
+	bad "the deployment renderer did not compile"
+	grep -E 'Error:' "${cache}/render.log" | head -3 | sed 's/^/      /'
+else
+	if "${cache}/render-bin" "${origin}" "${revision}" "${out_dir}" \
+		<"${modules_tsv}" >"${cache}/render-out.log" 2>&1; then
+		ok "rendered index.html, _headers and _redirects for ${origin} @ ${revision}"
+		sed 's/^/      /' "${cache}/render-out.log"
+	else
+		bad "the deployment renderer failed"
+		sed 's/^/      /' "${cache}/render-out.log"
+	fi
+fi
 echo
 
 # ---------------------------------------------------------------------------
