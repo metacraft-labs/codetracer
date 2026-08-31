@@ -26,6 +26,7 @@ proc modeName(mode: DeliveryMode): string =
   of damBundled: "bundled"
   of damAsset: "asset"
   of damFetched: "fetched"
+  of damEntryDocument: "entry-document"
 
 when isMainModule:
   # One line per asset: id, path, mode, required, absence behaviour.

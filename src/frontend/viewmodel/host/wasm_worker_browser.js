@@ -75,24 +75,87 @@ const stubImports = (mod) => {
 let moduleUrls = {};
 const modules = new Map();
 
+// THREE FAULTS, THREE SENTENCES — and they must never collapse into one.
+//
+// A sibling campaign lost hours to a single message that covered two different
+// faults: a missing asset and a broken feature read identically, so the
+// investigation started in the wrong half of the system and stayed there. The
+// three states below are reached by different mistakes and fixed by different
+// people, so `load` names which one it is:
+//
+//   NOT DELIVERED    this deployment ships no such module. The entry document
+//                    declared no URL for it. Nobody is broken — the deployment
+//                    is smaller than the product. The registry normally
+//                    answers this before anything reaches the worker; if it
+//                    gets here, the page and the registry disagree.
+//   NOT SERVED       a URL was declared and the server does not have it. This
+//                    is a BROKEN DEPLOY: the document promises bytes the
+//                    publish directory lacks. `deployGuardDefects` exists to
+//                    make this unreachable, and this message is what it looks
+//                    like when the guard was bypassed.
+//   BROKEN           the bytes arrived and are not a usable module — truncated,
+//                    an HTML error page with a 200, or built against a
+//                    different ABI. The only one of the three that is a bug in
+//                    the module itself.
+const NOT_DELIVERED = 'not-delivered';
+const NOT_SERVED = 'not-served';
+const BROKEN = 'broken';
+
+const loadFault = (kind, id, detail) => {
+  const error = new Error(detail);
+  error.ctFault = kind;
+  error.ctModule = id;
+  return error;
+};
+
 async function load(id) {
   if (modules.has(id)) return modules.get(id);
   const url = moduleUrls[id];
-  if (!url) throw new Error(`no url declared for wasm module ${id}`);
+  if (!url) {
+    throw loadFault(NOT_DELIVERED, id,
+      `this deployment does not ship the \`${id}\` wasm module, so it was ` +
+      `never fetched. Nothing is broken: the module is absent, not failing.`);
+  }
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`fetching ${id} from ${url} failed: HTTP ${response.status}`);
-  }
-  let mod;
+  let response;
   try {
-    mod = await WebAssembly.compileStreaming(response.clone());
+    response = await fetch(url);
   } catch (e) {
-    // Wrong Content-Type, or an engine without streaming compile. Not worth
-    // surfacing: the only observable difference is peak memory.
-    mod = await WebAssembly.compile(await response.arrayBuffer());
+    // A network-level failure is still "not served" from the page's point of
+    // view: the bytes did not arrive. Distinguished from a 404 only in the
+    // detail, because the remedy — look at what the deployment published — is
+    // the same.
+    throw loadFault(NOT_SERVED, id,
+      `\`${id}\` is declared at ${url} and the request for it did not ` +
+      `complete: ${e && e.message ? e.message : e}`);
   }
-  const { exports } = await WebAssembly.instantiate(mod, stubImports(mod));
+  if (!response.ok) {
+    throw loadFault(NOT_SERVED, id,
+      `\`${id}\` is declared at ${url} and this deployment does not serve ` +
+      `it (HTTP ${response.status}). The page and the published files ` +
+      `disagree; the module itself has not been reached.`);
+  }
+
+  // The bytes are here. Everything from this point on is the module's own
+  // fault, and is reported as such.
+  let exports;
+  try {
+    let mod;
+    try {
+      mod = await WebAssembly.compileStreaming(response.clone());
+    } catch (e) {
+      // Wrong Content-Type, or an engine without streaming compile. Not worth
+      // surfacing on its own: the only observable difference is peak memory,
+      // and a genuinely bad module fails the buffered path too — where it is
+      // reported as BROKEN, below, rather than being blamed on the header.
+      mod = await WebAssembly.compile(await response.arrayBuffer());
+    }
+    ({ exports } = await WebAssembly.instantiate(mod, stubImports(mod)));
+  } catch (e) {
+    throw loadFault(BROKEN, id,
+      `\`${id}\` was served from ${url} but is not a usable wasm module: ` +
+      `${e && e.message ? e.message : e}`);
+  }
   modules.set(id, exports);
   return exports;
 }
@@ -176,6 +239,14 @@ self.onmessage = async (event) => {
       post({ seq, kind: 'failed', message: `no wasm build for subcommand ${sub}` });
     }
   } catch (e) {
-    post({ seq, kind: 'failed', message: String(e && e.message ? e.message : e) });
+    // `fault` is carried as its own field rather than being spelled into the
+    // message, so a reader can BRANCH on which of the three it was without
+    // matching prose. `wasm_worker.nim`'s `deliver` ignores fields it does not
+    // know, so this is additive to the protocol.
+    const message = String(e && e.message ? e.message : e);
+    const fault = (e && e.ctFault) || '';
+    post(fault
+      ? { seq, kind: 'failed', message, fault, module: (e && e.ctModule) || '' }
+      : { seq, kind: 'failed', message });
   }
 };

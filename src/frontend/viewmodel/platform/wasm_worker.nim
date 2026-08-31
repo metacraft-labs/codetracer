@@ -191,6 +191,42 @@ proc post(worker: WasmWorker; seq: int; module: WasmModuleId;
     "workingDir": spec.workingDir,
     "stdin": spec.stdinText}))
 
+const configureSeq* = 0
+  ## The sequence number the `configure` handshake uses.
+  ##
+  ## Safe BY CONSTRUCTION rather than by convention: `beginRun` increments
+  ## `nextSeq` *before* reading it, so the first real run is sequence 1 and 0
+  ## is never allocated to one. The worker echoes an `output` and an `exit` for
+  ## whatever sequence it was configured with, and `deliver` returns early for
+  ## any sequence not in `pending` — so the acknowledgement is discarded
+  ## exactly like the reply to a run that already settled, on the same line of
+  ## code, with no special case.
+
+proc configure*(worker: WasmWorker;
+                moduleUrls: seq[tuple[id: string, url: string]]) =
+  ## Tell the worker where its wasm modules are, before any run.
+  ##
+  ## THE HANDSHAKE THAT WAS MISSING. `wasm_worker_browser.js` has always
+  ## handled a `configure` message — it reads `moduleUrls` from it and refuses
+  ## with "no url declared for wasm module <id>" without one — and nothing in
+  ## Nim ever sent one. So a deployment could place both modules, serve them
+  ## correctly, start a worker, and still fail every run, because the worker
+  ## was never told the two URLs it needed. That is the same class of defect as
+  ## a published engine no page references: every part present, working, and
+  ## unconnected.
+  ##
+  ## Sent unconditionally at construction rather than lazily before the first
+  ## run. A lazy handshake would have to be re-sent after a `terminate`, and
+  ## the cost here is one small message on a worker that was just created
+  ## anyway.
+  var urls = newJObject()
+  for entry in moduleUrls:
+    urls[entry.id] = %entry.url
+  worker.transport.send($(%*{
+    "seq": configureSeq,
+    "kind": "configure",
+    "moduleUrls": urls}))
+
 proc beginRun(worker: WasmWorker; module: WasmModuleId; spec: ProcessSpec;
               onOutput: proc(chunk: ProcessOutputChunk);
               onExit: proc(exit: ProcessExit);
