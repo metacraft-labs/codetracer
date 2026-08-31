@@ -73,10 +73,13 @@ CLICK_OPENS = "clicking the offer in the rendered panel opens the session"
 CLICK_WALKS = "clicking the controls walks the session, and a repaint follows it"
 NO_MODEL = "a payload with no model at all offers nothing, and says why"
 NAMES = "the live tree carries the same attribute NAMES as the pure one"
+E2E_GATE = "the whole chain, with nothing authored, opens the gate"
+E2E_CONSTRAINT = "the real run confirms the constraint the renderer was built around"
+E2E_BINDINGS = "real Verno emits no binding locations, whatever the fixtures suggest"
 
 VNM5_CHECKS = [OPENS, REFUSES, WALKS, UNKNOWN, KNOWN, DEMOTE, ANCHOR, LOOP,
                NOLOOP, PROVENANCE, PAIRED, CLICK_OPENS, CLICK_WALKS, NO_MODEL,
-               NAMES]
+               NAMES, E2E_GATE, E2E_CONSTRAINT, E2E_BINDINGS]
 
 
 @dataclass
@@ -261,6 +264,44 @@ MUTATIONS = [
         "token. The pure expansion substitutes `model` and the live one "
         "substitutes `m`, so the two trees carry DIFFERENT attribute names and "
         "nothing else notices -- both render, both carry the right text",
+    ),
+    # --- the run nobody authored ------------------------------------------
+    Mutation(
+        "R20", VM,
+        "  trace.isSome and trace.get.steps.len > 0 and\n"
+        "    trace.get.model.status != pmsUnavailable",
+        "  trace.isSome and trace.get.steps.len > 2 and\n"
+        "    trace.get.model.status != pmsUnavailable",
+        E2E_GATE,
+        "the gate demands more steps than a real run produces -- the real "
+        "traces are 2 steps, and a threshold tuned to the authored fixtures "
+        "would shut the gate on real output",
+    ),
+    Mutation(
+        "R21", VM,
+        "  for index, step in vm.steps.val:\n"
+        "    let position = positionOf(step.hasLocation, step.location)",
+        "  for index, step in vm.steps.val:\n"
+        "    let position =\n"
+        "      if step.kind == cskViolation: unknownPosition(NoSnapPosReason)\n"
+        "      else: positionOf(step.hasLocation, step.location)",
+        E2E_CONSTRAINT,
+        "drops the ONE position that really does cross the venir boundary -- "
+        "the violated obligation's own span, which travels on the message "
+        "rather than on the snapshot map. An earlier arm here inverted the "
+        "known/unknown TALLY instead and was MISDIRECTED: the real document "
+        "has one known and one unknown step, so an inversion of a symmetric "
+        "pair is invisible. Recorded because it is the harness doing its job "
+        "-- a mutation a check cannot distinguish is not a kill",
+    ),
+    Mutation(
+        "R22", VM,
+        "      position: positionOf(binding.hasLocation, binding.location))",
+        "      position: unknownPosition(NoSnapPosReason))",
+        E2E_BINDINGS,
+        "every binding becomes position-less, which is what the REAL producer "
+        "emits -- so this arm is killed only by the authored half of the pair, "
+        "and it is the proof that half is load-bearing",
     ),
 ]
 
