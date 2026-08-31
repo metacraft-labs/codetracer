@@ -332,26 +332,24 @@ async function pinToEdge(
     .first()
     .textContent();
 
-  const toggle = stack.locator(".layout-buttons-container").first();
-  await toggle.click();
+  // The stack-header dropdown was removed; these commands live on the tab's
+  // right-click menu now (`addPanelTransferContextMenu` in `ui/layout.nim`).
+  await stack.locator(".lm_tab.lm_active").first().click({ button: "right" });
 
-  const dropdown = stack.locator(".layout-dropdown").first();
-  await expect(dropdown).not.toHaveClass(/hidden/, { timeout: 5_000 });
+  const menu = page.locator("#context-menu-container");
+  await expect(menu).toBeVisible({ timeout: 5_000 });
 
-  await page.evaluate(
-    ({ text, idx }) => {
-      const stacks = document.querySelectorAll(".lm_stack");
-      const s = stacks[idx];
-      if (!s) return;
-      for (const item of s.querySelectorAll(".layout-dropdown-node")) {
-        if (item.textContent?.trim() === text) {
-          (item as HTMLElement).click();
-          return;
-        }
+  await page.evaluate((text) => {
+    const items = document.querySelectorAll(
+      "#context-menu-container .context-menu-item",
+    );
+    for (const item of items) {
+      if (item.textContent?.trim() === text) {
+        (item as HTMLElement).click();
+        return;
       }
-    },
-    { text: `Pin to ${edge}`, idx: stackIndex },
-  );
+    }
+  }, `Pin to ${edge}`);
 
   await wait(1500);
   return (activeTitle ?? "").trim();

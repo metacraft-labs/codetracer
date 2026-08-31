@@ -32,8 +32,10 @@
  *                                  since a6151510e, and the per-tab buttons
  *                                  that replaced it were deleted in 1af471302)
  *   #auto-hide-backdrop          — click-to-dismiss backdrop behind overlay
- *   .layout-buttons-container    — GL stack header dropdown toggle
- *   .layout-dropdown-node        — individual item inside the dropdown
+ *   .context-menu-item           — a row in that menu; the pin/close/maximise
+ *                                  commands moved here when the stack-header
+ *                                  .layout-buttons-container dropdown was
+ *                                  removed as a duplicate affordance
  *
  * No mocks: a real JavaScript recording opened by the real Electron app.
  * The strip/overlay DOM is built by `layout.nim` the same way for every
@@ -78,12 +80,17 @@ const WAIT_TIMEOUT_MS = 15000;
 // ---------------------------------------------------------------------------
 
 /**
- * Open the dropdown menu on the first visible GL stack header and click
- * the menu item whose text matches `itemText` (e.g. "Pin to Bottom").
+ * Right-click the active tab of the first visible GL stack and click the
+ * context-menu item whose text matches `itemText` (e.g. "Pin to Bottom").
  *
- * The dropdown is a `.layout-buttons-container` div rendered in each
- * stack header. Clicking it toggles a child `.layout-dropdown` between
- * hidden and visible. Menu items are `.layout-dropdown-node` elements.
+ * The stack-header `.layout-buttons-container` dropdown this helper used to
+ * drive was removed — every action it carried is on the tab's right-click
+ * menu (`addPanelTransferContextMenu` in `ui/layout.nim`), which is now the
+ * only way to reach them.  That menu renders into `#context-menu-container`
+ * as `.context-menu-item` rows.
+ *
+ * Note the label change that came with the move: the dropdown's "Close all"
+ * is "Close" on the context menu.
  *
  * Returns the title text of the active tab in the stack that was acted
  * upon, so tests can assert which panel was pinned.
@@ -100,24 +107,18 @@ async function clickDropdownItem(
   await expect(stack).toBeVisible({ timeout: 10_000 });
 
   // The active tab label lives inside .lm_tab.lm_active .lm_title
-  const activeTitle = await stack
-    .locator(".lm_tab.lm_active .lm_title")
-    .first()
-    .textContent();
+  const activeTab = stack.locator(".lm_tab.lm_active").first();
+  const activeTitle = await activeTab.locator(".lm_title").first().textContent();
 
-  // Click the dropdown toggle (the container div in the stack header).
-  const toggle = stack.locator(".layout-buttons-container").first();
-  await toggle.click();
+  // Open the tab's context menu.  The handler calls preventDefault, so the
+  // browser's own menu never appears.
+  await activeTab.click({ button: "right" });
 
-  // Wait for the dropdown to become visible (hidden class removed).
-  const dropdown = stack.locator(".layout-dropdown").first();
-  await expect(dropdown).not.toHaveClass(/hidden/, { timeout: WAIT_TIMEOUT_MS });
+  const menu = ctPage.locator("#context-menu-container");
+  await expect(menu).toBeVisible({ timeout: WAIT_TIMEOUT_MS });
 
-  // Wait for the desired menu item to be visible so the DOM is populated.
-  const menuItem = dropdown.locator(".layout-dropdown-node", {
-    hasText: itemText,
-  });
-  await expect(menuItem).toBeVisible({ timeout: WAIT_TIMEOUT_MS });
+  const menuItem = menu.locator(".context-menu-item", { hasText: itemText });
+  await expect(menuItem.first()).toBeVisible({ timeout: WAIT_TIMEOUT_MS });
 
   const layoutUpdatedPromise = ctPage.evaluate(() => {
     return new Promise<void>((resolve) => {
@@ -125,26 +126,19 @@ async function clickDropdownItem(
     });
   });
 
-  // Click via page.evaluate() to avoid the blur race condition: the
-  // dropdown's onblur handler closes the menu before Playwright's
-  // click() can land. Using the DOM API fires the click synchronously.
-  // We scope the search to the correct stack (by index) since all
-  // stacks have identical menu items.
-  await ctPage.evaluate(
-    ({ text, idx }) => {
-      const stacks = document.querySelectorAll(".lm_stack");
-      const stack = stacks[idx];
-      if (!stack) return;
-      const items = stack.querySelectorAll(".layout-dropdown-node");
-      for (const item of items) {
-        if (item.textContent?.trim() === text) {
-          (item as HTMLElement).click();
-          return;
-        }
+  // Click via the DOM API: the menu closes itself on any document click, so
+  // a synthetic click is steadier than routing one through the page.
+  await ctPage.evaluate((text) => {
+    const items = document.querySelectorAll(
+      "#context-menu-container .context-menu-item",
+    );
+    for (const item of items) {
+      if (item.textContent?.trim() === text) {
+        (item as HTMLElement).click();
+        return;
       }
-    },
-    { text: itemText, idx: stackIndex },
-  );
+    }
+  }, itemText);
 
   // Wait for the deterministic layoutUpdated signal before returning
   await layoutUpdatedPromise;

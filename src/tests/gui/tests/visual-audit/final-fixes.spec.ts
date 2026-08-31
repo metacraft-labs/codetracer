@@ -342,19 +342,19 @@ test.describe("Visual Review — All Components", () => {
     });
 
     if (pinned !== "ok") {
-      console.warn(`Pin FILESYSTEM failed: ${pinned}, using dropdown fallback`);
-      // Fallback: use dropdown menu to pin the active tab.
+      console.warn(`Pin FILESYSTEM failed: ${pinned}, using context-menu fallback`);
+      // Fallback: pin the active tab from its right-click menu.  The
+      // stack-header dropdown that used to serve this was removed.
       const stacks = ctPage.locator(".lm_stack");
       const stack = stacks.first();
       if (await stack.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        const toggle = stack.locator(".layout-buttons-container").first();
-        await toggle.click();
+        await stack.locator(".lm_tab.lm_active").first().click({ button: "right" });
         await wait(300);
         await ctPage.evaluate(() => {
-          const stacks = document.querySelectorAll(".lm_stack");
-          const s = stacks[0];
-          if (!s) return;
-          for (const item of s.querySelectorAll(".layout-dropdown-node")) {
+          const items = document.querySelectorAll(
+            "#context-menu-container .context-menu-item",
+          );
+          for (const item of items) {
             if (item.textContent?.trim() === "Pin to Left") {
               (item as HTMLElement).click();
               return;
