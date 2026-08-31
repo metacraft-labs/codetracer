@@ -2953,6 +2953,17 @@ test-renderer-pane-parity:
   exec > >(tee test-logs/test-renderer-pane-parity.log) 2>&1
   bash ci/test/renderer-pane-parity.sh
 
+# ID1's verifier, proved by mutation. The suite itself runs in `vm-unit` and
+# `vm-unit-js` by the directory glob; this is the evidence that its assertions
+# can fail. M17 needs BOTH backends — it asserts green on C and red on JS — so
+# do not set CT_IDENTITY_ARMS here.
+test-identity-token-mutation:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-identity-token-mutation.log) 2>&1
+  bash ci/test/identity-token-mutation.sh
+
 # NS7a's first verification: the development loop has no network surface, so
 # there is no request for a token to ride on. Runs the gate through its own
 # build path FIRST (no bundle variables set, so it compiles both arms exactly

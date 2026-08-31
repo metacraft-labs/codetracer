@@ -1,0 +1,314 @@
+#!/usr/bin/env bash
+#
+# identity-token-mutation.sh — the mutation proof for ID1's verifier.
+#
+# `src/frontend/viewmodel/identity/token.nim` decides whether a signed identity
+# token is accepted, which band of its life it is in, and whether a subject is
+# revoked. A suite that reports ten green cases over it is worth exactly what
+# the evidence says it is, so this file supplies the evidence: one mutation per
+# assertion family, each verified to redden THE CASE WRITTEN FOR IT.
+#
+# A mutation caught by some other case is a MISS, not a kill. Every arm below
+# names the case it expects to go red, and several additionally name the cases
+# that must stay GREEN — because an arm that reddens everything proves only
+# that the suite noticed a change, not that the assertion in question can fail.
+#
+# ## The arm that justifies the JS lane
+#
+# M10 narrows `token.nim`'s bare `except:` to `except CatchableError:`. That is
+# the exact defect CONTRIBUTING.md records as a class rather than an incident:
+# on the C backend `parseJson` raises `JsonParsingError`, a `CatchableError`,
+# so the narrow form is correct there and the suite stays GREEN; on the JS
+# backend V8 throws a raw `SyntaxError` that no Nim exception type matches, so
+# the guard catches nothing and the exception escapes.
+#
+# That arm therefore asserts a DIFFERENT outcome per backend — green on C, red
+# on JS — which is the only way to demonstrate that running `vm-unit-js` is
+# load-bearing rather than duplicative. If both backends went red, the arm
+# would prove nothing about the lane.
+#
+# ## Restoring
+#
+# Arms mutate the module in place and restore it from a copy taken here — not
+# with `git checkout --`, because this repo installs a post-checkout hook that
+# "repairs" worktree hooks as a side effect, and a test run must not mutate git
+# state. The trap restores on interrupt too.
+#
+# Usage:  bash ci/test/identity-token-mutation.sh
+# Env:    CT_NIM_CACHE_ROOT  nimcache root (default /tmp/ct-nim-cache)
+#         CT_IDENTITY_ARMS   'c' to skip the JS backend (local iteration only;
+#                            CI must run both, and M10 needs both)
+
+set -uo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${repo_root}" || exit 2
+
+MODULE="src/frontend/viewmodel/identity/token.nim"
+SUITE="src/frontend/viewmodel/tests/unit/test_identity_token.nim"
+cache_root="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+work="$(mktemp -d)"
+backends="c js"
+[ "${CT_IDENTITY_ARMS:-}" = "c" ] && backends="c"
+
+arms=0
+misses=0
+
+cleanup() {
+	if [ -f "${work}/token.nim.orig" ]; then
+		cp "${work}/token.nim.orig" "${MODULE}" 2>/dev/null || true
+	fi
+	rm -rf "${work}"
+}
+trap cleanup EXIT INT TERM
+
+note() { printf '  %s\n' "$*"; }
+pass() {
+	arms=$((arms + 1))
+	printf '  [KILL]   %s\n' "$*"
+}
+miss() {
+	arms=$((arms + 1))
+	misses=$((misses + 1))
+	printf '  [MISS]   %s\n' "$*"
+}
+
+command -v nim >/dev/null 2>&1 || {
+	echo "nim is not on PATH; run inside the dev shell" >&2
+	exit 2
+}
+[ -f "${MODULE}" ] || {
+	echo "${MODULE} does not exist; this proof has no subject" >&2
+	exit 2
+}
+cp "${MODULE}" "${work}/token.nim.orig"
+
+# run_suite BACKEND -> transcript in ${work}/out.BACKEND ; echoes a state word
+#   ran      the suite compiled and produced case results
+#   nobuild  compilation failed (NOT a kill: the assertion never ran)
+run_suite() {
+	local backend="$1" out="${work}/out.$1"
+	if [ "${backend}" = "c" ]; then
+		nim c --hints:off --warnings:off \
+			--nimcache:"${cache_root}/idmut-c" \
+			-o:"${work}/suite-bin" -r "${SUITE}" >"${out}" 2>&1
+	else
+		nim js --hints:off --warnings:off \
+			--nimcache:"${cache_root}/idmut-js" \
+			-o:"${work}/suite.js" -r "${SUITE}" >"${out}" 2>&1
+	fi
+	if grep -q '\[Suite\]' "${out}"; then
+		printf 'ran'
+	else
+		printf 'nobuild'
+	fi
+}
+
+case_red() { grep -qF "[FAILED] $2" "${work}/out.$1"; }
+case_green() { grep -qF "[OK] $2" "${work}/out.$1"; }
+
+# mutate SED_SCRIPT — apply to the pristine module
+mutate() {
+	sed "$1" "${work}/token.nim.orig" >"${MODULE}"
+	if cmp -s "${MODULE}" "${work}/token.nim.orig"; then
+		return 1
+	fi
+	return 0
+}
+restore() { cp "${work}/token.nim.orig" "${MODULE}"; }
+
+# arm LABEL CASE SED — the common shape: mutate, run every backend, require
+# the named case red on each.
+arm() {
+	local label="$1" want_case="$2" sed_script="$3"
+	if ! mutate "${sed_script}"; then
+		miss "${label}: the mutation changed nothing — the pattern no longer matches the module"
+		restore
+		return
+	fi
+	local b state ok=1
+	for b in ${backends}; do
+		state="$(run_suite "${b}")"
+		if [ "${state}" = "nobuild" ]; then
+			miss "${label}: the mutated module did not compile on ${b}; the assertion never ran, so this is not a kill"
+			ok=0
+			break
+		fi
+		if ! case_red "${b}" "${want_case}"; then
+			miss "${label}: ${b} backend did not redden \"${want_case}\""
+			note "    a kill by a different case is a MISS. Cases that went red:"
+			grep '\[FAILED\]' "${work}/out.${b}" | sed 's/^/    /' | head -6
+			ok=0
+			break
+		fi
+	done
+	[ "${ok}" = "1" ] && pass "${label}"
+	restore
+}
+
+echo "=== mutation proof for ${MODULE} (ID1) ==="
+note "backends: ${backends}"
+echo
+
+# ---------------------------------------------------------------------------
+echo "Control arm: the unmutated module, on every backend"
+# ---------------------------------------------------------------------------
+control_ok=1
+for b in ${backends}; do
+	state="$(run_suite "${b}")"
+	if [ "${state}" != "ran" ]; then
+		printf '  [MISS]   control: the suite did not build on %s\n' "${b}"
+		tail -12 "${work}/out.${b}" | sed 's/^/    /'
+		control_ok=0
+		continue
+	fi
+	n_ok="$(grep -c '\[OK\]' "${work}/out.${b}" || true)"
+	n_bad="$(grep -c '\[FAILED\]' "${work}/out.${b}" || true)"
+	if [ "${n_bad}" -eq 0 ] && [ "${n_ok}" -eq 10 ]; then
+		printf '  [OK]     control: %s backend, %s cases, 0 failures\n' "${b}" "${n_ok}"
+	else
+		printf '  [MISS]   control: %s backend, %s ok / %s failed (expected 10 / 0)\n' \
+			"${b}" "${n_ok}" "${n_bad}"
+		control_ok=0
+	fi
+done
+arms=$((arms + 1))
+[ "${control_ok}" = "1" ] || misses=$((misses + 1))
+echo
+
+# ---------------------------------------------------------------------------
+echo "Mutation arms — one per assertion family"
+# ---------------------------------------------------------------------------
+
+# --- the four bands --------------------------------------------------------
+arm "M1  the warning band collapses into the renewing band" \
+	"test_expiry_degrades_to_grace_then_prompt" \
+	's/    return ibWarning/    return ibRenewing/'
+
+arm "M2  expiry boundary becomes exclusive (>= to >)" \
+	"test_expiry_degrades_to_grace_then_prompt" \
+	's/nowUnix >= c.expiresAtField/nowUnix > c.expiresAtField/'
+
+arm "M3  the silent renewing band starts warning the user" \
+	"test_expiry_degrades_to_grace_then_prompt" \
+	's/  band == ibWarning$/  band in {ibRenewing, ibWarning}/'
+
+arm "M4  renewal is never attempted" \
+	"test_expiry_degrades_to_grace_then_prompt" \
+	's/  band in {ibRenewing, ibWarning}$/  false/'
+
+# --- revocation and its window ---------------------------------------------
+arm "M5  the revocation list is never consulted" \
+	"test_revocation_takes_effect_within_the_stated_window" \
+	's/if revocations.isRevoked(claims.subjectField):/if false and revocations.isRevoked(claims.subjectField):/'
+
+arm "M6  the revocation window is understated as the renew lead" \
+	"test_revocation_takes_effect_within_the_stated_window" \
+	's/^  policy.licensePeriod$/  policy.renewLead/'
+
+# M7 was first written as a rewrite of the rejection MESSAGE, which produced a
+# dangling string continuation on the following line and did not compile. The
+# harness reported that as a MISS rather than a kill — correctly, because an
+# assertion that never ran has not been shown to be able to fail. Narrowing the
+# guard from `<= 0` to `< 0` is the same defect expressed in code that builds:
+# `expires_at: 0` stops being caught as "never expires". It also touches the
+# twin guard in `windowsExceedPolicy`, which is harmless — the two differ only
+# AT zero, and no other fixture in the suite uses a zero expiry.
+arm "M7  a never-expiring token is accepted, unbounding revocation" \
+	"test_revocation_takes_effect_within_the_stated_window" \
+	's/  if c.expiresAtField <= 0:/  if c.expiresAtField < 0:/'
+
+arm "M8  a widened window no longer needs a recorded reason" \
+	"test_revocation_takes_effect_within_the_stated_window" \
+	's/  period > policy.licensePeriod or renewLead > policy.renewLead/  false/'
+
+# --- the signature and what a rejection may reveal -------------------------
+arm "M9  the signature is never checked" \
+	"test_verification_needs_no_network" \
+	's/  if not keyring.verify(claims.keyIdField, message, signature):/  if false:/'
+
+arm "M10 a rejected token leaks its claims" \
+	"test_verification_needs_no_network" \
+	's/    return reject(dkBadSignature, "the pinned key rejected this token")/    return IdentityDecision(kindField: dkBadSignature, bandField: ibNormal, claimsField: claims, detailField: "the pinned key rejected this token")/'
+
+# M11 was first written as `if keyring.verify.isNil:` -> `if false:`, which
+# does not fail the assertion — it CRASHES, because the next statement calls
+# the nil closure. The harness scored that a MISS, and that verdict is the
+# right one twice over: a crash leaves the case neither [OK] nor [FAILED], so
+# nothing demonstrated that the fail-closed assertion can go red, and a arm
+# whose evidence is a segfault cannot tell a missing guard from a broken build.
+# Failing OPEN — returning an ACCEPTED decision where the guard used to
+# reject — is the defect the assertion is actually written against.
+arm "M11 an absent verifier fails OPEN instead of closed" \
+	"the container is refused when it is not ours" \
+	's/    return reject(dkMalformed, "no signature verifier was supplied")/    return IdentityDecision(kindField: dkAccepted, bandField: ibNormal, claimsField: claims, detailField: "")/'
+
+# --- rotation --------------------------------------------------------------
+arm "M12 the key id is never checked, so rotation is inexpressible" \
+	"key rotation is expressible, which licensing cannot do" \
+	's/  if not keyring.knows(claims.keyIdField):/  if false:/'
+
+# --- the container ---------------------------------------------------------
+arm "M13 a licence container is accepted as an identity token" \
+	"the container is refused when it is not ours" \
+	's/    if raw\[i\] != byte(IdentityMagic\[i\]):/    if false:/'
+
+arm "M14 a declared length that does not span the container is trusted" \
+	"the container is refused when it is not ours" \
+	's/  if payloadEnd + SignatureLen != raw.len:/  if false:/'
+
+# --- the published windows -------------------------------------------------
+arm "M15 a published window is quietly changed" \
+	"the published windows are inherited, not invented" \
+	's/  DefaultRenewLead\* = 14/  DefaultRenewLead* = 21/'
+
+# --- claims may not be authored --------------------------------------------
+arm "M16 the claim fields become writable by any product" \
+	"claims cannot be authored by a product" \
+	's/    subjectField: string/    subjectField*: string/'
+
+# ---------------------------------------------------------------------------
+# M17 IS THE BACKEND-PORTABILITY ARM AND ASSERTS A DIFFERENT OUTCOME PER
+# BACKEND. It is written out longhand because `arm` requires the same verdict
+# everywhere, and the whole value here is that the verdicts DIFFER.
+# ---------------------------------------------------------------------------
+if [ "${backends}" = "c js" ]; then
+	label="M17 the JSON guard is narrowed to except CatchableError"
+	want="test_rejects_a_payload_that_is_not_json"
+	if ! mutate 's/^  except:$/  except CatchableError:/'; then
+		miss "${label}: the mutation changed nothing"
+		restore
+	else
+		c_state="$(run_suite c)"
+		js_state="$(run_suite js)"
+		if [ "${c_state}" != "ran" ]; then
+			miss "${label}: the mutated module did not compile on C"
+		elif case_red c "${want}"; then
+			miss "${label}: the C backend ALSO reddened. The arm's whole claim is that this defect is invisible on C, so a red there means the mutation is not the one CONTRIBUTING.md describes"
+		elif ! case_green c "${want}"; then
+			miss "${label}: the C backend neither passed nor failed the case"
+		elif [ "${js_state}" != "ran" ] && ! grep -q 'SyntaxError' "${work}/out.js"; then
+			miss "${label}: the JS run produced neither case results nor a SyntaxError"
+			tail -8 "${work}/out.js" | sed 's/^/    /'
+		elif case_red js "${want}" || grep -q 'SyntaxError' "${work}/out.js"; then
+			pass "${label}"
+			note "    C backend: GREEN (JsonParsingError IS a CatchableError there)"
+			note "    JS backend: RED  (V8's raw SyntaxError matches no Nim type)"
+			note "    This is why vm-unit-js is load-bearing and not duplicative."
+		else
+			miss "${label}: the JS backend did not redden \"${want}\""
+			grep '\[FAILED\]' "${work}/out.js" | sed 's/^/    /' | head -4
+		fi
+		restore
+	fi
+else
+	note "M17 skipped: it needs both backends (CT_IDENTITY_ARMS=c is set)"
+fi
+
+echo
+echo "${arms} arm(s), ${misses} miss(es)"
+if [ "${misses}" -gt 0 ]; then
+	echo "RESULT: FAILED — ${misses} arm(s) did not kill on their own case"
+	exit 1
+fi
+echo "RESULT: OK — every assertion family in ${MODULE} has a mutation that reddens it"
