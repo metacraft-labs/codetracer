@@ -49,9 +49,25 @@ let
   #
   # To add a new platform: build once, take the ``got:`` hash from the
   # "hash mismatch" error, and add it below.
+  #
+  # NOTE: any change to ``yarn.lock`` invalidates BOTH hashes below, so they
+  # have to be refreshed in the same commit range as the lockfile change or
+  # every nix build fails with a hash mismatch. Running *any* yarn command in
+  # this directory also makes the nixify plugin rewrite this file and DELETE
+  # this whole per-system block, collapsing it to a single ``outputHash`` for
+  # whichever machine happened to run yarn -- see commit 2c4b0a76, which had
+  # to restore it once already. It did it five more times while the security
+  # bumps in this branch were being prepared. Always check
+  # ``git diff node-packages/yarn-project.nix`` after invoking yarn.
   cacheOutputHashes = {
+    # STALE -- must be regenerated on an x86_64-linux builder before this
+    # branch merges. The security bumps here (tar, basic-ftp, shell-quote,
+    # immutable, ws) all changed yarn.lock, and `yarn nixify fetch` only
+    # populates the cache for the current architecture, so this value cannot
+    # be produced on macOS. Take the ``got:`` hash from the CI hash-mismatch
+    # error and paste it here.
     "x86_64-linux" = "sha512-2guUBYTPk7MUt9DfamxnVESTpzx06r7rPnl2GGenNdrXqw3wgIfMZ4dvGHubyj4Lj+m2XVtQNow9hRjUz0cCsg==";
-    "aarch64-darwin" = "sha512-mt7iF+4GNu9oGd42DeCMddB5bcemUYNdzj8g1gEKgzSIfGemBZxJCNC/u0k6kD1xwg7OfOwksHXWq88JBqA56A==";
+    "aarch64-darwin" = "sha512-HlfoP0GZumvRJeIlTYag3j+XU2FMT0i3wvrMUNNgEiwvDlO6G8MuSXxpUSgih+6hDA1KceAAgt1kPzRnpYkfFQ==";
   };
 
   cacheOutputHash =
