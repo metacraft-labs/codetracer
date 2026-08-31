@@ -236,6 +236,22 @@ jobs:
           '
           ls -l noir-wasm-out
 
+      - name: Setup isonim siblings
+        # The Noir Studio bundle carries the RENDERER, and `src/frontend/ui_js.nim`
+        # reaches `isonim/dsl/tailwind`, which `staticRead`s
+        # `isonim/build/tailwind-styles.json` at COMPILE time. Nim cannot catch a
+        # failing `staticRead`, so without this the assembly step dies several
+        # minutes in with an error naming neither this workflow nor the file's
+        # purpose — which is exactly what `ci/test/renderer-browser-build.sh`
+        # warns about and checks for before it builds anything.
+        #
+        # This deploy is the first workflow to compile the renderer, so it is the
+        # first to need the isonim family; `setup-dev-env` above provisions the
+        # db-backend siblings, which are a different set.
+        uses: ./.github/actions/setup-isonim-siblings
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: Assemble the Noir Studio bundle
         # ONE assembly step, and it is the SAME script the `web-bundle-assets`
         # gate runs on every push — so what CI checks and what this uploads are
