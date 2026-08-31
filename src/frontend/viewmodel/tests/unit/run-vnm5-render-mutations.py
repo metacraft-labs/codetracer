@@ -55,6 +55,7 @@ SUITE = "src/frontend/viewmodel/tests/unit/test_counterexample_session.nim"
 VM = "src/frontend/viewmodel/viewmodels/counterexample_session_vm.nim"
 PANEL = "src/frontend/viewmodel/viewmodels/verification_vm.nim"
 PANEL_VIEW = "src/frontend/viewmodel/views/isonim_verification_view.nim"
+CX_VIEW = "src/frontend/viewmodel/views/isonim_counterexample_view.nim"
 LOOP_MATH = "src/frontend/ui/flow_loop_math.nim"
 
 OPENS = "one action turns a failed obligation into a session on its first step"
@@ -68,9 +69,14 @@ LOOP = "the loop control moves the session, and its arithmetic is flow_loop_math
 NOLOOP = "no producer emits a loop step, so the real payloads render no slider"
 PROVENANCE = "the provenance travels with the panel and with every row"
 PAIRED = "the text tier still offers nothing, and the same renderer offers when it may"
+CLICK_OPENS = "clicking the offer in the rendered panel opens the session"
+CLICK_WALKS = "clicking the controls walks the session, and a repaint follows it"
+NO_MODEL = "a payload with no model at all offers nothing, and says why"
+NAMES = "the live tree carries the same attribute NAMES as the pure one"
 
 VNM5_CHECKS = [OPENS, REFUSES, WALKS, UNKNOWN, KNOWN, DEMOTE, ANCHOR, LOOP,
-               NOLOOP, PROVENANCE, PAIRED]
+               NOLOOP, PROVENANCE, PAIRED, CLICK_OPENS, CLICK_WALKS, NO_MODEL,
+               NAMES]
 
 
 @dataclass
@@ -205,7 +211,7 @@ MUTATIONS = [
     # --- the offer, in the text tier's own panel ----------------------------
     Mutation(
         "R14", PANEL_VIEW,
-        "      if model.counterexampleOffers.len > 0:",
+        "      if mdl.counterexampleOffers.len > 0:",
         "      if true:",
         PAIRED,
         "the offer section renders over a run that has nothing to offer",
@@ -218,6 +224,43 @@ MUTATIONS = [
         PAIRED,
         "the offer never renders -- the state the negative half of PAIRED is "
         "green over on its own",
+    ),
+    # --- reachability: the panel a user can get to ------------------------
+    Mutation(
+        "R16", PANEL_VIEW,
+        "    onOpenCounterexample: proc(findingId: string) =\n"
+        "      discard vm.openCounterexample(session, findingId))",
+        "    onOpenCounterexample: proc(findingId: string) = discard)",
+        CLICK_OPENS,
+        "the button is in the markup and wired to nothing -- which is what "
+        "'built and unreachable' looks like from the user's side, and what a "
+        "check that only calls the API cannot see",
+    ),
+    Mutation(
+        "R17", CX_VIEW,
+        "    onStepForward: proc() = vm.stepForward(),",
+        "    onStepForward: proc() = vm.stepBackward(),",
+        CLICK_WALKS,
+        "the Step control is wired to the wrong operation",
+    ),
+    Mutation(
+        "R18", PANEL_VIEW,
+        "  if model.modelAbsentReason.len == 0:\n    return \"\"",
+        "  if true:\n    return \"\"",
+        NO_MODEL,
+        "a payload with no model renders no explanation -- an absent "
+        "affordance that reads as a missing feature",
+    ),
+    Mutation(
+        "R19", CX_VIEW,
+        "`data-ct-counterexample-model-status` = mdl.modelStatusLabel",
+        "`data-ct-counterexample-mdl-status` = mdl.modelStatusLabel",
+        NAMES,
+        "THE bug this check was written for, reproduced in one line: an "
+        "accent-quoted attribute name containing the template's own parameter "
+        "token. The pure expansion substitutes `model` and the live one "
+        "substitutes `m`, so the two trees carry DIFFERENT attribute names and "
+        "nothing else notices -- both render, both carry the right text",
     ),
 ]
 

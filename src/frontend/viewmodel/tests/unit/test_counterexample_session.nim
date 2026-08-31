@@ -55,7 +55,7 @@
 ##
 ## Discovered by the `vm-unit` (C) and `vm-unit-js` (JS) lanes by glob.
 
-import std/[json, options, strutils, tables, unittest]
+import std/[algorithm, json, options, strutils, tables, unittest]
 
 import isonim/core/[signals, computation]
 import isonim/testing/mock_dom
@@ -181,6 +181,15 @@ proc containsDigit(text: string): bool =
     if c in {'0' .. '9'}:
       return true
   false
+
+proc renderSessionLive(vm: CounterexampleSessionVM): MockNode =
+  var renderer: MockRenderer
+  renderCounterexampleSessionLive(renderer, vm)
+
+proc renderPanelLive(vm: VerificationVM;
+                     session: CounterexampleSessionVM): MockNode =
+  var renderer: MockRenderer
+  renderVerificationPanelLive(renderer, vm, session)
 
 proc renderSession(model: CounterexampleSessionModel): MockNode =
   var renderer: MockRenderer
@@ -717,3 +726,173 @@ suite "VN-M5 a counterexample is visibly a solver's, never a recording":
     ck buttons[0].attributes["data-ct-verification-counterexample-steps"] == "4"
     ck renderedText(node).toLowerAscii.contains("step through the counterexample")
     expectCount(10)
+
+# ---------------------------------------------------------------------------
+# Reachability — the panel a user can actually get to
+# ---------------------------------------------------------------------------
+
+suite "VN-M5 the panel is reachable, and only where the data allows":
+
+  test "clicking the offer in the rendered panel opens the session":
+    # The chain deliverable 1 names, exercised through the markup rather than
+    # through the API: render the verification panel, find the button a
+    # developer would click, dispatch a click on it, and require a session.
+    #
+    # Asserting `openCounterexample` directly (which the first suite does)
+    # proves the *call* works. It cannot prove the button is wired to it, and a
+    # button wired to nothing is exactly what "built and unreachable" looks
+    # like from the user's side.
+    startCount()
+    let vm = vmWith(SolverModelPayload)
+    let session = createCounterexampleSessionVM()
+    ck not session.isOpen.val
+
+    let node = renderPanelLive(vm, session)
+    let buttons = nodesWithAttributeValue(node, "data-ct-verification-action",
+                                          "open-counterexample")
+    ck buttons.len == 1                        # positive control on the scan
+    fireEvent(buttons[0], "click")
+
+    ck session.isOpen.val
+    ck session.findingId.val == "f1"
+    ck session.currentStep.val == 0
+    ck session.stepCount.val == 4
+
+    # And the *pure* render's button is inert rather than absent: the tree is
+    # the same tree, the handler is nil, and dispatching on it must neither
+    # open a session nor raise. That is what makes one template safe to serve
+    # both entry points.
+    let inert = createCounterexampleSessionVM()
+    let pureNode = renderPanel(panelModel(vm))
+    let pureButtons = nodesWithAttributeValue(
+      pureNode, "data-ct-verification-action", "open-counterexample")
+    ck pureButtons.len == 1
+    fireEvent(pureButtons[0], "click")
+    ck not inert.isOpen.val
+    expectCount(8)
+
+  test "clicking the controls walks the session, and a repaint follows it":
+    # The other half of reachable: the controls in the mounted markup move the
+    # session. `mountIsoNimCounterexampleSession` re-runs the render inside a
+    # `createEffect`, so what a browser shows after a click is what a re-render
+    # shows here.
+    startCount()
+    let session = sessionOn(SolverModelPayload, "f1")
+    let first = renderSessionLive(session)
+    ck nodesWithAttributeValue(first, "data-ct-counterexample-step-current",
+                               "true").len == 1
+    ck first.nodesWithAttribute("data-ct-counterexample-step").len == 4
+
+    proc click(node: MockNode; action: string) =
+      let hits = nodesWithAttributeValue(node,
+        "data-ct-counterexample-action", action)
+      doAssert hits.len == 1, action & ": expected exactly one control"
+      fireEvent(hits[0], "click")
+
+    click(first, "step-forward")
+    ck session.currentStep.val == 1
+    # The repaint: the current row moved with the session.
+    let second = renderSessionLive(session)
+    let current = nodesWithAttributeValue(second,
+      "data-ct-counterexample-step-current", "true")
+    ck current.len == 1
+    ck current[0].attributes["data-ct-counterexample-step"] == "1"
+
+    click(second, "continue")
+    ck session.currentStep.val == 3
+    let third = renderSessionLive(session)
+    ck nodesWithAttributeValue(third, "data-ct-counterexample-step-current",
+                               "true")[0]
+        .attributes["data-ct-counterexample-step"] == "3"
+    ck nodesWithAttributeValue(third, "data-ct-counterexample-step-violation",
+                               "true").len == 1
+
+    click(third, "step-backward")
+    ck session.currentStep.val == 2
+    expectCount(9)
+
+  test "a payload with no model at all offers nothing, and says why":
+    # The case most likely to be wrong, so it is asserted rather than reasoned
+    # about. `not_proved_assertion.json` is attached and believed and its
+    # counterexample has `model.status == unavailable`.
+    #
+    # What a developer sees: no button, and a sentence carrying the producer's
+    # own recorded reason. An absent affordance with no explanation reads as a
+    # missing feature; this reads as what it is.
+    startCount()
+    let vm = vmWith(NoModelPayload)
+    let session = createCounterexampleSessionVM()
+    ck vm.payloadStatus.val == psAttached      # positive control: it IS here
+    let reason = modelIsAbsentBecause(decoded(NoModelPayload))
+    ck reason.len > 0
+    ck reason.contains("venir")                # the producer's own words
+
+    let node = renderPanelLive(vm, session)
+    ck nodesWithAttributeValue(node, "data-ct-verification-action",
+                               "open-counterexample").len == 0
+    ck nodesWithAttribute(node, "data-ct-verification-no-model").len == 1
+    ck renderedText(node).contains(reason)
+    ck renderedText(node).contains("No counterexample to step through")
+
+    # The contrast arm, through the same renderer: a payload that DOES carry a
+    # model has the button and no such sentence. Without this the check above
+    # would pass over a panel that always prints the sentence.
+    let withModel = renderPanelLive(vmWith(SolverModelPayload),
+                                    createCounterexampleSessionVM())
+    ck nodesWithAttribute(withModel, "data-ct-verification-no-model").len == 0
+    ck nodesWithAttributeValue(withModel, "data-ct-verification-action",
+                               "open-counterexample").len == 1
+    expectCount(9)
+
+  test "the live tree carries the same attribute NAMES as the pure one":
+    # This check exists because of a bug it caught, and the bug was silent.
+    #
+    # `renderVerificationPanelImpl`'s parameters used to be named `model` and
+    # `handlers`. Nim substitutes an `untyped` template argument wherever the
+    # parameter's *identifier* appears — **including inside an accent-quoted
+    # attribute name**, where `data-ct-verification-no-model` contains `model`
+    # as a whole token. So the pure render (whose argument was itself called
+    # `model`) emitted `data-ct-verification-no-model`, and the live render
+    # (whose argument is a local called `m`) emitted
+    # `data-ct-verification-no-m`.
+    #
+    # Nothing failed. Both trees rendered, both carried the right *text*, and
+    # only an assertion on the attribute in the *live* tree could see it. The
+    # parameters are now `mdl`/`hnd`, which are tokens no attribute name
+    # contains — but the rename is a convention, and this check is what makes
+    # it enforced.
+    startCount()
+    proc attributeNames(node: MockNode): seq[string] =
+      var acc: seq[string] = @[]
+      walk(node, proc(n: MockNode) =
+        for name, _ in n.attributes:
+          if name.startsWith("data-ct-") and name notin acc:
+            acc.add name)
+      acc.sort()
+      acc
+
+    # The verification panel, in the state that has every conditional block:
+    # an attached payload with a steppable counterexample.
+    let vm = vmWith(SolverModelPayload)
+    let pureNames = attributeNames(renderPanel(panelModel(vm)))
+    let liveNames = attributeNames(
+      renderPanelLive(vm, createCounterexampleSessionVM()))
+    ck pureNames.len > 0                       # positive control on the scan
+    ck liveNames == pureNames
+
+    # And the counterexample panel, whose template has the same hazard in
+    # `data-ct-counterexample-model-status` and
+    # `data-ct-counterexample-model-bindings`.
+    let session = sessionOn(SolverModelPayload, "f1")
+    let purePanel = attributeNames(renderSession(sessionModel(session)))
+    let livePanel = attributeNames(renderSessionLive(session))
+    ck purePanel.len > 0
+    ck livePanel == purePanel
+    ck "data-ct-counterexample-model-status" in livePanel
+    ck "data-ct-counterexample-model-bindings" in livePanel
+
+    # The no-model panel is a separate state and has its own block.
+    let noModel = vmWith(NoModelPayload)
+    ck "data-ct-verification-no-model" in
+      attributeNames(renderPanelLive(noModel, createCounterexampleSessionVM()))
+    expectCount(7)

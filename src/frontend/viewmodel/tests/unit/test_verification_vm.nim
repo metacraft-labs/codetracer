@@ -99,6 +99,17 @@ proc nodesWithAttribute(node: MockNode; name: string): seq[MockNode] =
       acc.add n)
   acc
 
+proc hasOfferNode(node: MockNode): bool =
+  ## Whether the panel renders the "step through the counterexample" *offer*.
+  ##
+  ## The node, not the words. A vocabulary search cannot tell an offer from a
+  ## sentence that mentions one, and after VN-M5 the panel has to be able to
+  ## say "there is no counterexample here" without that reading as one.
+  for found in nodesWithAttribute(node, "data-ct-verification-action"):
+    if found.attributes["data-ct-verification-action"] == "open-counterexample":
+      return true
+  false
+
 proc verificationAction(): ProjectAction =
   let declared = parseTasksJson(ExampleTasksJson)
   let vernoOnes = vernoActions(declared)
@@ -634,8 +645,27 @@ suite "VN-M4 a payload changes what is known, not what is promised":
     let node = renderVerificationPanel(renderer, panelModel(vm))
     let haystack = (renderedText(node) & " " & allAttributeText(node)).toLowerAscii
     check haystack.len > 0
-    check not haystack.contains("counterexample")
-    check not haystack.contains("step through")
+
+    # **This assertion was narrowed, and the narrowing is a finding rather
+    # than a tidy-up.** It used to read `not haystack.contains("counterexample")`
+    # and `not haystack.contains("step through")`. Making this state *explain
+    # itself* — a payload arrived, was believed, and carries no model — needs a
+    # sentence, and the only honest sentence uses both phrases: "No
+    # counterexample to step through: <the producer's own reason>".
+    #
+    # So the words are now permitted **only inside the refusal**, and that is
+    # what is asserted. The thing the original check existed to forbid is the
+    # *offer*, and the offer is pinned by its own node below rather than by the
+    # vocabulary. A panel that grew a button would fail the second check
+    # whatever words it used, which the string search never could.
+    check not hasOfferNode(node)
+    check haystack.contains("no counterexample to step through")
+    # Every occurrence of the vocabulary is inside that one sentence: strip it
+    # and nothing is left. This is what keeps "permitted in the refusal" from
+    # becoming "permitted anywhere".
+    let withoutRefusal = haystack.replace("no counterexample to step through", "")
+    check not withoutRefusal.contains("counterexample")
+    check not withoutRefusal.contains("step through")
 
   test "the results pane still cannot offer a trace, with a payload attached":
     # `toTestEvents` is built from the report, which the payload never enters —
