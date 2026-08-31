@@ -827,6 +827,16 @@ type
       ## detached again before a click could land on it.
       ## Reset wherever ``commitOffset`` is reset.
 
+  VerificationComponent* = ref object of Component
+    ## VN-M5 / VN-M3. The GoldenLayout carrier for the verification panel.
+    ##
+    ## It owns no state: the panel is an IsoNim view over `VerificationVM` and
+    ## `CounterexampleSessionVM`, which live in `ui/verification.nim` because
+    ## the run outlives any one tab. This type exists so the panel has a
+    ## `Content` identity, a container id (`verificationComponent-{id}`) and a
+    ## place on the event bus — the same three things every other IsoNim panel
+    ## gets from its legacy component.
+
   UnifiedDiffComponent* = ref object of Component
     ## One unified-diff editor tab: a Monaco document showing the diff for a
     ## single target.

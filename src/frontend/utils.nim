@@ -592,6 +592,11 @@ proc makeFilesystemComponent*(data: Data, id: int): FilesystemComponent =
     forceRedraw: true,)
   data.registerComponent(result, Content.Filesystem)
 
+proc makeVerificationComponent*(data: Data, id: int): VerificationComponent =
+  ## VN-M5. See `VerificationComponent`: a carrier, with no state of its own.
+  result = VerificationComponent(id: id)
+  data.registerComponent(result, Content.Verification)
+
 proc makeUnifiedDiffComponent*(data: Data, id: int): UnifiedDiffComponent =
   ## One unified-diff editor tab.  ``diffTarget`` is filled in by
   ## ``openLayoutTab`` from the layout path the request carried, which is also
@@ -1035,6 +1040,7 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.RequestPanel:    data.makeRequestPanelComponent(id)
   of Content.VCS:             data.makeVCSComponent(id)
   of Content.UnifiedDiff:     data.makeUnifiedDiffComponent(id)
+  of Content.Verification:    data.makeVerificationComponent(id)
   # of Content.PointList:       data.makePointListComponent()
   else:
     raise newException(ValueError, &"Could not create a component. Unexpected content {content} type was given.")

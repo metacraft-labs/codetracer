@@ -4,7 +4,7 @@ import
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
   frame_viewer, pixel_history, shader_debug, video_player,
-  vcs, unified_diff,
+  vcs, unified_diff, verification,
   agent_activity, agent_workspace,
   session_switch, auto_hide, auto_hide_overlay,
   caption_bar_progress,
@@ -1218,6 +1218,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.CommandPalette,
       Content.VCS,
       Content.UnifiedDiff,
+      Content.Verification,
       Content.AgentActivity,
       Content.AgentActivityDeepReview,
       Content.AgentWorkspace,
@@ -1413,6 +1414,15 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         if state.content == Content.UnifiedDiff:
           unified_diff.syncIntoVM(UnifiedDiffComponent(component))
           unified_diff.tryMountUnifiedDiffTab(component.id)
+
+        # VN-M5. The verification panel is an IsoNim view with no legacy
+        # renderer at all, so there is nothing to sync into a VM first: the
+        # `VerificationComponent` carries no state. Its mount puts TWO IsoNim
+        # roots in the container — the run, and the counterexample the run
+        # produced — and the second is empty until a session is opened from
+        # the first.
+        if state.content == Content.Verification:
+          verification.tryMountIsoNimVerificationPanel()
 
         if state.content == Content.AgentActivity:
           agent_activity.syncLegacyAgentActivityIntoVM(
