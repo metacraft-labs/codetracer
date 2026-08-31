@@ -260,6 +260,18 @@ func entitlements*(c: IdentityClaims): seq[string] = c.entitlementsField
 func windowExceptionReason*(c: IdentityClaims): string =
   c.windowExceptionReasonField
 
+func rejectedDecision*(kind: DecisionKind; detail: string): IdentityDecision =
+  ## The ONLY exported constructor for a decision, and it can only build a
+  ## REFUSAL. `dkAccepted` is coerced to `dkMalformed`, so the session layer can
+  ## report an inspection failure without acquiring the ability to manufacture
+  ## an acceptance — which would be authoring an identity by the back door,
+  ## exactly what ID1's fifth deliverable forbids. The claims are always empty
+  ## for the same reason a rejected token yields none.
+  IdentityDecision(
+    kindField: (if kind == dkAccepted: dkMalformed else: kind),
+    bandField: ibNotYetValid, claimsField: IdentityClaims(),
+    detailField: detail)
+
 func kind*(d: IdentityDecision): DecisionKind = d.kindField
 func band*(d: IdentityDecision): IdentityBand = d.bandField
 func claims*(d: IdentityDecision): IdentityClaims = d.claimsField
@@ -433,28 +445,63 @@ func knows*(keyring: PinnedKeyring; keyId: string): bool =
 # environment read and no network call, and that is checked by the signature
 # rather than asserted about the body.
 # ---------------------------------------------------------------------------
-proc verifyToken*(raw: openArray[byte]; keyring: PinnedKeyring;
-                  nowUnix: int64; revocations: RevocationList;
-                  policy: WindowPolicy): IdentityDecision =
-  template reject(k: DecisionKind; why: string): IdentityDecision =
-    IdentityDecision(kindField: k, bandField: ibNotYetValid,
-                     claimsField: IdentityClaims(), detailField: why)
+type
+  TokenInspection* = object
+    ## Everything decidable about a token WITHOUT its signature: the container
+    ## layout, the claims, and the rules those claims must satisfy.
+    ##
+    ## THIS TYPE EXISTS BECAUSE WEBCRYPTO IS ASYNCHRONOUS. `crypto.subtle.verify`
+    ## returns a promise, and there is no synchronous WebCrypto, so a browser
+    ## cannot implement the synchronous `SignatureVerifier` seam at all. The
+    ## options were to make verification async everywhere — which would make
+    ## every entitlement question a future and hand the verifier a capability to
+    ## await, exactly the shape this module is built to avoid — or to split the
+    ## work at the one place that genuinely needs I/O.
+    ##
+    ## So the split is: inspection is PURE and happens on every check;
+    ## the signature is checked ONCE, at admission, where a future is
+    ## appropriate. `ct_license_ffi` already draws the same line, between
+    ## `ct_license_start` and `ct_license_heartbeat`, for the same reason.
+    ##
+    ## `verifyToken` below is unchanged in behaviour and remains the whole
+    ## story for a caller that has a synchronous primitive (the native FFI).
+    okField: bool
+    kindField: DecisionKind
+    detailField: string
+    claimsField: IdentityClaims
+    messageField: seq[byte]
+    signatureField: seq[byte]
+
+func inspectionOk*(i: TokenInspection): bool = i.okField
+func inspectionKind*(i: TokenInspection): DecisionKind = i.kindField
+func inspectionDetail*(i: TokenInspection): string = i.detailField
+func inspectionClaims*(i: TokenInspection): IdentityClaims = i.claimsField
+func signedMessage*(i: TokenInspection): seq[byte] = i.messageField
+func tokenSignature*(i: TokenInspection): seq[byte] = i.signatureField
+
+proc inspectToken*(raw: openArray[byte]; policy: WindowPolicy): TokenInspection =
+  ## Pure. No clock, no key, no I/O — the signature is somebody else's problem
+  ## precisely so that this half can run anywhere and be tested everywhere.
+  template refuse(k: DecisionKind; why: string): TokenInspection =
+    TokenInspection(okField: false, kindField: k, detailField: why,
+                    claimsField: IdentityClaims(), messageField: @[],
+                    signatureField: @[])
 
   if raw.len < MinTokenLen:
-    return reject(dkMalformed, "token is shorter than the smallest valid container")
+    return refuse(dkMalformed, "token is shorter than the smallest valid container")
   for i in 0 ..< IdentityMagic.len:
     if raw[i] != byte(IdentityMagic[i]):
-      return reject(dkMalformed,
+      return refuse(dkMalformed,
         "container magic is not " & IdentityMagic.escape() &
         "; a licence is not an identity token")
 
   let declared = readU32LE(raw, 4)
   if declared > MaxPayloadLen.uint32:
-    return reject(dkMalformed, "declared payload length exceeds the maximum")
+    return refuse(dkMalformed, "declared payload length exceeds the maximum")
   let payloadStart = 8
   let payloadEnd = payloadStart + declared.int
   if payloadEnd + SignatureLen != raw.len:
-    return reject(dkMalformed,
+    return refuse(dkMalformed,
       "declared payload length does not account for the whole container")
 
   var payload = newString(declared.int)
@@ -464,18 +511,11 @@ proc verifyToken*(raw: openArray[byte]; keyring: PinnedKeyring;
   var claims = IdentityClaims()
   let parseError = parseClaims(payload, claims)
   if parseError.len > 0:
-    return reject(dkMalformed, parseError)
+    return refuse(dkMalformed, parseError)
 
   let ruleError = claimRuleViolation(claims, policy)
   if ruleError.len > 0:
-    return reject(dkMalformed, ruleError)
-
-  # Rotation before authenticity, so that an old build meeting a new key says
-  # "update me" rather than "you are forged". The two are different user
-  # actions and licensing cannot express the difference at all.
-  if not keyring.knows(claims.keyIdField):
-    return reject(dkUnknownKeyId,
-      "no pinned key bears key_id '" & claims.keyIdField & "'")
+    return refuse(dkMalformed, ruleError)
 
   # The signature covers magic + length + payload, exactly as CTL's does.
   let signedLen = payloadEnd
@@ -486,12 +526,16 @@ proc verifyToken*(raw: openArray[byte]; keyring: PinnedKeyring;
   for i in 0 ..< SignatureLen:
     signature[i] = raw[payloadEnd + i]
 
-  if keyring.verify.isNil:
-    return reject(dkMalformed, "no signature verifier was supplied")
-  if not keyring.verify(claims.keyIdField, message, signature):
-    return reject(dkBadSignature, "the pinned key rejected this token")
+  TokenInspection(okField: true, kindField: dkAccepted, detailField: "",
+                  claimsField: claims, messageField: message,
+                  signatureField: signature)
 
-  # Only now are the claims trustworthy enough to return.
+proc decideVerified*(claims: IdentityClaims; nowUnix: int64;
+                     revocations: RevocationList): IdentityDecision =
+  ## The band half, for claims whose signature HAS been checked. Pure.
+  ## Shared by `verifyToken` and by the session layer's admitted-token path so
+  ## that a token admitted asynchronously and one verified synchronously cannot
+  ## disagree about the same instant.
   let band = bandAt(claims, nowUnix)
 
   if band == ibNotYetValid:
@@ -516,3 +560,31 @@ proc verifyToken*(raw: openArray[byte]; keyring: PinnedKeyring;
 
   IdentityDecision(kindField: dkAccepted, bandField: band, claimsField: claims,
                    detailField: "")
+
+proc verifyToken*(raw: openArray[byte]; keyring: PinnedKeyring;
+                  nowUnix: int64; revocations: RevocationList;
+                  policy: WindowPolicy): IdentityDecision =
+  template reject(k: DecisionKind; why: string): IdentityDecision =
+    IdentityDecision(kindField: k, bandField: ibNotYetValid,
+                     claimsField: IdentityClaims(), detailField: why)
+
+  let inspection = inspectToken(raw, policy)
+  if not inspection.okField:
+    return reject(inspection.kindField, inspection.detailField)
+  let claims = inspection.claimsField
+
+  # Rotation before authenticity, so that an old build meeting a new key says
+  # "update me" rather than "you are forged". The two are different user
+  # actions and licensing cannot express the difference at all.
+  if not keyring.knows(claims.keyIdField):
+    return reject(dkUnknownKeyId,
+      "no pinned key bears key_id '" & claims.keyIdField & "'")
+
+  if keyring.verify.isNil:
+    return reject(dkMalformed, "no signature verifier was supplied")
+  if not keyring.verify(claims.keyIdField, inspection.messageField,
+                        inspection.signatureField):
+    return reject(dkBadSignature, "the pinned key rejected this token")
+
+  # Only now are the claims trustworthy enough to return.
+  decideVerified(claims, nowUnix, revocations)

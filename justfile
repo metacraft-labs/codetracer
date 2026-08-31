@@ -2975,15 +2975,20 @@ test-renderer-pane-parity:
   exec > >(tee test-logs/test-renderer-pane-parity.log) 2>&1
   bash ci/test/renderer-pane-parity.sh
 
-# ID1's verifier, proved by mutation. The suite itself runs in `vm-unit` and
-# `vm-unit-js` by the directory glob; this is the evidence that its assertions
-# can fail. M17 needs BOTH backends — it asserts green on C and red on JS — so
-# do not set CT_IDENTITY_ARMS here.
-test-identity-token-mutation:
+# ID1's identity layer: the mutation proof, the WebCrypto seam executed under
+# Node, and the assertion that no environment variable can turn verification
+# off.
+#
+# The unit suites themselves run in `vm-unit` and `vm-unit-js` by the directory
+# glob; these three are the evidence around them. M17 needs BOTH backends — it
+# asserts green on C and red on JS — so do not set CT_IDENTITY_ARMS here.
+test-identity:
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p test-logs
-  exec > >(tee test-logs/test-identity-token-mutation.log) 2>&1
+  exec > >(tee test-logs/test-identity.log) 2>&1
+  bash ci/test/identity-no-escape-hatch.sh
+  bash ci/test/identity-webcrypto.sh
   bash ci/test/identity-token-mutation.sh
 
 # NS7a's first verification: the development loop has no network surface, so

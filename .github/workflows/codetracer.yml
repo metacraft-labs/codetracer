@@ -1795,7 +1795,7 @@ jobs:
         # longer dispatches.
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-pane-parity
 
-      - name: Identity token mutation proof (ID1)
+      - name: Identity layer — escape hatch, WebCrypto seam, mutation proof (ID1/ID2)
         # `viewmodel/identity/token.nim` is the verification library ID1 asks
         # every product to link, and `test_identity_token.nim` runs in
         # `vm-unit` and `vm-unit-js` by the directory glob — this step is the
@@ -1807,7 +1807,19 @@ jobs:
         # stay GREEN while the JS backend goes RED — CONTRIBUTING.md's
         # portability rule, as a check. Both backends are needed for that arm
         # to prove anything, so this step must never be reduced to one.
-        run: nix develop .#devShells.x86_64-linux.default --command just test-identity-token-mutation
+        #
+        # Also runs `identity-no-escape-hatch.sh`, ID2's hard requirement: the
+        # licensing binding ships `CT_LICENSE_DEV_NO_FFI`, a RUNTIME env var
+        # that disables enforcement entirely. Survivable for a licence; for an
+        # identity token it is an authentication bypass, so its absence is
+        # asserted rather than left to habit — with two positive controls, one
+        # synthetic and one over the real binding that has the hatch.
+        #
+        # And `identity-webcrypto.sh`, which drives the browser signature seam
+        # under Node against REAL Ed25519. That path cannot be a `vm-unit-js`
+        # suite: `crypto.subtle` is a V8 microtask and `drainPlatformCallbacks`
+        # drains nim-everywhere's queue, not V8's.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-identity
 
       - name: Noir Studio signed out (NS7a / Identity ID3)
         # `test_development_loop_needs_no_account`, as a property of the built

@@ -46,6 +46,30 @@ cd "${repo_root}" || exit 2
 
 MODULE="src/frontend/viewmodel/identity/token.nim"
 SUITE="src/frontend/viewmodel/tests/unit/test_identity_token.nim"
+MODULE2="src/frontend/viewmodel/identity/session.nim"
+SUITE2="src/frontend/viewmodel/tests/unit/test_identity_session.nim"
+
+# Which pair the arms below currently operate on. `use_pair` swaps both at
+# once, so an arm can never mutate one module and run the other's suite —
+# which would produce a green run that proved nothing and looked like a
+# surviving mutant.
+active_module="${MODULE}"
+active_suite="${SUITE}"
+active_cases=10
+use_pair() {
+	case "$1" in
+	token)
+		active_module="${MODULE}"
+		active_suite="${SUITE}"
+		active_cases=10
+		;;
+	session)
+		active_module="${MODULE2}"
+		active_suite="${SUITE2}"
+		active_cases=10
+		;;
+	esac
+}
 cache_root="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
 work="$(mktemp -d)"
 backends="c js"
@@ -57,6 +81,9 @@ misses=0
 cleanup() {
 	if [ -f "${work}/token.nim.orig" ]; then
 		cp "${work}/token.nim.orig" "${MODULE}" 2>/dev/null || true
+	fi
+	if [ -f "${work}/session.nim.orig" ]; then
+		cp "${work}/session.nim.orig" "${MODULE2}" 2>/dev/null || true
 	fi
 	rm -rf "${work}"
 }
@@ -81,7 +108,12 @@ command -v nim >/dev/null 2>&1 || {
 	echo "${MODULE} does not exist; this proof has no subject" >&2
 	exit 2
 }
+[ -f "${MODULE2}" ] || {
+	echo "${MODULE2} does not exist; this proof has no subject" >&2
+	exit 2
+}
 cp "${MODULE}" "${work}/token.nim.orig"
+cp "${MODULE2}" "${work}/session.nim.orig"
 
 # run_suite BACKEND -> transcript in ${work}/out.BACKEND ; echoes a state word
 #   ran      the suite compiled and produced case results
@@ -91,11 +123,11 @@ run_suite() {
 	if [ "${backend}" = "c" ]; then
 		nim c --hints:off --warnings:off \
 			--nimcache:"${cache_root}/idmut-c" \
-			-o:"${work}/suite-bin" -r "${SUITE}" >"${out}" 2>&1
+			-o:"${work}/suite-bin" -r "${active_suite}" >"${out}" 2>&1
 	else
 		nim js --hints:off --warnings:off \
 			--nimcache:"${cache_root}/idmut-js" \
-			-o:"${work}/suite.js" -r "${SUITE}" >"${out}" 2>&1
+			-o:"${work}/suite.js" -r "${active_suite}" >"${out}" 2>&1
 	fi
 	if grep -q '\[Suite\]' "${out}"; then
 		printf 'ran'
@@ -108,14 +140,23 @@ case_red() { grep -qF "[FAILED] $2" "${work}/out.$1"; }
 case_green() { grep -qF "[OK] $2" "${work}/out.$1"; }
 
 # mutate SED_SCRIPT — apply to the pristine module
+pristine_of() {
+	if [ "${active_module}" = "${MODULE2}" ]; then
+		printf '%s' "${work}/session.nim.orig"
+	else
+		printf '%s' "${work}/token.nim.orig"
+	fi
+}
 mutate() {
-	sed "$1" "${work}/token.nim.orig" >"${MODULE}"
-	if cmp -s "${MODULE}" "${work}/token.nim.orig"; then
+	local orig
+	orig="$(pristine_of)"
+	sed "$1" "${orig}" >"${active_module}"
+	if cmp -s "${active_module}" "${orig}"; then
 		return 1
 	fi
 	return 0
 }
-restore() { cp "${work}/token.nim.orig" "${MODULE}"; }
+restore() { cp "$(pristine_of)" "${active_module}"; }
 
 # arm LABEL CASE SED — the common shape: mutate, run every backend, require
 # the named case red on each.
@@ -151,7 +192,7 @@ note "backends: ${backends}"
 echo
 
 # ---------------------------------------------------------------------------
-echo "Control arm: the unmutated module, on every backend"
+echo "Control arm: the unmutated token module, on every backend"
 # ---------------------------------------------------------------------------
 control_ok=1
 for b in ${backends}; do
@@ -164,11 +205,11 @@ for b in ${backends}; do
 	fi
 	n_ok="$(grep -c '\[OK\]' "${work}/out.${b}" || true)"
 	n_bad="$(grep -c '\[FAILED\]' "${work}/out.${b}" || true)"
-	if [ "${n_bad}" -eq 0 ] && [ "${n_ok}" -eq 10 ]; then
+	if [ "${n_bad}" -eq 0 ] && [ "${n_ok}" -eq "${active_cases}" ]; then
 		printf '  [OK]     control: %s backend, %s cases, 0 failures\n' "${b}" "${n_ok}"
 	else
-		printf '  [MISS]   control: %s backend, %s ok / %s failed (expected 10 / 0)\n' \
-			"${b}" "${n_ok}" "${n_bad}"
+		printf '  [MISS]   control: %s backend, %s ok / %s failed (expected %s / 0)\n' \
+			"${b}" "${n_ok}" "${n_bad}" "${active_cases}"
 		control_ok=0
 	fi
 done
@@ -177,7 +218,7 @@ arms=$((arms + 1))
 echo
 
 # ---------------------------------------------------------------------------
-echo "Mutation arms — one per assertion family"
+echo "Mutation arms for ${MODULE} — one per assertion family"
 # ---------------------------------------------------------------------------
 
 # --- the four bands --------------------------------------------------------
@@ -225,7 +266,7 @@ arm "M8  a widened window no longer needs a recorded reason" \
 # --- the signature and what a rejection may reveal -------------------------
 arm "M9  the signature is never checked" \
 	"test_verification_needs_no_network" \
-	's/  if not keyring.verify(claims.keyIdField, message, signature):/  if false:/'
+	's/  if not keyring.verify(claims.keyIdField, inspection.messageField,/  if false and keyring.verify(claims.keyIdField, inspection.messageField,/'
 
 arm "M10 a rejected token leaks its claims" \
 	"test_verification_needs_no_network" \
@@ -304,6 +345,89 @@ if [ "${backends}" = "c js" ]; then
 else
 	note "M17 skipped: it needs both backends (CT_IDENTITY_ARMS=c is set)"
 fi
+
+# ---------------------------------------------------------------------------
+echo
+echo "Control arm: the unmutated session module"
+# ---------------------------------------------------------------------------
+use_pair session
+control_ok=1
+for b in ${backends}; do
+	state="$(run_suite "${b}")"
+	if [ "${state}" != "ran" ]; then
+		printf '  [MISS]   control(session): the suite did not build on %s\n' "${b}"
+		tail -12 "${work}/out.${b}" | sed 's/^/    /'
+		control_ok=0
+		continue
+	fi
+	n_ok="$(grep -c '\[OK\]' "${work}/out.${b}" || true)"
+	n_bad="$(grep -c '\[FAILED\]' "${work}/out.${b}" || true)"
+	if [ "${n_bad}" -eq 0 ] && [ "${n_ok}" -eq "${active_cases}" ]; then
+		printf '  [OK]     control(session): %s backend, %s cases, 0 failures\n' "${b}" "${n_ok}"
+	else
+		printf '  [MISS]   control(session): %s backend, %s ok / %s failed (expected %s / 0)\n' \
+			"${b}" "${n_ok}" "${n_bad}" "${active_cases}"
+		control_ok=0
+	fi
+done
+arms=$((arms + 1))
+[ "${control_ok}" = "1" ] || misses=$((misses + 1))
+echo
+
+# ---------------------------------------------------------------------------
+echo "Mutation arms for ${MODULE2} — the layer that CAN reach a network"
+# ---------------------------------------------------------------------------
+
+# S1 IS THE ONE THIS WHOLE MODULE EXISTS FOR. §3.3.1a's first row is "No
+# network required, no renewal attempted", and a refresh client that polls in
+# the normal band passes every functional test while deleting the offline
+# property. Only a call COUNT catches it.
+arm "S1  the refresh client polls in the normal band" \
+	"the normal band makes no network call at all" \
+	's/  if action == raNone:/  if false:/'
+
+arm "S2  the silent and visible bands collapse into one action" \
+	"the renewing band refreshes silently and the warning band visibly" \
+	's/  of ibRenewing: raSilent/  of ibRenewing: raVisible/'
+
+# S3: an unknown key id is answerable locally. Skipping that check sends
+# attacker-shaped input to the transport, which is how a malformed token
+# becomes a way to drive traffic.
+arm "S3  an unknown key id is sent to the transport instead of refused locally" \
+	"a token that fails inspection never becomes a network event" \
+	's/  if not known:/  if false:/'
+
+arm "S4  a fetched revocation list is discarded" \
+	"revocation arrives over the transport and takes effect" \
+	's/      s.revocationsField = list/      discard list/'
+
+arm "S5  revocation staleness uses the warn lead instead of the renew lead" \
+	"revocation staleness is the renew lead, not a number of its own" \
+	's/  nowUnix - s.revocationsField.obtainedAt > s.policyField.renewLead/  nowUnix - s.revocationsField.obtainedAt > s.policyField.warnLead/'
+
+# S6 was first written as a two-line sed pattern with an embedded \n, which
+# sed does not match against the pattern space line-by-line — it changed
+# nothing, and the harness said so rather than scoring a phantom kill. The
+# single-line form matches the same guard in `decide`, `plan` AND `bandOf`,
+# which is correct here: all three are asserted by the one case, and a session
+# that forgot it had no token would be wrong in all three ways at once.
+arm "S6  a session with no token decides as though it had one" \
+	"a session with no token is refused, and says so" \
+	's/if not s.hasTokenField:/if false:/'
+
+arm "S7  an invalid signature still admits the token" \
+	"admission checks the signature exactly once, and only after inspection" \
+	's/      if not valid:/      if false:/'
+
+# S8's subject lives in token.nim but its ASSERTION lives in the session
+# suite, so the pair is swapped by hand: mutate the token module, run the
+# session suite. This is the one place the two are deliberately crossed, and
+# it is crossed because `rejectedDecision` is the seam between them.
+active_module="${MODULE}"
+arm "S8  the decision constructor stops coercing a forged acceptance" \
+	"a decision cannot be forged through the exported constructor" \
+	's/    kindField: (if kind == dkAccepted: dkMalformed else: kind),/    kindField: kind,/'
+active_module="${MODULE2}"
 
 echo
 echo "${arms} arm(s), ${misses} miss(es)"
