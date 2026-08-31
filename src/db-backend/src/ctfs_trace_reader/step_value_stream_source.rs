@@ -43,6 +43,7 @@ use codetracer_trace_types::{CallKey, FullValueRecord, Line, PathId, StepId, Typ
 
 use crate::db::DbStep;
 
+use codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder;
 use codetracer_trace_reader::step_stream_reader::{StepStreamReader, open_step_stream};
 use codetracer_trace_reader::value_stream_reader::{ValueStreamReader, open_value_stream};
 use codetracer_trace_writer::meta_dat::{meta_dat_has_step_stream, meta_dat_has_value_stream};
@@ -70,6 +71,31 @@ pub struct SeekableStepStream {
     path: Option<PathBuf>,
     record_count: AtomicU64,
     chunk_size: usize,
+    /// The `global_position_index` decoder for a COLUMN-AWARE container, or
+    /// `None` for a line-only one.
+    ///
+    /// This is the field that decides how a `Step` record's integer coordinate
+    /// is READ, and there are two mutually exclusive encodings behind that one
+    /// `u64`:
+    ///
+    /// * line-only containers store the M23a packed `global_line_index`
+    ///   (`path_id << 32 | line`), whose inverse is `unpack_global_line_index`;
+    /// * column-aware containers store a `global_position_index` — a cumulative
+    ///   BYTE address across every registered file — which only the per-file
+    ///   line-length tables can resolve to `(file, line, column)`.
+    ///
+    /// Nothing in the record distinguishes them, so the reader must be told,
+    /// and a reader that is not told reads a byte offset as a line number. That
+    /// is exactly the defect this field exists to fix: the browser's pure-Rust
+    /// reader took the lazy step path unconditionally, `unpack_global_line_index`
+    /// turned a GPI under 2^32 into `path_id = 0` and `line = <the byte
+    /// offset>`, and every step in a column-aware container reported `paths[0]`
+    /// at a four-digit line while the call tree — which comes from `calls.dat`
+    /// and never touches this encoding — stayed perfectly correct.
+    ///
+    /// `None` is the default and is what every legacy / old-format / line-only
+    /// container keeps, so those paths are bit-for-bit unchanged.
+    position_decoder: Option<Arc<GlobalPositionDecoder>>,
     /// Number of *distinct* Zstd chunks this source has had to decompress since
     /// it was opened.
     ///
@@ -110,6 +136,7 @@ impl SeekableStepStream {
                     path: Some(path.to_path_buf()),
                     record_count: AtomicU64::new(record_count),
                     chunk_size,
+                    position_decoder: None,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
             }
@@ -146,6 +173,7 @@ impl SeekableStepStream {
                     path: None,
                     record_count: AtomicU64::new(record_count),
                     chunk_size,
+                    position_decoder: None,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
             }
@@ -177,24 +205,77 @@ impl SeekableStepStream {
     /// when this source has no retained path (an in-memory source that cannot be
     /// re-opened) or the re-open fails — the caller then falls back to driving
     /// the range through this (shared) source instead.
+    /// The sibling inherits this source's position decoder (a cheap `Arc`
+    /// clone). Without that, a parallel whole-table build would decode the same
+    /// container's steps differently on the worker threads than on this one —
+    /// the same byte-offset-as-line-number defect, reappearing only under
+    /// concurrency and only on part of the table.
     pub fn open_sibling(&self) -> Option<SeekableStepStream> {
         let path = self.path.as_ref()?;
         match SeekableStepStream::open(path) {
-            Ok(Some(sibling)) => Some(sibling),
+            Ok(Some(sibling)) => Some(sibling.with_position_decoder(self.position_decoder.clone())),
             _ => None,
         }
     }
 
+    /// Install the `global_position_index` decoder for a COLUMN-AWARE
+    /// container, consuming and returning the stream so it can be wired at the
+    /// point of construction.
+    ///
+    /// The caller is responsible for only passing a decoder built from the
+    /// SAME container's Layout A `paths.dat` tables. Passing `None` leaves the
+    /// stream on the legacy line-only decode, which is what every old-format
+    /// and non-column-aware container must keep getting.
+    #[must_use]
+    pub fn with_position_decoder(mut self, decoder: Option<Arc<GlobalPositionDecoder>>) -> Self {
+        self.position_decoder = decoder;
+        self
+    }
+
+    /// Whether this stream decodes its records as column-aware
+    /// `global_position_index` values.
+    pub fn is_column_aware(&self) -> bool {
+        self.position_decoder.is_some()
+    }
+
     /// Fetch the `(path_id, line)` of step `step_id` from the SEEKABLE
+    /// `steps.dat` stream, decompressing only its chunk. The line-only
+    /// projection of [`step_position`](Self::step_position); see there for how
+    /// the record's integer coordinate is interpreted.
+    pub fn step_line(&self, step_id: StepId) -> Option<(PathId, Line)> {
+        self.step_position(step_id).map(|(path_id, line, _)| (path_id, line))
+    }
+
+    /// Fetch the `(path_id, line, column)` of step `step_id` from the SEEKABLE
     /// `steps.dat` stream, decompressing only its chunk. Returns `None` for an
     /// out-of-range id, or when the record at that index is not a `Step` (e.g. a
     /// `Raise`/`Catch`/`ThreadSwitch` marker carries no source line).
     ///
-    /// The decoded record's `global_line_index` is the exact value M23a packed
-    /// from the original `(path_id, line)`; [`unpack_global_line_index`] is its
-    /// inverse, so the returned location is byte-identical to the materialized
-    /// `DbStep`'s `(path_id, line)`.
-    pub fn step_line(&self, step_id: StepId) -> Option<(PathId, Line)> {
+    /// # Which encoding the record's `u64` is in
+    ///
+    /// A `Step` record carries ONE integer, and it means one of two different
+    /// things depending on the container:
+    ///
+    /// * **line-only** — it is the M23a packed `global_line_index`, and
+    ///   [`unpack_global_line_index`] is its exact inverse, so the result is
+    ///   byte-identical to the materialized `DbStep`'s `(path_id, line)`. The
+    ///   column is `None`, matching the legacy semantics.
+    /// * **column-aware** — it is a `global_position_index`, a cumulative byte
+    ///   address across every registered file, and only the per-file
+    ///   line-length tables resolve it. `column` is then the real recorded
+    ///   1-based column.
+    ///
+    /// The record does not say which, so [`with_position_decoder`] is how the
+    /// stream is told, and a stream that has not been told stays on the
+    /// line-only reading.
+    ///
+    /// A GLI the decoder rejects (out of range for the container's address
+    /// space — a partial or inconsistent trace) degrades to the line-only
+    /// reading rather than dropping the step, which keeps a damaged container
+    /// steppable instead of blank.
+    ///
+    /// [`with_position_decoder`]: Self::with_position_decoder
+    pub fn step_position(&self, step_id: StepId) -> Option<(PathId, Line, Option<Line>)> {
         if step_id.0 < 0 || step_id.0 as u64 >= self.record_count.load(Ordering::Relaxed) {
             return None;
         }
@@ -213,8 +294,17 @@ impl SeekableStepStream {
 
         match record {
             StepStreamRecord::Step { global_line_index } => {
+                if let Some(decoder) = self.position_decoder.as_ref()
+                    && let Ok(pos) = decoder.decode_global_position_index(global_line_index)
+                {
+                    return Some((
+                        PathId(pos.file as usize),
+                        Line(i64::from(pos.line)),
+                        Some(Line(i64::from(pos.column))),
+                    ));
+                }
                 let (path_id, line) = unpack_global_line_index(global_line_index);
-                Some((PathId(path_id), Line(line)))
+                Some((PathId(path_id), Line(line), None))
             }
             // Raise/Catch/ThreadSwitch records carry no source line; the
             // execution stream interleaves them with `Step` records but only
@@ -498,22 +588,32 @@ fn decode_value(blob: &[u8]) -> ValueRecord {
 /// range-fill caller produces byte-identical steps. Steps whose stream record
 /// carries no source line (a Raise/Catch/ThreadSwitch marker) — or an
 /// out-of-range read — degrade to a `(PathId(0), Line(0))` location, the same
-/// neutral slot the materialized path produced for a marker step. `column` is
-/// always `None`: the lazy/replay path is only taken for NON-column-aware
-/// traces (column-aware traces keep eager materialization), exactly as the M24c
-/// routing documents.
+/// neutral slot the materialized path produced for a marker step.
+///
+/// `column` comes from the stream, and is `None` on exactly the containers that
+/// carry no column data. This used to be hard-coded `None` on the grounds that
+/// "the lazy/replay path is only taken for NON-column-aware traces" — an
+/// invariant the NATIVE (Nim FFI) router does hold, but which the browser's
+/// pure-Rust `open_new_format_rust` silently broke by taking the lazy path
+/// unconditionally. The hard-coded `None` is therefore not a statement of fact
+/// but a second bug stacked on the first: it is why a container flagged
+/// `has_column_aware_steps` reported `column: None` for every step. Reading the
+/// column from the stream makes the value true on both routes instead of true
+/// on one and assumed on the other.
 pub fn reconstruct_db_step(
     stream: &SeekableStepStream,
     call_keys: &[CallKey],
     global_call_keys: &[CallKey],
     index: usize,
 ) -> DbStep {
-    let (path_id, line) = stream.step_line(StepId(index as i64)).unwrap_or((PathId(0), Line(0)));
+    let (path_id, line, column) = stream
+        .step_position(StepId(index as i64))
+        .unwrap_or((PathId(0), Line(0), None));
     DbStep {
         step_id: StepId(index as i64),
         path_id,
         line,
-        column: None,
+        column,
         call_key: call_keys.get(index).copied().unwrap_or(CallKey(-1)),
         global_call_key: global_call_keys.get(index).copied().unwrap_or(CallKey(-1)),
     }

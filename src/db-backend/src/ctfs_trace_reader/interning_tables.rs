@@ -94,6 +94,14 @@ fn decode_varint(data: &[u8], pos: &mut usize) -> Result<u64, String> {
     Ok(result)
 }
 
+/// Decode one zigzag-encoded signed LEB128 varint at `*pos`, advancing `*pos`
+/// past it. The inverse of the Nim writer's `encodeSignedVarint`, which is what
+/// a Layout A `paths.dat` per-line length table is written with.
+fn decode_signed_varint(data: &[u8], pos: &mut usize) -> Result<i64, String> {
+    let zz = decode_varint(data, pos)?;
+    Ok(((zz >> 1) as i64) ^ -((zz & 1) as i64))
+}
+
 /// One `<name>.dat` + `<name>.off` Variable-Size Record Table.
 #[derive(Debug)]
 struct VarSizeTable {
@@ -167,6 +175,22 @@ pub struct InterningTables {
     pub types: Vec<TypeRecord>,
     /// Variable names, indexed by `VariableId`.
     pub variable_names: Vec<String>,
+    /// Per-file addressable line lengths, indexed by `PathId` and then by
+    /// 0-based line index — the "Layout A" per-line offset table a
+    /// column-aware `paths.dat` record carries after its path bytes.
+    ///
+    /// This is the table `GlobalPositionDecoder::from_line_lengths` needs, and
+    /// carrying it is what lets the pure-Rust (browser) reader decode a
+    /// column-aware container's `global_position_index` steps at all. It used
+    /// to be parsed and thrown away — `decode_column_aware_path` skipped the
+    /// tail — which left the browser reader with no way to tell a byte-offset
+    /// GLI from an M23a packed `(path_id, line)` and made it read every
+    /// column-aware step as `paths[0]` at a four-digit line.
+    ///
+    /// Always the same length as [`paths`](Self::paths). Every entry is EMPTY
+    /// on a line-only (non-column-aware) container, which is the signal the
+    /// caller uses to leave the legacy decode path exactly as it was.
+    pub line_lengths: Vec<Vec<u32>>,
     /// Which on-disk record layout these tables were decoded from.
     pub layout: RecordLayout,
 }
@@ -262,13 +286,17 @@ impl InterningTables {
         let varnames_table = Self::load_table(ctfs, "varnames")?;
 
         let mut paths = Vec::with_capacity(paths_table.count());
+        let mut line_lengths = Vec::with_capacity(paths_table.count());
         for id in 0..paths_table.count() {
             let raw = paths_table.record(id)?;
-            paths.push(if column_aware_paths {
-                decode_column_aware_path(id, raw)?
+            if column_aware_paths {
+                let (path, lengths) = decode_column_aware_path(id, raw)?;
+                paths.push(path);
+                line_lengths.push(lengths);
             } else {
-                String::from_utf8_lossy(raw).into_owned()
-            });
+                paths.push(String::from_utf8_lossy(raw).into_owned());
+                line_lengths.push(Vec::new());
+            }
         }
 
         let mut variable_names = Vec::with_capacity(varnames_table.count());
@@ -312,6 +340,7 @@ impl InterningTables {
             functions,
             types,
             variable_names,
+            line_lengths,
             layout,
         }))
     }
@@ -330,19 +359,63 @@ impl InterningTables {
     }
 }
 
-/// Decode a column-aware ("Layout A") `paths.dat` record down to its path.
+/// Decode a column-aware ("Layout A") `paths.dat` record into its path AND its
+/// per-line length table.
 ///
 /// The record is `path_len: varint, path bytes, line_count: varint,
-/// line_lengths: varint × line_count` (the per-line table is zigzag-delta
-/// encoded). Only the path is needed here — the per-line lengths feed the
-/// column decoder, which is a separate concern — so the tail is skipped.
-fn decode_column_aware_path(id: usize, raw: &[u8]) -> Result<String, String> {
+/// line_lengths: signed varint × line_count`, and the per-line table is
+/// **zigzag-delta** encoded: entry 0 is the absolute length of line 0, and each
+/// subsequent entry is that line's length MINUS the previous line's. That is
+/// the exact shape `ensurePathIdColumnAware` writes
+/// (`codetracer-trace-format-nim/src/codetracer_trace_writer/interning_table.nim`,
+/// and `codetracer-trace-format-spec/trace-events.md` §"`paths.dat` per-line
+/// offset table").
+///
+/// The tail used to be SKIPPED here, with a comment saying the per-line lengths
+/// "feed the column decoder, which is a separate concern". On the native Nim
+/// path that was true — the decoder harvested them through the `lineLengthRaw`
+/// FFI instead. In the browser there is no FFI, so skipping them left the
+/// pure-Rust reader with no per-file address table and therefore no way to
+/// decode a `global_position_index`. Reading them here is what closes that.
+///
+/// `line_count == 0` is legitimate and common (a recorder that has not surfaced
+/// per-line column counts writes the `path_len` prefix and an empty tail), and
+/// yields an empty table rather than an error.
+fn decode_column_aware_path(id: usize, raw: &[u8]) -> Result<(String, Vec<u32>), String> {
     let mut pos = 0usize;
     let path_len = decode_varint(raw, &mut pos)? as usize;
     if pos + path_len > raw.len() {
         return Err(format!("paths.dat: record {id} path extends past record"));
     }
-    Ok(String::from_utf8_lossy(&raw[pos..pos + path_len]).into_owned())
+    let path = String::from_utf8_lossy(&raw[pos..pos + path_len]).into_owned();
+    pos += path_len;
+
+    // A record that stops after its path bytes is a pre-Layout-A record read
+    // under a column-aware meta bit. Treat it as "no per-line table" rather
+    // than as corruption: the decoder simply is not built, and the container
+    // keeps the legacy line-only behaviour.
+    if pos >= raw.len() {
+        return Ok((path, Vec::new()));
+    }
+
+    let line_count = decode_varint(raw, &mut pos)? as usize;
+    let mut lengths = Vec::with_capacity(line_count);
+    let mut previous: i64 = 0;
+    for line in 0..line_count {
+        let delta = decode_signed_varint(raw, &mut pos)
+            .map_err(|e| format!("paths.dat: record {id} line-length entry {line}: {e}"))?;
+        // Entry 0 is absolute; the rest are deltas from the previous entry.
+        let value = if line == 0 { delta } else { previous + delta };
+        if value < 0 {
+            return Err(format!(
+                "paths.dat: record {id} line {line} decodes to a negative length ({value}); \
+                 the per-line table is not zigzag-delta encoded as the spec requires"
+            ));
+        }
+        lengths.push(value as u32);
+        previous = value;
+    }
+    Ok((path, lengths))
 }
 
 /// Decode one M23d-layout `funcs.dat` record into a [`FunctionRecord`].
