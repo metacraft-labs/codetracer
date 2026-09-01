@@ -329,6 +329,36 @@ async function traceArtifact(artifact, inputs) {
   return text;
 }
 
+// The compile module's output, turned into AVM bytecode. Deliberately the same
+// `alloc` / call / `result_len` / `free` shape as the two above — upstream's
+// crate spells its exports `avmt_*` and `compile_vfs.rs` spells its `nv_*`, and
+// the shim crate that wraps the transpiler says in its own header that it
+// mirrors `nv_*` so that one loader can drive both without knowing which it
+// holds. This function is that loader's third case and nothing more.
+//
+// THE ARTIFACT IS PASSED AS AN OBJECT AND SERIALISED HERE. Taking a string
+// instead would let a caller hand over an artifact it read from somewhere else,
+// which is exactly the join this routing exists to make — a contract compiled
+// in the tab, transpiled in the tab — being quietly satisfied by a contract
+// compiled elsewhere.
+async function transpileArtifact(artifact) {
+  const exports = await load('avm-transpiler');
+  const [ptr, len] = put(exports, 'avmt_alloc', JSON.stringify(artifact));
+  const outPtr = exports.avmt_transpile(ptr, len);
+  const ok = exports.avmt_ok();
+  const outLen = exports.avmt_result_len();
+  const text = new TextDecoder().decode(
+    new Uint8Array(exports.memory.buffer, outPtr, outLen).slice());
+  exports.avmt_free(outPtr, outLen);
+  exports.avmt_free(ptr, len);
+  // `avmt_ok` is THREE-valued and the -1 is load-bearing: a host that read it
+  // without transpiling would otherwise see a 0 and report a refusal, which is
+  // a different and much more alarming sentence than "nothing ran".
+  if (ok === -1) throw new Error('the transpiler was loaded but never called');
+  if (ok !== 1) throw new Error(`the transpiler refused the artifact: ${text.slice(0, 300)}`);
+  return text;
+}
+
 // ---------------------------------------------------------------------------
 // Sessions
 // ---------------------------------------------------------------------------
@@ -714,6 +744,15 @@ self.onmessage = async (event) => {
     } else if (sub === 'trace') {
       const payload = JSON.parse(request.stdin);
       const text = await traceArtifact(payload.artifact, payload.inputs);
+      post({ seq, kind: 'output', stream: 'stdout', text });
+      post({ seq, kind: 'exit', exitCode: 0, signalled: false });
+    } else if (sub === 'transpile') {
+      // The stdin shape is `{artifact}` — the same envelope `trace` uses, so a
+      // caller that has a compile response in hand passes `response.artifact`
+      // to either without reshaping it. That is what makes
+      // compile -> transpile and compile -> trace the same move.
+      const payload = JSON.parse(request.stdin);
+      const text = await transpileArtifact(payload.artifact);
       post({ seq, kind: 'output', stream: 'stdout', text });
       post({ seq, kind: 'exit', exitCode: 0, signalled: false });
     } else {
