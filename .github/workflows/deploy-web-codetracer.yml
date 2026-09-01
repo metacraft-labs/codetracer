@@ -131,10 +131,27 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Resolve the sibling pins this commit specifies
+        # The three siblings below are BUILD INPUTS of the bundle this job
+        # deploys, and they used to be cloned at `=dev` — a branch tip, so the
+        # same codetracer commit deployed on two days produced two different
+        # bundles and nothing could say which one a commit was supposed to
+        # produce. `clone-siblings` warns about exactly that entry shape
+        # ("This build is therefore not reproducible for '<name>'") and names
+        # `<name>=<40-hex sha>` as the sanctioned in-repo fix.
+        #
+        # The SHAs are not written here; they are read out of `flake.lock`,
+        # which is committed and already records the exact revision each of
+        # these three inputs resolves to for the Nix lane. So the commit —
+        # and only the commit — now decides what this job builds, and the two
+        # lanes cannot drift apart, because there is one number for each.
+        id: pins
+        run: bash scripts/sibling-pins.sh --github-output
+
       - name: Setup dev env
         # Installs Nix (with the Attic substituter/keys) and clones the
-        # cross-repo siblings adjacent to this checkout at their pinned `dev`
-        # refs. The browser-replay WASM build needs:
+        # cross-repo siblings adjacent to this checkout at the exact revisions
+        # resolved above. The browser-replay WASM build needs:
         #   * codetracer-native-recorder   — ct_emulator/build_wasm_api.sh
         #     (the private emulator WASM C generator build_wasm.sh requires),
         #   * codetracer-trace-format-nim  — build_wasm_api.sh's `nim c` adds
@@ -147,9 +164,7 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            codetracer-native-recorder=dev
-            codetracer-trace-format=dev
-            codetracer-trace-format-nim=dev
+            ${{ steps.pins.outputs.pins }}
             # THE ISONIM FAMILY, pinned to explicit commits.
             #
             # Needed because this is the first workflow that compiles the
@@ -190,6 +205,19 @@ jobs:
             nim-acp=bb5b8a2c5c3805946847270c9eea39d718747c5e
             nim-agent-harbor=0a1e06125daa5e33e09e1bab98edb6b811179a4e
             nim-agents=31f88a36a8e65e0846e62b15515d3686bd78de5a
+
+      - name: Assert the siblings that were cloned are the ones this commit pins
+        # The pins above are only a declaration until something compares them
+        # to the tree the compiler will actually read. This does that, and it
+        # fails rather than skips on every degenerate case: a sibling that is
+        # absent, not a git checkout, at the wrong revision, or dirty. An
+        # absent sibling reading as "nothing to check" is precisely how an
+        # unpinned build earns a green tick.
+        #
+        # It is counted and the count is asserted: verifying 0 siblings is a
+        # FAILURE, because a universal claim over an empty set is vacuously
+        # true and would look identical to a real pass.
+        run: bash scripts/sibling-pins.sh --verify "$(cd .. && pwd)"
 
       - name: Allow direnv in this checkout and the recorder sibling
         # build-dist.sh runs `direnv exec <repo> bash build_wasm.sh`, which in
