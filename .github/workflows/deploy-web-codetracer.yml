@@ -18,6 +18,39 @@ name: Deploy ide.codetracer.com
 # hostname, and renaming them is an infrastructure change, not a docs change.
 # codetracer-ci is moving separately to https://ci.codetracer.com.
 #
+# MERGING `cloud` INTO `dev`: THREE THINGS TRAVEL TOGETHER, AND THE THIRD IS
+# THE ONE THAT GETS LEFT BEHIND
+#
+# The product's mount gate lives on `cloud` and not here. Whoever merges must
+# take all three of these or none, because each of the first two is useless
+# without the third and FAILS SILENTLY rather than loudly:
+#
+#   1. ci/test/web-renderer-mounts.sh   the gate: the deployed page mounts the
+#                                       IDE, not a boot diagnostic. Eighteen
+#                                       counted assertions, an instrument arm
+#                                       and three mutation arms.
+#   2. ci/test/web_renderer_probe.mjs   the browser driver it runs. Also
+#                                       ci/test/web_deploy_guard.nim and
+#                                       ci/test/web_deployment_render.nim.
+#   3. nix/shells/ci-base.nix's fonts   `fontPackages` + `fontsConf` +
+#                                       FONTCONFIG_FILE.
+#
+# THE THIRD IS THE LEAST OBVIOUS AND THE MOST IMPORTANT. `playwright-driver
+# .browsers` ships Chromium and nothing that tells it where a font lives. On a
+# nix runner there is no /etc/fonts, so fontconfig matches nothing, Chromium
+# lays out every string with zero glyphs, and `innerText` — defined over the
+# RENDERED text, not the DOM — comes back empty for markup that is perfectly
+# correct. The gate then reports a byte-identical, working page as blank: it
+# measured 2337 bytes of markup, 46 elements, `.welcome-screen-root`, five start
+# options, both panels, and `only 0 characters of text are on screen`. It
+# blocked a deploy over a page that was fine.
+#
+# So a merge that takes the gate without the fonts turns a correct deploy red,
+# and — the worse direction — a merge that takes the fonts without the gate
+# leaves nothing checking that the page draws at all. `ci-base.nix` on `cloud`
+# carries the full reasoning; this note exists because nobody reading a merge
+# diff of a gate would think to look in a shell definition for its dependency.
+#
 # WHAT IS PUBLISHED
 #   browser-replay/build-dist.sh assembles browser-replay/dist/ =
 #     { index.html, worker.js, gateway-client.js, transport-test.html,

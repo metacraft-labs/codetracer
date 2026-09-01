@@ -1,0 +1,49 @@
+# Gates in ci/test/ that no CI root can reach, with why each is still here.
+#
+# THIS FILE FAILS IN BOTH DIRECTIONS. A listed gate that stays dark is reported
+# and does not fail the run. A listed gate that BECOMES REACHABLE fails the run,
+# by name, demanding its line be deleted — so an entry cannot outlive the hole
+# it records, and nobody has to remember to clean up after wiring one.
+#
+# It is not an exemption list. `NOT-A-CI-GATE:` in a gate's own header is the
+# exemption, and it means "this is not a gate" — a claim about the file, made in
+# the file, that a reviewer can disagree with. This file means the opposite:
+# these ARE gates, they SHOULD run, and today nothing runs them.
+#
+# THE FIRST DRAFT OF THIS FILE HAD TWELVE ENTRIES AND EIGHT WERE WRONG.
+# The guard that produced them was missing `ci/lint/*.sh` from its roots, and
+# those four dispatchers are where a good deal of CI actually lives — `nim.sh`
+# and `bash.sh` between them reach thirty gates that no workflow names directly.
+# Eight gates were reported dark that CI runs on every push. The both-directions
+# rule then evicted all eight the moment the roots were fixed, by name, without
+# anyone re-auditing the list. That is what the rule is for, and it is the second
+# time in two days it has removed its own entries.
+#
+# Measured on dev @ 03aa7274, 2026-09-01, by ci/test/shell-gate-coverage.sh:
+# five of sixty-three.
+#
+# Wiring them is deliberately NOT done here. Each needs an owner who knows what
+# it costs to run, what it needs on the runner, and whether it passes today — and
+# a guard author quietly adding five unknown jobs to CI would be making five
+# decisions that are not theirs. What is done here is making the number
+# impossible to lose.
+#
+# Format: one basename per line. `#` comments and blank lines ignored.
+
+# Has a 500-line self-test beside it (`cross-process-gate-test.sh`, which IS
+# reachable). The contract suite for a gate runs; the gate does not.
+cross-process-gate.sh
+
+# The JS-backend frontend lane's runner.
+frontend-js.sh
+
+# `scripts/test-origin-dap.sh` references it, and that script is itself reached
+# by no root — so the reference does not make it reachable. This is exactly the
+# case a mention-based scan gets wrong and a reachability walk does not.
+origin-dap-gate.sh
+
+# The worker-backend wasm end-to-end gate.
+worker-backend-wasm-e2e.sh
+
+# `ui-tests-db.sh` is wired and this is not, though the two are siblings.
+ui-tests.sh

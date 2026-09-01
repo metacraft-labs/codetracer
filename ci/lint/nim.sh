@@ -36,6 +36,21 @@ lint_step "test-lane coverage guard: contract suite" \
 lint_step "test-lane coverage: every test-shaped file runs somewhere" \
 	bash ci/test/test-lane-coverage.sh
 
+# THE SAME QUESTION, ONE FILE EXTENSION OVER. `test-lane-coverage.sh` is scoped
+# in its own first line to "any test-shaped **Nim** file", and `ci/test/` holds
+# sixty-three SHELL gates that nothing measured. Twelve of them were reachable
+# from no workflow, no recipe and no other reachable gate — several with their
+# own self-tests beside them, which is work that went in and then ran nowhere.
+#
+# It sits here, beside its Nim sibling, because the two are one guard asking one
+# question about two file types, and a reader who finds one should find the
+# other. Its contract suite runs first, for the reason the block above gives.
+lint_step "shell-gate coverage guard: contract suite" \
+	bash ci/test/shell-gate-coverage-test.sh
+
+lint_step "shell-gate coverage: every gate in ci/test/ is reachable from CI" \
+	bash ci/test/shell-gate-coverage.sh
+
 # The Embed SDK's boundary, in both directions: a consumer may reach the SDK
 # only through `codetracer_embed`, and the SDK's own import graph carries no
 # rendering and no chain concept. CodeTracer-Embed-SDK.md §3.2 says in as many
