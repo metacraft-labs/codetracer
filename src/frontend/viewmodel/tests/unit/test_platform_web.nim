@@ -28,6 +28,7 @@ import ../../platform/project_store
 import ../../platform/web_platform
 import ../../platform/web_entry
 import ../../platform/web_deployment
+import ../../platform/noir_template
 import ../../platform/archive
 
 proc awaitOutcome[T](future: PlatformFuture[PlatformOutcome[T]]
@@ -1066,3 +1067,139 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     check urls.len == 1
     check urls[0].id == noirTracerModuleId
     check urls[0].url == "/" & noirTracerWasmPath
+
+# ---------------------------------------------------------------------------
+# The entry route — the layer that was correct, tested and never called
+# ---------------------------------------------------------------------------
+#
+# Everything below `classifyPath` in this file already passed before
+# `https://ide.codetracer.com/noir` opened the welcome screen, and that is the
+# point of the block: a classifier can be right about every input while nothing
+# asks it anything. These tests are over the two values the wiring added — the
+# template a language selects, and the rewrite target a host is given — and the
+# assertion that the product actually consults them is a DOM assertion in
+# `ci/test/web-renderer-mounts.sh` (arms R and S), because it cannot be made
+# here.
+
+suite "the bundled template a language entry selects":
+  test "rule 0: every known language entry has a template, and none is empty":
+    ## The agreement rule 0 needs and `knownLanguageEntries` cannot state
+    ## alone. Adding `"cairo"` to that array and stopping there resolves
+    ## `/cairo` to `evTemplate` and then has nothing to open — a route that
+    ## mounts a blank surface, which is the failure this campaign keeps
+    ## finding one layer down.
+    check languagesWithoutTemplate().len == 0
+    # NON-VACUITY: the check above is also true of an empty language list.
+    check knownLanguageEntries.len > 0
+    for language in knownLanguageEntries:
+      check templateFor(language).hasFiles
+
+  test "the language-neutral root selects NO template, and that is rule 0":
+    ## `/` classifies as `efBare` with an EMPTY `languageEntry`, and rule 0 —
+    ## "the language is an entry point, not a namespace" — is why that must
+    ## not fall back to Noir. Defaulting here would make Noir the product's
+    ## default language, which is the permanent classification rule 0 refuses,
+    ## and it is also what would have made the fix for `/noir` silently change
+    ## what `/` does.
+    check classifyPath("/").language.len == 0
+    check not templateFor("").hasFiles
+    check not templateFor("cairo").hasFiles
+    check templateFor("noir").hasFiles
+
+  test "the template is a directory tree, not a single file":
+    ## §1a: "Noir projects are directory trees — `src/`, `tests/`,
+    ## `Nargo.toml`, multiple modules ... A single-file playground would
+    ## misrepresent the language." Asserted as a count and a shape rather than
+    ## trusted to whoever edits `noir_template.nim` next.
+    let tmpl = templateFor("noir")
+    check tmpl.templateFileCount == 4
+    check tmpl.language == "noir"
+    check tmpl.entryFile == "src/main.nr"
+    check tmpl.fileContent("src/main.nr").len > 0
+    check "mod utils;" in tmpl.fileContent("src/main.nr")
+    check tmpl.fileContent("Nargo.toml").len > 0
+    let directories = tmpl.templateDirectories
+    check directories.len == 2
+    check "src" in directories
+    check "tests" in directories
+
+  test "a file the template does not carry degrades rather than raising":
+    ## §1b.3 step 5: each part of a link degrades independently. A fragment
+    ## naming a file this template has no copy of opens the project at rest.
+    check templateFor("noir").fileContent("src/nope.nr") == ""
+
+  test "directories are DERIVED from the files, so none can be a phantom":
+    ## A folder list written beside `files` is a second statement of the same
+    ## project, and the panel would render a folder the project has no file in
+    ## the moment the two disagreed.
+    let made = ProjectTemplate(
+      language: "x", name: "x", entryFile: "a/b.nr",
+      files: @[TemplateFile(path: "a/b.nr", content: "")])
+    check made.templateDirectories == @["a"]
+    check ProjectTemplate().templateDirectories.len == 0
+
+  test "arriving still writes nothing and mints no address":
+    ## Rule 1 held before the template existed and must still hold now that
+    ## `/noir` opens a project. `noirHelloWorld()` is a pure value: the same
+    ## bytes for a first-time visitor, a returning one and a crawler.
+    let first = templateFor("noir")
+    let second = templateFor("noir")
+    check first.templateFileCount == second.templateFileCount
+    check first.fileContent("src/main.nr") == second.fileContent("src/main.nr")
+    let resolved = resolveEntry(EntryRequest(path: "/noir"), LocalState())
+    check resolved.verdict == evTemplate
+    check resolved.languageEntry == "noir"
+    check not resolved.writesOnArrival
+    check not resolved.mintsServerIdentifier
+
+suite "the rewrite target a static host is actually given":
+  test "no rewrite targets a path the host normalises into a redirect":
+    ## THE CDN HALF OF THE DEFECT, as a value.
+    ##
+    ## `renderRewriteConfig` emitted `/index.html` for every prefix, and
+    ## Cloudflare Pages answers `/index.html` with a 308 to `/`. Measured on
+    ## the live deployment 2026-09-01: `/noir`, `/s`, `/p`, `/projects` and
+    ## `/collab/join` — every rule that MATCHED — were redirects, so §1b.4's
+    ## "served **200 rather than 302**" was false of the whole table.
+    ##
+    ## Asserted over `rewriteTargets` rather than by grepping the rendered
+    ## text, because the rendered text now contains the string `/index.html`
+    ## in a comment explaining this, and a grep would fail for the wrong
+    ## reason.
+    let contract = deploymentContract("https://ide.example.test")
+    check normalisedRewriteTargets(contract).len == 0
+    # NON-VACUITY: an empty target list would also satisfy the check above.
+    check rewriteTargets(contract).len == rewritePrefixes().len * 2
+    for target in rewriteTargets(contract):
+      check target == entryDocumentAddress
+    check entryDocumentAddress == "/"
+    check entryDocumentAddress != "/" & entryDocumentPath
+
+  test "the rewrite table still covers every entry form, at the new target":
+    ## The fix must not have narrowed the contract while changing where it
+    ## points. `test_every_entry_form_reaches_the_application` above asserts
+    ## the prefixes; this asserts they survived into the rendered file with a
+    ## status of 200 and the canonical target.
+    let rendered = renderRewriteConfig(deploymentContract("https://a.test"))
+    for prefix in rewritePrefixes():
+      check (prefix & "  " & entryDocumentAddress & "  200") in rendered
+      check (prefix & "/*  " & entryDocumentAddress & "  200") in rendered
+
+    # THE STATUS COLUMN, parsed — not a substring search over the whole file.
+    #
+    # The first version of this check was `"308" notin rendered`, and it failed
+    # against a CORRECT table: the generated header comment now explains the
+    # 308 this fix exists for, so the digits are in the text while every rule
+    # is a 200. That is the "green/red for the wrong reason" shape in
+    # miniature, caught by the test going red rather than by review, and the
+    # honest instrument is the column a host actually reads.
+    var ruleRows = 0
+    for line in rendered.splitLines():
+      let row = line.strip()
+      if row.len == 0 or row[0] == '#': continue
+      let columns = row.splitWhitespace()
+      check columns.len == 3
+      check columns[1] == entryDocumentAddress
+      check columns[2] == "200"
+      ruleRows += 1
+    check ruleRows == rewritePrefixes().len * 2

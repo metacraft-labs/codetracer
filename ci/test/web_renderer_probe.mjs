@@ -73,6 +73,54 @@ try {
       startOptions: document.querySelectorAll('.start-option').length,
       recentPanels:
         document.querySelectorAll('.recent-folders, .recent-traces').length,
+      // The OTHER surface, for the route arm. `/noir` must mount the bundled
+      // template rather than the welcome screen (Noir-Studio.md §1b.0 rule 5,
+      // first row), so the gate needs to see both and tell them apart — a
+      // check that only counted welcome screens could say "the wrong thing
+      // mounted" but never "the right thing did".
+      //
+      // These are `viewmodel/views/isonim_filesystem_view.nim`'s own
+      // constants. `.filesystem-container` is the panel wrapper; the tree
+      // itself renders as jstree markup in the real-DOM path (NOT the
+      // `.filesystem-entry` classes, which are the MockRenderer's), so the row
+      // count reads `a.jstree-anchor` — one per file and folder.
+      filesystemPanels: document.querySelectorAll('.filesystem-container').length,
+      filesystemEntries: document.querySelectorAll('a.jstree-anchor').length,
+      // The template's own file names, as RENDERED text. The count above would
+      // be satisfied by a tree of the right size holding anything at all; this
+      // is what makes the assertion about *the Noir template* and not about
+      // "some filesystem panel mounted".
+      entryLabels: Array.from(document.querySelectorAll('a.jstree-anchor'))
+        .map((a) => (a.innerText || '').trim())
+        .filter((t) => t.length > 0),
+      // ...AND WHICH OF THEM A USER CAN ACTUALLY SEE, by hit test.
+      //
+      // This field exists because every other field above was right about a
+      // page that rendered NOTHING. The first version of the template surface
+      // mounted into `#isonim-app`, and measured: panel present, 7 entries,
+      // labels correct, colour `rgb(243,243,243)` on `rgb(27,27,27)`, real
+      // geometry, `innerText` unchanged at 422 characters — and a screenshot
+      // that was uniformly dark. `#session-container-0` comes later in the
+      // entry document and painted straight over it.
+      //
+      // `innerText` cannot see that: it is defined over rendered text, and the
+      // text WAS rendered — it was covered. So the instrument for occlusion
+      // has to be occlusion. `elementFromPoint` at each label's centre returns
+      // the topmost element there; if that is not the label or something
+      // inside it, a user is looking at whatever is.
+      //
+      // Deliberately reported beside `entryLabels` rather than replacing it:
+      // the two disagreeing is the diagnosis (mounted but covered), and one
+      // number could not say that.
+      entryLabelsVisible: Array.from(
+        document.querySelectorAll('a.jstree-anchor')
+      ).filter((a) => {
+        const r = a.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const top = document.elementFromPoint(
+          r.x + r.width / 2, r.y + r.height / 2);
+        return !!top && (top === a || a.contains(top));
+      }).map((a) => (a.innerText || '').trim()),
       // What a person reads off the screen. `innerText` is defined over the
       // RENDERED text — it is the field that answers "is there a product on
       // this page", and the only one of the two that a screenshot agrees with.

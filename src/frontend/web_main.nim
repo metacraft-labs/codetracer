@@ -111,6 +111,17 @@ proc describe(boot: WebBoot): string =
     # delivers no compiler" and "the compiler is broken" are different lines
     # rather than the same shrug.
     " toolchain=" & (if boot.toolchain.len > 0: boot.toolchain else: "(none)") &
+    # WHICH ADDRESS THIS TAB WAS OPENED ON, and what the product decided it
+    # means. Added for the same reason `toolchain` was, one defect later: the
+    # bundle is byte-identical at every URL it serves, so "the entry layer ran"
+    # and "the entry layer is dead code" were indistinguishable from outside —
+    # and the second was true for the whole life of the deployment. A user
+    # typing `/noir` reached the welcome screen and nothing anywhere said why.
+    #
+    # `efBare/evTemplate/noir` is the value that answers the bug report. It is
+    # on the same line as the rest because a reader comparing two runs should
+    # not have to correlate two lines to see which one routed.
+    " entry=" & describeEntry(boot.entry) &
     " announcement=" & (if boot.announcement.len > 0: boot.announcement
                         else: "(none)")
 

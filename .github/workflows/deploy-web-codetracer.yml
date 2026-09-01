@@ -588,16 +588,35 @@ jobs:
           [ "$fail" -eq 0 ] || { echo "the deployed artifact is not what was built" >&2; exit 1; }
           echo "the deployed bytes are the bytes that were built."
 
-      - name: Load the DEPLOYED page in a browser and assert the product is on it
+      - name: Load the DEPLOYED pages in a browser and assert the product is on them
         # The last and least substitutable check. Everything above this line
         # reasons about bytes: the right files, the right sizes, the right
         # descriptor. A deployment can satisfy all of it and still paint
-        # nothing — that is not hypothetical, it is what the previous deploy
+        # nothing — that is not hypothetical, it is what a previous deploy
         # did, and the step above it passed at the time.
         #
         # So the final acceptance is a browser on the real hostname, asserting
-        # the DOM. Not "boot reported ok": `.welcome-screen-root` present,
-        # start options rendered, and zero uncaught page errors.
+        # the DOM. Not "boot reported ok": the surface the ROUTE calls for,
+        # rendered, and zero uncaught page errors.
+        #
+        # TWO ROUTES, and the second is the one this step was missing.
+        # Until 2026-09-01 it loaded `$base/` and only `$base/`, so a build
+        # that ignored the URL entirely passed it — which is exactly what
+        # shipped: `https://ide.codetracer.com/noir` opened the welcome screen
+        # instead of the Noir template, and every gate stayed green because no
+        # gate ever asked for that address. `/` and `/noir` must show
+        # DIFFERENT surfaces (Noir-Studio.md §1b.0 rule 0), and asserting
+        # either alone is satisfied by a product that mounts one thing
+        # everywhere.
+        #
+        # THE HTTP STATUS IS CHECKED SEPARATELY FROM THE DOM, because the
+        # browser hides the difference. `/noir` was answered `308 -> /` by
+        # Cloudflare Pages — the rewrite target was `/index.html`, which Pages
+        # normalises — so the tab ended up at `/`, correctly rendered the
+        # language-neutral root, and a DOM-only check would have called that a
+        # pass while the address bar showed the user the wrong page. §1b.4
+        # requires the entry document "served 200 rather than 302"; this is
+        # that clause, measured on the deployment.
         #
         # `web-codetracer.pages.dev` is REQUIRED and `ide.codetracer.com` is
         # advisory, for the same propagation reason the size checks above draw
@@ -612,46 +631,94 @@ jobs:
             required=required
             [ "$base" = "https://ide.codetracer.com" ] && required=advisory
             echo "== $base =="
-            report="deployed-shots/$(echo "$base" | tr -c 'a-z0-9' '-').json"
-            CT_PROBE_SCREENSHOT="deployed-shots/$(echo "$base" | tr -c 'a-z0-9' '-').png" \
-              nix develop .#ci --command \
-                node ci/test/web_renderer_probe.mjs "$base/" 12000 >"$report" || true
-            if [ ! -s "$report" ]; then
-              echo "  the probe produced no report for $base" >&2
-              [ "$required" = required ] && fail=1
-              continue
-            fi
-            verdict="$(python3 - "$report" <<'PY'
-          import json, sys
+
+            # (1) The hosting contract, at HTTP level. Every entry prefix must
+            #     answer 200 with no redirect. `--max-redirs 0` rather than
+            #     following: a 308 that lands on a working page is still the
+            #     defect, because the URL the user typed is gone.
+            for path in /noir /noir/new /projects /s/probe /p/probe; do
+              code="$(curl -s -o /dev/null --max-redirs 0 \
+                        -w '%{http_code}' "$base$path" || echo 000)"
+              if [ "$code" = "200" ]; then
+                echo "  [OK]   $path -> $code"
+              else
+                echo "  [FAIL] $path -> $code (want 200; a 3xx means the rewrite" \
+                     "became a redirect and the address the user typed is lost)"
+                [ "$required" = required ] && fail=1
+              fi
+            done
+
+            # (2) The DOM, per route.
+            for route in "/:welcome" "/noir:template"; do
+              path="${route%%:*}"
+              want="${route##*:}"
+              label="$(echo "$base$path" | tr -c 'a-zA-Z0-9' '-')"
+              report="deployed-shots/${label}.json"
+              CT_PROBE_SCREENSHOT="deployed-shots/${label}.png" \
+                nix develop .#ci --command \
+                  node ci/test/web_renderer_probe.mjs "$base$path" 12000 >"$report" || true
+              if [ ! -s "$report" ]; then
+                echo "  the probe produced no report for $base$path" >&2
+                [ "$required" = required ] && fail=1
+                continue
+              fi
+              verdict="$(CT_WANT="$want" python3 - "$report" <<'PY'
+          import json, os, sys
           d = json.load(open(sys.argv[1]))
           dom = d.get("dom", {})
+          want = os.environ["CT_WANT"]
           roots = dom.get("welcomeScreenRoots", 0)
           opts = dom.get("startOptions", 0)
+          panels = dom.get("filesystemPanels", 0)
+          labels = dom.get("entryLabels") or []
           errs = d.get("pageErrors", [])
           problems = []
-          if roots != 1:
-              problems.append(f"{roots} .welcome-screen-root on the page (want 1)")
-          if opts < 5:
-              problems.append(f"{opts} start options rendered (want >= 5)")
+          if not dom.get("domRootPresent"):
+              # Non-vacuity: every count below is 0 on a page the probe never
+              # reached, which would read identically to a wrong surface.
+              problems.append("no #dom-root — the probe did not reach the application")
+          elif want == "welcome":
+              # Rule 0: the language-neutral root names no language, so there is
+              # no template to select and this is the correct surface for it.
+              if roots != 1:
+                  problems.append(f"{roots} .welcome-screen-root (want 1)")
+              if opts < 5:
+                  problems.append(f"{opts} start options rendered (want >= 5)")
+              if panels != 0:
+                  problems.append(f"{panels} filesystem panel(s) on the welcome route (want 0)")
+          else:
+              # §1b.0 rule 5, first row: the bundled hello-world template.
+              if roots != 0:
+                  problems.append(f"{roots} .welcome-screen-root on the template route "
+                                  "(want 0 — this is the reported defect)")
+              if panels != 1:
+                  problems.append(f"{panels} filesystem panel(s) (want 1)")
+              for name in ("main.nr", "Nargo.toml"):
+                  if name not in labels:
+                      problems.append(f"no {name} in the tree (labels: {labels})")
           if errs:
               problems.append("uncaught page errors: " + " | ".join(errs))
           print("OK" if not problems else "FAIL: " + "; ".join(problems))
           print("  renderer said: " + (d.get("rendererLine") or "(nothing)"))
           print("  boot said:     " + (d.get("bootLine") or "(nothing)"))
+          print("  tree:          " + ", ".join(labels) if labels else "  tree:          (none)")
           print("  on screen:     " + (dom.get("visibleText") or "")[:200].replace("\n", " / "))
           PY
           )"
-            echo "$verdict" | sed 's/^/  /'
-            case "$verdict" in
-              OK*) : ;;
-              *) [ "$required" = required ] && fail=1 ;;
-            esac
+              echo "  -- $path (expecting the $want surface)"
+              echo "$verdict" | sed 's/^/     /'
+              case "$verdict" in
+                OK*) : ;;
+                *) [ "$required" = required ] && fail=1 ;;
+              esac
+            done
           done
           [ "$fail" -eq 0 ] || {
-            echo "the deployed page does not show the product" >&2
+            echo "the deployed pages do not show the product the URL calls for" >&2
             exit 1
           }
-          echo "a browser loaded the deployed page and found the product on it."
+          echo "a browser loaded / and /noir on the deployed site and found the"
+          echo "right product on each."
 
       - name: Upload what the browser saw on the deployed page
         if: always()

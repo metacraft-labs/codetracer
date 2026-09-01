@@ -4404,6 +4404,16 @@ var actions*: array[ClientAction, ClientActionHandler] = [
 data.actions = actions
 
 when defined(ctWeb):
+  # The entry layer, imported HERE and not in the module's import list, because
+  # it is web-only: `ui/web_entry_surface.nim` reads `window.location` and
+  # mounts the bundled template, neither of which an Electron renderer build
+  # has any use for. The desktop arm's import graph is unchanged by this file.
+  import ui/web_entry_surface
+  from viewmodel/platform/web_entry import
+    EntryResolution, EntryVerdict, evTemplate, entryPath
+  from viewmodel/platform/noir_template import
+    ProjectTemplate, templateFor, hasFiles, templateFileCount
+
   # -------------------------------------------------------------------------
   # THE WEB BUILD'S ENTRY POINT — the call that was missing.
   #
@@ -4531,10 +4541,44 @@ when defined(ctWeb):
       data.ipc = ipc
       configureIPC(data)
       configure(data)
-      let mounted = welcome_screen.mountWebWelcomeScreen()
+
+      # THE CALL THAT WAS MISSING, and the reason `/noir` opened the welcome
+      # screen. `ui/web_entry_surface.nim`'s header has the full account; the
+      # short version is that `classifyPath`, `resolveEntry` and
+      # `currentEntryRequest` were all correct, all tested, and all
+      # unreachable, so this arm mounted one surface at every address the
+      # deployment serves.
+      let entry = web_entry_surface.currentRendererEntry()
+      let tmpl = templateFor(entry.languageEntry)
+
+      # Rule 5's third row, and it must happen BEFORE the mount rather than
+      # after: the surface is what a user then interacts with, and a Back press
+      # arriving between the two would find `/noir/new` still on the stack.
+      if entry.replacesHistoryEntry:
+        web_entry_surface.jsReplaceHistoryEntry(
+          cstring(entryPath(entry.languageEntry)))
+
+      # §1b.3 step 6 — "Never a blank editor, never an error page". Every arm
+      # below mounts something; the choice is WHICH, and it follows from the
+      # verdict rather than from a path test here. A second `classifyPath` in
+      # this file is exactly the drift `web_entry.nim`'s header warns about.
+      let wantsTemplate = entry.verdict == evTemplate and tmpl.hasFiles
+      let mounted =
+        if wantsTemplate: web_entry_surface.mountTemplateSurface(tmpl)
+        else: welcome_screen.mountWebWelcomeScreen()
+      let surface = if wantsTemplate: "noir-template" else: "welcome-screen"
+
       if mounted:
+        # The line names the ENTRY as well as the surface. Two builds — one
+        # that routes and one that ignores the path — produce the same DOM at
+        # `/`, so the only way a log distinguishes them is if the resolution
+        # says itself. `ci/test/web-renderer-mounts.sh`'s route arm reads this.
         reportWebRenderer(cstring(
-          webRendererLinePrefix & " ok surface=welcome-screen"))
+          webRendererLinePrefix & " ok surface=" & surface &
+          " entry=" & $entry.form & "/" & $entry.verdict &
+          " language=" & (if entry.languageEntry.len > 0: entry.languageEntry
+                          else: "(none)") &
+          " files=" & $tmpl.templateFileCount))
         # The page belongs to the product now. The line stays on the console —
         # which is what `ci/test/web-renderer-mounts.sh` reads — and leaves the
         # document, because a diagnostic a user has to look at is a diagnostic
@@ -4548,7 +4592,7 @@ when defined(ctWeb):
         # with the same word as a mount.
         reportWebRenderer(cstring(
           webRendererLinePrefix &
-          " refused surface=welcome-screen reason=no-container"))
+          " refused surface=" & surface & " reason=no-container"))
     except CatchableError:
       reportWebRenderer(cstring(
         webRendererLinePrefix & " failed reason=" & getCurrentExceptionMsg()))

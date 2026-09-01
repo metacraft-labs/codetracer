@@ -156,10 +156,64 @@ proc jsSetFullscreen(fullscreen: bool): Future[JsObject] {.importjs: """
 
 proc jsIsFullscreen(): bool {.importjs: "(!!document.fullscreenElement)".}
 proc jsHasFocus(): bool {.importjs: "(document.hasFocus())".}
-proc jsLocationPath(): cstring {.importjs: "(window.location.pathname)".}
-proc jsLocationHash(): cstring {.importjs: "(window.location.hash)".}
-proc jsLocationSearch(): cstring {.importjs: "(window.location.search)".}
-proc jsLocationOrigin(): cstring {.importjs: "(window.location.origin)".}
+# THE LOCATION READS ARE GUARDED, and they were not until `boot()` began
+# calling them.
+#
+# These four were written as bare `window.location.…` and that was harmless for
+# exactly as long as nothing called them: `currentEntryRequest` had no callers,
+# so the expression was never evaluated. The moment `boot()` resolved the entry,
+# `ci/test/web-bundle-smoke.sh` went red with
+#
+#     ReferenceError: window is not defined
+#
+# because that gate runs the loop arm under NODE, deliberately — it is how "the
+# web build boots" is checked without a browser. An unguarded global turns the
+# first line of `boot()` into an uncaught throw there, and the bundle produces
+# no boot line at all.
+#
+# A guard rather than a `-d:nodejs` branch: the value a non-browser host should
+# report is `/`, which is what `classifyPath` calls the language-neutral root,
+# and that is a TRUE statement about a program with no address rather than a
+# stub. The smoke test then measures a real resolution instead of skipping one.
+proc jsLocationPath(): cstring {.importjs: """
+(function () {
+  try {
+    if (typeof window !== 'undefined' && window.location) {
+      return String(window.location.pathname || '/');
+    }
+  } catch (e) {}
+  return '/';
+})()""".}
+
+proc jsLocationHash(): cstring {.importjs: """
+(function () {
+  try {
+    if (typeof window !== 'undefined' && window.location) {
+      return String(window.location.hash || '');
+    }
+  } catch (e) {}
+  return '';
+})()""".}
+
+proc jsLocationSearch(): cstring {.importjs: """
+(function () {
+  try {
+    if (typeof window !== 'undefined' && window.location) {
+      return String(window.location.search || '');
+    }
+  } catch (e) {}
+  return '';
+})()""".}
+
+proc jsLocationOrigin(): cstring {.importjs: """
+(function () {
+  try {
+    if (typeof window !== 'undefined' && window.location) {
+      return String(window.location.origin || '');
+    }
+  } catch (e) {}
+  return '';
+})()""".}
 
 proc jsShareOrigin(): cstring {.importjs: """
 (function () {
@@ -518,6 +572,21 @@ type
       ## the product would honour and not what the document claimed — a module
       ## dropped for missing provenance disappears from this string, which is
       ## the fact worth seeing.
+    entry*: EntryResolution
+      ## WHICH URL THE VISITOR ARRIVED ON, and what it resolves to.
+      ##
+      ## This field is the loop arm's half of a defect whose other half is in
+      ## `ui_js.nim`. `platform/web_entry.nim` has classified `/noir` as
+      ## `efBare` with `languageEntry == "noir"` since NS2, and
+      ## `test_platform_web.nim` asserts it; `currentEntryRequest()` has read
+      ## the browser's location since the same commit. Nothing called either.
+      ## The product therefore behaved identically at every address it serves,
+      ## and `https://ide.codetracer.com/noir` opened the welcome screen.
+      ##
+      ## It is reported on the boot line for the same reason `toolchain` is: a
+      ## build that resolves the entry and a build that ignores it produce
+      ## byte-identical bundles and byte-identical DOMs at `/`, so the only way
+      ## to tell them apart is to make the resolution SAY itself.
 
 proc currentEntryRequest*(): EntryRequest =
   ## The URL, as `web_entry` wants it: path and fragment, origin removed, query
@@ -527,6 +596,34 @@ proc currentEntryRequest*(): EntryRequest =
   var search = $jsLocationSearch()
   if search.len > 0 and search[0] == '?': search = search[1 .. ^1]
   EntryRequest(path: $jsLocationPath(), fragment: hash, query: search)
+
+proc currentEntryResolution*(): EntryResolution =
+  ## The arrival, resolved. The one call site that turns a URL into a decision.
+  ##
+  ## ## Why `LocalState()` and not the store
+  ##
+  ## §1b.0 rule 5's second row — "Has a local workspace → their most recent
+  ## one, as they left it" — needs the project store, and the store is opened
+  ## asynchronously several lines below. Passing an empty `LocalState` is
+  ## therefore not a shortcut but the TRUE statement about this build: nothing
+  ## in the web instantiation yet records a "most recent project", so
+  ## `hasWorkspace` is false for every visitor and rule 5's FIRST row applies.
+  ##
+  ## Writing it as an argument rather than inlining the assumption is the whole
+  ## point: `resolveEntry` already implements all three rows and is tested over
+  ## all three, so the day the store can answer, this is a one-line change and
+  ## not a new branch. An implementation that hard-coded "always the template"
+  ## would have to grow rule 5 back later, in a second place.
+  resolveEntry(currentEntryRequest(), LocalState())
+
+proc describeEntry*(resolution: EntryResolution): string =
+  ## The resolution as one clause for the boot line. Names the form AND the
+  ## verdict, because they fail differently: a wrong `form` is a classifier
+  ## defect and a wrong `verdict` is a precedence defect, and a single word
+  ## covering both would make them one indistinguishable symptom.
+  result = $resolution.form & "/" & $resolution.verdict
+  if resolution.languageEntry.len > 0:
+    result.add "/" & resolution.languageEntry
 
 proc pageOrigin*(): string =
   ## For building share URLs. Read from the page rather than compiled in, for
@@ -552,6 +649,9 @@ proc boot*(): Future[WebBoot] {.async.} =
   # cached, and unreachable.
   let deployment = deploymentDescriptor()
   let delivered = deliveredModulesFrom(deployment)
+  # THE SECOND PROBE, and the one this file defined and never called. See
+  # `WebBoot.entry`.
+  let entry = currentEntryResolution()
   let bridge = newBrowserBridge(volume, granted, answered, delivered,
                                 declaredModuleUrls(deployment))
   let opened = await openWebStore(bridge)
@@ -561,7 +661,8 @@ proc boot*(): Future[WebBoot] {.async.} =
       refusal: opened.error.message,
       condition: conditionFor(volume, granted, answered),
       announcement: "",
-      toolchain: describeToolchain(delivered))
+      toolchain: describeToolchain(delivered),
+      entry: entry)
 
   let web = newWebPlatform(bridge, opened.value)
   web.install()
@@ -570,4 +671,5 @@ proc boot*(): Future[WebBoot] {.async.} =
     web: web,
     condition: opened.value.durability.condition,
     announcement: opened.value.announcement,
-    toolchain: describeToolchain(delivered))
+    toolchain: describeToolchain(delivered),
+    entry: entry)

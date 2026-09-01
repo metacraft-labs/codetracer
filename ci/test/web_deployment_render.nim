@@ -7,7 +7,9 @@
 ## — the property that module's header claims and, until now, only claimed:
 ## `renderRewriteConfig` and `renderCacheConfig` existed and NOTHING CALLED
 ## THEM outside a unit test, and `renderEntryDocument` did not exist at all, so
-## every rewrite pointed at an `/index.html` no assembly step produced.
+## every rewrite pointed at a target no assembly step produced. (That target
+## is `/` now, not `/index.html` — see `web_deployment.entryDocumentAddress`
+## for the 308 the second spelling cost.)
 ##
 ## Compiled and run by `ci/test/web-bundle-assets.sh`, for the same reason the
 ## manifest program is: a helper that no lane compiles is the next

@@ -50,6 +50,54 @@
 #     two-line fixture through the same server and probe, so that failure now
 #     names the environment instead of the product.
 #
+# WHAT THIS GATE ITSELF MISSED, and arms D, R, S and V are the correction
+# ----------------------------------------------------------------------
+# On 2026-09-01 `https://ide.codetracer.com/noir` opened the WELCOME SCREEN
+# rather than the Noir template. This gate was green throughout, and it could
+# not have been anything else: every arm above loaded `/`, and a build that
+# resolves the entry URL and a build that ignores it produce byte-identical
+# DOMs at `/`. The gate asserted the product, thoroughly, at one address.
+#
+# The defect had two independent halves, and each has an arm now:
+#
+#   * THE CLIENT HALF. `platform/web_entry.classifyPath` classified `/noir`
+#     correctly, `resolveEntry` implemented all six of §1b.3's steps, and
+#     `host/web_browser.currentEntryRequest` read the location — and
+#     `currentEntryRequest` had ZERO CALLERS. `ui_js.nim` mounted the welcome
+#     screen unconditionally. Arm R loads `/noir` on the same bundle and
+#     asserts the template; arm S stubs the location read to a constant `/`
+#     and shows arm R going red, which is the shipped state reconstructed.
+#
+#   * THE CDN HALF. `renderRewriteConfig` targeted `/index.html`, and
+#     Cloudflare Pages answers that with `308 -> /`. So the language was
+#     destroyed before any script ran, and no client fix could have survived
+#     it. Arm D asserts the shipped `_redirects` targets nothing the host will
+#     normalise.
+#
+#   * A THIRD HALF FOUND WHILE FIXING THE OTHER TWO, and it is why arm V
+#     exists. The first template surface mounted into `#isonim-app`, which the
+#     entry document places before `#root-container` — so
+#     `#session-container-0` painted over the whole panel. Measured at the
+#     time: 1 filesystem panel, 7 entries, the right labels, `rgb(243,243,243)`
+#     on `rgb(27,27,27)`, real geometry, `innerText` unchanged — and a
+#     uniformly dark screenshot. Every DOM assertion in arm R was green over a
+#     page showing the user nothing. `innerText` cannot catch it, because the
+#     text was rendered and then covered, so arm R now hit-tests each row with
+#     `elementFromPoint` and arm V paints over the page to show that check
+#     works. Arm V's own first version was wrong in an instructive way — see
+#     its comment.
+#
+# VERIFIED TO REDDEN, each against the assertion written for it:
+#   * arm S, in-gate: reddens arm R's mount, tree and renderer-line checks and
+#     leaves `/` untouched.
+#   * arm V, in-gate: reddens arm R's VISIBILITY check alone and leaves the
+#     mount green — the pair that distinguishes "not there" from "covered".
+#   * restoring `/index.html` as the target in a copied bundle: 1 red, and it
+#     is arm D's target check.
+#   * deleting `_redirects` from a copied bundle: 8 red, led by arm D's
+#     "ships no _redirects" and arm R's non-vacuity guard — which is the guard
+#     doing its job, since `/noir` then 404s and every count is 0.
+#
 # NON-VACUITY. Every DOM assertion is guarded by `domRootPresent` being
 # reported first: a probe that failed to reach the page produces an empty
 # object, and "no `.welcome-screen-root` found" over nothing would otherwise be
@@ -156,15 +204,81 @@ port=0
 # OS pick and the process prints what it got: a fixed port makes two arms race
 # each other on a busy runner, and produces a red arm that says nothing about
 # the product.
+#
+# IT APPLIES THE BUNDLE'S OWN `_redirects`, and that is not a convenience.
+#
+# A bare `SimpleHTTPRequestHandler` 404s `/noir`, because the bundle contains
+# no file of that name — the deployment's §1b.4 rewrite is what makes the
+# address reach the application. A route arm served without it would measure
+# THIS SERVER and report the product as broken at a URL the CDN serves fine.
+#
+# The rules are read from `${dir}/_redirects`, which `renderRewriteConfig`
+# generated from `rewritePrefixes()`. So the harness routes by the same table
+# the CDN is given, and a prefix added to the product reaches this server
+# without anybody editing it — the property the generated file exists for. A
+# hand-written list of paths here would be the second implementation of "which
+# prefixes exist" that `web_entry.classifyPath`'s header warns about.
+#
+# Only `200` rows are honoured. A `30x` row is deliberately NOT followed: the
+# whole defect this arm exists for was a rewrite that a host turned into a
+# redirect, and a harness that quietly followed redirects could not see it.
 cat >"${cache}/serve.py" <<'PY'
-import http.server, socketserver, sys
+import http.server, os, socketserver, sys
 
 directory = sys.argv[1]
+
+
+def load_rewrites(root):
+    """[(prefix, is_splat, target)] from the generated _redirects, 200 rows only."""
+    rules = []
+    path = os.path.join(root, '_redirects')
+    if not os.path.exists(path):
+        return rules
+    for line in open(path):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = line.split()
+        if len(parts) != 3 or parts[2] != '200':
+            continue
+        pattern, target = parts[0], parts[1]
+        if pattern.endswith('/*'):
+            rules.append((pattern[:-2], True, target))
+        else:
+            rules.append((pattern, False, target))
+    return rules
+
+
+RULES = load_rewrites(directory)
 
 
 class Quiet(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=directory, **kw)
+
+    def translate_rewrite(self, path):
+        request = path.split('?', 1)[0].split('#', 1)[0]
+        # A real file always wins, exactly as it does on the host: the rewrite
+        # table must never shadow `/ui.js` or `/assets/...`.
+        candidate = os.path.join(directory, request.lstrip('/'))
+        if os.path.isfile(candidate):
+            return None
+        for prefix, is_splat, target in RULES:
+            if is_splat:
+                if request == prefix or request.startswith(prefix + '/'):
+                    return target
+            elif request == prefix or request == prefix + '/':
+                return target
+        return None
+
+    def send_head(self):
+        target = self.translate_rewrite(self.path)
+        if target is not None:
+            # `/` is the entry document's canonical address — see
+            # `web_deployment.entryDocumentAddress`. Serve its bytes at the
+            # REQUESTED url, with no redirect, which is what `200` means.
+            self.path = target
+        return super().send_head()
 
     def log_message(self, *a):
         pass
@@ -197,7 +311,10 @@ start_server() {
 # different instrument than the one it is vouching for would vouch for nothing.
 # ---------------------------------------------------------------------------
 probe_dir() {
-	local label="$1" dir="$2"
+	# `probe_dir <label> <dir> [url-path]`. The path defaults to `/`, which is
+	# every existing arm's subject and the ONLY address this gate ever loaded —
+	# the reason a router that ignored the URL passed it for weeks.
+	local label="$1" dir="$2" url_path="${3:-/}"
 	if ! start_server "${dir}"; then
 		echo "  the static server did not start" >&2
 		return 2
@@ -208,7 +325,7 @@ probe_dir() {
 		shot="${CT_PROBE_SCREENSHOT_DIR}/${label}.png"
 	fi
 	CT_PROBE_SCREENSHOT="${shot}" \
-		node ci/test/web_renderer_probe.mjs "http://127.0.0.1:${port}/" \
+		node ci/test/web_renderer_probe.mjs "http://127.0.0.1:${port}${url_path}" \
 		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
 	local rc=$?
 	stop_server
@@ -224,7 +341,7 @@ probe_dir() {
 # One arm: copy, mutate, serve, probe, print the JSON to a file.
 # ---------------------------------------------------------------------------
 run_arm() {
-	local label="$1" mutate="$2"
+	local label="$1" mutate="$2" url_path="${3:-/}"
 	arm_dir="${cache}/arm-${label}"
 	[ -d "${arm_dir}" ] && chmod -R u+w "${arm_dir}" 2>/dev/null
 	rm -rf "${arm_dir}"
@@ -253,7 +370,7 @@ run_arm() {
 			return 2
 		fi
 	fi
-	probe_dir "${label}" "${arm_dir}"
+	probe_dir "${label}" "${arm_dir}" "${url_path}"
 }
 
 # Read one field out of an arm's report. `json` is the only reader, so a
@@ -342,6 +459,80 @@ for p in sys.argv[1:]:
     assert s.startswith('(function(){\n'), p
     open(p, 'w').write(s[len('(function(){\n'):].rsplit('\n})();\n', 1)[0])
 PY
+}
+
+# Arm S — THE DEFECT THIS ROUTE ARM EXISTS FOR, reconstructed exactly.
+#
+# `https://ide.codetracer.com/noir` opened the welcome screen, because
+# `ui_js.nim`'s web arm mounted one surface at every address and never asked
+# what URL the visitor arrived on. `platform/web_entry.classifyPath`,
+# `resolveEntry` and `host/web_browser.currentEntryRequest` were all present,
+# all correct and all tested; `currentEntryRequest` had ZERO callers.
+#
+# This mutation puts the renderer back in that state with one substitution:
+# the location read becomes a constant `/`. Everything else — the classifier,
+# the template, the mount — is untouched and still runs, which is what makes
+# the arm specific. A router that is consulted but wrong would fail
+# differently, and an arm that deleted the whole entry layer would redden
+# every assertion and prove nothing about any of them.
+#
+# `String(window.location.pathname || '/')` is `ui/web_entry_surface.nim`'s
+# `jsEntryPath` importjs body, emitted verbatim by the Nim JS backend. Note
+# that grepping for a Nim STRING LITERAL here would find nothing — the backend
+# emits those as char-code arrays — but an `importjs` pattern is emitted as
+# source, which is why this mutation can be a text substitution at all.
+mutate_route_blind() {
+	local dir="$1"
+	grep -q "String(window.location.pathname || '/')" "${dir}/ui.js" || return 1
+	python3 - "${dir}/ui.js" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+needle = "String(window.location.pathname || '/')"
+assert s.count(needle) == 1, s.count(needle)
+open(p, 'w').write(s.replace(needle, "String('/')"))
+PY2
+}
+
+# Arm V — THE SURFACE IS MOUNTED AND A USER CANNOT SEE IT.
+#
+# Not hypothetical: it is what the first version of the template surface did.
+# It mounted into `#isonim-app`, which the entry document places BEFORE
+# `#root-container`, so `#session-container-0` painted over the whole panel.
+# Everything measured correct — 1 panel, 7 entries, the right labels, light
+# text on a dark background, real geometry, `innerText` unchanged at 422
+# characters — and the screenshot was uniformly dark.
+#
+# THE MUTATION IS AN OVERLAY RATHER THAN THE ORIGINAL MISTAKE, and the reason
+# is worth recording because the first attempt was wrong. Moving the mount
+# target back is not available to a shell: the id travels as a Nim string
+# literal and the JS backend emits those as char-code arrays, so there is no
+# text in `ui.js` to substitute (the same property that makes arm S possible
+# only because ITS subject is an `importjs` body, which IS emitted as source).
+#
+# The obvious substitute — making `#session-container-0` a fixed opaque box —
+# was tried and does NOT work, which the arm caught by going red at 6 of 7
+# rows instead of 0: the surface mounts INTO `#main`, a descendant of that
+# container, so covering it moves the panel with it rather than over it.
+#
+# So the mutation adds an opaque element after everything, which is the
+# GENERAL form of the defect — a correct, mounted, correctly-coloured surface
+# that the user cannot see — and it is what arm R's visibility assertion
+# claims to detect. It must take the rows to ZERO while leaving the panel
+# mounted; anything else and the pair is not isolating paint from presence.
+mutate_covered_surface() {
+	local dir="$1"
+	grep -q '</div>' "${dir}/index.html" || return 1
+	python3 - "${dir}/index.html" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+marker = '<script src="/public/dist/frontend_bundle.js" defer></script>'
+assert s.count(marker) == 1
+overlay = ('<div id="ct-occlusion-arm" style="position:fixed;inset:0;'
+           'background:#1e1e1e;z-index:2147483647"></div>\n')
+open(p, 'w').write(s.replace(marker, overlay + marker))
+PY2
 }
 
 # ---------------------------------------------------------------------------
@@ -521,6 +712,200 @@ esac
 echo
 
 # ---------------------------------------------------------------------------
+echo "Arm D: THE HOSTING CONTRACT — no rewrite targets a path the host will"
+echo "       normalise into a redirect"
+# ---------------------------------------------------------------------------
+#
+# §1b.4, the one clause it states in bold: the entry document is "served **200
+# rather than 302**". `renderRewriteConfig` emitted `/index.html` as every
+# rule's target, and Cloudflare Pages answers `/index.html` with a 308 to `/`
+# — its automatic clean-URL normalisation, the same one that turns
+# `/replay-demo.html` into `/replay-demo`. So every rule that actually matched
+# became a redirect, and `https://ide.codetracer.com/noir` moved the address
+# bar to `/` before a single script ran. Measured on the live deployment,
+# 2026-09-01; see `web_deployment.entryDocumentAddress`.
+#
+# This reads the SHIPPED file rather than the Nim value, because the Nim value
+# is asserted by `test_platform_web.nim` and the two failures are different:
+# a wrong constant is caught there, a bundle assembled from a stale renderer is
+# caught here.
+redirects_file="${bundle}/_redirects"
+if [ ! -s "${redirects_file}" ]; then
+	ck fail "the bundle ships no _redirects, so §1b.4's rewrite table is absent entirely"
+	ck fail "and there is therefore nothing to check its targets against"
+else
+	rw_total="$(awk '$3 == "200" { n++ } END { print n + 0 }' "${redirects_file}")"
+	rw_bad="$(awk '$3 == "200" && $2 ~ /index\.html$/ { n++ } END { print n + 0 }' "${redirects_file}")"
+	# NON-VACUITY: a file with no 200 rows would make the "none are bad" check
+	# below true for the emptiest possible reason. `rewritePrefixes()` yields
+	# five prefixes and two rows each.
+	if [ "${rw_total}" = "10" ]; then
+		ck ok "the shipped _redirects carries ${rw_total} 200-rewrites, so the target check has a subject"
+	else
+		ck fail "the shipped _redirects carries ${rw_total} 200-rewrites, not the 10 rewritePrefixes() implies"
+	fi
+	if [ "${rw_bad}" = "0" ]; then
+		ck ok "none of them targets /index.html, so the host has nothing left to normalise into a 308"
+	else
+		ck fail "${rw_bad} rewrite(s) target /index.html — Cloudflare Pages answers that with a 308 to /, which is the redirect §1b.4 forbids and the defect that shipped"
+		grep -n 'index\.html' "${redirects_file}" | sed 's/^/      /'
+	fi
+fi
+echo
+
+# ---------------------------------------------------------------------------
+echo "Arm R: THE ROUTE — /noir opens the bundled Noir template, not the"
+echo "       welcome screen"
+# ---------------------------------------------------------------------------
+#
+# THE ASSERTION THAT WOULD HAVE CAUGHT THIS, and the reason the gate above did
+# not: every arm before this one loads `/`. A build that resolves the entry and
+# a build that ignores it produce byte-identical DOMs at `/`, so no number of
+# assertions over that one address can tell them apart. The subject here is a
+# DIFFERENT URL on the SAME bundle.
+#
+# It pairs with the control arm rather than replacing it: `/` must still be the
+# welcome screen (rule 0 — the language-neutral root names no language, so
+# there is no template to select) and `/noir` must not be. Either assertion
+# alone is satisfiable by a product that mounts one thing everywhere.
+if ! run_arm route "" "/noir"; then
+	ck fail "arm R could not be measured"
+	ck fail "arm R could not be measured (second half)"
+	ck fail "arm R could not be measured (third half)"
+	ck fail "arm R could not be measured (fourth half)"
+	ck fail "arm R could not be measured (fifth half)"
+	ck fail "arm R could not be measured (sixth half)"
+else
+	r_present="$(json route dom.domRootPresent)"
+	r_welcome="$(json route dom.welcomeScreenRoots)"
+	r_fs="$(json route dom.filesystemPanels)"
+	r_entries="$(json route dom.filesystemEntries)"
+	r_errs="$(json route pageErrors)"
+	r_renderer="$(json route rendererLine)"
+	r_labels="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(" ".join(d.get("dom", {}).get("entryLabels") or []))
+' "${cache}/route.json" 2>/dev/null)"
+
+	# NON-VACUITY, same rule as the control arm: `welcomeScreenRoots == 0` over
+	# a page the probe never reached is indistinguishable from a correct route.
+	if [ "${r_present}" = "True" ]; then
+		ck ok "arm R: /noir served the application document, so the checks below have a subject"
+	else
+		ck fail "arm R: /noir produced no #dom-root — the rewrite did not reach the SPA and every check below would be vacuous"
+		dump_arm route
+	fi
+
+	# THE BUG REPORT, as one assertion. "I am taken immediately to the Welcome
+	# Screen of CodeTracer instead of the intended Noir template project."
+	if [ "${r_welcome}" = "0" ] && [ "${r_fs}" = "1" ]; then
+		ck ok "arm R: /noir mounted the project's filesystem panel and NO welcome screen"
+	else
+		ck fail "arm R: /noir mounted ${r_welcome} welcome screen(s) and ${r_fs} filesystem panel(s) — the reported defect is ${r_welcome} and 0"
+		dump_arm route
+	fi
+
+	# ...and that what mounted is THE TEMPLATE, not merely a panel of the right
+	# shape. `noir_template.noirHelloWorld` is the only source of these names.
+	case "${r_labels}" in
+	*"main.nr"*)
+		case "${r_labels}" in
+		*"Nargo.toml"*)
+			ck ok "arm R: the tree is the Noir template — ${r_entries} entries: ${r_labels}" ;;
+		*)
+			ck fail "arm R: the tree has no Nargo.toml; a Noir project without one is not one (labels: ${r_labels})" ;;
+		esac ;;
+	*)
+		ck fail "arm R: the tree has no main.nr (labels: '${r_labels}') — a filesystem panel mounted, but not over the template" ;;
+	esac
+
+	# THE PRODUCT'S OWN ACCOUNT OF THE ROUTE. The DOM says what mounted; this
+	# says what the product THOUGHT it was doing, and a disagreement between
+	# the two is a different bug from either being wrong alone.
+	case "${r_renderer}" in
+	*"surface=noir-template"*"entry=efBare/evTemplate"*"language=noir"*)
+		ck ok "arm R: the renderer reported the route it took: ${r_renderer#*: }" ;;
+	*)
+		ck fail "arm R: the renderer line does not name the noir template route (line: '${r_renderer}')" ;;
+	esac
+
+	# THE ASSERTION THE OTHERS COULD NOT MAKE. Every check above this one was
+	# green over a page that painted nothing: the panel was mounted, correct,
+	# light-on-dark and covered by `#session-container-0`. `innerText` did not
+	# move, because the text WAS rendered — it was occluded. So this reads a
+	# hit test, and it is the only field here that a covering element changes.
+	r_visible="$(json route dom.entryLabelsVisible)"
+	if [ "${r_visible}" = "${r_entries}" ] && [ "${r_entries:-0}" -ge 5 ] 2>/dev/null; then
+		ck ok "arm R: all ${r_visible} tree rows hit-test to themselves, so a user can see the project and not just the DOM"
+	else
+		ck fail "arm R: ${r_visible} of ${r_entries} tree rows are visible — the surface is mounted and something is painted over it, which is the state a DOM-only check calls a pass"
+		dump_arm route
+	fi
+
+	if [ "${r_errs}" = "0" ]; then
+		ck ok "arm R: no uncaught page errors on the template route"
+	else
+		ck fail "arm R: ${r_errs} uncaught page error(s) on /noir:"
+		python3 -c 'import json,sys; [print("      "+e) for e in json.load(open(sys.argv[1]))["pageErrors"]]' \
+			"${cache}/route.json"
+	fi
+fi
+echo
+
+echo "Arm S: MUTATION — the renderer stops reading the URL"
+echo "    The defect exactly: the entry layer exists, is correct, and is not"
+echo "    consulted. Expect arm R's mount assertion RED, / unchanged."
+if ! run_arm route-blind mutate_route_blind "/noir"; then
+	ck fail "arm S could not be measured"
+	ck fail "arm S could not be measured (second half)"
+else
+	s_welcome="$(json route-blind dom.welcomeScreenRoots)"
+	s_fs="$(json route-blind dom.filesystemPanels)"
+	s_renderer="$(json route-blind rendererLine)"
+	if [ "${s_welcome}" = "1" ] && [ "${s_fs}" = "0" ]; then
+		ck ok "arm S: /noir falls back to the welcome screen when the location is not read, so arm R's mount assertion can fail"
+	else
+		ck fail "arm S: /noir still mounted ${s_fs} filesystem panel(s) and ${s_welcome} welcome screen(s) with the URL read stubbed out — arm R's assertion cannot detect a blind router, so it proves nothing"
+	fi
+	# The twin. The mutation must break the ROUTE and not the renderer: a
+	# product that stopped mounting anything would also satisfy the check
+	# above's first half while being consistent with almost any bug.
+	case "${s_renderer}" in
+	*"codetracer-web-renderer: ok"*)
+		ck ok "arm S: the renderer still mounted a surface, so this arm isolates the routing and not the mount" ;;
+	*)
+		ck fail "arm S: the renderer stopped mounting altogether (line: '${s_renderer}'); the arm does not isolate the route" ;;
+	esac
+fi
+echo
+
+echo "Arm V: MUTATION — the template surface is mounted and painted over"
+echo "    The state a DOM-only check calls a pass. Expect the VISIBILITY"
+echo "    assertion RED and the mount assertion GREEN."
+if ! run_arm covered mutate_covered_surface "/noir"; then
+	ck fail "arm V could not be measured"
+	ck fail "arm V could not be measured (second half)"
+else
+	v_entries="$(json covered dom.filesystemEntries)"
+	v_visible="$(json covered dom.entryLabelsVisible)"
+	v_panels="$(json covered dom.filesystemPanels)"
+	if [ "${v_visible}" = "0" ] && [ "${v_entries:-0}" -ge 5 ] 2>/dev/null; then
+		ck ok "arm V: ${v_entries} rows are in the DOM and 0 are visible, so arm R's visibility assertion can fail"
+	else
+		ck fail "arm V: ${v_visible} of ${v_entries} rows still hit-test as visible under a covering element — arm R's visibility check cannot detect occlusion and proves nothing"
+	fi
+	# The twin: the mutation must change VISIBILITY and nothing else, or the
+	# assertion it vouches for is not the one it reddened.
+	if [ "${v_panels}" = "1" ]; then
+		ck ok "arm V: the panel is still mounted, so this arm isolates painting from mounting" ;
+	else
+		ck fail "arm V: the panel stopped mounting (${v_panels}); the arm does not isolate occlusion"
+	fi
+fi
+echo
+
+# ---------------------------------------------------------------------------
 # THE MUTATION ARMS. For each: the named assertion must go RED, and the arm
 # must not be red for some unrelated reason — so the check that is expected to
 # survive is asserted too.
@@ -598,10 +983,17 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-# 18 assertions, written from a run. See traps doc 4c: the count is what turns
-# "all green" into "all of them ran". 16 over the product, plus the two that
+# 30 assertions, written from a run. See traps doc 4c: the count is what turns
+# "all green" into "all of them ran". 28 over the product, plus the two that
 # vouch for the instrument doing the measuring.
-expect_count 18
+#
+# The twelve added for the entry route are the ones this gate was missing: it
+# loaded `/` and only `/`, so a renderer that never read the URL passed every
+# assertion in it while `https://ide.codetracer.com/noir` opened the welcome
+# screen. Two of the nine (arm D) are about the hosting contract rather than
+# the DOM, because the same defect had a CDN half: a 200-rewrite whose target
+# the host answered with a 308.
+expect_count 30
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

@@ -372,12 +372,17 @@ echo
 
 # ---------------------------------------------------------------------------
 echo "Step 3b: render the entry document and the host configuration"
-echo "    The asset nothing produced. renderRewriteConfig() has always emitted"
-echo "    '/index.html' as the target of every prefix, and no step ever made"
-echo "    such a file -- so a deployment would have served the rewrites and"
-echo "    404'd every one of them. The document also CARRIES the descriptor of"
-echo "    what this assembly actually placed, measured from the files on disk,"
-echo "    which is what the page reads instead of making a request."
+echo "    The asset nothing produced. renderRewriteConfig() emitted a target"
+echo "    for every prefix and no step ever wrote the file it named -- so a"
+echo "    deployment would have served the rewrites and 404'd every one."
+echo "    The target has since moved from '/index.html' to '/': Cloudflare"
+echo "    Pages normalises the first into a 308 redirect, which turned every"
+echo "    200-rewrite into the 302-class answer Noir-Studio.md 1b.4 forbids"
+echo "    and sent /noir to / before any script ran. web-renderer-mounts.sh"
+echo "    arm D asserts the shipped table over this. The document also CARRIES"
+echo "    the descriptor of what this assembly actually placed, measured from"
+echo "    the files on disk, which is what the page reads instead of making a"
+echo "    request."
 # ---------------------------------------------------------------------------
 origin="${CT_WEB_ORIGIN:-https://ide.codetracer.com}"
 revision="${CT_WEB_REVISION:-$(git -C "${repo_root}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"

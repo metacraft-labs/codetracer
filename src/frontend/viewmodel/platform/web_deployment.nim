@@ -226,7 +226,58 @@ type
 
 const
   entryDocumentPath* = "index.html"
-    ## The target `renderRewriteConfig` already emits for every prefix.
+    ## Where the assembly step WRITES the entry document.
+
+  entryDocumentAddress* = "/"
+    ## Where a rewrite must POINT at it, which is not the same string, and the
+    ## difference is a defect that reached production and stayed there.
+    ##
+    ## ## Measured on `ide.codetracer.com`, 2026-09-01
+    ##
+    ## `renderRewriteConfig` emitted `/index.html` as every rule's target. On
+    ## Cloudflare Pages the result was:
+    ##
+    ##     /noir            308 -> /          the rule fired
+    ##     /projects        308 -> /          the rule fired
+    ##     /s               308 -> /          the rule fired
+    ##     /p               308 -> /          the rule fired
+    ##     /collab/join     308 -> /          the rule fired
+    ##     /index.html      308 -> /          and here is why
+    ##     /noir/new        200                no exact rule; served anyway
+    ##     /nope            200                no rule at all; served anyway
+    ##
+    ## Pages normalises `/index.html` to `/` with a 308 — the same automatic
+    ## clean-URL rewrite that turns `/replay-demo.html` into `/replay-demo`,
+    ## which this deployment also serves and which is how the mechanism was
+    ## identified. Applying it to a rewrite TARGET converts the 200-rewrite
+    ## into a redirect, so the one line of §1b.4 that is stated in capitals —
+    ## "served **200 rather than 302**" — was violated by every rule that
+    ## actually matched.
+    ##
+    ## The user-visible defect is the whole of the bug report: typing
+    ## `ide.codetracer.com/noir` moved the address bar to `/`, so the language
+    ## was destroyed by the CDN *before any script ran*. No amount of correct
+    ## client-side routing could have survived it — `currentEntryRequest()`
+    ## would have read `/`, classified it as a language-neutral root, and been
+    ## right about the URL it was given.
+    ##
+    ## ## Why the fix is a different target and not a different status
+    ##
+    ## `renderRewriteConfig`'s own comment says why the status cannot move:
+    ## "a `301` or `302` here would break the SPA's own history handling and
+    ## would make `/noir/new`'s history replacement (rule 5) impossible."
+    ## That remains true. What changes is the target: `/` is already the
+    ## canonical address of the entry document on every static host in use, so
+    ## there is no normalisation left to apply to it.
+    ##
+    ## ## Why the rules are kept rather than deleted
+    ##
+    ## Deleting them would also have "fixed" `/noir`, because Pages serves its
+    ## SPA fallback for anything it cannot resolve — that is why `/nope`
+    ## answers 200 above. Relying on it would make §1b.4's hosting contract an
+    ## undocumented behaviour of one vendor, and would silently stop covering
+    ## a prefix the day a `404.html` is added to the bundle. The contract stays
+    ## explicit and stays generated from `rewritePrefixes()`.
   rendererBundlePath* = "ui.js"
   webEntryBundlePath* = "web.js"
 
@@ -391,9 +442,35 @@ proc renderRewriteConfig*(contract: DeploymentContract): string =
   ## and would make `/noir/new`'s history replacement (rule 5) impossible.
   result = "# Generated from viewmodel/platform/web_deployment.nim. Do not edit.\n"
   result.add "# Noir-Studio.md §1b.4 — one 200-rewrite per prefix.\n"
+  result.add "# The target is `" & entryDocumentAddress &
+    "` and not `/" & entryDocumentPath & "`; see that constant for the 308.\n"
   for rule in contract.rewrites:
-    result.add rule.prefix & "/*  /index.html  200\n"
-    result.add rule.prefix & "  /index.html  200\n"
+    result.add rule.prefix & "/*  " & entryDocumentAddress & "  200\n"
+    result.add rule.prefix & "  " & entryDocumentAddress & "  200\n"
+
+proc rewriteTargets*(contract: DeploymentContract): seq[string] =
+  ## Every target `renderRewriteConfig` emits, as a value.
+  ##
+  ## Written so `test_no_rewrite_targets_a_normalised_path` can assert over the
+  ## targets rather than grep the rendered text: the rendering is one string
+  ## and a grep for `/index.html` in it would also match the comment line
+  ## above, which is the kind of check that passes for the wrong reason.
+  for rule in contract.rewrites:
+    result.add entryDocumentAddress
+    result.add entryDocumentAddress
+
+proc normalisedRewriteTargets*(contract: DeploymentContract): seq[string] =
+  ## The targets a static host would answer with a redirect instead of the
+  ## document — §1b.4's "200 rather than 302", checked rather than promised.
+  ##
+  ## One entry per offending target, so the assertion is `.len == 0` and a
+  ## failure names the string. `/index.html` is the only member today and it is
+  ## the one that shipped; the test that reads this is the reason a future
+  ## edit back to it fails a suite rather than a deployment.
+  for target in rewriteTargets(contract):
+    if target.len >= entryDocumentPath.len and
+       target[target.len - entryDocumentPath.len .. ^1] == entryDocumentPath:
+      result.add target
 
 proc renderCacheConfig*(contract: DeploymentContract): string =
   result = "# Generated from viewmodel/platform/web_deployment.nim. Do not edit.\n"
