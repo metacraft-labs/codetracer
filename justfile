@@ -2574,10 +2574,33 @@ test-vm: test-vm-native test-vm-js
 # nothing assigned).  Its lane still never RUNS the file — a live round-trip
 # against the production sharing service must not — only compiles it.
 #
-# The six that are GREEN today and could be promoted as-is:
-#   test-common-units  test-ct-cli-units  test-vm-unit  test-book-isonim
+# The five that are GREEN today and could be promoted as-is:
+#   test-common-units  test-ct-cli-units  test-book-isonim
 #   test-online-sharing-compile
 #   test-lane-coverage (already runs, via ci/lint/nim.sh)
+#
+# `test-vm-unit` LEFT that list on 2026-09-01, and `test-vm-unit-js` with it.
+# Both are now red, by design and not by drift: Edit-Mode-Toolbar.md's three
+# specifying suites landed ahead of the implementation they specify, stating
+# the correct behaviour rather than the current behaviour.  27 checks are red
+# and 13 are green, identically on both backends; the 13 are the positive
+# controls that keep the 27 from being vacuous.  The suites go green on their
+# own when `viewmodel/viewmodels/edit_mode_toolbar.nim` lands — no edit to
+# them — at which point both lanes are promotable again.
+#
+#   src/frontend/viewmodel/tests/unit/test_edit_mode_toolbar_languages.nim
+#   src/frontend/viewmodel/tests/unit/test_edit_mode_toolbar_model.nim
+#   src/frontend/viewmodel/tests/unit/test_noir_build_diagnostics.nim
+#
+# Rows, evidence and the retirement condition:
+# codetracer-specs/Testing/Known-Test-Failures.md, "Specifying suites".
+# Mutation arms: src/frontend/viewmodel/tests/unit/run-edit-mode-toolbar-mutations.py
+# (18/18 killed, each by exactly one named check, on both backends).
+#
+# DO NOT make these lanes green by deleting or skipping a suite.  If one is in
+# your way, the answer is in the ledger row, and `release_gate.nim` will fail
+# the m16 lane if you try — all three are registered in CoreViewModelGateTests
+# for precisely that reason.
 # (`test-lanes` is the thirteenth recipe; it prints lane contents and runs
 #  nothing, so it is neither red nor promotable.)
 #
