@@ -20,20 +20,34 @@ use std::sync::Mutex;
 /// We use it to satisfy `Sync` requirements for `static` storage.
 static VFS_STORE: Lazy<Mutex<HashMap<String, Vec<u8>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Take the store, tolerating a poisoned lock.
+///
+/// `unwrap()` on the guard is what this used to do, and it is now a
+/// `clippy::unwrap_used` error because `mod vfs` is compiled into the
+/// `replay-server` binary (whose crate root denies that lint) and not only
+/// into the wasm library. Poisoning is not a real state here — the three
+/// critical sections below are a `HashMap` insert, a `get`, and a
+/// `contains_key`, none of which can panic — so recovering the inner value is
+/// both correct and the only behaviour that never aborts a replay session
+/// over an unrelated panic elsewhere.
+fn store() -> std::sync::MutexGuard<'static, HashMap<String, Vec<u8>>> {
+    VFS_STORE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Write a file into the in-memory VFS store.
 pub fn vfs_write(path: &str, data: Vec<u8>) {
-    let mut store = VFS_STORE.lock().unwrap();
+    let mut store = store();
     store.insert(path.to_string(), data);
 }
 
 /// Read file bytes from the in-memory VFS store.
 pub fn vfs_read(path: &str) -> Option<Vec<u8>> {
-    let store = VFS_STORE.lock().unwrap();
+    let store = store();
     store.get(path).cloned()
 }
 
 /// Check whether a file exists in the in-memory VFS store.
 pub fn vfs_exists(path: &str) -> bool {
-    let store = VFS_STORE.lock().unwrap();
+    let store = store();
     store.contains_key(path)
 }

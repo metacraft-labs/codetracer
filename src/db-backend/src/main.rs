@@ -115,6 +115,12 @@ mod sourcemap_cache;
 // copy because `dap_handler::Handler::load_source_views` reaches for
 // the module via the `crate::source_views` path.
 mod source_views;
+
+// Mirror of the `lib.rs` declaration, for the same reason as the one above:
+// `expr_loader` reads source text through `crate::vfs`, so the bin needs its
+// own copy of the module. A native `replay-server` never writes into the
+// store, so it is always empty and every lookup misses.
+mod vfs;
 // RS-M2 — request/interval spans (`ct/load-request-spans` + the read-only
 // legacy JSONL shim).  Mirror of the lib.rs declaration; the bin needs its own
 // copy because `dap_handler::Handler::load_request_spans` reaches for the
