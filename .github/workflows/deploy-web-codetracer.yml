@@ -354,6 +354,15 @@ jobs:
           nix develop .#ci --command bash -c '
             export CT_NOIR_WASM_COMPILER="$(pwd)/noir-wasm-out/noir_wasm.wasm"
             export CT_NOIR_WASM_TRACER="$(pwd)/noir-wasm-out/noir_tracer_wasm.wasm"
+            # THE ENGINE, from the browser-replay build two steps up. The
+            # Studio declares its own copies under /assets/ rather than
+            # pointing at the /pkg/ tree staged for BlockTracer: /pkg/ is a
+            # cross-origin contract another repository fetches and is served
+            # with the entry documents cache class, and a 60-second TTL on an
+            # 18 MB module is the failure the fetched-not-bundled decision
+            # exists to avoid. Without this the assembly step SKIPS the engine
+            # loudly and the bundle is exactly what it is today.
+            export CT_REPLAY_ENGINE_DIR="$(pwd)/browser-replay/dist/pkg"
             export CT_WEB_BUNDLE_DIR="$(pwd)/studio-bundle"
             export CT_WEB_REVISION="${GITHUB_SHA:0:8}"
             direnv exec "$(pwd)" bash ci/test/web-bundle-assets.sh
