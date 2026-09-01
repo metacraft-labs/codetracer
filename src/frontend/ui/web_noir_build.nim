@@ -102,17 +102,17 @@ var
   activeIntent: NoirRunIntent
   activeInFlight = false
   buildTemplate: ProjectTemplate
-  lastStartCount* = 0
+  lastStartCount = 0
     ## How many `start` messages this module has caused the worker to be sent.
     ##
-    ## Exported and counted because "the compiler is now reachable" is exactly
-    ## the claim a chain of green checks cannot support: the state this
-    ## replaces produced ZERO `start` messages while every check passed. A
-    ## number the page can be asked for makes the difference observable from
-    ## outside without instrumenting `Worker.postMessage` — and the browser
-    ## gate asserts the two agree, so neither can drift alone.
-
-proc noirBuildStartCount*(): int = lastStartCount
+    ## Counted because "the compiler is now reachable" is exactly the claim a
+    ## chain of green checks cannot support: the state this replaces produced
+    ## ZERO `start` messages while every check passed. It rides on every
+    ## `codetracer-noir-build:` line, so a log records how many dispatches a
+    ## session made — beside `ci/test/noir-build-in-browser.sh`'s independent
+    ## count, taken by wrapping `Worker.postMessage` before any page script
+    ## runs. Two instruments, one fact; the gate reads the second, and this one
+    ## is what a support question is answered from.
 
 proc jsNowMs(): float {.importjs: "Date.now()".}
 
