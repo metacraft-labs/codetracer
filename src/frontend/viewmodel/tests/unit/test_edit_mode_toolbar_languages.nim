@@ -99,7 +99,12 @@ const NoirNargoSrc =
 # ---------------------------------------------------------------------------
 
 const EditModeToolbarModule =
-  currentSourcePath() & "/../../../viewmodels/edit_mode_toolbar.nim"
+  currentSourcePath()[0 ..< currentSourcePath().rfind('/')] &
+    "/../../viewmodels/edit_mode_toolbar.nim"
+  ## CORRECTED — see the identical note in `test_edit_mode_toolbar_model.nim`.
+  ## The old spelling appended `..` to a regular file, so `test -e` answered
+  ## `NO` unconditionally and this suite could never have flipped to green no
+  ## matter what landed.
 
 const EditModeToolbarBuilt =
   staticExec("test -e '" & EditModeToolbarModule & "' && echo YES || echo NO")
@@ -247,7 +252,21 @@ suite "EMT §10.1 the canonical build table is the suite":
     # the table fails here rather than silently shrinking the suite.
     ck exercised == 16
     ck CanonicalRows.len == 16
-    expectCount(50)
+    expectCount(if EditModeToolbarBuilt: 65 else: 50)
+    ## COUNT CORRECTED, 50 -> 65 for the built arm, with no assertion added or
+    ## removed.
+    ##
+    ## The two arms genuinely assert different amounts and the single literal
+    ## could only match one of them. The built arm makes **four** assertions
+    ## for each of the fifteen canonical rows (`ranked.len`, `confidence`,
+    ## `command`, `args`) and **three** for the JS row, which proposes no
+    ## command; the `pending` arm emits three for all sixteen. So 15*4 + 3 + 2
+    ## = 65 against 16*3 + 2 = 50. Measured: all 65 passed and the check failed
+    ## on `asserted == 50` alone.
+    ##
+    ## Still a literal, and deliberately: EMT-A61's whole point is that a row
+    ## dropped from §10.1 must FAIL here rather than shrink the suite, so this
+    ## number is supposed to be brittle.
 
   test "EMT-A62 every recognised-not-proposed row is recognised, and says why":
     ## The whole point of §10.2. "No command" must be a RECOGNISED kind with a
@@ -438,10 +457,24 @@ suite "EMT §6 totality, emptiness and the two unrecognisable languages":
         ck proposal.confidence == pcCanonical or proposal.reason.len > 0
       ck seen == ProjectKind.high.ord + 1
       ck seen >= CanonicalRows.len
+      expectCount(ProjectKind.high.ord + 1 + 2)
+      ## COUNT CORRECTED, and it could not have been a literal at all.
+      ##
+      ## The built arm asserts once per `ProjectKind` — that is what totality
+      ## MEANS here — plus the two counts, so the number is a function of the
+      ## enum's size. `expectCount(2)` was sized for the `pending` arm.
+      ## Measured with the feature in place: 30 members, `asserted == 32`,
+      ## all 32 passing, and the check failing on `asserted == 2` alone.
+      ##
+      ## Expressed against `ProjectKind.high` rather than as `32` on purpose.
+      ## A47 exists so that "a kind added later WITHOUT a row fails rather than
+      ## passes"; a frozen literal would make *adding a kind at all* fail here
+      ## for the wrong reason, and the person fixing that would reach for the
+      ## literal rather than for the missing row.
     else:
       pending(HeuristicAwaited & " — ProjectKind totality")
       pending(HeuristicAwaited & " — the asserted member count")
-    expectCount(2)
+      expectCount(2)
 
   test "EMT-A49 LangPolkavm and LangSolana cannot be recognised from sources":
     ## EMT-F7, and the assertion exists so the gap is not quietly "fixed" by a
