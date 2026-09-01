@@ -1231,8 +1231,9 @@ test-frontend-js:
   scratchpad_dispatch_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-scratchpad-add-dispatch-test.XXXXXX.js")"
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
+  shortcut_bindings_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-bindings-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$html_sinks_probe"' EXIT
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$html_sinks_probe"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1262,6 +1263,16 @@ test-frontend-js:
   # backend refuses it outright ("Module jsFFI is designed to be used with the
   # JavaScript backend").  It ran in no lane at all until this line existed —
   # two real cases over the socket-rebinding path that could not fail a build.
+  # The shipped shortcut table binds what it names, and nothing landed in
+  # `conflictList` -- where `initShortcutMap` silently DROPS a second claim on
+  # a chord, producing an action with no keyboard and a menu item with no hint
+  # beside it.  Needs the same `window` alias as the scratchpad suite, for the
+  # same `types.nim` reason.
+  echo "Running shipped shortcut binding tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$shortcut_bindings_test" js src/frontend/tests/shortcut_bindings_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$shortcut_bindings_test"
+  echo ""
   echo "Running IPC registry rebind tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$ipc_registry_test" js src/frontend/tests/ipc_registry_test.nim
@@ -3007,6 +3018,59 @@ test-noir-build-in-browser:
   mkdir -p test-logs
   exec > >(tee test-logs/test-noir-build-in-browser.log) 2>&1
   bash ci/test/noir-build-in-browser.sh
+
+# A failed build, a keystroke, and a caret that lands on the error. In a real
+# browser tab, against the assembled publish tree.
+#
+# `test-noir-build-in-browser` ends where this begins: it proves a Build
+# reaches the compiler and paints a verdict, and says nothing about what
+# happens next.  What happened next was nothing at all.  `aGotoNextError` and
+# `aGotoPreviousError` were live `ClientAction` members with commented-out menu
+# entries and `nil` handlers; `renderer.jumpLocation` had zero callers; the
+# PROBLEMS pane's row click dispatched `ct/jump-location`, a command with no
+# engine implementation anywhere in the repo; and the BUILD pane's rows carried
+# a `build-clickable` class, a `cursor: pointer` and a documented
+# `click->jumpToLocation` whose handler was deleted in commit 20e24939.  All of
+# it green.
+#
+# So this gate's subject is WHERE THE CARET ENDS UP, read out of Monaco with
+# `getPosition()`, compared against the line and column the PROBLEMS pane
+# itself paints — not against a hardcoded constant that would have to be
+# "fixed" to whatever the code does.  Rows are hit-tested at their own left
+# edge: the first run found the pane parked at x = -9999 inside a dismissed
+# auto-hide overlay with perfectly correct diagnostics in it.
+#
+# Needs the two wasm modules, exactly as the recipe above does, and EXITS 2
+# without them rather than passing.
+test-build-error-navigation:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-build-error-navigation.log) 2>&1
+  bash ci/test/build-error-navigation-in-browser.sh
+
+# Every check in the build-error navigation gate, killed on purpose, one at a
+# time.
+#
+# Twenty-four green checks are worth nothing until each has been shown to go
+# red for its OWN reason — a kill by some other check is reported as a MISS,
+# because it means the check written for that behaviour does not cover it.  The
+# five arms drop the diagnostic's column on the way to the caret, silence the
+# wrap announcement, remove the chord from `default_config.yaml` (the exact
+# silently-unbound failure this feature was built to avoid), stop revealing the
+# pane, and stop filtering navigation to errors.
+#
+# Each arm asserts the patched file actually CHANGED first: a patch that
+# matches nothing leaves the gate green and would report coverage forever.
+#
+# Slow — every arm rebuilds the renderer and drives a browser.  Point
+# CT_WEB_BUNDLE_DIR at an assembled tree or each arm reassembles one.
+test-build-error-nav-mutations:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-build-error-nav-mutations.log) 2>&1
+  bash ci/test/build-error-nav-mutations.sh
 
 test-renderer-host-budget:
   #!/usr/bin/env bash

@@ -102,6 +102,22 @@ type
     hasOutput*: Memo[bool]
 
     # -- Callbacks wired by the host (ui_js.nim) after VM creation --
+    onJumpToLine*: proc(path: string; line: int)
+      ## Open a diagnostic row's file at its line.
+      ##
+      ## The pane's own header has documented `click→jumpToLocation` on these
+      ## rows since the Karax→IsoNim migration, `lineClass` still puts
+      ## `build-clickable` on every row with a parsed location, and
+      ## `styles/components/status_bar.styl:106` still gives that class a
+      ## `cursor: pointer` and a hover underline. The handler was dropped in
+      ## commit 20e24939 and never replaced, so the rows have looked clickable
+      ## and done nothing since — and `real-compiler-errors.spec.ts` asserts
+      ## the CLASS, by name, which passes over exactly that.
+      ##
+      ## No column: `BuildOutputLine` carries `locationPath` and
+      ## `locationLine` only. The PROBLEMS pane's rows carry a column and
+      ## navigate with it; this is the coarser of the two surfaces and says so
+      ## rather than passing a zero that looks like a real answer.
     runBuild*: proc() ## Trigger a build-only (no re-record) action.
     cancelBuildProc*: proc()
       ## Stop the in-flight build, when the host has a way to.
@@ -164,6 +180,19 @@ proc appendProblem*(vm: BuildVM; problem: BuildProblemLine) =
   var entries = vm.problems.val
   entries.add(problem)
   vm.problems.val = entries
+
+proc jumpToLine*(vm: BuildVM; line: BuildOutputLine) =
+  ## Open the file a diagnostic row names, at the line it names.
+  ##
+  ## A no-op for a row with no parsed location — which is most of them, since
+  ## every line of build output becomes a row and only the ones
+  ## `parseBuildLocation` matched carry a path. The guard is here rather than
+  ## in the view so that both renderer arms get it.
+  if line.locationPath.len == 0 or line.locationLine <= 0:
+    return
+  if vm.onJumpToLine.isNil:
+    return
+  vm.onJumpToLine(line.locationPath, line.locationLine)
 
 proc clearOutput*(vm: BuildVM) =
   ## Clear all output / errors / problems and reset the exit code so

@@ -85,6 +85,11 @@ import ../viewmodel/platform/noir_build
 import ../viewmodel/viewmodels/noir_build_producer
 from ../viewmodel/viewmodels/build_vm import BuildVM
 import ./build as build_pane
+# The PROBLEMS pane's mirror of the same diagnostics. `from ... import` to keep
+# this module's import surface narrow — it needs three procs, not the module.
+from ./errors import
+  syncErrorsAppendProblem, syncErrorsClear, highlightFirstBuildError
+from ../viewmodel/store/types import BuildProblemLine
 
 export noir_build_producer
 
@@ -239,6 +244,15 @@ proc producerFor(tmpl: ProjectTemplate): NoirBuildProducer =
       build_pane.buildVMInstance,
       projectRoot = "/" & tmpl.name,
       packageDir = tmpl.name)
+    # FEED THE PROBLEMS PANE TOO. Without these two the browser arm painted
+    # diagnostics in the BUILD pane and left PROBLEMS empty, so error
+    # navigation — which ranges over the PROBLEMS list — would have had
+    # nothing to range over, and would have looked like a broken shortcut
+    # rather than a missing producer.
+    activeProducer.onProblem = proc(problem: BuildProblemLine) =
+      syncErrorsAppendProblem(problem)
+    activeProducer.onProblemsCleared = proc() =
+      syncErrorsClear()
   activeProducer
 
 proc startTrace(producer: NoirBuildProducer; tmpl: ProjectTemplate)
@@ -273,6 +287,16 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
   # exit code is non-zero. This is one pane with two producers, so it gets one
   # behaviour.
   ensureBuildPaneVisible()
+
+  # AND, ON A REFUSAL, SELECT THE FIRST ERROR WITHOUT FOCUSING IT (EMT-D21).
+  #
+  # `npvRefused` and not `npvFaulted`: a refusal means the toolchain answered
+  # and the user has something to fix, so there are diagnostics to select. A
+  # fault means the toolchain did not answer, in which case there is nothing
+  # about the user's program to navigate to and selecting a row would be
+  # inventing one.
+  if verdict == npvRefused:
+    highlightFirstBuildError()
 
 proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
               phase: NoirBuildPhase; args: seq[string]; stdin: string;

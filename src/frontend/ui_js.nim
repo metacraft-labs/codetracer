@@ -855,6 +855,16 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         folder "Build":
           element "Rebuild/Re-record file", aReRecord, true
           element "Rebuild/Re-record project", aReRecordProject, true
+          --sub
+          # The chord beside each label comes for free: `menu.nim:424` fills
+          # `MenuNodeRecord.shortcut` from `loadShortcut`, which reads
+          # `config.shortcutMap.actionShortcuts` — i.e. the config table only.
+          # That is exactly why these two bindings went in
+          # `default_config.yaml` and not into `ui/shortcuts.nim`'s hard-bound
+          # block: a hard-bound chord cannot be displayed here by
+          # construction, and cannot be rebound by the user.
+          element "Go to Next Error", aGotoNextError, true
+          element "Go to Previous Error", aGotoPreviousError, true
         #   element "Build Project", aBuild, false
         #   element "Compile Current File (Nim Check)", aCompile, false
         #   element "Run Static Analysis (drnim)", aRunStatic, false
@@ -4549,6 +4559,25 @@ var actions*: array[ClientAction, ClientActionHandler] = [
 ]
 
 data.actions = actions
+
+# Build-error navigation, assigned BY NAME rather than by position in the
+# array literal above.
+#
+# `actions` is a positional `array[ClientAction, ClientActionHandler]` of 184
+# entries, and `aGotoNextError` / `aGotoPreviousError` sit at ordinals 101 and
+# 102 in the middle of an unbroken run of ~40 `nil`s. Editing the literal in
+# place is a silent off-by-one away from binding a different action, and it
+# would still compile. Naming the member is checked by the compiler and is the
+# same form `data.actions[ClientAction.build] = ...` already uses below.
+#
+# The two members are not new: they have been in the enum since
+# `frontend.nim:122-123` with their menu entries commented out at
+# `ui_js.nim:849-850` and no handler anywhere — live enum members that nothing
+# could ever reach. This is the wiring they were missing.
+data.actions[ClientAction.aGotoNextError] = proc(actionData: JsObject) =
+  errors.gotoNextBuildError()
+data.actions[ClientAction.aGotoPreviousError] = proc(actionData: JsObject) =
+  errors.gotoPreviousBuildError()
 
 when defined(ctWeb):
   # The entry layer, imported HERE and not in the module's import list, because

@@ -108,22 +108,39 @@ proc groupBtnClass(vm: ErrorsVM): string =
   else:
     "problems-filter-btn"
 
-proc problemRowClass(p: BuildProblemLine): string =
+proc problemRowClass(vm: ErrorsVM; p: BuildProblemLine;
+                     masterIndex: int): string =
   ## Class for a single problem row.  Combines the row marker and
   ## severity modifier so the page-object's
   ## ``.problems-severity-error`` / ``-warning`` selectors match.
-  "problems-row problems-severity-" & severityClassSuffix(p.severity)
+  ##
+  ## The selected row additionally gets ``problems-row-selected``. Selection
+  ## is compared BY MASTER INDEX, not by value: two diagnostics on the same
+  ## line of the same file are equal as ``BuildProblemLine``s, and a
+  ## value comparison would highlight both.
+  result = "problems-row problems-severity-" & severityClassSuffix(p.severity)
+  if masterIndex >= 0 and masterIndex == vm.selectedIndex.val:
+    result &= " problems-row-selected"
 
 proc iconClass(p: BuildProblemLine): string =
   ## Class for the per-row severity icon span.
   "problems-icon problems-icon-" & severityClassSuffix(p.severity)
 
-proc onProblemClick(vm: ErrorsVM; problem: BuildProblemLine): proc() =
+proc onProblemClick(vm: ErrorsVM; problem: BuildProblemLine;
+                    masterIndex: int): proc() =
   ## Closure factory so each row captures its own ``BuildProblemLine``.
   ## Without this each click handler would share the same loop variable
   ## reference.
+  ##
+  ## A click SELECTS the row as well as jumping, so that a subsequent
+  ## `next error` continues from where the user clicked rather than from
+  ## wherever the keyboard had last been — the two ways of moving through
+  ## the list share one cursor.
   let captured = problem
-  result = proc() = vm.jumpToProblem(captured)
+  let capturedIndex = masterIndex
+  result = proc() =
+    vm.selectProblemIndex(capturedIndex)
+    vm.jumpToProblem(captured)
 
 proc onFilterClick(vm: ErrorsVM; filter: ProblemFilterTag): proc() =
   ## Closure factory so each filter button captures its own filter
@@ -131,10 +148,10 @@ proc onFilterClick(vm: ErrorsVM; filter: ProblemFilterTag): proc() =
   let captured = filter
   result = proc() = vm.setFilter(captured)
 
-template renderProblemRow(r, vm, p: untyped): untyped =
+template renderProblemRow(r, vm, p, masterIndex: untyped): untyped =
   ui(r):
-    tdiv(class = problemRowClass(p),
-         onclick = onProblemClick(vm, p)):
+    tdiv(class = problemRowClass(vm, p, masterIndex),
+         onclick = onProblemClick(vm, p, masterIndex)):
       tdiv(class = iconClass(p)):
         text severityIcon(p.severity)
       tdiv(class = "problems-path"):
@@ -171,6 +188,15 @@ template renderErrorsShell(r, vm, rootClass, listContainer: untyped): untyped =
             text warningBadgeText(vm)
           tdiv(class = "problems-count-badge"):
             text totalBadgeText(vm)
+        # THE NAVIGATION ANNOUNCEMENT (EMT-D22.2 / D22.3).
+        #
+        # The repo has no status bar — the only `setStatus` in the tree is the
+        # LSP client's private one — so rather than invent a surface this
+        # feature cannot test, the announcement is painted here, in the pane
+        # the message is about. `statusMessage` is empty until something is
+        # announced, so this is blank in the ordinary case.
+        tdiv(class = "problems-status"):
+          text vm.statusMessage.val
         tdiv(class = "problems-controls"):
           tdiv(class = filterBtnClass(vm, pfAll),
                onclick = onFilterClick(vm, pfAll)):
@@ -200,7 +226,7 @@ proc renderErrorsPanel*(r: MockRenderer; vm: ErrorsVM): MockNode =
   let panel = renderErrorsShell(r, vm, "problems-panel", listContainer)
 
   createRenderEffect proc() =
-    let visible = vm.visibleProblems.val
+    let visible = vm.visibleRefs.val
     let grouped = vm.groupByFile.val
     r.clearChildren(listContainer)
 
@@ -210,13 +236,14 @@ proc renderErrorsPanel*(r: MockRenderer; vm: ErrorsVM): MockNode =
 
     if grouped:
       var order: seq[string] = @[]
-      var groups: Table[string, seq[BuildProblemLine]]
+      var groups: Table[string, seq[ProblemRef]]
       for i in 0 ..< visible.len:
-        let p = visible[i]
+        let entry = visible[i]
+        let p = entry.problem
         if not groups.hasKey(p.path):
           groups[p.path] = @[]
           order.add(p.path)
-        groups[p.path].add(p)
+        groups[p.path].add(entry)
 
       let groupedNode = renderProblemsGroupedRoot(r)
       r.appendChild(listContainer, groupedNode)
@@ -227,12 +254,14 @@ proc renderErrorsPanel*(r: MockRenderer; vm: ErrorsVM): MockNode =
         let groupNode = renderGroupedProblemShell(r, header)
         r.appendChild(groupedNode, groupNode)
         for rowIndex in 0 ..< rows.len:
-          let p = rows[rowIndex]
-          r.appendChild(groupNode, renderProblemRow(r, vm, p))
+          let entry = rows[rowIndex]
+          r.appendChild(groupNode,
+                        renderProblemRow(r, vm, entry.problem, entry.index))
     else:
       for i in 0 ..< visible.len:
-        let p = visible[i]
-        r.appendChild(listContainer, renderProblemRow(r, vm, p))
+        let entry = visible[i]
+        r.appendChild(listContainer,
+                      renderProblemRow(r, vm, entry.problem, entry.index))
 
   panel
 
@@ -250,7 +279,7 @@ when defined(js):
                                   listContainer)
 
     createRenderEffect proc() =
-      let visible = vm.visibleProblems.val
+      let visible = vm.visibleRefs.val
       let grouped = vm.groupByFile.val
       r.clearChildren(listContainer)
 
@@ -260,13 +289,14 @@ when defined(js):
 
       if grouped:
         var order: seq[string] = @[]
-        var groups: Table[string, seq[BuildProblemLine]]
+        var groups: Table[string, seq[ProblemRef]]
         for i in 0 ..< visible.len:
-          let p = visible[i]
+          let entry = visible[i]
+          let p = entry.problem
           if not groups.hasKey(p.path):
             groups[p.path] = @[]
             order.add(p.path)
-          groups[p.path].add(p)
+          groups[p.path].add(entry)
 
         let groupedNode = renderProblemsGroupedRoot(r)
         r.appendChild(listContainer, groupedNode)
@@ -277,12 +307,14 @@ when defined(js):
           let groupNode = renderGroupedProblemShell(r, header)
           r.appendChild(groupedNode, groupNode)
           for rowIndex in 0 ..< rows.len:
-            let p = rows[rowIndex]
-            r.appendChild(groupNode, renderProblemRow(r, vm, p))
+            let entry = rows[rowIndex]
+            r.appendChild(groupNode,
+                          renderProblemRow(r, vm, entry.problem, entry.index))
       else:
         for i in 0 ..< visible.len:
-          let p = visible[i]
-          r.appendChild(listContainer, renderProblemRow(r, vm, p))
+          let entry = visible[i]
+          r.appendChild(listContainer,
+                        renderProblemRow(r, vm, entry.problem, entry.index))
 
     panel
 

@@ -110,6 +110,37 @@ bindings:
   findSymbol: "CTRL+T"
   aRestart: "CTRL+F4"
 
+  # Build-error navigation. The whole F8 family was unavailable, twice over,
+  # and both refusals were measured rather than assumed.
+  #
+  # NOT F8 / SHIFT+F8 -- what VS Code uses and what this feature's spec
+  # proposed. `forwardContinue` above already claims "F8 F2" and
+  # `reverseContinue` claims "SHIFT+F8", and `initShortcutMap`
+  # (common/config.nim:112-135) is FIRST-WRITER-WINS: a second claim on a
+  # chord is not registered at all, it is pushed into `conflictList`, which
+  # nothing reads. Binding F8 here would have produced an action with no
+  # chord and a menu item showing no shortcut -- indistinguishable from a
+  # feature that was never wired.
+  #
+  # NOT ALT+F8 either, which was the next choice and which MONACO ITSELF
+  # BINDS to its marker-navigation action. Measured in a browser tab: with
+  # the chord added to MONACO_SHORTCUTS_WHITELIST it fired TWICE per press
+  # (once through the delegated Monaco command, once through Mousetrap), so a
+  # single press of "next error" on a one-error build advanced and then
+  # wrapped; with the chord removed from the whitelist it fired NOT AT ALL,
+  # because Monaco consumed the key before it reached the document.
+  #
+  # CTRL+ALT+N / CTRL+ALT+P are outside the F8 family entirely, are claimed by
+  # nothing in this file, are not hard-bound in `ui/shortcuts.nim`, and are not
+  # Monaco defaults -- so exactly one handler runs, and it runs with the caret
+  # in the editor, which is the only place anyone presses "next error" from.
+  # N/P for next/previous; the pair is symmetric, which the SHIFT+ convention
+  # used by the stepping chords could not be here (`shortcut()` in
+  # `ui/shortcuts.nim:17` splits on "+" with maxsplit 2, so a four-token chord
+  # like CTRL+ALT+SHIFT+N parses its key as "SHIFT+N" and resolves to nothing).
+  aGotoNextError: "CTRL+ALT+N"
+  aGotoPreviousError: "CTRL+ALT+P"
+
   # Visual Replay / Video Player keyboard shortcuts (spec: GUI/Debugging-Features/Visual-Replay.md §Keyboard Shortcuts).
   # Each handler in ui_js.nim guards on `videoPlayerHasFocus()` so the
   # bindings only fire when the Video Player panel is focused or the cursor

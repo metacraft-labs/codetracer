@@ -215,7 +215,7 @@ proc lowAsm*(data: Data): bool
 proc highlightLine*(path: cstring, line: int)
 proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false): int {.discardable.}
 proc step*(data: Data, action: CtEventKind, repeat: int = 1, fromShortcutArg: bool = false, taskId: TaskId = NO_TASK_ID)
-proc openLocation*(data: Data, path: cstring, line: int) {.async.}
+proc openLocation*(data: Data, path: cstring, line: int, col: int = utils.NO_COLUMN) {.async.}
 
 # UTILS
 
@@ -999,12 +999,12 @@ proc switchTabHistory*(data: Data) {.exportc, locks: 0.} =
   if data.ui.mode != CalltraceLayoutMode:
     data.openTab(newTab.name, newTab.editorView)
 
-proc openLocation*(data: Data, path: cstring, line: int) {.async.} =
+proc openLocation*(data: Data, path: cstring, line: int, col: int = utils.NO_COLUMN) {.async.} =
   # Pass line to openTab so the built-in mechanisms handle scroll reliably:
   #   - already-open tab  → showTab calls editor.focusLine(line) immediately
   #   - new tab           → openNewEditorView polls every 10ms until Monaco
   #                         is mounted, then calls focusLine
-  utils.openTab(data, path, ViewSource, line=line)
+  utils.openTab(data, path, ViewSource, line=line, col=col)
   # Additionally apply the orange flash highlight via a poll that targets the
   # specific tab key.  focusLine (above) only scrolls; this adds the visual
   # indicator so the user knows exactly which line was matched.
