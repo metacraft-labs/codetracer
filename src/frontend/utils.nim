@@ -1123,6 +1123,19 @@ proc convertComponentLabel*(content: Content, id: int): cstring =
 proc openNewLayoutContainer*(data: Data, itemType: cstring, isEditor: bool = false): GoldenContentItem =
   var index: int
 
+  # A NIL LAYOUT IS A NIM ERROR HERE, not a JavaScript one thirty frames later.
+  #
+  # `data.ui.layout.groundItem` on a nil layout raises a native `TypeError`,
+  # which no `except CatchableError` in this file catches and which therefore
+  # surfaced as an uncaught page error with the editor pane missing. Raising a
+  # Nim exception instead puts it inside `openLayoutTab`'s existing handler,
+  # so the failure is logged with the panel it was for and the rest of the
+  # session keeps its layout.
+  if data.ui.layout.isNil or data.ui.layout.groundItem.isNil or
+     data.ui.layout.groundItem.contentItems.len == 0:
+    raise newException(ValueError,
+      "no GoldenLayout ground item; a panel cannot be opened yet")
+
   let parent = data.ui.layout.groundItem
                              .contentItems[0]
 
@@ -1374,21 +1387,33 @@ proc openLayoutTab*(
   if not similarParent.isNil:
     parent = similarParent
   else:
-    let hasOpenEditors = data.hasActiveOpenEditors()
-    if (content == Content.EditorView or content == Content.NoInfo or wantsIndependentTab) and
-      not data.ui.editorPanels[EditorView.ViewSource].isNil and
-      hasOpenEditors:
-      let activeEditorPanel = data.ui.editorPanels[EditorView.ViewSource]
-      if isAttachedToLayout(activeEditorPanel, data.ui.layout):
-        parent = activeEditorPanel
+    # `openNewLayoutContainer` raises when GoldenLayout has no ground item —
+    # which happens when a panel is requested before the layout finished
+    # mounting. Handled HERE rather than left to propagate: the two call sites
+    # below sit inside `makeEditorViewDetailed`, which runs inside an `async`
+    # proc, so an escaping exception would reject a promise nobody awaits and
+    # the pane would go missing with nothing logged. That is the shape of the
+    # defect this handler was added for.
+    try:
+      let hasOpenEditors = data.hasActiveOpenEditors()
+      if (content == Content.EditorView or content == Content.NoInfo or wantsIndependentTab) and
+        not data.ui.editorPanels[EditorView.ViewSource].isNil and
+        hasOpenEditors:
+        let activeEditorPanel = data.ui.editorPanels[EditorView.ViewSource]
+        if isAttachedToLayout(activeEditorPanel, data.ui.layout):
+          parent = activeEditorPanel
+        else:
+          parent = data.openNewLayoutContainer(cstring"stack", isEditor)
+          if content == Content.EditorView:
+            data.ui.editorPanels[EditorView.ViewSource] = parent
       else:
         parent = data.openNewLayoutContainer(cstring"stack", isEditor)
         if content == Content.EditorView:
           data.ui.editorPanels[EditorView.ViewSource] = parent
-    else:
-      parent = data.openNewLayoutContainer(cstring"stack", isEditor)
-      if content == Content.EditorView:
-        data.ui.editorPanels[EditorView.ViewSource] = parent
+    except CatchableError:
+      cerror "tabs: cannot place " & $content & " (" & $layoutPath & "): " &
+        getCurrentExceptionMsg()
+      return
 
   var newComponent =
     if not (isEditor and data.ui.editors.hasKey(layoutPath)):
