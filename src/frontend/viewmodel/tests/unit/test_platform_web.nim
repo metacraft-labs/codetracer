@@ -521,15 +521,68 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     check cacheClassFor("/p/hello-world-3f9a2c") == ccEntryDocument
     check cacheClassFor("/s/9f2b1c") == ccImmutable
     check cacheClassFor("/assets/app.9f2b1c.js") == ccStaticAsset
+    # A REAL published asset, beside the hashed example. `/assets/app.9f2b1c.js`
+    # is a filename no assembly step has ever produced, and while it was the
+    # only `/assets/` address in this list the class was being validated on
+    # fiction: all three files actually published under `/assets/` have stable
+    # names, and all three were served `immutable` for a year as a result.
+    check cacheClassFor("/" & wasmWorkerScriptPath) == ccMutableAsset
     check cacheClassFor("/noir") == ccEntryDocument
     var seen: set[CacheClass] = {}
     for address in ["/", "/noir", "/noir/new", "/s/9f2b1c",
                     "/p/hello-world-3f9a2c",
                     "/p/hello-world-3f9a2c/current.json",
-                    "/assets/app.9f2b1c.js", "/projects"]:
+                    "/assets/app.9f2b1c.js", "/" & wasmWorkerScriptPath,
+                    "/projects"]:
       seen.incl cacheClassFor(address)
     for class in CacheClass:
       check class in seen
+
+  test "no asset this deployment publishes is served `immutable` under a stable name":
+    ## THE INVARIANT, over the paths a deployment actually ships rather than
+    ## over an illustrative string.
+    ##
+    ## `immutable` tells a cache the bytes at a URL will never change. That is
+    ## true of a content-addressed name and false of every other kind, and when
+    ## it is false the cache is right and we are wrong: after deploy `2fb3afa6`
+    ## both custom domains served a 36-hour-old `assets/wasm-worker.js` with
+    ## `cf-cache-status: HIT`, through a deploy that had uploaded the new one.
+    ##
+    ## Checked in both directions so neither half can rot:
+    ##   * every unhashed published asset resolves to a revalidating class, and
+    ##   * the `/assets/*` rule the CDN actually receives carries that class.
+    for path in unhashedStaticAssets():
+      check cacheClassFor(path) == ccMutableAsset
+      check "immutable" notin headerFor(cacheClassFor(path))
+
+    let contract = deploymentContract("https://ide.example.test")
+    for rule in contract.caches:
+      if "immutable" in rule.headerValue:
+        # Whatever the glob covers must be content-addressed. `/s/*` is, by
+        # construction — a snapshot id IS the digest. `/assets/*` is not, today.
+        check rule.pattern == snapshotPrefix & "*"
+
+  test "the `/assets/*` glob follows the digests, not the directory":
+    ## The self-upgrading half. Nobody has to remember to flip a header the day
+    ## content-hashed filenames land: the rule is derived from the published
+    ## set, so it tightens and loosens on its own.
+    check assetIsContentAddressed("/assets/app.9f2b1c.js")
+    check assetIsContentAddressed("/assets/ui.deadbeefcafe.js")
+    check not assetIsContentAddressed("/assets/wasm-worker.js")
+    check not assetIsContentAddressed("/assets/noir_wasm.wasm")
+    check not assetIsContentAddressed("/index.html")
+    # Too short to be a digest, and a version suffix must not be mistaken for
+    # one — `immutable` on `app.v2.js` would be the same defect with a nicer
+    # name.
+    check not assetIsContentAddressed("/assets/app.v2.js")
+    check not assetIsContentAddressed("/assets/app.1234.js")
+
+    # Today every published `/assets/` file is stable-named, so the glob must
+    # revalidate. This is the assertion that goes red if someone reinstates the
+    # year-long header without hashing the names.
+    check unhashedStaticAssets().len == publishedStaticAssets().len
+    check publishedStaticAssets().len > 0
+    check staticAssetGlobClass() == ccMutableAsset
 
   test "the generated cache config agrees with cacheClassFor, address by address":
     ## The failure this prevents is the one review found: the classifier said
@@ -547,10 +600,24 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
         path.startsWith(head) and path.endsWith(tail)
 
     let contract = deploymentContract("https://ide.example.test")
-    for address in ["/", "/noir", "/noir/new", "/s/9f2b1c",
-                    "/p/hello-world-3f9a2c",
-                    "/p/hello-world-3f9a2c/current.json",
-                    "/assets/app.9f2b1c.js", "/projects"]:
+    # THE ADDRESSES THIS DEPLOYMENT CAN ACTUALLY SERVE, and the `/assets/` ones
+    # are the published set rather than an illustrative hashed name.
+    #
+    # `/assets/app.9f2b1c.js` used to stand here, and it cannot: a `_headers`
+    # glob applies ONE rule to the whole directory, so a per-path classifier
+    # that answers `ccStaticAsset` for a hashed name and a table that must
+    # cover the directory's weakest member will always disagree on a filename
+    # the deployment does not contain. Asserting agreement on fiction forces
+    # the table to be wrong about fact — which is the shape of the original
+    # defect, not a fix for it: the hashed example is exactly what let
+    # `immutable` sit on three stable-named files for a year.
+    var addresses = @["/", "/noir", "/noir/new", "/s/9f2b1c",
+                      "/p/hello-world-3f9a2c",
+                      "/p/hello-world-3f9a2c/current.json",
+                      "/projects"]
+    addresses.add publishedStaticAssets()
+    check publishedStaticAssets().len > 0   # the loop must not be vacuous
+    for address in addresses:
       var applied = ""
       for rule in contract.caches:
         if matchesPattern(rule.pattern, address):
@@ -923,14 +990,33 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
       if asset.required:
         check asset.absenceBehaviour.len == 0
 
-  test "the fetched modules and the worker are served as static assets":
-    # They must land under the prefix whose cache rule is `immutable`, or a CDN
-    # serves a 16 MB module with the entry document's 60-second TTL.
+  test "the fetched modules and the worker are served under the asset prefix":
+    # They must land under the prefix that has its OWN cache rule, or a CDN
+    # serves a 16 MB module with the entry document's 60-second TTL. That was
+    # this test's real subject and it is unchanged.
+    #
+    # WHAT CHANGED, and why the old assertion had to go. It also demanded
+    # `ccStaticAsset` and `immutableHeader` by name — it required the bug. On
+    # 2026-09-01 that year-long `immutable`, sitting on three STABLE filenames,
+    # pinned a 36-hour-old `assets/wasm-worker.js` at both custom domains
+    # through a deploy that had uploaded the new one; the CDN was entitled to
+    # it, because `immutable` is a promise the bytes never change and these
+    # names do not carry a digest to make that true.
+    #
+    # So the assertion is now the property actually wanted — a class of its
+    # own, distinct from the document's — plus the invariant that `immutable`
+    # is reserved for names that earn it. When the assembly step emits digests
+    # these become `ccStaticAsset` again, and this test keeps passing across
+    # that change rather than having to be edited through it.
     for asset in webRuntimeAssets():
       if asset.mode notin {damBundled, damEntryDocument}:
         check asset.path.startsWith(staticAssetPrefix[1 .. ^1])
-        check cacheClassFor("/" & asset.path) == ccStaticAsset
-        check headerFor(cacheClassFor("/" & asset.path)) == immutableHeader
+        let class = cacheClassFor("/" & asset.path)
+        check class == staticAssetGlobClass()
+        check class notin {ccEntryDocument, ccPointer}
+        check headerFor(class) != entryDocumentHeader
+        if "immutable" in headerFor(class):
+          check assetIsContentAddressed("/" & asset.path)
 
   test "and the entry document is the one thing that must NOT be immutable":
     # The mirror of the case above, and the reason `damEntryDocument` is its

@@ -592,6 +592,77 @@ jobs:
           }
           size() { wc -c <"site/$1" | tr -d ' '; }
 
+          # EVERY PUBLISHED FILE, not a hand-written subset.
+          #
+          # This list used to name seven paths. The deploy stages 535, so the
+          # gate covered 1.3% of what it publishes, and the 528 it skipped
+          # included `public/dist/frontend_bundle.js` — the third-party bundle
+          # whose absence is why a deployed page once painted nothing at all
+          # (`index.html`'s own load-order comment records it). A stale or
+          # truncated copy of THAT file is invisible to a seven-path check and
+          # fatal to the product.
+          #
+          # The 2026-09-01 staleness was caught only because
+          # `assets/wasm-worker.js` happened to be one of the seven. That is
+          # not a property a gate should have.
+          #
+          # Two passes, because 535 files x 2 hosts sequentially at the poll
+          # interval would dominate the job: a fast parallel sweep finds the
+          # disagreements, then only those are polled against the propagation
+          # deadline. A converged deploy pays one parallel sweep.
+          manifest="$RUNNER_TEMP/publish-manifest.tsv"
+          # `_headers` and `_redirects` are consumed by Pages as configuration
+          # and are not served back; `serve.conf` is the local nginx helper.
+          # Everything else in the tree is a URL a user or a sibling repo can
+          # fetch, so everything else is checked.
+          ( cd site && find . -type f \
+              ! -name '_headers' ! -name '_redirects' ! -name 'serve.conf' \
+              -printf '%P\t%s\n' ) | sort > "$manifest"
+          echo "verifying $(wc -l <"$manifest") published files on each host"
+
+          # EVERY WORKER REPORTS A VERDICT, and the number of verdicts is
+          # asserted against the number of files.
+          #
+          # The first version of this sweep printed only disagreements, which
+          # made silence mean success — and silence is also what a worker that
+          # never ran produces. That is not hypothetical: a NUL-separator bug
+          # (below) made every worker fail with `Could not resolve host`, and
+          # the sweep reported zero disagreements over four files. A gate whose
+          # pass condition is "nothing was printed" cannot tell a clean
+          # deployment from a broken instrument.
+          #
+          # So each worker prints `OK <path>` or `BAD <path> <expected> <got>`,
+          # and the count of lines must equal the count of manifest entries.
+          check_one() {
+            local base="$1" rel="$2" expect="$3" got
+            got="$(curl -fsSL --retry 2 --retry-delay 1 --retry-all-errors \
+                     -o /dev/null -w '%{size_download}' "$base/$rel" || echo 0)"
+            if [ "$got" = "$expect" ]; then
+              printf 'OK\t%s\n' "$rel"
+            else
+              printf 'BAD\t%s\t%s\t%s\n' "$rel" "$expect" "$got"
+            fi
+          }
+          export -f check_one
+
+          sweep() {
+            # One host, every file, in parallel.
+            #
+            # NUL-separated triples rather than a re-lookup per file: the
+            # manifest is TSV, and a path with a space or a glob character in
+            # it must not become two arguments. `-n 3` hands each worker its
+            # own (base, path, expected-size).
+            #
+            # `printf "%c", 0` and NOT `ORS="\0"`: a NUL terminates awk's C
+            # string, so `ORS="\0"` is silently the EMPTY separator and every
+            # field runs into the next.
+            local base="$1"
+            awk -F'\t' -v b="$base" \
+              '{printf "%s%c%s%c%s%c", b, 0, $1, 0, $2, 0}' "$manifest" \
+              | xargs -0 -P 16 -n 3 bash -c 'check_one "$0" "$1" "$2"'
+          }
+
+          expected_files="$(wc -l <"$manifest" | tr -d ' ')"
           for base in "https://web-codetracer.pages.dev" "https://ide.codetracer.com"; do
             # Both hosts are REQUIRED now. The asymmetry existed to absorb a
             # propagation window, and the polling above absorbs it properly —
@@ -599,26 +670,58 @@ jobs:
             # would have been a `note:` line in a green run.
             required=required
             echo "== $base =="
-            # The product.
-            check "$base" "/" "$(size index.html)" "$required"
-            # `/ui.js` ONLY. There used to be a `/web.js` beside it — the "loop
-            # arm", which called boot() while ui.js rendered. They were two
-            # separately compiled Nim programs and the renderer could not see
-            # the platform the other installed, so a Build button had nothing
-            # to call. NS9 merged them; the page loads one Nim bundle, and it
-            # is 380,418 bytes smaller than the pair it replaces.
-            check "$base" "/ui.js" "$(size ui.js)" "$required"
-            check "$base" "/assets/wasm-worker.js" "$(size assets/wasm-worker.js)" "$required"
-            for m in noir_wasm.wasm noir_tracer_wasm.wasm; do
-              [ -f "site/assets/$m" ] || continue
-              check "$base" "/assets/$m" "$(size "assets/$m")" "$required"
-            done
-            # The engine paths BlockTracer fetches cross-origin. These must not
-            # have moved; this repository's deploy breaking another one's is
-            # precisely the failure worth a check.
-            check "$base" "/worker.js" "$(size worker.js)" "$required"
-            check "$base" "/pkg/db_backend_bg.wasm" "$(size pkg/db_backend_bg.wasm)" "$required"
+            results="$RUNNER_TEMP/sweep-results.tsv"
+            sweep "$base" > "$results"
+            verdicts="$(wc -l <"$results" | tr -d ' ')"
+            if [ "$verdicts" -ne "$expected_files" ]; then
+              echo "  the sweep returned $verdicts verdicts for $expected_files files — the instrument did not run over every file" >&2
+              fail=1
+            fi
+            disagreed="$(awk -F'\t' '$1=="BAD"{print $2}' "$results" | sort -u)"
+            if [ -z "$disagreed" ]; then
+              echo "  ok: $verdicts/$expected_files published files match what was uploaded"
+            else
+              echo "  $(printf '%s\n' "$disagreed" | wc -l | tr -d ' ') of $expected_files file(s) disagreed on the first sweep; polling those"
+              while IFS= read -r rel; do
+                [ -n "$rel" ] || continue
+                check "$base" "/$rel" "$(size "$rel")" "$required"
+              done <<<"$disagreed"
+            fi
           done
+
+          # THE CAUSE, asserted at the deployment rather than in a unit test.
+          #
+          # `immutable` tells a cache the bytes at a URL never change. On a
+          # stable filename that is false, and the CDN is entitled to believe
+          # it for the full max-age: after deploy 2fb3afa6 both custom domains
+          # served a 36-hour-old `assets/wasm-worker.js` (`cf-cache-status:
+          # HIT`, `age: 131292`) while the pages.dev origin served the new one,
+          # and it was still stale an hour later. `web_deployment.nim` now
+          # derives the `/assets/*` class from whether the published names
+          # carry digests; this checks that what the CDN actually returns
+          # agrees, because the header table is merged with the engine's at
+          # staging time and a merge is another place for it to go wrong.
+          echo "== no stable-named asset is served immutable =="
+          while IFS= read -r rel; do
+            case "$rel" in assets/*) ;; *) continue ;; esac
+            # A digest in the name is the only thing that makes `immutable`
+            # true. Mirrors `assetIsContentAddressed` in web_deployment.nim.
+            base_name="${rel##*/}"
+            if printf '%s' "$base_name" | grep -qE '\.[0-9a-fA-F]{6,}\.'; then
+              continue
+            fi
+            for base in "https://web-codetracer.pages.dev" "https://ide.codetracer.com"; do
+              cc="$(curl -fsSI --retry 3 --retry-delay 2 --retry-all-errors \
+                      "$base/$rel" | tr -d '\r' \
+                    | grep -i '^cache-control:' | cut -d' ' -f2- || true)"
+              if printf '%s' "$cc" | grep -qi 'immutable'; then
+                echo "  $base/$rel is served '$cc' but its name carries no digest — a deploy cannot dislodge it" >&2
+                fail=1
+              else
+                echo "  ok: $base/$rel -> ${cc:-<none>}"
+              fi
+            done
+          done < <(cut -f1 "$manifest")
 
           echo "== the served page declares what was served =="
           # Not "it returned 200". The descriptor is what makes the toolchain

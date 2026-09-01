@@ -43,10 +43,48 @@ type
     ccPointer
       ## `/p/*/current.json`. Short TTL plus stale-while-revalidate.
     ccStaticAsset
-      ## The bundle's own hashed assets. Not in §1b.4's table because they are
-      ## not an *address* of the product, but they exist and would otherwise be
-      ## served under the entry document's class, which would be wrong in the
-      ## expensive direction.
+      ## The bundle's own CONTENT-ADDRESSED assets. Not in §1b.4's table because
+      ## they are not an *address* of the product, but they exist and would
+      ## otherwise be served under the entry document's class, which would be
+      ## wrong in the expensive direction.
+      ##
+      ## `immutable` here is only correct while the filename carries a digest.
+      ## See `ccMutableAsset` for what happened when it did not.
+    ccMutableAsset
+      ## An asset under `/assets/` whose filename is STABLE across builds.
+      ##
+      ## ## Measured on ide.codetracer.com and noirstudio.dev, 2026-09-01
+      ##
+      ## Every file this deployment actually publishes under `/assets/` is in
+      ## this class, and all three were being served in `ccStaticAsset`'s:
+      ##
+      ##     assets/wasm-worker.js
+      ##     assets/noir_wasm.wasm
+      ##     assets/noir_tracer_wasm.wasm
+      ##
+      ## `immutable, max-age=31536000` on a stable filename is a promise the
+      ## bytes at that URL will never change, and a deploy breaks it every time.
+      ## Cloudflare believed it: after deploy `2fb3afa6`, both custom domains
+      ## served `assets/wasm-worker.js` at 14150 bytes — the PREVIOUS build —
+      ## with `cf-cache-status: HIT` and `age: 131292` (36.5 hours), while the
+      ## `pages.dev` origin served the correct 35525. It was still stale an hour
+      ## after the deploy, and would have stayed so for a year.
+      ##
+      ## The product happened to keep working, because that older revision of
+      ## the same file still handled `configure`/`start`/`compile`/`trace`. That
+      ## is luck, not design: a slightly different older revision is a silently
+      ## broken product behind a green deploy.
+      ##
+      ## THE TWO WASM MODULES CARRY THE SAME RISK AND ESCAPED BY ACCIDENT. They
+      ## answered `cf-cache-status: DYNAMIC` — not edge-cached, so always fresh
+      ## from origin — for reasons that belong to the CDN and not to us. Nothing
+      ## in this file made them safe, so both are in this class too.
+      ##
+      ## The class is not the end state. It is what is TRUE today: these names
+      ## are stable, so the header must revalidate. When the assembly step emits
+      ## digests in the filenames, those paths become genuinely content-
+      ## addressed and `assetIsContentAddressed` moves them to `ccStaticAsset`
+      ## with no further edit here.
 
   RewriteRule* = object
     ## A 200-rewrite, never a redirect. §1b.4: "served **200 rather than 302**".
@@ -88,6 +126,25 @@ const
   immutableHeader* = "public, max-age=31536000, immutable"
   pointerHeader* = "public, max-age=30, stale-while-revalidate=86400"
   staticAssetHeader* = "public, max-age=31536000, immutable"
+  mutableAssetHeader* = "public, max-age=0, must-revalidate"
+    ## The header for a stable-named asset, and `max-age=0` rather than a small
+    ## non-zero number on purpose.
+    ##
+    ## Any positive max-age is a window in which a deploy is invisible, and the
+    ## window that matters is the one right after a deploy — exactly when the
+    ## bytes changed. `must-revalidate` alone does not close it: it governs what
+    ## a cache may do once the entry is ALREADY stale, so `max-age=14400,
+    ## must-revalidate` (which `/ui.js` carries) still permits four hours of the
+    ## previous build.
+    ##
+    ## What this costs is one conditional request per asset per load, and what
+    ## it saves is the body: these files have strong ETags, so a warm cache pays
+    ## a round trip and a ~300-byte `304`, not 14 MB. That is the right trade
+    ## for a file whose staleness silently disables the compiler.
+    ##
+    ## It is NOT the trade for a content-addressed file, which is why
+    ## `staticAssetHeader` still exists and still says `immutable`: a digest in
+    ## the name makes the promise true and the round trip pure waste.
 
   snapshotPrefix* = "/s/"
   projectPrefix* = "/p/"
@@ -117,6 +174,39 @@ proc rewritePrefixes*(): seq[string] =
 
 const pointerObjectSuffix* = "/current.json"
 
+proc assetIsContentAddressed*(path: string): bool =
+  ## Does this asset's FILENAME carry a digest, so that `immutable` is true?
+  ##
+  ## This is the precondition the whole `ccStaticAsset` row rests on, and until
+  ## 2026-09-01 it was written only in prose — this file's own comments said
+  ## `/assets/` was "content-addressed" and the unit test selected the class
+  ## with `/assets/app.9f2b1c.js`, a filename no assembly step has ever
+  ## produced. Every real published asset has a stable name, so the class was
+  ## being validated on a fictional address while the three real ones went
+  ## unchecked. Making the predicate a FUNCTION is the point: it can be asked
+  ## about the paths a deployment actually ships.
+  ##
+  ## The shape recognised is `<name>.<digest>.<ext>` with a digest of at least
+  ## six hex characters — what every bundler emits and what
+  ## `/assets/app.9f2b1c.js` was pretending to be. A bare `name.ext` is not
+  ## content-addressed, and neither is `noir_wasm.wasm`.
+  let slash = path.rfind('/')
+  let name = if slash >= 0: path[slash + 1 .. ^1] else: path
+  let parts = name.split('.')
+  # Fewer than three parts cannot carry a digest BETWEEN a stem and an
+  # extension, which is the only position that survives a rename.
+  if parts.len < 3: return false
+  for i in 1 ..< parts.len - 1:
+    let segment = parts[i]
+    if segment.len < 6: continue
+    var allHex = true
+    for c in segment:
+      if c notin HexDigits:
+        allHex = false
+        break
+    if allHex: return true
+  false
+
 proc cacheClassFor*(path: string): CacheClass =
   ## The class a CDN must apply, from the path alone.
   ##
@@ -139,7 +229,10 @@ proc cacheClassFor*(path: string): CacheClass =
     return ccPointer
   if path.len >= staticAssetPrefix.len and
      path[0 ..< staticAssetPrefix.len] == staticAssetPrefix:
-    return ccStaticAsset
+    # `immutable` follows the DIGEST, not the directory. Serving a stable name
+    # under a year-long `immutable` is what pinned a 36-hour-old wasm worker on
+    # both custom domains through a successful deploy; see `ccMutableAsset`.
+    return if assetIsContentAddressed(path): ccStaticAsset else: ccMutableAsset
   let classified = classifyPath(path)
   case classified.form
   of efSnapshot: ccImmutable
@@ -427,12 +520,44 @@ proc undeclaredAbsences*(): seq[string] =
     if not asset.required and asset.absenceBehaviour.len == 0:
       result.add asset.id
 
+proc publishedStaticAssets*(): seq[string] =
+  ## Every asset this bundle places under `/assets/`, as the path a browser
+  ## requests. `RuntimeAsset.path` is relative to the bundle root, so the served
+  ## address is that with a leading slash.
+  let prefix = staticAssetPrefix[1 .. ^1]
+  for asset in webRuntimeAssets():
+    if asset.path.len >= prefix.len and asset.path[0 ..< prefix.len] == prefix:
+      result.add "/" & asset.path
+
+proc unhashedStaticAssets*(): seq[string] =
+  ## The published `/assets/` paths that carry no digest, and therefore may not
+  ## be served `immutable`.
+  ##
+  ## A value rather than a boolean so a failing assertion can NAME the files.
+  ## All three members today are the ones the 2026-09-01 staleness was found on.
+  for path in publishedStaticAssets():
+    if not assetIsContentAddressed(path): result.add path
+
+proc staticAssetGlobClass*(): CacheClass =
+  ## The class the single `/assets/*` rule may carry, DERIVED from the assets
+  ## this bundle actually publishes.
+  ##
+  ## Cloudflare's `_headers` matches by glob and cannot ask whether a filename
+  ## has a digest, so one rule must cover the whole directory — and a rule that
+  ## covers a mixed directory has to be correct for its weakest member. Deriving
+  ## it here means the day the assembly step starts emitting digests, the glob
+  ## becomes `immutable` on its own, and the day someone adds a stable-named
+  ## file to a hashed directory it stops being `immutable` on its own. Neither
+  ## is a decision anybody has to remember to make.
+  if unhashedStaticAssets().len > 0: ccMutableAsset else: ccStaticAsset
+
 proc headerFor*(class: CacheClass): string =
   case class
   of ccEntryDocument: entryDocumentHeader
   of ccImmutable: immutableHeader
   of ccPointer: pointerHeader
   of ccStaticAsset: staticAssetHeader
+  of ccMutableAsset: mutableAssetHeader
 
 proc deploymentContract*(origin: string): DeploymentContract =
   ## The whole contract, for a named origin. No default — see the header.
@@ -449,8 +574,9 @@ proc deploymentContract*(origin: string): DeploymentContract =
               class: ccPointer, headerValue: pointerHeader),
     CacheRule(pattern: snapshotPrefix & "*", class: ccImmutable,
               headerValue: immutableHeader),
-    CacheRule(pattern: staticAssetPrefix & "*", class: ccStaticAsset,
-              headerValue: staticAssetHeader),
+    CacheRule(pattern: staticAssetPrefix & "*",
+              class: staticAssetGlobClass(),
+              headerValue: headerFor(staticAssetGlobClass())),
     CacheRule(pattern: "/*", class: ccEntryDocument,
               headerValue: entryDocumentHeader)]
   result.writeSurfaces = @[
@@ -522,8 +648,10 @@ proc normalisedRewriteTargets*(contract: DeploymentContract): seq[string] =
 
 proc renderCacheConfig*(contract: DeploymentContract): string =
   result = "# Generated from viewmodel/platform/web_deployment.nim. Do not edit.\n"
-  result.add "# Noir-Studio.md §1b.4 — three cache classes keyed on path prefix.\n"
+  result.add "# Noir-Studio.md §1b.4 — cache classes keyed on path prefix.\n"
   result.add "# Most specific first: the first matching rule wins.\n"
+  result.add "# `immutable` appears only on content-addressed paths; see\n"
+  result.add "# `ccMutableAsset` in web_deployment.nim for the deploy it cost.\n"
   for rule in contract.caches:
     result.add rule.pattern & "\n"
     result.add "  Cache-Control: " & rule.headerValue & "\n"

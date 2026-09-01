@@ -2736,3 +2736,46 @@ commands.
   ■ is live" is a condition that never becomes true, on either platform, so no
   harness can synchronise on it. Not fixed here (it belongs to the pane's
   view); `ci/test/noir-build-in-browser.sh` records why it has no Stop arm.
+- 2026-09-01: `immutable` was being served on STABLE filenames, and a CDN
+  believed it. Every file the deploy publishes under `/assets/`
+  (`wasm-worker.js`, `noir_wasm.wasm`, `noir_tracer_wasm.wasm`) carried
+  `public, max-age=31536000, immutable` from `staticAssetHeader`, but none of
+  the three has a digest in its name. After deploy `2fb3afa6` both custom
+  domains served `assets/wasm-worker.js` at 14150 bytes — the PREVIOUS build —
+  with `cf-cache-status: HIT` and `age: 131292` (36.5 h), while
+  `web-codetracer.pages.dev` served the correct 35525; still stale an hour
+  later, and it would have stayed so for a year. The two `.wasm` modules
+  carried the identical header and escaped only because they answered
+  `cf-cache-status: DYNAMIC` — nothing in our code made them safe.
+  How it survived review: the class's own doc comment claimed `/assets/` was
+  "content-addressed", and `test_platform_web.nim` selected it with
+  `/assets/app.9f2b1c.js`, a hashed filename NO assembly step has ever
+  produced. The class was validated on a fictional address while the three real
+  ones went unchecked. Fixed by deriving the class from the published names
+  (`assetIsContentAddressed` / `staticAssetGlobClass`), so the glob revalidates
+  today and becomes `immutable` on its own if digests ever land.
+  A header fix does NOT cure an already-poisoned edge object: the entry is held
+  under the OLD max-age and never revalidates, so clearing it needs a one-time
+  cache purge.
+- 2026-09-01: the deploy's "Verify the DEPLOYED artifact" step checked SEVEN
+  hard-coded paths against a tree of 535 published files — 1.3% coverage. The
+  wasm-worker staleness above was caught only because that file happened to be
+  one of the seven. Among the 528 unchecked was
+  `public/dist/frontend_bundle.js`, whose absence is the documented cause of a
+  deployed page that painted nothing. Now every published file is swept on both
+  hosts, and the number of verdicts is asserted against the number of files —
+  because the first draft printed only disagreements, which made silence mean
+  success, and silence is also what a worker that never ran produces (an awk
+  `ORS="\0"` is the EMPTY separator, since NUL terminates the C string; every
+  worker failed and the sweep reported zero disagreements over four files).
+- 2026-09-01: deploy run 33547074249 annotated that there is NO workspace lock
+  for codetracer (neither `locks/<project>/codetracer/<sha>.xml` nor
+  `.toml` in metacraft-manifests for `2fb3afa6` or `df60154d`), and that three
+  siblings — `codetracer-native-recorder`, `codetracer-trace-format`,
+  `codetracer-trace-format-nim` — are pinned by the explicit entry `<name>=dev`
+  rather than by a 40-hex SHA. The same commit can therefore build different
+  artifacts depending on WHEN it is built, which undermines the deploy guard's
+  byte comparison (it compares served bytes to just-built bytes, not to the
+  commit) and any claim that a deployed artifact corresponds to a revision. Not
+  fixed here; the lasting fix named by the annotation is to declare those
+  siblings in codetracer's project manifest and publish the lock.
