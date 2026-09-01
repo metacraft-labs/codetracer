@@ -535,34 +535,69 @@ jobs:
         #
         # Both hosts are checked. `web-codetracer.pages.dev` is what
         # BlockTracer fetches cross-origin; `ide.codetracer.com` is what a user
-        # types. They are the same deployment and have been observed to lag
-        # each other by a propagation window, so a mismatch on the custom
-        # domain alone is reported rather than failed.
+        # types.
+        #
+        # THEY LAG EACH OTHER, AND NOT ALWAYS IN THE SAME DIRECTION. This step
+        # used to treat the custom domain as the one that might be stale and
+        # the `pages.dev` alias as authoritative. On 2026-09-01 the reverse
+        # happened: `ide.codetracer.com/ui.js` served the new 14711748 bytes
+        # while `web-codetracer.pages.dev/ui.js` was still on the previous
+        # deployment at 14708792, and the step failed a deploy whose bytes were
+        # correct. Both hosts agreed within seconds.
+        #
+        # So the fix is not to demote either host — a real mismatch on either
+        # is a real defect — but to stop reading a propagation window as a
+        # verdict. Each URL is now POLLED until it matches or a deadline
+        # passes, and the time it took to converge is printed, so a widening
+        # window shows up as a number rather than as a flake. `curl --retry`
+        # cannot do this: it retries transport and HTTP errors, and a stale
+        # edge answers 200 with the wrong body.
         shell: bash
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
         run: |
           set -uo pipefail
           fail=0
+          # 120 seconds is a bound on Cloudflare's propagation window, not on
+          # anybody's patience: a deployment that has not converged in two
+          # minutes has a real problem, and this still fails on it.
+          deadline_s=120
+          interval_s=5
           check() {
             local base="$1" path="$2" expect="$3" required="$4"
-            local got
-            got="$(curl -fsSL --retry 5 --retry-delay 4 --retry-all-errors \
-                     -o /dev/null -w '%{size_download}' "$base$path" || echo 0)"
+            local got waited=0
+            while : ; do
+              got="$(curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+                       -o /dev/null -w '%{size_download}' "$base$path" || echo 0)"
+              [ "$got" = "$expect" ] && break
+              [ "$waited" -ge "$deadline_s" ] && break
+              sleep "$interval_s"
+              waited=$((waited + interval_s))
+            done
             if [ "$got" = "$expect" ]; then
-              echo "  ok: $base$path -> $got bytes (matches what was uploaded)"
+              if [ "$waited" -eq 0 ]; then
+                echo "  ok: $base$path -> $got bytes (matches what was uploaded)"
+              else
+                # Printed rather than swallowed: the window is a fact about the
+                # CDN worth watching, and a step that hid it would turn a
+                # widening lag into a sudden failure one day.
+                echo "  ok: $base$path -> $got bytes (matched after ${waited}s of propagation)"
+              fi
             elif [ "$required" = "required" ]; then
-              echo "  MISMATCH: $base$path served $got bytes, uploaded $expect" >&2
+              echo "  MISMATCH: $base$path served $got bytes, uploaded $expect after ${waited}s" >&2
               fail=1
             else
-              echo "  note: $base$path served $got bytes, uploaded $expect (propagation)"
+              echo "  note: $base$path served $got bytes, uploaded $expect (advisory, ${waited}s)"
             fi
           }
           size() { wc -c <"site/$1" | tr -d ' '; }
 
           for base in "https://web-codetracer.pages.dev" "https://ide.codetracer.com"; do
+            # Both hosts are REQUIRED now. The asymmetry existed to absorb a
+            # propagation window, and the polling above absorbs it properly —
+            # demoting a host instead meant a genuinely broken custom domain
+            # would have been a `note:` line in a green run.
             required=required
-            [ "$base" = "https://ide.codetracer.com" ] && required=advisory
             echo "== $base =="
             # The product.
             check "$base" "/" "$(size index.html)" "$required"
