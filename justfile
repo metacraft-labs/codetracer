@@ -2968,6 +2968,46 @@ test-noir-wasm-worker:
   exec > >(tee test-logs/test-noir-wasm-worker.log) 2>&1
   bash ci/test/noir-wasm-worker-e2e.sh
 
+# Every check in the Noir Build/Run path, killed on purpose, one at a time.
+#
+# `test_noir_build_marshalling.nim`, `test_noir_build_producer.nim` and
+# `test_wasm_worker.nim` are green.  Green over what?  Each arm below breaks
+# ONE line of the product and requires a NAMED test case to go red -- not "the
+# suite failed", a specific case by title, so a break caught only by some other
+# check is reported as a MISS.
+#
+# It also guards the trap the last campaign hit: an arm whose PREMISE has moved
+# patches nothing, the suite passes, and the arm reports "could not be
+# measured" forever while looking like coverage.  A no-op patch is a HARD
+# FAILURE here, not a skip.
+test-noir-build-mutations:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-build-mutations.log) 2>&1
+  bash ci/test/noir-build-mutations.sh
+
+# A Build in a real browser that fetches the compiler, compiles, and PAINTS its
+# result -- against the assembled publish tree.
+#
+# The state this replaces was green everywhere and had never fetched either
+# wasm module: instrumenting `Worker.postMessage` before page scripts ran and
+# exercising every Build-shaped gesture produced one `configure` message, ZERO
+# `start` messages and ZERO `.wasm` requests.  So this gate's subject is the
+# GESTURE, and its numbers are those three.
+#
+# Needs the two modules.  Assemble a bundle with CT_NOIR_WASM_COMPILER /
+# CT_NOIR_WASM_TRACER / CT_NOIR_WASM_REF set and point CT_WEB_BUNDLE_DIR at it,
+# or let this recipe assemble one from the same variables.  Without a compiler
+# in the tree it EXITS 2 rather than passing: a gate with nothing to reach
+# measures nothing.
+test-noir-build-in-browser:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-build-in-browser.log) 2>&1
+  bash ci/test/noir-build-in-browser.sh
+
 test-renderer-host-budget:
   #!/usr/bin/env bash
   set -euo pipefail

@@ -4556,6 +4556,10 @@ when defined(ctWeb):
   # mounts the bundled template, neither of which an Electron renderer build
   # has any use for. The desktop arm's import graph is unchanged by this file.
   import ui/web_entry_surface
+  # The Build/Run call path, web-only for the same reason: it reaches
+  # `ctPlatform().process` expecting the wasm host a browser tab has and an
+  # Electron renderer does not.
+  import ui/web_noir_build
   from viewmodel/platform/web_entry import
     EntryResolution, EntryVerdict, evTemplate, entryPath, entryPathOnHost
   from viewmodel/platform/noir_template import
@@ -4826,6 +4830,47 @@ when defined(ctWeb):
       # line that still said `noir-template` would be naming a thing the build
       # no longer contains.
       let surface = if wantsTemplate: "edit-mode" else: "welcome-screen"
+
+      # THE CALL PATH THIS MILESTONE EXISTS FOR, and its position is
+      # load-bearing. `enterTemplateEditMode` delivers `CODETRACER::no-trace`
+      # SYNCHRONOUSLY through the in-page transport's `deliver`, and
+      # `onNoTrace` calls `configureMiddleware()` — which is what creates
+      # `build.buildVMInstance` and installs the DESKTOP `runBuild`
+      # (`data.update(build=true)`, a message to a host this tab does not
+      # have). So by the time control returns here the VM exists and carries
+      # the wrong callback; installing before the mount would find no VM at
+      # all, and installing inside `enterTemplateEditMode` would put a
+      # platform reach into the surface module that mounts panes.
+      #
+      # Only on the template arm: the welcome screen has no open project, and
+      # a Build button pointed at nothing is worse than one that is absent.
+      if wantsTemplate and mounted:
+        web_noir_build.installNoirBuildCommands(tmpl)
+
+        # BUILD IS THE CONFIGURED ACTION, NOT A NEW CHORD.
+        #
+        # `default_config.yaml` has bound `build: "CTRL+B"` all along, and
+        # `bindShortcut` dispatches through `data.actions[action]` — read at
+        # PRESS TIME. So replacing the handler here is immune to the rebinding
+        # race that a `Mousetrap.bind` from this position loses: `onNoTrace`
+        # calls `configureShortcuts()` again, and it is `{.async.}`, so its
+        # rebinding lands in a later microtask than this line. Measured — a
+        # `Mousetrap.bind("ctrl+b")` here never fired, and neither did
+        # `Mousetrap.trigger('ctrl+b')` from the page, because the shortcut
+        # table had already been rebuilt over it.
+        #
+        # The desktop's hard-coded `ctrl+b` in `ui/shortcuts.nim` is excluded
+        # from `ctWeb` for the same defect from the other side; see the comment
+        # there.
+        data.actions[ClientAction.build] = proc(actionData: JsObject) =
+          web_noir_build.startNoirBuild()
+
+        # RUN has no configured chord, so it gets one that nothing else binds.
+        # NOT `ctrl+r` and NOT `F5`: both are the browser's own reload on every
+        # platform, and a studio that ate either would be taking a key away
+        # from the user rather than giving them one.
+        Mousetrap.`bind`("ctrl+enter") do ():
+          web_noir_build.startNoirRun()
 
       if mounted:
         # The line names the ENTRY as well as the surface. Two builds — one

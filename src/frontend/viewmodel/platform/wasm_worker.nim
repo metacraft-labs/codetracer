@@ -101,6 +101,27 @@ proc finish(worker: WasmWorker; seq: int; exit: ProcessExit;
   worker.pending.del(seq)
   worker.bySeq.del($run.handle)
 
+  # A `start` HAS NOWHERE TO PUT A FAILURE, and that was a silent drop.
+  #
+  # `runOnWorker` passes a `settle` and gets the failure text as a
+  # `PlatformError.message`. `startOnWorker` passes `settle: nil` — its handle
+  # resolved long ago — so every branch below that carries a `failure` ended
+  # at `run.onExit(ProcessExit(exitCode: 1))` and threw the message away. The
+  # three module-load faults `wasm_worker_browser.js` composes are exactly
+  # such messages ("this deployment does not ship the `noir-tracer` wasm
+  # module…"), and a streaming caller saw a bare exit code 1 instead of any of
+  # them: the same shrug for a module that was never published, one that the
+  # server does not serve, and one that is broken — which is precisely the
+  # conflation that file's own header says cost a sibling campaign hours.
+  #
+  # It goes to STDERR rather than to a new callback because that is what it
+  # is: a process that failed wrote to stderr and exited non-zero, and every
+  # caller of `start` already handles both. A fourth `WasmHost` operation
+  # would have to be added to four hosts and every test that builds one, to
+  # carry information the existing channel carries correctly.
+  if failure.len > 0 and run.settle.isNil and not run.onOutput.isNil:
+    run.onOutput(ProcessOutputChunk(stream: psStderr, text: failure))
+
   if not run.onExit.isNil:
     run.onExit(exit)
   if run.settle.isNil: return

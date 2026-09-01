@@ -951,6 +951,10 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
   <div id="root-container">
     <div id="auto-hide-layout-row">
       <div id="auto-hide-strip-left"></div>
+      <div id="auto-hide-docked-left">
+        <div id="auto-hide-docked-left-content"></div>
+        <div id="auto-hide-docked-left-resize" class="auto-hide-docked-resize-handle"></div>
+      </div>
       <div id="ROOT">
         <div id="context-menu-container" style="display: none;"></div>
         <div id="fixed-search"></div>
@@ -958,8 +962,62 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
           <section id="main"></section>
         </div>
       </div>
+      <div id="auto-hide-docked-right">
+        <div id="auto-hide-docked-right-resize" class="auto-hide-docked-resize-handle"></div>
+        <div id="auto-hide-docked-right-content"></div>
+      </div>
       <div id="auto-hide-strip-right"></div>
     </div>
+    <!--
+      THE AUTO-HIDE OVERLAY, and its absence is why BUILD could not be SEEN.
+
+      `ui/layout.nim` registers BUILD, PROBLEMS, FIND IN FILES and REQUESTS as
+      STANDALONE auto-hide panes: they are not in `default_layout.json`, their
+      DOM lives in `#auto-hide-standalone-host` (parked at `left: -9999px`),
+      and a user reaches them by clicking a label in the strip. Revealing one
+      means `auto_hide.doShowOverlayImpl` reparenting its live element into
+      `#auto-hide-overlay-content`.
+
+      This document had the strips and NOT the overlay. So the four labels
+      were drawn, clicking one reached `doShowOverlayImpl`, and that proc's
+      first act is:
+
+          let overlayEl = document.getElementById(cstring"auto-hide-overlay")
+          if overlayEl.isNil:
+            cerror "auto_hide: #auto-hide-overlay not found in DOM"
+            return
+
+      — a console line and a pane that never appears. Measured: a compile that
+      had already painted `codetracer: compiled hello_noir cleanly` into the
+      BUILD pane, with the pane still at x = -9999 six seconds later.
+
+      Copied structurally from `src/frontend/index.html`, which is the rule
+      this whole skeleton follows and states above: §1a.1 is explicit that the
+      web is a MODE of CodeTracer and that "no pane is invented for the web",
+      and two divergent documents are the first place that stops being true.
+      The docked hosts come with it for the same reason — `pinPanel` and the
+      docked sidebar path resolve them by id, and a document carrying half the
+      auto-hide surface fails in a different place instead of not at all.
+    -->
+    <div id="auto-hide-docked-bottom">
+      <div id="auto-hide-docked-bottom-resize" class="auto-hide-docked-resize-handle auto-hide-docked-resize-handle-bottom"></div>
+      <div id="auto-hide-docked-bottom-content"></div>
+    </div>
+    <div id="auto-hide-overlay">
+      <div id="auto-hide-overlay-resize" class="auto-hide-overlay-resize-handle"></div>
+      <div id="auto-hide-overlay-header">
+        <span id="auto-hide-overlay-title"></span>
+        <div class="auto-hide-overlay-header-buttons">
+          <button id="auto-hide-overlay-unpin-btn" title="Unpin (restore to layout)">Unpin</button>
+          <button id="auto-hide-overlay-close-btn" title="Close overlay">&#x2715;</button>
+        </div>
+      </div>
+      <div id="auto-hide-overlay-body" style="display:flex; flex:1; min-height:0; overflow:hidden;">
+        <div id="auto-hide-overlay-side-tabs"></div>
+        <div id="auto-hide-overlay-content"></div>
+      </div>
+    </div>
+    <div id="auto-hide-backdrop"></div>
     <footer>
       <div id="search-results"></div>
       <div id="status"></div>

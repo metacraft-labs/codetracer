@@ -103,6 +103,21 @@ type
 
     # -- Callbacks wired by the host (ui_js.nim) after VM creation --
     runBuild*: proc() ## Trigger a build-only (no re-record) action.
+    cancelBuildProc*: proc()
+      ## Stop the in-flight build, when the host has a way to.
+      ##
+      ## The pair of `runBuild`, and added for the same reason: the pane has
+      ## one ■ and there is more than one thing that can be running behind it.
+      ## `cancelBuild` below dispatches `ct/build-cancel` on the backend, which
+      ## is the desktop `ct` process's channel — a browser tab has no such
+      ## process, and its build is a wasm module in a Worker that stops by
+      ## `worker.terminate()` and by nothing else.
+      ##
+      ## Nil on the desktop, where the backend dispatch is the right and only
+      ## answer. A host that sets this is saying "I own the running thing",
+      ## and the fallback below is skipped rather than also fired: sending
+      ## `ct/build-cancel` into a browser's stub backend would resolve `{}` and
+      ## make a Stop that did nothing look like one that worked.
 
 # ---------------------------------------------------------------------------
 # Actions
@@ -174,6 +189,12 @@ proc cancelBuild*(vm: BuildVM) =
   ## also calls the legacy IPC channel directly from the view; the VM
   ## exposing the same action keeps the signal flow self-contained for
   ## headless tests.
+  ##
+  ## A host that installed ``cancelBuildProc`` owns the running build and is
+  ## asked instead — see that field.  Exactly one of the two runs.
+  if not vm.cancelBuildProc.isNil:
+    vm.cancelBuildProc()
+    return
   discard vm.store.backend.send("ct/build-cancel", %*{})
 
 # ---------------------------------------------------------------------------

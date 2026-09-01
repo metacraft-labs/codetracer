@@ -281,8 +281,30 @@ proc configureShortcuts* =
     let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
     data.runTests(options)
 
-  Mousetrap.`bind`("ctrl+b") do ():
-    data.reRecordCurrent(projectOnly=true)
+  # CTRL+B IS A CONFIGURED SHORTCUT, AND THIS LINE SHADOWS IT.
+  #
+  # `src/config/default_config.yaml` binds `build: "CTRL+B"`, the loop at the
+  # top of this proc binds it to `ClientAction.build`, and then this runs and
+  # replaces it — Mousetrap's `bind` overwrites a chord rather than chaining —
+  # so the YAML entry has been dead on every platform. Left alone on the
+  # desktop, where re-recording the project is what the chord has meant in
+  # practice and changing it is not this milestone's business.
+  #
+  # EXCLUDED FROM THE WEB BUILD, because there it is not merely a surprise but
+  # a dead end. `reRecordCurrent` returns immediately when `data.trace.isNil`
+  # ("No trace is loaded; nothing to re-record."), and a tab in edit mode never
+  # has a trace — so Ctrl+B in the browser could do nothing else, ever. With
+  # this line out of the way the configured `build` action reaches
+  # `data.actions[ClientAction.build]`, which `ui_js.nim`'s web arm points at
+  # the Noir wasm toolchain.
+  #
+  # `data.actions` is read AT PRESS TIME by `bindShortcut`, which is why the
+  # web arm can install its handler whenever it likes: `configureShortcuts`
+  # runs again from `onNoTrace` and `onWelcomeScreen`, and a rebinding race
+  # over the chord would otherwise decide whether Build worked.
+  when not defined(ctWeb):
+    Mousetrap.`bind`("ctrl+b") do ():
+      data.reRecordCurrent(projectOnly=true)
 
   # Mousetrap.`bind`("alt+t") do ():
   #   runTracepoints(data)
