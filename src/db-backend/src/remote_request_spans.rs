@@ -79,12 +79,12 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::ctfs_trace_reader::ctfs_container::{BlockSource, CtfsError, CtfsReader};
+use crate::ctfs_trace_reader::ctfs_container::{BlockSource, CtfsReader};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ctfs_trace_reader::http_range_source::HttpRangeSource;
 use crate::ctfs_trace_reader::span_stream::{
     SPAN_TYPE_WEB_REQUEST, SPANS_DATA_FILE_NAME, SPANS_INDEX_ENTRY_SIZE, SPANS_INDEX_FILE_NAME,
-    SPANS_INDEX_HEADER_SIZE, SpanStreamReader, meta_dat_has_span_stream, resolve_spans,
+    SPANS_INDEX_HEADER_SIZE, SpanStreamReader, resolve_spans,
 };
 use crate::request_spans::{RequestSpanDelta, RequestSpanSource, to_request_record};
 
@@ -265,8 +265,6 @@ pub struct RemoteRequestSpanTail {
     /// with the same fingerprint cannot differ in any committed byte, so the
     /// second one does no further work.
     directory_stamp: Option<DirectoryStamp>,
-    /// Whether `meta.dat` declared bit 13 as of `directory_stamp`.
-    has_span_stream: bool,
     /// The next delta must be a full snapshot.
     reset_pending: bool,
     policy: RemotePollPolicy,
@@ -281,12 +279,13 @@ pub struct RemoteRequestSpanTail {
 /// size. It cannot false-negative on a block-padded append, which is exactly
 /// where `Content-Length` does.
 ///
-/// `meta.dat` is in the stamp so that bit 13 and the recording id are re-read
-/// only when they *could* have moved: a container that gains its first span
-/// gains `spans.idx`, and a container replaced wholesale by a different
-/// recording changes `meta.dat`'s size or one of the stream sizes in all but a
+/// `meta.dat` is in the stamp so that the recording id is re-read only when it
+/// *could* have moved: a container replaced wholesale by a different recording
+/// changes `meta.dat`'s size or one of the stream sizes in all but a
 /// pathological coincidence. That is the same bet the local tail makes with
-/// `(len, mtime)`, made against better evidence.
+/// `(len, mtime)`, made against better evidence. Note the stamp does NOT decide
+/// whether a span stream exists — that is answered structurally by the presence
+/// of a `spans.dat` directory entry, never by `meta.dat`'s bit-13 hint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DirectoryStamp {
     meta_size: u64,
@@ -321,7 +320,6 @@ impl RemoteRequestSpanTail {
             ctfs,
             recording_id: String::new(),
             directory_stamp: None,
-            has_span_stream: false,
             // The first delta a client ever receives is by definition the whole
             // settled set, so it is flagged as a snapshot.
             reset_pending: true,
@@ -378,24 +376,43 @@ impl RemoteRequestSpanTail {
             data_size: self.ctfs.file_size(SPANS_DATA_FILE_NAME).unwrap_or(0),
         };
 
+        // Span-stream PRESENCE is STRUCTURAL: a container carries a span stream
+        // iff its Block 0 directory has a `spans.dat` entry — NEVER because
+        // `meta.dat` set feature bit 13. That bit is a HINT a writer may only
+        // stamp at close, so gating on it would refuse a span stream that
+        // structurally exists in a still-recording or still-uploading container
+        // (trace-format spec amendment: "Stream-presence flags are a hint, not a
+        // gate"; `internal-files.md` + `ctfs-container.md` §6). This mirrors the
+        // local readers (`SpanStreamReader::open_from_ctfs`,
+        // `follow_stream_source.rs`), which answer existence by the presence of
+        // the stream's own files and gate reading on the companion index's
+        // structural validity.
+        let data_present = self.ctfs.file_size(SPANS_DATA_FILE_NAME).is_some();
+
         // A recording swapped in at the same URL does not share a cursor space
-        // with the one we were reading. Checking costs one small range read,
-        // and only when the directory actually moved — an idle poll fetches
-        // nothing but the directory itself.
+        // with the one we were reading. The recording id comes from `meta.dat`,
+        // but it is read PURELY to detect that swap — never to decide whether
+        // spans exist — and a `meta.dat` that is absent or torn (the terminal
+        // file a truncated upload loses first) simply yields no id, disabling
+        // swap detection without ever blocking a readable span stream. Checked
+        // only when the directory actually moved; an idle poll fetches nothing
+        // but the directory itself.
         if self.directory_stamp != Some(stamp) {
-            let (recording_id, has_span_stream) = self.read_meta_facts()?;
-            if !self.recording_id.is_empty() && recording_id != self.recording_id {
+            let recording_id = self.read_recording_id();
+            if !self.recording_id.is_empty() && !recording_id.is_empty() && recording_id != self.recording_id {
                 self.reset_pending = true;
             }
-            self.recording_id = recording_id;
-            self.has_span_stream = has_span_stream;
+            if !recording_id.is_empty() {
+                self.recording_id = recording_id;
+            }
         }
         self.directory_stamp = Some(stamp);
 
-        if !self.has_span_stream {
-            // No span stream (yet). A live recorder declares bit 13 the first
-            // time it registers a span, so this is a state a poll loop must be
-            // able to leave, not a terminal answer.
+        if !data_present {
+            // No `spans.dat` entry: this container has no span stream (yet). A
+            // live recorder writes the stream's files the first time it registers
+            // a span, so this is a state a poll loop must be able to leave, not a
+            // terminal answer.
             let reset = self.reset_pending;
             self.reset_pending = false;
             self.last_stats = RemotePollStats {
@@ -411,6 +428,13 @@ impl RemoteRequestSpanTail {
             });
         }
 
+        // `spans.dat` is present, so the container HAS a span stream. Reading it
+        // REQUIRES an intact committed `spans.idx`: a `spans.dat` whose companion
+        // index is absent, truncated, or has an unreadable header is a torn
+        // prefix that lost the very thing that bounds its chunks, and we REFUSE
+        // (below, via `read_committed_index`) rather than invent span records
+        // from raw `spans.dat` bytes. This is the anti-guessing invariant, now
+        // anchored on STRUCTURAL INDEX-VALIDITY instead of the `meta.dat` bit.
         let index = self.read_committed_index(stamp.index_size)?;
         let head = index.chunk_count() as u64;
 
@@ -442,47 +466,64 @@ impl RemoteRequestSpanTail {
         })
     }
 
-    /// `meta.dat`'s `(recording_id, declares-bit-13)`, in ONE fetch.
+    /// `meta.dat`'s UUIDv7 recording id, or `""` when it cannot be read.
     ///
-    /// A container with no readable `meta.dat` has no recording id and, by
-    /// construction, no span stream — bit 13 lives in `meta.dat`, so a
-    /// container that cannot produce one cannot declare it.
-    fn read_meta_facts(&mut self) -> Result<(String, bool), String> {
+    /// The id is used ONLY to notice a different recording published at the same
+    /// URL (a swap invalidates the cursor space). It deliberately never gates
+    /// span reading and never fails the poll: `meta.dat` is the terminal file a
+    /// truncated upload loses first, and under the "hint, not a gate" model a
+    /// torn or absent `meta.dat` must not stop a structurally-present,
+    /// index-intact span stream from being read. A missing id merely disables
+    /// swap detection until a readable `meta.dat` reappears.
+    fn read_recording_id(&mut self) -> String {
         match self.ctfs.read_file(META_DAT_FILE_NAME) {
-            Ok(bytes) => {
-                let recording_id = crate::ctfs_trace_reader::meta_dat::parse_meta_dat(&bytes)
-                    .map(|m| m.recording_id)
-                    .unwrap_or_default();
-                Ok((recording_id, meta_dat_has_span_stream(&bytes)))
-            }
-            Err(CtfsError::FileNotFound(_)) => Ok((String::new(), false)),
-            Err(e) => Err(format!(
-                "failed to read {META_DAT_FILE_NAME} over the range reader: {e}"
-            )),
+            Ok(bytes) => crate::ctfs_trace_reader::meta_dat::parse_meta_dat(&bytes)
+                .map(|m| m.recording_id)
+                .unwrap_or_default(),
+            Err(_) => String::new(),
         }
     }
 
-    /// Fetch `spans.idx` and keep only its whole, landed entries.
+    /// Fetch the WHOLE committed `spans.idx` and validate it is intact, or REFUSE.
+    ///
+    /// This is the structural index-validity gate that anchors "refuse rather
+    /// than guess" now that the `meta.dat` bit no longer decides span presence.
+    /// The read is STRICT — every byte the directory declares for `spans.idx`
+    /// must be backed — so a `spans.dat` that is present but whose companion
+    /// index is absent, truncated, or header-unreadable fails the poll instead
+    /// of yielding a shorter, guessed prefix. That mirrors the local readers,
+    /// which require a fully-readable `<stream>.idx`
+    /// ([`SpanStreamReader::open_from_ctfs`] reads it strictly;
+    /// `follow_stream_source.rs` reads `[0, idx_size)` and errors on any byte not
+    /// committed).
     ///
     /// The index is 16 bytes per chunk, so fetching it whole is a few hundred
     /// bytes even for a long session — there is nothing to be gained by
     /// range-reading *it*, and having the entire cumulative column in hand is
     /// what makes the `spans.dat` delta addressable in one range.
     ///
-    /// A trailing partial entry is DISCARDED rather than parsed. That is the
-    /// first fail-closed boundary: half an index entry names a chunk offset
-    /// nobody wrote.
+    /// The writer commits whole index entries, so a valid `declared` size is
+    /// `header + k*entry`; the whole-entry trim below is a belt-and-braces guard
+    /// that a trailing partial entry (half an entry names a chunk offset nobody
+    /// wrote) can never reach the parser.
     fn read_committed_index(&mut self, declared: u64) -> Result<SpanIndex, String> {
-        let bytes = self
-            .ctfs
-            .read_file_range_available(SPANS_INDEX_FILE_NAME, 0, declared)
-            .map_err(|e| format!("failed to read {SPANS_INDEX_FILE_NAME}: {e}"))?;
-        if bytes.len() < SPANS_INDEX_HEADER_SIZE {
+        if declared < SPANS_INDEX_HEADER_SIZE as u64 {
             return Err(format!(
-                "{SPANS_INDEX_FILE_NAME}: only {} of the {SPANS_INDEX_HEADER_SIZE} header bytes have landed",
-                bytes.len()
+                "{SPANS_INDEX_FILE_NAME}: the committed index is not intact — declared size {declared} \
+                 is below the {SPANS_INDEX_HEADER_SIZE}-byte header (a torn or absent index for a \
+                 present {SPANS_DATA_FILE_NAME} — refusing rather than guessing spans)"
             ));
         }
+        // STRICT read: unlike the tolerant `_available` variant, `read_file_range`
+        // errors when any declared byte has not landed — which is exactly the
+        // "index not intact -> refuse" gate. A `FileNotFound` here (a present
+        // `spans.dat` with no `spans.idx` at all) is likewise a refusal.
+        let bytes = self
+            .ctfs
+            .read_file_range(SPANS_INDEX_FILE_NAME, 0, declared)
+            .map_err(|e| {
+                format!("{SPANS_INDEX_FILE_NAME}: committed index is not intact-readable (refusing rather than guessing spans): {e}")
+            })?;
         let whole_entries = (bytes.len() - SPANS_INDEX_HEADER_SIZE) / SPANS_INDEX_ENTRY_SIZE;
         let usable = SPANS_INDEX_HEADER_SIZE + whole_entries * SPANS_INDEX_ENTRY_SIZE;
         Ok(SpanIndex {

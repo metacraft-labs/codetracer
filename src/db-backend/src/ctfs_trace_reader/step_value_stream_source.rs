@@ -46,7 +46,6 @@ use crate::db::DbStep;
 use codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder;
 use codetracer_trace_reader::step_stream_reader::{StepStreamReader, open_step_stream};
 use codetracer_trace_reader::value_stream_reader::{ValueStreamReader, open_value_stream};
-use codetracer_trace_writer::meta_dat::{meta_dat_has_step_stream, meta_dat_has_value_stream};
 use codetracer_trace_writer::step_stream::{StepStreamRecord, unpack_global_line_index};
 use codetracer_trace_writer::value_stream::ValueStreamEvent;
 
@@ -122,10 +121,10 @@ impl std::fmt::Debug for SeekableStepStream {
 
 impl SeekableStepStream {
     /// Open the seekable step stream for a `.ct` path. Returns `Ok(None)` when
-    /// the container carries no dedicated `steps.dat` stream (the
-    /// `has_step_stream` capability flag is unset, or the file is absent) — the
-    /// caller then falls back to the fully-materialized `Db` step table, so
-    /// backward compatibility is preserved.
+    /// the container carries no dedicated `steps.dat` stream (the file is
+    /// structurally absent) — the caller then falls back to the fully-materialized
+    /// `Db` step table, so backward compatibility is preserved. Existence is
+    /// decided by structural presence, not the `has_step_stream` hint bit.
     pub fn open(path: &Path) -> Result<Option<SeekableStepStream>, String> {
         match open_step_stream(path)? {
             Some(reader) => {
@@ -153,16 +152,19 @@ impl SeekableStepStream {
             Ok(meta) => meta,
             Err(_) => return Ok(None),
         };
-        if !meta_dat_has_step_stream(&meta) {
-            return Ok(None);
-        }
+        // Existence is answered by STRUCTURAL PRESENCE of `steps.dat`, never by
+        // `meta.dat`'s `has_step_stream` hint bit — a writer may stamp that bit
+        // only at close, so gating on it would refuse a step stream that
+        // structurally exists in a still-recording trace (trace-format spec:
+        // "Stream-presence flags are a hint, not a gate"). `meta.dat` is still
+        // read because `StepStreamReader::from_files` needs it to decode records.
         let dat = match ctfs.read_file("steps.dat") {
             Ok(dat) => dat,
             Err(_) => return Ok(None),
         };
         let idx = ctfs
             .read_file("steps.idx")
-            .map_err(|e| format!("steps.idx missing despite has_step_stream flag: {e}"))?;
+            .map_err(|e| format!("steps.idx missing despite steps.dat presence: {e}"))?;
 
         match StepStreamReader::from_files(&meta, dat, idx)? {
             Some(reader) => {
@@ -386,16 +388,15 @@ impl SeekableValueStream {
             Ok(meta) => meta,
             Err(_) => return Ok(None),
         };
-        if !meta_dat_has_value_stream(&meta) {
-            return Ok(None);
-        }
+        // Structural presence of `values.dat` decides existence, not the
+        // `has_value_stream` hint bit (see `SeekableStepStream::open_from_ctfs`).
         let dat = match ctfs.read_file("values.dat") {
             Ok(dat) => dat,
             Err(_) => return Ok(None),
         };
         let idx = ctfs
             .read_file("values.idx")
-            .map_err(|e| format!("values.idx missing despite has_value_stream flag: {e}"))?;
+            .map_err(|e| format!("values.idx missing despite values.dat presence: {e}"))?;
 
         match ValueStreamReader::from_files(&meta, dat, idx)? {
             Some(reader) => {
@@ -478,16 +479,15 @@ fn open_step_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<StepStream
         Ok(meta) => meta,
         Err(_) => return Ok(None),
     };
-    if !meta_dat_has_step_stream(&meta) {
-        return Ok(None);
-    }
+    // Structural presence of `steps.dat` decides existence, not the
+    // `has_step_stream` hint bit (see `SeekableStepStream::open_from_ctfs`).
     let dat = match ctfs.read_file("steps.dat") {
         Ok(dat) => dat,
         Err(_) => return Ok(None),
     };
     let idx = ctfs
         .read_file("steps.idx")
-        .map_err(|e| format!("steps.idx missing despite has_step_stream flag: {e}"))?;
+        .map_err(|e| format!("steps.idx missing despite steps.dat presence: {e}"))?;
     StepStreamReader::from_files(&meta, dat, idx)
 }
 
@@ -496,16 +496,15 @@ fn open_value_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<ValueStre
         Ok(meta) => meta,
         Err(_) => return Ok(None),
     };
-    if !meta_dat_has_value_stream(&meta) {
-        return Ok(None);
-    }
+    // Structural presence of `values.dat` decides existence, not the
+    // `has_value_stream` hint bit (see `SeekableStepStream::open_from_ctfs`).
     let dat = match ctfs.read_file("values.dat") {
         Ok(dat) => dat,
         Err(_) => return Ok(None),
     };
     let idx = ctfs
         .read_file("values.idx")
-        .map_err(|e| format!("values.idx missing despite has_value_stream flag: {e}"))?;
+        .map_err(|e| format!("values.idx missing despite values.dat presence: {e}"))?;
     ValueStreamReader::from_files(&meta, dat, idx)
 }
 

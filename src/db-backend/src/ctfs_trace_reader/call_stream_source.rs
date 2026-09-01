@@ -33,7 +33,6 @@ use codetracer_trace_types::{CallKey, FullValueRecord, FunctionId, StepId, TypeI
 
 use codetracer_trace_reader::call_stream_reader::{CallStreamReader, open_call_stream};
 use codetracer_trace_writer::call_stream::{CallStreamRecord, VOID_RETURN_MARKER};
-use codetracer_trace_writer::meta_dat::meta_dat_has_call_stream;
 
 use crate::db::DbCall;
 
@@ -75,10 +74,11 @@ impl std::fmt::Debug for SeekableCallStream {
 
 impl SeekableCallStream {
     /// Open the seekable call stream for a `.ct` path. Returns `Ok(None)` when
-    /// the container carries no dedicated `calls.dat` stream (the
-    /// `has_call_stream` capability flag is unset, or the file is absent) — the
-    /// caller then falls back to the legacy fully-materialized call tree, so
-    /// backward compatibility is preserved.
+    /// the container carries no dedicated `calls.dat` stream (the file is
+    /// structurally absent) — the caller then falls back to the legacy
+    /// fully-materialized call tree, so backward compatibility is preserved.
+    /// Existence is decided by structural presence, not the `has_call_stream`
+    /// hint bit.
     pub fn open(path: &Path) -> Result<Option<SeekableCallStream>, String> {
         match open_call_stream(path)? {
             Some(reader) => {
@@ -103,16 +103,19 @@ impl SeekableCallStream {
             Ok(meta) => meta,
             Err(_) => return Ok(None),
         };
-        if !meta_dat_has_call_stream(&meta) {
-            return Ok(None);
-        }
+        // Existence is answered by STRUCTURAL PRESENCE of `calls.dat`, never by
+        // `meta.dat`'s `has_call_stream` hint bit — a writer may stamp that bit
+        // only at close, so gating on it would refuse a call stream that
+        // structurally exists in a still-recording trace (trace-format spec:
+        // "Stream-presence flags are a hint, not a gate"). `meta.dat` is still
+        // read because `CallStreamReader::from_files` needs it to decode records.
         let dat = match ctfs.read_file("calls.dat") {
             Ok(dat) => dat,
             Err(_) => return Ok(None),
         };
         let idx = ctfs
             .read_file("calls.idx")
-            .map_err(|e| format!("calls.idx missing despite has_call_stream flag: {e}"))?;
+            .map_err(|e| format!("calls.idx missing despite calls.dat presence: {e}"))?;
 
         match CallStreamReader::from_files(&meta, dat, idx)? {
             Some(reader) => {
@@ -220,16 +223,15 @@ fn open_call_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<CallStream
         Ok(meta) => meta,
         Err(_) => return Ok(None),
     };
-    if !meta_dat_has_call_stream(&meta) {
-        return Ok(None);
-    }
+    // Structural presence of `calls.dat` decides existence, not the
+    // `has_call_stream` hint bit (see `SeekableCallStream::open_from_ctfs`).
     let dat = match ctfs.read_file("calls.dat") {
         Ok(dat) => dat,
         Err(_) => return Ok(None),
     };
     let idx = ctfs
         .read_file("calls.idx")
-        .map_err(|e| format!("calls.idx missing despite has_call_stream flag: {e}"))?;
+        .map_err(|e| format!("calls.idx missing despite calls.dat presence: {e}"))?;
     CallStreamReader::from_files(&meta, dat, idx)
 }
 

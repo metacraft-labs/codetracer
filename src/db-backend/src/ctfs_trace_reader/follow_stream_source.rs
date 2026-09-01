@@ -47,9 +47,6 @@ use codetracer_trace_reader::step_stream_reader::decode_chunk_records as decode_
 use codetracer_trace_reader::value_stream_reader::decode_chunk_records as decode_value_chunk_records;
 use codetracer_trace_types::{Line, PathId};
 use codetracer_trace_writer::call_stream::CallStreamRecord;
-use codetracer_trace_writer::meta_dat::{
-    meta_dat_has_call_stream, meta_dat_has_step_stream, meta_dat_has_value_stream,
-};
 use codetracer_trace_writer::step_stream::{StepStreamRecord, unpack_global_line_index};
 use codetracer_trace_writer::value_stream::ValueRecordEntry;
 
@@ -228,20 +225,6 @@ fn read_internal_file_range(path: &Path, name: &str, offset: u64, len: usize) ->
     Ok(whole[start..end].to_vec())
 }
 
-/// Whether a follow source's `meta.dat` is committed AND a capability-flag
-/// predicate holds. Used to honor a finalized container's capability flags (a
-/// sealed container that does not advertise a given stream must read nothing).
-fn meta_flag_set(source: &FollowFileSource, path: &Path, predicate: impl Fn(&[u8]) -> bool) -> bool {
-    let meta_size = source.file_size("meta.dat").unwrap_or(0);
-    if meta_size == 0 {
-        return false;
-    }
-    match read_internal_file_range(path, "meta.dat", 0, meta_size as usize) {
-        Ok(meta) => predicate(&meta),
-        Err(_) => false,
-    }
-}
-
 /// A follow-mode reader over a growing container's `steps.dat` / `steps.idx`
 /// split execution stream.
 ///
@@ -264,11 +247,12 @@ pub struct FollowStepStreamSource {
 impl FollowStepStreamSource {
     /// Open a growing `.ct` for follow-mode split-stream STEP reads.
     ///
-    /// Requires the container to advertise the `has_step_stream` capability bit
-    /// in `meta.dat` — but tolerates `meta.dat` being absent at open (a live
-    /// recorder commits it last), in which case the gate is re-checked on each
-    /// [`Self::refresh`]. An initial refresh decodes whatever chunks are already
-    /// committed.
+    /// Existence of the step stream is answered by STRUCTURAL PRESENCE — a
+    /// committed `steps.idx` header — never by `meta.dat`'s `has_step_stream`
+    /// hint bit (which a writer may only stamp at close; gating on it would break
+    /// reading a still-recording trace — see the trace-format spec, "Stream-presence
+    /// flags are a hint, not a gate"). An initial refresh decodes whatever chunks
+    /// are already committed.
     pub fn open(path: &Path) -> Result<Self, CtfsError> {
         let source = FollowFileSource::open(path)?;
         let mut reader = FollowStepStreamSource {
@@ -310,16 +294,11 @@ impl FollowStepStreamSource {
     pub fn refresh(&mut self) -> Result<usize, CtfsError> {
         self.source.refresh()?;
 
-        // Gate on the step stream's READABILITY (a `steps.idx` with a committed
-        // header), not on `meta.dat` (committed LAST). Once `meta.dat` HAS landed
-        // we additionally honor its `has_step_stream` flag: a finalized container
-        // that explicitly does NOT advertise the step stream must read nothing.
-        if self.source.file_size("meta.dat").unwrap_or(0) > 0
-            && !meta_flag_set(&self.source, &self.path, meta_dat_has_step_stream)
-        {
-            return Ok(0);
-        }
-
+        // Gate on the step stream's STRUCTURAL READABILITY (a `steps.idx` with a
+        // committed header) — NEVER on `meta.dat`'s `has_step_stream` hint bit.
+        // The bit may be stamped only at close, so gating on it would refuse to
+        // read a step stream that structurally exists in a still-recording trace
+        // (trace-format spec: "Stream-presence flags are a hint, not a gate").
         let idx_size = self.source.file_size("steps.idx").unwrap_or(0);
         if idx_size < 4 {
             return Ok(0);
@@ -365,9 +344,9 @@ pub struct FollowValueStreamSource {
 }
 
 impl FollowValueStreamSource {
-    /// Open a growing `.ct` for follow-mode split-stream VALUE reads. Tolerates a
-    /// not-yet-committed `meta.dat`; re-checks the `has_value_stream` flag on each
-    /// refresh once `meta.dat` lands.
+    /// Open a growing `.ct` for follow-mode split-stream VALUE reads. Existence
+    /// is answered by STRUCTURAL PRESENCE (a committed `values.idx` header), never
+    /// by `meta.dat`'s `has_value_stream` hint bit.
     pub fn open(path: &Path) -> Result<Self, CtfsError> {
         let source = FollowFileSource::open(path)?;
         let mut reader = FollowValueStreamSource {
@@ -401,12 +380,8 @@ impl FollowValueStreamSource {
     pub fn refresh(&mut self) -> Result<usize, CtfsError> {
         self.source.refresh()?;
 
-        if self.source.file_size("meta.dat").unwrap_or(0) > 0
-            && !meta_flag_set(&self.source, &self.path, meta_dat_has_value_stream)
-        {
-            return Ok(0);
-        }
-
+        // Structural presence only — the `values.idx` header, not the
+        // `has_value_stream` hint bit (see `FollowStepStreamSource::refresh`).
         let idx_size = self.source.file_size("values.idx").unwrap_or(0);
         if idx_size < 4 {
             return Ok(0);
@@ -454,9 +429,9 @@ pub struct FollowCallStreamSource {
 }
 
 impl FollowCallStreamSource {
-    /// Open a growing `.ct` for follow-mode split-stream CALL reads. Tolerates a
-    /// not-yet-committed `meta.dat`; re-checks the `has_call_stream` flag on each
-    /// refresh once `meta.dat` lands.
+    /// Open a growing `.ct` for follow-mode split-stream CALL reads. Existence
+    /// is answered by STRUCTURAL PRESENCE (a committed `calls.idx` header), never
+    /// by `meta.dat`'s `has_call_stream` hint bit.
     pub fn open(path: &Path) -> Result<Self, CtfsError> {
         let source = FollowFileSource::open(path)?;
         let mut reader = FollowCallStreamSource {
@@ -494,12 +469,8 @@ impl FollowCallStreamSource {
     pub fn refresh(&mut self) -> Result<usize, CtfsError> {
         self.source.refresh()?;
 
-        if self.source.file_size("meta.dat").unwrap_or(0) > 0
-            && !meta_flag_set(&self.source, &self.path, meta_dat_has_call_stream)
-        {
-            return Ok(0);
-        }
-
+        // Structural presence only — the `calls.idx` header, not the
+        // `has_call_stream` hint bit (see `FollowStepStreamSource::refresh`).
         let idx_size = self.source.file_size("calls.idx").unwrap_or(0);
         if idx_size < 4 {
             return Ok(0);
@@ -552,8 +523,8 @@ impl FollowCallStreamSource {
 /// final-file path uses, for the split streams the Rust reader owns.
 ///
 /// A stream that the container does not (yet) carry simply stays empty — its
-/// gate (the companion `.idx` header, plus a finalized container's capability
-/// flag) keeps it at zero records — so a steps-only bundle still works.
+/// gate (the STRUCTURAL presence of the companion `.idx` header) keeps it at zero
+/// records — so a steps-only bundle still works.
 #[derive(Debug)]
 pub struct FollowReader {
     steps: FollowStepStreamSource,
