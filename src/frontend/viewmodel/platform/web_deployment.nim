@@ -305,6 +305,32 @@ type
       ## delivered) in the one place it could not be seen, because the gate
       ## checked the manifest and the manifest did not mention the document.
 
+  FetchConsumer* = enum
+    ## WHICH run-time consumer fetches a `damFetched` asset.
+    ##
+    ## `damFetched` used to have exactly one meaning, because it had exactly
+    ## two members: "a Noir wasm module the bare-ABI worker `load()`s by id".
+    ## `noir_wasm_modules.deliverableModuleIds()` IS `fetchedRuntimeAssets()`,
+    ## and `web-bundle-assets.sh`'s Step 6 greps `load('<id>')` in
+    ## `wasm_worker_browser.js` for every fetched row — so a third fetched
+    ## asset would have joined the Noir wasm registry by arithmetic, and the
+    ## page would have declared `nargo` over a module that is not a Noir
+    ## module and has no `nv_*` / `ct_*` ABI at all.
+    ##
+    ## The replay engine is fetched for the same reasons the Noir modules are
+    ## (18 MB, wanted by a minority of sessions, `immutable` once fetched) and
+    ## belongs to a different consumer: it is a wasm-bindgen module driven
+    ## from its own worker. So the delivery decision and the consumer are two
+    ## fields rather than one.
+    fcNotFetched
+      ## Not `damFetched`. The default, so every non-fetched row is unchanged.
+    fcNoirWasmWorker
+      ## `wasm_worker_browser.js` resolves it by id from the `configure`
+      ## message and instantiates it against the bare `nv_*` / `ct_*` ABI.
+    fcReplayEngine
+      ## `replay-worker.js` instantiates it through wasm-bindgen glue and
+      ## then speaks DAP over `postMessage`.
+
   RuntimeAsset* = object
     ## One file a web deployment must carry for the product to work.
     id*: string
@@ -323,6 +349,9 @@ type
       ## What a user gets when an optional asset is not shipped. Same rule as
       ## `capabilities.degradedBehaviour`: an absence without a stated
       ## consequence is a gap in the product, not a gap in the docs.
+    fetchedBy*: FetchConsumer
+      ## Meaningful only for `damFetched`, and `fetchedDeclaresItsConsumer()`
+      ## holds the two in agreement in both directions.
 
 const
   entryDocumentPath* = "index.html"
@@ -464,6 +493,30 @@ const
   noirCompilerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_wasm.wasm"
   noirTracerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_tracer_wasm.wasm"
 
+  # THE REPLAY ENGINE. Three files, and they are the Studio's OWN copies.
+  #
+  # The same bytes are already published at `/worker.js` and `/pkg/*` by the
+  # staging step, because BlockTracer fetches them cross-origin from this
+  # deployment and the deploy workflow asserts they have not moved. Those
+  # paths stay exactly where they are: this repository's deploy breaking
+  # another one's is the failure that check exists for.
+  #
+  # So the Studio declares its own copies under `/assets/` rather than
+  # pointing the manifest at `/pkg/`. That is not duplication for its own
+  # sake — it is what keeps every existing rule true at once. A manifest row
+  # under `/pkg/` would be served with the entry document's 60-second TTL
+  # (`cacheClassFor` maps exactly one prefix to `ccStaticAsset`), and making
+  # `/pkg/*` immutable instead would pin a non-content-addressed 18 MB engine
+  # in every CDN edge and browser cache for a year — on the path another
+  # product fetches. The cost of the copy is upload bytes in CI; a visitor
+  # fetches one or the other, never both.
+  replayWorkerScriptPath* = staticAssetPrefix[1 .. ^1] & "replay-worker.js"
+  replayEngineModuleId* = "replay-engine"
+  replayEngineGlueId* = "replay-engine-glue"
+  replayWorkerModuleId* = "replay-worker"
+  replayEngineWasmPath* = staticAssetPrefix[1 .. ^1] & "db_backend_bg.wasm"
+  replayEngineGluePath* = staticAssetPrefix[1 .. ^1] & "db_backend.js"
+
 proc webRuntimeAssets*(): seq[RuntimeAsset] =
   ## Everything a web deployment serves, in delivery order.
   @[
@@ -488,27 +541,87 @@ proc webRuntimeAssets*(): seq[RuntimeAsset] =
       absenceBehaviour: ""),
     RuntimeAsset(
       id: noirCompilerModuleId, path: noirCompilerWasmPath, mode: damFetched,
-      required: false,
+      required: false, fetchedBy: fcNoirWasmWorker,
       absenceBehaviour:
         "Noir compilation is unavailable and `nargo compile` is reported as " &
         "having no wasm build in this deployment, by name, rather than " &
         "failing part-way through a run"),
     RuntimeAsset(
       id: noirTracerModuleId, path: noirTracerWasmPath, mode: damFetched,
-      required: false,
+      required: false, fetchedBy: fcNoirWasmWorker,
       absenceBehaviour:
         "a compiled Noir program cannot be traced in the tab, so replay is " &
-        "offered only for recordings produced elsewhere")]
+        "offered only for recordings produced elsewhere"),
+    RuntimeAsset(
+      id: replayWorkerModuleId, path: replayWorkerScriptPath, mode: damAsset,
+      required: false,
+      absenceBehaviour:
+        "a trace produced in the tab can be inspected as counts but not " &
+        "STEPPED THROUGH: with no worker to instantiate the replay engine " &
+        "in, the session reports that this deployment ships no engine " &
+        "rather than opening a debugger that answers nothing"),
+    RuntimeAsset(
+      id: replayEngineGlueId, path: replayEngineGluePath, mode: damFetched,
+      required: false, fetchedBy: fcReplayEngine,
+      absenceBehaviour:
+        "the replay engine cannot be instantiated — the wasm is bytes and " &
+        "this is the wasm-bindgen glue that imports them — so replay is " &
+        "reported as unavailable rather than failing inside " &
+        "`WebAssembly.compileStreaming`"),
+    RuntimeAsset(
+      id: replayEngineModuleId, path: replayEngineWasmPath, mode: damFetched,
+      required: false, fetchedBy: fcReplayEngine,
+      absenceBehaviour:
+        "a trace can be produced in the tab and not replayed in it; the " &
+        "session says so by name instead of opening on an empty timeline")]
 
 proc requiredRuntimeAssets*(): seq[RuntimeAsset] =
   for asset in webRuntimeAssets():
     if asset.required: result.add asset
 
 proc fetchedRuntimeAssets*(): seq[RuntimeAsset] =
-  ## The assets the worker resolves by URL. `wasm_worker_browser.js` receives
-  ## exactly these ids in its `configure` message.
+  ## Everything fetched at run time rather than at load, whoever fetches it.
+  ##
+  ## This is the DELIVERY question, and it is the one the deploy guard and the
+  ## entry document's `modules[]` ask: a fetched file present in the publish
+  ## tree but not declared in the served page is a defect, because nothing at
+  ## run time could have found its URL. It is NOT the question "which ids does
+  ## the Noir wasm worker resolve" — that is `noirWasmModuleAssets`, and the
+  ## two were the same list only for as long as the engine was undeclared.
   for asset in webRuntimeAssets():
     if asset.mode == damFetched: result.add asset
+
+proc fetchedBy*(consumer: FetchConsumer): seq[RuntimeAsset] =
+  ## The fetched assets one run-time consumer resolves.
+  for asset in webRuntimeAssets():
+    if asset.mode == damFetched and asset.fetchedBy == consumer:
+      result.add asset
+
+proc noirWasmModuleAssets*(): seq[RuntimeAsset] =
+  ## The modules `wasm_worker_browser.js` receives in its `configure` message
+  ## and instantiates against the bare `nv_*` / `ct_*` ABI.
+  fetchedBy(fcNoirWasmWorker)
+
+proc replayEngineAssets*(): seq[RuntimeAsset] =
+  ## The wasm-bindgen engine `replay-worker.js` instantiates. Two files, and
+  ## both or neither: the glue without the wasm imports bytes that are not
+  ## there, and the wasm without the glue is 18 MB nothing can call into.
+  fetchedBy(fcReplayEngine)
+
+proc fetchedWithoutConsumer*(): seq[string] =
+  ## Every row where the delivery decision and the consumer disagree.
+  ##
+  ## Asserted `.len == 0` in both directions, and that is the whole point of
+  ## splitting them: a new `damFetched` row that forgot to say who fetches it
+  ## would default to `fcNotFetched` and vanish from every consumer's list
+  ## while still being declared, placed and served — an asset nothing loads,
+  ## which is this repository's signature defect. A row that names a consumer
+  ## without being fetched is the same mistake pointing the other way.
+  for asset in webRuntimeAssets():
+    if asset.mode == damFetched and asset.fetchedBy == fcNotFetched:
+      result.add asset.id
+    elif asset.mode != damFetched and asset.fetchedBy != fcNotFetched:
+      result.add asset.id
 
 proc undeclaredAbsences*(): seq[string] =
   ## Every optional asset that does not say what its absence costs. The

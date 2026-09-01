@@ -114,7 +114,15 @@ proc deliverableModuleIds*(): seq[string] =
   ## The asset ids a deployment MAY deliver, read from the manifest rather
   ## than restated — `web_deployment.nim`'s header makes this argument for
   ## `rewritePrefixes` and the assembly step makes it again.
-  for asset in fetchedRuntimeAssets():
+  ##
+  ## `noirWasmModuleAssets()` and NOT `fetchedRuntimeAssets()`. This registry
+  ## resolves bare-ABI `nv_*` / `ct_*` modules and its whole output is a
+  ## `nargo` claim; the replay engine is fetched for the same delivery reasons
+  ## and is a wasm-bindgen module driven from its own worker, so a list keyed
+  ## on "fetched" would have made the page declare `nargo` over it and
+  ## `subcommandForAsset` answer the empty string for a module the registry
+  ## had already counted.
+  for asset in noirWasmModuleAssets():
     result.add asset.id
 
 proc unknownDeliveredModules*(delivered: seq[DeliveredWasmModule]): seq[string] =
@@ -147,7 +155,7 @@ proc deliveredSubcommands*(delivered: seq[DeliveredWasmModule]): seq[string] =
   ## refusal sentence's "It provides: ..." list is stable rather than dependent
   ## on the order a probe happened to report.
   let registrable = registrableModules(delivered)
-  for asset in fetchedRuntimeAssets():
+  for asset in noirWasmModuleAssets():
     for module in registrable:
       if module.id == asset.id:
         let sub = subcommandForAsset(asset.id)
@@ -160,7 +168,7 @@ proc deliveredProvenance*(delivered: seq[DeliveredWasmModule]): string =
   ## `builtFrom` that mentioned only the compiler would make the tracer's
   ## origin unanswerable while looking answered.
   let registrable = registrableModules(delivered)
-  for asset in fetchedRuntimeAssets():
+  for asset in noirWasmModuleAssets():
     for module in registrable:
       if module.id == asset.id:
         if result.len > 0: result.add "; "

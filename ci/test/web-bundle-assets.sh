@@ -44,6 +44,8 @@
 # Usage:  bash ci/test/web-bundle-assets.sh
 # Env:    CT_NOIR_WASM_COMPILER  path to noir_wasm.wasm            (optional)
 #         CT_NOIR_WASM_TRACER    path to noir_tracer_wasm.wasm     (optional)
+#         CT_REPLAY_ENGINE_DIR   a wasm-pack `pkg/` holding db_backend.js
+#                                and db_backend_bg.wasm             (optional)
 #         CT_WEB_BUNDLE_DIR      output dir (default src/build-debug/web)
 #         ISONIM_SRC             isonim source tree
 
@@ -419,6 +421,40 @@ place_module() {
 }
 place_module CT_NOIR_WASM_COMPILER noir-compiler
 place_module CT_NOIR_WASM_TRACER noir-tracer
+
+# THE REPLAY ENGINE. Same shape as the Noir modules and for the same reason:
+# the bytes come from a build this script does not run, so it takes them from
+# the environment and says loudly when they are not there. `CT_REPLAY_ENGINE_DIR`
+# points at a `pkg/` directory of the shape `wasm-pack --target web` writes and
+# `browser-replay/build-dist.sh` copies from — the two files are named there,
+# not here, because a name spelled twice drifts once.
+if [ -n "${CT_REPLAY_ENGINE_DIR:-}" ]; then
+	CT_REPLAY_ENGINE_GLUE="${CT_REPLAY_ENGINE_DIR}/db_backend.js"
+	CT_REPLAY_ENGINE_WASM="${CT_REPLAY_ENGINE_DIR}/db_backend_bg.wasm"
+	export CT_REPLAY_ENGINE_GLUE CT_REPLAY_ENGINE_WASM
+fi
+# BOTH OR NEITHER, asserted rather than hoped. The glue without the wasm
+# imports bytes that are not there and the wasm without the glue is 18 MB
+# nothing can call into, so a half-placed engine is worse than an absent one:
+# the entry document would declare a module the session then fails to
+# instantiate, inside `WebAssembly.compileStreaming`, where the message names
+# neither this script nor that page.
+engine_placed=0
+place_module CT_REPLAY_ENGINE_GLUE replay-engine-glue && engine_placed=$((engine_placed + 1))
+place_module CT_REPLAY_ENGINE_WASM replay-engine && engine_placed=$((engine_placed + 1))
+if [ "${engine_placed}" -eq 1 ]; then
+	bad "the replay engine was half-placed: the glue and the wasm are one asset in two files and a deployment must carry both or neither"
+fi
+if [ "${engine_placed}" -eq 2 ]; then
+	replay_worker_src="browser-replay/app/replay-worker.js"
+	replay_worker_dst="${out_dir}/$(printf '%s\n' "${manifest}" | awk -F'\t' '$1=="replay-worker"{print $2}')"
+	mkdir -p "$(dirname "${replay_worker_dst}")"
+	if cp "${replay_worker_src}" "${replay_worker_dst}" 2>/dev/null; then
+		ok "replay worker placed at ${replay_worker_dst#"${out_dir}"/}"
+	else
+		bad "the engine was placed and ${replay_worker_src} was not, so nothing can instantiate it"
+	fi
+fi
 echo
 
 # ---------------------------------------------------------------------------
@@ -460,7 +496,7 @@ noir_ref="${CT_NOIR_WASM_REF:-}"
 modules_tsv="${cache}/declared-modules.tsv"
 : >"${modules_tsv}"
 declare_module() {
-	local id="$1" crate="$2"
+	local id="$1" crate="$2" origin_label="${3:-noir@codetracer ${noir_ref} }"
 	local path
 	path="$(printf '%s\n' "${manifest}" | awk -F'\t' -v i="${id}" '$1==i{print $2}')"
 	local file="${out_dir}/${path}"
@@ -470,16 +506,37 @@ declare_module() {
 	# the bytes about to be uploaded, so a truncated copy is a failed deploy
 	# rather than a broken page.
 	[ -f "${file}" ] || return 0
-	if [ -z "${noir_ref}" ]; then
-		bad "${id}: placed, but CT_NOIR_WASM_REF is unset, so it has no provenance and the page would drop it"
+	if [ -z "${origin_label}" ]; then
+		bad "${id}: placed, but its provenance is unset, so it has no builtFrom and the page would drop it"
 		return 0
 	fi
 	printf '%s\t/%s\t%s\t%s\n' "${id}" "${path}" \
 		"$(wc -c <"${file}" | tr -d ' ')" \
-		"noir@codetracer ${noir_ref} ${crate}" >>"${modules_tsv}"
+		"${origin_label}${crate}" >>"${modules_tsv}"
 }
-declare_module noir-compiler "compiler/wasm"
-declare_module noir-tracer "tooling/tracer_wasm"
+noir_provenance=""
+[ -n "${noir_ref}" ] && noir_provenance="noir@codetracer ${noir_ref} "
+declare_module noir-compiler "compiler/wasm" "${noir_provenance}"
+declare_module noir-tracer "tooling/tracer_wasm" "${noir_provenance}"
+
+# THE ENGINE IS DECLARED, and it has to be for two independent reasons.
+#
+# `deployGuardDefects` treats a fetched asset present in the publish tree and
+# absent from the entry document's `modules[]` as a defect, so placing it
+# without declaring it would BLOCK the deploy. And `declaredModuleUrls` — the
+# only function that turns an asset into something the browser can reach — is
+# read straight out of the served document, because `noir-studio-signed-out.sh`
+# asserts the loop-arm bundle has zero network egress sites and the descriptor
+# is therefore in the DOM rather than fetched. An undeclared engine is an
+# engine with no URL, which is what `ide.codetracer.com` has been serving.
+#
+# Its provenance is this repository's own revision, not the noir ref: the
+# engine is `src/db-backend` built for wasm32, and labelling it with a `noir`
+# commit would make the page name the wrong repository for the bytes.
+engine_provenance=""
+[ -n "${revision}" ] && engine_provenance="codetracer ${revision} "
+declare_module replay-engine-glue "src/db-backend (wasm-bindgen glue)" "${engine_provenance}"
+declare_module replay-engine "src/db-backend" "${engine_provenance}"
 
 if ! nim c --hints:off --warnings:off --nimcache:"${cache}/render" \
 	-o:"${cache}/render-bin" ci/test/web_deployment_render.nim \
@@ -638,14 +695,30 @@ echo "    A rename on one side produces 'no url declared for wasm module' in a"
 echo "    browser and nothing at all before that."
 # ---------------------------------------------------------------------------
 if [ -f "${worker_code:-/nonexistent}" ]; then
-	while IFS=$'\t' read -r id path mode req behaviour; do
+	checked_ids=0
+	while IFS=$'\t' read -r id path mode req behaviour consumer; do
 		[ "${mode}" = "fetched" ] || continue
+		# THE CONSUMER COLUMN, and not just `mode`. `fetched` now covers two
+		# different workers: `wasm_worker_browser.js` resolves the Noir
+		# modules by id from its `configure` message, and `replay-worker.js`
+		# instantiates the replay engine through wasm-bindgen glue and never
+		# calls `load()` at all. Checking every fetched row against this
+		# worker would fail on the engine, and dropping the check to make it
+		# pass would stop asserting the thing it exists for.
+		[ "${consumer}" = "noir-wasm-worker" ] || continue
+		checked_ids=$((checked_ids + 1))
 		if grep -qF "load('${id}')" "${worker_code}"; then
 			ok "the worker resolves '${id}', the id the manifest declares"
 		else
 			bad "the manifest declares fetched module '${id}' and the worker never loads it"
 		fi
 	done < <(printf '%s\n' "${manifest}")
+	# NON-VACUITY. A `continue` that matched nothing would leave this loop
+	# silent and green, which is what a filter added to a passing check tends
+	# to become.
+	if [ "${checked_ids}" -eq 0 ]; then
+		bad "no fetched row named the noir-wasm-worker as its consumer, so Step 6 checked nothing"
+	fi
 fi
 echo
 

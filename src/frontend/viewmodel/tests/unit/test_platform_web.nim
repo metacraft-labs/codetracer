@@ -955,17 +955,61 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     check (id: "renderer", mode: damBundled) in byId
     check (id: "wasm-worker", mode: damAsset) in byId
 
-  test "the two Noir modules are FETCHED, never bundled":
-    # ~16 MB and ~4.6 MB. Bundling them inflates by a third as base64 and puts
-    # the result in front of first paint, for a capability most sessions never
-    # invoke.
+  test "the two Noir modules and the replay engine are FETCHED, never bundled":
+    # ~16 MB, ~4.6 MB and ~18 MB. Bundling any of them inflates it by a third
+    # as base64 and puts the result in front of first paint, for a capability
+    # most sessions never invoke.
+    #
+    # THE ENGINE IS A DECLARED ADDITION TO THIS LIST, not an accident of the
+    # count. It was published at `/pkg/db_backend_bg.wasm` and `/worker.js`
+    # and asserted by the deploy workflow while `webRuntimeAssets()` did not
+    # name it — so the entry document carried no URL for it, and the one
+    # function that turns an asset into something the browser can reach
+    # (`declaredModuleUrls`) had nothing to hand over. `ide.codetracer.com`
+    # served 18 MB of working engine that nothing could reference.
     let fetched = fetchedRuntimeAssets()
     var ids: seq[string]
     for asset in fetched: ids.add asset.id
-    check ids.sorted == @[noirCompilerModuleId, noirTracerModuleId].sorted
+    check ids.sorted == @[noirCompilerModuleId, noirTracerModuleId,
+                          replayEngineGlueId, replayEngineModuleId].sorted
     for asset in fetched:
       check asset.mode == damFetched
       check asset.mode != damBundled
+
+  test "a fetched asset says WHO fetches it, in both directions":
+    # `damFetched` meant "a Noir wasm module" for as long as it had exactly
+    # two members, because `deliverableModuleIds()` was `fetchedRuntimeAssets()`
+    # spelled differently. A third fetched row would have joined the Noir
+    # registry by arithmetic and the page would have claimed `nargo` over a
+    # wasm-bindgen module with no `nv_*` ABI.
+    check fetchedWithoutConsumer().len == 0
+    var noirIds, engineIds: seq[string]
+    for asset in noirWasmModuleAssets(): noirIds.add asset.id
+    for asset in replayEngineAssets(): engineIds.add asset.id
+    check noirIds.sorted == @[noirCompilerModuleId, noirTracerModuleId].sorted
+    check engineIds.sorted == @[replayEngineGlueId, replayEngineModuleId].sorted
+    # Counted, and disjoint: the two lists partition the fetched set, so an
+    # asset joining one of them silently cannot also be leaving the other.
+    check noirIds.len + engineIds.len == fetchedRuntimeAssets().len
+    for id in engineIds:
+      check id notin noirIds
+
+  test "the engine is BOTH files or the deployment does not have one":
+    # The glue without the wasm imports bytes that are not there; the wasm
+    # without the glue is 18 MB nothing can call into. Declaring one is worse
+    # than declaring neither, because the session would report an engine and
+    # then fail inside `WebAssembly.compileStreaming`.
+    check replayEngineAssets().len == 2
+    var paths: seq[string]
+    for asset in replayEngineAssets(): paths.add asset.path
+    check replayEngineGluePath in paths
+    check replayEngineWasmPath in paths
+    # And the worker that instantiates them is an ASSET, not a fetched module:
+    # `new Worker(url)` takes a same-origin URL and cannot take bytes.
+    var workerMode = damBundled
+    for asset in webRuntimeAssets():
+      if asset.id == replayWorkerModuleId: workerMode = asset.mode
+    check workerMode == damAsset
 
   test "a fetched module's id is the id the worker resolves":
     # `wasm_worker_browser.js` looks its URLs up by these exact strings
