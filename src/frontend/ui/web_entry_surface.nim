@@ -99,6 +99,7 @@ import
 import ../viewmodel/platform/web_entry
 import ../viewmodel/platform/web_deployment
 import ../viewmodel/platform/noir_template
+import ./web_replay_host
 from ../index/layout_config_repair import sanitizeLayoutConfig
 from ../edit_mode import chooseInitialEditPath
 from ../../ct_test/contracts import TestCatalog
@@ -669,6 +670,11 @@ proc enterTemplateEditMode*(tmpl: ProjectTemplate): bool =
 
   installTemplateHost(tmpl)
   installTemplatePaneHost(tmpl)
+  # The replay host, registered here for the reason `installTemplateHost`'s
+  # own header gives about itself: before the `no-trace` delivery, so it
+  # exists before anything can ask. Nothing asks until a Run has produced a
+  # trace, so this only makes the tab ABLE to open a session.
+  installReplayHost()
   mountedTemplate = tmpl
   discard data.ipc.deliver(cstring"CODETRACER::no-trace",
                            templateNoTracePayload(tmpl, layout))

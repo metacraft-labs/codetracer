@@ -3,66 +3,88 @@
 ## Everything about the handshake that can be decided without a browser is
 ## decided elsewhere — `platform/replay_engine_vfs.nim` turns a `MemoryTrace`
 ## into files and `backend/replay_engine_boot.nim` says what to post and when,
-## and both run in the `vm-unit` lane on both backends. This module is the
+## both green in the `vm-unit` lane on both backends. This module is the
 ## adapter that could not be: it constructs the `Worker`, moves bytes across
-## the `postMessage` boundary, and hands back the `BackendService` the
-## ViewModels already speak to.
+## the `postMessage` boundary, and then gets out of the way.
 ##
-## It is deliberately the smallest thing that can be written here, for the
-## reason `web_browser.nim`'s header gives about itself: a web instantiation
-## written as one large `when defined(js)` branch would be the most important
-## module in the product to check and the one nothing checks.
+## ## What it hands back, and why it is NOT a `BackendService`
 ##
-## ## The one thing that is NOT a string
+## The first shape of this module built a `WorkerBackend` and returned a
+## `BackendService`, on the reasoning that the ViewModels speak to a
+## `BackendService` and so that is what a session needs. Measuring the
+## renderer says otherwise, and the difference is the whole acceptance
+## criterion.
 ##
-## `worker_backend.nim` hands its transport a JSON **string**, because DAP
-## traffic is JSON and the module owns the protocol rather than the wire. That
-## is right for every message except `vfs-write`, whose `data` is the raw bytes
-## of a trace or a source file: `vfs_write_file(path, &[u8])` is a wasm-bindgen
-## import that takes a `Uint8Array`, and a structured clone of a JS array of
-## numbers is not one. So this adapter parses the text back into an object
-## before posting — which `worker_backend.nim`'s header already requires of any
-## transport, since the engine `JSON.stringify`s what it sends — and converts
-## `data` in the one place where the shape is known.
+## Source text does not travel over the ViewModel backend at all.
+## `editor_service.onCompleteMove` — the legacy service, not a ViewModel —
+## reads `location.missingPath` off a `ct/complete-move` event to choose
+## between the editor pane and the NO SOURCE view, and then fetches the text
+## with a `CODETRACER::tab-load` IPC round trip. That event reaches it through
+## `dap.receiveEvent` and the `viewsApi` fan-out, which a `BackendService`
+## swap does not touch. A session whose `sendProc` reached a live engine while
+## `editor_service` still listened to the dead DAP channel would step, resolve
+## positions, and paint nothing.
+##
+## So the engine is installed one layer lower, as a peer for the IPC id the
+## DAP transport already writes to: `dap.asyncSendCtRequest` ends in
+## `api.ipc.send("CODETRACER::dap-raw-message", packet)`, and `newWebIpc`'s
+## `respond` is exactly the hook for answering it in-page. Give that id a
+## responder and the whole existing pipeline — pending-response continuations,
+## `receiveEvent`, `middleware`, `editor_service`, every panel VM's store —
+## starts working with no changes at all. `installTemplateHost` already
+## answers `CODETRACER::tab-load` the same way, and this is that pattern
+## applied to the channel next to it.
+##
+## ## The two things that are not a string
+##
+## `vfs-write`'s `data` is raw bytes. `vfs_write_file(path, &[u8])` is a
+## wasm-bindgen import that takes a `Uint8Array`, and a structured clone of a
+## JS array of numbers is still a plain array on the other side — where it
+## would fail inside the engine rather than at the boundary. And a DAP frame
+## is posted as an object, because that is what the engine's dispatcher reads
+## and what `dap.nim` built.
 
 when not defined(js):
   {.error: "browser_replay_engine.nim constructs a browser `Worker`; there " &
            "is no native instantiation of it, and a native replay session " &
-           "uses backend/stdio_backend.nim".}
+           "uses the desktop DAP transport".}
 
 import std/[json, jsffi]
 
-import ../backend/backend_service
-import ../backend/worker_backend
 import ../backend/replay_engine_boot
 import ../platform/replay_engine_vfs
 
 type
+  ReplayFrameHandler* = proc(frame: JsObject)
+    ## Called for every DAP response and event the engine emits after `start`.
+
   ReplaySessionOutcome* = object
     ## What a caller gets back, without having to ask a second question.
-    service*: BackendService
-      ## Nil unless `ready`. A caller holding a nil service and a reason is
-      ## holding the whole truth about the session.
     ready*: bool
     failure*: string
       ## Empty unless the boot failed. Always a sentence naming what is
       ## missing, never "an error occurred".
+    send*: proc(frame: JsObject)
+      ## Post a DAP request frame to the engine. Nil unless `ready`.
+    terminate*: proc()
+      ## Tear the worker down. Nil unless `ready`.
 
 proc jsNewWorker(url: cstring): JsObject
   {.importjs: "new Worker(#, { type: 'module' })".}
 proc jsWorkerTerminate(worker: JsObject)
   {.importjs: "#.terminate()".}
+proc jsWorkerPostObject(worker: JsObject; message: JsObject)
+  {.importjs: "#.postMessage(#)".}
 
-proc postStructured(worker: JsObject; messageJson: cstring)
+proc postBootMessage(worker: JsObject; messageJson: cstring)
   {.importjs: """
   (function (w, text) {
     var message = JSON.parse(text);
-    // `vfs-write` is the only message whose payload is bytes rather than
+    // `vfs-write` is the only boot message whose payload is bytes rather than
     // JSON. `data` arrives as an array of byte values because that is what
     // survives a Nim `JsonNode`; `vfs_write_file` wants a `Uint8Array`, and a
     // structured clone of a plain array is still a plain array on the other
-    // side — where it would reach wasm-bindgen as the wrong type and fail
-    // inside the engine rather than here.
+    // side.
     if (message && message.type === 'vfs-write' && Array.isArray(message.data)) {
       message.data = new Uint8Array(message.data);
     }
@@ -70,23 +92,29 @@ proc postStructured(worker: JsObject; messageJson: cstring)
   })(#, #)
   """.}
 
+proc jsFrameKind(frame: JsObject): cstring
+  {.importjs: "((# || {}).type || '')".}
+
+proc jsStringify(value: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+
 proc newBrowserReplaySession*(scriptUrl: string;
                               moduleUrls: seq[tuple[id: string, url: string]];
                               payload: ReplayVfsPayload;
+                              onFrame: ReplayFrameHandler;
                               onSettled: proc(outcome: ReplaySessionOutcome)):
     void =
   ## Boot the engine over `payload` and settle exactly once.
   ##
-  ## `onSettled` is called with `ready: true` and a live `BackendService` when
-  ## the engine has the whole trace and its source and has handed the worker to
-  ## the DAP dispatcher, and with a reason otherwise. It is called ONCE: a
-  ## caller that had to distinguish "not yet" from "never" would be holding the
-  ## state machine's job.
+  ## `onSettled` is called with `ready: true` and a `send` once the engine
+  ## holds the whole trace and its source and has handed the worker to the DAP
+  ## dispatcher, and with a reason otherwise. It is called ONCE: a caller that
+  ## had to distinguish "not yet" from "never" would be holding the state
+  ## machine's job.
   ##
-  ## The defective-payload case never constructs a `Worker` at all —
-  ## `beginReplayBoot` refuses before posting, and there is nothing to tear
-  ## down.
+  ## A defective payload never constructs a `Worker` at all — `beginReplayBoot`
+  ## refuses before posting, and there is nothing to tear down.
   var settled = false
+  var started = false
   var boot: ReplayBoot
   var messages: seq[JsonNode]
   (boot, messages) = beginReplayBoot(payload, moduleUrls)
@@ -96,7 +124,6 @@ proc newBrowserReplaySession*(scriptUrl: string;
     return
 
   let worker = jsNewWorker(scriptUrl.cstring)
-  var backend: WorkerBackend
 
   proc terminateWorker() =
     jsWorkerTerminate(worker)
@@ -107,54 +134,79 @@ proc newBrowserReplaySession*(scriptUrl: string;
     onSettled(outcome)
 
   proc post(message: JsonNode) =
-    postStructured(worker, ($message).cstring)
+    postBootMessage(worker, ($message).cstring)
 
-  backend = newWorkerBackend(
-    postProc = proc(messageJson: string) =
-      postStructured(worker, messageJson.cstring),
-    terminateProc = terminateWorker)
+  proc sendFrame(frame: JsObject) =
+    jsWorkerPostObject(worker, frame)
 
-  backend.onControl(proc(message: JsonNode) =
-    # Every control message goes through the state machine, including the ones
-    # it ignores. A handler that filtered first would be a second copy of the
-    # machine's own opinion about which messages are progress.
-    if settled: return
-    let replies = boot.deliver(message)
-    for reply in replies: post(reply)
+  proc receive(raw: JsObject) =
+    # AFTER `start`, EVERY MESSAGE IS A DAP FRAME. `wasm_start()` replaces the
+    # worker's own `onmessage` with the engine's dispatcher, so from that
+    # moment the worker posts nothing else — and routing a frame through the
+    # boot state machine would have it ignore, not misread, it. The order of
+    # these two branches is what keeps the handshake and the session from
+    # having to know about each other.
+    if started:
+      if not onFrame.isNil: onFrame(raw)
+      return
+    var decoded: JsonNode
+    try:
+      decoded = parseJson($jsStringify(raw))
+    except:
+      # A BARE except: under `nim js` a malformed frame raises a `SyntaxError`
+      # that `except CatchableError` does not catch, and an unhandled
+      # rejection here would leave the boot waiting forever with no reason.
+      decoded = nil
+    if decoded.isNil:
+      terminateWorker()
+      settle(ReplaySessionOutcome(
+        ready: false,
+        failure: "the replay worker sent a message that is not JSON, so the " &
+                 "engine's handshake cannot be followed"))
+      return
+    let replies = boot.deliver(decoded)
+    for reply in replies:
+      if reply.hasKey("type") and reply["type"].getStr == "start":
+        # Posted LAST and the flag set first: the engine may answer `"ready"`
+        # in the same task, and a flag set after the post would route that
+        # answer into the boot machine as an unknown message.
+        started = true
+      post(reply)
     case boot.phase
     of rbpFailed:
-      # The worker is torn down rather than left running: it holds an 18 MB
-      # wasm instance and a trace, and a session nobody can reach is the
-      # expensive kind of leak.
+      # The worker holds an 18 MB wasm instance and a whole trace; a session
+      # nobody can reach is the expensive kind of leak.
       terminateWorker()
       settle(ReplaySessionOutcome(ready: false, failure: boot.failure))
     of rbpReady:
       settle(ReplaySessionOutcome(
-        service: backend.toBackendService(), ready: true))
-    else: discard)
-
-  # A Nim closure rather than a method call on `backend` from inside the emit:
-  # `deliver` is a proc taking the object, not a JS method hanging off it, and
-  # the same shape in `web_browser.nim`'s `newWorkerTransport` is why that one
-  # routes through a local `receive`.
-  proc receive(raw: cstring) =
-    backend.deliver($raw)
+        ready: true, send: sendFrame, terminate: terminateWorker))
+    else: discard
 
   {.emit: """
   `worker`.onmessage = function (event) {
-    `receive`(typeof event.data === 'string'
-      ? event.data
-      : JSON.stringify(event.data));
+    `receive`(event.data);
   };
   `worker`.onerror = function (event) {
     // An error event is not a message and must not be dropped. It is reported
-    // THROUGH the protocol's own failure path, which is the thing that stops a
-    // caller waiting for a `wasm-loaded` that will never arrive.
-    `receive`(JSON.stringify({
+    // THROUGH the handshake's own failure path, which is the thing that stops
+    // a caller waiting for a `wasm-loaded` that will never arrive.
+    `receive`({
       type: "worker-error",
       error: "the replay worker failed: " + String(event.message || event)
-    }));
+    });
   };
   """.}
 
   for message in messages: post(message)
+
+proc replayFrameIsResponse*(frame: JsObject): bool =
+  ## Whether a frame from the engine is a response rather than an event.
+  ##
+  ## The two go to different entry points — `onDapReceiveResponse` settles the
+  ## `asyncSendCtRequest` continuation waiting on `request_seq` and then runs
+  ## the legacy fan-out, `onDapReceiveEvent` only runs the fan-out — and
+  ## sending a response down the event path would leave every ViewModel future
+  ## unresolved until its timeout while the legacy panels updated. That
+  ## asymmetry is exactly the failure `dap.nim`'s own M49 comment records.
+  $jsFrameKind(frame) == "response"

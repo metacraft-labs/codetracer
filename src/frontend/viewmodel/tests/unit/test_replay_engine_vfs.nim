@@ -47,7 +47,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 50
+const ExpectedAssertions = 67
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -57,6 +57,7 @@ const ExpectedAssertions = 50
 
 const
   MainPath = "/virtual/a_1_mul/src/main.nr"
+  RelativePath = "hello_noir/src/main.nr"
   MainSource = "fn main(x: Field, y: pub Field) {\n    assert(x * y == 6);\n}\n"
 
 proc byteArray(text: string): JsonNode =
@@ -171,19 +172,75 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     counted "no source text" in payload.defects[0]
     counted payload.files.len == 0
 
-  test "a relative recorded path is refused rather than written":
-    # The engine spells a source path three ways and only an absolute path is
-    # the same VFS key under all three. A relative one would be written under
-    # a key that exactly one of the three probes ever asks for, which is a
-    # session that resolves some positions and not others for no visible
-    # reason.
-    let payload = replayVfsPayload(memoryTrace(paths = @["src/main.nr"]))
-    counted payload.defects.len > 0
-    var named = false
-    for defect in payload.defects:
-      if "relative path" in defect: named = true
-    counted named
-    counted payload.files.len == 0
+  test "a relative recorded path is written under BOTH spellings":
+    # THIS CASE USED TO ASSERT A REFUSAL, and the refusal was wrong. The
+    # reasoning behind it was right — the engine's flat key store is probed
+    # bare by `find_real_path` and workdir-joined by `StepLinesLoader`, so one
+    # key would satisfy one probe — but the conclusion was measured against
+    # the engine and never against the product. The browser Noir compiler is
+    # handed a virtual package tree and records `hello_noir/src/main.nr`.
+    # Every trace a tab can produce is the refused case, so this module would
+    # have rejected all of them and shown the user a defect naming the
+    # engine's probe order.
+    let payload = replayVfsPayload(memoryTrace(paths = @[RelativePath]))
+    counted payload.defects.len == 0
+    counted payload.sourceViews == 1
+    # Both keys carry the same bytes, so whichever probe asks, it hits.
+    counted payload.hasFile(RelativePath)
+    counted payload.hasFile("trace/" & RelativePath)
+    counted payload.fileNamed(RelativePath) == MainSource
+    counted payload.fileNamed("trace/" & RelativePath) == MainSource
+    # And the metadata names the workdir those keys were derived from, rather
+    # than leaving the engine to fall back to a value this module did not use.
+    let meta = parseJson(payload.fileNamed("trace/trace_metadata.json"))
+    counted meta["workdir"].getStr == "trace"
+
+  test "an absolute recorded path still writes exactly one key":
+    # `PathBuf::join` discards the base for an absolute path, so all three
+    # probes collapse onto one string and a second entry would be dead weight
+    # in a map that holds a whole recording's source.
+    counted vfsKeysFor(MainPath, "/anything").len == 1
+    counted vfsKeysFor(MainPath, "/anything") == @[MainPath]
+    counted vfsKeysFor(RelativePath, "trace") ==
+      @[RelativePath, "trace/" & RelativePath]
+    counted vfsKeysFor("", "trace").len == 0
+    counted vfsKeysFor(RelativePath, "") == @[RelativePath]
+
+  test "a location is retargeted to the spelling the renderer opens tabs by":
+    # The compiler records `hello_noir/src/main.nr`; the renderer keys tabs by
+    # `/hello_noir/src/main.nr`. A location handed to `editor_service` in the
+    # compiler's spelling opens a SECOND, empty tab beside the one the user is
+    # looking at, which is the failure that looks like it worked.
+    counted rendererSpelling(RelativePath, "hello_noir", "/hello_noir") ==
+      "/hello_noir/src/main.nr"
+    # A path outside the package is passed through rather than having a slash
+    # bolted on: inventing a project-relative identity for a stdlib source
+    # would make a location claim the project contains a file it does not.
+    counted rendererSpelling("std/option.nr", "hello_noir", "/hello_noir") ==
+      "std/option.nr"
+    counted rendererSpelling("", "hello_noir", "/hello_noir") == ""
+    counted rendererSpelling(RelativePath, "", "/hello_noir") == RelativePath
+
+    # The walk covers every `location` in a frame, not one known key: the
+    # engine puts a `Location` in `ct/complete-move`'s body AND in a call, and
+    # a rewrite that knew only the first would leave the calltrace pointing at
+    # the compiler's spelling.
+    var frame = %*{
+      "event": "ct/complete-move",
+      "body": {
+        "location": {"path": RelativePath, "line": 3},
+        "calls": [{"location": {"path": RelativePath, "line": 1}}]}}
+    let rewritten = retargetLocationPaths(frame, "hello_noir", "/hello_noir")
+    # A COUNT, because zero over a frame that carries a location is the silent
+    # case — the session steps, the position resolves, and a second empty tab
+    # opens.
+    counted rewritten == 2
+    counted frame["body"]["location"]["path"].getStr == "/hello_noir/src/main.nr"
+    counted frame["body"]["calls"][0]["location"]["path"].getStr ==
+      "/hello_noir/src/main.nr"
+    # Idempotent: a frame that has already been retargeted is left alone, so a
+    # host that installed the translation twice does not double-prefix.
+    counted retargetLocationPaths(frame, "hello_noir", "/hello_noir") == 0
 
   test "vfsJoin is the engine's join, not the host's":
     # `os./` emits a backslash on a Windows build of this lane and the VFS key

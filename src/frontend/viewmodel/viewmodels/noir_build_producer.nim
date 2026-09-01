@@ -55,6 +55,7 @@ import ../platform/noir_build
 import ../platform/process
 import ../store/types
 import ./build_vm
+import ../backend/replay_session_service
 
 export noir_build
 
@@ -484,6 +485,58 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
                       severity = blsInfo, path = producer.rendererPath(path),
                       line = 1)
       producer.lastVerdict = npvSucceeded
+      # THE TRACE IS HANDED ON WHILE IT STILL EXISTS.
+      #
+      # `producer.stdoutText` is the whole `MemoryTrace` document and this is
+      # the only moment it is both complete and still there: `beginPhase`
+      # clears it, so a session asked for after the next Build would be opened
+      # over an empty string. It is also the moment the trace has just been
+      # judged good, which is the right precondition for opening a debugger
+      # over it — the two arms above have already refused a trace with no
+      # steps and one the tracer could not decode.
+      #
+      # ASKED FOR, NOT ASSUMED. `requestReplaySession` answers `false` on a
+      # desktop build, in the extension, and in a web deployment that ships no
+      # engine. All three must keep showing the summary rows above, so the
+      # pane says which of the two happened rather than leaving a user to
+      # infer it from a debugger that did or did not appear.
+      # CONTAINED, and this is not defensive habit. `onExit` still has work to
+      # do after this line — `setCode` and `setStatus` are what tell the pane
+      # the Build finished — so an exception escaping a replay attempt would
+      # abort the BUILD's own bookkeeping and leave a pane that traced 10
+      # steps looking like it was still running. Measured exactly that way:
+      # the rows painted, the two `note` calls below never ran, and the tab
+      # reported one uncaught page error with no message a user could read.
+      var opened = false
+      var refusal = ""
+      try:
+        opened = requestReplaySession(ReplaySessionRequest(
+          rawMemoryTrace: producer.stdoutText,
+          packageDir: producer.packageDir,
+          projectRoot: producer.projectRoot))
+      except CatchableError as e:
+        refusal = e.msg
+      except:
+        # A BARE arm too: under `nim js` a `Defect` and a raw JS throw are
+        # neither `CatchableError`, and the whole point of this block is that
+        # nothing gets past it.
+        refusal = "the replay host raised a value that is not an exception"
+      if opened:
+        producer.note("opening a replay session over this trace")
+      elif refusal.len > 0:
+        producer.note("a replay session could not be started: " & refusal)
+      else:
+        # SAID OUT LOUD, and this row is the product's answer rather than a
+        # diagnostic. A user who has just watched a program be traced and sees
+        # no debugger appear is owed the reason, and "nothing happened" is the
+        # one thing a pane must never mean. It is also what tells a gate the
+        # difference between a deployment that ships no engine and a wiring
+        # defect that silently declined to open one.
+        producer.note(
+          "this build cannot replay a trace in the tab (" &
+          (if replaySessionServiceInstalled(): "the session was declined"
+           else: "no replay host is installed") &
+          "); the rows above are what the trace contains")
 
   # A verdict and an exit code must agree, and the VERDICT is the authority.
   # The worker sets a compile's exit code from `response.ok`, so the two

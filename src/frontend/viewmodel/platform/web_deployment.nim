@@ -275,11 +275,24 @@ proc pointerPath*(slug, projectId: string): string =
 #                rejected by any `Content-Security-Policy` worth setting and
 #                would be uncacheable besides.
 #   damFetched   a file fetched on first use and never at load. The two Noir
-#                wasm modules are this because they are ~16 MB and ~4.6 MB: a
-#                bundled copy inflates by a third as base64 AND must be parsed
-#                as JavaScript source before the first paint, for a capability
-#                most sessions never invoke. Fetched, they are `ccImmutable`
-#                and cached indefinitely.
+#                wasm modules and the replay engine are this because they are
+#                ~16 MB, ~4.6 MB and ~18 MB: a bundled copy inflates by a third
+#                as base64 AND must be parsed as JavaScript source before the
+#                first paint, for capabilities most sessions never invoke.
+#
+#                WHAT THEY ARE NOT, YET. This paragraph used to end "fetched,
+#                they are `ccImmutable` and cached indefinitely", and that
+#                stopped being true on 2026-09-01: `immutable` follows the
+#                DIGEST, none of these filenames carries one, and
+#                `cacheClassFor` therefore answers `ccMutableAsset` —
+#                `max-age=0, must-revalidate` — for all five. The delivery
+#                decision still holds on its own terms (bytes off the
+#                first-paint path, fetched only when the capability is used),
+#                but the caching half of the argument is currently unearned,
+#                and `unhashedStaticAssets()` names exactly which files owe
+#                it. Digested filenames from the assembly step are what would
+#                pay it back, and `cacheClassFor` already answers
+#                `ccStaticAsset` the moment they appear.
 # ---------------------------------------------------------------------------
 
 type

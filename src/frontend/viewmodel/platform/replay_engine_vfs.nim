@@ -104,6 +104,25 @@ proc vfsJoin*(folder, name: string): string =
   elif folder.endsWith("/"): folder & name
   else: folder & "/" & name
 
+proc pathJoin*(base, path: string): string =
+  ## Rust's `Path::join`, which is NOT this module's `vfsJoin`.
+  ##
+  ## The engine performs BOTH operations on the same store and they differ in
+  ## the case that matters. `join_vfs(folder, name)` is a string concatenation
+  ## and is how the trace folder's own files are addressed; `PathBuf::join` is
+  ## how a source path is joined onto the workdir, and it DISCARDS the base
+  ## when the path is already absolute.
+  ##
+  ## Spelling both as concatenation was a real defect and the suite caught it:
+  ## an absolute recorded path produced a second key `/workdir//abs/path`,
+  ## which no probe ever asks for, and `sourceFileCount` — a number a caller
+  ## asserts on — silently doubled.
+  if path.len == 0: return base
+  if path.isAbsolute: return path
+  if base.len == 0: return path
+  if base.endsWith("/"): base & path
+  else: base & "/" & path
+
 proc decodeContent(node: JsonNode): string =
   ## `SourceView.content` is a `Vec<u8>` serialised by plain serde, so it
   ## arrives as a JSON array of integers and NOT as a string. Decoding it as a
@@ -115,6 +134,36 @@ proc decodeContent(node: JsonNode): string =
     let value = byteNode.getInt
     if value < 0 or value > 255: return ""
     result.add chr(value)
+
+proc vfsKeysFor*(recordedPath, workdir: string): seq[string] =
+  ## Every spelling of `recordedPath` the engine might probe, deduplicated.
+  ##
+  ## ## Why this is a LIST and not the recorded string
+  ##
+  ## The engine's VFS is a flat `HashMap<String, Vec<u8>>` with no path
+  ## handling at all, and three separate probes inside it spell a source path
+  ## differently: `ExprLoader::find_real_path` uses the bare recorded string,
+  ## `StepLinesLoader` always uses `workdir.join(recorded)`, and the origin
+  ## chain uses one or the other. For an ABSOLUTE recorded path `PathBuf::join`
+  ## discards the base and all three collapse onto one key.
+  ##
+  ## This module used to REFUSE a relative recorded path on exactly that
+  ## reasoning, and the reasoning was right while the conclusion was wrong.
+  ## Measured against the product rather than the engine: the browser Noir
+  ## compiler is handed a virtual package tree and records
+  ## `hello_noir/src/main.nr` — relative, because that is the key it was given.
+  ## Every trace a tab can produce is the refused case, so the refusal would
+  ## have rejected all of them and the session would have reported a defect
+  ## naming the engine's probe order to a user who had done nothing wrong.
+  ##
+  ## Writing both spellings costs one extra map entry per source file and
+  ## makes the probe order stop mattering. The list is deduplicated so the
+  ## absolute case still writes exactly one.
+  if recordedPath.len == 0: return @[]
+  result = @[recordedPath]
+  if workdir.len > 0:
+    let joined = pathJoin(workdir, recordedPath)
+    if joined != recordedPath: result.add joined
 
 proc replayVfsPayload*(rawMemoryTrace: string;
                        traceFolder = "trace"): ReplayVfsPayload =
@@ -173,23 +222,27 @@ proc replayVfsPayload*(rawMemoryTrace: string;
   if paths.len == 0:
     result.defects.add "the trace registered no source paths"
 
-  for path in paths:
-    if not path.isAbsolute:
-      result.defects.add(
-        "the trace records `" & path & "` as a relative path; the engine " &
-        "probes a source path both bare and joined onto the workdir, and " &
-        "only an absolute path is the same VFS key under both")
-      break
-
+  # THE WORKDIR IS WRITTEN, ALWAYS, AND THE KEYS ARE DERIVED FROM THE SAME
+  # VALUE. `setup_from_vfs` falls back to the trace folder when
+  # `trace_metadata.json` names no workdir, so a payload that omitted it would
+  # leave the engine joining against `"trace"` while this module joined
+  # against something else — the two spellings would miss each other and every
+  # position would resolve to source the engine cannot read. Deriving both
+  # sides from one variable makes that disagreement unrepresentable.
   let workdir =
-    if document.hasKey("workdir") and document["workdir"].kind == JString:
+    if document.hasKey("workdir") and document["workdir"].kind == JString and
+       document["workdir"].getStr.len > 0:
       document["workdir"].getStr
-    elif paths.len > 0:
+    elif paths.len > 0 and paths[0].isAbsolute:
+      # An absolute recording knows where it ran; `PathBuf::join` discards the
+      # base for these anyway, so this only affects what the metadata says.
       paths[0].parentDir
     else:
-      ""
-  if workdir.len == 0:
-    result.defects.add "the trace names no workdir and has no path to derive one from"
+      # A relative recording — every trace a browser tab can produce, because
+      # the Noir compiler is handed a virtual package tree and records the key
+      # it was given. The engine's own fallback is the trace folder, so naming
+      # it here says out loud what would otherwise be assumed.
+      traceFolder
 
   if result.defects.len > 0: return
 
@@ -212,7 +265,8 @@ proc replayVfsPayload*(rawMemoryTrace: string;
       if not view.hasKey("content"): continue
       let text = decodeContent(view["content"])
       if text.len == 0: continue
-      result.files.add VfsFile(path: paths[pathId], content: text)
+      for key in vfsKeysFor(paths[pathId], workdir):
+        result.files.add VfsFile(path: key, content: text)
       inc result.sourceViews
 
   if result.sourceViews == 0:
@@ -228,6 +282,67 @@ proc replayVfsPayload*(rawMemoryTrace: string;
   # at the end rather than an early return at each check.
   if result.defects.len > 0:
     result.files = @[]
+
+proc rendererSpelling*(recordedPath, packageDir, projectRoot: string): string =
+  ## The recorded path, in the spelling the renderer opens tabs by.
+  ##
+  ## ## Why a translation is needed at all
+  ##
+  ## Two spellings of one file, and both are correct for their own side. The
+  ## browser Noir compiler is handed a virtual package tree and records
+  ## `hello_noir/src/main.nr`, because that is the key it was given, and the
+  ## engine echoes that string back in every `ct/complete-move` location. The
+  ## renderer keys tabs, file-tree rows and breakpoints by
+  ## `/hello_noir/src/main.nr` — `utils.openTab` treats a relative name as a
+  ## path it must rescue by tail-matching, and `edit_mode.sourceScore` awards
+  ## a bonus for a leading `/src/` segment.
+  ##
+  ## So a location handed to `editor_service` in the compiler's spelling opens
+  ## a SECOND, empty tab beside the one the user is looking at — the failure
+  ## that looks like it worked. `noir_build_producer.rendererPath` makes this
+  ## same conversion for diagnostics and gives the same reasons; this is the
+  ## same rule for locations, in the pure layer, so the browser host can apply
+  ## it without owning it.
+  ##
+  ## A path the prefix does not match is passed through unchanged rather than
+  ## having a slash bolted on: the stdlib's own sources reach locations
+  ## occasionally, and inventing a project-relative identity for them would
+  ## make a location claim the project contains a file it does not.
+  if recordedPath.len == 0 or packageDir.len == 0: return recordedPath
+  let prefix = packageDir & "/"
+  if recordedPath.startsWith(prefix):
+    return projectRoot & "/" & recordedPath[prefix.len .. ^1]
+  recordedPath
+
+proc retargetLocationPaths*(frame: JsonNode; packageDir, projectRoot: string):
+    int =
+  ## Rewrite every `path` under a DAP frame's `location` objects, in place.
+  ##
+  ## Returns how many were rewritten, so a caller can assert a number rather
+  ## than assert that a walk happened. Zero over a frame that carries a
+  ## location is the silent case: the session steps, the position resolves,
+  ## and the editor opens a second empty tab.
+  ##
+  ## The walk is over the whole frame rather than one known key because the
+  ## engine puts a `Location` in several places — `ct/complete-move`'s body is
+  ## one, a call's `location` is another — and a rewrite that knew only the
+  ## first would leave the calltrace pointing at the compiler's spelling.
+  if frame.isNil: return 0
+  case frame.kind
+  of JObject:
+    for key, value in frame.pairs:
+      if key == "path" and value.kind == JString:
+        let retargeted =
+          rendererSpelling(value.getStr, packageDir, projectRoot)
+        if retargeted != value.getStr:
+          frame[key] = newJString(retargeted)
+          result += 1
+      else:
+        result += retargetLocationPaths(value, packageDir, projectRoot)
+  of JArray:
+    for item in frame.items:
+      result += retargetLocationPaths(item, packageDir, projectRoot)
+  else: discard
 
 proc sourceFileCount*(payload: ReplayVfsPayload): int =
   ## Files that are source rather than trace plumbing.
