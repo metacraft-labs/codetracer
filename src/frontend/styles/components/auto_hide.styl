@@ -574,6 +574,41 @@
 #auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child::before
   display: none
 
+// ...and with no curve there, the tab's left corners have nothing to round
+// against: it sits flush with the panel's own left edge, and the upward bridge
+// shadow already joins the two into one shape.  Rounding them only puts a notch
+// in an edge that should run straight down from the panel into the tab, so
+// square the left side and leave the right corners as they are.
+#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child
+  // Top-left only.  That corner is where the tab meets the panel above, and the
+  // bridge shadow already fuses the two, so a curve there notches an edge that
+  // should run straight down.  The bottom-left is the opposite case: nothing
+  // continues past it, the tab simply ends, so it keeps the 0.36em every other
+  // corner has.
+  border-top-left-radius: 0
+
+// The panel's own bottom-left corner is the last thing rounding that edge.  With
+// the first tab active the two are one shape, squared down the left side, so a
+// curve here only reintroduces the notch the rule above just removed.
+//
+// Scoped with :has() to that case alone: with any later tab active the first tab
+// is an inactive pill sitting apart from the panel, and the panel's corner
+// should still curve.  The strip lives in `#status-base` and the panel under
+// `#root-container`, so `body` is the nearest shared ancestor to hang this on.
+//
+// The `.ct-docked-outline` SVG reads its corner radii back out of computed
+// style, so the traced line follows this without a second change.
+// Both surfaces that can sit above the tab have to give up the same corner:
+// clicking docks the panel, hovering opens the overlay, and either way the
+// square-topped tab is directly beneath.  `#auto-hide-overlay-body` is listed
+// too because it, not the outer overlay, paints the background and clips to the
+// rounded corners.
+body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
+  #auto-hide-docked-bottom,
+  #auto-hide-overlay.auto-hide-overlay-bottom,
+  #auto-hide-overlay.auto-hide-overlay-bottom #auto-hide-overlay-body
+    border-bottom-left-radius: 0
+
 // ---------------------------------------------------------------------------
 // Tab label span — carries the text rotation so the tab div stays un-rotated.
 // ---------------------------------------------------------------------------
