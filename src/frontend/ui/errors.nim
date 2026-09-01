@@ -15,9 +15,13 @@
 ## ---------------------------------------------------------------------------
 
 import
-  ui_imports, ../[types, communication]
+  ui_imports, auto_hide, ../[types, communication]
 
 import std/json
+# `Signal.val` is a template, so reading an `ErrorsVM` signal here needs the
+# module in scope even though the type arrives through `errors_vm` — the same
+# reason `ui/build.nim` imports it.
+import isonim/core/signals
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
@@ -25,7 +29,9 @@ from ../viewmodel/store/types as vmtypes import
   blsNone, blsError, blsWarning, blsInfo, pfAll, pfErrors, pfWarnings
 from ../viewmodel/viewmodels/errors_vm import
   ErrorsVM, createErrorsVM, setProblems, appendProblem, clearProblems,
-  setFilter, setGroupByFile, toggleGroupByFile, jumpToProblem
+  setFilter, setGroupByFile, toggleGroupByFile, jumpToProblem,
+  ErrorNavOutcome, enoEmpty, enoMoved, enoWrapped,
+  gotoNextError, gotoPreviousError, highlightFirstError
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_errors_view import mountIsoNimErrors
 
@@ -39,6 +45,7 @@ var errorsComponentRef: ErrorsComponent
 var isoNimErrorsMounted*: bool = false
 
 proc tryMountIsoNimErrorsPanel*()
+proc installErrorsVMCallbacks*(vm: ErrorsVM)
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
@@ -55,6 +62,7 @@ proc initErrorsVMWithStore*(store: ReplayDataStore) =
     isoNimErrorsMounted = false
   errorsVMStore = store
   errorsVMInstance = createErrorsVM(store)
+  installErrorsVMCallbacks(errorsVMInstance)
   clog "ErrorsVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimErrorsPanel()
 
@@ -82,8 +90,72 @@ proc initErrorsVM*() =
 
   errorsVMStore = createReplayDataStore(stubBackend)
   errorsVMInstance = createErrorsVM(errorsVMStore)
+  installErrorsVMCallbacks(errorsVMInstance)
   clog "ErrorsVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimErrorsPanel()
+
+proc revealProblemsPanel*() =
+  ## Bring the Problems pane on screen **without focusing it**.
+  ##
+  ## EMT-D21: revealing is not focusing. ``openLayoutTab`` activates the tab
+  ## in the GoldenLayout tree and ``revealOverlay`` un-hides a pinned
+  ## auto-hide panel; neither moves keyboard focus, and neither is allowed
+  ## to start doing so. The two cases are both handled because the Problems
+  ## pane can live in either place depending on the user's layout, and a
+  ## reveal that only worked in one would make `next error` conditional on
+  ## layout — the thing EMT-D22.4 rules out.
+  if data.isNil or data.ui.layout.isNil:
+    return
+  if data.ui.componentMapping[Content.BuildErrors].len > 0:
+    data.openLayoutTab(Content.BuildErrors)
+  if not autoHideState.isNil:
+    let panel = autoHideState.findPanelByContent(Content.BuildErrors)
+    if not panel.isNil:
+      revealOverlay(panel)
+  # And MOUNT it, for the reason `web_noir_build.ensureBuildPaneVisible` gives
+  # for the BUILD pane: `tryMountIsoNimErrorsPanel` retries for ~2 s after the
+  # VM is created and then gives up, which is long expired by the time anyone
+  # presses a key. It is idempotent, so this costs nothing when the pane was
+  # already mounted and is the difference between painted rows and an empty
+  # container when it was not.
+  tryMountIsoNimErrorsPanel()
+
+proc installErrorsVMCallbacks*(vm: ErrorsVM) =
+  ## Wire the Problems pane to the editor.
+  ##
+  ## Before this existed, ``ErrorsVM.jumpToProblem`` dispatched
+  ## ``ct/jump-location``, which `backend/dap_dialect.md` §7 records as one of
+  ## nine commands with **no engine implementation** — so clicking a build
+  ## error was a silent no-op in production while the mock-backend view tests
+  ## stayed green. This is the same treatment ``installSearchVMCallbacks``
+  ## (`ui/search_results.nim:158`) already gives the Find in Files pane, and
+  ## it reaches the editor through the same live ``data.openLocation``.
+  if vm.isNil:
+    return
+  vm.onJumpToProblem = proc(path: string, line: int, col: int) =
+    discard data.openLocation(cstring(path), line, col)
+  vm.onRevealPanel = proc() =
+    revealProblemsPanel()
+
+proc gotoNextBuildError*() =
+  ## The ``aGotoNextError`` action.
+  if errorsVMInstance.isNil:
+    return
+  discard errorsVMInstance.gotoNextError()
+
+proc gotoPreviousBuildError*() =
+  ## The ``aGotoPreviousError`` action.
+  if errorsVMInstance.isNil:
+    return
+  discard errorsVMInstance.gotoPreviousError()
+
+proc highlightFirstBuildError*() =
+  ## Select the first error after a failed build, without moving focus.
+  ## Called from ``build.onBuildCode`` and from the wasm producer's failure
+  ## path — the two places a build can fail.
+  if errorsVMInstance.isNil:
+    return
+  discard errorsVMInstance.highlightFirstError()
 
 proc safeStr(s: cstring): string =
   ## Convert a possibly-null cstring to an empty string.  E2E tests
@@ -127,6 +199,25 @@ proc syncLegacyErrorsIntoVM*(self: ErrorsComponent) =
   let buildComp = self.data.buildComponent(0)
   if buildComp.isNil:
     errorsVMInstance.setProblems(@[])
+    return
+
+  # AN EMPTY LEGACY RECORD DOES NOT MEAN "NO PROBLEMS".
+  #
+  # This proc mirrors `buildComponent(0).build.problems`, which only the
+  # DESKTOP producer fills (`ui/build.nim`'s `CODETRACER::build-*` handlers).
+  # The browser's producer is `viewmodels/noir_build_producer.nim`, which feeds
+  # the VMs directly and never touches the legacy record — so on the web arm
+  # this list is permanently empty.
+  #
+  # It is called on every panel mount, and `tryMountIsoNimErrorsPanel` calls it
+  # again right after mounting. Without this guard, revealing the Problems pane
+  # after a failed browser build ERASED the diagnostics that build had just
+  # produced: measured as a pane that reported "no errors" while the compiler's
+  # rows were sitting in the VM a moment earlier.
+  if buildComp.build.problems.len == 0 and
+     errorsVMInstance.problems.val.len > 0:
+    errorsVMInstance.setFilter(problemFilterToVM(self.filter))
+    errorsVMInstance.setGroupByFile(self.groupByFile)
     return
 
   var rows: seq[BuildProblemLine] = @[]

@@ -116,6 +116,26 @@ const MONACO_SHORTCUTS_WHITELIST: seq[cstring] =
       "SHIFT+F12",
       "CTRL+KeyS",
   ]
+  # BUILD-ERROR NAVIGATION IS DELIBERATELY *NOT* IN THE LIST ABOVE, and the
+  # reason is worth recording because the obvious change is the wrong one.
+  #
+  # Mousetrap's DEFAULT `stopCallback` ignores a chord raised inside a
+  # textarea, and Monaco's input surface is one — so a global binding would
+  # normally never fire while the user was editing, which is the only place
+  # anybody presses "go to next error" from. That is what this whitelist is
+  # for, and `ALT+F8` was added to it on exactly that reasoning.
+  #
+  # But `ui/shortcuts.nim:318` overrides `stopCallback` to `return false` for
+  # the whole application. The global binding therefore ALREADY fires with the
+  # caret in the editor, and adding the chord here made it fire TWICE — once
+  # through Mousetrap and once through the delegated Monaco command. Measured
+  # in a browser tab: one press of ALT+F8 on a one-error build advanced to the
+  # error and then wrapped, reporting "wrapped to first error" for a list the
+  # user had not finished walking once.
+  #
+  # The entries above predate that override and are left alone: F2/F8/F10-F12
+  # are chords Monaco itself would otherwise consume, and changing them is a
+  # separate question from this one.
 const EDITOR_GUTTER_PADDING = 2 #px
 
 proc getLineFunctionName(self: EditorViewComponent, line: int): cstring

@@ -1537,9 +1537,27 @@ proc makeEditorView*(
   cdebug "editor: make editor view: active = " & $editorName
   data.services.editor.active = editorName
 
-proc focusLine(editor: EditorViewComponent, line: int) =
+const NO_COLUMN* = 0
+  ## "no column was specified" for the caret-moving path below.
+  ##
+  ## Zero rather than -1 because that is the value this code has always
+  ## passed to Monaco, which clamps a column below 1 up to 1. Keeping the
+  ## default identical means every existing caller — search results,
+  ## calltrace, stepping, the command palette — lands exactly where it landed
+  ## before, and only a caller that asks for a column gets one.
+
+proc focusLine(editor: EditorViewComponent, line: int, col: int = NO_COLUMN) =
+  ## Move the caret to ``line`` (and ``col`` when given), scroll it into view
+  ## and focus the editor.
+  ##
+  ## The column is threaded through for build-error navigation: a diagnostic
+  ## carries a column and landing on the start of the line instead of on the
+  ## offending token is the difference between "go to error" and "go to the
+  ## line the error is on". Monaco columns are 1-based, which is also how the
+  ## compilers this feature reads report them, so the value passes straight
+  ## through.
   editor.monacoEditor.revealLineInCenter(line)
-  editor.monacoEditor.setPosition(MonacoPosition(lineNumber: line, column: 0))
+  editor.monacoEditor.setPosition(MonacoPosition(lineNumber: line, column: col))
   editor.monacoEditor.focus()
 
 proc openNewEditorView*(
@@ -1547,7 +1565,8 @@ proc openNewEditorView*(
     name: cstring,
     editorView: EditorView,
     noInfoMessage: cstring = cstring"",
-    line:int = NO_LINE) {.async.} =
+    line:int = NO_LINE,
+    col: int = NO_COLUMN) {.async.} =
   if name == "NO SOURCE" or editorView == ViewNoSource:
     data.openNoSourceView(name, noInfoMessage)
     return
@@ -1603,7 +1622,7 @@ proc openNewEditorView*(
         if isNull(data.ui.editors[editorName].monacoEditor):
           discard kdom.setTimeout(cb, 10)
         else:
-          data.ui.editors[editorName].focusLine(line)
+          data.ui.editors[editorName].focusLine(line, col)
 
       discard kdom.setTimeout(cb, 10)
 
@@ -1633,7 +1652,7 @@ proc makeEditorViewDetailed(
   cdebug "editor: after open layout tab, active = " & $editorName
   data.services.editor.active = editorName
 
-proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line: int = NO_LINE) =
+proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line: int = NO_LINE, col: int = NO_COLUMN) =
   if tab.isNil:
     cerror "tabs: tab is nil in showTab"
     return
@@ -1668,7 +1687,7 @@ proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line
       editor.noInfo.message = noInfoMessage
 
     if line != -1:
-      editor.focusLine(line)
+      editor.focusLine(line, col)
 
     # else:
     #   # TODO expansions in low level editors?
@@ -1712,7 +1731,8 @@ proc openTab*(
     name: cstring,
     editorView: EditorView = EditorView.ViewSource,
     noInfoMessage: cstring = cstring"",
-    line: int = NO_LINE) = #  lang: Lang = LangUnknown) =
+    line: int = NO_LINE,
+    col: int = NO_COLUMN) = #  lang: Lang = LangUnknown) =
   var tabName = editorTabPath(name, editorView)
   if editorView in {EditorView.ViewSource, EditorView.ViewTargetSource} and
       not data.services.editor.open.hasKey(tabName):
@@ -1732,9 +1752,9 @@ proc openTab*(
   # let tabName = if name != "unknown": name else: "NO SOURCE"
   # singleton no info page?
   if not data.services.editor.open.hasKey(tabName):
-    discard data.openNewEditorView(tabName, editorView, noInfoMessage=noInfoMessage, line=line)
+    discard data.openNewEditorView(tabName, editorView, noInfoMessage=noInfoMessage, line=line, col=col)
   elif not data.services.editor.open[tabName].loading:
-    data.showTab(tabName, noInfoMessage=noInfoMessage, line=line)
+    data.showTab(tabName, noInfoMessage=noInfoMessage, line=line, col=col)
   # TODO: For now comment out and find a workaround later on
   # Issue is with recursion imports with event_helpers(communication.nim)
   # else:

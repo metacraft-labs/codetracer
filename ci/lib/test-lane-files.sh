@@ -530,10 +530,18 @@ test_lane_files() {
 		# no lane knew about — the "registered in only one place runs nowhere"
 		# shape.  Its C-backend counterpart is
 		# `src/tests/cli/target_axes_test.nim`, in the `cli-record` lane.
+		#
+		# `shortcut_bindings_test.nim` asserts that the SHIPPED
+		# `default_config.yaml` actually binds the chords it names, and that
+		# nothing landed in `conflictList` — where `initShortcutMap` silently
+		# drops a second claim on a chord. It is JS-only because
+		# `frontend/config.nim` is built on `std/jsffi`'s `JsAssoc`, and it
+		# needs the same `globalThis.window` shim the scratchpad suite does.
 		printf '%s\n' \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
 			src/frontend/tests/scratchpad_add_dispatch_test.nim \
+			src/frontend/tests/shortcut_bindings_test.nim \
 			src/frontend/tests/target_axes_js_test.nim
 		;;
 

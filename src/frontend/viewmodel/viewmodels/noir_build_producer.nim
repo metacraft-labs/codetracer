@@ -115,6 +115,26 @@ type
       ## run before settling it, but a transport that delivered twice would
       ## otherwise append a second copy of every line.
 
+    onProblem*: proc(problem: BuildProblemLine)
+      ## Mirror a diagnostic into the PROBLEMS pane, when a host asks for it.
+      ##
+      ## The desktop feeds two view-models from one diagnostic —
+      ## `ui/build.nim:448` calls `BuildVM.appendProblem` and
+      ## `ui/errors.nim:201` calls `ErrorsVM.appendProblem` — and this
+      ## producer only ever fed the first. The consequence was that in a
+      ## browser tab the BUILD pane painted diagnostics and the PROBLEMS pane
+      ## stayed empty, which also meant `BuildVM.problems` had no production
+      ## reader at all: it was written on every build and read by nothing but
+      ## tests.
+      ##
+      ## A callback rather than a direct call because this module is in the
+      ## ViewModel layer, which `ci/test/hostfree-build.sh` forbids from
+      ## reaching the host. The host installs it; see `ui/web_noir_build.nim`.
+    onProblemsCleared*: proc()
+      ## Paired with `onProblem`: a new compile clears the pane's problem
+      ## list, and the mirror has to be cleared with it or the second build
+      ## shows the first build's errors underneath its own.
+
 const
   noirBuildFaultPrefix* = "codetracer: "
     ## Prefixes the lines this producer writes ABOUT the build rather than
@@ -303,6 +323,8 @@ proc paintDiagnostic(producer: NoirBuildProducer; diagnostic: NoirDiagnostic) =
     path = problem.path,
     line = problem.line)
   producer.vm.appendProblem(problem)
+  if not producer.onProblem.isNil:
+    producer.onProblem(problem)
   producer.vm.appendError(BuildErrorLine(
     locationPath: problem.path,
     locationLine: problem.line,
@@ -347,6 +369,8 @@ proc beginPhase*(producer: NoirBuildProducer; phase: NoirBuildPhase;
     # Only the first phase of a Run clears. A trace that wiped the pane would
     # delete the compile's own warnings before the user had read them.
     producer.vm.clearOutput()
+    if not producer.onProblemsCleared.isNil:
+      producer.onProblemsCleared()
 
 proc onOutput*(producer: NoirBuildProducer; chunk: ProcessOutputChunk) =
   ## The worker's `output` message.

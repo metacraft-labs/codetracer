@@ -22,7 +22,7 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/build_vm import
   BuildVM, BuildStatus, createBuildVM,
   setCommand, setRunning, setBuildStartTime, setCode, appendLine,
-  appendError, appendProblem, clearOutput
+  appendError, appendProblem, clearOutput, jumpToLine
 from isonim/web/dom_api import nil
 # `Signal.val` is a template, so reading a `BuildVM` signal here needs the
 # module in scope even though the type arrives through `build_vm`. Used by the
@@ -49,6 +49,22 @@ proc ansiToHtml(raw: cstring): cstring
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
+proc installBuildVMJumpCallback(vm: BuildVM) =
+  ## Give the BUILD pane's diagnostic rows the click their own header has
+  ## documented since the Karax->IsoNim migration dropped it (commit
+  ## 20e24939). `lineClass` still marks them `build-clickable` and the
+  ## stylesheet still gives that class a `cursor: pointer`, so until now the
+  ## rows looked clickable and did nothing.
+  ##
+  ## Reaches the editor through `data.openLocation`, the same live path the
+  ## Find in Files pane uses -- NOT through `ct/jump-location`, which
+  ## `backend/dap_dialect.md` section 7 records as having no engine
+  ## implementation at all.
+  if vm.isNil:
+    return
+  vm.onJumpToLine = proc(path: string, line: int) =
+    discard data.openLocation(cstring(path), line)
+
 proc initBuildVMWithStore*(store: ReplayDataStore) =
   ## Initialise the parallel ``BuildVM`` using an externally-provided
   ## ``ReplayDataStore`` (typically the shared store from
@@ -60,6 +76,7 @@ proc initBuildVMWithStore*(store: ReplayDataStore) =
     isoNimBuildMounted = false
   buildVMStore = store
   buildVMInstance = createBuildVM(store)
+  installBuildVMJumpCallback(buildVMInstance)
   clog "BuildVM: parallel ViewModel instance created (shared store)"
   tryMountIsoNimBuildPanel()
 
@@ -87,6 +104,7 @@ proc initBuildVM() =
 
   buildVMStore = createReplayDataStore(stubBackend)
   buildVMInstance = createBuildVM(buildVMStore)
+  installBuildVMJumpCallback(buildVMInstance)
   clog "BuildVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimBuildPanel()
 
@@ -526,6 +544,15 @@ method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
       let errorsPanel = autoHideState.findPanelByContent(Content.BuildErrors)
       if not errorsPanel.isNil:
         revealOverlay(errorsPanel)
+
+    # HIGHLIGHT THE FIRST ERROR, AND DO NOT FOCUS ANYTHING (EMT-D21).
+    #
+    # `focusBuild` and `openLayoutTab` above only activate a tab; neither moves
+    # keyboard focus, and this must not either. Selecting the first row gives
+    # `next error` an origin and shows the user where they will land, while the
+    # keyboard stays wherever it was — a build that pulled the caret out of the
+    # editor would be unusable, and builds are frequent.
+    errors.highlightFirstBuildError()
 
     self.data.functions.switchToEdit(self.data)
   else:

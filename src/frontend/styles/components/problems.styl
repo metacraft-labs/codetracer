@@ -84,6 +84,40 @@
   &:hover
     background: colors-ui-surface-input-default
 
+// The row `next error` / `previous error` has moved to, and the row a failed
+// build highlights.
+//
+// WITHOUT THIS RULE THE SELECTION IS INVISIBLE. The view has always been able
+// to add a class; nothing styled it, so a user pressing "next error" would see
+// the caret move and the Problems list look identical — which is the
+// "selecting without showing it" half of the confusion EMT-D22.5 is about.
+//
+// A left border as well as a background, because the background alone is
+// nearly the hover colour and the two states must be distinguishable while the
+// pointer is over the list.
+.problems-row-selected
+  background: colors-ui-surface-base-selected
+  box-shadow: inset 0.1875em 0 0 colors-ui-surface-action-primary
+  &:hover
+    background: colors-ui-surface-base-selected
+
+// What navigation announced -- "error 2 of 5", "wrapped to first error",
+// "no errors". Sits in the header beside the counts.
+//
+// The repo has no status bar (the only `setStatus` in the tree is the LSP
+// client's private one), so the announcement is painted in the pane it is
+// about. Empty until something is announced, which is why there is no
+// reserved height here: an always-present empty element would push the filter
+// buttons around for no reason.
+.problems-status
+  margin-left: 10px
+  font-size: 11px
+  opacity: 0.75
+  font-style: italic
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
+
 .problems-icon
   flex-shrink: 0
   width: 16px

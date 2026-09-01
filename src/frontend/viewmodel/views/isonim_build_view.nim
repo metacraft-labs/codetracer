@@ -170,7 +170,8 @@ proc renderBuildPanel*(r: MockRenderer; vm: BuildVM): MockNode =
       # Capture loop-local value so DSL closures don't share state.
       let lineCopy = line
       let lineNode = ui(r):
-        tdiv(class = lineClass(lineCopy)):
+        tdiv(class = lineClass(lineCopy),
+             onclick = proc() = vm.jumpToLine(lineCopy)):
           text lineCopy.htmlText
       r.appendChild(outputContainer, lineNode)
 
@@ -232,11 +233,19 @@ when defined(js):
       while not isonim_dom.isNodeNil(containerAsNode.firstChild):
         discard isonim_dom.removeChild(containerAsNode, containerAsNode.firstChild)
       for line in lines:
+        let lineCopy = line
         let lineNode = isonim_dom.createElement(isonim_dom.document, cstring"div")
-        isonim_dom.setAttribute(lineNode, cstring"class", cstring(lineClass(line)))
+        isonim_dom.setAttribute(lineNode, cstring"class", cstring(lineClass(lineCopy)))
         # innerHTML — the htmlText carries ANSI-decorated <span> runs
         # from ansi_up (legacy view used Karax's `verbatim`).
-        lineNode.innerHTML = cstring(line.htmlText)
+        lineNode.innerHTML = cstring(lineCopy.htmlText)
+        # THE CLICK THE HEADER HAS ALWAYS DOCUMENTED. `build-clickable` and
+        # its `cursor: pointer` have been on these rows since the Karax
+        # migration dropped the handler; this is the handler.
+        if lineCopy.locationPath.len > 0 and lineCopy.locationLine > 0:
+          isonim_dom.addEventListener(isonim_dom.Node(lineNode), cstring"click",
+            proc(ev: isonim_dom.Event) =
+              vm.jumpToLine(lineCopy))
         isonim_dom.appendChild(isonim_dom.Node(outputContainer),
                                isonim_dom.Node(lineNode))
       if autoScrollOn:
