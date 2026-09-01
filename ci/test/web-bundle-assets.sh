@@ -34,9 +34,11 @@
 # gate deliberately does not restate its result. What is new here is that the
 # files that protocol needs are now placed where a tab can fetch them.
 #
-# THE TWO WASM MODULES ARE NOT IN THE REPO (~16 MB and ~4.6 MB, built from
-# published refs in the `noir` fork). Point CT_NOIR_WASM_COMPILER and
-# CT_NOIR_WASM_TRACER at them. WITHOUT THEM THIS SKIPS THAT PART LOUDLY AND
+# THE THREE WASM MODULES ARE NOT IN THE REPO (~16 MB and ~4.6 MB from published
+# refs in the `noir` fork; ~5.2 MB from `aztec-avm-runtime`'s
+# `avm-transpiler-wasm`, which wraps Aztec's own transpiler). Point
+# CT_NOIR_WASM_COMPILER, CT_NOIR_WASM_TRACER and CT_AVM_TRANSPILER_WASM at
+# them. WITHOUT THEM THIS SKIPS THAT PART LOUDLY AND
 # STILL CHECKS EVERYTHING ELSE — the same convention `noir-wasm-worker-e2e.sh`
 # established, and for the same reason: a gate that silently passes over an
 # absent input is how a deployment ships with no modules and nobody notices.
@@ -44,6 +46,9 @@
 # Usage:  bash ci/test/web-bundle-assets.sh
 # Env:    CT_NOIR_WASM_COMPILER  path to noir_wasm.wasm            (optional)
 #         CT_NOIR_WASM_TRACER    path to noir_tracer_wasm.wasm     (optional)
+#         CT_AVM_TRANSPILER_WASM path to avm_transpiler_wasm.wasm  (optional)
+#         CT_NOIR_WASM_REF       the `noir` rev the first two came from
+#         CT_AVM_TRANSPILER_REF  the rev the transpiler came from
 #         CT_WEB_BUNDLE_DIR      output dir (default src/build-debug/web)
 #         ISONIM_SRC             isonim source tree
 
@@ -419,6 +424,11 @@ place_module() {
 }
 place_module CT_NOIR_WASM_COMPILER noir-compiler
 place_module CT_NOIR_WASM_TRACER noir-tracer
+# The third module is NOT from the `noir` fork — it wraps Aztec's own
+# `avm-transpiler` — which is why it has its own variable and its own ref below
+# rather than riding on `CT_NOIR_WASM_REF`. A deployment that placed it under
+# the Noir ref would be claiming a provenance that names the wrong repository.
+place_module CT_AVM_TRANSPILER_WASM avm-transpiler
 echo
 
 # ---------------------------------------------------------------------------
@@ -456,11 +466,15 @@ revision="${CT_WEB_REVISION:-$(git -C "${repo_root}" rev-parse --short HEAD 2>/d
 # that cannot say where it came from is dropped by `registrableModules` — so
 # an unset value here disables the module rather than shipping it anonymously.
 noir_ref="${CT_NOIR_WASM_REF:-}"
+# The transpiler's own, for the reason `place_module` gives above: it is a
+# different repository and a different crate, and one variable covering both
+# would make either module able to ship under the other's provenance.
+avm_transpiler_ref="${CT_AVM_TRANSPILER_REF:-}"
 
 modules_tsv="${cache}/declared-modules.tsv"
 : >"${modules_tsv}"
 declare_module() {
-	local id="$1" crate="$2"
+	local id="$1" crate="$2" ref="$3" repo="$4"
 	local path
 	path="$(printf '%s\n' "${manifest}" | awk -F'\t' -v i="${id}" '$1==i{print $2}')"
 	local file="${out_dir}/${path}"
@@ -470,16 +484,18 @@ declare_module() {
 	# the bytes about to be uploaded, so a truncated copy is a failed deploy
 	# rather than a broken page.
 	[ -f "${file}" ] || return 0
-	if [ -z "${noir_ref}" ]; then
-		bad "${id}: placed, but CT_NOIR_WASM_REF is unset, so it has no provenance and the page would drop it"
+	if [ -z "${ref}" ]; then
+		bad "${id}: placed, but its ref variable is unset, so it has no provenance and the page would drop it"
 		return 0
 	fi
 	printf '%s\t/%s\t%s\t%s\n' "${id}" "${path}" \
 		"$(wc -c <"${file}" | tr -d ' ')" \
-		"noir@codetracer ${noir_ref} ${crate}" >>"${modules_tsv}"
+		"${repo} ${ref} ${crate}" >>"${modules_tsv}"
 }
-declare_module noir-compiler "compiler/wasm"
-declare_module noir-tracer "tooling/tracer_wasm"
+declare_module noir-compiler "compiler/wasm" "${noir_ref}" "noir@codetracer"
+declare_module noir-tracer "tooling/tracer_wasm" "${noir_ref}" "noir@codetracer"
+declare_module avm-transpiler "avm-transpiler-wasm" "${avm_transpiler_ref}" \
+	"aztec-avm-runtime@browser/vendor-aztec-nr"
 
 if ! nim c --hints:off --warnings:off --nimcache:"${cache}/render" \
 	-o:"${cache}/render-bin" ci/test/web_deployment_render.nim \

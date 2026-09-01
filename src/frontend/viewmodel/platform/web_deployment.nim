@@ -463,6 +463,8 @@ const
   noirTracerModuleId* = "noir-tracer"
   noirCompilerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_wasm.wasm"
   noirTracerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_tracer_wasm.wasm"
+  avmTranspilerModuleId* = "avm-transpiler"
+  avmTranspilerWasmPath* = staticAssetPrefix[1 .. ^1] & "avm_transpiler_wasm.wasm"
 
 proc webRuntimeAssets*(): seq[RuntimeAsset] =
   ## Everything a web deployment serves, in delivery order.
@@ -498,7 +500,14 @@ proc webRuntimeAssets*(): seq[RuntimeAsset] =
       required: false,
       absenceBehaviour:
         "a compiled Noir program cannot be traced in the tab, so replay is " &
-        "offered only for recordings produced elsewhere")]
+        "offered only for recordings produced elsewhere"),
+    RuntimeAsset(
+      id: avmTranspilerModuleId, path: avmTranspilerWasmPath, mode: damFetched,
+      required: false,
+      absenceBehaviour:
+        "an Aztec contract compiled in the tab cannot be turned into AVM " &
+        "bytecode, so `avm-transpiler transpile` is reported as having no " &
+        "wasm build in this deployment and a contract stops at the artifact")]
 
 proc requiredRuntimeAssets*(): seq[RuntimeAsset] =
   for asset in webRuntimeAssets():

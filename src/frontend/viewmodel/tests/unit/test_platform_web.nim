@@ -955,14 +955,15 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     check (id: "renderer", mode: damBundled) in byId
     check (id: "wasm-worker", mode: damAsset) in byId
 
-  test "the two Noir modules are FETCHED, never bundled":
-    # ~16 MB and ~4.6 MB. Bundling them inflates by a third as base64 and puts
-    # the result in front of first paint, for a capability most sessions never
-    # invoke.
+  test "the three toolchain modules are FETCHED, never bundled":
+    # ~16 MB, ~4.6 MB and ~5.2 MB. Bundling them inflates by a third as base64
+    # and puts the result in front of first paint, for a capability most
+    # sessions never invoke.
     let fetched = fetchedRuntimeAssets()
     var ids: seq[string]
     for asset in fetched: ids.add asset.id
-    check ids.sorted == @[noirCompilerModuleId, noirTracerModuleId].sorted
+    check ids.sorted == @[noirCompilerModuleId, noirTracerModuleId,
+                          avmTranspilerModuleId].sorted
     for asset in fetched:
       check asset.mode == damFetched
       check asset.mode != damBundled
@@ -974,6 +975,7 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     # at run time and nowhere earlier.
     check noirCompilerModuleId == "noir-compiler"
     check noirTracerModuleId == "noir-tracer"
+    check avmTranspilerModuleId == "avm-transpiler"
 
   test "every OPTIONAL asset says what its absence costs":
     # The same rule `capabilities.undeclaredDegradations` enforces one layer
