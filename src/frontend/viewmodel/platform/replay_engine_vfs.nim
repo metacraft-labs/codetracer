@@ -374,6 +374,29 @@ proc rendererSpelling*(recordedPath, packageDir, projectRoot: string): string =
     return projectRoot & "/" & recordedPath[prefix.len .. ^1]
   recordedPath
 
+proc isLocationPathKey*(key: string): bool =
+  ## Whether a `Location` field names a source path that must be retargeted.
+  ##
+  ## A SUFFIX RULE, DELIBERATELY, AND NOT A LIST OF THREE. `Location` carries
+  ## `path`, `highLevelPath` and `lowLevelPath`, and they are read by
+  ## DIFFERENT consumers: `editor_service` keys its `CODETRACER::tab-load`
+  ## round trip on `highLevelPath` — `web_entry_surface` says so on the
+  ## responder, "`argId` is `location.highLevelPath` and must stay exactly
+  ## that" — while `missingPath` and the stack frame come off `path`.
+  ##
+  ## Rewriting only `path` was measured in a browser and is the reason this is
+  ## a rule: the position resolved with `missingPath=false`, the engine held
+  ## the source, and the editor still painted nothing, because the tab was
+  ## requested under a spelling the bundled template host has no file for. One
+  ## key short is a session correct everywhere a test looks and blank where a
+  ## user looks — and a hard-coded list of three would be one key short again
+  ## the moment a fourth consumer reads a fourth field.
+  ##
+  ## Over-matching is safe by construction. `rendererSpelling` passes through
+  ## anything that does not start with the package prefix, so a field that
+  ## merely ends in `Path` and holds something else is returned unchanged.
+  key == "path" or key.endsWith("Path")
+
 proc retargetLocationPaths*(frame: JsonNode; packageDir, projectRoot: string;
                             traceFolder = "trace"): int =
   ## Rewrite every `path` under a DAP frame's `location` objects, in place.
@@ -404,8 +427,7 @@ proc retargetLocationPaths*(frame: JsonNode; packageDir, projectRoot: string;
       # `trace/hello_noir/src/main.nr` and the bundled template host has no
       # such file. One key short is a session that is correct everywhere a
       # test looks and blank where a user looks.
-      if key in ["path", "highLevelPath", "lowLevelPath"] and
-         value.kind == JString:
+      if isLocationPathKey(key) and value.kind == JString:
         let retargeted = rendererSpelling(
           stripTraceFolder(value.getStr, traceFolder), packageDir, projectRoot)
         if retargeted != value.getStr:

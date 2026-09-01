@@ -332,11 +332,19 @@ ck "$([ "${distinct}" -gt 1 ] && echo ok || echo no)" \
 	"stepping advanced through ${distinct} distinct position(s)"
 
 painted_chars="$(field "${control}" '.editorPaintedChars')"
+raw_lines="$(field "${control}" '.editorRawLineCount')"
+editors="$(field "${control}" '.editorWidgetCount')"
 no_source="$(field "${control}" '.noSourceVisible')"
+# THE ZERO, MADE LEGIBLE. `editorPaintedChars: 0` is equally consistent with
+# "no editor on this layout" and "an editor behind the BUILD pane", and those
+# need opposite fixes. Reported before the assertion so a failure names which
+# one it is instead of leaving the next reader to guess.
+before_dismiss="$(field "${control}" '.editorPaintedCharsBeforeDismiss')"
+note "editor widgets: ${editors}, raw .view-line elements: ${raw_lines}, painted chars: ${before_dismiss} before dismissing the BUILD overlay, ${painted_chars} after"
 # THE ACCEPTANCE. Painted, hit-tested text in the editor — not `innerText`,
 # not a tab title, not a resolved location.
 ck "$([ "${painted_chars}" -gt 40 ] && echo ok || echo no)" \
-	"the editor PAINTED ${painted_chars} characters of source"
+	"the editor PAINTED ${painted_chars} characters of source, after the user dismisses the BUILD overlay their own Run opened"
 ck "$([ "${no_source}" = false ] && echo ok || echo no)" \
 	"and the NO SOURCE view is not what the user is looking at"
 
@@ -346,6 +354,10 @@ ck "$([ "${errors}" -eq 0 ] && echo ok || echo no)" \
 
 note "replay milestones:"
 jq -r '.replayLines[]' <"${control}" | sed 's/^/        /'
+note "engine requests:"
+jq -r '.engineRequests[] | "        \(.status) \(.contentType) \(.bytes) \(.url)"' <"${control}"
+note "why lines were not counted (first 4):"
+jq -r '.editorRejected[0:4][]' <"${control}" | sed 's/^/        /'
 note "painted (first 6):"
 jq -r '.editorPaintedLines[0:6][]' <"${control}" | sed 's/^/        /'
 echo
@@ -375,6 +387,8 @@ if run_probe "${arm_a}" "${arm_a_out}"; then
 		"arm A: the engine was not fetched"
 	ck "$([ "${a_painted}" -le 40 ] && echo ok || echo no)" \
 		"arm A: and no source was painted from a session (${a_painted} chars)"
+	note "arm A engine requests:"
+	jq -r '.engineRequests[] | "        \(.status) \(.contentType) \(.bytes) \(.url)"' <"${arm_a_out}"
 	note "arm A milestones:"
 	jq -r '.replayLines[]' <"${arm_a_out}" | sed 's/^/        /'
 else

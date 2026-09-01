@@ -47,7 +47,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 91
+const ExpectedAssertions = 99
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -273,6 +273,22 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     # A key that merely CONTAINS a path-like string is left alone, so the
     # walk cannot start rewriting function names or messages.
     counted full["body"]["location"]["functionName"].getStr == "main"
+
+    # THE RULE, NOT THE LIST. A fourth path field read by a fourth consumer is
+    # how the three-key version regressed into a one-key version; the suffix
+    # rule means a `Location` that grows one is covered on the day it appears
+    # rather than on the day a user reports a blank editor.
+    counted isLocationPathKey("path")
+    counted isLocationPathKey("highLevelPath")
+    counted isLocationPathKey("lowLevelPath")
+    counted isLocationPathKey("expansionPath")
+    counted not isLocationPathKey("functionName")
+    counted not isLocationPathKey("pathId")
+    var future = %*{"location": {
+      "path": "trace/" & RelativePath, "somethingNewPath": "trace/" & RelativePath}}
+    counted retargetLocationPaths(future, "hello_noir", "/hello_noir") == 2
+    counted future["location"]["somethingNewPath"].getStr ==
+      "/hello_noir/src/main.nr"
 
   test "vfsJoin is the engine's join, not the host's":
     # `os./` emits a backslash on a Windows build of this lane and the VFS key

@@ -74,8 +74,14 @@ page.on('console', (m) => consoleLines.push(`${m.type()}: ${m.text().slice(0, 50
 page.on('response', (r) => {
   const u = r.url();
   if (!u.endsWith('.wasm')) return;
-  const length = r.headers()['content-length'];
-  wasmRequests.push({ url: u, status: r.status(), bytes: length ? Number(length) : -1 });
+  const headers = r.headers();
+  const length = headers['content-length'];
+  wasmRequests.push({
+    url: u,
+    status: r.status(),
+    contentType: headers['content-type'] || '',
+    bytes: length ? Number(length) : -1,
+  });
 });
 
 // THE INSTRUMENT, installed before a single page script runs.
@@ -131,6 +137,7 @@ const report = {
   vfsWrites: [],
   wasmRequests: [],
   engineFetched: false,
+  engineRequests: [],
   stepCount: 0,
   sourceViewsWritten: 0,
   distinctLines: [],
@@ -138,6 +145,10 @@ const report = {
   missingPathCount: 0,
   editorPaintedLines: [],
   editorPaintedChars: 0,
+  editorPaintedCharsBeforeDismiss: -1,
+  editorRawLineCount: -1,
+  editorRejected: [],
+  editorWidgetCount: -1,
   stepButtonPresent: false,
   gestureError: '',
   noSourceVisible: false,
@@ -153,30 +164,49 @@ const report = {
 const paintedEditorScript = () => {
   const lines = [];
   let chars = 0;
-  for (const el of document.querySelectorAll('.view-line')) {
+  // EVERY REASON A LINE WAS NOT COUNTED, and the RAW element count beside the
+  // painted one. `editorPaintedChars: 0` is equally consistent with "no editor
+  // on this layout" and "an editor behind the BUILD pane", and those need
+  // opposite fixes — so a zero that cannot tell them apart is not a
+  // measurement. The row probe in this same file needed exactly this
+  // correction first; this is the same fix in the place the acceptance
+  // criterion actually reads.
+  const rejected = [];
+  const all = document.querySelectorAll('.view-line');
+  for (const el of all) {
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
-    if (r.width === 0 || r.height === 0) continue;
-    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') continue;
+    const text = (el.innerText || el.textContent || '')
+      .replace(/\u00a0/g, ' ').trimEnd();
+    const why = (reason) => rejected.push(
+      reason + ' rect=' + Math.round(r.x) + ',' + Math.round(r.y) + ' ' +
+      Math.round(r.width) + 'x' + Math.round(r.height) + ' :: ' + text.slice(0, 40));
+    if (r.width === 0 || r.height === 0) { why('zero-size'); continue; }
+    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') {
+      why('css-' + cs.visibility + '/' + cs.display + '/' + cs.opacity);
+      continue;
+    }
     const px = r.x + Math.min(6, r.width / 2);
     const py = r.y + r.height / 2;
     const top = document.elementFromPoint(px, py);
-    if (!top) continue;
-    if (!(top === el || el.contains(top) || top.contains(el))) continue;
-    const text = (el.innerText || el.textContent || '').replace(/ /g, ' ').trimEnd();
-    if (text.trim().length === 0) continue;
+    if (!top) { why('nothing-at-point'); continue; }
+    if (!(top === el || el.contains(top) || top.contains(el))) {
+      why('covered-by-' + top.tagName + '.' + String(top.className || '').slice(0, 40));
+      continue;
+    }
+    if (text.trim().length === 0) { why('empty-text'); continue; }
     lines.push(text);
     chars += text.trim().length;
   }
   // The NO SOURCE view is the other half of the question: a session that
-  // resolved nothing paints this instead, and a gate that only counted
-  // editor lines would read its absence as "no source yet" rather than as
-  // "the product said it has none".
+  // resolved nothing paints this instead, and a gate that only counted editor
+  // lines would read its absence as "no source yet" rather than as "the
+  // product said it has none".
   let noSource = false;
   for (const el of document.querySelectorAll('*')) {
     if (el.children.length > 0) continue;
-    const text = (el.textContent || '').trim();
-    if (!text.startsWith('We were not able to open the given location path')) continue;
+    const t = (el.textContent || '').trim();
+    if (!t.startsWith('We were not able to open the given location path')) continue;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) continue;
     noSource = true;
@@ -185,7 +215,12 @@ const paintedEditorScript = () => {
   const tabs = Array.from(document.querySelectorAll('.lm_tab .lm_title'))
     .map((e) => (e.innerText || e.textContent || '').trim())
     .filter((t) => t.length > 0);
-  return { lines, chars, noSource, tabs };
+  // Is there an editor on this layout AT ALL? `.monaco-editor` is the widget's
+  // own root, so its absence is "no editor here" and its presence with zero
+  // painted lines is "an editor that is covered or empty" — the distinction
+  // the raw count exists to make.
+  const editors = document.querySelectorAll('.monaco-editor').length;
+  return { lines, chars, noSource, tabs, rejected, raw: all.length, editors };
 };
 
 const buildRowsScript = () => {
@@ -286,9 +321,32 @@ try {
     report.gestureError = 'no .step-forward control is mounted in this layout';
   }
 
+  // MEASURED TWICE, BEFORE AND AFTER THE USER'S NEXT GESTURE.
+  //
+  // The BUILD pane opened by Ctrl+Enter is a DISMISSIBLE auto-hide overlay —
+  // `Planned-Features/Auto-Hide-Panes.md` §3.3 — and it sits over the editor.
+  // The first measurement found 2 editor widgets and 22 rendered `.view-line`
+  // elements carrying the template's real source, every one rejected
+  // `covered-by-DIV`. That is not "the product painted nothing"; it is "the
+  // product painted it behind the pane the same keystroke opened".
+  //
+  // So the reading BEFORE dismissal is kept and reported, and the gate
+  // asserts on the reading after — because the claim under test is that a
+  // user can SEE the source of the line being executed, and a user who has
+  // just run a program dismisses the output overlay to look at their code.
+  // Both numbers are reported so relaxing one cannot hide the other.
+  report.editorPaintedCharsBeforeDismiss =
+    (await page.evaluate(paintedEditorScript)).chars;
+  try {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(600);
+  } catch (e) { /* a layout with no overlay is the same measurement twice */ }
   const painted = await page.evaluate(paintedEditorScript);
   report.editorPaintedLines = painted.lines;
   report.editorPaintedChars = painted.chars;
+  report.editorRawLineCount = painted.raw;
+  report.editorRejected = painted.rejected;
+  report.editorWidgetCount = painted.editors;
   report.noSourceVisible = painted.noSource;
   report.openTabTitles = painted.tabs;
   const rowReport = await page.evaluate(buildRowsScript);
@@ -334,24 +392,37 @@ for (const line of report.replayLines) {
 }
 report.distinctLines = Array.from(seen);
 report.wasmRequests = wasmRequests;
-// THE ENGINE, MATCHED BY STEM AND ANSWERED WITH A STATUS.
+// THE ENGINE, MATCHED BY STEM AND ANSWERED WITH A STATUS AND A TYPE.
 //
-// `includes('db_backend_bg.wasm')` was two defects in one predicate.
+// Three defects have lived in this one predicate, and the merge keeps the cure
+// for all three.
 //
-// It required `_bg` to be followed immediately by `.wasm`, and the published
-// name is `db_backend_bg.<16 hex>.wasm` — so it would have answered `false`
-// forever on a working deployment, reddening the control AND turning mutation
-// arm A ("the engine was not fetched") green for the wrong reason. A predicate
-// that stops matching is worse than one that breaks, because one of the two
-// verdicts it feeds looks like success.
+// `includes('db_backend_bg.wasm')` required `_bg` to be followed immediately
+// by `.wasm`, and the published name is now `db_backend_bg.<16 hex>.wasm` — so
+// it would answer `false` forever on a working deployment, reddening the
+// control AND turning mutation arm A ("the engine was not fetched") green for
+// the wrong reason. A predicate that stops matching is worse than one that
+// breaks, because one of the two verdicts it feeds looks like success.
 //
-// And it asked only whether the URL was REQUESTED, which is true whether the
-// answer was 18 MB or a 404 — and Cloudflare Pages was measured answering an
-// absent `.wasm` with the entry document at 200 `text/html`. "The engine was
-// fetched" has to mean the bytes arrived, so the status is part of the claim.
-report.engineFetched = wasmRequests.some(
-  (r) => /\/db_backend_bg(\.[0-9a-f]{6,})?\.wasm$/.test(new URL(r.url).pathname) &&
-    r.status === 200);
+// It also asked only whether the URL was REQUESTED, which is true whether the
+// answer was 18 MB or a 404 — measured, when arm A began reporting the engine
+// as fetched over a tree it had just been deleted from.
+//
+// And the status alone is not enough: this harness applies the bundle's own
+// `_redirects`, and Cloudflare Pages was measured answering an absent `.wasm`
+// with the entry document at 200 `text/html`. `application/wasm` is what
+// `WebAssembly.compileStreaming` requires, so the predicate and the browser
+// agree on what counts as an engine arriving.
+const isEnginePath = (url) => {
+  try {
+    return /\/db_backend_bg(\.[0-9a-f]{6,})?\.wasm$/.test(new URL(url).pathname);
+  } catch (e) {
+    return false;
+  }
+};
+report.engineRequests = wasmRequests.filter((r) => isEnginePath(r.url));
+report.engineFetched = report.engineRequests.some(
+  (r) => r.status === 200 && String(r.contentType).includes('wasm'));
 report.pageErrors = pageErrors;
 report.consoleLines = consoleLines.filter((l) =>
   l.includes('codetracer-') || l.includes('Error') || l.includes('error:'));
