@@ -92,6 +92,15 @@ when isMainModule:
     descriptor.modules.add DeployedModule(
       id: fields[0], url: fields[1], bytes: bytes, builtFrom: fields[3])
 
+  # A DECLARATION THAT CANNOT MATCH IS REFUSED HERE, not discovered in a
+  # browser. Its symptom is a working product at the generic entry point and
+  # silence — see `unmatchableLanguageOrigins`.
+  let unmatchable = unmatchableLanguageOrigins(descriptor)
+  if unmatchable.len > 0:
+    for problem in unmatchable:
+      stderr.writeLine "language origin can never match: " & problem
+    quit 2
+
   createDir outDir
   writeFile outDir / entryDocumentPath, renderEntryDocument(descriptor)
 

@@ -4589,7 +4589,20 @@ when defined(ctWeb):
           # could not tell a correct `noirstudio.dev/` from a
           # `ide.codetracer.com/` that had wrongly picked up a language.
           " host=" & (if hostLanguage.len > 0: hostLanguage else: "(neutral)") &
-          " files=" & $tmpl.templateFileCount))
+          " files=" & $tmpl.templateFileCount &
+          # §1b.3 step 6: "a plain statement of what was asked for and could
+          # not be found. Never a blank editor, never an error page."
+          # `resolveEntry` composes that sentence for an unresolvable address
+          # and for a project pointer that could not be refreshed, and it was
+          # going nowhere — a computed value nothing consults, which is the
+          # shape this whole change exists to stop repeating.
+          #
+          # HONEST RESIDUAL: the console and the boot diagnostic are not a
+          # user-facing surface. The surface that should carry this sentence is
+          # the project view NS9 builds; until then it is at least SAID, so a
+          # support question about a mistyped link has an answer in the log
+          # rather than a shrug.
+          (if entry.explanation.len > 0: " note=" & entry.explanation else: "")))
         # The page belongs to the product now. The line stays on the console —
         # which is what `ci/test/web-renderer-mounts.sh` reads — and leaves the
         # document, because a diagnostic a user has to look at is a diagnostic

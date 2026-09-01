@@ -722,6 +722,49 @@ proc languageForOrigin*(descriptor: DeploymentDescriptor;
     if entry.origin == origin: return entry.language
   ""
 
+proc unmatchableLanguageOrigins*(descriptor: DeploymentDescriptor): seq[string] =
+  ## Declared language origins that `window.location.origin` can never equal,
+  ## with the reason. Asserted empty by the assembly step.
+  ##
+  ## ## Why this is a separate check and not a rule in the parser
+  ##
+  ## Because the failure it catches is a TYPO AT DEPLOY TIME, and its symptom
+  ## is indistinguishable from success: a `noirstudio.dev` declared with a
+  ## trailing slash, or as `http://`, or as a bare hostname, simply never
+  ## matches — so the domain serves a perfectly working product at the
+  ## language-neutral root and nothing anywhere says the map was ignored. That
+  ## is this campaign's recurring shape (a correct declaration nothing
+  ## consults) with the declaration itself as the defect.
+  ##
+  ## It is checked where the value is WRITTEN rather than where it is read, and
+  ## `parseDeploymentDescriptor` deliberately does NOT drop these: a test
+  ## harness serves the bundle over plain HTTP on a loopback origin, and a
+  ## parser that refused `http://` would make the two-domain routing untestable
+  ## without TLS. The build asserts the shape; the parser stays tolerant.
+  ##
+  ## `window.location.origin` is always `<scheme>://<host>[:<port>]` with no
+  ## path and no trailing slash, which is the whole basis of every rule here.
+  for entry in descriptor.languageOrigins:
+    if entry.origin.len > 0 and entry.origin[^1] == '/':
+      result.add entry.origin &
+        " (a trailing slash: window.location.origin never has one)"
+      continue
+    var hasScheme = false
+    for i in 0 ..< entry.origin.len - 2:
+      if entry.origin[i] == ':' and entry.origin[i + 1] == '/' and
+         entry.origin[i + 2] == '/':
+        hasScheme = true
+        break
+    if not hasScheme:
+      result.add entry.origin &
+        " (no scheme: an origin is <scheme>://<host>, not a bare hostname)"
+      continue
+    if entry.origin.len < 8 or entry.origin[0 ..< 8] != "https://":
+      result.add entry.origin &
+        " (not https: a public language entry point served over http is " &
+        "either a typo or a downgrade, and the CDN redirects http to https " &
+        "so the page would never report this origin anyway)"
+
 proc declaredLanguageOrigins*(descriptor: DeploymentDescriptor): seq[string] =
   ## For the deploy log and the gate: which hosts this deployment says are
   ## language entry points, so a two-domain deployment can be SEEN to be one.

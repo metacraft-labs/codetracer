@@ -1119,9 +1119,31 @@ suite "the bundled template a language entry selects":
     check "mod utils;" in tmpl.fileContent("src/main.nr")
     check tmpl.fileContent("Nargo.toml").len > 0
     let directories = tmpl.templateDirectories
-    check directories.len == 2
+    check directories.len == 1
     check "src" in directories
-    check "tests" in directories
+    # NOT a top-level `tests/` beside `src/`, which is what §1a's mock-up
+    # draws. Nargo compiles `src/` and nothing else, so such a directory would
+    # be SHOWN in the file tree and never built — measured on the first version
+    # of this template: `nargo test` ran 3 of 4 tests and said nothing about
+    # the fourth. A first screen teaching a layout that does not work is the
+    # "misrepresents the language" failure §1a forbids, one level down.
+    check "tests" notin directories
+    check tmpl.fileContent("src/tests.nr").len > 0
+    check "mod tests;" in tmpl.fileContent("src/main.nr")
+    check "mod utils;" in tmpl.fileContent("src/main.nr")
+
+  test "every module the template ships is DECLARED, so nargo compiles it":
+    ## The check the `nargo test` count would have failed. A `.nr` file under
+    ## `src/` that no `mod` statement names is dead: it appears in the file
+    ## tree, contributes nothing, and its tests never run — silently, which is
+    ## the whole problem.
+    let tmpl = templateFor("noir")
+    let root = tmpl.fileContent("src/main.nr")
+    for file in tmpl.files:
+      if file.path == "Nargo.toml" or file.path == "src/main.nr": continue
+      check file.path[0 ..< 4] == "src/"
+      let module = file.path[4 ..< file.path.len - 3]
+      check ("mod " & module & ";") in root
 
   test "a file the template does not carry degrades rather than raising":
     ## §1b.3 step 5: each part of a link degrades independently. A fragment
@@ -1343,3 +1365,34 @@ suite "which hosts are language entry points is deployment configuration":
     check "/new" in rewritePrefixes()
     let rendered = renderRewriteConfig(deploymentContract("https://a.test"))
     check "/new  " & entryDocumentAddress & "  200" in rendered
+
+  test "a language origin that can never match is refused at build time":
+    ## The typo whose symptom is success. `noirstudio.dev` declared with a
+    ## trailing slash, without a scheme, or over http never equals
+    ## `window.location.origin`, so the domain serves a working product at the
+    ## language-neutral root and nothing says the map was ignored.
+    var good = DeploymentDescriptor()
+    good.languageOrigins.add OriginLanguage(
+      origin: "https://noirstudio.dev", language: "noir")
+    good.languageOrigins.add OriginLanguage(
+      origin: "https://www.noirstudio.dev", language: "noir")
+    check unmatchableLanguageOrigins(good).len == 0
+    # NON-VACUITY: an empty descriptor also has nothing unmatchable.
+    check good.languageOrigins.len == 2
+
+    var bad = DeploymentDescriptor()
+    bad.languageOrigins.add OriginLanguage(
+      origin: "https://noirstudio.dev/", language: "noir")
+    bad.languageOrigins.add OriginLanguage(
+      origin: "noirstudio.dev", language: "noir")
+    bad.languageOrigins.add OriginLanguage(
+      origin: "http://noirstudio.dev", language: "noir")
+    check unmatchableLanguageOrigins(bad).len == 3
+
+    # And the PARSER stays tolerant of all three, deliberately: the mount
+    # gate serves the bundle over plain HTTP on a loopback origin, and a
+    # parser that dropped `http://` would make the two-domain routing
+    # untestable without TLS. The build refuses the shape; the parser does not.
+    let roundTripped = parseDeploymentDescriptor(renderDeploymentDescriptor(bad))
+    check roundTripped.languageOrigins.len == 3
+    check languageForOrigin(roundTripped, "http://noirstudio.dev") == "noir"

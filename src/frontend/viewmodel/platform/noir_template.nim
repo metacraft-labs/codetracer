@@ -45,14 +45,31 @@
 ## adding `"cairo"` to `knownLanguageEntries` and stopping there fails a suite
 ## instead of shipping a route that opens a blank surface.
 ##
-## ## The tree is a tree, deliberately
+## ## The tree is a tree, deliberately — and it is a tree nargo COMPILES
 ##
 ## §1a: "Noir projects are directory trees — `src/`, `tests/`, `Nargo.toml`,
 ## multiple modules — so the file tree is present from the first frame rather
 ## than appearing when a second file does. **A single-file playground would
-## misrepresent the language.**" So the template carries two modules and a
-## test, and `templateFileCount` is asserted rather than left to whoever edits
-## this file next.
+## misrepresent the language.**" So the template carries three modules, and
+## `templateFileCount` is asserted rather than left to whoever edits this file
+## next.
+##
+## WHERE THIS DEPARTS FROM §1a'S PICTURE, and why the picture is wrong. That
+## mock-up draws `tests` as a sibling of `src`. Nargo compiles `src/` and
+## nothing else, so a top-level `tests/` directory is shown in the file tree
+## and never built — measured, with the layout this file shipped first:
+##
+##     $ nargo test
+##     [hello_noir] Running 3 test functions        <- not 4
+##     [hello_noir] 3 tests passed
+##
+## The fourth test was in `tests/bounds.nr` and nargo never saw it, silently.
+## A first screen whose file tree contains a directory the toolchain ignores is
+## the same failure as the single-file playground the paragraph above forbids,
+## one level down: it teaches the visitor a layout that does not work. So tests
+## are a MODULE — `src/tests.nr`, declared by `mod tests;` — and
+## `test_the_template_is_a_crate_nargo_builds` is the assertion that keeps it
+## one.
 
 import ./web_entry
 
@@ -113,7 +130,8 @@ authors = [""]
 """),
       TemplateFile(
         path: "src/main.nr",
-        content: """mod utils;
+        content: """mod tests;
+mod utils;
 
 // The first thing you see, and the first thing you can change.
 //
@@ -135,6 +153,30 @@ fn test_equal_inputs_are_rejected() {
 }
 """),
       TemplateFile(
+        path: "src/tests.nr",
+        content: """// Tests are a MODULE of the crate, declared by `mod tests;` in `main.nr`.
+//
+// Not a top-level `tests/` directory beside `src/`, which is what §1a's
+// mock-up draws — nargo compiles `src/` and nothing else, so a sibling
+// `tests/` folder would be shown in the file tree and never built. A tree
+// carrying a directory the toolchain ignores is precisely the
+// "misrepresents the language" failure §1a warns about, one level down from
+// the single-file playground it names. Measured: `nargo test` over the
+// earlier layout ran 3 of 4 tests and said nothing about the fourth.
+
+use crate::utils;
+
+#[test]
+fn test_bounds_accepts_the_largest_valid_value() {
+    utils::assert_in_range(127);
+}
+
+#[test(should_fail)]
+fn test_bounds_rejects_the_first_invalid_value() {
+    utils::assert_in_range(128);
+}
+"""),
+      TemplateFile(
         path: "src/utils.nr",
         content: """// A second module, because a Noir project is a directory tree and a
 // single-file playground would misrepresent the language.
@@ -148,18 +190,6 @@ pub fn assert_in_range(value: Field) {
 #[test]
 fn test_in_range_accepts_small_values() {
     assert_in_range(7);
-}
-"""),
-      TemplateFile(
-        path: "tests/bounds.nr",
-        content: """// Integration-style tests live beside the modules they exercise.
-
-use dep::std;
-
-#[test]
-fn test_bounds() {
-    let value: Field = 127;
-    crate::utils::assert_in_range(value);
 }
 """)])
 
