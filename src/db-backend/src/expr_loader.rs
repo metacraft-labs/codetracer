@@ -558,6 +558,53 @@ pub struct ExprLoader {
 // let file_expr_loader = FileExprLoader::new(..);
 // let file_info = file_expr_loader.process_file(.., ..)?;
 
+/// The source text a host pushed into the in-memory VFS for `path`.
+///
+/// ## Why this exists, and why it is the ONLY place it is needed
+///
+/// On `wasm32-unknown-unknown` there is no filesystem. `fs::read_to_string`
+/// returns `Unsupported` and `Path::exists()` is unconditionally `false`, so
+/// every recorded source path in a browser session is the "missing path"
+/// case — not because the source is absent, but because there is nowhere for
+/// it to be. A Noir trace produced in the tab *carries* its own source text
+/// (`MemoryTrace::source_views[].content`), and the host writes it into the
+/// VFS at the recorded path alongside `trace.json`.
+///
+/// Everything the engine does with source text funnels through
+/// [`ExprLoader::file_source_code`] into `processed_files`:
+///
+/// * `load_location` reads `file_lines` for the enclosing-function range,
+///   which is what puts a name on a stack frame;
+/// * `get_source_line_v2` reads the same cache and is the sole source-line
+///   acquisition point for the §6.1 origin-chain classifier — the
+///   `origin-classifier` crate parses exactly this string;
+/// * `Location::missing_path` is computed a few lines below from the same
+///   path.
+///
+/// So one lookup here reaches all of them, and there is no second, separate
+/// "source classification" route that would need its own. This is the
+/// distinction the VFS work was commissioned to settle: getting the source
+/// into the container is *not* sufficient on its own — nothing read the VFS
+/// for source before this — and once it is read, position resolution and
+/// origin classification are served by the same read.
+fn vfs_source_text(path: &Path) -> Option<String> {
+    crate::vfs::vfs_read(path.to_string_lossy().as_ref()).and_then(|bytes| String::from_utf8(bytes).ok())
+}
+
+/// Whether `path` names something the engine can actually read.
+///
+/// `Path::exists()` alone is wrong for a browser session for the reason given
+/// on [`vfs_source_text`]: it answers `false` for every path on wasm32,
+/// including the ones whose text the engine is holding in memory. A
+/// `missing_path` computed from it alone reports a source-less session over a
+/// trace that shipped its own source.
+fn source_is_reachable(path: &Path) -> bool {
+    if path.exists() {
+        return true;
+    }
+    vfs_source_text(path).is_some()
+}
+
 #[allow(clippy::unwrap_used)]
 impl ExprLoader {
     pub fn new(trace: CoreTrace) -> Self {
@@ -2007,7 +2054,6 @@ impl ExprLoader {
         }
         Ok(())
     }
-
     fn find_real_path(&self, path: &Path) -> PathBuf {
         if self.trace.imported {
             let trace_files_folder = PathBuf::from(&self.trace.trace_output_folder).join("files");
@@ -2042,10 +2088,21 @@ impl ExprLoader {
         if !self.processed_files.contains_key(path) {
             let read_path = self.find_real_path(path);
             info!("try to read {read_path:?}");
-            let source_result = fs::read_to_string(read_path);
+            let source_result = fs::read_to_string(&read_path);
             match source_result {
                 Ok(source_code) => Ok(source_code),
                 Err(e) => {
+                    // The recording's own copy, if the host pushed one. Tried
+                    // only AFTER the filesystem so that a native session keeps
+                    // reading the working tree exactly as it did before; in a
+                    // browser the read above is `Unsupported` for every path,
+                    // so this is the only branch that can ever succeed there.
+                    if let Some(text) = vfs_source_text(&read_path) {
+                        return Ok(text);
+                    }
+                    if let Some(text) = vfs_source_text(path) {
+                        return Ok(text);
+                    }
                     if self.trace.imported {
                         // trying with original path
                         // instead of trace source one
@@ -2288,7 +2345,7 @@ impl ExprLoader {
             }
         }
         let real_path = self.find_real_path(path_buf);
-        updated_location.missing_path = !real_path.exists();
+        updated_location.missing_path = !source_is_reachable(&real_path);
         updated_location
     }
 

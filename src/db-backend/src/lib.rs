@@ -27,7 +27,17 @@ pub mod async_continuation;
 #[cfg(all(target_arch = "wasm32", feature = "browser-transport"))]
 pub mod c_compat;
 
-#[cfg(feature = "browser-transport")]
+// Compiled on every target, not only the browser one. The store itself is a
+// `HashMap<String, Vec<u8>>` behind a `Mutex` and depends on nothing
+// target-specific — only the `wasm_bindgen` exports that let JavaScript write
+// into it are `browser-transport`-gated, and they stay that way.
+//
+// It is unconditional because `expr_loader` now reads source text through it
+// (see `expr_loader::vfs_source_text`), and a browser-only module would have
+// made that read testable only by building 18 MB of wasm and standing up a
+// worker. The comment two blocks up records what that costs: the browser DAP
+// path "had no host-runnable unit tests at all". A native build populates
+// this store from nowhere, so nothing about native behaviour changes.
 pub mod vfs;
 
 // The one clock in this crate. `std::time::{SystemTime, Instant}::now()`
