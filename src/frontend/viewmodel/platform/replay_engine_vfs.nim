@@ -391,7 +391,21 @@ proc retargetLocationPaths*(frame: JsonNode; packageDir, projectRoot: string;
   case frame.kind
   of JObject:
     for key, value in frame.pairs:
-      if key == "path" and value.kind == JString:
+      # ALL THREE PATH KEYS, not just `path`. A `Location` carries `path`,
+      # `highLevelPath` and `lowLevelPath`, and they are read by different
+      # consumers: `editor_service` keys its `CODETRACER::tab-load` round trip
+      # on `highLevelPath` — `web_entry_surface` says so on the responder,
+      # "`argId` is `location.highLevelPath` and must stay exactly that" —
+      # while `missingPath` and the stack frame come off `path`.
+      #
+      # Rewriting only `path` was measured in a browser: the position resolved
+      # with `missingPath=false`, the engine had the source, and the editor
+      # still painted nothing, because the tab was requested under
+      # `trace/hello_noir/src/main.nr` and the bundled template host has no
+      # such file. One key short is a session that is correct everywhere a
+      # test looks and blank where a user looks.
+      if key in ["path", "highLevelPath", "lowLevelPath"] and
+         value.kind == JString:
         let retargeted = rendererSpelling(
           stripTraceFolder(value.getStr, traceFolder), packageDir, projectRoot)
         if retargeted != value.getStr:

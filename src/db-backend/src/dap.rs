@@ -583,6 +583,44 @@ pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapR
 }
 
 #[cfg(feature = "browser-transport")]
+/// Answer a message the worker could not decode with a DAP failure response.
+///
+/// See the call sites in [`setup_onmessage_callback`]: the alternative is
+/// `unwrap_throw`, which traps and kills the worker, and a killed worker is
+/// indistinguishable from a slow one until every pending request times out.
+///
+/// `request_seq` and `command` are recovered from the raw JSON when they are
+/// there, because that is what lets the client settle the continuation it
+/// parked rather than merely learn that something went wrong.
+#[cfg(feature = "browser-transport")]
+fn post_decode_failure(scope: &web_sys::DedicatedWorkerGlobalScope, raw: &Value, reason: &str) {
+    use wasm_bindgen::JsValue;
+
+    let request_seq = raw.get("seq").and_then(|v| v.as_i64()).unwrap_or(0);
+    let command = raw
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let response = DapMessage::Response(Response {
+        base: ProtocolMessage {
+            seq: 0,
+            type_: "response".to_string(),
+        },
+        request_seq,
+        success: false,
+        command,
+        message: Some(format!("the replay engine could not decode this message: {reason}")),
+        body: serde_json::json!({}),
+    });
+    if let Ok(json) = serde_json::to_string(&response) {
+        let _ = scope.post_message(&JsValue::from_str(&json));
+    }
+    web_sys::console::error_1(&JsValue::from_str(&format!(
+        "replay engine: undecodable message rejected: {reason}"
+    )));
+}
+
 pub fn setup_onmessage_callback() -> Result<(), DapError> {
     use std::rc::Rc;
 
@@ -620,14 +658,54 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
 
         let dap_message_raw = event.data();
 
-        let dap_message_str = JSON::stringify(&dap_message_raw)
-            .unwrap_throw()
-            .as_string()
-            .unwrap_throw();
+        // A MESSAGE THIS FUNCTION CANNOT READ IS ANSWERED, NOT DROPPED.
+        //
+        // Both steps below used to end in `unwrap_throw`, which trips
+        // wasm32's `unreachable` trap and kills the worker mid-session — the
+        // exact failure the comment further down already refuses for a
+        // handler error ("would leave the browser replay client hanging on
+        // configurationDone"). The decode step above it had no such
+        // protection, so a client that mis-shaped one packet got a dead
+        // worker and no reply, and every pending request sat unresolved
+        // until its timeout with nothing on either side saying why. That
+        // cost a full debugging session to diagnose from the outside.
+        //
+        // It also accepts a STRING as well as an object now, and that is not
+        // generosity — it is symmetry with what this same function POSTS.
+        // Responses go out as `JsValue::from_str(&json)`, so a client that
+        // echoes a frame back, or a transport that normalises everything to
+        // text, was sending something `JSON::stringify` would QUOTE rather
+        // than decode. One worker should not read one encoding and write
+        // another.
+        let dap_message_str = match dap_message_raw.as_string() {
+            Some(text) => text,
+            None => match JSON::stringify(&dap_message_raw).ok().and_then(|s| s.as_string()) {
+                Some(text) => text,
+                None => {
+                    post_decode_failure(
+                        &t_clone,
+                        &Value::Null,
+                        "the message is neither a string nor JSON-serialisable",
+                    );
+                    return;
+                }
+            },
+        };
 
-        let dap_message = from_json(&dap_message_str)
-            .map_err(|_| "Could not convert message")
-            .unwrap_throw();
+        // Best-effort `seq` and `command` for the failure response, read from
+        // the raw JSON rather than from the decoded message there is none of.
+        // A client whose request cannot be decoded still has a continuation
+        // parked under that `seq`; answering with it settles the request
+        // instead of leaving it to time out.
+        let raw_value: Value = serde_json::from_str(&dap_message_str).unwrap_or(Value::Null);
+
+        let dap_message = match from_json(&dap_message_str) {
+            Ok(message) => message,
+            Err(e) => {
+                post_decode_failure(&t_clone, &raw_value, &format!("{e}"));
+                return;
+            }
+        };
 
         // Create a channel pair. handle_message_browser sends responses via
         // the Sender. After it returns, we drain the Receiver and post each

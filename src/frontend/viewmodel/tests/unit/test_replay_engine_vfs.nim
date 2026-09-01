@@ -47,7 +47,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 86
+const ExpectedAssertions = 91
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -257,6 +257,22 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     counted retargetLocationPaths(joined, "hello_noir", "/hello_noir") == 1
     counted joined["body"]["location"]["path"].getStr ==
       "/hello_noir/src/main.nr"
+
+    # ALL THREE PATH KEYS. `editor_service` keys its `tab-load` round trip on
+    # `highLevelPath`, so a rewrite that reached only `path` produced a
+    # session that resolved its position, held the source, and painted
+    # nothing — correct everywhere a test looked, blank where a user looked.
+    var full = %*{"body": {"location": {
+      "path": "trace/" & RelativePath,
+      "highLevelPath": "trace/" & RelativePath,
+      "lowLevelPath": "trace/" & RelativePath,
+      "functionName": "main"}}}
+    counted retargetLocationPaths(full, "hello_noir", "/hello_noir") == 3
+    for key in ["path", "highLevelPath", "lowLevelPath"]:
+      counted full["body"]["location"][key].getStr == "/hello_noir/src/main.nr"
+    # A key that merely CONTAINS a path-like string is left alone, so the
+    # walk cannot start rewriting function names or messages.
+    counted full["body"]["location"]["functionName"].getStr == "main"
 
   test "vfsJoin is the engine's join, not the host's":
     # `os./` emits a backslash on a Windows build of this lane and the VFS key
