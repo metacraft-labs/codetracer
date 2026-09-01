@@ -20,31 +20,36 @@
 # and check the two sizes in the log against the ones recorded here.
 
 NOIR_REPO=https://github.com/metacraft-labs/noir
-NOIR_REF=codetracer
-# WHAT THIS BUMP BUYS: a contract can be compiled in a DEBUGGABLE form.
+NOIR_REF=ns10/entry-call-order
+# WHAT THIS BUMP BUYS: a browser-produced trace opens on `main` instead of on
+# a frame the engine invented.
 #
-# At 6c590c77 the mode dispatcher derived `as_contract = mode == "contract"` and
-# `for_debugging = mode == "debug"` — two booleans off one string — while
-# `vfs::compile_resolved` takes them independently. `as_contract && for_debugging`
-# was unreachable, and since `debug` is `compile_main` and a contract crate has
-# no `main`, an Aztec contract could not be made steppable in one compile or in
-# ten. The revision below adds the `contract-debug` mode that sets both, and
-# refuses an unknown mode instead of degrading it to a `program` compile.
+# `MemorySink::start` pushed the entry `Step` and then the `<toplevel>` `Call`.
+# CodeTracer's `TraceProcessor` opens a frame when it reads a `Call` and
+# attributes each following `Step` to whichever frame is open, so a `Step` that
+# arrives with none open makes it synthesize a `<top-level>` frame — which then
+# shadows both the recording's `<toplevel>` and the program's `main`. Measured
+# through the real `replay-server` over DAP on `a_1_mul`: three frames with
+# `main` nowhere in them, against `main` on top of `<toplevel>` once the two
+# pushes are swapped. Every browser trace this deployment can produce was
+# affected, and no native recording was.
 #
-# PUSHED, AND THAT WAS THE GATE. `build-noir-wasm.sh` CLONES this rev; it does
-# not read a checkout. So while the revision existed only in a local noir
-# worktree this pin named a commit no builder could resolve, and no deploy
-# could have succeeded. It is now on `browser/contract-debug-mode` at
-# metacraft-labs/noir, verified not by the push reporting success but by
-# fetching the bare rev into an EMPTY clone that had never seen this machine:
+# THIS REVISION CONTAINS THE ONE IT REPLACES. It is a direct child of
+# 9d4e40a6, the contract-debug bump already merged here, so this is a
+# fast-forward of the same line rather than a second pin racing it — the two
+# do not have to be reconciled because one contains the other.
+#
+# PUSHED, AND CHECKED THE WAY THE BUILDER RESOLVES IT. `build-noir-wasm.sh`
+# runs `git fetch --depth 1 origin <rev>` into a directory it created, so the
+# check is the same operation:
 #
 #   git init && git remote add origin https://github.com/metacraft-labs/noir
-#   git fetch --depth=1 origin 9d4e40a64297101aede7bef453acaa5ea0586744
+#   git fetch --depth=1 origin df2d2f2e48b12ad4628ac75f8be7f252d80fd5c2
 #
-# resolves, and `compiler/wasm/src/compile_vfs.rs` at the fetched commit
-# carries `contract-debug`. That is the same operation the build script
-# performs, so what was checked is what the builder does.
-NOIR_REV=9d4e40a64297101aede7bef453acaa5ea0586744
+# resolves in an empty clone that had never seen this machine, and
+# `tooling/tracer_wasm/src/memory_sink.rs` at the fetched commit pushes the
+# `Call` before the `Step`.
+NOIR_REV=df2d2f2e48b12ad4628ac75f8be7f252d80fd5c2
 
 # The noir workspace resolves `codetracer_trace_types` and
 # `codetracer_trace_writer_nim` through PATH dependencies on a sibling checkout
@@ -54,11 +59,14 @@ NOIR_REV=9d4e40a64297101aede7bef453acaa5ea0586744
 TRACE_FORMAT_REPO=https://github.com/metacraft-labs/codetracer-trace-format
 TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 
-# Measured at the revisions above (2026-09-01, aarch64-darwin). The compiler
-# moved 15862494 -> 15858329 (-4165) across the contract-debug change; the
-# tracer was not touched and its figure is carried forward unmeasured, which is
-# what "advisory" below licenses. Both builds of the new revision from the same
-# directory gave the identical 15858329.
+# Measured at the revisions above (2026-09-01, aarch64-darwin). This bump
+# touches `tooling/tracer_wasm` and nothing else, so the TRACER figure is the
+# measured one this time and the COMPILER's is carried forward unmeasured —
+# the mirror image of the previous bump, and recorded as such rather than
+# leaving both looking equally fresh. The tracer built at 4623865 from
+# `/Users/zahary/m/dev/.agent-wt/ns10/noir`; the +5401 against the figure it
+# replaces is dominated by the build-directory path length described below,
+# not by the two swapped pushes.
 #
 # ADVISORY, AND THE BUILD SCRIPT ONLY REPORTS ON THEM. These are not
 # reproducible byte-for-byte and that was measured, not assumed: building the
@@ -78,4 +86,4 @@ TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 # assembly run — so it catches a stale document over fresh bytes, which is the
 # failure that reached production in the sibling campaign.
 EXPECT_COMPILER_BYTES=15858329
-EXPECT_TRACER_BYTES=4618464
+EXPECT_TRACER_BYTES=4623865
