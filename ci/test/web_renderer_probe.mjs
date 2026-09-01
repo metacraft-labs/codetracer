@@ -143,6 +143,53 @@ try {
       // this page", and the only one of the two that a screenshot agrees with.
       visibleText: text.slice(0, 1200),
       visibleTextLength: text.length,
+      // ...AND WHAT `innerText` STILL OVERCOUNTS, which is why the field below
+      // exists.
+      //
+      // `innerText` is defined over rendered text but NOT over VISIBLE text:
+      // it counts glyphs that are laid out and then painted over. Measured on
+      // the deployed `/noir`, 2026-09-01:
+      //
+      //     innerText           425 characters
+      //     readable by a user   46 characters   (six file names)
+      //     the other 379        the boot diagnostic, sitting under #menu
+      //
+      // So `visibleTextLength > 200` — this gate's own assertion — was
+      // satisfied almost entirely by a developer log line the user cannot
+      // see. A page showing nothing but a hidden diagnostic would pass it.
+      //
+      // `paintedTextLength` measures each TEXT NODE with a Range (so the box
+      // is the glyphs' own box, not some ancestor's) and hit-tests its centre.
+      // A Range is required rather than an element walk: the tree's labels
+      // live in anchors that also contain an icon element, and an
+      // element-level walk either skips them or attributes the icon's box to
+      // the text. The first version of this measurement did skip them and
+      // reported 0 for a page whose six labels are plainly legible — a
+      // measurement bug that would have been read as a product defect.
+      paintedText: (() => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let painted = 0, occluded = 0;
+        const shown = [], hidden = [];
+        let n;
+        while ((n = walker.nextNode())) {
+          const t = (n.textContent || '').trim();
+          if (!t) continue;
+          const owner = n.parentElement;
+          if (!owner) continue;
+          const cs = getComputedStyle(owner);
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          const c = range.getBoundingClientRect();
+          const off = c.width === 0 || c.height === 0 ||
+            cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0';
+          const top = off ? null
+            : document.elementFromPoint(c.x + c.width / 2, c.y + c.height / 2);
+          if (!off && top && (top === owner || owner.contains(top) || top.contains(owner))) {
+            painted += t.length; shown.push(t.slice(0, 60));
+          } else { occluded += t.length; hidden.push(t.slice(0, 60)); }
+        }
+        return { painted, occluded, shown, hidden };
+      })(),
       // ...and what the DOM merely CONTAINS. Reported beside it and asserted
       // by nothing, because the pair is a diagnostic and not a verdict: when
       // `domTextLength` is large and `visibleTextLength` is 0, the markup is
@@ -152,6 +199,37 @@ try {
       // exists to catch, so it stays out of every assertion.
       domTextLength: (document.body.textContent || '').trim().length,
       title: document.title,
+      // THE RENDERED TREE, AS ONE COMPARABLE VALUE.
+      //
+      // `ide.codetracer.com/noir` and `noirstudio.dev/` are meant to be the
+      // same screen reached two ways, and "the same" has to be checkable
+      // rather than eyeballed. This is every element a user could see —
+      // tag, id, class, integer rect, and whether it hit-tests to itself —
+      // joined in document order. Two hosts agreeing on this string agree on
+      // layout, stacking and content; two hosts disagreeing produce a diff
+      // that names the element.
+      //
+      // Rects are rounded to integers because sub-pixel layout differs
+      // harmlessly between runs. The ORIGIN is deliberately excluded: it is
+      // the one thing that must differ between the two hosts, and including
+      // it would make the digests differ by construction.
+      renderedTree: (() => {
+        const rows = [];
+        for (const e of document.querySelectorAll('body *')) {
+          const c = e.getBoundingClientRect();
+          if (c.width === 0 || c.height === 0) continue;
+          const cs = getComputedStyle(e);
+          if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') continue;
+          const top = document.elementFromPoint(c.x + c.width / 2, c.y + c.height / 2);
+          const painted = !!top && (top === e || e.contains(top) || top.contains(e));
+          const cls = (typeof e.className === 'string' ? e.className : '').trim();
+          rows.push([e.tagName.toLowerCase(), e.id, cls,
+                     Math.round(c.x), Math.round(c.y),
+                     Math.round(c.width), Math.round(c.height),
+                     painted ? 'p' : 'o'].join('|'));
+        }
+        return rows;
+      })(),
       // The origin the PAGE believes it is on. Reported so a route arm can
       // show it measured the second host and not the first — a host-mapping
       // rule that silently failed to apply would otherwise look exactly like

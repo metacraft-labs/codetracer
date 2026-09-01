@@ -108,9 +108,60 @@
 #   * arm O's own twin, in-gate: the SAME bundle on an undeclared origin must
 #     still open the welcome screen, so the arm is a claim about the origin and
 #     not about a build that started mounting the template everywhere.
+#   * the two status-line assertions: verified by a bundle that keeps the
+#     diagnostic in the page AND removes the `#menu` that happens to cover it.
+#     Exactly those two go red, 37 still run, and the control's painted count
+#     moves 328 -> 672 — so the paint measurement tracks reality rather than
+#     reporting a constant. Note the un-hiding ALONE is not enough: `#menu` and
+#     the welcome overlay both occlude the line, which is precisely why its
+#     invisibility was luck and not design.
+#   * arm O's equivalence check: verified discriminating rather than constant —
+#     over the same run's reports, the two ways into the template hash equal
+#     (6083830ff511b7d8) while the template and the welcome screen hash
+#     differently (6083830ff511b7d8 vs dfeb0dfd1ddd095b). A comparator that
+#     could not tell those apart would assert nothing.
 #   * deleting `_redirects` from a copied bundle: 8 red, led by arm D's
 #     "ships no _redirects" and arm R's non-vacuity guard — which is the guard
 #     doing its job, since `/noir` then 404s and every count is 0.
+#
+# THE INSTRUMENT WAS OVERCOUNTING, AND THE OVERCOUNT WAS THE DIAGNOSTIC
+# ---------------------------------------------------------------------
+# This gate asserted `visibleTextLength > 200` — `innerText` — as its "there
+# is a product on this page" check. `innerText` is defined over RENDERED text
+# but not over VISIBLE text: it counts glyphs that are laid out and then
+# painted over. Measured on the deployed `/noir`, 2026-09-01:
+#
+#     innerText            425 characters
+#     readable by a user    46 characters   (the six template file names)
+#     the other 379         `#codetracer-boot`, sitting under `#menu`
+#
+# So the check was satisfied almost entirely by a developer log line nobody
+# can see, and a page that rendered nothing else would have passed it. The
+# boot line was never hidden; it was merely LUCKY, occluded by an element that
+# happens to come later in the document.
+#
+# Both halves are fixed. The renderer now hides both status lines once a
+# surface mounts, and the probe measures `paintedText` — every text node
+# boxed with a Range and hit-tested at its centre. A Range is required rather
+# than an element walk, and the first attempt proved it: an element-level walk
+# skipped the tree's labels (their anchors also contain an icon element) and
+# reported ZERO painted characters for a page whose six labels are plainly
+# legible. That would have been read as a product defect. It was a measurement
+# defect.
+#
+# THE TWO HOSTS ARE ONE SCREEN, AND ARM O NOW ASSERTS IT
+# ------------------------------------------------------
+# A user reported `noirstudio.dev` and `ide.codetracer.com/noir` showing
+# different content. Measured, they were identical: 42 visible elements with
+# the same tags, ids, classes, rects and paint status, and pixel-identical
+# screenshots (same SHA-256). The real cause was in the USER'S BROWSER — a
+# cached 308 from the CDN defect, which no deployment can revoke; see
+# `platform/web_deployment.entryDocumentAddress`.
+#
+# The report was still right to make, because the property was UNASSERTED.
+# `hostLanguage` is a live input to the render dispatch, and nothing stopped
+# the two paths diverging. `renderedTree` is now a comparable value and arm O
+# asserts the digests match.
 #
 # NON-VACUITY. Every DOM assertion is guarded by `domRootPresent` being
 # reported first: a probe that failed to reach the page produces an empty
@@ -411,6 +462,32 @@ for key in sys.argv[2].split("."):
         sys.exit(0)
 print(d if not isinstance(d, list) else len(d))
 ' "${cache}/$1.json" "$2"
+}
+
+# The painted-text pair, and the rendered-tree digest. Separate readers because
+# `json` collapses a list to its length, which is right for counting elements
+# and wrong for comparing two trees or quoting what a user can read.
+painted_len() {
+	python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+print((d.get("dom", {}).get("paintedText") or {}).get("painted", -1))
+' "${cache}/$1.json" 2>/dev/null
+}
+painted_shown() {
+	python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(" ".join((d.get("dom", {}).get("paintedText") or {}).get("shown", [])))
+' "${cache}/$1.json" 2>/dev/null
+}
+tree_digest() {
+	python3 -c '
+import hashlib, json, sys
+d = json.load(open(sys.argv[1]))
+rows = d.get("dom", {}).get("renderedTree") or []
+print(hashlib.sha256("\n".join(rows).encode()).hexdigest() if rows else "EMPTY")
+' "${cache}/$1.json" 2>/dev/null
 }
 
 # Everything the probe collected and no assertion reads. Printed only when an
@@ -742,16 +819,37 @@ if [ "${c_panels:-0}" -ge 2 ] 2>/dev/null; then
 else
 	ck fail "only ${c_panels} recent-work panel(s) rendered"
 fi
-if [ "${c_text:-0}" -gt 200 ] 2>/dev/null; then
-	ck ok "${c_text} characters of text are on screen"
+c_painted="$(painted_len control)"
+if [ "${c_painted:-0}" -gt 200 ] 2>/dev/null; then
+	ck ok "${c_painted} characters of text are PAINTED (of ${c_text} laid out)"
 else
-	ck fail "only ${c_text} characters of text are on screen"
+	ck fail "only ${c_painted} characters are painted (innerText claims ${c_text}) — the difference is text a user cannot see"
 	# Arm I has already established that this browser CAN draw letters, so
 	# this is the product. Print what the probe saw anyway: the difference
 	# between `domTextLength` and `visibleTextLength` says whether the markup
 	# is there and hidden, or not there at all.
 	dump_arm control
 fi
+
+# THE DIAGNOSTICS ARE NOT PART OF THE PRODUCT, and this is where that becomes
+# an assertion rather than an intention.
+#
+# `visibleTextLength` — `innerText` — counts text that is laid out and then
+# painted over. On the deployed `/noir`, 2026-09-01: 425 characters by that
+# measure, 46 readable, and the other 379 were the boot diagnostic sitting
+# under `#menu`. The check above USED to read that number, so "there is a
+# product on this page" was satisfied almost entirely by a developer log line
+# nobody can see. A page rendering nothing else would have passed it.
+#
+# Two things changed. The renderer hides both status lines once a surface
+# mounts, and this asserts it — so the diagnostic cannot come back as the
+# thing keeping the text assertion green.
+case "$(painted_shown control)" in
+*"codetracer-web-boot"* | *"codetracer-web-renderer"*)
+	ck fail "a status line is PAINTED on a page that mounted: '$(painted_shown control)' — the diagnostics must leave the document once the product is on it, or the text assertion above is measuring them" ;;
+*)
+	ck ok "no status line is painted once the product mounted, so the text count above is the product's own" ;;
+esac
 
 # NO UNCAUGHT ERRORS. The defect was an exception nothing was listening for.
 if [ "${c_errs}" = "0" ]; then
@@ -915,6 +1013,22 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 		dump_arm route
 	fi
 
+	# WHAT A USER CAN ACTUALLY READ ON THIS ROUTE, and it must be the project.
+	# The count is small on purpose — six file names is 46 characters — so the
+	# assertion is on the CONTENT rather than on a threshold a diagnostic could
+	# meet. `innerText` here is 425; the gap is the hidden status lines, which
+	# is exactly why this reads `paintedText` instead.
+	r_painted="$(painted_len route)"
+	r_shown="$(painted_shown route)"
+	case "${r_shown}" in
+	*"codetracer-web-boot"* | *"codetracer-web-renderer"*)
+		ck fail "arm R: a status line is painted on /noir ('${r_shown}') — the route's readable text is a diagnostic, not the project" ;;
+	*"main.nr"*)
+		ck ok "arm R: the ${r_painted} characters a user can read on /noir are the project's own files: ${r_shown}" ;;
+	*)
+		ck fail "arm R: the painted text on /noir is '${r_shown}' (${r_painted} chars) — the project's file names are not what a user reads" ;;
+	esac
+
 	if [ "${r_errs}" = "0" ]; then
 		ck ok "arm R: no uncaught page errors on the template route"
 	else
@@ -1044,6 +1158,45 @@ else
 			ck fail "arm O: the same bundle on an undeclared origin gave ${n_welcome} welcome screen(s) and ${n_fs} panel(s) — / has started meaning noir everywhere, which is rule 0's failure"
 		fi
 	fi
+
+	# ------------------------------------------------------------------
+	# EQUIVALENCE. `noirstudio.dev/` and `ide.codetracer.com/noir` are the
+	# same screen reached two ways, and that is now asserted rather than
+	# assumed.
+	#
+	# A user reported the two hosts showing different content. Measured, they
+	# were identical — 42 elements, same rects, same paint status,
+	# pixel-identical screenshots — and the real cause was a cached 308 in
+	# their browser from the CDN defect (see `entryDocumentAddress`). But the
+	# report was reasonable and the property was UNASSERTED: nothing stopped
+	# the two paths diverging, and `hostLanguage` is a live input to the
+	# render dispatch.
+	#
+	# `renderedTree` is every visible element's tag, id, class, integer rect
+	# and paint status in document order. Two hosts agreeing on its digest
+	# agree on layout, stacking and content. The origin is deliberately not in
+	# it — that is the one thing that must differ.
+	if ! probe_dir language-host-path "${arm_dir}" "/noir" "${language_host}"; then
+		ck fail "arm O: the equivalence twin could not be measured"
+	else
+		d_root="$(tree_digest language-host)"
+		d_path="$(tree_digest language-host-path)"
+		if [ "${d_root}" = "EMPTY" ] || [ "${d_path}" = "EMPTY" ]; then
+			ck fail "arm O: one of the two renderings produced no tree (root=${d_root} path=${d_path}) — the comparison below would be vacuous"
+		elif [ "${d_root}" = "${d_path}" ]; then
+			ck ok "arm O: / on the language host and /noir render an IDENTICAL tree (${d_root:0:16}), so the two ways in are one screen"
+		else
+			ck fail "arm O: / on the language host and /noir render DIFFERENT trees (${d_root:0:16} vs ${d_path:0:16}) — the same project reached two ways must look the same"
+			python3 -c '
+import json, sys
+a = json.load(open(sys.argv[1]))["dom"]["renderedTree"]
+b = json.load(open(sys.argv[2]))["dom"]["renderedTree"]
+sa, sb = set(a), set(b)
+for row in sorted(sa - sb)[:6]: print("      only on /:     " + row)
+for row in sorted(sb - sa)[:6]: print("      only on /noir: " + row)
+' "${cache}/language-host.json" "${cache}/language-host-path.json"
+		fi
+	fi
 fi
 echo
 
@@ -1125,8 +1278,8 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-# 34 assertions, written from a run. See traps doc 4c: the count is what turns
-# "all green" into "all of them ran". 32 over the product, plus the two that
+# 37 assertions, written from a run. See traps doc 4c: the count is what turns
+# "all green" into "all of them ran". 35 over the product, plus the two that
 # vouch for the instrument doing the measuring.
 #
 # The sixteen added for the entry route are the ones this gate was missing: it
@@ -1135,7 +1288,7 @@ echo
 # screen. Two of the nine (arm D) are about the hosting contract rather than
 # the DOM, because the same defect had a CDN half: a 200-rewrite whose target
 # the host answered with a 308.
-expect_count 34
+expect_count 37
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

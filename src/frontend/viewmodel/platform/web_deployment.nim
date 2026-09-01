@@ -277,6 +277,32 @@ const
     ## canonical address of the entry document on every static host in use, so
     ## there is no normalisation left to apply to it.
     ##
+    ## ## THE COST WAS NOT TRANSIENT, AND THIS IS THE PART WORTH REMEMBERING
+    ##
+    ## A wrong redirect on an SPA entry path is not a bug that ends when the
+    ## deploy is fixed. `308` is a PERMANENT redirect and Cloudflare sent it
+    ## with **no `Cache-Control` at all**, so browsers cache it heuristically
+    ## and treat it as permanent. Measured with a persistent Chromium profile
+    ## against a fixture reproducing both deployments:
+    ##
+    ##     phase 1, old deploy (308)      /noir -> / , welcome screen
+    ##     phase 2, FIXED deploy, SAME
+    ##       browser                      /noir -> / , welcome screen
+    ##     phase 3, fixed deploy, fresh
+    ##       browser                      /noir      , the template
+    ##
+    ## Phase 2 is the finding: the browser never asks the server again. Every
+    ## visitor who opened `ide.codetracer.com/noir` during the ~13 hours the
+    ## defect was live is still redirected, and no deployment can revoke it —
+    ## the request is not made. A normal reload does not clear it; only a
+    ## different URL (`/noir/`, which is a different cache key and which the
+    ## classifier resolves identically) or clearing the cache does.
+    ##
+    ## That is why `web-renderer-mounts.sh` arm D and the deploy's
+    ## `--max-redirs 0` status check are not cosmetic. A 3xx on an entry path
+    ## is a defect that outlives its own fix, in the caches of exactly the
+    ## people who tried the product first.
+    ##
     ## ## Why the rules are kept rather than deleted
     ##
     ## Deleting them would also have "fixed" `/noir`, because Pages serves its

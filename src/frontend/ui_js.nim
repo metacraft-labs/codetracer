@@ -4516,9 +4516,40 @@ when defined(ctWeb):
     if (typeof document !== 'undefined') {
       var el = document.getElementById('codetracer-renderer');
       if (el) { el.hidden = true; }
+      var boot = document.getElementById('codetracer-boot');
+      if (boot) { boot.hidden = true; }
     }
   } catch (e) {}
 })()""".}
+    ## Hides BOTH arms' status lines once a surface has mounted, and the boot
+    ## line is the one that was left behind.
+    ##
+    ## ## Why it matters more than tidiness
+    ##
+    ## `#codetracer-boot` was never hidden. On the deployed `/noir` it was not
+    ## VISIBLE either — but only by accident: it sits at (0,0) and `#menu`,
+    ## which comes later in the document, painted over it. So 379 characters of
+    ## developer diagnostic were laid out in the page, counted by `innerText`,
+    ## and invisible to a user. Measured, 2026-09-01:
+    ##
+    ##     innerText           425 characters
+    ##     readable by a user   46 characters   (the six template file names)
+    ##
+    ## `ci/test/web-renderer-mounts.sh` asserted `visibleTextLength > 200`, so
+    ## its "there is a product on this page" check was being satisfied almost
+    ## entirely by a log line nobody can see — and would have passed over a
+    ## page that rendered nothing else. That is the trap this campaign keeps
+    ## finding, in the INSTRUMENT this time rather than in the product.
+    ##
+    ## Two fixes, and both were needed. The probe now measures painted text
+    ## with a Range and a hit test (`paintedText`), and the diagnostic stops
+    ## being in the page at all once the product is on it. A status line whose
+    ## invisibility depends on another element's stacking order is not hidden,
+    ## it is lucky.
+    ##
+    ## FAILURES STILL SAY SO. This runs only on the success path; a refusal or
+    ## an exception leaves both lines visible, which is the one time a user
+    ## needs to be told something.
 
   const webRendererLinePrefix* = "codetracer-web-renderer:"
 

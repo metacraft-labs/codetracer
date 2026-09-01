@@ -720,7 +720,16 @@ jobs:
           panels = dom.get("filesystemPanels", 0)
           labels = dom.get("entryLabels") or []
           errs = d.get("pageErrors", [])
+          pt = dom.get("paintedText") or {}
+          shown = " ".join(pt.get("shown", []))
           problems = []
+          # WHAT A USER CAN ACTUALLY READ. `innerText` counts text that is laid
+          # out and then painted over: on the deployed /noir it reported 425
+          # characters where 46 were readable, the rest being the boot
+          # diagnostic under #menu. So the acceptance reads painted text, and
+          # refuses a page whose readable content is a status line.
+          if "codetracer-web-boot" in shown or "codetracer-web-renderer" in shown:
+              problems.append("a status line is PAINTED: " + shown[:120])
           if not dom.get("domRootPresent"):
               # Non-vacuity: every count below is 0 on a page the probe never
               # reached, which would read identically to a wrong surface.
@@ -747,6 +756,7 @@ jobs:
           if errs:
               problems.append("uncaught page errors: " + " | ".join(errs))
           print("OK" if not problems else "FAIL: " + "; ".join(problems))
+          print("  painted text:  %d chars: %s" % (pt.get("painted", -1), shown[:160]))
           print("  renderer said: " + (d.get("rendererLine") or "(nothing)"))
           print("  boot said:     " + (d.get("bootLine") or "(nothing)"))
           print("  tree:          " + ", ".join(labels) if labels else "  tree:          (none)")
