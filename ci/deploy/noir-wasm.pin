@@ -21,7 +21,21 @@
 
 NOIR_REPO=https://github.com/metacraft-labs/noir
 NOIR_REF=codetracer
-NOIR_REV=6c590c77899379b7a06cc3953e3fb07b810fc4c8
+# WHAT THIS BUMP BUYS: a contract can be compiled in a DEBUGGABLE form.
+#
+# At 6c590c77 the mode dispatcher derived `as_contract = mode == "contract"` and
+# `for_debugging = mode == "debug"` — two booleans off one string — while
+# `vfs::compile_resolved` takes them independently. `as_contract && for_debugging`
+# was unreachable, and since `debug` is `compile_main` and a contract crate has
+# no `main`, an Aztec contract could not be made steppable in one compile or in
+# ten. The revision below adds the `contract-debug` mode that sets both, and
+# refuses an unknown mode instead of degrading it to a `program` compile.
+#
+# NOT YET PUSHED. This revision is on `browser/contract-debug-mode` in a local
+# noir worktree and MUST be pushed to metacraft-labs/noir before a deploy can
+# resolve it — `build-noir-wasm.sh` clones the rev, it does not read a checkout.
+# Until then this pin names a commit that only exists locally.
+NOIR_REV=9d4e40a64297101aede7bef453acaa5ea0586744
 
 # The noir workspace resolves `codetracer_trace_types` and
 # `codetracer_trace_writer_nim` through PATH dependencies on a sibling checkout
@@ -31,7 +45,11 @@ NOIR_REV=6c590c77899379b7a06cc3953e3fb07b810fc4c8
 TRACE_FORMAT_REPO=https://github.com/metacraft-labs/codetracer-trace-format
 TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 
-# Measured at the revisions above (2026-08-31, aarch64-darwin).
+# Measured at the revisions above (2026-09-01, aarch64-darwin). The compiler
+# moved 15862494 -> 15858329 (-4165) across the contract-debug change; the
+# tracer was not touched and its figure is carried forward unmeasured, which is
+# what "advisory" below licenses. Both builds of the new revision from the same
+# directory gave the identical 15858329.
 #
 # ADVISORY, AND THE BUILD SCRIPT ONLY REPORTS ON THEM. These are not
 # reproducible byte-for-byte and that was measured, not assumed: building the
@@ -50,5 +68,5 @@ TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 # against the file in the publish directory, and both come from the same
 # assembly run — so it catches a stale document over fresh bytes, which is the
 # failure that reached production in the sibling campaign.
-EXPECT_COMPILER_BYTES=15862494
+EXPECT_COMPILER_BYTES=15858329
 EXPECT_TRACER_BYTES=4618464
