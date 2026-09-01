@@ -405,6 +405,19 @@ ct_tup_config="${CODETRACER_CONFIG:-debug}"
 ct_tup_variant="build-${ct_tup_config}"
 ct_publish_build_env "" "$ct_tup_config" "$ct_tup_variant" "src/$ct_tup_variant"
 
+# Mirror the reprobuild branch's env-var setup so cargo build scripts work
+# without network access on the Linux tup path (Linux keeps tup as default):
+#   * CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1 prevents nimble from
+#     trying to download nim-stew over the network.
+#   * CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS injects the vendored stew tree
+#     so `nim c` can resolve `results`/`stew` without a nimble package store.
+export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL="${CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL:-1}"
+if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && [ -d "$PWD/libs/nim-stew/stew" ]; then
+	ct_nim_paths_lib="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew:$PWD/libs/nim-result"
+	export CT_EMULATOR_EXTRA_NIM_PATHS="$ct_nim_paths_lib"
+	export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS:-$ct_nim_paths_lib}"
+fi
+
 # tup's dependency tracking is a FUSE mount, and libfuse can only obtain
 # /dev/fuse through a setuid helper at a path compiled into the binary. When
 # that helper is missing, tup reports a mount timeout three layers away from
