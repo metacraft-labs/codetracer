@@ -62,7 +62,20 @@ const LayoutModeSrc =
   staticRead("../../../../common/common_types/debugger_features/debugger.nim")
 
 const EditModeToolbarModule =
-  currentSourcePath() & "/../../../viewmodels/edit_mode_toolbar.nim"
+  currentSourcePath()[0 ..< currentSourcePath().rfind('/')] &
+    "/../../viewmodels/edit_mode_toolbar.nim"
+  ## CORRECTED, and the correction is the reason this suite could not have gone
+  ## green on its own as its header claimed.
+  ##
+  ## It was `currentSourcePath() & "/../../../viewmodels/…"`, which appends
+  ## `..` **to a regular file**. Path resolution walks components left to
+  ## right, so `…/test_edit_mode_toolbar_model.nim/..` is `ENOTDIR` and
+  ## `test -e` answered `NO` unconditionally — with the module present, absent,
+  ## or anything else. The probe was not measuring whether the feature had
+  ## landed; it was a constant. Dropping the filename first is the whole fix.
+  ##
+  ## Measured, not reasoned: with the module in place the old spelling still
+  ## answered `NO` and all twelve red checks stayed red on both backends.
 
 const EditModeToolbarBuilt =
   staticExec("test -e '" & EditModeToolbarModule & "' && echo YES || echo NO")
@@ -135,35 +148,23 @@ const UnknownGroupKind = """
 
 const MalformedTasksJson = "{ \"version\": \"2.0.0\", \"tasks\": [ {,,, ] "
 
-suite "EMT §1 the defect, recorded as the starting state":
-
-  test "the topbar has no mode parameter today, and no command slots":
-    ## Green today, and it must go RED when the feature lands — at which point
-    ## it is deleted with the same change. A "known starting state" check that
-    ## outlives the state it records is worse than none.
-    startCount()
-    # `topbarModel` takes a profile and a fullscreen flag, and no LayoutMode.
-    ck compiles(topbarModel(desktopProfile, false))
-    # The nine members are the whole vocabulary; the feature's five are absent.
-    ck not declared(tbaBuild)
-    ck not declared(tbaRun)
-    ck not declared(tbaActionOverflow)
-    ck not declared(tbaRunTests)
-    ck not declared(tbaRecordTests)
-    # And the debugger controls are unconditional on every profile — the
-    # thirteen stepping buttons paint in Edit mode too.
-    for profile in AllProfiles:
-      ck topbarModel(profile).has(tbaDebuggerControls)
-    # The mode vocabulary exists — in `common/`, and NOWHERE in the ViewModel
-    # layer. Derived from the enum's declaration rather than imported, because
-    # the declaring module is not standalone-importable (it needs `langstring`
-    # from its parent) and the ViewModel layer imports no part of it. That gap
-    # is the feature's first structural task, and it is recorded here so that
-    # "add a mode parameter" is not mistaken for a one-line change.
-    ck "LayoutMode* = enum" in LayoutModeSrc
-    ck "EditMode" in LayoutModeSrc
-    ck "DebugMode" in LayoutModeSrc
-    expectCount(13)
+## ## §1's starting-state check has EXPIRED and was deleted here
+##
+## `"the topbar has no mode parameter today, and no command slots"` recorded
+## the defect as it stood: `topbarModel` took no mode, `tbaBuild` / `tbaRun` /
+## `tbaActionOverflow` / `tbaRunTests` / `tbaRecordTests` did not exist, and
+## `tbaDebuggerControls` was unconditional on all four profiles. Its own
+## comment set the terms — *"it must go RED when the feature lands, at which
+## point it is deleted with the same change; a known-starting-state check that
+## outlives the state it records is worse than none"* — and
+## `Known-Test-Failures.md` names it as **a check with an expiry**.
+##
+## All five `not declared(...)` assertions are now false, because the five
+## members are declared in `viewmodels/topbar_actions.nim`, which is what the
+## suite below reaches through. Mutation arm **M9** was retired with it: its
+## killer was this check, and an arm whose killer no longer exists cannot
+## resolve to exactly one green check, which is the property
+## `verify_arms_are_unambiguous` asserts before anything runs.
 
 suite "EMT §7.3 what the toolbar carries in each mode":
 
@@ -197,9 +198,18 @@ suite "EMT §7.3 what the toolbar carries in each mode":
         ck tbaSessionTabs in debugging.actions
     else:
       for profile in AllProfiles:
-        for _ in 0 ..< 14:
+        for _ in 0 ..< 13:
           pending(ToolbarAwaited & " — mode gating on " & profile.displayName)
-    expectCount(56)
+    expectCount(52)
+    ## COUNT CORRECTED, 56 -> 52, and no assertion was added or removed.
+    ##
+    ## The built arm makes **13** assertions per profile — count the `ck` lines
+    ## above — and the unbuilt arm emitted 14, so `expectCount(56)` matched the
+    ## `pending` arm and could never match the real one. Measured: with the
+    ## feature in place every one of the 52 product assertions passed and the
+    ## check still failed on `asserted == 56` alone. The `pending` loop is
+    ## corrected to 13 in the same edit so the two arms agree, which is the
+    ## invariant `expectCount` exists to protect.
 
   test "EMT-A5 the mode decision is a parameter, not a compile-time define":
     ## `test_topbar_actions_follow_capability_not_build` is the model: ONE test
@@ -333,9 +343,12 @@ suite "EMT §3/§7.1 reading declarations, and selecting among them":
       ck not swapped.resolved
       ck swapped.candidates.len == two.candidates.len
     else:
-      for _ in 0 ..< 8:
+      for _ in 0 ..< 7:
         pending("`selectBuildCommand` — §7.1 ordered selection, §7.2 ambiguity")
-    expectCount(8)
+    expectCount(7)
+    ## COUNT CORRECTED, 8 -> 7, and no assertion was added or removed. There
+    ## are seven `ck` lines above; the `pending` arm emitted eight. Measured:
+    ## all seven passed and the check failed on `asserted == 8` alone.
 
   test "EMT-A18/A19 a declaration beats the guess, and the guess must ask":
     ## A18: a declared build task AND a recognised Rust project yields the
@@ -511,10 +524,27 @@ suite "EMT §8 disabled versus hidden, and the browser's capability tier":
       # A29 — the corpus really does exercise each of the causes, asserted as a
       # count so a corpus that quietly stopped producing them fails.
       ck disabledSeen >= 5
+      expectCount(4 + disabledSeen + 1)
+      ## COUNT CORRECTED, and this one was not off by a constant — it was
+      ## **unsatisfiable**.
+      ##
+      ## The built arm asserts 4 (the Foundry case) + **one per disabled
+      ## button** + 1 (`disabledSeen >= 5`). So `asserted == 5 + disabledSeen`,
+      ## while `disabledSeen >= 5` is required — the two can never both hold
+      ## against the fixed `expectCount(5)`, which was sized for the `pending`
+      ## arm. Measured with the feature in place: `disabledSeen == 19` and
+      ## `asserted == 24`, every one of the 24 passing, and the check failing
+      ## on `asserted == 5` alone.
+      ##
+      ## Written as an EXPRESSION rather than as the literal 24 deliberately.
+      ## The guard's job is that a check which quietly stopped asserting fails;
+      ## a literal would freeze today's corpus size and turn `expectCount` into
+      ## a second thing to update whenever a fixture is added, which is how it
+      ## ends up loosened to `>=` by the next person.
     else:
       for _ in 0 ..< 5:
         pending(ToolbarAwaited & " — the disabled-button corpus")
-    expectCount(5)
+      expectCount(5)
 
 suite "EMT §9 Run means record-then-replay, and the verdict is the artefact":
 

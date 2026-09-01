@@ -759,11 +759,16 @@ const
     # excluded from `vm-unit-js` and listed here.
     "src/frontend/viewmodel/tests/unit/test_project_action_runner.nim",
     # Edit-Mode-Toolbar.md's three specifying suites.  Registered for a reason
-    # the other entries do not have: these are RED ON PURPOSE — they state the
-    # correct behaviour for a feature that is not built, and they go green on
-    # their own when `viewmodels/edit_mode_toolbar.nim` lands.  They are listed
-    # in `codetracer-specs/Testing/Known-Test-Failures.md` under "Specifying
-    # suites".
+    # the other entries do not have: they were written RED ON PURPOSE, stating
+    # the correct behaviour for a feature that was not built.
+    #
+    # `viewmodels/edit_mode_toolbar.nim` has since landed and 24 of the 27 reds
+    # went green.  THE REGISTRATION STAYS, and the three that did not are why:
+    # each is a defective assertion left failing rather than relaxed to fit the
+    # implementation, and a failing check nobody chose to soften is precisely
+    # the one a later change deletes to get a lane green.  See
+    # `codetracer-specs/Testing/Known-Test-Failures.md`, "Specifying suites",
+    # which now names each remaining red and what retires it.
     #
     # A red suite is the one a later change is MOST tempted to delete or
     # `skip()` when it is in the way, and glob discovery is silent about both.
