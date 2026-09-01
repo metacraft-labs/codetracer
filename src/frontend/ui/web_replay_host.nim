@@ -96,6 +96,27 @@ proc deliverFrame(request: ReplaySessionRequest; frame: JsObject) =
     decoded, request.packageDir, request.projectRoot)
   let outbound = jsObjectFromJson(($decoded).cstring)
   replayFramesIn += 1
+  # EVERY FRAME, not only the moves. A session that hands back nothing and a
+  # session that hands back refusals are indistinguishable from the move log
+  # alone, and both look exactly like "the engine is thinking". This line is
+  # what turns the second into a sentence with a name in it.
+  block:
+    let kind =
+      if decoded.hasKey("type") and decoded["type"].kind == JString:
+        decoded["type"].getStr
+      else: "?"
+    let what =
+      if decoded.hasKey("command") and decoded["command"].kind == JString:
+        decoded["command"].getStr
+      elif decoded.hasKey("event") and decoded["event"].kind == JString:
+        decoded["event"].getStr
+      else: "?"
+    var detail = ""
+    if decoded.hasKey("success") and decoded["success"].kind == JBool:
+      detail = " success=" & $decoded["success"].getBool
+    if decoded.hasKey("message") and decoded["message"].kind == JString:
+      detail.add " message=" & decoded["message"].getStr
+    report("frame " & kind & " " & what & detail)
   # EVERY MOVE IS REPORTED, with its path and whether the engine could reach
   # the source. This is the one line `ci/test/noir-replay-in-browser.sh` reads
   # to tell the two false passes apart: a session that steps but resolves
@@ -128,6 +149,19 @@ proc deliverFrame(request: ReplaySessionRequest; frame: JsObject) =
 
 proc openSession(request: ReplaySessionRequest) =
   ## Turn a `MemoryTrace` into a live session, or say why not.
+  ##
+  ## THE FIRST LINE IS THE ARRIVAL, and it is reported before anything can
+  ## fail. A browser gate found a Run that traced 36 events and then nothing:
+  ## no session, and neither of the two rows the producer writes for the
+  ## outcome. That leaves two candidates — the producer never asks, or the
+  ## host never hears — and a headless case in `test_noir_build_producer`
+  ## has since removed the first. This line removes the second from guesswork:
+  ## it is the one fact that separates "the ask did not arrive" from "the ask
+  ## arrived and the session failed", and every later report is downstream of
+  ## it.
+  report("asked for a session over " & $request.rawMemoryTrace.len &
+         " bytes, package=" & request.packageDir &
+         " root=" & request.projectRoot)
   let payload = replayVfsPayload(request.rawMemoryTrace)
   if payload.defects.len > 0:
     lastReplayFailure = payload.defects[0]

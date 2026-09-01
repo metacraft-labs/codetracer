@@ -47,7 +47,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 67
+const ExpectedAssertions = 79
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -258,6 +258,53 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     # The source view is NOT under the folder — its key is the recorded path.
     counted payload.hasFile(MainPath)
     counted payload.sourceFileCount == 1
+
+  test "this module imports no `std/os`, and that is a shipped-target rule":
+    ## THE GUARD FOR THE DEFECT THIS SUITE COULD NOT CATCH.
+    ##
+    ## `os.isAbsolute` has branches for posix, for dos-like filesystems and
+    ## for `defined(nodejs)`, and an `else` that is `raiseAssert "unreachable"`.
+    ## A browser `nim js` build matches none of the three. This lane runs
+    ## `nim js -d:nodejs`, so every case above took the node branch and passed
+    ## while a deployed tab raised an `AssertionDefect` on the first call —
+    ## measured, with the trace already produced and the host already asked.
+    ##
+    ## No behavioural assertion could have found that, because the lane and
+    ## the shipped target differ in the define that selects the branch. So the
+    ## assertion is on the SOURCE: this module is compiled into a browser
+    ## bundle, and `std/os` is a module whose browser behaviour is
+    ## `raiseAssert`. Reasoning about which of its procs happen to be safe is
+    ## how this comes back.
+    const source = staticRead("../../platform/replay_engine_vfs.nim")
+    var importsOs = false
+    for line in source.splitLines:
+      let trimmed = line.strip
+      if not trimmed.startsWith("import ") and not trimmed.startsWith("from "):
+        continue
+      # `std/[json, strutils]` and `std/os` and `os` all have to be caught,
+      # and a mention inside a doc comment must not be.
+      if trimmed.contains("std/os") or trimmed.contains(" os,") or
+         trimmed.endsWith(" os") or trimmed.contains("[os,") or
+         trimmed.contains(", os]") or trimmed.contains(", os,"):
+        importsOs = true
+    counted not importsOs
+
+  test "the recorded-path predicates do not consult the host":
+    # `/`-rooted whatever the machine, because these strings came from a
+    # virtual filesystem and not from a disk.
+    counted isRecordedAbsolute("/virtual/a/src/main.nr")
+    counted not isRecordedAbsolute("hello_noir/src/main.nr")
+    counted not isRecordedAbsolute("")
+    counted not isRecordedAbsolute(".")
+    # A desktop-made recording opened in a browser keeps its identity rather
+    # than being silently reclassified as relative.
+    counted isRecordedAbsolute("C:/Users/x/src/main.nr")
+    counted isRecordedAbsolute("C:\\Users\\x\\main.nr")
+    counted not isRecordedAbsolute("C:main.nr")
+    counted recordedParentDir("hello_noir/src/main.nr") == "hello_noir/src"
+    counted recordedParentDir("/virtual/a/main.nr") == "/virtual/a"
+    counted recordedParentDir("main.nr") == ""
+    counted recordedParentDir("/main.nr") == ""
 
   test "the assertion count is measured":
     ## Every case above runs its checks through `counted`, so this number

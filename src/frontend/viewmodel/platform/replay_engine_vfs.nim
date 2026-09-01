@@ -53,7 +53,7 @@
 ## it without a browser. The host that actually posts these to a worker lives
 ## in `host/web_browser.nim`.
 
-import std/[json, os, strutils]
+import std/[json, strutils]
 
 type
   VfsFile* = object
@@ -94,6 +94,44 @@ const
     ## the recording's own workdir rather than against the literal string
     ## `"trace"`.
 
+proc isRecordedAbsolute*(path: string): bool =
+  ## Whether a RECORDED path is absolute, decided without `std/os`.
+  ##
+  ## ## Why this is not `os.isAbsolute`, measured rather than preferred
+  ##
+  ## `std/os`'s `isAbsolute` has branches for posix, for dos-like filesystems
+  ## and for `defined(nodejs)`, and an `else` that is
+  ## `raiseAssert "unreachable"`. A browser `nim js` build matches none of the
+  ## three, so the FIRST call raises an `AssertionDefect` whose message is the
+  ## word "unreachable" — which is what a deployed tab did: a Run traced 36
+  ## events, the replay host was asked for a session over 4913 bytes, and the
+  ## ask died inside this predicate before anything could report a reason.
+  ##
+  ## The `vm-unit-js` lane did not catch it and could not have: it runs
+  ## `nim js -d:nodejs`, which takes the node branch. The lane and the shipped
+  ## target differ in exactly one define, and the code path that differs is
+  ## the one that matters. `test_replay_engine_vfs` now pins that this module
+  ## imports no `std/os` at all, because reasoning about which of its procs
+  ## are browser-safe is how this comes back.
+  ##
+  ## It is also the more correct predicate. These are the RECORDING's paths,
+  ## not the host renderer's: the Noir compiler is handed a virtual package
+  ## tree and its keys are slash-rooted strings whatever machine the tab runs
+  ## on, so asking the host OS what "absolute" means would be asking the
+  ## wrong question even where it answers.
+  if path.len == 0: return false
+  if path[0] == '/' or path[0] == '\\': return true
+  # A Windows-style drive-letter path recorded by a native run, so a
+  # desktop-made trace opened in a browser is not silently reclassified.
+  path.len > 2 and path[1] == ':' and (path[2] == '/' or path[2] == '\\')
+
+proc recordedParentDir*(path: string): string =
+  ## The directory part of a recorded path, on `/` only. Same reasoning as
+  ## `isRecordedAbsolute`: `os.parentDir` splits on the HOST's separator, and
+  ## the string being split came from a virtual filesystem.
+  let cut = path.rfind('/')
+  if cut <= 0: "" else: path[0 ..< cut]
+
 proc vfsJoin*(folder, name: string): string =
   ## The engine's `join_vfs`: a single `/`, never the host separator.
   ##
@@ -118,7 +156,7 @@ proc pathJoin*(base, path: string): string =
   ## which no probe ever asks for, and `sourceFileCount` — a number a caller
   ## asserts on — silently doubled.
   if path.len == 0: return base
-  if path.isAbsolute: return path
+  if isRecordedAbsolute(path): return path
   if base.len == 0: return path
   if base.endsWith("/"): base & path
   else: base & "/" & path
@@ -233,10 +271,10 @@ proc replayVfsPayload*(rawMemoryTrace: string;
     if document.hasKey("workdir") and document["workdir"].kind == JString and
        document["workdir"].getStr.len > 0:
       document["workdir"].getStr
-    elif paths.len > 0 and paths[0].isAbsolute:
+    elif paths.len > 0 and isRecordedAbsolute(paths[0]):
       # An absolute recording knows where it ran; `PathBuf::join` discards the
       # base for these anyway, so this only affects what the metadata says.
-      paths[0].parentDir
+      recordedParentDir(paths[0])
     else:
       # A relative recording — every trace a browser tab can produce, because
       # the Noir compiler is handed a virtual package tree and records the key

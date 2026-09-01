@@ -114,7 +114,6 @@ proc newBrowserReplaySession*(scriptUrl: string;
   ## A defective payload never constructs a `Worker` at all — `beginReplayBoot`
   ## refuses before posting, and there is nothing to tear down.
   var settled = false
-  var started = false
   var boot: ReplayBoot
   var messages: seq[JsonNode]
   (boot, messages) = beginReplayBoot(payload, moduleUrls)
@@ -140,13 +139,18 @@ proc newBrowserReplaySession*(scriptUrl: string;
     jsWorkerPostObject(worker, frame)
 
   proc receive(raw: JsObject) =
-    # AFTER `start`, EVERY MESSAGE IS A DAP FRAME. `wasm_start()` replaces the
-    # worker's own `onmessage` with the engine's dispatcher, so from that
-    # moment the worker posts nothing else — and routing a frame through the
-    # boot state machine would have it ignore, not misread, it. The order of
-    # these two branches is what keeps the handshake and the session from
-    # having to know about each other.
-    if started:
+    # THE SWITCH IS THE BOOT'S OWN PHASE, not a flag set when `start` is
+    # posted. That flag was the first shape and it lost the handshake's last
+    # message: `wasm_start()` answers with `"ready"`, and a flag set before
+    # the post routed that answer straight past the state machine into the DAP
+    # handler. Measured in a browser — six VFS writes, every one acknowledged,
+    # and then silence, with no error anywhere because nothing had failed.
+    #
+    # `rbpReady` is set BY the `"ready"` message, so gating on it hands over
+    # exactly one message later than the flag did, which is the correct
+    # boundary: after `wasm_start()` the engine's dispatcher owns `onmessage`
+    # and everything from then on is a DAP frame.
+    if boot.phase == rbpReady:
       if not onFrame.isNil: onFrame(raw)
       return
     var decoded: JsonNode
@@ -164,13 +168,15 @@ proc newBrowserReplaySession*(scriptUrl: string;
         failure: "the replay worker sent a message that is not JSON, so the " &
                  "engine's handshake cannot be followed"))
       return
+    # A BARE STRING IS A STATUS, not a frame. `wasm_start()` posts the string
+    # `"ready"` and nothing else does; `WorkerBackend.deliver` wraps exactly
+    # this shape as `worker-status` for the same reason, and without the wrap
+    # it decodes to a `JString`, fails the state machine's `JObject` guard,
+    # and is dropped in silence.
+    if decoded.kind == JString:
+      decoded = %*{"type": "worker-status", "status": decoded.getStr}
     let replies = boot.deliver(decoded)
     for reply in replies:
-      if reply.hasKey("type") and reply["type"].getStr == "start":
-        # Posted LAST and the flag set first: the engine may answer `"ready"`
-        # in the same task, and a flag set after the post would route that
-        # answer into the boot machine as an unknown message.
-        started = true
       post(reply)
     case boot.phase
     of rbpFailed:

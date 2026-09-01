@@ -50,8 +50,26 @@ const pageErrors = [];
 const consoleLines = [];
 const wasmRequests = [];
 
-page.on('pageerror', (e) =>
-  pageErrors.push(String((e && e.message) || e).slice(0, 300)));
+// A Nim exception reaching the top level is an OBJECT, not an `Error`, so
+// `String(e)` renders it as the useless literal "Object" — which is exactly
+// what this gate reported for two runs while the interesting fact (the
+// message) sat one property away. Every shape is tried, and the raw JSON is
+// the last resort so the report can never be a word with no content.
+const describeError = (e) => {
+  if (!e) return 'undefined';
+  const parts = [];
+  if (e.message) parts.push(`message=${e.message}`);
+  if (e.msg) parts.push(`msg=${e.msg}`);
+  if (e.name) parts.push(`name=${e.name}`);
+  if (e.stack) parts.push(`stack=${String(e.stack).slice(0, 400)}`);
+  if (parts.length === 0) {
+    try { parts.push(`json=${JSON.stringify(e).slice(0, 400)}`); }
+    catch (x) { parts.push(`unstringifiable=${Object.prototype.toString.call(e)}`); }
+  }
+  return parts.join(' | ').slice(0, 700);
+};
+
+page.on('pageerror', (e) => pageErrors.push(describeError(e)));
 page.on('console', (m) => consoleLines.push(`${m.type()}: ${m.text().slice(0, 500)}`));
 page.on('response', (r) => {
   const u = r.url();
@@ -70,6 +88,15 @@ page.on('response', (r) => {
 // `vfs-write` carries a `Uint8Array` and cannot be a string, and the count of
 // those is exactly the "did the source get into the container" question.
 await page.addInitScript(() => {
+  window.__ctThrown = [];
+  window.addEventListener('error', (ev) => {
+    const e = ev && ev.error;
+    try {
+      window.__ctThrown.push(
+        (e && (e.message || e.msg)) ? String(e.message || e.msg)
+          : (e ? JSON.stringify(e).slice(0, 400) : String(ev.message)));
+    } catch (x) { window.__ctThrown.push('unstringifiable'); }
+  });
   window.__ctWorkerMessages = [];
   window.__ctVfsWrites = [];
   const original = Worker.prototype.postMessage;
@@ -116,6 +143,7 @@ const report = {
   noSourceVisible: false,
   openTabTitles: [],
   pageErrors: [],
+  thrown: [],
   consoleLines: [],
 };
 
@@ -271,6 +299,7 @@ try {
     () => (window.__ctWorkerMessages || []).slice());
   report.vfsWrites = await page.evaluate(
     () => (window.__ctVfsWrites || []).slice());
+  report.thrown = await page.evaluate(() => (window.__ctThrown || []).slice());
 } catch (e) {
   report.loadError = String((e && e.message) || e).slice(0, 400);
 }

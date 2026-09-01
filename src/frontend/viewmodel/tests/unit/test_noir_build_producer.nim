@@ -35,6 +35,7 @@ import ../../store/replay_data_store
 import ../../store/types
 import ../../viewmodels/build_vm
 import ../../viewmodels/noir_build_producer
+import ../../backend/replay_session_service
 
 var countedAssertions = 0
 
@@ -42,7 +43,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 145
+const ExpectedAssertions = 160
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -467,6 +468,66 @@ suite "the severity mapping is total":
     # A path that merely STARTS with the package name is not inside it.
     counted producer.rendererPath("hello_noir_other/x.nr") ==
       "hello_noir_other/x.nr"
+
+  test "a successful trace is offered to a replay session":
+    ## THE ASK, MEASURED WHERE IT IS MADE. A browser gate reported that a Run
+    ## traced 36 events and that neither of the two rows this arm writes for
+    ## the replay outcome reached the pane, which leaves two candidates: the
+    ## producer never asks, or the browser host never hears. This case removes
+    ## the first from the list — headlessly, in seconds, instead of through an
+    ## eight-minute bundle build and a Chromium run.
+    resetReplaySessionServiceForTests()
+    var asked: seq[ReplaySessionRequest]
+    installReplaySessionService(ReplaySessionService(
+      startProc: proc(r: ReplaySessionRequest) = asked.add r))
+    let producer = fixture()
+    counted runPhase(producer, nbpTrace, TraceDocument, 0) == npvSucceeded
+    # A COUNT: "the service was called" and "called once with this trace" differ
+    # by a double-open, which is two workers over one store.
+    counted asked.len == 1
+    counted asked[0].rawMemoryTrace == TraceDocument
+    counted asked[0].packageDir == "hello_noir"
+    counted asked[0].projectRoot == "/hello_noir"
+    # ...and the pane SAYS it, so a user is never left inferring whether a
+    # debugger was supposed to appear.
+    counted linesMentioning(producer.vm, "opening a replay session") == 1
+    resetReplaySessionServiceForTests()
+
+  test "a trace with no steps is never offered to a replay session":
+    ## The refusal has to happen before the ask, not inside it: opening a
+    ## session over a step-less trace is the false pass this whole path has.
+    resetReplaySessionServiceForTests()
+    var asked = 0
+    installReplaySessionService(ReplaySessionService(
+      startProc: proc(r: ReplaySessionRequest) = asked += 1))
+    let producer = fixture()
+    counted runPhase(producer, nbpTrace, TrivialTrace, 0) == npvFaulted
+    counted asked == 0
+    resetReplaySessionServiceForTests()
+
+  test "with no replay host, the pane says so rather than staying silent":
+    resetReplaySessionServiceForTests()
+    let producer = fixture()
+    counted runPhase(producer, nbpTrace, TraceDocument, 0) == npvSucceeded
+    counted linesMentioning(producer.vm, "cannot replay a trace in the tab") == 1
+    counted linesMentioning(producer.vm, "no replay host is installed") == 1
+
+  test "a replay host that raises does not abort the build's bookkeeping":
+    ## Measured in a browser: an exception escaping the ask aborted `onExit`
+    ## before `setCode`, and a pane that had just traced 10 steps was left
+    ## looking like it was still running.
+    resetReplaySessionServiceForTests()
+    installReplaySessionService(ReplaySessionService(
+      startProc: proc(r: ReplaySessionRequest) =
+        raise newException(ValueError, "no engine in this deployment")))
+    let producer = fixture()
+    counted runPhase(producer, nbpTrace, TraceDocument, 0) == npvSucceeded
+    counted linesMentioning(producer.vm, "could not be started") == 1
+    counted linesMentioning(producer.vm, "no engine in this deployment") == 1
+    # The build's own verdict still reached the pane, which is the thing the
+    # escaping exception used to prevent.
+    counted producer.vm.code.val == 0
+    resetReplaySessionServiceForTests()
 
   test "noir_build_producer_assertion_count_is_measured":
     checkpoint("counted assertions: " & $countedAssertions)
