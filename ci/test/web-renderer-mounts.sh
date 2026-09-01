@@ -596,6 +596,69 @@ open(p, 'w').write(s.replace(needle, "String('/')"))
 PY2
 }
 
+# Arm E — THE HOST ANSWERS `tab-load` SYNCHRONOUSLY, and the editor is blank.
+#
+# Measured, not invented: this is the state the first working version of the
+# in-page host was in for one build. `utils.asyncSend` calls `ipc.send` from
+# INSIDE its promise executor and registers `asyncSendCache[id][argId]` on the
+# line AFTER the promise is constructed, so a responder that replies before
+# returning resolves the future too early and the resolve wrapper's
+# `jsdelete data.asyncSendCache[id][argId]` throws
+# `TypeError: Cannot convert undefined or null to object`.
+#
+# What that produced is precisely the failure this gate's new checks exist to
+# separate: the topbar, the layout and the file tree were all correct and the
+# EDITOR PANE WAS ABSENT, because `openNewEditorView` never got past its await
+# and so never built one. So this arm must redden the editor checks and leave
+# the tree and topbar checks green — anything else and the pair is not
+# isolating the pane from the page.
+#
+# The substitution is one line, and `deferHostReply` exists as a named helper
+# in `ui_js.newWebIpc` so that it can be. An inline `setTimeout(fn, 0)` would
+# need a needle that also matches the renderer's several hundred other timers.
+mutate_sync_host_reply() {
+	local dir="$1"
+	local needle="var deferHostReply = function (fn) { setTimeout(fn, 0); };"
+	grep -qF "${needle}" "${dir}/ui.js" || return 1
+	python3 - "${dir}/ui.js" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+needle = "var deferHostReply = function (fn) { setTimeout(fn, 0); };"
+assert s.count(needle) == 1, s.count(needle)
+open(p, 'w').write(s.replace(
+    needle, "var deferHostReply = function (fn) { fn(); };"))
+PY2
+}
+
+# Arm T — THE TOPBAR'S CONTAINER IS NOT IN THE DOCUMENT.
+#
+# The twin of arm B one element over. Arm B removes the container the SURFACE
+# mounts into and shows that nothing mounts; this removes the container the
+# CHROME mounts into and must leave the surface alone — the layout, the tree
+# and the editor all still there, and only the topbar assertion red.
+#
+# It is a document mutation rather than a bundle one because that is what the
+# defect would be: `#menu` comes from the entry document that
+# `platform/web_deployment.renderEntryDocument` generates, and a skeleton that
+# drifted from `src/frontend/index.html` is exactly how the web arm would lose
+# a piece of chrome the desktop keeps. §1a.1 names that hazard directly — "two
+# divergent documents would be the first place that stops being true".
+mutate_no_menu() {
+	local dir="$1"
+	grep -q 'id="menu"' "${dir}/index.html" || return 1
+	python3 - "${dir}/index.html" <<'PY2'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+out = re.sub(r'<div[^>]*id="menu"[^>]*>.*?</div>', '', s, count=1, flags=re.S)
+if out == s:
+    out = re.sub(r'<div[^>]*id="menu"[^>]*/?>', '', s, count=1)
+assert out != s
+open(p, 'w').write(out)
+PY2
+}
+
 # Arm V — THE SURFACE IS MOUNTED AND A USER CANNOT SEE IT.
 #
 # Not hypothetical: it is what the first version of the template surface did.
@@ -993,11 +1056,19 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 	# THE PRODUCT'S OWN ACCOUNT OF THE ROUTE. The DOM says what mounted; this
 	# says what the product THOUGHT it was doing, and a disagreement between
 	# the two is a different bug from either being wrong alone.
+	#
+	# `surface=edit-mode`, and the word is the assertion. It used to be
+	# `surface=noir-template`, which named a web-only surface that drew a
+	# filesystem panel and nothing else. `ui/web_entry_surface` now delivers
+	# `CODETRACER::no-trace` — the message `ct edit <path>` and the welcome
+	# screen's "open recent folder" both send — so what mounts is CodeTracer in
+	# Edit mode. A gate still accepting the old word would accept a build that
+	# went back to the parallel path.
 	case "${r_renderer}" in
-	*"surface=noir-template"*"entry=efBare/evTemplate"*"language=noir"*)
+	*"surface=edit-mode"*"entry=efBare/evTemplate"*"language=noir"*)
 		ck ok "arm R: the renderer reported the route it took: ${r_renderer#*: }" ;;
 	*)
-		ck fail "arm R: the renderer line does not name the noir template route (line: '${r_renderer}')" ;;
+		ck fail "arm R: the renderer line does not report edit mode on the noir route (line: '${r_renderer}')" ;;
 	esac
 
 	# THE ASSERTION THE OTHERS COULD NOT MAKE. Every check above this one was
@@ -1028,6 +1099,76 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 	*)
 		ck fail "arm R: the painted text on /noir is '${r_shown}' (${r_painted} chars) — the project's file names are not what a user reads" ;;
 	esac
+
+	# -----------------------------------------------------------------------
+	# THE FIRST SCREEN IS EDIT MODE, and the four checks below are what
+	# separates that claim from "a filesystem panel mounted".
+	#
+	# Noir-Studio.md §1a: "The first screen is CodeTracer in Edit mode on a
+	# working multi-file project — Filesystem, Editor, Test Results,
+	# Constraints — not a landing page". What shipped before this was the
+	# Filesystem alone, in no layout, with no topbar: 46 readable characters.
+	# Every assertion above was green over it, because every one of them was
+	# about the file tree.
+	#
+	# TEST RESULTS AND CONSTRAINTS ARE NOT ASSERTED, and that is deliberate
+	# rather than an omission the count hides. `Content` has no member for
+	# either on any platform — §1a calls them "new panes this campaign
+	# contributes" — so a check for them here would be a check for something
+	# no build of CodeTracer contains, and the honest place to add it is the
+	# milestone that adds the panes.
+	# -----------------------------------------------------------------------
+	r_stacks="$(json route dom.glStacks)"
+	if [ "${r_stacks:-0}" -ge 2 ] 2>/dev/null; then
+		ck ok "arm R: /noir opened a GoldenLayout with ${r_stacks} stacks, so this is the product's layout and not a single panel in a div"
+	else
+		ck fail "arm R: /noir shows ${r_stacks:-0} GoldenLayout stack(s) — edit mode puts the Filesystem and the Editor in separate stacks, so fewer than two means the layout did not load"
+		dump_arm route
+	fi
+
+	# The EDITOR PANE, named by the file it holds. `chooseInitialEditPath`
+	# scores the project's filenames and `src/main.nr` must win it: `+20` for
+	# a preferred extension, `+20` for being called `main`, `+10` for sitting
+	# under `/src/`. A tab called anything else means the heuristic did not
+	# run — which is exactly what a non-empty `startOptions.name` causes, and
+	# what made `Nargo.toml` the first tab until it was fixed.
+	r_tabs="$(json route dom.glTabTitles)"
+	r_tabtext="$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["dom"].get("glTabTitles") or []))' "${cache}/route.json")"
+	case "${r_tabtext}" in
+	*"main.nr"*)
+		ck ok "arm R: the editor pane is open on the template's entry file — ${r_tabs} tabs: ${r_tabtext}" ;;
+	*)
+		ck fail "arm R: no editor tab names main.nr (tabs: '${r_tabtext}') — edit mode opened the layout but not the project's entry file" ;;
+	esac
+
+	# ...AND THE SOURCE IS ON THE SCREEN. The pair with the check above is the
+	# point: a tab title is drawn by GoldenLayout and would still be there over
+	# an editor that never received its file. This reads Monaco's own painted
+	# `.view-line`s, hit-tested, and looks for a line only this template has.
+	#
+	# It is also the answer to the one risk that was unmeasured when this work
+	# started — whether Monaco can load in a statically hosted tab at all.
+	r_lines="$(json route dom.editorLinesVisible)"
+	r_linetext="$(python3 -c 'import json,sys; print(" ".join((json.load(open(sys.argv[1]))["dom"].get("editorLinesVisible") or [])))' "${cache}/route.json")"
+	case "${r_linetext}" in
+	*"fn main"*)
+		ck ok "arm R: Monaco painted ${r_lines} lines of the template's own source, including its fn main" ;;
+	*)
+		ck fail "arm R: the editor shows ${r_lines} painted line(s) and none of them is the template's fn main — the pane mounted without its file (text: '${r_linetext:0:160}')" ;;
+	esac
+
+	# THE TOPBAR. §1a.2: "The topbar is almost unchanged... it already carries
+	# the debugger controls, the omnibar, the tabs". Counted as PAINTED
+	# descendants rather than as `#menu` existing, because `#menu` is in the
+	# entry document's skeleton either way — an existence check would have been
+	# green throughout the week this page rendered nothing.
+	r_topbar="$(json route dom.topbarPainted)"
+	if [ "${r_topbar:-0}" -ge 10 ] 2>/dev/null; then
+		ck ok "arm R: the topbar is painted — ${r_topbar} visible elements, so the debugger controls and the omnibar are on screen"
+	else
+		ck fail "arm R: the topbar has ${r_topbar:-0} painted element(s) — the renderer did not draw the menu, so the first screen is a layout with no chrome"
+		dump_arm route
+	fi
 
 	if [ "${r_errs}" = "0" ]; then
 		ck ok "arm R: no uncaught page errors on the template route"
@@ -1137,7 +1278,7 @@ else
 	fi
 
 	case "${o_renderer}" in
-	*"surface=noir-template"*"host=noir"*)
+	*"surface=edit-mode"*"host=noir"*)
 		ck ok "arm O: the renderer named the host language it routed by: ${o_renderer#*: }" ;;
 	*)
 		ck fail "arm O: the renderer line does not report a noir host (line: '${o_renderer}')" ;;
@@ -1288,7 +1429,62 @@ echo
 # screen. Two of the nine (arm D) are about the hosting contract rather than
 # the DOM, because the same defect had a CDN half: a 200-rewrite whose target
 # the host answered with a 308.
-expect_count 37
+echo "Arm E: MUTATION — the in-page host answers tab-load synchronously"
+echo "    The measured state of one build: layout, topbar and tree correct,"
+echo "    editor pane absent. Expect arm R's EDITOR checks RED, the rest GREEN."
+if ! run_arm sync-reply mutate_sync_host_reply "/noir"; then
+	ck fail "arm E could not be measured"
+	ck fail "arm E could not be measured (second half)"
+else
+	e_lines="$(python3 -c 'import json,sys; print(" ".join((json.load(open(sys.argv[1]))["dom"].get("editorLinesVisible") or [])))' "${cache}/sync-reply.json")"
+	e_entries="$(json sync-reply dom.entryLabelsVisible)"
+	e_topbar="$(json sync-reply dom.topbarPainted)"
+	case "${e_lines}" in
+	*"fn main"*)
+		ck fail "arm E: the editor still paints the template's source with the host replying synchronously — arm R's source assertion cannot detect the early-resolve defect, so it proves nothing" ;;
+	*)
+		ck ok "arm E: the editor pane loses its source when the host replies synchronously, so arm R's source assertion can fail" ;;
+	esac
+	# The twin. A mutation that took the whole page down would satisfy the
+	# check above while being consistent with almost any bug; what makes this
+	# arm about the EDITOR is that everything else survives it.
+	if [ "${e_entries:-0}" -ge 5 ] 2>/dev/null && [ "${e_topbar:-0}" -ge 10 ] 2>/dev/null; then
+		ck ok "arm E: the tree (${e_entries} rows) and the topbar (${e_topbar} elements) are untouched, so this arm isolates the editor from the page"
+	else
+		ck fail "arm E: the mutation also took out the tree (${e_entries} rows) or the topbar (${e_topbar} elements) — it is not isolating the editor pane"
+	fi
+fi
+echo
+
+echo "Arm T: MUTATION — the topbar's container is stripped from the document"
+echo "    The twin of arm B, one element over. Expect arm R's TOPBAR check"
+echo "    RED and the layout, tree and editor checks GREEN."
+if ! run_arm no-menu mutate_no_menu "/noir"; then
+	ck fail "arm T could not be measured"
+	ck fail "arm T could not be measured (second half)"
+else
+	t_topbar="$(json no-menu dom.topbarPainted)"
+	t_lines="$(python3 -c 'import json,sys; print(" ".join((json.load(open(sys.argv[1]))["dom"].get("editorLinesVisible") or [])))' "${cache}/no-menu.json")"
+	t_entries="$(json no-menu dom.entryLabelsVisible)"
+	if [ "${t_topbar:-0}" -lt 10 ] 2>/dev/null; then
+		ck ok "arm T: the topbar paints ${t_topbar:-0} element(s) without its container, so arm R's topbar assertion can fail"
+	else
+		ck fail "arm T: the topbar still paints ${t_topbar} element(s) with #menu removed — arm R's topbar assertion is not reading the topbar"
+	fi
+	case "${t_lines}" in
+	*"fn main"*)
+		if [ "${t_entries:-0}" -ge 5 ] 2>/dev/null; then
+			ck ok "arm T: the editor still shows the template's source and the tree still has ${t_entries} rows, so this arm isolates the chrome from the panes"
+		else
+			ck fail "arm T: removing #menu also emptied the file tree (${t_entries} rows) — it is not isolating the chrome"
+		fi ;;
+	*)
+		ck fail "arm T: removing #menu also took the editor's source off the screen — it is not isolating the chrome" ;;
+	esac
+fi
+echo
+
+expect_count 45
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

@@ -4466,15 +4466,67 @@ when defined(ctWeb):
   # failing silently, which is what makes an unported feature legible when
   # someone clicks it. `deliver` is the third method and is the point: it lets
   # the page hand the renderer an event locally, on the same path a host would.
+  #
+  # `respond` is the fourth, and it is what makes the FIRST SCREEN possible
+  # rather than merely legible. Some of those ~99 messages are not
+  # notifications but QUESTIONS: `utils.asyncSend` registers a future, sends
+  # `CODETRACER::<id>`, and waits for the host to answer on
+  # `CODETRACER::<id>-received`. `tab-load` is one, and it is the one edit mode
+  # cannot do without — `openNewEditorView` awaits it for the source of the
+  # file it is about to show. Warned-about-and-dropped, that await never
+  # settles, and the result is a permanently blank editor with nothing in the
+  # page to say why.
+  #
+  # A responder is therefore a HOST CAPABILITY implemented in the page, not a
+  # bypass: `ui/web_entry_surface.installTemplateHost` answers `tab-load` out
+  # of the bundled template with the same `{argId, value}` message
+  # `index/config.sendTabInfo` sends, so `renderer.onTabLoadReceived` resolves
+  # the same future the same way. The renderer cannot tell the two apart, which
+  # is the property that keeps this one door and not two.
   proc newWebIpc(): js {.importjs: """
 (function () {
   var handlers = {};
+  var responders = {};
+  var deferHostReply = function (fn) { setTimeout(fn, 0); };
   return {
     handlers: handlers,
+    responders: responders,
     on: function (id, code) {
       (handlers[id] = handlers[id] || []).push(code);
     },
+    respond: function (id, code) {
+      responders[id] = code;
+    },
     send: function (id, payload) {
+      var responder = responders[id];
+      if (responder) {
+        // ASYNCHRONOUSLY, and this is a correctness requirement rather than a
+        // nicety. `utils.asyncSend` calls `ipc.send` from INSIDE the promise
+        // executor and only registers `asyncSendCache[id][argId]` on the line
+        // AFTER the promise is constructed. A responder that answers
+        // synchronously therefore resolves the future before that line runs,
+        // and the resolve wrapper's `jsdelete data.asyncSendCache[id][argId]`
+        // dereferences an undefined map — measured, as
+        // `TypeError: Cannot convert undefined or null to object` thrown out
+        // of `CODETRACER::tab-load-received`, with the editor left blank.
+        //
+        // A real host is a process away, so its reply is always at least a
+        // task later. Deferring here makes the in-page host obey the same
+        // ordering the renderer was written against instead of asking every
+        // responder to remember to.
+        //
+        // `deferHostReply` is a named helper rather than an inline
+        // `setTimeout` so that `ci/test/web-renderer-mounts.sh`'s arm E can
+        // substitute ONE unique line and reconstruct the synchronous state
+        // exactly. An inline call would need a needle that also matches the
+        // renderer's other `setTimeout`s.
+        deferHostReply(function () {
+          try { responder.call(responder, undefined, payload); }
+          catch (e) { console.error('codetracer-web: responder for ' + id +
+                                    ' threw', e); }
+        });
+        return;
+      }
       console.warn('codetracer-web: no host for ' + id +
                    ' — this surface is not ported to the browser yet', payload);
     },
@@ -4601,9 +4653,19 @@ when defined(ctWeb):
       # this file is exactly the drift `web_entry.nim`'s header warns about.
       let wantsTemplate = entry.verdict == evTemplate and tmpl.hasFiles
       let mounted =
-        if wantsTemplate: web_entry_surface.mountTemplateSurface(tmpl)
+        if wantsTemplate: web_entry_surface.enterTemplateEditMode(tmpl)
         else: welcome_screen.mountWebWelcomeScreen()
-      let surface = if wantsTemplate: "noir-template" else: "welcome-screen"
+      # `edit-mode`, not `noir-template`, and the rename is the finding.
+      #
+      # The old name described a web-specific surface that drew a Filesystem
+      # panel and nothing else. There is no such surface any more:
+      # `enterTemplateEditMode` delivers `CODETRACER::no-trace`, which is the
+      # message `ct edit <path>` and the welcome screen's "open recent folder"
+      # both send, so what mounts is CodeTracer in Edit mode — its
+      # GoldenLayout, its topbar, its panes — over the bundled project. A log
+      # line that still said `noir-template` would be naming a thing the build
+      # no longer contains.
+      let surface = if wantsTemplate: "edit-mode" else: "welcome-screen"
 
       if mounted:
         # The line names the ENTRY as well as the surface. Two builds — one

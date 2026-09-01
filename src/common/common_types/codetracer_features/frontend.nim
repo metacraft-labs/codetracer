@@ -476,3 +476,41 @@ func revealsPinnedPanel*(
     requestedPath.len > 0 and requestedPath == pinnedPath
   else:
     true
+
+proc editModeHiddenContentIds*(): seq[int] =
+  ## The replay-only panes an EDITING session does not show.
+  ##
+  ## ## Why this sits beside the `Content` enum rather than in the index process
+  ##
+  ## It lived in `frontend/index/config.nim`, whose only reachable caller is
+  ## `loadEditLayoutConfig` — and `index/config.nim` imports `electron_lib`,
+  ## which is `{.error.}` under `-d:ctWeb`. So the web build could not ask
+  ## "which panes does edit mode hide?" without either importing Electron or
+  ## writing the list a second time, and a second list is how a pane added to
+  ## edit mode on one platform silently keeps appearing on the other. That is
+  ## the property `Planned-Features/Noir-Studio.md` §3 exists to protect: "the
+  ## web is a build of the product and not a fork of it".
+  ##
+  ## The set is a fact about `Content`, so it belongs where `Content` is
+  ## declared. Both platforms now read this one declaration:
+  ## `index/config.nim` for the desktop's `default_edit_layout.json`, and
+  ## `ui/web_entry_surface.nim` for the layout the browser enters edit mode on.
+  @[
+    ord(Content.Trace),
+    ord(Content.State),
+    ord(Content.Scratchpad),
+    ord(Content.Repl),
+    ord(Content.EventLog),
+    ord(Content.Timeline),
+    ord(Content.TerminalOutput),
+    ord(Content.StepList),
+    ord(Content.Calltrace),
+    ord(Content.CalltraceEditor),
+    ord(Content.TraceLog),
+    ord(Content.AgentActivity),
+    ord(Content.AgentActivityDeepReview),
+    # Content.FrameViewer removed in M3 — pane no longer dispatched.
+    ord(Content.PixelHistory),
+    ord(Content.ShaderDebug),
+    ord(Content.VideoPlayer)
+  ]

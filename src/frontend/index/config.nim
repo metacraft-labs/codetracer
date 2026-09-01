@@ -591,27 +591,6 @@ proc sanitizeEditLayoutConfig*(config: js; editorContent: int;
   ## a layout file GoldenLayout refuses to restore — issue #608.
   sanitizeLayoutConfig(config, editorContent, hiddenContents)
 
-proc editModeHiddenContentIds(): seq[int] =
-  @[
-    ord(Content.Trace),
-    ord(Content.State),
-    ord(Content.Scratchpad),
-    ord(Content.Repl),
-    ord(Content.EventLog),
-    ord(Content.Timeline),
-    ord(Content.TerminalOutput),
-    ord(Content.StepList),
-    ord(Content.Calltrace),
-    ord(Content.CalltraceEditor),
-    ord(Content.TraceLog),
-    ord(Content.AgentActivity),
-    ord(Content.AgentActivityDeepReview),
-    # Content.FrameViewer removed in M3 — pane no longer dispatched.
-    ord(Content.PixelHistory),
-    ord(Content.ShaderDebug),
-    ord(Content.VideoPlayer)
-  ]
-
 proc reviewPillarContentIds(): seq[int] =
   ## The panels a DeepReview session is assembled from and must therefore
   ## keep, even though an *editing* session hides them.

@@ -138,6 +138,65 @@ try {
           r.x + r.width / 2, r.y + r.height / 2);
         return !!top && (top === a || a.contains(top));
       }).map((a) => (a.innerText || '').trim()),
+      // THE EDIT-MODE SURFACE. §1a: the first screen is "CodeTracer in Edit
+      // mode on a working multi-file project", so the gate needs to see the
+      // parts of it that the filesystem fields above cannot: the layout, the
+      // editor pane, and the topbar.
+      //
+      // These are deliberately the DESKTOP's own selectors, not web-specific
+      // ones. `.lm_stack` and `.lm_title` are GoldenLayout's; `.monaco-editor`
+      // and `.view-line` are Monaco's; `#menu` is the topbar's id in
+      // `src/frontend/index.html`. A web-only class here would let the two
+      // platforms drift apart without this gate noticing, which is the whole
+      // property §3 asks for.
+      glStacks: document.querySelectorAll('.lm_stack').length,
+      glTabTitles: Array.from(document.querySelectorAll('.lm_tab .lm_title'))
+        .map((e) => (e.textContent || '').trim()).filter((t) => t.length > 0),
+      monacoEditors: document.querySelectorAll('.monaco-editor').length,
+      // The SOURCE, as painted lines. Monaco renders one `.view-line` per
+      // visible row, so this is what a reader of the editor pane actually
+      // reads — and it is separate from `paintedText` because a pane that
+      // mounted with no content is a different failure from a pane that did
+      // not mount, and the gate has to be able to say which.
+      editorLinesVisible: Array.from(document.querySelectorAll('.view-line'))
+        .filter((e) => {
+          const r = e.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return false;
+          const top = document.elementFromPoint(
+            r.x + r.width / 2, r.y + r.height / 2);
+          return !!top && (top === e || e.contains(top) || top.contains(e));
+        // NON-BREAKING SPACES NORMALISED, and this is a measurement fix rather
+        // than a convenience. Monaco emits U+00A0 for the spaces inside a
+        // source line, so `textContent` gives back `fn\u00a0main` — which
+        // matches nothing a check writes as `fn main`. The first version of
+        // this field did not normalise, and the assertion went red over an
+        // editor that was plainly showing the right code in the screenshot:
+        // a measurement defect that would have been read as a product one,
+        // which is the trap this file's own header warns about.
+        //
+        // A user reads a space, so the instrument reports a space.
+        }).map((e) => (e.textContent || '').replace(/\u00a0/g, ' ').trim())
+          .filter((t) => t.length > 0),
+      // The topbar, measured as PAINT rather than presence. `#menu` is in the
+      // entry document's skeleton whether or not the renderer ever drew into
+      // it, so `!!document.getElementById('menu')` would be green over the
+      // blank page this gate exists for. This counts its painted descendants.
+      topbarPainted: (() => {
+        const menu = document.getElementById('menu');
+        if (!menu) return 0;
+        let painted = 0;
+        for (const e of menu.querySelectorAll('*')) {
+          const r = e.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          const cs = getComputedStyle(e);
+          if (cs.visibility === 'hidden' || cs.display === 'none' ||
+              cs.opacity === '0') continue;
+          const top = document.elementFromPoint(
+            r.x + r.width / 2, r.y + r.height / 2);
+          if (top && (top === e || e.contains(top) || top.contains(e))) painted += 1;
+        }
+        return painted;
+      })(),
       // What a person reads off the screen. `innerText` is defined over the
       // RENDERED text — it is the field that answers "is there a product on
       // this page", and the only one of the two that a screenshot agrees with.
