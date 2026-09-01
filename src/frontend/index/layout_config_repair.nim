@@ -172,6 +172,64 @@ proc sanitizeLayoutConfig*(config: js; editorContent: int;
   ## Returns the original `config` untouched when the sanitised tree would be
   ## empty, so a degenerate layout is never persisted as "no root at all".
 
+proc unclaimedTopLevelPercent*(config: js): int {.importjs:
+  """(function(config) {
+    const root = config && (config.root || config);
+    if (!root || root.type !== 'row') return -1;
+    const kids = Array.isArray(root.content) ? root.content : null;
+    if (!kids || kids.length === 0) return -1;
+    let total = 0;
+    for (const kid of kids) {
+      const raw = kid ? kid.size : undefined;
+      if (raw === undefined || raw === null) return -1;
+      let value;
+      if (typeof raw === 'number') {
+        // A RESOLVED config: GoldenLayout splits the unit out into
+        // `sizeUnit`, and anything but a percentage cannot be summed against
+        // the others.
+        if (kid.sizeUnit !== '%' && kid.sizeUnit !== 'percent') return -1;
+        value = raw;
+      } else {
+        const text = String(raw).trim();
+        if (!text.endsWith('%')) return -1;
+        value = Number(text.slice(0, -1));
+      }
+      if (!Number.isFinite(value)) return -1;
+      total += value;
+    }
+    const free = 100 - total;
+    return free > 0 && free < 100 ? Math.round(free) : 0;
+  })(#)""".}
+  ## The percentage of the top-level row that the layout does NOT account for.
+  ##
+  ## ## What it is for, and why the number is not recoverable later
+  ##
+  ## `src/config/default_layout.json` declares three top-level columns —
+  ## `20%` Filesystem, `55%` replay panes, `25%` the NS9 panes — and edit mode
+  ## hides every component of the middle one, so `sanitizeLayoutConfig` drops
+  ## it. The survivors still SAY `20%` and `25%`, but GoldenLayout renormalises
+  ## a row to fill 100% the instant it loads one: measured, `20/25` became
+  ## `44.44/55.56` before any pane had been created. The editor's container is
+  ## created after that, so by the time it asks how much room the layout meant
+  ## to leave it, the answer has been overwritten.
+  ##
+  ## So it is read HERE, from the config as sent, where `20%` and `25%` are
+  ## still strings and the missing `55` is still visible as the shortfall.
+  ##
+  ## ## Why "unclaimed" rather than "what was dropped"
+  ##
+  ## A sanitiser that reported what it removed would answer only for the path
+  ## that removes something. This asks a question about the config in front of
+  ## it — how much of the row is unspoken for — which has the same answer for
+  ## a sanitised layout, for a hand-edited one, and for a future layout that
+  ## simply leaves a gap. `0` means the row is fully accounted for and the
+  ## caller must not interfere; `-1` means the question has no well-defined
+  ## answer (no explicit sizes, a non-row root) and likewise.
+  ##
+  ## Returns `0` rather than a negative for an OVER-subscribed row: a layout
+  ## summing past 100 is GoldenLayout's business to normalise, not this
+  ## function's to complain about.
+
 # ---------------------------------------------------------------------------
 # Load-side repair
 # ---------------------------------------------------------------------------

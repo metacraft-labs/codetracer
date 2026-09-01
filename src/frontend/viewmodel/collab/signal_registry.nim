@@ -361,6 +361,26 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addDerived("SearchResultsVM",
     ["visibleResults", "resultCount", "fileCount"])
 
+  entries.addMany("TestResultsVM", ["catalog", "summary", "projectName"],
+    vscBackendAuthoritative,
+    "What tests a project has and what a run of them said are facts about " &
+    "the workspace and the runner, not about a participant. Everyone in a " &
+    "session is looking at the same project and the same run.")
+  entries.addEntry("TestResultsVM", "runAbsence", vscRendererLocal,
+    "Why THIS renderer cannot start a run — a browser has no `nargo` and no " &
+    "subprocess, a desktop host does. It is a statement about the local " &
+    "platform, so publishing it would tell a desktop participant that their " &
+    "own machine cannot run tests because someone else's tab cannot.")
+  entries.addDerived("TestResultsVM", ["rows", "isEmpty", "headline"])
+
+  entries.addMany("ConstraintsVM", ["report", "projectName"],
+    vscBackendAuthoritative,
+    "A circuit's opcode counts are a property of the sources everyone in " &
+    "the session is looking at, produced by `nargo info` or shipped with " &
+    "the bundled template.")
+  entries.addDerived("ConstraintsVM",
+    ["hasReport", "acirOpcodes", "unconstrainedOpcodes", "headline"])
+
   entries.addMany("TraceLogVM", ["entries"], vscBackendAuthoritative,
     "Trace-log entries are backend/session facts.")
   entries.addEntry("TraceLogVM", "selectedIndex", vscSharedSessionViewState,

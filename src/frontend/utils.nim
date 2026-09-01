@@ -293,6 +293,14 @@ proc makeSearchResultsComponent*(data: Data): SearchResultsComponent =
   data.ui.searchResults = result
   data.registerComponent(result, Content.SearchResults)
 
+proc makeTestResultsComponent*(data: Data, id: int): TestResultsComponent =
+  result = TestResultsComponent(id: id)
+  data.registerComponent(result, Content.TestResults)
+
+proc makeConstraintsComponent*(data: Data, id: int): ConstraintsComponent =
+  result = ConstraintsComponent(id: id)
+  data.registerComponent(result, Content.Constraints)
+
 proc makeTraceLogComponent*(data: Data, id: int): TraceLogComponent =
   result = TraceLogComponent(
     id: id,
@@ -1020,6 +1028,8 @@ proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", n
   of Content.Scratchpad:      data.makeScratchpadComponent(id)
   of Content.Repl:            data.makeReplComponent(id)
   of Content.TraceLog:        data.makeTraceLogComponent(id)
+  of Content.TestResults:     data.makeTestResultsComponent(id)
+  of Content.Constraints:     data.makeConstraintsComponent(id)
   of Content.CalltraceEditor: data.makeCalltraceEditorComponent(id)
   of Content.TerminalOutput:  data.makeTerminalOutputComponent(id)
   of Content.Shell:           data.makeShellComponent(id)
@@ -1126,11 +1136,85 @@ proc openNewLayoutContainer*(data: Data, itemType: cstring, isEditor: bool = fal
     content: @[]
   )
 
+  # THE EDITOR GETS THE SPACE THE LAYOUT LEFT FOR IT.
+  #
+  # `src/config/default_layout.json` has no editor component in it, and it
+  # cannot: `sanitizeLayoutConfig` strips per-trace editor tabs on save, so a
+  # declared editor stack would be emptied and dropped the first time a layout
+  # was persisted (an empty stack is a config GoldenLayout rejects outright —
+  # `Stack.init`'s activeItemIndex range check). The editor's container is
+  # therefore always created here, at index 1, between the Filesystem column
+  # and whatever follows.
+  #
+  # Created with NO SIZE, GoldenLayout gives it an equal share of the row.
+  # Measured on a first-ever edit-mode launch, where the replay-only middle
+  # column has been hidden and only the 20% Filesystem column survives: the
+  # editor took 50%, the file tree took 50%, and §1a's 20/55/25 was nowhere.
+  # A desktop `ct edit <folder>` on a machine with no saved edit layout hits
+  # exactly the same path, so this is a shared defect and not a web one.
+  #
+  # The remainder of the sizes the layout DECLARED is the right number, and it
+  # is the layout's own statement rather than a constant invented here: with
+  # the Filesystem column at 20% and the NS9 panes' column at 25%, the editor
+  # is 55%, which is §1a's figure arrived at rather than copied. When the
+  # layout does not declare sizes for every top-level child the question has
+  # no answer and this leaves GoldenLayout's behaviour alone.
   let resolvedConfig = data.ui.contentItemConfig.resolve(config)
 
   let contentItem = data.ui.layout.createAndInitContentItem(resolvedConfig, parent)
 
   discard parent.addChild(contentItem, index)
+
+  # ...AND THEN TAKE THE WIDTH BACK, because `addChild` just threw it away.
+  #
+  # GoldenLayout's `RowOrColumn.addChild` does not read the size the config
+  # asked for. It assigns `(1 / contentItems.length) * 100` to the new item and
+  # scales every sibling by `(100 - newItemSize) / 100`
+  # (`node_modules/golden-layout/dist/esm/ts/items/row-or-column.js:103-117`).
+  # So a third child always arrives at 33.3% whatever it was created with —
+  # measured on the deployed `/noir` as 29.3 / 33.0 / 36.6 where the layout
+  # declares 20 / 55 / 25.
+  #
+  # Setting `size` afterwards and calling `updateSize` is how the same file
+  # does it, so this is GoldenLayout's own mechanism rather than a workaround
+  # around it. The siblings keep their RELATIVE proportions and are scaled into
+  # what is left, which is what makes this a redistribution and not a second
+  # layout: a user who has dragged a splitter still gets their ratio back,
+  # narrowed.
+  #
+  # Guarded and total: a GoldenLayout without `updateSize`, a row whose
+  # siblings report no size, or an editorAreaPercent of 0 all leave the tree
+  # exactly as `addChild` left it.
+  if isEditor and data.ui.editorAreaPercent > 0 and
+     data.ui.editorAreaPercent < 100:
+    let wanted = data.ui.editorAreaPercent
+    {.emit: """
+    try {
+      var parent_ = `parent`;
+      var added_ = `contentItem`;
+      var kids_ = parent_ && parent_.contentItems;
+      if (kids_ && kids_.length > 1) {
+        var others_ = 0;
+        for (var i_ = 0; i_ < kids_.length; i_++) {
+          if (kids_[i_] !== added_) { others_ += Number(kids_[i_].size) || 0; }
+        }
+        if (others_ > 0) {
+          var scale_ = (100 - `wanted`) / others_;
+          for (var j_ = 0; j_ < kids_.length; j_++) {
+            kids_[j_].size = (kids_[j_] === added_)
+              ? `wanted`
+              : (Number(kids_[j_].size) || 0) * scale_;
+          }
+          if (typeof parent_.updateSize === 'function') {
+            parent_.updateSize(false);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('layout: could not apply the editor width: ' +
+        (e && e.message ? e.message : String(e)));
+    }
+    """.}
 
   return cast[GoldenContentItem](data.ui.layout.groundItem
                                                .contentItems[0]

@@ -65,17 +65,21 @@
 ## `mountTemplateSurface`, which drew a Filesystem panel into `<section
 ## id="main">` and nothing else, is deleted. See `templateNoTracePayload`.
 ##
-## §1a's picture also shows **Test Results** and **Constraints**, and those are
-## NOT here. They are not deferred web work: `Content` has no member for either
-## and no platform has such a pane, so a desktop user running `nargo test` has
-## nowhere for the results to go. §1a says so itself — they are "new panes this
-## campaign contributes, and they are CodeTracer's rather than the studio's".
-## Building them in the browser only would make the web a fork of the product,
-## which is the one thing §3 exists to prevent. What is here is the rest of
-## §1a's first screen: CodeTracer in Edit mode, with the panes edit mode has.
+## §1a's picture also shows **Test Results** and **Constraints**, and they are
+## here now — as `Content.TestResults` and `Content.Constraints`, ordinary
+## CodeTracer panes with IsoNim views, in `src/config/default_layout.json`'s
+## right-hand column and absent from `editModeHiddenContentIds`, which together
+## is the whole of "both platforms get them". Building them in the browser only
+## would have made the web a fork of the product, which is what §3 exists to
+## prevent; building them in `Content` means a desktop `ct edit` on a Noir
+## crate gets both from the same declaration.
+##
+## What this module supplies is the WEB HOST's answer to the one message they
+## are fed by — see `installTemplatePaneHost`. The Electron host's answer is
+## `index/ns9_panes.nim`, and the renderer cannot tell which replied.
 
 import
-  std/[ strutils ],
+  std/[ json, strutils ],
   ui_imports
 
 import ../viewmodel/platform/web_entry
@@ -83,6 +87,12 @@ import ../viewmodel/platform/web_deployment
 import ../viewmodel/platform/noir_template
 from ../index/layout_config_repair import sanitizeLayoutConfig
 from ../edit_mode import chooseInitialEditPath
+from ../../ct_test/contracts import TestCatalog
+from ../../ct_test/frameworks/noir_test_syntax import
+  NoirSourceFile, noirCatalogFromSources
+from ../../common/noir_constraints import
+  ConstraintReport, parseNargoInfoJson, absentReport
+from ../../ct_test/contracts import toJson
 
 when defined(js):
   proc jsEntryPath(): cstring {.importjs: """
@@ -506,6 +516,73 @@ proc installTemplateHost*(tmpl: ProjectTemplate) =
         value: templateTabInfo(tmpl, $requested)
       }))
 
+const webTestRunAbsence* =
+  "This build cannot run the tests. A browser has no `nargo` and no " &
+  "subprocess, and the Noir wasm worker implements exactly two operations — " &
+  "`compile` and `trace`. Running these needs a test operation in the wasm " &
+  "module and a branch for it in the worker; neither exists yet. The tests " &
+  "listed above are the ones `nargo test` would run: the selectors are " &
+  "produced by the same parser the `ct test` provider uses, and " &
+  "`ci/test/noir-template-toolchain.sh` compares them against nargo's own " &
+  "names on every run."
+  ## Why the Run column is not offered here, said once, where the pane can
+  ## show it. A pane that lists five tests beside a button that does nothing
+  ## is worse than one that says why — and "not wired up yet" would be untrue:
+  ## the operation does not exist to wire.
+
+proc templateTestCatalog*(tmpl: ProjectTemplate): TestCatalog =
+  ## Which tests the bundled project has, parsed from its own sources by the
+  ## parser `ct test`'s Noir provider uses.
+  ##
+  ## Not a second discovery implementation and not a hand-written list: the
+  ## renderer calls `noir_test_syntax.noirCatalogFromSources`, which
+  ## `frameworks/noir_nargo.nim` also calls after reading files off a disk.
+  ## `ci/test/noir-template-toolchain.sh` runs the real `nargo test` over this
+  ## same template and requires the selector SETS to be equal, so "the pane
+  ## lists the tests the runner runs" is measured rather than asserted.
+  var sources: seq[NoirSourceFile] = @[]
+  for file in tmpl.files:
+    sources.add NoirSourceFile(path: file.path, content: file.content)
+  noirCatalogFromSources(sources)
+
+proc templateConstraintReport*(tmpl: ProjectTemplate): ConstraintReport =
+  ## What the bundled circuit costs.
+  ##
+  ## Parsed from `noir_template.noirTemplateNargoInfoJson` with the same
+  ## `parseNargoInfoJson` the desktop uses on live `nargo info` output — one
+  ## parser, one shape, two sources. The counts are a pure function of sources
+  ## that are themselves a compile-time constant, and
+  ## `ci/test/noir-template-toolchain.sh` re-runs `nargo info` and fails on any
+  ## drift, so this is a measurement that travels rather than a cached answer.
+  if not tmpl.hasFiles:
+    return absentReport("No project is open.")
+  parseNargoInfoJson(noirTemplateNargoInfoJson,
+                     noirTemplateConstraintProvenance)
+
+proc installTemplatePaneHost*(tmpl: ProjectTemplate) =
+  ## Answer `CODETRACER::ns9-panes` for the bundled template.
+  ##
+  ## The web platform's half of the one message NS9's panes are fed by; the
+  ## Electron index's half is `index/ns9_panes.nim`. `onNoTrace` sends the
+  ## request once edit mode's layout exists, and both hosts reply on the same
+  ## two channels, so the renderer's handlers cannot tell them apart.
+  ##
+  ## Registered BEFORE the `no-trace` delivery, because that delivery is what
+  ## ends up sending the request — a responder installed afterwards would be
+  ## installed after the question.
+  data.ipc.respond(cstring"CODETRACER::ns9-panes",
+    proc(sender: js, payload: JsObject) =
+      data.ipc.deliver(cstring"CODETRACER::ns9-panes-catalog", js{
+        catalog: cstring(pretty(templateTestCatalog(tmpl).toJson())),
+        absence: cstring(webTestRunAbsence)
+      })
+      let report = templateConstraintReport(tmpl)
+      data.ipc.deliver(cstring"CODETRACER::ns9-panes-constraints", js{
+        info: cstring(noirTemplateNargoInfoJson),
+        provenance: cstring(noirTemplateConstraintProvenance),
+        absence: cstring(report.absence)
+      }))
+
 proc templateNoTracePayload*(tmpl: ProjectTemplate; layout: JsObject): JsObject =
   ## The `CODETRACER::no-trace` message, field for field with
   ## `index/startup.nim:249` and `index/traces.nim:1173`.
@@ -606,6 +683,7 @@ proc enterTemplateEditMode*(tmpl: ProjectTemplate): bool =
     return false
 
   installTemplateHost(tmpl)
+  installTemplatePaneHost(tmpl)
   mountedTemplate = tmpl
   discard data.ipc.deliver(cstring"CODETRACER::no-trace",
                            templateNoTracePayload(tmpl, layout))

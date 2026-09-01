@@ -3,6 +3,7 @@ import
   state, editor, debug, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
   welcome_screen,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
+  test_results, constraints,
   frame_viewer, pixel_history, shader_debug, video_player,
   vcs, unified_diff, verification,
   agent_activity, agent_workspace,
@@ -1236,6 +1237,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       Content.LowLevelCode,
       Content.RequestPanel,
       Content.TraceLog,
+      # NS9's two panes. Listed here, and NOT in `editModeHiddenContentIds`,
+      # which together is the whole of "both platforms get them": edit mode
+      # shows them on the desktop and in a browser from one declaration.
+      Content.TestResults,
+      Content.Constraints,
       Content.Scratchpad,
       Content.Filesystem,
       Content.CommandPalette,
@@ -1373,6 +1379,14 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # subscribes to tracepoint-result events) and
         # ``syncLegacyTraceLogIntoVM`` mirrors any rows already
         # accumulated when the panel becomes visible.
+        # TestResults and Constraints are IsoNim views with no legacy half,
+        # so there is nothing to sync -- the mount is the whole hook.
+        if state.content == Content.TestResults:
+          test_results.tryMountIsoNimTestResultsPanel()
+
+        if state.content == Content.Constraints:
+          constraints.tryMountIsoNimConstraintsPanel()
+
         if state.content == Content.TraceLog:
           trace_log.syncLegacyTraceLogIntoVM(TraceLogComponent(component))
           trace_log.tryMountIsoNimTraceLogPanel()

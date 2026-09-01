@@ -1,0 +1,133 @@
+// NS9's two panes — Test Results and Constraints.
+//
+// Both are row lists with a label on the left and a number on the right, so
+// they share a grid rather than each inventing one: a reader's eye lands in
+// the same place in either pane, which is the point of them being siblings in
+// one column.
+//
+// Colours come from the design-system variables the other panes use, so the
+// two follow a theme change without knowing a theme exists.
+
+ns9-row-padding = 2px 8px
+
+.test-results,
+.constraints
+  height: 100%
+  display: flex
+  flex-direction: column
+  overflow: auto
+  font-family: "SpaceGrotesk" !important
+  font-style: normal
+  font-weight: 400
+  color: colors-ui-text-default-label
+
+  &:focus
+    outline: 0px
+
+.test-results-headline,
+.constraints-headline
+  padding: 6px 8px 4px 8px
+  opacity: 0.75
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
+
+.test-results-body,
+.constraints-body
+  display: flex
+  flex-direction: column
+
+// ---------------------------------------------------------------------------
+// Test Results
+// ---------------------------------------------------------------------------
+
+.test-results-row
+  display: grid
+  // mark | name | where | duration.  The name takes the slack and the two
+  // right-hand columns are sized to their content, so a long test name
+  // truncates instead of pushing the duration off the pane.
+  grid-template-columns: 14px minmax(0, 1fr) auto auto
+  align-items: baseline
+  column-gap: 6px
+  padding: ns9-row-padding
+
+  &:hover
+    background-color: colors-ui-surface-hover-panel
+
+.test-results-mark
+  text-align: center
+  opacity: 0.8
+
+.test-results-name
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+.test-results-where,
+.test-results-duration
+  opacity: 0.55
+  font-size: 0.85em
+  white-space: nowrap
+
+.test-results-row.passed .test-results-mark
+  color: colors-ui-text-success-primary
+
+.test-results-row.failed .test-results-mark,
+.test-results-row.errored .test-results-mark
+  color: colors-ui-text-error-primary
+
+.test-results-row.not-run
+  opacity: 0.7
+
+.test-results-message
+  grid-column: 2 / -1
+  padding: 2px 0 4px 0
+  font-size: 0.85em
+  white-space: pre-wrap
+  color: colors-ui-text-error-primary
+
+// The absence line and the empty state are ordinary content, not errors: on
+// the web "these cannot be run here" is the correct and permanent answer.
+.test-results-absence,
+.test-results-empty,
+.constraints-absence,
+.constraints-provenance
+  padding: 6px 8px
+  font-size: 0.85em
+  line-height: 1.35
+  opacity: 0.6
+
+.hidden
+  display: none
+
+// ---------------------------------------------------------------------------
+// Constraints
+// ---------------------------------------------------------------------------
+
+.constraints-row
+  display: grid
+  // name | kind | count.  The count is right-aligned so a column of numbers
+  // reads as a column of numbers.
+  grid-template-columns: minmax(0, 1fr) auto 4em
+  align-items: baseline
+  column-gap: 6px
+  padding: ns9-row-padding
+
+  &:hover
+    background-color: colors-ui-surface-hover-panel
+
+.constraints-name
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+.constraints-kind
+  opacity: 0.5
+  font-size: 0.8em
+
+.constraints-count
+  text-align: right
+  font-variant-numeric: tabular-nums
+
+.constraints-row.unconstrained
+  opacity: 0.75

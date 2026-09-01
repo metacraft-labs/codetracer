@@ -416,6 +416,22 @@ probe_dir() {
 # ---------------------------------------------------------------------------
 # One arm: copy, mutate, serve, probe, print the JSON to a file.
 # ---------------------------------------------------------------------------
+jsonraw() {
+	# The value at a dotted path, verbatim (a list stays a list). `json` above
+	# reduces a list to its LENGTH, which is what most arms want and what the
+	# NS9 pane checks must not have — "five rows" and "five rows naming the
+	# project's own tests" are different assertions.
+	python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+for key in sys.argv[2].split("."):
+    d = d.get(key) if isinstance(d, dict) else None
+    if d is None:
+        print("")
+        sys.exit(0)
+print(json.dumps(d))
+' "${cache}/$1.json" "$2"
+}
 run_arm() {
 	local label="$1" mutate="$2" url_path="${3:-/}" map_host="${4:-}"
 	arm_dir="${cache}/arm-${label}"
@@ -662,6 +678,71 @@ s = open(p).read()
 needle = '\\x0Abindings:\\x0A'
 assert s.count(needle) == 1, s.count(needle)
 open(p, 'w').write(s.replace(needle, '\\x0Abindingz:\\x0A'))
+PY2
+}
+
+# Arm N — THE CONSTRAINT COUNTS THE BUNDLE SHIPS ARE WRONG.
+#
+# The web build cannot run `nargo`: there is no subprocess in a tab, the wasm
+# compiler exports no `info` operation, and the only compile a tracer host asks
+# for sets `force_brillig`, so even decoding its artifact would answer about an
+# all-unconstrained build. The counts therefore travel with the sources they
+# describe, produced by `nargo info --json` at build time
+# (`platform/noir_template.noirTemplateNargoInfoJson`), and
+# `ci/test/noir-template-toolchain.sh` re-runs the producer on every CI run and
+# fails on drift.
+#
+# THIS arm is the other half of that: it perturbs the shipped constant and
+# requires the PANE to disagree. Without it, arm R's `main=17(acir)` check
+# could be satisfied by a pane that renders a hard-coded 17 — which is exactly
+# the placeholder this campaign was told not to build. The number must come
+# from the constant, through `common/noir_constraints.parseNargoInfoJson`, to
+# the DOM.
+#
+# Everything else must stay green: the tests still list, the four panes are
+# still there, the proportions are unchanged. A mutation that moved any of
+# those would not be isolating the counts.
+mutate_wrong_constraint_counts() {
+	local dir="$1"
+	local needle='\"name\":\"main\",\"opcodes\":17'
+	grep -qF "${needle}" "${dir}/ui.js" || return 1
+	python3 - "${dir}/ui.js" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+needle = '\\"name\\":\\"main\\",\\"opcodes\\":17'
+assert needle in s, 'needle absent'
+open(p, 'w').write(s.replace(needle, needle.replace(':17', ':99')))
+PY2
+}
+
+# Arm W — THE LAYOUT NO LONGER LEAVES THE EDITOR ANY ROOM.
+#
+# `openNewLayoutContainer` gives the editor's container the percentage the
+# top-level row does not account for, because GoldenLayout's own `addChild`
+# assigns `(1 / n) * 100` and scales the siblings to fit
+# (`golden-layout/dist/esm/ts/items/row-or-column.js:103-117`) — measured as
+# 29.3 / 33.0 / 36.6 where the layout declares 20 / 55 / 25.
+#
+# Over-subscribing the row (20 + 55 + 75 = 150) makes `unclaimedTopLevelPercent`
+# answer `0`, which is its "the layout has no opinion" value, and the editor is
+# created with no size again. So this arm restores GoldenLayout's default
+# behaviour EXACTLY, which is the state arm R's proportion check exists to
+# detect — and it leaves every pane, every row and every count untouched, which
+# is what makes it a check on the geometry alone.
+mutate_oversubscribed_layout() {
+	local dir="$1"
+	grep -q '25%' "${dir}/ui.js" || return 1
+	python3 - "${dir}/ui.js" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+# Both `ui/layout.nim` and `ui/web_entry_surface.nim` `staticRead` the same
+# `default_layout.json`, so the string appears twice in one bundle and both
+# copies must move together — the surface reads one and the fallback the other.
+needle = '\\"size\\": \\"25%\\"'
+assert s.count(needle) >= 1, s.count(needle)
+open(p, 'w').write(s.replace(needle, '\\"size\\": \\"75%\\"'))
 PY2
 }
 
@@ -1216,6 +1297,108 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 		dump_arm route
 	fi
 
+	# -----------------------------------------------------------------------
+	# NS9's OTHER TWO PANES. §1a: "Filesystem, Editor, Test Results,
+	# Constraints — not a landing page". The first two were asserted above;
+	# these two did not exist on any platform until this campaign, and the
+	# whole point of building them as `Content` members is that a desktop user
+	# running Noir tests gets them too. What a browser can check is that they
+	# are here, that their data is the producer's own, and that the four sit
+	# where the picture puts them.
+	# -----------------------------------------------------------------------
+	case "${r_tabtext}" in
+	*"TEST RESULTS"*)
+		case "${r_tabtext}" in
+		*"CONSTRAINTS"*)
+			ck ok "arm R: all four of §1a's panes are on the first screen — ${r_tabtext}" ;;
+		*)
+			ck fail "arm R: no CONSTRAINTS pane in the layout (tabs: '${r_tabtext}')" ;;
+		esac ;;
+	*)
+		ck fail "arm R: no TEST RESULTS pane in the layout (tabs: '${r_tabtext}')" ;;
+	esac
+
+	# THE TESTS ARE THE PROJECT'S OWN, named by the runner's selectors. The
+	# parser that produced them is the one `ct test`'s Noir provider uses, and
+	# `ci/test/noir-template-toolchain.sh` compares its selectors against a
+	# real `nargo test` run — so this check is about DELIVERY to the pane,
+	# and that one is about correctness of the names.
+	r_testnames="$(python3 -c '
+import json, sys
+rows = json.load(open(sys.argv[1]))["dom"].get("testRows") or []
+print(" ".join(r["name"] for r in rows))
+' "${cache}/route.json")"
+	r_testcount="$(json route dom.testRows)"
+	if [ "${r_testcount:-0}" -eq 5 ] 2>/dev/null; then
+		ck ok "arm R: Test Results lists the template's 5 tests: ${r_testnames}"
+	else
+		ck fail "arm R: Test Results lists ${r_testcount:-0} test(s), and the bundled template has 5 (names: '${r_testnames}')"
+	fi
+	case "${r_testnames}" in
+	*"test_main"*"test_in_range_accepts_small_values"*)
+		ck ok "arm R: the rows are the project's own tests, from src/main.nr through src/utils.nr" ;;
+	*)
+		ck fail "arm R: the rows do not name the template's tests ('${r_testnames}') — the pane mounted over something else" ;;
+	esac
+
+	# ...AND THE PANE SAYS WHY THEY HAVE NOT RUN. On the web that is permanent
+	# and correct: there is no `nargo` in a tab and the wasm worker dispatches
+	# only `compile` and `trace`. A pane that listed five tests and said
+	# nothing about running them would be the placeholder this campaign was
+	# told not to build.
+	r_absence="$(json route dom.testAbsenceLength)"
+	r_testhead="$(jsonraw route dom.testHeadline)"
+	if [ "${r_absence:-0}" -gt 80 ] 2>/dev/null; then
+		ck ok "arm R: Test Results states why a run cannot start here (${r_absence} characters), headline ${r_testhead}"
+	else
+		ck fail "arm R: Test Results offers no reason the tests have not run (${r_absence:-0} characters) — five rows and no explanation"
+	fi
+
+	# CONSTRAINTS SHOWS A MEASURED NUMBER. 17 is `nargo info --json`'s answer
+	# for this template; `ci/test/noir-template-toolchain.sh` re-runs the
+	# producer and fails if the bundle's copy has drifted from it, so the
+	# number written here is pinned by a measurement rather than by taste.
+	r_constraints="$(python3 -c '
+import json, sys
+rows = json.load(open(sys.argv[1]))["dom"].get("constraintRows") or []
+print(" ".join(r["name"] + "=" + r["count"] + "(" + r["kind"] + ")" for r in rows))
+' "${cache}/route.json")"
+	case "${r_constraints}" in
+	*"main=17(acir)"*)
+		ck ok "arm R: Constraints shows the measured ACIR opcode count: ${r_constraints}" ;;
+	*)
+		ck fail "arm R: Constraints does not show main=17(acir) — rows were '${r_constraints}'" ;;
+	esac
+	r_prov="$(jsonraw route dom.constraintProvenance)"
+	case "${r_prov}" in
+	*"nargo info"*)
+		ck ok "arm R: the counts carry their provenance, so a reader can judge them: ${r_prov}" ;;
+	*)
+		ck fail "arm R: the constraint counts carry no provenance (${r_prov}) — a number a user cannot judge" ;;
+	esac
+
+	# §1a's PROPORTIONS. Not decoration: the same layout produced 29/33/37
+	# before `openNewLayoutContainer` stopped letting GoldenLayout's `addChild`
+	# split the row evenly, and a file tree as wide as the editor is a
+	# different product from the one the picture draws. The tolerance is ±4
+	# points, which is wider than sub-pixel noise and far narrower than the
+	# even split this exists to catch.
+	r_wfs="$(python3 -c '
+import json, sys
+w = json.load(open(sys.argv[1]))["dom"].get("paneWidths") or {}
+print(w.get("filesystem", -1), w.get("editor", -1), w.get("testResults", -1))
+' "${cache}/route.json")"
+	if python3 -c '
+import sys
+fs, ed, tr = (float(x) for x in sys.argv[1].split())
+ok = abs(fs - 20) <= 4 and abs(ed - 55) <= 4 and abs(tr - 25) <= 4
+sys.exit(0 if ok else 1)
+' "${r_wfs}"; then
+		ck ok "arm R: the four panes sit at §1a's proportions — filesystem/editor/test-results ${r_wfs} against 20/55/25"
+	else
+		ck fail "arm R: the panes are at ${r_wfs} and §1a draws 20/55/25 — GoldenLayout split the row evenly instead of honouring the layout's declaration"
+	fi
+
 	if [ "${r_errs}" = "0" ]; then
 		ck ok "arm R: no uncaught page errors on the template route"
 	else
@@ -1562,7 +1745,77 @@ else
 fi
 echo
 
-expect_count 48
+echo "Arm N: MUTATION — the shipped constraint counts are perturbed"
+echo "    Expect arm R's CONSTRAINT check RED; tests, panes and proportions"
+echo "    green. Without this, a hard-coded 17 would pass."
+if ! run_arm bad-counts mutate_wrong_constraint_counts "/noir"; then
+	ck fail "arm N could not be measured"
+	ck fail "arm N could not be measured (second half)"
+else
+	n_rows="$(python3 -c '
+import json, sys
+rows = json.load(open(sys.argv[1]))["dom"].get("constraintRows") or []
+print(" ".join(r["name"] + "=" + r["count"] for r in rows))
+' "${cache}/bad-counts.json")"
+	n_tests="$(json bad-counts dom.testRows)"
+	case "${n_rows}" in
+	*"main=17"*)
+		ck fail "arm N: the pane still shows main=17 with the shipped constant perturbed — the number is not coming from the bundle, so arm R's check proves nothing" ;;
+	*"main=99"*)
+		ck ok "arm N: the pane follows the shipped constant (${n_rows}), so arm R's count assertion reads real data and can fail" ;;
+	*)
+		ck fail "arm N: the constraints pane shows '${n_rows}' — the mutation broke more than the count" ;;
+	esac
+	if [ "${n_tests:-0}" -eq 5 ] 2>/dev/null; then
+		ck ok "arm N: Test Results still lists 5 tests, so this arm isolates the constraint counts from the rest of the first screen"
+	else
+		ck fail "arm N: Test Results lists ${n_tests:-0} test(s) — the mutation is not isolating the counts"
+	fi
+fi
+echo
+
+echo "Arm W: MUTATION — the layout over-subscribes its own row"
+echo "    GoldenLayout's default even split, restored. Expect arm R's"
+echo "    PROPORTION check RED and every pane's content green."
+if ! run_arm wide-layout mutate_oversubscribed_layout "/noir"; then
+	ck fail "arm W could not be measured"
+	ck fail "arm W could not be measured (second half)"
+else
+	w_widths="$(python3 -c '
+import json, sys
+w = json.load(open(sys.argv[1]))["dom"].get("paneWidths") or {}
+print(w.get("filesystem", -1), w.get("editor", -1), w.get("testResults", -1))
+' "${cache}/wide-layout.json")"
+	if python3 -c '
+import sys
+fs, ed, tr = (float(x) for x in sys.argv[1].split())
+sys.exit(0 if abs(ed - 55) > 4 else 1)
+' "${w_widths}"; then
+		ck ok "arm W: the editor loses its declared width when the row is over-subscribed (${w_widths}), so arm R's proportion assertion can fail"
+	else
+		ck fail "arm W: the panes are still at ${w_widths} — arm R's proportion check is not reading the layout's declaration"
+	fi
+	# The twin: geometry only. Every pane must still hold exactly what it held.
+	w_tests="$(json wide-layout dom.testRows)"
+	w_counts="$(python3 -c '
+import json, sys
+rows = json.load(open(sys.argv[1]))["dom"].get("constraintRows") or []
+print(" ".join(r["name"] + "=" + r["count"] for r in rows))
+' "${cache}/wide-layout.json")"
+	case "${w_counts}" in
+	*"main=17"*)
+		if [ "${w_tests:-0}" -eq 5 ] 2>/dev/null; then
+			ck ok "arm W: all four panes still hold their own content (5 tests, ${w_counts}), so this arm isolates geometry from data"
+		else
+			ck fail "arm W: Test Results lost its rows (${w_tests:-0}) — the arm is not isolating geometry"
+		fi ;;
+	*)
+		ck fail "arm W: the constraint counts changed too (${w_counts}) — the arm is not isolating geometry" ;;
+	esac
+fi
+echo
+
+expect_count 59
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

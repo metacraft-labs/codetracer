@@ -475,13 +475,15 @@ when defined(js):
     ##
     ## ## What it deliberately does not claim
     ##
-    ## This is a mounted welcome screen, not NS9. Noir-Studio.milestones.org's
-    ## NS9 asks that "the first screen is CodeTracer in Edit mode on a working
-    ## multi-file project — Filesystem, Editor, Test Results, Constraints — not
-    ## a landing page", and that milestone is `planned` and depends on NS1's
-    ## unfinished call-site migration. What this closes is the gap BELOW that
-    ## one: the renderer now runs and paints in a browser, so NS9 has a mounted
-    ## tree to put panes into instead of a blank `<div>`.
+    ## This is a mounted welcome screen, not NS9 — and the distinction is now
+    ## a ROUTE rather than a milestone boundary. NS9 asks that "the first
+    ## screen is CodeTracer in Edit mode on a working multi-file project —
+    ## Filesystem, Editor, Test Results, Constraints — not a landing page",
+    ## and that is what `/noir` opens: `ui/web_entry_surface.
+    ## enterTemplateEditMode` delivers `CODETRACER::no-trace` and all four
+    ## panes mount. This surface is what a LANGUAGE-NEUTRAL root opens, where
+    ## rule 0 says there is no right template to pick, so a welcome screen is
+    ## the correct answer rather than a lesser one.
     ##
     ## Returns whether it mounted, so the caller can say so rather than assume.
     ensureWelcomeScreenVm()

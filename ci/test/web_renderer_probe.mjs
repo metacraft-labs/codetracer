@@ -197,6 +197,55 @@ try {
         }
         return painted;
       })(),
+      // NS9'S TWO PANES. §1a's first screen is "Filesystem, Editor, Test
+      // Results, Constraints", and until this campaign the last two existed on
+      // no platform. They are ordinary CodeTracer panes now — `Content`
+      // members with IsoNim views — so these read their own class names, the
+      // same way the filesystem fields above read `isonim_filesystem_view`'s.
+      testRows: Array.from(document.querySelectorAll('.test-results-row'))
+        .map((e) => ({
+          name: (e.querySelector('.test-results-name') || {}).textContent || '',
+          where: (e.querySelector('.test-results-where') || {}).textContent || '',
+          state: (typeof e.className === 'string' ? e.className : '')
+            .replace('test-results-row', '').trim(),
+        })),
+      testHeadline:
+        ((document.querySelector('.test-results-headline') || {}).textContent || '').trim(),
+      // The stated reason a run cannot start here. On the web this is the
+      // permanent and correct answer, so it is CONTENT — a pane that listed
+      // five tests beside a dead Run button would be worse.
+      testAbsenceLength:
+        ((document.querySelector('.test-results-absence') || {}).textContent || '').trim().length,
+      constraintRows: Array.from(document.querySelectorAll('.constraints-row'))
+        .map((e) => ({
+          name: (e.querySelector('.constraints-name') || {}).textContent || '',
+          kind: (e.querySelector('.constraints-kind') || {}).textContent || '',
+          count: (e.querySelector('.constraints-count') || {}).textContent || '',
+        })),
+      constraintHeadline:
+        ((document.querySelector('.constraints-headline') || {}).textContent || '').trim(),
+      // Where the numbers came from. A count with no provenance is a count a
+      // user cannot judge, so its ABSENCE is a defect the gate can see.
+      constraintProvenance:
+        ((document.querySelector('.constraints-provenance') || {}).textContent || '').trim(),
+      // THE PROPORTIONS §1a DRAWS: 20 / 55 / 25. Measured as painted width
+      // over the viewport, because the layout's own declaration is gone by
+      // the time anything can read it — GoldenLayout renormalises a row to
+      // fill 100% on load (see `layout_config_repair.unclaimedTopLevelPercent`).
+      paneWidths: (() => {
+        const w = window.innerWidth || 1;
+        const pct = (sel) => {
+          const e = document.querySelector(sel);
+          if (!e) return -1;
+          const r = e.getBoundingClientRect();
+          return Math.round((r.width / w) * 1000) / 10;
+        };
+        return {
+          filesystem: pct('.filesystem-container'),
+          editor: pct('.monaco-editor'),
+          testResults: pct('.test-results'),
+        };
+      })(),
       // What a person reads off the screen. `innerText` is defined over the
       // RENDERED text — it is the field that answers "is there a product on
       // this page", and the only one of the two that a screenshot agrees with.

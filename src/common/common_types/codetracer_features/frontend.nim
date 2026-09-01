@@ -370,6 +370,26 @@ type
     ## affordance for a thing that usually is not there — the promise this
     ## campaign exists to avoid making.
     Verification = 47
+    ## NS9. The two panes `Planned-Features/Noir-Studio.md` §1a's first screen
+    ## shows beside the Filesystem and the Editor, and which no platform had.
+    ##
+    ## They are CodeTracer's rather than the studio's, which is why they are
+    ## here and not in a web-only module: §1a is explicit that "a desktop user
+    ## running Noir tests gets both, because the web is a build of the product
+    ## and not a fork of it". Both are absent from `editModeHiddenContentIds`
+    ## below, so an editing session shows them on either platform, and both
+    ## are ordinary `genericUiComponent` panes with an IsoNim view — nothing
+    ## about them is web-shaped.
+    TestResults = 48
+      ## Per-test pass/fail for the open project. Its model is the one that
+      ## already existed and had no pane: `TestItem` / `TestCatalog` from
+      ## `src/ct_test/contracts.nim` for what tests EXIST, and
+      ## `TestRunSummary` / `TestRunRow` from
+      ## `viewmodel/viewmodels/test_run_summary_vm.nim` for what a run SAID.
+    Constraints = 49
+      ## What the circuit costs, as `nargo info --json` reports it. See
+      ## `src/common/noir_constraints.nim` for why the rows are per ACIR
+      ## function rather than the per-module roll-up §1a's picture draws.
 
   ConnectionLossReason* = enum
     ConnectionLossNone,

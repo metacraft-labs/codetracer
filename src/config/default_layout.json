@@ -146,6 +146,43 @@
                             }
                         ]
                     }
+                ],
+                "size": "55%"
+            },
+            {
+                "type": "column",
+                "size": "25%",
+                "content": [
+                    {
+                        "type": "stack",
+                        "content": [
+                            {
+                                "type": "component",
+                                "componentType": "genericUiComponent",
+                                "componentState": {
+                                    "id": 0,
+                                    "label": "testResultsComponent-0",
+                                    "content": 48
+                                },
+                                "title": "genericUiComponent"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "stack",
+                        "content": [
+                            {
+                                "type": "component",
+                                "componentType": "genericUiComponent",
+                                "componentState": {
+                                    "id": 0,
+                                    "label": "constraintsComponent-0",
+                                    "content": 49
+                                },
+                                "title": "genericUiComponent"
+                            }
+                        ]
+                    }
                 ]
             }
         ]

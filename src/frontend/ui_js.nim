@@ -9,6 +9,14 @@ import
       no_source, ui_imports, shortcuts, step_list, low_level_code,
       request_panel, session_switch, session_tabs, command, frame_viewer,
       pixel_history, shader_debug, video_player, agentic_session_launcher],
+  # `layout_config_repair` is dependency-free by design (its own header says
+  # so) precisely so a non-Electron caller can use it; `onNoTrace` reads the
+  # editor's declared width out of the layout config with it.
+  index/layout_config_repair,
+  ui/[test_results, constraints],
+  ../ct_test/contracts,
+  ../common/noir_constraints,
+  viewmodel/viewmodels/[test_results_vm, constraints_vm],
   # `electron_presence` supplies `inElectron`, which the two `if inElectron:`
   # blocks at the bottom of this file read to choose an IPC transport.
   #
@@ -2820,6 +2828,20 @@ proc onNoTrace(
       data.services.search.functionsInSourcemapPrepared.add(prepared)
 
   data.services.editor.filesystem = response.filesystem
+  # READ BEFORE THE ASSIGNMENT, and that ordering is the whole of it.
+  # `response.layout` still carries the layout's declared `20%` / `25%`
+  # strings; the moment GoldenLayout loads it those become the renormalised
+  # `44.44` / `55.56` that fill the row, and the space the layout meant to
+  # leave for the editor is no longer visible anywhere. Measured, on the
+  # deployed `/noir`: the file tree and the editor split the window 50/50
+  # because the editor's container was created with no size at all.
+  #
+  # Both platforms reach this line with the same value — `index/config.
+  # loadEditLayoutConfig`'s output on the desktop, `ui/web_entry_surface.
+  # noirStudioEditLayout`'s in a browser — so the fix is one call site rather
+  # than one per host.
+  data.ui.editorAreaPercent =
+    max(0, unclaimedTopLevelPercent(cast[js](response.layout)))
   data.ui.resolvedConfig = cast[GoldenLayoutResolvedConfig](response.layout)
   data.config = response.config
   data.config.flow.realFlowUI = loadFlowUI(data.config.flow.ui)
@@ -2902,6 +2924,14 @@ proc onNoTrace(
       # remember those and be able to load them on ctrl+page etc
       # TODO
       # discard
+
+  # ASK FOR THE NS9 PANES' DATA once the layout exists, so the panes are
+  # mounted by the time an answer arrives. Sent for an EDIT session only: a
+  # replay session is looking at a recording, and "which tests does this
+  # workspace have" is a question about a workspace.
+  if data.startOptions.edit:
+    data.ipc.send "CODETRACER::ns9-panes",
+      js{ folder: data.startOptions.folder }
 
   configureShortcuts()
   redrawAll()
@@ -3265,6 +3295,57 @@ proc onReviewDatasetRead*(sender: js,
   # every launch path publishes it, then the one host entry point.
   vcs.openReviewDataset(data, response.dataset)
 
+# ---------------------------------------------------------------------------
+# NS9's two panes, filled by whichever host this build has
+#
+# ONE MESSAGE, TWO HOSTS, and that is the point rather than an implementation
+# detail. `CODETRACER::ns9-panes` asks "what tests does this project have, and
+# what does its circuit cost". The Electron index answers it by running the
+# `ct test` Noir provider in-process and `nargo info --json` as a subprocess;
+# `ui/web_entry_surface.installTemplateHost` answers it for the bundled
+# template out of the bundle. The renderer cannot tell which answered, which is
+# what keeps the panes CodeTracer's rather than the studio's
+# (`Planned-Features/Noir-Studio.md` §3).
+# ---------------------------------------------------------------------------
+
+proc onNs9PanesCatalog(
+    sender: js,
+    response: jsobject(catalog=cstring, absence=cstring)) =
+  ## The project's test catalog, in `contracts.toJson`'s shape.
+  test_results.initTestResultsVM()
+  if test_results.testResultsVMInstance.isNil:
+    return
+  let absence = $response.absence
+  test_results.testResultsVMInstance.setRunAbsence(absence)
+  let raw = $response.catalog
+  if raw.len == 0:
+    return
+  try:
+    test_results.testResultsVMInstance.setCatalog(
+      testCatalogFromJson(parseJson(raw)))
+  except CatchableError:
+    # A catalog that will not parse is a host fault, and the pane must not
+    # pretend the project has no tests because of it — that is the reading
+    # `absence` exists to make impossible.
+    cerror "ns9-panes: the test catalog did not parse: " &
+      getCurrentExceptionMsg()
+    test_results.testResultsVMInstance.setRunAbsence(
+      "The host sent a test catalog this build could not read.")
+
+proc onNs9PanesConstraints(
+    sender: js,
+    response: jsobject(info=cstring, provenance=cstring, absence=cstring)) =
+  ## `nargo info --json`, verbatim, or a stated reason there is none.
+  constraints.initConstraintsVM()
+  if constraints.constraintsVMInstance.isNil:
+    return
+  let absence = $response.absence
+  if absence.len > 0:
+    constraints.constraintsVMInstance.setAbsence(absence)
+    return
+  constraints.constraintsVMInstance.setReport(
+    parseNargoInfoJson($response.info, $response.provenance))
+
 macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
   let ipc = ident("ipc")
   let data = ident("data")
@@ -3337,6 +3418,8 @@ proc configureIPC(data: Data) =
     "start-deepreview"
 
     "no-trace"
+    "ns9-panes-catalog"
+    "ns9-panes-constraints"
     "welcome-screen"
     # #568: the recent-traces / recent-folders push for startup paths whose own
     # startup message does not carry them (`index/recent_items.nim`).

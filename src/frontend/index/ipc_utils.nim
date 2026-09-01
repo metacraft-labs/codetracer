@@ -2,6 +2,7 @@ import
   std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
   review_dataset,
+  ns9_panes,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
@@ -157,6 +158,11 @@ proc configureIpcMain* =
     "record-from-launch"
     "record-with-launch-config"
     "init-edit-mode"
+
+    # NS9 — the one message Test Results and Constraints are fed by. Answered
+    # here by `index/ns9_panes.onNs9Panes`, and in a browser by
+    # `ui/web_entry_surface.installTemplatePaneHost`.
+    "ns9-panes"
 
     "tab-load"
     "load-low-level-tab"

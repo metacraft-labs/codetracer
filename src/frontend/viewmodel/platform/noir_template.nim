@@ -68,8 +68,9 @@
 ## the same failure as the single-file playground the paragraph above forbids,
 ## one level down: it teaches the visitor a layout that does not work. So tests
 ## are a MODULE — `src/tests.nr`, declared by `mod tests;` — and
-## `test_the_template_is_a_crate_nargo_builds` is the assertion that keeps it
-## one.
+## `ci/test/noir-template-toolchain.sh` is the assertion that keeps it one:
+## it materialises this template, runs `nargo test` against it and requires
+## five passing tests.
 
 import ./web_entry
 
@@ -257,3 +258,43 @@ proc fileContent*(tmpl: ProjectTemplate; path: string): string =
   for file in tmpl.files:
     if file.path == path: return file.content
   ""
+
+# ---------------------------------------------------------------------------
+# What the template COSTS, measured by the real producer
+# ---------------------------------------------------------------------------
+
+const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir","functions":[{"name":"main","opcodes":17}],"unconstrained_functions":[{"name":"directive_invert","opcodes":9},{"name":"directive_integer_quotient","opcodes":8}]}]}"""
+  ## The bundled template's `nargo info --json`, verbatim.
+  ##
+  ## ## Why a constant is the honest representation, and not a cached answer
+  ##
+  ## A circuit's opcode count is a pure function of its sources. The template's
+  ## sources are a compile-time constant — that is this module's whole design,
+  ## and rule 5's reason for it ("it costs no storage, has no retention
+  ## question, works offline on a second visit, and cannot rot"). A pure
+  ## function of a constant is a constant, so carrying the answer is the same
+  ## kind of claim as carrying the files.
+  ##
+  ## What would make it dishonest is drift, and that is what
+  ## `test_noir_template_constraints.nim` exists to prevent: it writes this
+  ## template to a temporary directory, runs `nargo info --json` against it,
+  ## and fails if the bytes differ. So editing `main.nr` without re-measuring
+  ## fails a suite instead of shipping a number that is quietly wrong — the
+  ## same gate that checks the crate compiles and its five tests pass.
+  ##
+  ## ## And why the web needs it at all
+  ##
+  ## `nargo` is not in a browser, and the wasm compiler has no `info`
+  ## operation: `compile_vfs.rs` exports `nv_compile_vfs` and nothing else, the
+  ## worker dispatches exactly `compile` and `trace`, and the only compile a
+  ## tracer host asks for sets `force_brillig: true` — so even decoding its
+  ## artifact would answer about an all-unconstrained build rather than the
+  ## circuit. Producing this number in a tab needs a new wasm export and a new
+  ## worker branch; until then the answer travels with the sources it is an
+  ## answer about.
+
+const noirTemplateConstraintProvenance* =
+  "nargo info --json, run against this template at build time"
+  ## Shown in the pane. A count with no provenance is a count a user cannot
+  ## judge: "17" means one thing measured a second ago and another thing
+  ## shipped in a bundle, and the pane must not make them look alike.

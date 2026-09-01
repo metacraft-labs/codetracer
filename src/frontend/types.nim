@@ -1790,6 +1790,20 @@ type
     skipNextBlur*: bool
     focusByMouse*: bool
 
+  TestResultsComponent* = ref object of Component
+    ## NS9's Test Results pane. Stateless: everything it draws lives in
+    ## `viewmodel/viewmodels/test_results_vm.TestResultsVM`, which is where a
+    ## pane built today keeps its state. The component exists so the pane is
+    ## constructed, registered and found the way every other CodeTracer pane
+    ## is — through `makeComponent` and `componentMapping` — rather than being
+    ## a div someone mounted into a GoldenLayout container.
+    discard
+
+  ConstraintsComponent* = ref object of Component
+    ## NS9's Constraints pane. Stateless for the same reason; see
+    ## `viewmodel/viewmodels/constraints_vm.ConstraintsVM`.
+    discard
+
   TraceLogComponent* = ref object of Component
     table*: DataTableComponent
     renderedLength*: int
@@ -1904,6 +1918,15 @@ type
     layoutConfig*:   GoldenLayoutConfigClass
     contentItemConfig*: GoldenLayoutItemConfigClass
     resolvedConfig*: GoldenLayoutResolvedConfig
+    editorAreaPercent*: int
+      ## How wide the editor's own container should be, as a percentage of the
+      ## top-level row, or `0` for "the layout has no opinion — let
+      ## GoldenLayout distribute".
+      ##
+      ## Written once per session load from the layout config AS SENT (see
+      ## `index/layout_config_repair.unclaimedTopLevelPercent` for why it
+      ## cannot be read later) and consumed by `utils.openNewLayoutContainer`,
+      ## which is the only place an editor container is ever created.
     savedLayoutBeforeEdit*: GoldenLayoutResolvedConfig
     editModeLayout*: GoldenLayoutResolvedConfig         # NEW - persistent edit layout
     lastUsedEditLayout*: GoldenLayoutResolvedConfig     # NEW - last saved edit layout
@@ -2822,6 +2845,12 @@ template shellComponent*(data: Data, id: int): ShellComponent =
 
 template traceLogComponent*(data: Data, id: int): TraceLogComponent =
   TraceLogComponent(data.ui.componentMapping[Content.TraceLog][id])
+
+template testResultsComponent*(data: Data, id: int): TestResultsComponent =
+  TestResultsComponent(data.ui.componentMapping[Content.TestResults][id])
+
+template constraintsComponent*(data: Data, id: int): ConstraintsComponent =
+  ConstraintsComponent(data.ui.componentMapping[Content.Constraints][id])
 
 
 # macro delegate*(namespace: static[string], messages: untyped): untyped =
