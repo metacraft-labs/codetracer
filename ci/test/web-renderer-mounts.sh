@@ -631,6 +631,40 @@ open(p, 'w').write(s.replace(
 PY2
 }
 
+# Arm F — THE COMPILED-IN CONFIG FIXTURE STOPS PARSING.
+#
+# `config.defaultRendererConfig` `staticRead`s `src/config/default_config.yaml`
+# and runs it through a parser written for that file's shape. Both have the
+# same silent failure: a `Config` with an empty `shortcutMap` is NON-NIL, so it
+# dereferences cleanly in `ui/menu.nim`, `ui/shortcuts.nim` and
+# `ui/editor.nim`, and the product mounts, paints, and answers no key. Every
+# other assertion in this gate stays green over it — which is exactly why the
+# count travels on the renderer line.
+#
+# The mutation renames the fixture's `bindings:` section header, so the parser
+# files every chord under a section `defaultRendererConfig` ignores. Nothing
+# else changes: the theme, the flow settings and the layout all still parse, so
+# an arm that reddened the mount would be reddening something other than the
+# keyboard.
+#
+# The needle is the fixture's own text. `staticRead` puts it in `ui.js` as a
+# JS string literal with `\x0A` escapes, which is why it can be substituted at
+# all — and it is one line of the file rather than a Nim identifier, so it
+# cannot collide with the enum member of the same name the backend also emits.
+mutate_unparsed_bindings() {
+	local dir="$1"
+	local needle='\x0Abindings:\x0A'
+	grep -qF "${needle}" "${dir}/ui.js" || return 1
+	python3 - "${dir}/ui.js" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+needle = '\\x0Abindings:\\x0A'
+assert s.count(needle) == 1, s.count(needle)
+open(p, 'w').write(s.replace(needle, '\\x0Abindingz:\\x0A'))
+PY2
+}
+
 # Arm T — THE TOPBAR'S CONTAINER IS NOT IN THE DOCUMENT.
 #
 # The twin of arm B one element over. Arm B removes the container the SURFACE
@@ -1162,6 +1196,18 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 	# descendants rather than as `#menu` existing, because `#menu` is in the
 	# entry document's skeleton either way — an existence check would have been
 	# green throughout the week this page rendered nothing.
+	# THE KEYBOARD, which no DOM assertion above can see. A `Config` whose
+	# `bindings:` section did not parse is non-nil and empty, and produces a
+	# product that mounts, paints and answers no key. `default_config.yaml`
+	# binds ~60 chords; the floor is set well below that so a binding added or
+	# removed does not fail this, while a fixture that stopped parsing does.
+	r_shortcuts="$(printf '%s' "${r_renderer}" | sed -n 's/.*shortcuts=\([0-9-]*\).*/\1/p')"
+	if [ "${r_shortcuts:-0}" -ge 40 ] 2>/dev/null; then
+		ck ok "arm R: the compiled-in config bound ${r_shortcuts} key chords, so the shortcut map edit mode was given is populated"
+	else
+		ck fail "arm R: the renderer reports ${r_shortcuts:-none} bound key chords — the bundled default_config.yaml did not parse, and the product has a keyboard that answers nothing"
+	fi
+
 	r_topbar="$(json route dom.topbarPainted)"
 	if [ "${r_topbar:-0}" -ge 10 ] 2>/dev/null; then
 		ck ok "arm R: the topbar is painted — ${r_topbar} visible elements, so the debugger controls and the omnibar are on screen"
@@ -1484,7 +1530,39 @@ else
 fi
 echo
 
-expect_count 45
+echo "Arm F: MUTATION — the compiled-in config fixture stops parsing"
+echo "    A non-nil Config with an empty shortcut map: the page still mounts"
+echo "    and paints. Expect arm R's SHORTCUT check RED, everything else GREEN."
+if ! run_arm no-bindings mutate_unparsed_bindings "/noir"; then
+	ck fail "arm F could not be measured"
+	ck fail "arm F could not be measured (second half)"
+else
+	f_renderer="$(json no-bindings rendererLine)"
+	f_shortcuts="$(printf '%s' "${f_renderer}" | sed -n 's/.*shortcuts=\([0-9-]*\).*/\1/p')"
+	f_entries="$(json no-bindings dom.entryLabelsVisible)"
+	f_lines="$(python3 -c 'import json,sys; print(" ".join((json.load(open(sys.argv[1]))["dom"].get("editorLinesVisible") or [])))' "${cache}/no-bindings.json")"
+	if [ "${f_shortcuts:-0}" -lt 40 ] 2>/dev/null; then
+		ck ok "arm F: the shortcut count falls to ${f_shortcuts:-none} when the fixture's bindings section is renamed, so arm R's shortcut assertion can fail"
+	else
+		ck fail "arm F: the renderer still reports ${f_shortcuts} bound chords with the fixture's bindings section renamed — arm R's shortcut assertion is not reading the parse"
+	fi
+	# The twin, and it is the point of the arm: an empty shortcut map is
+	# INVISIBLE. The page must still mount and paint exactly as before, which
+	# is what makes the count on the renderer line the only witness there is.
+	case "${f_lines}" in
+	*"fn main"*)
+		if [ "${f_entries:-0}" -ge 5 ] 2>/dev/null; then
+			ck ok "arm F: the page still mounts and paints (${f_entries} tree rows, the editor's source on screen) with no keyboard at all — which is why this defect needs a reported count and not a DOM check"
+		else
+			ck fail "arm F: the mutation also emptied the file tree (${f_entries} rows) — it is breaking more than the bindings parse"
+		fi ;;
+	*)
+		ck fail "arm F: the mutation also took the editor's source off the screen — it is breaking more than the bindings parse" ;;
+	esac
+fi
+echo
+
+expect_count 48
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

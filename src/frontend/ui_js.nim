@@ -4683,6 +4683,13 @@ when defined(ctWeb):
           # `ide.codetracer.com/` that had wrongly picked up a language.
           " host=" & (if hostLanguage.len > 0: hostLanguage else: "(neutral)") &
           " files=" & $tmpl.templateFileCount &
+          # THE KEYBOARD, as a number. A `Config` whose `bindings:` section did
+          # not parse is non-nil and empty: it dereferences cleanly in
+          # `ui/menu.nim`, `ui/shortcuts.nim` and `ui/editor.nim`, and yields a
+          # product that mounts, paints, and answers no key. No DOM assertion
+          # can see that, which is why the count is said out loud here rather
+          # than left to be inferred from a screen.
+          " shortcuts=" & $shortcutBindingCount(data.config) &
           # §1b.3 step 6: "a plain statement of what was asked for and could
           # not be found. Never a blank editor, never an error page."
           # `resolveEntry` composes that sentence for an unresolvable address

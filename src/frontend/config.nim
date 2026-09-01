@@ -108,8 +108,15 @@ proc initShortcutMap*(map: InputShortcutMap): ShortcutMap =
 # be Nim.  It handles exactly the shape `src/config/default_config.yaml` has
 # and nothing more: `key: value` at column 0, one level of two-space nesting
 # under a bare `key:`, `#` comments and blank lines.  There are no anchors, no
-# sequences and no multi-line scalars in that file, and
-# `test_default_config.nim` fails if one appears.
+# sequences and no multi-line scalars in that file.
+#
+# WHAT KEEPS THAT HONEST is `shortcutBindingCount` at the bottom of this
+# module and arm F of `ci/test/web-renderer-mounts.sh`, not a unit test — this
+# module imports `frontend/types`, which imports `kdom`, so it compiles on
+# neither the `vm-unit` lane (C backend) nor `vm-unit-js` (node): the renderer
+# is a BROWSER module and node is not a browser, which is the same constraint
+# `ci/test/renderer-browser-build.sh` exists under. The count therefore travels
+# in the renderer line and is asserted against a real browser instead.
 
 const defaultConfigYaml* = staticRead("../config/default_config.yaml")
   ## `src/config/default_config.yaml`, verbatim, at compile time.
@@ -126,9 +133,10 @@ type
 proc parseSimpleYamlConfig*(raw: string): seq[ConfigYamlEntry] =
   ## The two-level subset of YAML `default_config.yaml` is written in.
   ##
-  ## Exported so `test_default_config.nim` can assert the parse without
-  ## building a `Config`, and so a fixture that grew an unsupported construct
-  ## fails a unit test rather than silently losing a key at runtime.
+  ## Exported so the parse can be exercised without building a `Config`, and
+  ## kept separate from `defaultRendererConfig` for that reason. A fixture that
+  ## grew an unsupported construct loses a key silently here; what catches that
+  ## is the shortcut count on the renderer line — see `shortcutBindingCount`.
   result = @[]
   var section = ""
   for rawLine in raw.splitLines():
@@ -235,3 +243,21 @@ proc defaultRendererConfig*(): Config =
   result.flow.realFlowUI = flowUIFromName(result.flow.ui)
   result.bindings = bindings
   result.shortcutMap = initShortcutMap(bindings)
+
+proc shortcutBindingCount*(config: Config): int =
+  ## How many distinct key chords the config binds. `0` for a nil config, a
+  ## nil map, or a `bindings:` section that did not parse.
+  ##
+  ## Exists to be REPORTED. `defaultRendererConfig` reads a compile-time
+  ## fixture through a parser written for that fixture's shape, and the
+  ## failure mode of both is silent: a `Config` with an empty `shortcutMap` is
+  ## non-nil, dereferences cleanly everywhere `ui/menu.nim` and
+  ## `ui/shortcuts.nim` touch it, and produces a product that mounts, paints
+  ## and has no keyboard. Nothing in a DOM could tell that apart from a
+  ## working one, so the renderer line carries the count and
+  ## `ci/test/web-renderer-mounts.sh` asserts it — with arm F, which breaks the
+  ## fixture's `bindings:` header, as the proof that the assertion can fail.
+  if config.isNil or config.shortcutMap.shortcutActions.isNil:
+    return 0
+  for _, _ in config.shortcutMap.shortcutActions:
+    result += 1
