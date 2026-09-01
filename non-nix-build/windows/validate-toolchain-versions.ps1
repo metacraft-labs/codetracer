@@ -13,6 +13,7 @@ $requiredKeys = @(
   "JUST_VERSION",
   "JUST_WIN_X64_SHA256",
   "CARGO_NEXTEST_VERSION",
+  "CARGO_NEXTEST_WIN_X64_SHA256",
   "NODE_VERSION",
   "UV_VERSION",
   "DOTNET_SDK_VERSION",
@@ -54,6 +55,7 @@ $valuePatterns = @{
   "JUST_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "JUST_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "CARGO_NEXTEST_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
+  "CARGO_NEXTEST_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "NODE_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "UV_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "DOTNET_SDK_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
