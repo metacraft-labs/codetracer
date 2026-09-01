@@ -321,6 +321,28 @@ proc replayVfsPayload*(rawMemoryTrace: string;
   if result.defects.len > 0:
     result.files = @[]
 
+proc stripTraceFolder*(reportedPath, traceFolder: string): string =
+  ## Undo the workdir join the engine applies to a relative recorded path.
+  ##
+  ## MEASURED, not anticipated. With the metadata workdir set to the trace
+  ## folder — which is what a relative recording gets, because the engine's own
+  ## fallback is the folder and this module writes what it derives its keys
+  ## from — a `ct/complete-move` comes back naming
+  ## `trace/hello_noir/src/main.nr`. That is the engine being consistent: it
+  ## joined the workdir onto the recorded path exactly as `StepLinesLoader`
+  ## does, and the VFS key it read is one this module wrote.
+  ##
+  ## It is still not a path the RENDERER can do anything with. `hello_noir` is
+  ## the package prefix `rendererSpelling` strips, and `trace/hello_noir/...`
+  ## does not start with it — so the location passed through unchanged, the
+  ## editor opened a tab named after the engine's trace folder, and the
+  ## bundled template host answered `-1` for a file it does not have.
+  if traceFolder.len == 0: return reportedPath
+  let prefix = traceFolder & "/"
+  if reportedPath.startsWith(prefix):
+    return reportedPath[prefix.len .. ^1]
+  reportedPath
+
 proc rendererSpelling*(recordedPath, packageDir, projectRoot: string): string =
   ## The recorded path, in the spelling the renderer opens tabs by.
   ##
@@ -352,8 +374,8 @@ proc rendererSpelling*(recordedPath, packageDir, projectRoot: string): string =
     return projectRoot & "/" & recordedPath[prefix.len .. ^1]
   recordedPath
 
-proc retargetLocationPaths*(frame: JsonNode; packageDir, projectRoot: string):
-    int =
+proc retargetLocationPaths*(frame: JsonNode; packageDir, projectRoot: string;
+                            traceFolder = "trace"): int =
   ## Rewrite every `path` under a DAP frame's `location` objects, in place.
   ##
   ## Returns how many were rewritten, so a caller can assert a number rather
@@ -370,16 +392,18 @@ proc retargetLocationPaths*(frame: JsonNode; packageDir, projectRoot: string):
   of JObject:
     for key, value in frame.pairs:
       if key == "path" and value.kind == JString:
-        let retargeted =
-          rendererSpelling(value.getStr, packageDir, projectRoot)
+        let retargeted = rendererSpelling(
+          stripTraceFolder(value.getStr, traceFolder), packageDir, projectRoot)
         if retargeted != value.getStr:
           frame[key] = newJString(retargeted)
           result += 1
       else:
-        result += retargetLocationPaths(value, packageDir, projectRoot)
+        result += retargetLocationPaths(value, packageDir, projectRoot,
+                                        traceFolder)
   of JArray:
     for item in frame.items:
-      result += retargetLocationPaths(item, packageDir, projectRoot)
+      result += retargetLocationPaths(item, packageDir, projectRoot,
+                                      traceFolder)
   else: discard
 
 proc sourceFileCount*(payload: ReplayVfsPayload): int =

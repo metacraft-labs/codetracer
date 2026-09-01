@@ -47,7 +47,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 79
+const ExpectedAssertions = 86
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -241,6 +241,22 @@ suite "a browser-produced MemoryTrace becomes the files the engine reads":
     # Idempotent: a frame that has already been retargeted is left alone, so a
     # host that installed the translation twice does not double-prefix.
     counted retargetLocationPaths(frame, "hello_noir", "/hello_noir") == 0
+
+    # THE WORKDIR JOIN THE ENGINE APPLIES, undone. Measured in a browser: a
+    # relative recording gets the trace folder as its workdir, so the engine
+    # reports `trace/hello_noir/src/main.nr` — consistent on its side, and a
+    # path the renderer cannot open on ours.
+    counted stripTraceFolder("trace/hello_noir/src/main.nr", "trace") ==
+      "hello_noir/src/main.nr"
+    counted stripTraceFolder("hello_noir/src/main.nr", "trace") ==
+      "hello_noir/src/main.nr"
+    counted stripTraceFolder("/abs/main.nr", "trace") == "/abs/main.nr"
+    counted stripTraceFolder("tracey/main.nr", "trace") == "tracey/main.nr"
+    counted stripTraceFolder("trace/x.nr", "") == "trace/x.nr"
+    var joined = %*{"body": {"location": {"path": "trace/" & RelativePath}}}
+    counted retargetLocationPaths(joined, "hello_noir", "/hello_noir") == 1
+    counted joined["body"]["location"]["path"].getStr ==
+      "/hello_noir/src/main.nr"
 
   test "vfsJoin is the engine's join, not the host's":
     # `os./` emits a backslash on a Windows build of this lane and the VFS key

@@ -49,7 +49,7 @@ when not defined(js):
            "is no native instantiation of it, and a native replay session " &
            "uses the desktop DAP transport".}
 
-import std/[json, jsffi]
+import std/[json, jsffi, strutils]
 
 import ../backend/replay_engine_boot
 import ../platform/replay_engine_vfs
@@ -95,7 +95,23 @@ proc postBootMessage(worker: JsObject; messageJson: cstring)
 proc jsFrameKind(frame: JsObject): cstring
   {.importjs: "((# || {}).type || '')".}
 
-proc jsStringify(value: JsObject): cstring {.importjs: "JSON.stringify(#)".}
+proc frameJsonText*(value: JsObject): cstring {.importjs: """
+  (function (v) { return typeof v === 'string' ? v : JSON.stringify(v); })(#)
+  """.}
+  ## The JSON text of a worker message, whichever way it was posted.
+  ##
+  ## THE ASYMMETRY IS REAL AND IT IS THE ENGINE'S. `replay-worker.js` posts
+  ## its handshake acknowledgements as OBJECTS, and the engine's own
+  ## `setup_onmessage_callback` posts every DAP frame as
+  ## `JsValue::from_str(&json)` — a STRING. One worker, two encodings,
+  ## depending on which side of `wasm_start()` you are on.
+  ##
+  ## `JSON.stringify` on a string does not decode it, it quotes it: a frame
+  ## posted as text became `"\"{\\\"seq\\\":1...}\""`, parsed back to a
+  ## `JString`, and every field lookup on it missed. `wasm_worker.nim`'s
+  ## header records a sibling campaign losing to exactly this — "an engine
+  ## that sent objects one way and JSON the other" — and the cure there was
+  ## to coerce at the boundary, which is what this does.
 
 proc newBrowserReplaySession*(scriptUrl: string;
                               moduleUrls: seq[tuple[id: string, url: string]];
@@ -153,21 +169,28 @@ proc newBrowserReplaySession*(scriptUrl: string;
     if boot.phase == rbpReady:
       if not onFrame.isNil: onFrame(raw)
       return
+    # THE WORKER SPEAKS THREE SHAPES ON ONE CHANNEL, and all three are the
+    # engine's, not a choice of ours: `replay-worker.js` posts handshake
+    # acknowledgements as OBJECTS, `setup_onmessage_callback` posts DAP frames
+    # as JSON TEXT, and `wasm_start()` posts the BARE WORD `ready`, which is
+    # not a JSON document at all. Decoding used to work on the third by
+    # accident — `JSON.stringify("ready")` quotes it into `"ready"`, which
+    # parses as a `JString` — and tightening the other two exposed that. Each
+    # shape is now named where it is handled instead of surviving on an
+    # encoding coincidence.
+    let text = $frameJsonText(raw)
     var decoded: JsonNode
     try:
-      decoded = parseJson($jsStringify(raw))
+      decoded = parseJson(text)
     except:
       # A BARE except: under `nim js` a malformed frame raises a `SyntaxError`
       # that `except CatchableError` does not catch, and an unhandled
       # rejection here would leave the boot waiting forever with no reason.
       decoded = nil
     if decoded.isNil:
-      terminateWorker()
-      settle(ReplaySessionOutcome(
-        ready: false,
-        failure: "the replay worker sent a message that is not JSON, so the " &
-                 "engine's handshake cannot be followed"))
-      return
+      # Not JSON, so it is the bare status word. Refusing here would fail the
+      # boot on the one message that completes it.
+      decoded = %*{"type": "worker-status", "status": text.strip}
     # A BARE STRING IS A STATUS, not a frame. `wasm_start()` posts the string
     # `"ready"` and nothing else does; `WorkerBackend.deliver` wraps exactly
     # this shape as `worker-status` for the same reason, and without the wrap

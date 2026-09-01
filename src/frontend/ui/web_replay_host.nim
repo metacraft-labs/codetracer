@@ -52,6 +52,7 @@ from ../../common/ct_event import
 var activeReplayTerminate: proc()
   ## The worker holding the current session, so a second Run replaces it
   ## rather than leaving two 18 MB wasm instances answering one store.
+var replayFramesOut* = 0
 var replayFramesIn* = 0
   ## Frames delivered into the renderer, and locations retargeted. Counters
   ## rather than a boolean because "a session opened" is the claim a broken
@@ -60,7 +61,6 @@ var replayLocationsRetargeted* = 0
 var lastReplayFailure* = ""
 
 proc jsObjectFromJson(text: cstring): JsObject {.importjs: "JSON.parse(#)".}
-proc jsStringifyObject(value: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 proc jsReportReplay(line: cstring) {.importjs: """
 (function (s) { try { console.log(s); } catch (e) {} })(#)""".}
 
@@ -83,7 +83,7 @@ proc deliverFrame(request: ReplaySessionRequest; frame: JsObject) =
   ## asymmetry `dap.nim`'s M49 comment records having cost a campaign.
   var decoded: JsonNode
   try:
-    decoded = parseJson($jsStringifyObject(frame))
+    decoded = parseJson($frameJsonText(frame))
   except:
     # A BARE except: under `nim js` a malformed frame raises a `SyntaxError`
     # that `except CatchableError` does not catch, and an unhandled rejection
@@ -101,6 +101,9 @@ proc deliverFrame(request: ReplaySessionRequest; frame: JsObject) =
   # alone, and both look exactly like "the engine is thinking". This line is
   # what turns the second into a sentence with a name in it.
   block:
+    if decoded.kind != JObject:
+      report("frame (not an object): " & ($decoded)[0 .. min(80, ($decoded).high)])
+      return
     let kind =
       if decoded.hasKey("type") and decoded["type"].kind == JString:
         decoded["type"].getStr
@@ -142,7 +145,16 @@ proc deliverFrame(request: ReplaySessionRequest; frame: JsObject) =
       location["missingPath"].kind == JBool and
       location["missingPath"].getBool
     report("move " & path & ":" & $line & " missingPath=" & $missing)
-  if replayFrameIsResponse(frame):
+  # ROUTED FROM THE DECODED FRAME, not from a property read off the raw
+  # JsObject. The engine posts frames as TEXT, so `raw.type` is `undefined`
+  # and every response would have been delivered as an event — which settles
+  # no `asyncSendCtRequest` continuation, so every ViewModel future would sit
+  # unresolved until its timeout while the legacy panels updated. That is the
+  # precise asymmetry `dap.nim`'s M49 comment records having cost a campaign.
+  let isResponse =
+    decoded.kind == JObject and decoded.hasKey("type") and
+    decoded["type"].kind == JString and decoded["type"].getStr == "response"
+  if isResponse:
     discard data.ipc.deliver(cstring"CODETRACER::dap-receive-response", outbound)
   else:
     discard data.ipc.deliver(cstring"CODETRACER::dap-receive-event", outbound)
@@ -216,6 +228,11 @@ proc openSession(request: ReplaySessionRequest) =
       # for.
       data.ipc.respond(cstring"CODETRACER::dap-raw-message",
         proc(sender: js, packet: JsObject) =
+          # REPORTED ON THE WAY OUT TOO. A silent engine and a host whose
+          # requests never left look identical from the inbound side, and
+          # forty minutes went into telling them apart once already.
+          replayFramesOut += 1
+          report("send " & $frameJsonText(packet))
           outcome.send(packet))
       report("engine ready; opening the trace")
       # `initialize` was already sent once, from `configureMiddleware`, into a
