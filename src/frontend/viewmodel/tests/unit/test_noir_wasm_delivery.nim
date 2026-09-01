@@ -40,7 +40,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 83
+const ExpectedAssertions = 87
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -230,13 +230,26 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     counted noirCompilerModuleId in ids
     counted noirTracerModuleId in ids
 
-    # Derived, not restated: every FETCHED asset is deliverable and no
-    # bundled or asset-mode one is.
-    var fetchedIds: seq[string]
-    for asset in fetchedRuntimeAssets(): fetchedIds.add asset.id
-    counted ids == fetchedIds
+    # Derived, not restated: the deliverable list IS the manifest's
+    # `fcNoirWasmWorker` rows, and no bundled or asset-mode one.
+    var noirIds: seq[string]
+    for asset in noirWasmModuleAssets(): noirIds.add asset.id
+    counted ids == noirIds
     counted "renderer" notin ids
     counted "wasm-worker" notin ids
+
+    # AND NOT EVERY FETCHED ASSET. This used to be `ids == fetchedIds` and it
+    # was true only while `damFetched` had exactly two members, both Noir
+    # modules. The replay engine is fetched for the same delivery reasons and
+    # is not a Noir module: it has no `nv_*` / `ct_*` ABI, `subcommandForAsset`
+    # answers the empty string for it, and a registry that counted it would
+    # make the page claim `nargo` over a wasm-bindgen debugger.
+    var fetchedIds: seq[string]
+    for asset in fetchedRuntimeAssets(): fetchedIds.add asset.id
+    counted fetchedIds.len > ids.len
+    counted replayEngineModuleId in fetchedIds
+    counted replayEngineModuleId notin ids
+    counted replayEngineGlueId notin ids
 
     # The mapping is total over the manifest and empty off it.
     counted subcommandForAsset(noirCompilerModuleId) == compileSubcommand
