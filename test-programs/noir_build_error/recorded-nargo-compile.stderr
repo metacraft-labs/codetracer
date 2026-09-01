@@ -1,0 +1,22 @@
+warning: unused variable x
+  ┌─ src/main.nr:1:9
+  │
+1 │ fn main(x: Field, y: pub Field) {
+  │         - unused variable
+  │
+
+warning: unused variable y
+  ┌─ src/main.nr:1:19
+  │
+1 │ fn main(x: Field, y: pub Field) {
+  │                   - unused variable
+  │
+
+error: Expected type bool, found type Field
+  ┌─ src/main.nr:3:19
+  │
+3 │     let b: bool = a;  // type mismatch: Field cannot be assigned to bool
+  │                   -
+  │
+
+Aborting due to 1 previous error

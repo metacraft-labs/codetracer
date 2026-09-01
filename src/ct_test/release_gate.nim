@@ -758,6 +758,21 @@ const
     # (`runquota_process` is a POSIX launcher, `std/os` reads files), hence
     # excluded from `vm-unit-js` and listed here.
     "src/frontend/viewmodel/tests/unit/test_project_action_runner.nim",
+    # Edit-Mode-Toolbar.md's three specifying suites.  Registered for a reason
+    # the other entries do not have: these are RED ON PURPOSE — they state the
+    # correct behaviour for a feature that is not built, and they go green on
+    # their own when `viewmodels/edit_mode_toolbar.nim` lands.  They are listed
+    # in `codetracer-specs/Testing/Known-Test-Failures.md` under "Specifying
+    # suites".
+    #
+    # A red suite is the one a later change is MOST tempted to delete or
+    # `skip()` when it is in the way, and glob discovery is silent about both.
+    # That is exactly what this array asserts and `checkNoHardSkips` enforces.
+    # Deleting a specifying suite silently converts "not built yet" into "never
+    # specified", which is the shape this campaign keeps finding.
+    "src/frontend/viewmodel/tests/unit/test_edit_mode_toolbar_languages.nim",
+    "src/frontend/viewmodel/tests/unit/test_edit_mode_toolbar_model.nim",
+    "src/frontend/viewmodel/tests/unit/test_noir_build_diagnostics.nim",
     # VN-M4 — the structured payload contract.  Registered for a reason that is
     # sharper than VN-M3's and is worth stating separately: almost every
     # assertion in this suite is about something the decoder must *refuse*.
