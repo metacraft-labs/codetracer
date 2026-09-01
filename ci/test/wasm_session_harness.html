@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  wasm_session_harness.html — the page `wasm-worker-session.sh` loads.
+
+  It is served from a COPY of the assembled publish tree, alongside it rather
+  than inside it: the worker under test is `/assets/wasm-worker.js`, byte for
+  byte as `web-bundle-assets.sh` placed it, and the gate asserts the copy's
+  published files are unchanged. Adding a page to the tree itself would have
+  put a second Nim bundle beside `ui.js`, which the deploy workflow asserts
+  against in both directions — and the two arms of that assertion were merged
+  today and must not split again.
+
+  Nothing here is a test. The page runs the harness and writes one JSON object
+  into `#session-report`; `wasm_session_probe.mjs` reads it and the shell
+  script counts assertions over it. The same split `web_renderer_probe.mjs`
+  uses, and for its reason: the control arm and the mutation arms must read
+  the same instrument.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>wasm worker session harness</title>
+  <style>
+    body { font: 13px ui-monospace, monospace; padding: 16px; }
+    pre { white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>wasm worker session harness</h1>
+  <p>Opens a long-lived session in the published worker and exchanges
+     messages with it. The report below is the measurement.</p>
+  <pre id="session-report">{}</pre>
+  <script src="/__harness/session_harness.js"></script>
+</body>
+</html>

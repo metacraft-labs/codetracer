@@ -114,6 +114,24 @@ proc exitMessage(s, code: int): string =
 proc outputMessage(s: int; stream, text: string): string =
   $(%*{"seq": s, "kind": "output", "stream": stream, "text": text})
 
+proc failedMessage(s: int; message: string; fault = ""): string =
+  if fault.len == 0:
+    $(%*{"seq": s, "kind": "failed", "message": message})
+  else:
+    $(%*{"seq": s, "kind": "failed", "message": message, "fault": fault})
+
+proc openSession(worker: WasmWorker; onOutput: proc(chunk: ProcessOutputChunk);
+                 onExit: proc(exit: ProcessExit)): ProcessHandle =
+  ## A session is an ordinary `start`; the module id is opaque to this layer
+  ## and the worker routes on the subcommand, so the registry's `nargo` entry
+  ## serves as well as any other. What makes the run a SESSION is that the
+  ## fake below never posts an `exit` for it.
+  let box = watch(worker.startOnWorker(
+    noirModule, processSpec("nargo", @["session-probe"]), onOutput, onExit))
+  drainPlatformCallbacks()
+  doAssert box.did and box.value.ok, "startOnWorker must resolve its handle"
+  box.value.value
+
 # ---------------------------------------------------------------------------
 # Synchronously observable: what was posted, and what `deliver` does at once.
 # ---------------------------------------------------------------------------
@@ -194,6 +212,68 @@ suite "streaming and liveness are observable as they happen":
     check exits.len == 1
     check exits[0].signalled
     check not exits[0].succeededExit
+
+suite "a session is addressed by its run's sequence, and messages say which":
+
+  test "an input carries its OWN sequence and NAMES the session's":
+    ## The structural heart of the design, and the reason it is asserted on
+    ## the parsed message rather than on a substring: a `failed` finishes the
+    ## run it names, so an `input` that reused the session's sequence would
+    ## make a refusal — a full inbox, say — indistinguishable from the death
+    ## of the session it was declining to accept. Two facts, two sequences.
+    let (worker, fake) = newFakePair(registry)
+    let handle = worker.openSession(nil, nil)
+    let sessionSeq = seqOf(fake, 0)
+
+    discard worker.sendToSession(handle, "{\"id\":1,\"method\":\"status\"}")
+    check fake.sent.len == 2
+    let input = parseJson(fake.sent[1])
+    check input["kind"].getStr == "input"
+    check input["session"].getInt == sessionSeq
+    check input["seq"].getInt != sessionSeq
+    check input["text"].getStr == "{\"id\":1,\"method\":\"status\"}"
+
+  test "two inputs to one session get two distinct sequences":
+    let (worker, fake) = newFakePair(registry)
+    let handle = worker.openSession(nil, nil)
+    discard worker.sendToSession(handle, "one")
+    discard worker.sendToSession(handle, "two")
+    check fake.sent.len == 3
+    check seqOf(fake, 1) != seqOf(fake, 2)
+    check parseJson(fake.sent[1])["session"].getInt ==
+          parseJson(fake.sent[2])["session"].getInt
+
+  test "close names the session and does NOT terminate the worker":
+    ## `stopAll` is `worker.terminate()` and takes every other session and
+    ## every in-flight compile with it. A session that could only be ended
+    ## that way would make "I am done with this node" cost the whole tab's
+    ## toolchain, so the counter-check here is on `terminated`.
+    let (worker, fake) = newFakePair(registry)
+    let handle = worker.openSession(nil, nil)
+    discard worker.closeSession(handle)
+    check fake.sent.len == 2
+    check parseJson(fake.sent[1])["kind"].getStr == "close"
+    check parseJson(fake.sent[1])["session"].getInt == seqOf(fake, 0)
+    check fake.terminated == 0
+
+  test "a delivery is not a process: it does not answer runIsActive":
+    let (worker, fake) = newFakePair(registry)
+    let handle = worker.openSession(nil, nil)
+    discard worker.sendToSession(handle, "one")
+    let deliverySeq = parseJson(fake.sent[1])["seq"].getInt
+    check not worker.runIsActive(ProcessHandle("wasm-" & $deliverySeq))
+    check worker.runIsActive(handle)
+
+  test "sending to a handle that is not a live session posts NOTHING":
+    ## Refused on this side, because this side already knows — `finish`
+    ## removed the handle when the run ended. The assertion is on `sent`: a
+    ## round trip to ask a question whose answer is already held is a request
+    ## a dead worker cannot answer at all.
+    let (worker, fake) = newFakePair(registry)
+    let handle = worker.openSession(nil, nil)
+    worker.deliver(exitMessage(seqOf(fake, 0), 0))
+    discard worker.sendToSession(handle, "one")
+    check fake.sent.len == 1
 
 # ---------------------------------------------------------------------------
 # Settled futures. Async for the reason in the header.
@@ -333,7 +413,199 @@ proc asyncSuite() {.async.} =
       "did=" & $box.did)
 
   echo ""
+  echo "[Suite] a SESSION outlives its answers, and a refusal does not kill it"
+
+  block:
+    const name = "a session stays live across two round trips and is not settled"
+    # The property the whole mechanism exists for, asserted as a NEGATIVE with
+    # its positive twin: the run must still be unsettled after traffic has
+    # flowed both ways twice, and it must settle the moment the session
+    # actually exits. Without the twin, "never settles" is satisfied by a
+    # protocol that settles nothing.
+    let (worker, fake) = newFakePair(registry)
+    var lines: seq[string] = @[]
+    var exits: seq[ProcessExit] = @[]
+    proc onOutput(chunk: ProcessOutputChunk) = lines.add chunk.text
+    proc onExit(exit: ProcessExit) = exits.add exit
+    let handle = worker.openSession(onOutput, onExit)
+    let s = seqOf(fake, 0)
+
+    let firstAck = watch(worker.sendToSession(handle, "{\"method\":\"register\"}"))
+    worker.deliver(exitMessage(parseJson(fake.sent[1])["seq"].getInt, 0))
+    worker.deliver(outputMessage(s, "stdout", "{\"id\":1,\"result\":{}}\n"))
+    await settleTurn()
+
+    let secondAck = watch(worker.sendToSession(handle, "{\"method\":\"send\"}"))
+    worker.deliver(exitMessage(parseJson(fake.sent[2])["seq"].getInt, 0))
+    worker.deliver(outputMessage(s, "stdout", "{\"id\":2,\"result\":{}}\n"))
+    await settleTurn()
+
+    let stillLive = worker.runIsActive(handle) and exits.len == 0
+    let bothAcked = firstAck.did and firstAck.value.ok and
+                    secondAck.did and secondAck.value.ok
+
+    # THE TWIN.
+    worker.deliver(exitMessage(s, 0))
+    await settleTurn()
+    report(name,
+      stillLive and bothAcked and lines.len == 2 and
+      exits.len == 1 and exits[0].exitCode == 0 and
+      not worker.runIsActive(handle),
+      "live=" & $stillLive & " acked=" & $bothAcked & " lines=" & $lines.len &
+      " exits=" & $exits.len)
+
+  block:
+    const name = "A REFUSED DELIVERY LEAVES THE SESSION RUNNING"
+    # Why an `input` carries its own sequence. The worker refuses the delivery
+    # with `session-busy`; the SESSION's run must be untouched, because
+    # backpressure that destroys the thing applying it is worse than no
+    # backpressure at all. Asserted on both halves: the delivery settles as a
+    # named, retryable refusal AND the session is still live.
+    let (worker, fake) = newFakePair(registry)
+    var exits: seq[ProcessExit] = @[]
+    proc onOutput(chunk: ProcessOutputChunk) = discard
+    proc onExit(exit: ProcessExit) = exits.add exit
+    let handle = worker.openSession(onOutput, onExit)
+
+    let ack = watch(worker.sendToSession(handle, "one"))
+    worker.deliver(failedMessage(parseJson(fake.sent[1])["seq"].getInt,
+                                 "session 1 already has 64 message(s) waiting",
+                                 faultSessionBusy))
+    await settleTurn()
+    report(name,
+      ack.did and (not ack.value.ok) and
+      ack.value.error.kind == pkQuotaExceeded and
+      worker.runIsActive(handle) and exits.len == 0,
+      "settled=" & $ack.did & " kind=" &
+      (if ack.did: $ack.value.error.kind else: "-") &
+      " sessionLive=" & $worker.runIsActive(handle))
+
+  block:
+    const name = "an input sent after the session exited is refused, not hung"
+    let (worker, fake) = newFakePair(registry)
+    let handle = worker.openSession(nil, nil)
+    worker.deliver(exitMessage(seqOf(fake, 0), 0))
+    let ack = watch(worker.sendToSession(handle, "one"))
+    await settleTurn()
+    report(name,
+      ack.did and (not ack.value.ok) and ack.value.error.kind == pkNotFound,
+      "settled=" & $ack.did)
+
+  block:
+    const name = "a pending delivery is stranded by nothing: terminate settles it"
+    let (worker, fake) = newFakePair(registry)
+    let handle = worker.openSession(nil, nil)
+    let ack = watch(worker.sendToSession(handle, "one"))
+    discard worker.stopAll()
+    await settleTurn()
+    report(name,
+      ack.did and (not ack.value.ok) and
+      workerStoppedMessage in ack.value.error.message,
+      "settled=" & $ack.did)
+
+  echo ""
+  echo "[Suite] the worker's own death reaches every run (sequence 0)"
+
+  block:
+    const name = "A `failed` ON SEQUENCE 0 FAILS EVERY OUTSTANDING RUN"
+    # THE DEFECT THIS FIXES. `host/web_browser.newWorkerTransport` turns
+    # `worker.onerror` into exactly this message — "an error event is not a
+    # message, and must not be silently dropped" — and `deliver` dropped it,
+    # because sequence 0 is never in `pending` and the early return took it.
+    # Every outstanding run then waited for the life of the tab. A compile is
+    # exposed to that for seconds; a session for as long as the page is open.
+    let (worker, fake) = newFakePair(registry)
+    var exits: seq[ProcessExit] = @[]
+    proc onOutput(chunk: ProcessOutputChunk) = discard
+    proc onExit(exit: ProcessExit) = exits.add exit
+    let session = worker.openSession(onOutput, onExit)
+    let compile = watch(worker.runOnWorker(
+      noirModule, processSpec("nargo", @["compile"])))
+    worker.deliver(failedMessage(0, "the wasm worker failed: boom"))
+    await settleTurn()
+    report(name,
+      compile.did and (not compile.value.ok) and
+      workerDiedPrefix in compile.value.error.message and
+      "boom" in compile.value.error.message and
+      exits.len == 1 and exits[0].signalled and
+      not worker.runIsActive(session),
+      "compileSettled=" & $compile.did & " sessionExits=" & $exits.len)
+
+  block:
+    const name = "and the CONFIGURE acknowledgement on sequence 0 fails nothing"
+    # The counter-check, and it is not decoration: `configure` is answered on
+    # sequence 0 with an `output` and an `exit`, so a broadcast that keyed on
+    # the sequence alone would kill every run on the handshake — a fix strictly
+    # worse than the defect. Only `failed` broadcasts.
+    let (worker, fake) = newFakePair(registry)
+    let box = watch(worker.runOnWorker(noirModule, processSpec("nargo", @["trace"])))
+    worker.configure(@[(id: "noir-compiler", url: "/assets/noir_wasm.wasm")])
+    worker.deliver(outputMessage(0, "stdout", ""))
+    worker.deliver(exitMessage(0, 0))
+    await settleTurn()
+    let survived = not box.did
+    worker.deliver(exitMessage(seqOf(fake, 0), 0))
+    await settleTurn()
+    report(name,
+      survived and box.did and box.value.ok,
+      "survivedConfigure=" & $survived & " thenSettled=" & $box.did)
+
+  echo ""
+  echo "[Suite] each `fault` reaches the caller as its OWN error kind"
+
+  # The field has been on the wire since the module-load faults were split
+  # into three sentences, and had ZERO readers on this side: a vocabulary
+  # designed for branching that nothing branched on. Each row is its own
+  # counted assertion, because a single loop reporting once would let four
+  # collapse into one and still look green.
+  for row in [
+      (fault: faultNotDelivered, want: pkNotFound),
+      (fault: faultNotServed,    want: pkTransport),
+      (fault: faultBroken,       want: pkFailed),
+      (fault: faultNoSession,    want: pkNotFound),
+      (fault: faultSessionBusy,  want: pkQuotaExceeded)]:
+    let (worker, fake) = newFakePair(registry)
+    let box = watch(worker.runOnWorker(noirModule, processSpec("nargo", @["trace"])))
+    worker.deliver(failedMessage(seqOf(fake, 0), "the module said no", row.fault))
+    await settleTurn()
+    report("fault `" & row.fault & "` is " & $row.want,
+      box.did and (not box.value.ok) and
+      box.value.error.kind == row.want and
+      box.value.error.detail == row.fault,
+      "kind=" & (if box.did: $box.value.error.kind else: "-"))
+
+  block:
+    const name = "a fault this build does not know is still a failure, not a raise"
+    # The worker may be a newer build than the page — they are separate assets
+    # with separate cache lifetimes. An unclassifiable fault must still settle
+    # the run.
+    let (worker, fake) = newFakePair(registry)
+    let box = watch(worker.runOnWorker(noirModule, processSpec("nargo", @["trace"])))
+    worker.deliver(failedMessage(seqOf(fake, 0), "from the future", "quantum"))
+    await settleTurn()
+    report(name,
+      box.did and (not box.value.ok) and box.value.error.kind == pkFailed,
+      "settled=" & $box.did)
+
+  echo ""
   echo "async checks: " & $asyncOk & " passed, " & $asyncFailed & " failed"
+
+  # THE COUNT ITSELF, ASSERTED. Every block above is a `report`, and a block
+  # that raised before reaching its `report` — or one deleted in a merge —
+  # leaves the tally short while every line printed says `[OK]`. Universal
+  # quantification over an empty set passes vacuously; this is the guard
+  # against the set quietly shrinking.
+  const expectedAsyncChecks = 20
+    ## 8 that were here, plus 12: 4 on a session outliving its answers, 2 on
+    ## sequence 0, and 6 on the `fault` vocabulary. Written from a run — and
+    ## the first run had it wrong by two, which is the guard earning its place
+    ## before the code it guards had a chance to rot.
+  if asyncOk + asyncFailed != expectedAsyncChecks:
+    echo "  [FAILED] " & $(asyncOk + asyncFailed) & " async check(s) ran, " &
+      $expectedAsyncChecks & " were written. An assertion that did not run " &
+      "is not an assertion that passed."
+    quit(1)
+
   if asyncFailed > 0:
     quit(1)
 

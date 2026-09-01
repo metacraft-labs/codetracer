@@ -75,6 +75,40 @@ parentPort.on('message', async (raw) => {
   }
   const seq = request.seq;
   try {
+    // THE TWIN HAD ALREADY DRIFTED, and this arm is the correction. The
+    // browser worker has handled `configure` since the handshake landed, and
+    // `platform/wasm_worker.configure` sends one at construction — so a Nim
+    // driver pointed at this file received `unknown request kind configure`
+    // for its first message. Nothing broke, because the reply lands on
+    // sequence 0 and `deliver` discards a `configure` acknowledgement either
+    // way; but "the two files are identical message for message" is what lets
+    // the e2e stand as evidence for the browser one, and it was not true.
+    //
+    // The URLs are ignored here on purpose: this worker reads its modules
+    // from `workerData` paths, which is the one difference the header allows.
+    // Answering rather than refusing is what keeps the vocabularies equal.
+    if (request.kind === 'configure') {
+      post({ seq, kind: 'output', stream: 'stdout', text: '' });
+      post({ seq, kind: 'exit', exitCode: 0, signalled: false });
+      return;
+    }
+
+    // SESSIONS are the browser worker's, and this file does NOT host them.
+    // That is a deliberate difference and it is named rather than silent: the
+    // services a session runs are browser-side, and a twin that refused them
+    // with `unknown request kind` would say the protocol has no such verb
+    // instead of that this host has no such service. The distinction is the
+    // one `wasm_registry.nim` spends its header on — "no module at all"
+    // against "a module that was not built with this subcommand" — and the
+    // e2e's whole value is that the two files do not disagree by accident.
+    if (request.kind === 'input' || request.kind === 'close') {
+      post({ seq, kind: 'failed', fault: 'no-session',
+             message: `this node twin hosts no sessions, so \`${request.kind}\` ` +
+                      `has nothing to address. Sessions are a browser-worker ` +
+                      `capability; see host/wasm_worker_browser.js.` });
+      return;
+    }
+
     if (request.kind !== 'start') {
       post({ seq, kind: 'failed', message: `unknown request kind ${request.kind}` });
       return;
