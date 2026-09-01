@@ -2779,3 +2779,15 @@ commands.
   commit) and any claim that a deployed artifact corresponds to a revision. Not
   fixed here; the lasting fix named by the annotation is to declare those
   siblings in codetracer's project manifest and publish the lock.
+- 2026-09-01: what the all-files sweep found on its first real run, and the
+  distinction worth keeping. Cloudflare Pages does NOT upload a path named
+  `.git`, so `libs/codetracer-design-system/.git` — a 57-byte submodule
+  gitlink that `cp -rL` pulls into the publish tree — answered 9174 bytes on
+  both hosts: the SPA fallback, i.e. the request fell through the 200-rewrite
+  to the entry document. Nothing is disclosed. But it is NOT a blanket dotfile
+  rule: `libs/codetracer-design-system/scripts/.gitignore` IS uploaded and IS
+  served, with its real 19 bytes. Pages excludes `.git` and `node_modules` by
+  name, not dotfiles as a class, so the manifest mirrors exactly that. An
+  over-broad exclusion is how a real asset quietly stops being checked.
+  Separately: the gitlink has no business in the publish tree at all; the
+  staging step's `cp -rL` should not be carrying it. Not fixed here.

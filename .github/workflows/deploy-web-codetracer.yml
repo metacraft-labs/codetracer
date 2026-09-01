@@ -615,8 +615,31 @@ jobs:
           # and are not served back; `serve.conf` is the local nginx helper.
           # Everything else in the tree is a URL a user or a sibling repo can
           # fetch, so everything else is checked.
+          # The manifest is what Cloudflare Pages actually UPLOADS, which is not
+          # the same set as what is on disk, and the difference is asserted
+          # here rather than discovered per deploy.
+          #
+          # `_headers` and `_redirects` are consumed as configuration and never
+          # served back; `serve.conf` is the local nginx helper.
+          #
+          # `.git` is excluded because PAGES excludes it. Measured on the first
+          # run of this sweep: `libs/codetracer-design-system/.git` (a 57-byte
+          # submodule gitlink that `cp -rL` pulled in) answered 9174 bytes on
+          # both hosts — the SPA fallback, i.e. the file was never uploaded and
+          # the rewrite caught the request. Nothing is disclosed, but a gate
+          # that expects a file the host refuses to serve fails every deploy
+          # forever, and worse, it would make a post-purge run look like the
+          # purge had failed.
+          #
+          # NOT a blanket dotfile rule: `scripts/.gitignore` IS uploaded and IS
+          # served, with its real 19 bytes. Pages excludes `.git` and
+          # `node_modules` by name, not dotfiles as a class, so this mirrors
+          # that and nothing wider — an over-broad exclusion here is how a real
+          # asset stops being checked.
           ( cd site && find . -type f \
               ! -name '_headers' ! -name '_redirects' ! -name 'serve.conf' \
+              ! -path '*/.git/*' ! -name '.git' \
+              ! -path '*/node_modules/*' \
               -printf '%P\t%s\n' ) | sort > "$manifest"
           echo "verifying $(wc -l <"$manifest") published files on each host"
 
