@@ -31,10 +31,19 @@ NOIR_REF=codetracer
 # ten. The revision below adds the `contract-debug` mode that sets both, and
 # refuses an unknown mode instead of degrading it to a `program` compile.
 #
-# NOT YET PUSHED. This revision is on `browser/contract-debug-mode` in a local
-# noir worktree and MUST be pushed to metacraft-labs/noir before a deploy can
-# resolve it — `build-noir-wasm.sh` clones the rev, it does not read a checkout.
-# Until then this pin names a commit that only exists locally.
+# PUSHED, AND THAT WAS THE GATE. `build-noir-wasm.sh` CLONES this rev; it does
+# not read a checkout. So while the revision existed only in a local noir
+# worktree this pin named a commit no builder could resolve, and no deploy
+# could have succeeded. It is now on `browser/contract-debug-mode` at
+# metacraft-labs/noir, verified not by the push reporting success but by
+# fetching the bare rev into an EMPTY clone that had never seen this machine:
+#
+#   git init && git remote add origin https://github.com/metacraft-labs/noir
+#   git fetch --depth=1 origin 9d4e40a64297101aede7bef453acaa5ea0586744
+#
+# resolves, and `compiler/wasm/src/compile_vfs.rs` at the fetched commit
+# carries `contract-debug`. That is the same operation the build script
+# performs, so what was checked is what the builder does.
 NOIR_REV=9d4e40a64297101aede7bef453acaa5ea0586744
 
 # The noir workspace resolves `codetracer_trace_types` and
