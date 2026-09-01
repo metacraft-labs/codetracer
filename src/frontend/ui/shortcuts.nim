@@ -315,6 +315,62 @@ proc configureShortcuts* =
   Mousetrap.`bind`("ctrl+pagedown") do ():
     switchTab(change = 1)
 
+  # WHAT THIS IS FOR, and what it is no longer for. Measured in a real tab
+  # against the assembled web bundle on 2026-09-02; the gate is
+  # `ci/test/chord-and-pane-uniqueness.sh` and the probes it drives are
+  # `ci/test/chord_double_fire_probe.mjs` and
+  # `ci/test/chord_stopcallback_probe.mjs`.
+  #
+  # Mousetrap's DEFAULT `stopCallback` returns `true` — swallow the chord —
+  # when the event target is an INPUT / SELECT / TEXTAREA or `isContentEditable`
+  # and does not carry the class `mousetrap`
+  # (`node_modules/mousetrap/mousetrap.js`). Returning `false` unconditionally
+  # therefore means: every chord fires no matter where the caret is.
+  #
+  # THE ORIGINAL REASON WAS MONACO, AND IT HAS EXPIRED. Monaco used to take
+  # keystrokes on a hidden `textarea.inputarea`, which the default rule
+  # swallowed, so without this line F8/F10/F11/F12 died whenever the caret was
+  # in the code editor. Current Chromium Monaco uses the EditContext API
+  # instead: the focused element is `div.native-edit-context`, with
+  # `isContentEditable == false` and no `mousetrap` class, so the DEFAULT rule
+  # already returns `false` for it. Measured on the shipped bundle:
+  # `hasTextareaInputArea: false`, `hasNativeEditContext: true`,
+  # `defaultWouldStop: false` for the focused element. Monaco no longer needs
+  # this line at all.
+  #
+  # WHAT IT STILL BUYS, and this is the reason it is not simply deleted. Five
+  # ordinary inputs in the page WOULD be blocked by the default rule, because
+  # nobody tagged them: `#fixed-search-include`, `#fixed-search-exclude`,
+  # `textarea.ime-text-area`, `#fif-input` and `.request-filter-search`. Two
+  # others are already exempt the intended way, by carrying the class —
+  # `#command-query-text` and `#fixed-search-query`. So the product HAS a
+  # per-element mechanism for this and uses it inconsistently; this line is the
+  # blunt instrument covering the gap. Deleting it would silently kill chords
+  # in those five, and narrowing it is a behaviour change about whether F10
+  # should step while you are typing in the Find-in-Files filter — a question
+  # worth answering deliberately, by tagging those five `mousetrap`, rather
+  # than as a side effect of a cleanup.
+  #
+  # IT IS NOT A DOUBLE-DELIVERY HAZARD TODAY, which is the thing this comment
+  # exists to stop being rediscovered. The whitelisted chords in
+  # `ui/editor.nim`'s MONACO_SHORTCUTS_WHITELIST are registered BOTH as Monaco
+  # commands (`delegateShortcuts`) and as Mousetrap binds (`bindShortcut`
+  # above), and both call the same `data.actions[action]`. The two never both
+  # deliver: with the caret in Monaco, Monaco's keybinding service
+  # `preventDefault`s AND `stopPropagation`s, so the event never reaches
+  # Mousetrap's listener on `document`; with the caret outside, Monaco's
+  # command does not run. Measured over all ten whitelisted chords in both
+  # focus contexts — 20 presses, every one delivering exactly once, and never
+  # by both paths.
+  #
+  # THE HAZARD IS REAL FOR THE NEXT CHORD, THOUGH, and that is what the gate
+  # is for rather than this line. A chord Monaco ALSO binds natively breaks the
+  # exclusivity: the build-error-navigation work measured ALT+F8 (Monaco's
+  # marker navigation) firing TWICE per press when whitelisted and never when
+  # not. Nothing in the product would notice — stepping's apparent immunity is
+  # `data.status.stableBusy`, a step-serialisation guard that swallows a second
+  # delivery by accident, and a non-stepping action has no such accident.
+  # Anything added to MONACO_SHORTCUTS_WHITELIST must go through the gate.
   Mousetrap.prototype.stopCallback = proc(): bool =
     return false
 

@@ -2911,6 +2911,36 @@ test-web-renderer-mounts:
   exec > >(tee test-logs/test-web-renderer-mounts.log) 2>&1
   bash ci/test/web-renderer-mounts.sh
 
+# ONE PRESS RUNS ONE ACTION, AND ONE PANE ID NAMES ONE NODE.
+#
+# Two latent defects that did no visible harm by luck rather than by design.
+#
+# The pane half is a fixed bug with a mutation proof: `ui/layout.nim`'s
+# standalone auto-hide registration had its `continue` one level too deep, so a
+# layout that already gave GoldenLayout a container for the pane fell through
+# and built a SECOND div with the same id — measured as two
+# `#errorsComponent-0` nodes, the GL one holding the mounted panel and an empty
+# duplicate parked offscreen at x = -9999.
+#
+# The chord half is a hazard rather than a present bug, and the gate is what
+# keeps it that way. Every entry of `ui/editor.nim`'s
+# MONACO_SHORTCUTS_WHITELIST is registered BOTH as a Monaco command and as a
+# Mousetrap bind onto the same `data.actions` slot, and
+# `ui/shortcuts.nim`'s global `stopCallback` override removes Mousetrap's
+# reason to stand down. They do not both fire today only because Monaco
+# `stopPropagation`s — which is a property of the chords currently on the list,
+# not a mechanism. ALT+F8, which Monaco binds natively, was measured firing
+# twice per press when whitelisted.
+#
+# Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
+# otherwise.
+test-chord-and-pane-uniqueness:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-chord-and-pane-uniqueness.log) 2>&1
+  bash ci/test/chord-and-pane-uniqueness.sh
+
 # THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
 # which said in its own words: "no CI recipe produces a web bundle, so
 # `test_one_codebase_two_platforms` is unasserted, and nothing calls the web
