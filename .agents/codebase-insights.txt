@@ -2667,3 +2667,72 @@ rest to `handle_request`). Grepping `dap_handler.rs` for command-looking
 strings matches filesystem paths (`meta_dat/sources`, `origin-patterns`), a
 replay-task name (`"flow"`) and a default literal (`"source"`) — none of them
 commands.
+
+## The browser's Build/Run path, and four things that were quietly in its way
+
+- 2026-09-01: `ui/web_noir_build.nim` is the call path from a gesture to the
+  Noir wasm toolchain. Everything either side of it existed and was tested
+  (registry, worker protocol, transport, the merged NS9 bundle); nothing
+  called it. Marshalling is `platform/noir_build.nim`, pane-driving is
+  `viewmodels/noir_build_producer.nim`, and both are pure so `vm-unit` and
+  `vm-unit-js` run all of it. Four obstacles were found by measurement and
+  each is worth knowing before touching this area:
+  * **`ui/shortcuts.nim`'s hard-coded `ctrl+b` shadows a CONFIGURED shortcut.**
+    `default_config.yaml` binds `build: "CTRL+B"`, the YAML loop binds it, and
+    then a later `Mousetrap.bind` in the same proc replaces it — Mousetrap
+    overwrites rather than chains. The YAML entry has been dead on every
+    platform. It is now excluded from `-d:ctWeb`, and the web arm installs
+    `data.actions[ClientAction.build]` instead, which `bindShortcut` reads AT
+    PRESS TIME. A `Mousetrap.bind` from `ui_js.nim`'s web arm does NOT work:
+    `onNoTrace` is `{.async.}` and calls `configureShortcuts()` again in a
+    later microtask, so it rebinds over anything installed there — measured,
+    with `Mousetrap.trigger('ctrl+b')` from the page also reaching nothing.
+  * **The generated entry document had the auto-hide STRIPS and not the
+    OVERLAY.** BUILD, PROBLEMS, FIND IN FILES and REQUESTS are standalone
+    auto-hide panes (`ui/layout.nim`): their DOM lives in
+    `#auto-hide-standalone-host` at `left:-9999px` and revealing one means
+    reparenting it into `#auto-hide-overlay-content`. `web_deployment.nim`'s
+    skeleton omitted `#auto-hide-overlay`, so `doShowOverlayImpl` logged
+    "not found in DOM" and returned — none of the four could ever be opened in
+    a browser. The skeleton now carries the overlay, the backdrop and the three
+    docked hosts, copied structurally from `src/frontend/index.html`.
+  * **`build.syncLegacyBuildIntoVM` wiped the pane on every reveal.**
+    `ui/layout.nim`'s `onPanelShown` calls it whenever the BUILD overlay is
+    shown, and it is a BULK REPLACE from `self.build` — the Electron
+    producer's mirror, permanently empty in a browser. Measured: a compile
+    reporting `rows=1 paneRows=1` (one view model, holding the row) and
+    `#build` holding none 50 ms later, the row appearing only on the next
+    gesture. It now returns early when the legacy record is empty and the view
+    model is not.
+  * **`wasm_worker.finish` dropped a `failed` message's TEXT on the `start`
+    path.** `run` gets it as a `PlatformError.message`; `start` has no
+    `settle`, so the three module-load faults
+    (`not-delivered`/`not-served`/`broken`) reached a streaming caller as a
+    bare exit code 1. It is now delivered on stderr before the exit.
+- 2026-09-01: `mode: "debug"` SILENCES WARNINGS. `compiler/wasm/src/vfs.rs`'s
+  `debugging_compile_options()` sets `silence_warnings: true` (nargo's own
+  choice — the instrumenter imports `__debug` functions the user did not
+  write). Measured over one program carrying both an unused expression and an
+  unresolved path: `program` mode reports 2 diagnostics, `debug` reports 1. So
+  Build asks for `program` and Run asks for `debug`, and they are not
+  interchangeable in either direction — an uninstrumented artifact traces to
+  ONE event and ZERO steps while both wasm modules report `ok`.
+- 2026-09-01: `VfsResponse`'s `warnings` and `diagnostics` are ABSENT, not
+  empty, when there are none (`skip_serializing_if = "Vec::is_empty"`), and a
+  RESOLVE refusal (`git-dependency-refused`, `missing-manifest`) carries ZERO
+  diagnostics and one positioned message in `manifest`/`line`/`column`. A pane
+  that rendered only `diagnostics` paints nothing for the two most likely
+  first-run mistakes.
+- 2026-09-01: `views/isonim_build_view.nim` assigns `BuildOutputLine.htmlText`
+  to `innerHTML` — deliberately, because the desktop's producer passes ANSI
+  runs through `ansi_up`. Anything else writing that field must escape: Noir
+  diagnostics quote the user's own source, and §1b.3 links can carry a project.
+- 2026-09-01: the BUILD pane's ■ has a NON-REACTIVE `disabled` class.
+  `views/isonim_build_view.nim`'s header computes it once with
+  `stopButtonClass(vm)`; measured over a real compile in a browser it stayed
+  `build-ctrl-btn build-stop-btn disabled` for the whole run while the header
+  text beside it updated from `▶` to `build succeeded`. The button still WORKS
+  — `cancelBuild` is wired to the click, not to the class — but "wait until the
+  ■ is live" is a condition that never becomes true, on either platform, so no
+  harness can synchronise on it. Not fixed here (it belongs to the pane's
+  view); `ci/test/noir-build-in-browser.sh` records why it has no Stop arm.

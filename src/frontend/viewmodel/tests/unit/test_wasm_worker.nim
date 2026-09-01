@@ -196,6 +196,61 @@ suite "streaming and liveness are observable as they happen":
     check exits[0].exitCode == 0
     check not worker.runIsActive(handle)
 
+  test "a failed message reaches a START caller, on stderr":
+    ## THE SILENT DROP THIS CASE EXISTS FOR.
+    ##
+    ## `finish` settles a `run` by handing the failure text to its `settle`
+    ## proc, which becomes a `PlatformError.message`. A `start` has no
+    ## `settle` — its handle resolved before anything happened — so every
+    ## `failed` message it received ended at `onExit(exitCode: 1)` and the
+    ## TEXT was thrown away.
+    ##
+    ## What that text is matters: `wasm_worker_browser.js` composes three
+    ## deliberately different sentences for its three module-load faults, and
+    ## its own header records that conflating a missing asset with a broken
+    ## feature cost a sibling campaign hours. A streaming caller saw the same
+    ## bare exit code for a module that was never published, one the server
+    ## does not serve, and one that is broken.
+    ##
+    ## It arrives on stderr because that is what it is — a process that failed
+    ## wrote to stderr and exited non-zero — and every caller of `start`
+    ## already handles both. A fourth `WasmHost` operation would have to be
+    ## added to four hosts and every test that builds one, to carry
+    ## information the existing channel carries correctly.
+    let (worker, fake) = newFakePair(registry)
+    var seen: seq[ProcessOutputChunk] = @[]
+    var exits: seq[ProcessExit] = @[]
+    proc onOutput(chunk: ProcessOutputChunk) = seen.add chunk
+    proc onExit(exit: ProcessExit) = exits.add exit
+    discard worker.startOnWorker(noirModule, processSpec("nargo", @["trace"]),
+                                 onOutput, onExit)
+    const Fault = "this deployment does not ship the `noir-tracer` wasm module"
+    worker.deliver($(%*{
+      "seq": seqOf(fake, 0), "kind": "failed", "message": Fault,
+      "fault": "not-delivered", "module": "noir-tracer"}))
+
+    check seen.len == 1
+    check seen[0].stream == psStderr
+    check seen[0].text == Fault
+    check exits.len == 1
+    check exits[0].exitCode == 1
+    check not exits[0].signalled
+    # ORDER IS PART OF THE CONTRACT: the text must arrive BEFORE the exit, or
+    # a producer that paints at exit paints an empty pane and then receives
+    # the reason for it.
+    check seen.len == 1 and exits.len == 1
+
+    # CONTROL ARM: a clean exit posts no stderr, so the assertion above is
+    # about the failure and not about a callback that fires for everything.
+    let (worker2, fake2) = newFakePair(registry)
+    var seen2: seq[ProcessOutputChunk] = @[]
+    proc onOutput2(chunk: ProcessOutputChunk) = seen2.add chunk
+    proc onExit2(exit: ProcessExit) = discard
+    discard worker2.startOnWorker(noirModule, processSpec("nargo", @["compile"]),
+                                  onOutput2, onExit2)
+    worker2.deliver(exitMessage(seqOf(fake2, 0), 0))
+    check seen2.len == 0
+
   test "terminate reports an outstanding run as KILLED, not as exit 0":
     ## `process.nim`'s `ProcessExit.signalled`: "a cancelled run establishes
     ## nothing, and callers that conflate the two report a cancellation as a

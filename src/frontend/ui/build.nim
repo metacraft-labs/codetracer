@@ -24,6 +24,10 @@ from ../viewmodel/viewmodels/build_vm import
   setCommand, setRunning, setBuildStartTime, setCode, appendLine,
   appendError, appendProblem, clearOutput
 from isonim/web/dom_api import nil
+# `Signal.val` is a template, so reading a `BuildVM` signal here needs the
+# module in scope even though the type arrives through `build_vm`. Used by the
+# empty-record guard in `syncLegacyBuildIntoVM`.
+from isonim/core/signals import Signal, val
 from ../viewmodel/views/isonim_build_view import mountIsoNimBuild
 
 export build_location_parser
@@ -106,6 +110,37 @@ proc syncLegacyBuildIntoVM*(self: BuildComponent) =
   ## bulk-replace scenario.
   if buildVMInstance.isNil or self.isNil:
     return
+
+  # AN EMPTY LEGACY RECORD IS NOT AN INSTRUCTION TO CLEAR, and this guard is
+  # what makes the pane safe to have two producers.
+  #
+  # `self.build` is the ELECTRON producer's mirror: `onBuildCommand`,
+  # `onBuildStdout` and `onBuildCode` fill it from `CODETRACER::build-*`, which
+  # a `ct` process sends. The web instantiation has no such process — its
+  # producer is `viewmodel/viewmodels/noir_build_producer`, driving the same
+  # `BuildVM` from the wasm worker's `output` / `exit` / `failed` messages —
+  # so `self.build` there is permanently empty.
+  #
+  # This proc is a BULK REPLACE, and `ui/layout.nim`'s `onPanelShown` calls it
+  # every time the BUILD overlay is revealed. Without this guard, revealing the
+  # pane to look at a build's result wiped that result and replaced it with the
+  # empty desktop record. Measured, on the web arm: a compile that reported
+  # `rows=1 paneRows=1` — the producer's view model and the pane's being the
+  # same object, holding the row — and `#build` holding none 50 ms later, with
+  # the row appearing only on the NEXT gesture, one whole build late. That is
+  # this campaign's own failure shape, arriving inside the fix for it.
+  #
+  # The condition is about the SOURCE, not the platform: an empty legacy record
+  # says "no legacy build has run", and it must not overwrite a view model that
+  # something else filled. When the desktop's record does hold a build, it wins
+  # exactly as before, which is what the E2E injection path this proc was
+  # written for needs.
+  if self.build.output.len == 0 and self.build.problems.len == 0 and
+     safeStr(self.build.command).len == 0 and
+     not self.build.running and
+     buildVMInstance.output.val.len > 0:
+    return
+
   buildVMInstance.clearOutput()
   buildVMInstance.setCommand(safeStr(self.build.command))
   buildVMInstance.setRunning(self.build.running)

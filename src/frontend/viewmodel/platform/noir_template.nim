@@ -106,6 +106,15 @@ const noirTemplateName* = "hello_noir"
 
 const noirEntryFile* = "src/main.nr"
 
+const noirInputsFile* = "Prover.toml"
+  ## Where a Noir `bin` package keeps the arguments its `main` is run with.
+  ##
+  ## Named here because two different layers ask about it and neither should
+  ## spell it: `noir_build_producer.traceInputsMissing` reports its absence by
+  ## name, and the Run path reads it out of the open project to hand to
+  ## `ct_trace`, whose contract is "`inputs` is the text of a `Prover.toml`"
+  ## (`tooling/tracer_wasm/src/lib.rs`).
+
 proc noirHelloWorld*(): ProjectTemplate =
   ## §1a's project, as its picture shows it: `src/main.nr`, `src/utils.nr`,
   ## `tests/`, `Nargo.toml`.
@@ -128,6 +137,32 @@ type = "bin"
 authors = [""]
 
 [dependencies]
+"""),
+      # THE FILE THAT MADE `Run` POSSIBLE, and its absence is why Run did
+      # nothing until now.
+      #
+      # `main(x: Field, y: pub Field)` takes two arguments and a `bin`
+      # package takes them from `Prover.toml`. Without one the tracer has
+      # nothing to encode against the ABI and refuses — correctly — so the
+      # template shipped a project that could be compiled and could not be
+      # run, which is half of what §1a promises ("its tests already passing,
+      # one keystroke from being changed").
+      #
+      # WHY THESE TWO VALUES AND NOT ZEROES. A default of `0` for both would
+      # satisfy the ABI and then fail `assert(x != y)` on the first Run — a
+      # first-run experience that reports the bundled template as broken. `1`
+      # and `2` are the template's OWN already-passing case: `test_main()`
+      # calls `main(1, 2)` a few lines down in `src/main.nr`. So the first
+      # Run reproduces a test the visitor can see, which is the honest
+      # default and the one whose failure would mean something.
+      #
+      # Quoted strings, because `Field` values are arbitrary-precision and
+      # nargo's TOML format takes them as strings; a bare `1` is a TOML
+      # integer and does not round-trip for values above 2^63.
+      TemplateFile(
+        path: noirInputsFile,
+        content: """x = "1"
+y = "2"
 """),
       TemplateFile(
         path: "src/main.nr",

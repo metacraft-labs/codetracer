@@ -1142,7 +1142,14 @@ suite "the bundled template a language entry selects":
     ## misrepresent the language." Asserted as a count and a shape rather than
     ## trusted to whoever edits `noir_template.nim` next.
     let tmpl = templateFor("noir")
-    check tmpl.templateFileCount == 4
+    # FIVE, not four: three sources, a `Nargo.toml` and a `Prover.toml`.
+    #
+    # The inputs file was added when Run became reachable — a `bin` package
+    # takes `main`'s arguments from it, and without one the tracer has nothing
+    # to encode against the ABI, so the template shipped a project that could
+    # be compiled and could not be run.
+    # `test_noir_build_marshalling.nim` asserts what is in it.
+    check tmpl.templateFileCount == 5
     check tmpl.language == "noir"
     check tmpl.entryFile == "src/main.nr"
     check tmpl.fileContent("src/main.nr").len > 0
@@ -1169,11 +1176,31 @@ suite "the bundled template a language entry selects":
     ## the whole problem.
     let tmpl = templateFor("noir")
     let root = tmpl.fileContent("src/main.nr")
+    # THE SUBJECT IS THE SOURCES, and it has to be selected rather than
+    # assumed. This loop used to skip two named files and require everything
+    # else to be a module, which was true while the template carried only
+    # `Nargo.toml` and three `.nr` files — and became wrong the moment it grew
+    # a `Prover.toml`, which is a manifest-like part of a `bin` package and
+    # not a crate module.
+    #
+    # COUNTED, because a selection that matched nothing would make the whole
+    # case pass vacuously — which is exactly what a `continue` list does when
+    # a file is renamed.
+    var modules = 0
+    var manifests = 0
     for file in tmpl.files:
-      if file.path == "Nargo.toml" or file.path == "src/main.nr": continue
+      if not file.path.endsWith(".nr"):
+        # `Nargo.toml` and `Prover.toml`: package metadata, not crate sources.
+        check not file.path.contains("/")
+        inc manifests
+        continue
       check file.path[0 ..< 4] == "src/"
+      if file.path == "src/main.nr": continue
       let module = file.path[4 ..< file.path.len - 3]
       check ("mod " & module & ";") in root
+      inc modules
+    check modules == 2
+    check manifests == 2
 
   test "a file the template does not carry degrades rather than raising":
     ## §1b.3 step 5: each part of a link degrades independently. A fragment
