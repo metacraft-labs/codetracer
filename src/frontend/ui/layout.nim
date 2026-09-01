@@ -226,6 +226,15 @@ proc createContextMenuFromOptions(
     actions: actions
   )
 
+proc pinActiveContentItem(layout: js, stack: js, edge: AutoHideEdge) =
+  ## Pin the currently active tab in `stack` to the given auto-hide edge.
+  ## Uses `getActiveContentItem` to find what to detach.
+  let activeItem = stack.getActiveContentItem()
+  if activeItem.isNil or activeItem.isUndefined:
+    cwarn "auto_hide: no active content item in stack"
+    return
+  pinPanel(cast[GoldenLayout](layout), cast[GoldenContentItem](activeItem), edge)
+
 proc injectPinButton(tabElement: JsObject, onPin: proc()) =
   ## Insert a pin button to the left of the GL close button inside a tab element.
   ## Clicking it calls `onPin`, which sends the panel to the auto-hide sidebar.

@@ -267,6 +267,12 @@ proc attachScrollSentinel(r: MockRenderer; sentinel: MockNode;
 proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
   r.appendChild(host, child)
 
+proc setInnerHtml(r: MockRenderer; node: MockNode; html: string) =
+  ## Set the inner HTML of a mock node.  ``renderBranchPicker`` uses this to
+  ## inject the chevron SVG.  In the mock renderer this is a no-op: tests do
+  ## not inspect the chevron SVG content.
+  discard
+
 when defined(js):
   proc attachScrollSentinel(r: WebRenderer; sentinel: isonim_dom.Element;
                             callbacks: VCSCallbacks) =
