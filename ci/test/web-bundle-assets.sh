@@ -130,10 +130,20 @@ while IFS=$'\t' read -r _id _path _mode _req _behaviour; do
 	rm -f "${out_dir}/${_path}"
 done < <(printf '%s\n' "${manifest}")
 
+# AND ONE PATH THE MANIFEST NO LONGER DECLARES. `web.js` was a required asset
+# until NS9 merged the two Nim bundles; a tree assembled by an older revision
+# of this script still has one, and the loop above stopped removing it the
+# moment it left `webRuntimeAssets()`. Left in place it would be an unreferenced
+# 1 MB file that no document loads and no check looks at — "an asset nothing
+# can reach", which is the exact state the deploy guard exists to catch and
+# which this script would otherwise have manufactured itself.
+rm -f "${out_dir}/web.js"
+
 # ---------------------------------------------------------------------------
-echo "Step 2: build the two bundled entry points"
-echo "    The renderer is the one that was impossible until now: its import"
-echo "    graph reached lib/electron_lib.nim, which is {.error.} under -d:ctWeb."
+echo "Step 2: build the renderer, which is the only Nim bundle a page loads"
+echo "    It was impossible until recently: its import graph reached"
+echo "    lib/electron_lib.nim, which is {.error.} under -d:ctWeb. It now also"
+echo "    carries the boot sequence that used to live in a second bundle."
 # ---------------------------------------------------------------------------
 build() {
 	local label="$1" target="$2" out="$3"
@@ -159,12 +169,48 @@ build renderer src/frontend/ui_js.nim "${out_dir}/ui.js" \
 # shipped bundle with it meant the file uploaded to a CDN was a node build that
 # happened to contain no `require(`. The renderer arm beside it has always been
 # `js-browser`; this makes the pair agree.
-build web-entry src/frontend/web_main.nim "${out_dir}/web.js" \
-	-d:ctWeb --path:src/frontend/viewmodel
+# THERE IS NO SECOND NIM BUNDLE ANY MORE, and its removal is NS9.
+#
+# This script used to build `src/frontend/web_main.nim` into `${out_dir}/web.js`
+# and the entry document used to load it first. It was the "loop arm": it
+# called `boot()`, which installs the platform. The renderer could not see what
+# it installed, and the reason was structural — `installPlatform` writes a
+# module-level `var` in `viewmodel/platform/platform.nim`, `nim js` gives each
+# compiled program its own, and the IIFE step below (which is load-bearing, see
+# its header) is precisely what guaranteed the two could never meet. So every
+# `ctPlatform()` in the renderer returned the refusing `uninstalledProfile`,
+# and the ~19 MB of Noir compiler step 3 places had no reachable caller.
+#
+# Measured on the pair this replaced, which is the shortest statement of the
+# defect available:
+#
+#     web.js   contains installPlatform__viewmodelZplatformZplatform_u99
+#     ui.js    contains no installPlatform AT ALL — the symbol was eliminated
+#              as dead code, because nothing in the renderer could install one
+#
+# `ui_js.nim`'s web arm now calls `boot()` itself, in the same program, so the
+# `installedPlatform` the renderer reads is the one `boot()` wrote.
+#
+# IT IS ALSO SMALLER, which is the measurement that settled the choice between
+# merging and bridging:
+#
+#     before   ui.js 14,616,358 + web.js 1,029,682 = 15,646,040 bytes
+#     after    ui.js 15,265,622                    = 15,265,622 bytes
+#     delta                                          -380,418 bytes
+#
+# The shared runtime — the 196 functions and 85 type tables the IIFEs existed
+# to keep apart — is emitted once instead of twice, and that saves more than
+# the loop arm's own modules cost.
+#
+# `web_main.nim` still compiles and is still tested: `ci/test/web-bundle-smoke.sh`
+# builds it with `-d:nodejs -d:ctWeb` and runs it under node, which drives
+# §4.2's third row without a browser. It builds its OWN copy and does not read
+# this directory, so nothing here needs to produce one. What changed is that no
+# deployment carries it.
 
 # -----------------------------------------------------------------------
-# SCOPE THE TWO NIM BUNDLES. They share a page, and until this step they
-# shared its GLOBAL SCOPE, which is not a style question.
+# SCOPE THE NIM BUNDLE. It shares a page with the third-party bundle, and
+# until this step it shared its GLOBAL SCOPE, which is not a style question.
 #
 # `nim js` emits its whole program as top-level `var`s and `function`
 # declarations. Two independently compiled bundles therefore collide on
@@ -200,11 +246,17 @@ build web-entry src/frontend/web_main.nim "${out_dir}/web.js" \
 # desktop and dev-server builds are untouched — they load one Nim bundle and
 # this step does not run for them.
 #
-# WHAT IT DOES NOT FIX: the two arms still cannot share Nim state, so the
-# renderer cannot see the platform, project store or wasm registry that
-# `web.js` booted. That is one bundle's worth of work and it is NS9's, not
-# this script's. What changes here is that they no longer corrupt each
-# other, which they did.
+# WHAT IT DID NOT FIX, AND WHAT DID. This header used to end: "the two arms
+# still cannot share Nim state, so the renderer cannot see the platform,
+# project store or wasm registry that `web.js` booted. That is one bundle's
+# worth of work and it is NS9's, not this script's."
+#
+# That work is done, and it was one bundle's worth almost literally — see the
+# block above `scope_bundle`'s caller. There is one Nim program now, so there
+# is no cross-bundle state to share and nothing for the IIFE to protect
+# against. It is kept anyway, for the narrower reason a wrapper is still worth
+# having: a bundle declaring ~280 top-level names should not put them on
+# `window` beside the third-party bundle's.
 scope_bundle() {
 	local label="$1" file="$2"
 	if head -c 12 "${file}" | grep -q '^(function()'; then
@@ -228,7 +280,6 @@ scope_bundle() {
 	fi
 }
 scope_bundle renderer "${out_dir}/ui.js"
-scope_bundle web-entry "${out_dir}/web.js"
 echo
 
 # ---------------------------------------------------------------------------

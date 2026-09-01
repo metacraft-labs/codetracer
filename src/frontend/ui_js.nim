@@ -1,3 +1,29 @@
+# FIRST, AND THE POSITION IS LOAD-BEARING — NS9.
+#
+# `web_boot` starts the web instantiation's `boot()` in its own module
+# initialiser, and a Nim module initialises before the module that imports it.
+# Putting this line at the top is what makes `boot()` run BEFORE
+# `ui/agent_activity`'s module-scope `monaco.editor.createModel`.
+#
+# That matters because `monaco` comes from the third-party bundle, and a
+# deployment that loses it makes this file raise `ReferenceError` a quarter of
+# the way through its own top-level code. When the boot call sat at the TAIL of
+# this file, such a throw meant the platform never booted and the page reported
+# nothing about why — `ci/test/web-renderer-mounts.sh`'s arm A is that
+# deployment, and its twin assertion ("the loop arm still booted") is what
+# caught the regression when the two Nim bundles were merged into this one.
+#
+# `boot()` is async, so it returns at its first `await` with its continuation
+# already queued; a later synchronous throw in the same module-init pass does
+# not cancel it. So the boot line is still reported, and a renderer that dies
+# is still distinguishable from a storage layer that refused.
+#
+# A `from ... import` rather than a plain `import`: `web_boot` re-exports
+# `host/web_browser`, and this file's import list is the tree's most
+# collision-prone. Two names is the whole surface.
+when defined(ctWeb):
+  from web_boot import startWebSession, describeRunningPlatform
+
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
   options, json,
@@ -4535,6 +4561,19 @@ when defined(ctWeb):
   from viewmodel/platform/noir_template import
     ProjectTemplate, templateFor, hasFiles, templateFileCount
 
+  # `web_boot` is imported at the TOP of this file, not here, and its header
+  # explains why the position is load-bearing. The short version of what it
+  # does: `installPlatform` writes a module-level `var` in
+  # `viewmodel/platform/platform.nim`, a `nim js` program gets exactly one of
+  # those, and the deployment used to run TWO programs — `web.js` booted and
+  # `ui.js` rendered. Measured on the baseline pair, and it is the cleanest
+  # statement of the defect available: `web.js` contained
+  # `installPlatform__viewmodelZplatformZplatform_u99`, and `ui.js` contained
+  # no `installPlatform` at all, the symbol having been eliminated as dead code
+  # because nothing in the renderer could ever install a platform. Every
+  # `ctPlatform()` here therefore returned `uninstalledProfile`: `pkHeadless`,
+  # every capability absent, every operation refusing.
+
   # -------------------------------------------------------------------------
   # THE WEB BUILD'S ENTRY POINT — the call that was missing.
   #
@@ -4811,6 +4850,22 @@ when defined(ctWeb):
           # can see that, which is why the count is said out loud here rather
           # than left to be inferred from a screen.
           " shortcuts=" & $shortcutBindingCount(data.config) &
+          # THE PLATFORM THE RENDERER ITSELF CAN SEE, which is the fact this
+          # milestone exists to change and the one no line has ever carried.
+          #
+          # The boot line already said `platform=pkWeb`, and it was true of the
+          # program that printed it. This says it of the program that MOUNTS
+          # PANES, and until the arms were merged the honest value here was
+          # `platform=pkHeadless run=false` on every load — beside a boot line
+          # reporting `toolchain=nargo:compile+trace` from the other bundle.
+          # Two true sentences that together were a lie about the product, and
+          # nothing printed the second one.
+          #
+          # `ci/test/web-renderer-mounts.sh` asserts this clause agrees with
+          # the boot line's, and its arm C reddens exactly this by neutering
+          # `installPlatform` — which leaves the mount untouched, so the arm
+          # names the mechanism rather than reporting that something broke.
+          describeRunningPlatform() &
           # §1b.3 step 6: "a plain statement of what was asked for and could
           # not be found. Never a blank editor, never an error page."
           # `resolveEntry` composes that sentence for an unresolvable address
@@ -4842,7 +4897,34 @@ when defined(ctWeb):
       reportWebRenderer(cstring(
         webRendererLinePrefix & " failed reason=" & getCurrentExceptionMsg()))
 
-  startWebRenderer()
+  proc startWebArm() {.async.} =
+    ## Boot the platform, THEN render — and in that order for one reason.
+    ##
+    ## `boot()` is asynchronous by necessity: §4.5 requires the project store
+    ## to be OPENED before a platform exists, because a platform is a thing
+    ## that can write and a refused store must not be written to. So there is
+    ## no synchronous point at which `ctPlatform()` could already be the web
+    ## platform, and a renderer that mounted first would run `configure(data)`
+    ## and its first surface against `uninstalledProfile` — which is precisely
+    ## the state that shipped, just reached from one program instead of two.
+    ##
+    ## THE COST IS ONE TASK, NOT A ROUND TRIP. `boot()` awaits
+    ## `navigator.storage.persisted()` and the OPFS handle; both are local. The
+    ## probe in `ci/test/web_renderer_probe.mjs` settles for 9s after `load`,
+    ## against a boot measured in single-digit milliseconds.
+    ##
+    ## A REFUSED BOOT STILL RENDERS. `startWebSession` reports the refusal on
+    ## the boot line and returns it; the renderer then mounts against
+    ## `uninstalledProfile`, which is no worse than every load before this
+    ## change and strictly better than a blank page — §4.5's refusal has a UI,
+    ## and a user who cannot be given storage still needs to be told so by
+    ## something other than an empty document. The renderer's own line reports
+    ## `platform=pkHeadless run=false` in that case, so the two states are
+    ## distinguishable in the log rather than being one shrug.
+    discard await startWebSession()
+    startWebRenderer()
+
+  discard startWebArm()
 
 # The DEV-SERVER arm, unchanged, and now guarded against the web build rather
 # than serving as its accidental default. `not defined(ctWeb)` is the whole of

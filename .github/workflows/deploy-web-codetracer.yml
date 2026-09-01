@@ -21,7 +21,7 @@ name: Deploy ide.codetracer.com
 # WHAT IS PUBLISHED — TWO PRODUCTS, ONE FILE TREE
 #
 #   1. NOIR STUDIO, the hosted product, at `/`. `ci/test/web-bundle-assets.sh`
-#      assembles { index.html, ui.js, web.js, assets/wasm-worker.js,
+#      assembles { index.html, ui.js, assets/wasm-worker.js,
 #      assets/noir_wasm.wasm, assets/noir_tracer_wasm.wasm, _headers,
 #      _redirects }. Until 2026-08-31 NOTHING PUBLISHED THIS AT ALL: CI proved
 #      the bundle compiled and booted and no workflow shipped it, so the
@@ -566,7 +566,12 @@ jobs:
             echo "== $base =="
             # The product.
             check "$base" "/" "$(size index.html)" "$required"
-            check "$base" "/web.js" "$(size web.js)" "$required"
+            # `/ui.js` ONLY. There used to be a `/web.js` beside it — the "loop
+            # arm", which called boot() while ui.js rendered. They were two
+            # separately compiled Nim programs and the renderer could not see
+            # the platform the other installed, so a Build button had nothing
+            # to call. NS9 merged them; the page loads one Nim bundle, and it
+            # is 380,418 bytes smaller than the pair it replaces.
             check "$base" "/ui.js" "$(size ui.js)" "$required"
             check "$base" "/assets/wasm-worker.js" "$(size assets/wasm-worker.js)" "$required"
             for m in noir_wasm.wasm noir_tracer_wasm.wasm; do
@@ -595,10 +600,25 @@ jobs:
             echo "  the served page carries NO descriptor — it would report no toolchain" >&2
             fail=1
           fi
-          if printf '%s' "$doc" | grep -q 'src="/web.js"'; then
-            echo "  ok: the served page references the loop-arm bundle"
+          # EXACTLY ONE NIM BUNDLE, asserted as a count in both directions.
+          #
+          # The first clause is the old check's job: a page referencing no Nim
+          # bundle can never boot. The second is NS9's: `/web.js` reappearing
+          # means the two-program split is back, and that failure is SILENT —
+          # both files would be 200, both the right size, and the boot line
+          # would still say `ok`, because the loop arm really did boot. Only a
+          # Build button would ever have known, which is how 19 MB of working
+          # compiler stayed unreachable through a fully green deploy.
+          nim_bundles=0
+          printf '%s' "$doc" | grep -q 'src="/ui.js"' && nim_bundles=$((nim_bundles + 1))
+          printf '%s' "$doc" | grep -q 'src="/web.js"' && nim_bundles=$((nim_bundles + 1))
+          if [ "$nim_bundles" -eq 1 ] && printf '%s' "$doc" | grep -q 'src="/ui.js"'; then
+            echo "  ok: the served page references exactly one Nim bundle, and it is /ui.js"
+          elif [ "$nim_bundles" -eq 0 ]; then
+            echo "  the served page references no Nim bundle — it can never boot" >&2
+            fail=1
           else
-            echo "  the served page references no /web.js — it can never boot" >&2
+            echo "  the served page references a second Nim bundle (/web.js) — the renderer cannot see the platform it boots" >&2
             fail=1
           fi
 

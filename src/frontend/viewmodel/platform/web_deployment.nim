@@ -312,7 +312,25 @@ const
     ## a prefix the day a `404.html` is added to the bundle. The contract stays
     ## explicit and stays generated from `rewritePrefixes()`.
   rendererBundlePath* = "ui.js"
-  webEntryBundlePath* = "web.js"
+    ## THE ONLY NIM BUNDLE A DEPLOYMENT CARRIES, as of NS9.
+    ##
+    ## There used to be a second, `web.js`, built from `web_main.nim` and
+    ## loaded before this one: the "loop arm" installed the platform and the
+    ## renderer painted. They could not be one program's worth of state and
+    ## never were. `installPlatform` writes a module-level `var` in
+    ## `platform/platform.nim`, `nim js` gives each compiled program its own,
+    ## and `ci/test/web-bundle-assets.sh` wraps each bundle in an IIFE — which
+    ## is load-bearing, because otherwise the second redefines 196 of the
+    ## first's functions and 85 of its type tables — so the scoping that kept
+    ## them from corrupting each other is exactly what kept them from sharing
+    ## anything. The renderer's `ctPlatform()` therefore returned the refusing
+    ## `uninstalledProfile` on every load of the deployed page, and the 19 MB
+    ## of Noir compiler this manifest places was unreachable from the only code
+    ## that could have called it.
+    ##
+    ## Merging cost nothing and saved 380,418 bytes: the shared runtime is
+    ## emitted once. `web_main.nim` still exists as `web-bundle-smoke.sh`'s
+    ## headless boot entry point; it is not deployed.
 
   # THE THREE ASSETS THE RENDERER HAS ALWAYS NEEDED AND THIS MANIFEST NEVER
   # NAMED, which is why a correct-looking deployment painted nothing.
@@ -361,9 +379,6 @@ proc webRuntimeAssets*(): seq[RuntimeAsset] =
       required: true, absenceBehaviour: ""),
     RuntimeAsset(
       id: "renderer", path: rendererBundlePath, mode: damBundled,
-      required: true, absenceBehaviour: ""),
-    RuntimeAsset(
-      id: "web-entry", path: webEntryBundlePath, mode: damBundled,
       required: true, absenceBehaviour: ""),
     RuntimeAsset(
       id: "third-party-bundle", path: thirdPartyBundlePath, mode: damBundled,
@@ -532,9 +547,9 @@ proc renderCacheConfig*(contract: DeploymentContract): string =
 # ## Why the descriptor travels IN the entry document and is not fetched
 #
 # This is the constraint that decided the design, and it is not a preference.
-# `ci/test/noir-studio-signed-out.sh` asserts that the loop arm — `web_main.nim`
-# -> `web.js`, which carries write, compile, run, record and export — contains
-# **zero network egress sites**, and that is what makes the development loop
+# `ci/test/noir-studio-signed-out.sh` asserts that the boot sequence —
+# `web_main.nim`, which carries write, compile, run, record and export —
+# contains **zero network egress sites**, and that is what makes the loop
 # work signed out and on a plane. A `fetch('/assets/deployment.json')` in
 # `boot()` would be the first one, and it would be an egress site on the
 # critical path of a product whose whole claim is that it has none.
@@ -862,11 +877,11 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
   ##
   ## ## The load order is the specification's, and the `defer` is not cosmetic
   ##
-  ## `web.js` is the loop arm and installs the platform; `ui.js` is the
-  ## renderer. Both are `defer`, so the descriptor element is in the DOM before
-  ## either runs — `boot()` reads it synchronously and a script that ran first
-  ## would find nothing and report a deployment with no toolchain, which is the
-  ## failure that looks exactly like a correct empty deployment.
+  ## `ui.js` boots the platform and then renders — one Nim program, since NS9;
+  ## see `rendererBundlePath`. It is `defer`, so the descriptor element is in
+  ## the DOM before it runs — `boot()` reads it synchronously and a script that
+  ## ran first would find nothing and report a deployment with no toolchain,
+  ## which is the failure that looks exactly like a correct empty deployment.
   let json = renderDeploymentDescriptor(descriptor)
   result = """<!DOCTYPE html>
 <meta charset="utf-8">
@@ -958,21 +973,28 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
      scope and a browser raises `ReferenceError` — not `undefined` — for a
      global that was never assigned. This is the script whose absence made the
      deployed page blank.
-  2. `web.js`, the loop arm: it installs the platform and reads the descriptor
-     above out of the DOM.
-  3. `ui.js`, the renderer, last.
+  2. `ui.js` last. It is the ONLY Nim bundle now: it boots the platform, reads
+     the descriptor above out of the DOM, and then renders. There used to be a
+     `web.js` between these two lines that did the booting, and the renderer
+     could not see what it booted — see `rendererBundlePath` for why that was
+     structural rather than an oversight.
 
-  All four are `defer`, which preserves document order and keeps a 13 MB
+  All three are `defer`, which preserves document order and keeps a 13 MB
   bundle off the parser's critical path. A `type="module"` would scope them
   more strongly and was measured instead: it makes `ui.js` a `SyntaxError`
   ("Identifier 'debugRepl' has already been declared"), because Nim's JS
-  backend emits declarations that are legal only in sloppy mode. The scoping
-  the two Nim bundles DO need is applied to the files themselves by
-  `ci/test/web-bundle-assets.sh`; see its header for what shares a global
-  scope and what that cost.
+  backend emits declarations that are legal only in sloppy mode.
+
+  `ui.js` is still wrapped in an IIFE by `ci/test/web-bundle-assets.sh`, and
+  the reason has changed: it is no longer keeping two Nim bundles apart,
+  because there are no longer two. It is kept because a bundle that declares
+  ~280 top-level names has no business putting them on `window` beside the
+  third-party bundle's, and because removing it would be a change with a cost
+  and no benefit. What it still costs is unchanged and still worth stating:
+  `{.exportc.}` procs meant for a devtools console (`debugCT`, `debugRepl`,
+  `readLog`) are not reachable from the global scope in the WEB build.
 -->
 <script src="/""" & thirdPartyBundlePath & """" defer></script>
 <script src="/public/third_party/jstree.min.js" defer></script>
-<script src="/""" & webEntryBundlePath & """" defer></script>
 <script src="/""" & rendererBundlePath & """" defer></script>
 """

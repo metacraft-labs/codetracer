@@ -846,8 +846,13 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     var ids: seq[string]
     for asset in required: ids.add asset.id
     check "renderer" in ids
-    check "web-entry" in ids
     check "wasm-worker" in ids
+    # AND NOT A SECOND NIM BUNDLE. `web-entry` was a required asset until NS9:
+    # `web.js` called `boot()` and `ui.js` rendered, in two separately compiled
+    # programs, so the renderer's `ctPlatform()` was never the platform
+    # `boot()` installed. The renderer boots itself now, and a `web-entry`
+    # reappearing here is that defect coming back.
+    check "web-entry" notin ids
     # The document itself is required too, and it is the one that was missing:
     # `renderRewriteConfig` has always emitted `/index.html` as the target of
     # every prefix while nothing produced such a file, so a deployment would
@@ -866,7 +871,12 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     # Counted, so an asset silently losing `required` is caught. Asserting only
     # membership would pass over a manifest that had gained three more —
     # which is exactly what happened here, and this line is what said so.
-    check required.len == 7
+    #
+    # 7 -> 6: `web-entry` left, and the count is lowered in the same commit
+    # that removes it so the reduction is RECORDED rather than absorbed. A
+    # count that quietly tracked the manifest would let the second bundle
+    # return without anything noticing.
+    check required.len == 6
 
   test "the renderer is BUNDLED and the worker is a separate ASSET":
     # Not a stylistic distinction. `new Worker(url)` takes a URL and
@@ -970,10 +980,30 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
                        builtFrom: "noir@codetracer 6c590c7789 compiler/wasm")])
     let document = renderEntryDocument(descriptor)
     check document.contains("id=\"" & deploymentDescriptorElementId & "\"")
-    # The page must reference BOTH bundles, or it is a document that can never
+    # The page must reference the renderer, or it is a document that can never
     # boot whatever else is right about it.
-    check document.contains("src=\"/" & webEntryBundlePath & "\"")
     check document.contains("src=\"/" & rendererBundlePath & "\"")
+
+    # AND IT MUST REFERENCE EXACTLY ONE NIM BUNDLE — NS9, asserted as a COUNT
+    # rather than as an absence, because "does not contain web.js" would pass
+    # just as happily over a document that referenced no bundle at all.
+    #
+    # The document used to load two: `web.js` called `boot()` and `ui.js`
+    # rendered. `installPlatform` writes a module-level `var` in
+    # `platform/platform.nim` and `nim js` gives each compiled program its own,
+    # so the renderer's `ctPlatform()` was never the platform `boot()`
+    # installed — it was `uninstalledProfile`, on every load, with the Noir
+    # compiler this deployment serves sitting unreachable behind it.
+    #
+    # This case is the regression guard for the merge. A second Nim bundle
+    # reappearing in this document is that defect returning, and it would
+    # otherwise return silently: both bundles would load, both would be 200,
+    # the boot line would still say `ok`, and only a Build button would know.
+    var nimBundleRefs = 0
+    for candidate in [rendererBundlePath, "web.js"]:
+      if document.contains("src=\"/" & candidate & "\""): nimBundleRefs += 1
+    check nimBundleRefs == 1
+    check not document.contains("src=\"/web.js\"")
 
     let opened = document.find(">", document.find(
       "id=\"" & deploymentDescriptorElementId & "\"")) + 1

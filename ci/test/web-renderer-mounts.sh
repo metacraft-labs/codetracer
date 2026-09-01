@@ -558,24 +558,70 @@ open(p, 'w').write(s.replace('<div id="welcomeScreen"></div>', ''))
 PY
 }
 
-# Arm C — the collision. Unwrap the two Nim bundles so they share a global
-# scope again, which is how the deployed pair was built. `ui.js` then redefines
-# 196 of `web.js`'s functions and 85 of its type tables under it, and the loop
-# arm's async `boot()` resumes into a foreign runtime.
+# Arm C — THE PLATFORM DOES NOT REACH THE RENDERER, which is the defect NS9
+# removed and the one this arm now reconstructs.
 #
-# This arm exists because the collision was INVISIBLE while the renderer was
-# broken: `ui.js` died before it reached the declarations that clobber the
-# type tables, so fixing the renderer is what exposes it. A check that only
-# ran against the shipped state would have gone green over it.
-mutate_unscoped() {
+# ## What this arm used to be, and why it had to change
+#
+# It used to unwrap the IIFEs around the two deployed Nim bundles so they
+# shared a global scope again: `ui.js` then redefined 196 of `web.js`'s
+# functions and 85 of its type tables, and the loop arm's async `boot()`
+# resumed into a foreign runtime. That arm cannot be run any more, because
+# there is no longer a second bundle to collide with — `ui_js.nim` boots and
+# renders in one program. Left in place it would have been a check that cannot
+# fail, which is worse than no check: `mutate_unscoped` would have died on a
+# missing `web.js`, and the gate would have reported "arm C could not be
+# measured" forever while looking like coverage.
+#
+# ## What it is now
+#
+# The same INVARIANT, mutated at its real seam. The invariant the merge buys is
+# "the platform the renderer sees is the one `boot()` installed", and the
+# single point where that is established is `installPlatform` — one function,
+# which writes the module-level `var installedPlatform` in
+# `viewmodel/platform/platform.nim` that `ctPlatform()` then reads.
+#
+# Neutering its BODY puts the product back in the exact pre-NS9 state: `boot()`
+# still runs, still requests persistence, still opens the store, still reads
+# the descriptor and still builds a `WebPlatform` — and the renderer's
+# `ctPlatform()` still answers `uninstalledProfile`, because nothing wrote the
+# var. That is precisely what two separately compiled bundles produced, now
+# reproduced inside one.
+#
+# ## Why it is found by structure and not by name
+#
+# `nim js` mangles top-level procs as `<name>__<module path>_<n>` and emits
+# string literals as char-code arrays, so grepping this bundle for a Nim
+# identifier's SOURCE spelling finds nothing while the code is present. The
+# emitted FUNCTION DECLARATION is structural and survives, so that is what is
+# matched. The regex is anchored on the module path as well as the name, so it
+# cannot drift onto `installFrontendPlatform` or a same-named proc elsewhere.
+#
+# The body is replaced by brace-matching rather than by a line substitution
+# because the Nim backend's output is not line-oriented and a `sed` here would
+# either miss or truncate the file.
+mutate_no_platform_install() {
 	local dir="$1"
-	head -c 12 "${dir}/ui.js" | grep -q '^(function()' || return 1
-	python3 - "${dir}/ui.js" "${dir}/web.js" <<'PY'
-import sys
-for p in sys.argv[1:]:
-    s = open(p).read()
-    assert s.startswith('(function(){\n'), p
-    open(p, 'w').write(s[len('(function(){\n'):].rsplit('\n})();\n', 1)[0])
+	python3 - "${dir}/ui.js" <<'PY'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+m = re.search(r'function (installPlatform__viewmodelZplatformZplatform_[A-Za-z0-9]+)\(([^)]*)\)\s*\{', s)
+if not m:
+    sys.exit(1)                      # the needle is gone; the arm must not
+                                     # silently pass over a bundle it cannot cut
+depth, i = 1, m.end()
+while i < len(s) and depth:
+    if s[i] == '{': depth += 1
+    elif s[i] == '}': depth -= 1
+    i += 1
+if depth:
+    sys.exit(1)
+# The signature is preserved and the body emptied, so every CALLER still runs
+# and only the effect is gone. Removing the function outright would raise a
+# ReferenceError inside boot() and take the whole boot down, which would redden
+# the arm for the wrong reason.
+open(p, 'w').write(s[:m.end()] + '\n' + s[i - 1:])
 PY
 }
 
@@ -594,11 +640,22 @@ PY
 # differently, and an arm that deleted the whole entry layer would redden
 # every assertion and prove nothing about any of them.
 #
-# `String(window.location.pathname || '/')` is `ui/web_entry_surface.nim`'s
-# `jsEntryPath` importjs body, emitted verbatim by the Nim JS backend. Note
-# that grepping for a Nim STRING LITERAL here would find nothing — the backend
-# emits those as char-code arrays — but an `importjs` pattern is emitted as
-# source, which is why this mutation can be a text substitution at all.
+# `String(window.location.pathname || '/')` is
+# `host/web_browser.jsLocationPath`'s importjs body, emitted verbatim by the
+# Nim JS backend. Note that grepping for a Nim STRING LITERAL here would find
+# nothing — the backend emits those as char-code arrays — but an `importjs`
+# pattern is emitted as source, which is why this mutation can be a text
+# substitution at all.
+#
+# THE `count == 1` ASSERTION BELOW IS LOAD-BEARING, and it earned that in this
+# milestone. It used to be `ui/web_entry_surface.nim`'s own `jsEntryPath` that
+# matched — a byte-identical copy of the host module's, which existed because
+# `web.js` and `ui.js` were separately compiled programs with no way to share
+# a value. Merging them into one bundle put both copies in one file, this
+# assertion tripped, and the duplication was removed rather than the assertion
+# relaxed. `web_entry_surface.currentRendererEntryRequest` now calls
+# `web_browser.currentEntryRequest`, so there is one reader of the location in
+# the program and this arm blinds all of it.
 mutate_route_blind() {
 	local dir="$1"
 	grep -q "String(window.location.pathname || '/')" "${dir}/ui.js" || return 1
@@ -1038,9 +1095,9 @@ else
 		"${cache}/control.json"
 fi
 
-# BOTH ARMS REPORTED. The renderer line is new; the boot line is the
-# regression guard for the global-scope collision, which only becomes
-# observable once the renderer runs to completion.
+# BOTH LINES REPORTED. They come from ONE program now — `ui_js.nim`'s web arm
+# boots and then renders — where they used to come from two bundles that could
+# not see each other. That is why the third and fourth checks below can exist.
 case "${c_renderer}" in
 *"codetracer-web-renderer: ok"*)
 	ck ok "the renderer arm reported a mount: ${c_renderer#*: }" ;;
@@ -1049,10 +1106,72 @@ case "${c_renderer}" in
 esac
 case "${c_boot}" in
 *"codetracer-web-boot: ok"*)
-	ck ok "the loop arm still booted alongside the renderer" ;;
+	ck ok "the boot sequence completed in the renderer's own program" ;;
 *)
-	ck fail "the loop arm did not boot (line: '${c_boot}')" ;;
+	ck fail "the boot sequence did not complete (line: '${c_boot}')" ;;
 esac
+
+# ---------------------------------------------------------------------------
+# THE REACH — NS9, and the assertion this whole gate previously could not make.
+#
+# `ci/test/web-bundle-assets.sh` used to say, in its own header: "the two arms
+# still cannot share Nim state, so the renderer cannot see the platform,
+# project store or wasm registry that `web.js` booted." Everything above this
+# block was true while that was also true — the page mounted, painted, routed
+# and answered keys, and a Build button would still have found
+# `uninstalledProfile`, because `installPlatform` writes a module-level `var`
+# and `nim js` gives each compiled program its own.
+#
+# The renderer line now carries `platform=` and `run=`, and BOTH ARE READ FROM
+# `ctPlatform()` BY THE CODE THAT MOUNTS PANES — `web_boot.describeRunningPlatform`
+# is compiled into the renderer's program and called from `startWebRenderer`.
+# So `platform=pkWeb` here is the renderer answering about itself, not the boot
+# arm answering about the boot arm.
+#
+# Matched on `platform=pkWeb` as a substring of a console line, which is a
+# structural match on emitted output and not on a Nim identifier — `nim js`
+# emits string literals as char-code arrays, so grepping the BUNDLE for this
+# text would find nothing while the code is present. The console line is the
+# runtime value, and that is what is read here.
+case "${c_renderer}" in
+*"platform=pkWeb"*)
+	ck ok "the renderer's own ctPlatform() is the booted web platform" ;;
+*)
+	ck fail "the renderer's ctPlatform() is not the web platform (line: '${c_renderer}') — this is the NS9 defect: a mounted, painting product whose platform is uninstalledProfile" ;;
+esac
+
+# AND IT AGREES WITH THE BOOT LINE, which is the check that makes the one above
+# more than a spelling. `run=` is the WASM REGISTRY read through the renderer's
+# platform: `web_platform.newWebPlatform` subtracts `capProcessSpawn` when
+# `bridge.wasm.registry.modules.len == 0` ("the profile follows the registry").
+# `toolchain=` on the boot line is the other half — what the DEPLOYMENT
+# delivered, measured from the bytes on disk by the assembly step.
+#
+# The two disagreeing is precisely the state that shipped: a descriptor naming
+# two Noir modules beside a renderer holding `uninstalledProfile`, so
+# `toolchain=nargo:compile+trace` and `run=false` on the same page. Asserting
+# AGREEMENT rather than `run=true` is deliberate — most builds of this gate
+# ship no wasm modules (`CT_NOIR_WASM_COMPILER` unset), and a check demanding
+# `run=true` would either fail on every such run or be quietly skipped, which
+# is how a check stops being one. This form runs on EVERY build and is exactly
+# as strong in both directions.
+c_toolchain="none"
+case "${c_boot}" in
+*"toolchain=(none)"*) c_toolchain="none" ;;
+*"toolchain="*) c_toolchain="some" ;;
+esac
+c_run="unknown"
+case "${c_renderer}" in
+*"run=true"*) c_run="some" ;;
+*"run=false"*) c_run="none" ;;
+esac
+if [ "${c_run}" = "unknown" ]; then
+	ck fail "the renderer line carries no run= clause (line: '${c_renderer}'); the deployment/registry agreement cannot be measured"
+elif [ "${c_toolchain}" = "${c_run}" ]; then
+	ck ok "what the deployment delivered and what the renderer can run agree (toolchain=${c_toolchain}, run=${c_run})"
+else
+	ck fail "the deployment delivered toolchain=${c_toolchain} but the renderer reports run=${c_run} — the compiler is on the origin and unreachable from the code that would call it"
+fi
 echo
 
 # ---------------------------------------------------------------------------
@@ -1619,30 +1738,44 @@ else
 fi
 echo
 
-echo "Arm C: MUTATION — the two Nim bundles share a global scope"
-echo "    Expect: 'booted' RED (ui.js clobbers web.js's runtime)."
-if ! run_arm unscoped mutate_unscoped; then
+echo "Arm C: MUTATION — installPlatform's body is emptied, so boot() runs and"
+echo "    installs nothing. Expect: the REACH check RED, the mount GREEN."
+if ! run_arm no-platform mutate_no_platform_install; then
+	# `run_arm` returns non-zero when the mutation function does, and
+	# `mutate_no_platform_install` exits 1 when its needle is absent. That is
+	# deliberate: a mutation that cannot find what it mutates must fail the
+	# gate, not pass it. The predecessor of this arm would have started
+	# reporting exactly this the day the second bundle was removed.
 	ck fail "arm C could not be measured"
 	ck fail "arm C could not be measured (second half)"
 else
-	c2_boot="$(json unscoped bootLine)"
-	c2_welcome="$(json unscoped dom.welcomeScreenRoots)"
-	case "${c2_boot}" in
-	*"codetracer-web-boot: ok"*)
-		ck fail "arm C: the loop arm booted even unscoped, so the control's boot check does not detect the collision" ;;
+	c2_renderer="$(json no-platform rendererLine)"
+	c2_welcome="$(json no-platform dom.welcomeScreenRoots)"
+	# THE ARM'S OWN ASSERTION, and the twin of the control's reach check. If
+	# this stayed green, `platform=pkWeb` in the control would be measuring
+	# something other than the install — a constant, or the boot arm's answer
+	# leaking in — and the reach check would prove nothing.
+	case "${c2_renderer}" in
+	*"platform=pkWeb"*)
+		ck fail "arm C: the renderer still reports pkWeb with installPlatform neutered, so the control's reach check does not detect a platform that never reached the renderer" ;;
 	*)
-		ck ok "arm C: the loop arm breaks when the bundles are unscoped, so the control's boot check is real" ;;
+		ck ok "arm C: the renderer falls back to uninstalledProfile when nothing installs a platform, so the control's reach check is real (line: '${c2_renderer}')" ;;
 	esac
-	# The twin, and the reason this arm is not just "something went wrong".
-	# The collision runs one way: `ui.js` loads second and redefines `web.js`'s
-	# runtime, so the RENDERER is unharmed and only the loop arm's async
-	# continuation lands in a foreign one. An arm that broke both would be
-	# consistent with almost any bug; an arm that breaks exactly one names the
-	# mechanism.
+	# The twin, and the reason this arm names a mechanism rather than reporting
+	# that something broke. The platform reach and the mount are independent:
+	# `startWebRenderer` mounts through the in-page IPC host and the entry
+	# layer, neither of which consults `ctPlatform()`. So the correct signature
+	# of THIS defect is a page that looks completely healthy — it paints,
+	# routes and answers keys — and cannot compile. An arm that also took the
+	# mount down would be consistent with almost any bug, and would not
+	# distinguish this one from arm A or arm B.
+	#
+	# It is also the historically accurate signature: this is what
+	# ide.codetracer.com served, and why every check was green over it.
 	if [ "${c2_welcome}" = "1" ]; then
-		ck ok "arm C: the renderer still mounted, so the collision is one-directional as described"
+		ck ok "arm C: the renderer still mounted, so the arm isolates the platform reach from the mount"
 	else
-		ck fail "arm C: the renderer also stopped mounting (${c2_welcome} roots); the arm does not isolate the collision"
+		ck fail "arm C: the renderer also stopped mounting (${c2_welcome} roots); the arm does not isolate the platform reach"
 	fi
 fi
 echo
@@ -1815,7 +1948,17 @@ print(" ".join(r["name"] + "=" + r["count"] for r in rows))
 fi
 echo
 
-expect_count 59
+# 59 -> 61. NS9 added two to the CONTROL arm — the renderer's own
+# `ctPlatform()` is the booted web platform, and what the deployment delivered
+# agrees with what the renderer can run. Arm C's two are unchanged in number
+# and changed in subject: it used to unwrap two Nim bundles into a shared
+# global scope, and there is only one bundle now, so it neuters
+# `installPlatform` instead and reddens the first of the two new checks.
+#
+# Raised in the same commit that adds them, so the additions are RECORDED. A
+# count that tracked the tally automatically would let an assertion be deleted
+# without anything noticing, which is the whole reason this line exists.
+expect_count 61
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

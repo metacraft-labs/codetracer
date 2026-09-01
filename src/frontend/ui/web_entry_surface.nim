@@ -22,25 +22,39 @@
 ## check that it stays one — the previous gate loaded `/` only, so a router
 ## that ignored the path was indistinguishable from one that honoured it.
 ##
-## ## Why this reads the location again rather than taking it from `boot()`
+## ## Why this no longer reads the location itself
 ##
-## `boot()` now resolves the entry too, and reports it on the boot line. It
-## cannot HAND the resolution over, and the reason is structural rather than
-## tidiness: `web.js` and `ui.js` are separately compiled Nim programs, each
-## wrapped in its own IIFE by `ci/test/web-bundle-assets.sh`. That scoping is
-## load-bearing — unwrapping it is mutation arm C of the mount gate, and it
-## breaks the loop arm because `ui.js` redefines 196 of `web.js`'s functions —
-## so there is no shared value for them to share. And `boot()` is `async`,
-## while `startWebRenderer()` runs at `ui.js` module init: even a DOM handoff
-## would be a race the renderer loses on every load.
+## It used to, and the duplication was forced rather than chosen. `boot()`
+## resolves the entry too and reports it on the boot line, and it could not
+## HAND the resolution over: `web.js` and `ui.js` were separately compiled Nim
+## programs, each wrapped in its own IIFE by `ci/test/web-bundle-assets.sh`, so
+## there was no shared value for them to share. This module therefore carried
+## its own `jsEntryPath` / `jsEntryOrigin` / `jsEntryHash` / `jsEntrySearch`,
+## byte-identical to `host/web_browser`'s.
 ##
-## What is NOT duplicated is the part that matters. `classifyPath` and
-## `resolveEntry` are imported from `platform/web_entry`, so both arms reach
-## the same verdict from the same code; only the three-line read of
-## `window.location` appears twice. `web_entry.classifyPath`'s own header names
-## the hazard precisely — "two implementations of *which prefixes exist* is how
-## a form reaches the SPA in the code and 404s at the CDN" — and that is the
-## classification, which has exactly one implementation here.
+## NS9 merged the two programs, and the duplication went from necessary to
+## hazardous — two readers of one browser API, in one bundle, free to drift.
+## `currentRendererEntryRequest` now calls `host/web_browser.currentEntryRequest`
+## and the four `importjs` bodies are gone. The location has one implementation.
+##
+## THE GATE FOUND THIS, WHICH IS THE PART WORTH RECORDING.
+## `ci/test/web-renderer-mounts.sh`'s arm S substitutes the single emitted
+## `String(window.location.pathname || '/')` and asserts there is exactly one.
+## The merged bundle had two, arm S failed with "could not be measured", and
+## the redundancy was named by a check rather than noticed by a reader.
+##
+## What was NEVER duplicated is the part that matters most, and it is unchanged:
+## `classifyPath` and `resolveEntry` come from `platform/web_entry`, so the
+## renderer and the boot sequence reach the same verdict from the same code.
+## `web_entry.classifyPath`'s own header names the hazard — "two
+## implementations of *which prefixes exist* is how a form reaches the SPA in
+## the code and 404s at the CDN" — and that classification has, and always had,
+## exactly one implementation.
+##
+## The renderer still ASKS separately rather than being handed `boot.entry`,
+## and that is deliberate: `boot()` is allowed to REFUSE (§4.5), and a refused
+## boot must still mount something at the right address — "never a blank
+## editor, never an error page". Asking keeps that true without a branch.
 ##
 ## ## Why `/` still gets the welcome screen, and `/noir` does not
 ##
@@ -95,47 +109,27 @@ from ../../common/noir_constraints import
 from ../../ct_test/contracts import toJson
 
 when defined(js):
-  proc jsEntryPath(): cstring {.importjs: """
-(function () {
-  try {
-    if (typeof window !== 'undefined' && window.location) {
-      return String(window.location.pathname || '/');
-    }
-  } catch (e) {}
-  return '/';
-})()""".}
-
-  proc jsEntryOrigin(): cstring {.importjs: """
-(function () {
-  try {
-    if (typeof window !== 'undefined' && window.location) {
-      return String(window.location.origin || '');
-    }
-  } catch (e) {}
-  return '';
-})()""".}
-
-  proc jsEntryHash(): cstring {.importjs: """
-(function () {
-  try {
-    if (typeof window !== 'undefined' && window.location) {
-      return String(window.location.hash || '');
-    }
-  } catch (e) {}
-  return '';
-})()""".}
-    ## Returns the hash RAW, leading separator included, and the separator is
-    ## stripped in Nim below rather than here.
-    ##
-    ## Not a style choice. `importjs` reads `#` as a parameter placeholder, so
-    ## a pattern containing the literal `'#'` this function would need to
-    ## compare against fails the build with
-    ##
-    ##     Error: wrong importcpp pattern; expected parameter at position 1
-    ##
-    ## — the same trap `web_main.nim`'s `jsReport` documents from the other
-    ## side. `host/web_browser.currentEntryRequest` strips it in Nim for this
-    ## reason too, so both arms now do the identical thing.
+  # THE LOCATION IS READ ONCE, IN ONE PLACE, and that place is
+  # `host/web_browser.currentEntryRequest`.
+  #
+  # This module used to carry its own `jsEntryPath`, `jsEntryOrigin`,
+  # `jsEntryHash` and `jsEntrySearch` — four `importjs` bodies byte-identical
+  # to the host module's. That was forced rather than chosen: `web.js` and
+  # `ui.js` were separately compiled Nim programs and there was no shared value
+  # for them to share, so the read had to exist on both sides.
+  #
+  # NS9 merged the arms, and the duplication stopped being a necessity and
+  # became a hazard — two readers of one browser API in one program, free to
+  # drift. It was also immediately DETECTED, which is the part worth recording:
+  # `ci/test/web-renderer-mounts.sh`'s arm S substitutes the single emitted
+  # `String(window.location.pathname || '/')` and asserts there is exactly one
+  # of them. The merged bundle had two, the assertion failed, and the gate
+  # named the redundancy before a human noticed it.
+  #
+  # `jsReplaceHistoryEntry` below stays here: it WRITES the location and the
+  # host module has no counterpart, so it is not a second implementation of
+  # anything.
+  from ../viewmodel/host/web_browser import currentEntryRequest
 
   proc jsDeploymentText(): cstring {.importjs: """
 (function () {
@@ -167,16 +161,6 @@ when defined(js):
     ## back to the language-neutral root — which is precisely what that arm
     ## loads a second origin to detect. A drift here cannot be silent.
 
-  proc jsEntrySearch(): cstring {.importjs: """
-(function () {
-  try {
-    if (typeof window !== 'undefined' && window.location) {
-      return String(window.location.search || '');
-    }
-  } catch (e) {}
-  return '';
-})()""".}
-
   proc jsReplaceHistoryEntry*(path: cstring) {.importjs: """
 (function (p) {
   try {
@@ -206,15 +190,16 @@ var mountedTemplate*: ProjectTemplate
   ## ask afterwards. Written only by `enterTemplateEditMode`.
 
 proc currentRendererEntryRequest*(): EntryRequest =
-  ## The renderer arm's read of the location. See the header for why there are
-  ## two of these and why only the read is duplicated.
+  ## The location, as `web_entry` wants it — read through the one
+  ## implementation, `host/web_browser.currentEntryRequest`.
+  ##
+  ## This proc used to BE a second implementation, and the header above says
+  ## why it was and why it no longer is. It survives as a named accessor rather
+  ## than being deleted for its `else` branch: the module compiles on the C
+  ## backend for unit tests, where there is no `window` and the true answer is
+  ## the language-neutral root.
   when defined(js):
-    var hash = $jsEntryHash()
-    if hash.len > 0 and hash[0] == '#': hash = hash[1 .. ^1]
-    var search = $jsEntrySearch()
-    if search.len > 0 and search[0] == '?': search = search[1 .. ^1]
-    EntryRequest(origin: $jsEntryOrigin(), path: $jsEntryPath(),
-                 fragment: hash, query: search)
+    currentEntryRequest()
   else:
     EntryRequest(origin: "", path: "/", fragment: "", query: "")
 

@@ -1,143 +1,59 @@
-## The web build's entry point — NS2, and the first thing in the tree that
-## calls `boot()`.
+## The HEADLESS entry point for the web instantiation's boot sequence.
 ##
-## ## What this is, and what it deliberately is not
+## ## What this is now, and what it stopped being
 ##
-## NS2 built the web instantiation, the project store, the durability model and
-## the URL entry layer, and then left them unreachable: its own HONEST RESIDUAL
-## says "nothing is wired to a running application ... `boot()` assembles
-## persistence, volume, store and platform in the order §4.2 and §4.5 require,
-## and no entry point calls it". This module is that entry point.
+## It used to be the web deployment's loop arm: `ci/test/web-bundle-assets.sh`
+## built it into `web.js`, the generated entry document loaded it beside
+## `ui.js`, and it was the only thing in the tree that called `boot()`.
 ##
-## It is **not** the product's UI, and pretending otherwise would be the more
-## damaging kind of progress. Rendering panes means `renderer.nim`, which
-## imports `platform_host`, which imports `host/desktop_electron` under
-## `when defined(js)` — so a browser build of the current renderer links
-## `require('child_process')` and `require('fs')`. Splitting that import into a
-## three-way switch is real work with its own risks, and doing it badly would
-## produce a bundle that loads and then behaves like a desktop build, which is
-## exactly the failure this campaign keeps finding.
+## That arrangement is what NS9 removed, and the reason is in `web_boot.nim`'s
+## header. `boot()` installs the platform by writing a module-level `var` in
+## `viewmodel/platform/platform.nim`; a `nim js` program gets one of those; and
+## the deployment ran two programs, each wrapped in its own IIFE by the assets
+## script precisely so they would stop redefining each other's runtime. So the
+## renderer's `ctPlatform()` could never be the platform this file booted — it
+## returned `uninstalledProfile` on every load of the deployed page, which is
+## why a Build button had nothing to call. Measured on the pair this replaced:
+## `web.js` carried `installPlatform__viewmodelZplatformZplatform_u99` and
+## `ui.js` carried no `installPlatform` at all.
 ##
-## So the scope here is the boot sequence and nothing else: request
-## persistence, choose a volume, open the store, install the platform, and make
-## the outcome **observable**. That is the whole of what "the web build runs"
-## can honestly mean today, and it is a bundle that a CI recipe produces and a
-## smoke test executes.
+## The boot call now lives in `ui_js.nim`'s web arm, in the same program as the
+## renderer, and the page loads one Nim bundle. That bundle is 380,418 bytes
+## SMALLER than the two it replaces, because the shared runtime — the 196
+## functions and 85 type tables the IIFEs existed to keep apart — is emitted
+## once instead of twice.
 ##
-## ## Why this module DOES import `platform_host`, and why that was once wrong
+## ## Why the file survives the arm that used it
 ##
-## The first version of this file deliberately avoided `platform_host`, because
-## that module's `when defined(js)` arm imported `host/desktop_electron` — so
-## importing it pulled `require('fs')` and `require('child_process')` into the
-## web bundle. Measured: 43 `require(` calls. The web build therefore had to
-## route around the front end's own platform accessor, which is not something a
-## second platform instantiation should ever have to do; every other module in
-## `src/frontend/` reaches the platform through `ctPlatform()`, and a web build
-## that could not was a web build no pane could ever be shared with.
+## Because `ci/test/web-bundle-smoke.sh` is a genuinely different check from
+## the browser gate, and it needs an entry point that is *only* the boot
+## sequence. It builds this with `nim js -d:nodejs -d:ctWeb` and runs it under
+## node, which drives §4.2's third row — no OPFS, the in-memory volume, a
+## session that announces it will lose work on close — without a browser, and
+## asserts the bundle links no node built-in. Pointing that gate at `ui_js.nim`
+## instead would make it a renderer test that happens to boot, and it would
+## stop being runnable under node at all.
 ##
-## `platform_host` is a three-way switch now (`js` + `ctWeb`, `js`, native), and
-## its web arm imports no host module at all. So this module imports it like
-## anything else, and the bundle still contains zero `require(` — which
-## `ci/test/web-bundle-smoke.sh` measures rather than assumes, and which is now
-## a check on the SWITCH rather than on this file's import list.
-##
-## The assertion below is the point: after `boot()`, `ctPlatform()` must hand
-## back the web platform. That is one call, and it is the difference between
-## "the web instantiation exists" and "the front end is running on it".
-##
-## ## Why the outcome is reported twice
-##
-## A page wants it in the DOM; a smoke test running under node has no DOM. Both
-## are the same fact, so both come from one call: the console line is the
-## contract `ci/test/web-bundle-smoke.sh` asserts on, and the DOM write is what
-## a page shows. Neither is a fallback for the other — a browser produces both.
+## So: this compiles, and nothing deploys it. `webRuntimeAssets()` no longer
+## names a `web.js`, `renderEntryDocument` no longer references one, and
+## `ci/test/web-bundle-assets.sh` no longer builds one into the publish
+## directory.
 
-import std/[asyncjs, jsffi]
+import std/[asyncjs]
 
-import viewmodel/host/web_browser
-import platform_host
+import web_boot
 
-const bootLinePrefix* = "codetracer-web-boot:"
-  ## The smoke test greps for this. A stable prefix rather than a parsed
-  ## structure, because the test's question is "did it boot, and into which
-  ## storage condition" — two facts, not a protocol.
-
-proc jsReport(line: cstring) {.importjs: """
-(function (s) {
-  try { if (typeof console !== 'undefined') { console.log(s); } } catch (e) {}
-  try {
-    if (typeof document !== 'undefined') {
-      var el = document.getElementById('codetracer-boot');
-      if (el) { el.textContent = s; }
-    }
-  } catch (e) {}
-})(#)""".}
-  ## The value is bound ONCE, as the IIFE's argument, and used twice as `s`.
-  ##
-  ## Writing `#` at both use sites does not work and does not fail quietly: a
-  ## bare `#` consumes the *next* parameter, so the second one asks for an
-  ## argument this proc does not have and the module does not compile
-  ## (`wrong importcpp pattern; expected parameter at position 2`). `#1` is not
-  ## honoured in this position either. Binding once is also the better shape —
-  ## the two sites are the same value by construction rather than by matching
-  ## spellings.
-
-proc describe(boot: WebBoot): string =
-  ## One line, deliberately: a boot that half-worked must not be reportable as
-  ## two half-lines that a reader assembles differently than a test does.
-  if not boot.ok:
-    return bootLinePrefix & " refused condition=" & $boot.condition &
-           " reason=" & boot.refusal
-  # `ctPlatform()` is asked here rather than `boot.web.platform`, and the
-  # difference is the whole assertion: the first goes through the front end's
-  # own accessor, which every pane uses, and is what would have handed back the
-  # ELECTRON platform on this build until the switch and the bootstrap fix.
-  # Reporting `boot.web.platform.profile.kind` instead would say `web` even
-  # when the front end at large could not see it.
-  let running = ctPlatform()
-  bootLinePrefix & " ok condition=" & $boot.condition &
-    " platform=" & $running.profile.kind &
-    " spawn=" & $running.can(capProcessSpawn) &
-    # WHAT THIS DEPLOYMENT ACTUALLY DELIVERED, and the reason the line grew a
-    # field. Every other clause here is a property of the BUILD, and a build is
-    # not a deployment: the same `web.js` reports an identical line whether it
-    # was served alongside 20 MB of Noir wasm or alongside nothing. So a page
-    # that had silently lost its modules was indistinguishable from a correct
-    # one, which is precisely how a sibling campaign shipped a replay engine no
-    # page referenced and read every dead session as "the engine is stale".
-    #
-    # `toolchain=(none)` is a legitimate and common value — most builds ship no
-    # modules and say so. What matters is that it is SAID, so "the deployment
-    # delivers no compiler" and "the compiler is broken" are different lines
-    # rather than the same shrug.
-    " toolchain=" & (if boot.toolchain.len > 0: boot.toolchain else: "(none)") &
-    # WHICH ADDRESS THIS TAB WAS OPENED ON, and what the product decided it
-    # means. Added for the same reason `toolchain` was, one defect later: the
-    # bundle is byte-identical at every URL it serves, so "the entry layer ran"
-    # and "the entry layer is dead code" were indistinguishable from outside —
-    # and the second was true for the whole life of the deployment. A user
-    # typing `/noir` reached the welcome screen and nothing anywhere said why.
-    #
-    # `efBare/evTemplate/noir` is the value that answers the bug report. It is
-    # on the same line as the rest because a reader comparing two runs should
-    # not have to correlate two lines to see which one routed.
-    " entry=" & describeEntry(boot.entry) &
-    " announcement=" & (if boot.announcement.len > 0: boot.announcement
-                        else: "(none)")
-
-proc startWebSession*(): Future[WebBoot] {.async.} =
-  ## Boot, report, and hand the result back.
-  ##
-  ## Returns the `WebBoot` rather than swallowing it so a caller — the page's
-  ## eventual UI, or a test — can act on `condition` and `announcement`. §4.2's
-  ## gate is unchanged and is not this module's to open: `readyForEditing` stays
-  ## false until something calls `acknowledgeDurability`, and the facade's
-  ## writes refuse until it does. An entry point that acknowledged on the user's
-  ## behalf would defeat the one mechanism standing between a volatile session
-  ## and silent data loss.
-  let booted = await boot()
-  jsReport(describe(booted).cstring)
-  return booted
+# Re-exported because `web-bundle-smoke.sh` greps the running program's output
+# for `bootLinePrefix`, and because a reader arriving at this file from that
+# script should find the two names it talks about here rather than one
+# indirection away.
+#
+# `#` and not `##`, and that is not a style preference: a `##` block after a
+# statement is `Error: invalid indentation`. It is the same trap
+# `platform_host.nim`'s `ctWeb` arm documents after its `discard`, and the one
+# that reached `dev` at ed9d6021 in `web_browser.nim`. It was hit here too,
+# writing this file, and caught in seconds because a gate compiles it.
+export bootLinePrefix, startWebSession
 
 when isMainModule:
   discard startWebSession()

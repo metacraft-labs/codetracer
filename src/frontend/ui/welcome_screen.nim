@@ -503,7 +503,7 @@ when defined(js):
     # broken, and one who sees it greyed out learns what this surface is.
     #
     # Only "Open folder" is live, and it is live because NS2's project store
-    # (OPFS) is what `web.js` already booted — the same capability the boot
+    # (OPFS) is what this same program already booted — the same capability the boot
     # line reports as `platform=pkWeb`.
     welcomeScreenVMInstance.setStartOptions(@[
       WelcomeStartOptionRecord(
