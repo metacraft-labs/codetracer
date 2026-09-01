@@ -1805,6 +1805,21 @@ jobs:
         # attributable to different steps.
         run: nix develop .#devShells.x86_64-linux.default --command just test-web-renderer-mounts
 
+      - name: One press, one action; one pane id, one node
+        # Two latent defects that were doing no harm by luck. The pane half is
+        # a fixed duplicate-id fall-through in `ui/layout.nim`, with an arm
+        # that reddens on the pre-fix bundle. The chord half is a standing
+        # hazard: every whitelisted chord is bound twice onto the same action,
+        # and only Monaco's `stopPropagation` keeps the two paths from both
+        # delivering — so a chord Monaco also binds natively doubles, as
+        # ALT+F8 was measured doing.
+        #
+        # Placed beside the mounts gate so both read the same assembled
+        # bundle, and carrying the same shape: counted assertions with the
+        # count asserted, a control arm, and an instrument arm that plants a
+        # real duplicate so "exactly one" cannot pass vacuously.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-chord-and-pane-uniqueness
+
       - name: Renderer host-reach budget (NS1 residual 1)
         # The migration that stands between the web bundle and a rendered pane,
         # as a ratchet rather than a plan. Fails when a module gains a host

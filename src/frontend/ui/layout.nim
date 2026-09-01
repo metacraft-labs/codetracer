@@ -1761,11 +1761,44 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       if not glContainerDiv.isNil and not glContainerDiv.parentNode.isNil:
         # The component exists in GL. Find its content item by walking
         # up from the component mapping's layoutItem.
+        #
+        # THE `continue` IS AT THIS LEVEL DELIBERATELY, and it used to be one
+        # level deeper. The question this branch answers is "did GoldenLayout
+        # already emit a container carrying this id?", and once the answer is
+        # yes there is nothing below that may run — the code below creates a
+        # div with `id = panelDef.label`, so reaching it would put a SECOND
+        # element with the same id in the document.
+        #
+        # That is not hypothetical. `layoutItem` is assigned only from GL's tab
+        # callback (`:1013`, `:1174`) and the component itself is built inside
+        # a deferred `windowSetTimeout` (`:1264`), while this loop runs on its
+        # own fixed 500 ms timer — so on a layout saved with the pane docked,
+        # "container exists, `layoutItem` not populated yet" is an ordinary
+        # race outcome, not a corner. Measured before this change with the
+        # container present and `layoutItem` nil: two `#errorsComponent-0`
+        # nodes, the GL one holding the mounted panel and an empty duplicate
+        # parked in the offscreen host at x = -9999.
+        #
+        # It stays broken after the duplicate is gone, because
+        # `ui/errors.nim`'s `tryMountIsoNimErrorsPanel` resolves its container
+        # with `getElementById` — which returns the FIRST match — and
+        # `mountIsoNimErrors` has no owner and no disposal. Any of the five
+        # sites that reset `isoNimErrorsMounted` could then remount into a
+        # different node and leave the previous subtree live. One id, one node.
         let component = data.ui.componentMapping[panelDef.content][0]
         if not component.isNil and not component.layoutItem.isNil:
           cdebug "auto_hide: pinning GL panel '" & $panelDef.title & "' to bottom auto-hide"
           pinPanel(layout, component.layoutItem, AutoHideEdge.Bottom)
-          continue
+        else:
+          # GL owns the container but we cannot reach its content item yet, so
+          # there is nothing to pin. Say so rather than falling through: a
+          # silent skip here is indistinguishable from a pane that was pinned,
+          # and the duplicate this used to create was the only evidence the
+          # state had been reached at all.
+          cwarn "auto_hide: '" & $panelDef.title & "' has a GoldenLayout " &
+            "container but no resolvable layoutItem; not pinning, and NOT " &
+            "creating a standalone duplicate of id '" & $panelDef.label & "'"
+        continue
 
       # Panel is not in GL — create a standalone auto-hide panel with
       # its own DOM container. Build/BuildErrors/SearchResults are now
