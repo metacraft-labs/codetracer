@@ -609,6 +609,19 @@ body:has(#auto-hide-bottom-strip .auto-hide-strip-tab.active:first-child)
   #auto-hide-overlay.auto-hide-overlay-bottom #auto-hide-overlay-body
     border-bottom-left-radius: 0
 
+// The first tab's bottom-left is where the strip's left edge finishes: the tab
+// is flush with the window inset and nothing continues past that corner, so it
+// carries a wider 0.5rem than the 0.36em the other corners use.
+//
+// `rem`, not `em`: 0.36em resolves against whatever font-size the tab inherits
+// and lands on 5.76px at 16px — a quarter-pixel short of the 6px it reads as,
+// so the curve antialiases instead of coming out crisp.  0.5rem is 8px exactly,
+// on a whole pixel, and does not move with the strip's type size.
+//
+// Not scoped to `.active`: this corner looks the same docked, hovered or idle.
+#auto-hide-bottom-strip .auto-hide-strip-tab:first-child
+  border-bottom-left-radius: 0.5rem
+
 // ---------------------------------------------------------------------------
 // Tab label span — carries the text rotation so the tab div stays un-rotated.
 // ---------------------------------------------------------------------------
