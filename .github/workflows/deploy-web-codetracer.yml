@@ -329,8 +329,25 @@ jobs:
         # module without one is DROPPED by `registrableModules`, so an unset
         # value here would publish 20 MB the tab refuses to register — which
         # the assembly step fails on rather than shipping.
+        #
+        # CT_WEB_LANGUAGE_ORIGINS declares which HOSTS are language entry
+        # points. `noirstudio.dev` is meant to be the Noir entry point the way
+        # `ide.codetracer.com/noir` is — one Pages project, one tree, two
+        # custom domains, no redirect, and the visitor stays on the domain they
+        # typed. The map travels in the entry document and the page reads it
+        # out of its own DOM, so this costs no request and
+        # `ci/test/noir-studio-signed-out.sh` still reports zero egress on the
+        # development loop.
+        #
+        # DECLARING A DOMAIN THAT DOES NOT RESOLVE YET IS HARMLESS AND IS THE
+        # RIGHT ORDER. The map is consulted only by a page already loaded on
+        # that origin, so shipping the declaration first means the domain works
+        # the moment it is added to the Pages project — no redeploy and no
+        # second artifact. Adding the domain itself is a Cloudflare dashboard
+        # action plus a DNS change, and is NOT done by this workflow.
         env:
           CT_WEB_ORIGIN: https://ide.codetracer.com
+          CT_WEB_LANGUAGE_ORIGINS: https://noirstudio.dev=noir,https://www.noirstudio.dev=noir
           CT_NOIR_WASM_REF: ${{ steps.noir_wasm.outputs.short_rev }}
         run: |
           set -euo pipefail
@@ -627,10 +644,41 @@ jobs:
           set -uo pipefail
           mkdir -p deployed-shots
           fail=0
-          for base in "https://web-codetracer.pages.dev" "https://ide.codetracer.com"; do
-            required=required
-            [ "$base" = "https://ide.codetracer.com" ] && required=advisory
+          # base|required|route:want,route:want
+          #
+          # THE THIRD ROW IS THE SECOND DOMAIN. On `noirstudio.dev` the ROOT is
+          # the Noir entry point — that is the whole of what "landing there is
+          # equivalent to /noir" means — and `/noir` still works there, because
+          # rule 0 makes `/noir` a spelling of an entry point rather than a
+          # namespace, and links get pasted between hosts by people who do not
+          # know there are two.
+          #
+          # It is `skippable`: until the domain is added to the Pages project
+          # and DNS points at it there is nothing to load, and a check that
+          # cannot reach its subject must SAY so rather than fail as though the
+          # product were broken. The moment the domain resolves this becomes a
+          # real assertion with no further change here.
+          for row in \
+            "https://web-codetracer.pages.dev|required|/:welcome,/noir:template" \
+            "https://ide.codetracer.com|advisory|/:welcome,/noir:template" \
+            "https://noirstudio.dev|skippable|/:template,/noir:template"; do
+            base="${row%%|*}"
+            rest="${row#*|}"
+            required="${rest%%|*}"
+            routes="${rest#*|}"
             echo "== $base =="
+            if [ "$required" = skippable ]; then
+              if ! curl -sf -o /dev/null --max-time 15 "$base/" 2>/dev/null; then
+                echo "  SKIPPED — $base does not resolve or does not serve yet."
+                echo "  A human must add it to the web-codetracer Pages project"
+                echo "  (Custom domains) and point DNS at it. The bundle already"
+                echo "  DECLARES it: see CT_WEB_LANGUAGE_ORIGINS above, and the"
+                echo "  languageOrigins entry in the served index.html. No"
+                echo "  redeploy is needed once the domain is attached."
+                continue
+              fi
+              required=advisory
+            fi
 
             # (1) The hosting contract, at HTTP level. Every entry prefix must
             #     answer 200 with no redirect. `--max-redirs 0` rather than
@@ -649,7 +697,7 @@ jobs:
             done
 
             # (2) The DOM, per route.
-            for route in "/:welcome" "/noir:template"; do
+            for route in ${routes//,/ }; do
               path="${route%%:*}"
               want="${route##*:}"
               label="$(echo "$base$path" | tr -c 'a-zA-Z0-9' '-')"
@@ -717,8 +765,8 @@ jobs:
             echo "the deployed pages do not show the product the URL calls for" >&2
             exit 1
           }
-          echo "a browser loaded / and /noir on the deployed site and found the"
-          echo "right product on each."
+          echo "a browser loaded each reachable host's entry routes on the"
+          echo "deployed site and found the product the URL calls for on each."
 
       - name: Upload what the browser saw on the deployed page
         if: always()

@@ -30,7 +30,24 @@ if (!url) {
   process.exit(2);
 }
 
-const browser = await chromium.launch();
+// A SECOND ORIGIN, WITHOUT A SECOND SERVER OR A REAL DOMAIN.
+//
+// `noirstudio.dev` is meant to be the Noir entry point the way
+// `ide.codetracer.com/noir` is: one Pages project, one tree, two custom
+// domains, and `/` meaning different things on each because the page reads its
+// own origin. A gate for that has to load the SAME bundle on a DIFFERENT
+// origin — same-origin is the entire variable.
+//
+// `--host-resolver-rules` is how Chromium is told a hostname resolves to the
+// loopback server, so the page's `window.location.origin` is a real foreign
+// origin rather than `127.0.0.1`. Nothing is registered, nothing is fetched
+// off the machine, and the harness's no-egress property is unchanged.
+//
+// Format: `MAP <host> 127.0.0.1:<port>` — the caller composes it, because only
+// it knows the port the OS handed the server.
+const hostMap = process.env.CT_PROBE_HOST_MAP || '';
+const browser = await chromium.launch(
+  hostMap ? { args: [`--host-resolver-rules=${hostMap}`] } : {});
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
 const pageErrors = [];
@@ -135,6 +152,11 @@ try {
       // exists to catch, so it stays out of every assertion.
       domTextLength: (document.body.textContent || '').trim().length,
       title: document.title,
+      // The origin the PAGE believes it is on. Reported so a route arm can
+      // show it measured the second host and not the first — a host-mapping
+      // rule that silently failed to apply would otherwise look exactly like
+      // a product that ignored the origin.
+      origin: location.origin,
     };
   });
 } catch (e) {

@@ -4410,7 +4410,7 @@ when defined(ctWeb):
   # has any use for. The desktop arm's import graph is unchanged by this file.
   import ui/web_entry_surface
   from viewmodel/platform/web_entry import
-    EntryResolution, EntryVerdict, evTemplate, entryPath
+    EntryResolution, EntryVerdict, evTemplate, entryPath, entryPathOnHost
   from viewmodel/platform/noir_template import
     ProjectTemplate, templateFor, hasFiles, templateFileCount
 
@@ -4549,14 +4549,20 @@ when defined(ctWeb):
       # unreachable, so this arm mounted one surface at every address the
       # deployment serves.
       let entry = web_entry_surface.currentRendererEntry()
+      let hostLanguage = web_entry_surface.currentRendererHostLanguage()
       let tmpl = templateFor(entry.languageEntry)
 
       # Rule 5's third row, and it must happen BEFORE the mount rather than
       # after: the surface is what a user then interacts with, and a Back press
       # arriving between the two would find `/noir/new` still on the stack.
       if entry.replacesHistoryEntry:
+        # `entryPathOnHost`, not `entryPath`: on a host whose ROOT is the
+        # language entry point, `/new` must be replaced by `/` and not by
+        # `/noir`. Replacing it with `/noir` would move the visitor off the
+        # root of the domain they came to, which is the one outcome
+        # "not a mere redirect — the user stays on this domain" rules out.
         web_entry_surface.jsReplaceHistoryEntry(
-          cstring(entryPath(entry.languageEntry)))
+          cstring(entryPathOnHost(entry.languageEntry, hostLanguage)))
 
       # §1b.3 step 6 — "Never a blank editor, never an error page". Every arm
       # below mounts something; the choice is WHICH, and it follows from the
@@ -4578,6 +4584,11 @@ when defined(ctWeb):
           " entry=" & $entry.form & "/" & $entry.verdict &
           " language=" & (if entry.languageEntry.len > 0: entry.languageEntry
                           else: "(none)") &
+          # WHICH HOST, as the product understood it. A two-domain deployment
+          # answers `/` differently on each, so a log that named only the path
+          # could not tell a correct `noirstudio.dev/` from a
+          # `ide.codetracer.com/` that had wrongly picked up a language.
+          " host=" & (if hostLanguage.len > 0: hostLanguage else: "(neutral)") &
           " files=" & $tmpl.templateFileCount))
         # The page belongs to the product now. The line stays on the console —
         # which is what `ci/test/web-renderer-mounts.sh` reads — and leaves the

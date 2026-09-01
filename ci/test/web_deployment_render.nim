@@ -16,7 +16,15 @@
 ## `host/web_browser.nim`, which sat unparseable on `dev` for days.
 ##
 ## Usage:
-##   web_deployment_render <origin> <revision> <out-dir> < modules.tsv
+##   web_deployment_render <origin> <revision> <out-dir> [language-origins]
+##     < modules.tsv
+##
+## `language-origins` is a comma-separated list of `<origin>=<language>` pairs
+## naming the hosts whose ROOT is a language entry point — e.g.
+## `https://noirstudio.dev=noir`. It is an ARGUMENT and not a constant for the
+## reason `platform/web_entry.nim`'s header gives: the product's host has moved
+## twice already and each move found a constant somebody had to hunt for.
+## Adding a second domain is a deploy-time argument, not a code change.
 ##
 ## stdin is one line per wasm module the assembly step ACTUALLY PLACED, with
 ## its measured size:
@@ -39,8 +47,24 @@ when isMainModule:
   let origin = paramStr(1)
   let revision = paramStr(2)
   let outDir = paramStr(3)
+  let languageOriginsArg = if paramCount() >= 4: paramStr(4) else: ""
 
   var descriptor = DeploymentDescriptor(origin: origin, revision: revision)
+  for rawPair in languageOriginsArg.split(','):
+    let pair = rawPair.strip()
+    if pair.len == 0: continue
+    let cut = pair.find('=')
+    # REFUSED rather than dropped, in the same spirit as a module with no
+    # provenance below: a malformed host declaration would silently leave
+    # `noirstudio.dev` resolving to the language-neutral root, which looks
+    # exactly like a working single-domain deployment and is the failure this
+    # whole change exists to stop being invisible.
+    if cut <= 0 or cut == pair.len - 1:
+      stderr.writeLine "malformed language origin (want <origin>=<language>): " &
+        pair
+      quit 2
+    descriptor.languageOrigins.add OriginLanguage(
+      origin: pair[0 ..< cut].strip(), language: pair[cut + 1 .. ^1].strip())
   for rawLine in stdin.lines:
     let line = rawLine.strip()
     if line.len == 0: continue
@@ -85,3 +109,12 @@ when isMainModule:
       "\t" & module.builtFrom
   if descriptor.modules.len == 0:
     echo "declared\t(no wasm modules)"
+
+  # The host map, in the deploy log. A two-domain deployment must be SEEN to be
+  # one: `languageOrigins` is the only difference between a bundle that makes
+  # `noirstudio.dev` the Noir entry point and one that leaves it generic, and
+  # the two are otherwise byte-identical.
+  for declared in declaredLanguageOrigins(descriptor):
+    echo "language-origin\t" & declared
+  if descriptor.languageOrigins.len == 0:
+    echo "language-origin\t(none — every host is the language-neutral root)"

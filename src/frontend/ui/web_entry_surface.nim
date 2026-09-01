@@ -81,6 +81,7 @@ from ../viewmodel/store/types import
 from ../viewmodel/viewmodels/filesystem_vm import
   FilesystemVM, createFilesystemVM, setRoot, expandPath
 import ../viewmodel/platform/web_entry
+import ../viewmodel/platform/web_deployment
 import ../viewmodel/platform/noir_template
 
 when defined(js):
@@ -131,6 +132,16 @@ when defined(js):
   return '/';
 })()""".}
 
+  proc jsEntryOrigin(): cstring {.importjs: """
+(function () {
+  try {
+    if (typeof window !== 'undefined' && window.location) {
+      return String(window.location.origin || '');
+    }
+  } catch (e) {}
+  return '';
+})()""".}
+
   proc jsEntryHash(): cstring {.importjs: """
 (function () {
   try {
@@ -152,6 +163,36 @@ when defined(js):
     ## — the same trap `web_main.nim`'s `jsReport` documents from the other
     ## side. `host/web_browser.currentEntryRequest` strips it in Nim for this
     ## reason too, so both arms now do the identical thing.
+
+  proc jsDeploymentText(): cstring {.importjs: """
+(function () {
+  try {
+    if (typeof document !== 'undefined') {
+      var el = document.getElementById('codetracer-deployment');
+      if (el) { return String(el.textContent || ''); }
+    }
+  } catch (e) {}
+  return '';
+})()""".}
+    ## The deployment's own description of itself, read OUT OF THE DOM.
+    ##
+    ## The renderer needs one fact from it — whether this origin is a language
+    ## entry point, so that `noirstudio.dev/` means what
+    ## `ide.codetracer.com/noir` means — and it must not cost a request:
+    ## `ci/test/noir-studio-signed-out.sh` asserts the development loop has
+    ## ZERO egress sites and a `fetch` here would be the first.
+    ##
+    ## The element id is spelled here rather than imported as
+    ## `deploymentDescriptorElementId` because an `importjs` pattern is a
+    ## compile-time string, not an expression — the same constraint
+    ## `host/web_browser.jsDeploymentDescriptorText` works under, which takes
+    ## the id as a parameter for exactly this reason.
+    ##
+    ## The two spellings are kept honest by arm O of
+    ## `ci/test/web-renderer-mounts.sh`: a mismatch makes this read return the
+    ## empty string, `languageForOrigin` answer "", and the language host fall
+    ## back to the language-neutral root — which is precisely what that arm
+    ## loads a second origin to detect. A drift here cannot be silent.
 
   proc jsEntrySearch(): cstring {.importjs: """
 (function () {
@@ -199,16 +240,37 @@ proc currentRendererEntryRequest*(): EntryRequest =
     if hash.len > 0 and hash[0] == '#': hash = hash[1 .. ^1]
     var search = $jsEntrySearch()
     if search.len > 0 and search[0] == '?': search = search[1 .. ^1]
-    EntryRequest(path: $jsEntryPath(), fragment: hash, query: search)
+    EntryRequest(origin: $jsEntryOrigin(), path: $jsEntryPath(),
+                 fragment: hash, query: search)
   else:
-    EntryRequest(path: "/", fragment: "", query: "")
+    EntryRequest(origin: "", path: "/", fragment: "", query: "")
+
+proc rendererDeploymentDescriptor*(): DeploymentDescriptor =
+  ## The descriptor this page carries, or the empty one.
+  ##
+  ## An empty descriptor is a WORKING deployment, not a failure: it declares no
+  ## language origins, `languageForOrigin` answers "", and every host behaves
+  ## as the language-neutral root. That is the correct degradation — a
+  ## single-domain deployment is what this product was until now.
+  when defined(js):
+    parseDeploymentDescriptor($jsDeploymentText())
+  else:
+    DeploymentDescriptor()
+
+proc currentRendererHostLanguage*(): string =
+  ## Which language this HOST's root means, if any. Rule 0 on the host axis.
+  let request = currentRendererEntryRequest()
+  languageForOrigin(rendererDeploymentDescriptor(), request.origin)
 
 proc currentRendererEntry*(): EntryResolution =
   ## `LocalState()` for the same reason `web_browser.currentEntryResolution`
   ## passes one: the renderer has no store of its own, and an empty local state
   ## is the true statement about a build with no "most recent project". Rule
   ## 5's first row is what then applies.
-  resolveEntry(currentRendererEntryRequest(), LocalState())
+  let request = currentRendererEntryRequest()
+  resolveEntry(request, LocalState(),
+               hostLanguage = languageForOrigin(rendererDeploymentDescriptor(),
+                                                request.origin))
 
 # ---------------------------------------------------------------------------
 # The template, as a filesystem tree

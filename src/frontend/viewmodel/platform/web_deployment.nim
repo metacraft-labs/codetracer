@@ -103,6 +103,13 @@ proc rewritePrefixes*(): seq[string] =
   ## than tidy.
   for language in knownLanguageEntries:
     result.add "/" & language
+  # `/new` is the clean-start address on a host whose ROOT is already the
+  # language — `noirstudio.dev/new`. It is one rewrite table for one tree
+  # serving every host the project has, so the prefix is emitted
+  # unconditionally; on a language-neutral host `/new` classifies `efUnknown`
+  # and §1b.3 step 6 opens the template with a sentence saying so, which is
+  # that step's prescribed answer and not an error page.
+  result.add "/new"
   result.add "/s"
   result.add "/p"
   result.add "/projects"
@@ -532,6 +539,24 @@ proc renderCacheConfig*(contract: DeploymentContract): string =
 # ---------------------------------------------------------------------------
 
 type
+  OriginLanguage* = object
+    ## One origin this deployment serves, and the language its ROOT means.
+    ##
+    ## Matched WHOLE and exactly — `https://noirstudio.dev` is not
+    ## `https://www.noirstudio.dev`, and a deployment that serves both declares
+    ## both. There is deliberately no normalisation, no suffix rule and no
+    ## wildcard here: every one of those is a place where the product would
+    ## start deciding which hosts exist, and which hosts exist is the
+    ## deployment's fact. A host the deployment forgot to declare falls back to
+    ## the language-neutral root, which is a working product at a generic
+    ## entry point rather than a broken one.
+    origin*: string
+    language*: string
+      ## A `web_entry.knownLanguageEntries` value. Checked at the boundary by
+      ## `parseDeploymentDescriptor`, so an origin declaring a language the
+      ## product does not have is dropped rather than routed to a template that
+      ## does not exist.
+
   DeployedModule* = object
     ## One wasm module a particular deployment placed AND declared.
     id*: string
@@ -557,6 +582,28 @@ type
     revision*: string
       ## The codetracer commit the bundle was built from.
     modules*: seq[DeployedModule]
+    languageOrigins*: seq[OriginLanguage]
+      ## WHICH HOSTS ARE LANGUAGE ENTRY POINTS, declared by the deployment.
+      ##
+      ## `noirstudio.dev` is meant to be the Noir entry point the way
+      ## `ide.codetracer.com/noir` is — same tree, same bundle, no redirect,
+      ## and the visitor stays on the domain they typed. Cloudflare Pages
+      ## serves any number of custom domains from one project, so nothing about
+      ## the ARTIFACT needs to differ; what differs is what `/` means, and that
+      ## is one string the page can read about itself.
+      ##
+      ## It travels in the descriptor rather than being compiled in, for the
+      ## reason `web_entry.nim`'s header gives about origins generally: the
+      ## product's host has already moved twice and each move found a constant.
+      ## A deployment that adds a second domain is a deploy-time argument here,
+      ## not a code change and not a rebuild.
+      ##
+      ## And it travels in the DOCUMENT rather than being fetched, for the
+      ## reason this section's header gives: the development loop is asserted
+      ## to have ZERO egress sites (`ci/test/noir-studio-signed-out.sh`), and a
+      ## request for the host map would be the first. Reading
+      ## `window.location.origin` and matching it against a value already in
+      ## the page costs nothing.
 
 const
   deploymentDescriptorElementId* = "codetracer-deployment"
@@ -592,10 +639,16 @@ proc renderDeploymentDescriptor*(descriptor: DeploymentDescriptor): string =
       "url": module.url,
       "bytes": module.bytes,
       "builtFrom": module.builtFrom}
+  var languageOrigins = newJArray()
+  for entry in descriptor.languageOrigins:
+    languageOrigins.add %*{
+      "origin": entry.origin,
+      "language": entry.language}
   jsonStringForHtml(%*{
     "origin": descriptor.origin,
     "revision": descriptor.revision,
-    "modules": modules})
+    "modules": modules,
+    "languageOrigins": languageOrigins})
 
 proc parseDeploymentDescriptor*(text: string): DeploymentDescriptor =
   ## The inverse, tolerant of everything except a lie.
@@ -638,6 +691,42 @@ proc parseDeploymentDescriptor*(text: string): DeploymentDescriptor =
     if module.id.len == 0 or module.url.len == 0 or module.builtFrom.len == 0:
       continue
     result.modules.add module
+
+  let languageOrigins = parsed{"languageOrigins"}
+  if languageOrigins.isNil or languageOrigins.kind != JArray: return
+  for entry in languageOrigins:
+    if entry.kind != JObject: continue
+    let declared = OriginLanguage(
+      origin: entry{"origin"}.getStr,
+      language: entry{"language"}.getStr)
+    if declared.origin.len == 0 or declared.language.len == 0: continue
+    # A LANGUAGE THE PRODUCT DOES NOT HAVE IS DROPPED HERE, at the boundary,
+    # rather than carried to `templateFor` and discovered as an empty surface.
+    # Same rule as a module missing its provenance three lines up: a
+    # half-valid declaration is what produces a route that mounts nothing.
+    var known = false
+    for language in knownLanguageEntries:
+      if language == declared.language: known = true
+    if not known: continue
+    result.languageOrigins.add declared
+
+proc languageForOrigin*(descriptor: DeploymentDescriptor;
+                        origin: string): string =
+  ## The language an origin's ROOT means, or "" for the language-neutral host.
+  ##
+  ## Pure, total, and the only place an origin is compared to anything. The
+  ## classifier takes this string as `hostLanguage` and never sees an origin,
+  ## which is what keeps `classifyPath` decidable offline from two strings.
+  if origin.len == 0: return ""
+  for entry in descriptor.languageOrigins:
+    if entry.origin == origin: return entry.language
+  ""
+
+proc declaredLanguageOrigins*(descriptor: DeploymentDescriptor): seq[string] =
+  ## For the deploy log and the gate: which hosts this deployment says are
+  ## language entry points, so a two-domain deployment can be SEEN to be one.
+  for entry in descriptor.languageOrigins:
+    result.add entry.origin & "=" & entry.language
 
 proc declaredModuleUrls*(descriptor: DeploymentDescriptor):
     seq[tuple[id: string, url: string]] =

@@ -51,7 +51,32 @@ type
     efUnknown
 
   EntryRequest* = object
-    ## What the browser handed us, origin already removed.
+    ## What the browser handed us.
+    origin*: string
+      ## The scheme and host the tab is on, e.g. `https://noirstudio.dev`.
+      ##
+      ## ## This is NOT the constant the module header forbids
+      ##
+      ## The header says "no origin appears in this file at all", and none
+      ## does: this is a FIELD the caller fills in from `window.location`, not
+      ## a literal. The rule it protects is that the product must not need a
+      ## rebuild when a host moves, and a field read from the page is the
+      ## strongest form of that — `cloud` -> `web` -> `ide` would each have
+      ## been a no-op here.
+      ##
+      ## ## Why the request carries it at all
+      ##
+      ## Because a host can BE a language entry point. `noirstudio.dev` should
+      ## mean what `ide.codetracer.com/noir` means, on the same tree and with
+      ## no redirect, and that is rule 0 on the host axis rather than a new
+      ## idea: "the language is an entry point, not a namespace". A language
+      ## may be entered by path or by hostname; neither owns the projects made
+      ## from it, which is why `/p/…` and `/s/…` are unchanged below on every
+      ## host.
+      ##
+      ## Carried but never MATCHED here. Which origins are language entry
+      ## points is a deployment fact, so it arrives as `hostLanguage` — see
+      ## `classifyPath`.
     path*: string
     fragment*: string
       ## Without the leading `#`.
@@ -218,16 +243,54 @@ proc isLanguageEntry(segment: string): bool =
     if entry == segment: return true
   false
 
-proc classifyPath*(path: string): tuple[form: EntryForm, language, locator: string] =
+proc classifyPath*(path: string; hostLanguage = ""
+                  ): tuple[form: EntryForm, language, locator: string] =
   ## Path → form. Deliberately separate from `resolveEntry`, because §1b.4's
   ## "one rewrite rule ... per-prefix" is generated from the same
   ## classification, and two implementations of "which prefixes exist" is how
   ## a form reaches the SPA in the code and 404s at the CDN.
+  ##
+  ## ## `hostLanguage`, and why it is a parameter rather than a lookup
+  ##
+  ## A deployment may serve a language entry point as a whole HOST:
+  ## `noirstudio.dev` means what `ide.codetracer.com/noir` means. Which hosts
+  ## those are is deployment configuration — `web_deployment.nim` is the module
+  ## that names hosts, and it takes every one of them as a parameter with no
+  ## default for the reason its header gives.
+  ##
+  ## So this function never sees an origin and never matches one. It takes the
+  ## ANSWER as a string, which keeps it a pure function of two strings:
+  ## `test_platform_web.nim` can table-test both hosts offline, and no part of
+  ## "which address is this product on" is decided by a global read from inside
+  ## the classifier.
+  ##
+  ## Empty `hostLanguage` is the language-neutral host and is the default, so
+  ## every existing call site keeps its exact behaviour.
   let segments = splitOn(trimSlashes(path), '/')
   if segments.len == 0 or (segments.len == 1 and segments[0].len == 0):
-    return (efBare, "", "")
+    # `/`. On a language host this IS the language entry point — that is the
+    # whole of what "landing on noirstudio.dev equals landing on /noir" means,
+    # and it is one field rather than a second code path because
+    # `languageEntry` was always the thing that selected the template.
+    return (efBare, hostLanguage, "")
+
+  if hostLanguage.len > 0 and segments.len == 1 and segments[0] == "new":
+    # `/new` on a language host is that host's clean start — rule 5's third
+    # row, spelled for a host whose root is already the language. This is the
+    # string `newProjectPath("")` has always produced; it simply had no
+    # meaning until a host could supply the language.
+    return (efNew, hostLanguage, "")
 
   if isLanguageEntry(segments[0]):
+    # `/noir` KEEPS WORKING ON A LANGUAGE HOST, deliberately, rather than
+    # 404ing or being treated as a nested `/noir/noir`.
+    #
+    # Two reasons, and the second is the load-bearing one. Rule 0 says the
+    # language is an entry point rather than a namespace, so `/noir` is a
+    # SPELLING of an entry point and both hosts should honour it. And links
+    # get pasted between hosts by people who do not know there are two: a
+    # `noirstudio.dev/noir` that failed would be a broken link produced by
+    # nobody making a mistake.
     if segments.len == 1: return (efBare, segments[0], "")
     if segments.len == 2 and segments[1].len == 0:
       return (efBare, segments[0], "")
@@ -235,6 +298,11 @@ proc classifyPath*(path: string): tuple[form: EntryForm, language, locator: stri
       return (efNew, segments[0], "")
     return (efUnknown, segments[0], "")
 
+  # EVERYTHING BELOW IS HOST-INDEPENDENT, and that is rule 0's other half.
+  # "Projects and snapshots therefore live at the root, language-neutral:
+  # `/p/…`, `/s/…`, `/projects`." A project link must resolve to the same
+  # project on `noirstudio.dev` as on `ide.codetracer.com`, so `hostLanguage`
+  # is deliberately not consulted again in this function.
   case segments[0]
   of "s":
     if segments.len >= 2 and segments[1].len > 0:
@@ -268,7 +336,8 @@ proc splitProjectLocator*(locator: string): tuple[slug, projectId: string] =
 # ---------------------------------------------------------------------------
 
 proc resolveEntry*(request: EntryRequest; local: LocalState;
-                   pointerReachable = true): EntryResolution =
+                   pointerReachable = true;
+                   hostLanguage = ""): EntryResolution =
   ## §1b.3's six steps, in order.
   ##
   ## `pointerReachable` is the caller's report of whether `current.json` could
@@ -276,7 +345,7 @@ proc resolveEntry*(request: EntryRequest; local: LocalState;
   ## pure and makes step 2's degradation — "a project link degrades to its last
   ## known state rather than to nothing" — a case in a table rather than a
   ## network test.
-  let classified = classifyPath(request.path)
+  let classified = classifyPath(request.path, hostLanguage)
   result.form = classified.form
   result.languageEntry = classified.language
   result.position = parsePosition(request.fragment)
@@ -405,3 +474,21 @@ proc entryPath*(language: string): string =
 
 proc newProjectPath*(language: string): string =
   if language.len == 0: "/new" else: "/" & language & "/new"
+
+proc entryPathOnHost*(language, hostLanguage: string): string =
+  ## The entry point's address AS SPELLED ON THIS HOST.
+  ##
+  ## Rule 5's third row replaces `/noir/new`'s history entry with the entry
+  ## point, and on `noirstudio.dev` the entry point is `/` — replacing it with
+  ## `/noir` there would move the visitor off the root of the domain they came
+  ## to, which is the one thing "not a mere redirect, the user stays on this
+  ## domain" rules out. Same rule, spelled for the host it is on.
+  if language.len > 0 and language == hostLanguage: "/"
+  else: entryPath(language)
+
+proc newProjectPathOnHost*(language, hostLanguage: string): string =
+  ## The clean-start address on this host: `/new` where the root is already the
+  ## language, `/noir/new` otherwise. The classifier accepts both on a language
+  ## host, so this chooses which one a LINK the product builds should say.
+  if language.len > 0 and language == hostLanguage: "/new"
+  else: newProjectPath(language)

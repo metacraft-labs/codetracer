@@ -1203,3 +1203,143 @@ suite "the rewrite target a static host is actually given":
       check columns[2] == "200"
       ruleRows += 1
     check ruleRows == rewritePrefixes().len * 2
+
+# ---------------------------------------------------------------------------
+# A HOST can be a language entry point — rule 0 on the other axis
+# ---------------------------------------------------------------------------
+#
+# `noirstudio.dev` should mean what `ide.codetracer.com/noir` means: the same
+# tree, the same bundle, no redirect, and the visitor stays on the domain they
+# typed. Rule 0 already says "the language is an entry point, not a namespace";
+# a hostname is another way to enter, and — critically — it must own no more
+# than a path prefix does. Projects and snapshots stay language-neutral on both
+# hosts, which the last test in this suite is entirely about.
+#
+# The classifier still contains no origin and matches none: it takes
+# `hostLanguage` as a string, so every case below is decidable offline from two
+# strings, which is why they can be a table rather than a browser test.
+
+suite "a host can be the language entry point":
+  const neutral = ""
+  const noirHost = "noir"
+
+  test "the root means the language on a language host, and nothing on the neutral one":
+    check classifyPath("/", noirHost).form == efBare
+    check classifyPath("/", noirHost).language == "noir"
+    check classifyPath("/", neutral).form == efBare
+    check classifyPath("/", neutral).language == ""
+    # ...which is the whole mechanism: `languageEntry` was always the field
+    # that selected the template, so the host changes one string and no branch.
+    check resolveEntry(EntryRequest(path: "/"), LocalState(),
+                       hostLanguage = noirHost).verdict == evTemplate
+    check templateFor(classifyPath("/", noirHost).language).hasFiles
+    check not templateFor(classifyPath("/", neutral).language).hasFiles
+
+  test "/noir keeps working on the language host rather than 404ing":
+    ## Decided rather than fallen into. `/noir` is a SPELLING of an entry point
+    ## (rule 0), and links get pasted between hosts by people who do not know
+    ## there are two — a `noirstudio.dev/noir` that failed would be a broken
+    ## link produced by nobody making a mistake.
+    check classifyPath("/noir", noirHost).form == efBare
+    check classifyPath("/noir", noirHost).language == "noir"
+    check classifyPath("/noir/", noirHost).form == efBare
+    check classifyPath("/noir/new", noirHost).form == efNew
+    check classifyPath("/noir/new", noirHost).language == "noir"
+    # And it does NOT become a nested namespace.
+    check classifyPath("/noir/noir", noirHost).form == efUnknown
+
+  test "/new is the clean start on a language host and unknown on the neutral one":
+    ## Rule 5's third row needs an address on a host whose root is already the
+    ## language. `/new` is the string `newProjectPath("")` has always produced;
+    ## it simply had no meaning until a host could supply the language.
+    check classifyPath("/new", noirHost).form == efNew
+    check classifyPath("/new", noirHost).language == "noir"
+    check classifyPath("/new", neutral).form == efUnknown
+    let fresh = resolveEntry(EntryRequest(path: "/new"), LocalState(),
+                             hostLanguage = noirHost)
+    check fresh.verdict == evTemplate
+    check fresh.replacesHistoryEntry
+    # §1b.3 step 6 on the neutral host: the template, and a sentence. Never an
+    # error page — so this is a supported answer and not a hole.
+    let onNeutral = resolveEntry(EntryRequest(path: "/new"), LocalState())
+    check onNeutral.verdict == evTemplate
+    check onNeutral.explanation.len > 0
+
+  test "the history replacement lands on the root of the host it is on":
+    ## Replacing `noirstudio.dev/new` with `/noir` would move the visitor off
+    ## the root of the domain they came to — the one outcome "not a mere
+    ## redirect, the user stays on this domain" rules out.
+    check entryPathOnHost("noir", "noir") == "/"
+    check entryPathOnHost("noir", "") == "/noir"
+    check entryPathOnHost("", "") == "/"
+    check newProjectPathOnHost("noir", "noir") == "/new"
+    check newProjectPathOnHost("noir", "") == "/noir/new"
+
+  test "PROJECTS AND SNAPSHOTS RESOLVE IDENTICALLY ON EVERY HOST":
+    ## Rule 0's other half, and the one that would be expensive to get wrong:
+    ## "Projects and snapshots therefore live at the root, language-neutral."
+    ## A `/p/…` link that meant different things on two hosts would be rule 0's
+    ## own failure mode — a link breaking because of a classification the
+    ## project never asked for — reintroduced on the host axis.
+    for path in ["/s/9f2b1c", "/p/hello-world-3f9a2c", "/projects",
+                 "/collab/join/tok", "/nope"]:
+      let onNeutral = classifyPath(path, neutral)
+      let onNoirHost = classifyPath(path, noirHost)
+      check onNeutral.form == onNoirHost.form
+      check onNeutral.language == onNoirHost.language
+      check onNeutral.locator == onNoirHost.locator
+    # NON-VACUITY: the loop above would also pass if `hostLanguage` did nothing
+    # at all. The root is the case that MUST differ.
+    check classifyPath("/", neutral).language != classifyPath("/", noirHost).language
+
+suite "which hosts are language entry points is deployment configuration":
+  test "the descriptor carries the host map and survives a round trip":
+    var descriptor = DeploymentDescriptor(
+      origin: "https://ide.example.test", revision: "abc12345")
+    descriptor.languageOrigins.add OriginLanguage(
+      origin: "https://noirstudio.example", language: "noir")
+    let parsed = parseDeploymentDescriptor(renderDeploymentDescriptor(descriptor))
+    check parsed.languageOrigins.len == 1
+    check parsed.languageOrigins[0].origin == "https://noirstudio.example"
+    check parsed.languageOrigins[0].language == "noir"
+    check declaredLanguageOrigins(parsed) == @["https://noirstudio.example=noir"]
+
+  test "the origin is matched WHOLE, and an undeclared host is neutral":
+    ## No normalisation, no suffix rule, no wildcard — every one of those is a
+    ## place where the product would start deciding which hosts exist, and
+    ## which hosts exist is the deployment's fact. A deployment serving `www.`
+    ## declares `www.`.
+    var descriptor = DeploymentDescriptor()
+    descriptor.languageOrigins.add OriginLanguage(
+      origin: "https://noirstudio.example", language: "noir")
+    check languageForOrigin(descriptor, "https://noirstudio.example") == "noir"
+    check languageForOrigin(descriptor, "https://www.noirstudio.example") == ""
+    check languageForOrigin(descriptor, "http://noirstudio.example") == ""
+    check languageForOrigin(descriptor, "https://ide.codetracer.com") == ""
+    check languageForOrigin(descriptor, "") == ""
+    # A deployment that declares nothing is a SINGLE-DOMAIN deployment, which
+    # is a correct one and is what this product was until now.
+    check languageForOrigin(DeploymentDescriptor(), "https://anything") == ""
+
+  test "an origin claiming a language the product does not have is dropped":
+    ## At the boundary, not at the mount. Carried through, it would resolve to
+    ## `evTemplate` with a `languageEntry` no template answers to — a route
+    ## that mounts nothing, which is this campaign's recurring shape.
+    let text = """{"origin":"https://a.test","revision":"r","modules":[],
+      "languageOrigins":[{"origin":"https://x.test","language":"cairo"},
+                         {"origin":"https://y.test","language":"noir"},
+                         {"origin":"","language":"noir"},
+                         {"origin":"https://z.test","language":""}]}"""
+    let parsed = parseDeploymentDescriptor(text)
+    check parsed.languageOrigins.len == 1
+    check parsed.languageOrigins[0].origin == "https://y.test"
+    check languageForOrigin(parsed, "https://x.test") == ""
+    check templateFor(languageForOrigin(parsed, "https://y.test")).hasFiles
+
+  test "the rewrite table covers the language host's clean-start address":
+    ## `/new` is reachable only on a language host, but there is ONE rewrite
+    ## file for one tree serving every host, so the prefix must be in it or
+    ## `noirstudio.dev/new` reaches the CDN and not the application.
+    check "/new" in rewritePrefixes()
+    let rendered = renderRewriteConfig(deploymentContract("https://a.test"))
+    check "/new  " & entryDocumentAddress & "  200" in rendered

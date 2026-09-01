@@ -50,8 +50,8 @@
 #     two-line fixture through the same server and probe, so that failure now
 #     names the environment instead of the product.
 #
-# WHAT THIS GATE ITSELF MISSED, and arms D, R, S and V are the correction
-# ----------------------------------------------------------------------
+# WHAT THIS GATE ITSELF MISSED, and arms D, R, S, V and O are the correction
+# -------------------------------------------------------------------------
 # On 2026-09-01 `https://ide.codetracer.com/noir` opened the WELCOME SCREEN
 # rather than the Noir template. This gate was green throughout, and it could
 # not have been anything else: every arm above loaded `/`, and a build that
@@ -87,6 +87,17 @@
 #     works. Arm V's own first version was wrong in an instructive way — see
 #     its comment.
 #
+#   * AND THE SAME CLASS OF DEFECT ONE AXIS OVER, which arm O forecloses.
+#     `noirstudio.dev` is to be the Noir entry point the way
+#     `ide.codetracer.com/noir` is: one Pages project, one tree, two custom
+#     domains, and `/` meaning different things on each because the page reads
+#     its own origin out of the deployment descriptor. Every arm above loads
+#     ONE host, so a change that quietly made the second domain land on the
+#     generic root would survive all of them — which is exactly how `/noir`
+#     survived. Arm O loads the same directory through a mapped hostname AND
+#     through the loopback address, and asserts the two show different
+#     surfaces.
+#
 # VERIFIED TO REDDEN, each against the assertion written for it:
 #   * arm S, in-gate: reddens arm R's mount, tree and renderer-line checks and
 #     leaves `/` untouched.
@@ -94,6 +105,9 @@
 #     mount green — the pair that distinguishes "not there" from "covered".
 #   * restoring `/index.html` as the target in a copied bundle: 1 red, and it
 #     is arm D's target check.
+#   * arm O's own twin, in-gate: the SAME bundle on an undeclared origin must
+#     still open the welcome screen, so the arm is a claim about the origin and
+#     not about a build that started mounting the template everywhere.
 #   * deleting `_redirects` from a copied bundle: 8 red, led by arm D's
 #     "ships no _redirects" and arm R's non-vacuity guard — which is the guard
 #     doing its job, since `/noir` then 404s and every count is 0.
@@ -314,18 +328,29 @@ probe_dir() {
 	# `probe_dir <label> <dir> [url-path]`. The path defaults to `/`, which is
 	# every existing arm's subject and the ONLY address this gate ever loaded —
 	# the reason a router that ignored the URL passed it for weeks.
-	local label="$1" dir="$2" url_path="${3:-/}"
+	# `probe_dir <label> <dir> [url-path] [map-host]`. The path defaults to
+	# `/`; `map-host` loads the same server through a foreign hostname, which
+	# is how the two-domain routing is measured — see the probe's own comment.
+	local label="$1" dir="$2" url_path="${3:-/}" map_host="${4:-}"
 	if ! start_server "${dir}"; then
 		echo "  the static server did not start" >&2
 		return 2
+	fi
+	local url="http://127.0.0.1:${port}${url_path}"
+	local host_map=""
+	if [ -n "${map_host}" ]; then
+		# Composed HERE and not by the caller, because the port is only known
+		# once the OS has handed it out.
+		host_map="MAP ${map_host} 127.0.0.1:${port}"
+		url="http://${map_host}${url_path}"
 	fi
 	local shot=""
 	if [ -n "${CT_PROBE_SCREENSHOT_DIR:-}" ]; then
 		mkdir -p "${CT_PROBE_SCREENSHOT_DIR}"
 		shot="${CT_PROBE_SCREENSHOT_DIR}/${label}.png"
 	fi
-	CT_PROBE_SCREENSHOT="${shot}" \
-		node ci/test/web_renderer_probe.mjs "http://127.0.0.1:${port}${url_path}" \
+	CT_PROBE_SCREENSHOT="${shot}" CT_PROBE_HOST_MAP="${host_map}" \
+		node ci/test/web_renderer_probe.mjs "${url}" \
 		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
 	local rc=$?
 	stop_server
@@ -341,7 +366,7 @@ probe_dir() {
 # One arm: copy, mutate, serve, probe, print the JSON to a file.
 # ---------------------------------------------------------------------------
 run_arm() {
-	local label="$1" mutate="$2" url_path="${3:-/}"
+	local label="$1" mutate="$2" url_path="${3:-/}" map_host="${4:-}"
 	arm_dir="${cache}/arm-${label}"
 	[ -d "${arm_dir}" ] && chmod -R u+w "${arm_dir}" 2>/dev/null
 	rm -rf "${arm_dir}"
@@ -370,7 +395,7 @@ run_arm() {
 			return 2
 		fi
 	fi
-	probe_dir "${label}" "${arm_dir}" "${url_path}"
+	probe_dir "${label}" "${arm_dir}" "${url_path}" "${map_host}"
 }
 
 # Read one field out of an arm's report. `json` is the only reader, so a
@@ -532,6 +557,49 @@ assert s.count(marker) == 1
 overlay = ('<div id="ct-occlusion-arm" style="position:fixed;inset:0;'
            'background:#1e1e1e;z-index:2147483647"></div>\n')
 open(p, 'w').write(s.replace(marker, overlay + marker))
+PY2
+}
+
+# Arm O — CONFIGURE THE BUNDLE AS A TWO-DOMAIN DEPLOYMENT.
+#
+# `noirstudio.dev` is meant to be the Noir entry point the way
+# `ide.codetracer.com/noir` is: one Pages project, ONE tree, two custom
+# domains, and the visitor staying on the domain they typed. Nothing about the
+# artifact differs — what differs is what `/` means, and that is one entry in
+# the deployment descriptor the page reads out of its own DOM.
+#
+# So this is not a mutation in the "break it" sense: it is the deploy-time
+# argument `CT_WEB_LANGUAGE_ORIGINS` supplies, applied to an already-assembled
+# bundle. The gate cannot re-run the assembly with a different origin (the
+# bundle is the subject, and CI hands it one), so it edits the one declaration
+# the assembly would have written.
+#
+# `noirstudio.test` rather than the real domain, and `.test` rather than `.dev`
+# deliberately: RFC 6761 reserves `.test` for exactly this, and a gate that
+# named the production hostname would be one DNS mistake away from measuring
+# the internet instead of the bundle.
+language_host="noirstudio.test"
+configure_language_host() {
+	local dir="$1"
+	grep -q 'id="codetracer-deployment"' "${dir}/index.html" || return 1
+	CT_LANGUAGE_HOST="${language_host}" python3 - "${dir}/index.html" <<'PY2'
+import json, os, re, sys
+p = sys.argv[1]
+s = open(p).read()
+host = "http://" + os.environ["CT_LANGUAGE_HOST"]
+m = re.search(r'(<script type="application/json" id="codetracer-deployment">)'
+              r'(.*?)(</script>)', s, re.S)
+assert m, "no deployment descriptor in the entry document"
+# The document escapes `<`, `>` and `&` so its own metadata cannot truncate the
+# script element. Undo, edit, redo — the same transform `jsonStringForHtml`
+# applies, because writing raw JSON back would leave a document the renderer
+# reads differently from this arm.
+raw = m.group(2).replace('\\u003c', '<').replace('\\u003e', '>').replace('\\u0026', '&')
+d = json.loads(raw)
+d.setdefault("languageOrigins", []).append({"origin": host, "language": "noir"})
+out = json.dumps(d, separators=(",", ":"))
+out = out.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+open(p, 'w').write(s[:m.start(2)] + out + s[m.end(2):])
 PY2
 }
 
@@ -739,10 +807,14 @@ else
 	# NON-VACUITY: a file with no 200 rows would make the "none are bad" check
 	# below true for the emptiest possible reason. `rewritePrefixes()` yields
 	# five prefixes and two rows each.
-	if [ "${rw_total}" = "10" ]; then
+	# Six prefixes, two rows each: `/noir`, `/new`, `/s`, `/p`, `/projects`,
+	# `/collab/join`. `/new` is the clean-start address on a host whose root is
+	# already the language (`noirstudio.dev/new`), and it is in the same file
+	# because one tree serves every domain the project has.
+	if [ "${rw_total}" = "12" ]; then
 		ck ok "the shipped _redirects carries ${rw_total} 200-rewrites, so the target check has a subject"
 	else
-		ck fail "the shipped _redirects carries ${rw_total} 200-rewrites, not the 10 rewritePrefixes() implies"
+		ck fail "the shipped _redirects carries ${rw_total} 200-rewrites, not the 12 rewritePrefixes() implies"
 	fi
 	if [ "${rw_bad}" = "0" ]; then
 		ck ok "none of them targets /index.html, so the host has nothing left to normalise into a 308"
@@ -906,6 +978,76 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
+echo "Arm O: THE SECOND DOMAIN — / on a language host is the Noir entry point"
+echo "    Same tree, same bundle, different origin. noirstudio.dev is meant to"
+echo "    mean what ide.codetracer.com/noir means, without a redirect and"
+echo "    without the visitor leaving the domain they typed."
+# ---------------------------------------------------------------------------
+#
+# THE VARIABLE IS THE ORIGIN AND NOTHING ELSE. The arm serves ONE directory and
+# probes it twice: once through `http://noirstudio.test/` and once through
+# `http://127.0.0.1:<port>/`. Identical bytes, identical path, two surfaces —
+# which is the whole claim, and neither probe alone can make it. A check that
+# only loaded the language host would pass for a build that had simply started
+# mounting the template everywhere, which is the same class of defect as the
+# one that shipped, inverted.
+if ! run_arm language-host configure_language_host "/" "${language_host}"; then
+	ck fail "arm O could not be measured"
+	ck fail "arm O could not be measured (second half)"
+	ck fail "arm O could not be measured (third half)"
+	ck fail "arm O could not be measured (fourth half)"
+else
+	o_origin="$(json language-host dom.origin)"
+	o_welcome="$(json language-host dom.welcomeScreenRoots)"
+	o_fs="$(json language-host dom.filesystemPanels)"
+	o_entries="$(json language-host dom.filesystemEntries)"
+	o_visible="$(json language-host dom.entryLabelsVisible)"
+	o_renderer="$(json language-host rendererLine)"
+
+	# NON-VACUITY, and it is specific to this arm: a `--host-resolver-rules`
+	# that silently failed to apply would leave the page on `127.0.0.1`, where
+	# the welcome screen is CORRECT — so the arm would fail while saying
+	# nothing true about the product. The origin is asserted before the surface.
+	if [ "${o_origin}" = "http://${language_host}" ]; then
+		ck ok "arm O: the page is on ${o_origin}, so this arm measured the second domain"
+	else
+		ck fail "arm O: the page reports origin '${o_origin}', not http://${language_host} — the host mapping did not apply and the surface check below would be about the wrong host"
+	fi
+
+	if [ "${o_welcome}" = "0" ] && [ "${o_fs}" = "1" ] && \
+	   [ "${o_visible}" = "${o_entries}" ] && [ "${o_entries:-0}" -ge 5 ] 2>/dev/null; then
+		ck ok "arm O: / on the language host opened the template — ${o_visible} visible rows, no welcome screen"
+	else
+		ck fail "arm O: / on the language host gave ${o_welcome} welcome screen(s), ${o_fs} panel(s), ${o_visible}/${o_entries} visible rows"
+		dump_arm language-host
+	fi
+
+	case "${o_renderer}" in
+	*"surface=noir-template"*"host=noir"*)
+		ck ok "arm O: the renderer named the host language it routed by: ${o_renderer#*: }" ;;
+	*)
+		ck fail "arm O: the renderer line does not report a noir host (line: '${o_renderer}')" ;;
+	esac
+
+	# THE TWIN, and the reason this arm is a claim about the ORIGIN. The same
+	# directory, the same server, an undeclared host: `/` must be the
+	# language-neutral root again. Rule 0 — a host that is not declared owns no
+	# language, and the product must not have started defaulting to Noir.
+	if ! probe_dir language-host-neutral "${arm_dir}" "/"; then
+		ck fail "arm O: the undeclared-origin twin could not be measured"
+	else
+		n_welcome="$(json language-host-neutral dom.welcomeScreenRoots)"
+		n_fs="$(json language-host-neutral dom.filesystemPanels)"
+		if [ "${n_welcome}" = "1" ] && [ "${n_fs}" = "0" ]; then
+			ck ok "arm O: the SAME bundle on an undeclared origin still opens the welcome screen, so the routing follows the host and not the build"
+		else
+			ck fail "arm O: the same bundle on an undeclared origin gave ${n_welcome} welcome screen(s) and ${n_fs} panel(s) — / has started meaning noir everywhere, which is rule 0's failure"
+		fi
+	fi
+fi
+echo
+
+# ---------------------------------------------------------------------------
 # THE MUTATION ARMS. For each: the named assertion must go RED, and the arm
 # must not be red for some unrelated reason — so the check that is expected to
 # survive is asserted too.
@@ -983,17 +1125,17 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-# 30 assertions, written from a run. See traps doc 4c: the count is what turns
-# "all green" into "all of them ran". 28 over the product, plus the two that
+# 34 assertions, written from a run. See traps doc 4c: the count is what turns
+# "all green" into "all of them ran". 32 over the product, plus the two that
 # vouch for the instrument doing the measuring.
 #
-# The twelve added for the entry route are the ones this gate was missing: it
+# The sixteen added for the entry route are the ones this gate was missing: it
 # loaded `/` and only `/`, so a renderer that never read the URL passed every
 # assertion in it while `https://ide.codetracer.com/noir` opened the welcome
 # screen. Two of the nine (arm D) are about the hosting contract rather than
 # the DOM, because the same defect had a CDN half: a 200-rewrite whose target
 # the host answered with a 308.
-expect_count 30
+expect_count 34
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

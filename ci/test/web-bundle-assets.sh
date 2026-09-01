@@ -385,6 +385,19 @@ echo "    the files on disk, which is what the page reads instead of making a"
 echo "    request."
 # ---------------------------------------------------------------------------
 origin="${CT_WEB_ORIGIN:-https://ide.codetracer.com}"
+
+# WHICH HOSTS ARE LANGUAGE ENTRY POINTS. `<origin>=<language>`, comma
+# separated; e.g. `https://noirstudio.dev=noir`. One Cloudflare Pages project
+# serves any number of custom domains from ONE tree, so a second domain is a
+# different meaning for `/` and not a second artifact — the descriptor carries
+# the map, the page reads it out of its own DOM, and no request is made.
+#
+# NO DEFAULT, deliberately, and it is the same rule `origin` follows two lines
+# up for a weaker reason: `platform/web_entry.nim` refuses to contain an origin
+# at all because the product's host has moved twice and each move found a
+# constant. An unset value here is a single-domain deployment, which is a
+# correct deployment.
+language_origins="${CT_WEB_LANGUAGE_ORIGINS:-}"
 revision="${CT_WEB_REVISION:-$(git -C "${repo_root}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 
 # The provenance strings. Read from the environment because only the caller
@@ -424,6 +437,7 @@ if ! nim c --hints:off --warnings:off --nimcache:"${cache}/render" \
 	grep -E 'Error:' "${cache}/render.log" | head -3 | sed 's/^/      /'
 else
 	if "${cache}/render-bin" "${origin}" "${revision}" "${out_dir}" \
+		"${language_origins}" \
 		<"${modules_tsv}" >"${cache}/render-out.log" 2>&1; then
 		ok "rendered index.html, _headers and _redirects for ${origin} @ ${revision}"
 		sed 's/^/      /' "${cache}/render-out.log"

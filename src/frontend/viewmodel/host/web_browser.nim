@@ -595,9 +595,11 @@ proc currentEntryRequest*(): EntryRequest =
   if hash.len > 0 and hash[0] == '#': hash = hash[1 .. ^1]
   var search = $jsLocationSearch()
   if search.len > 0 and search[0] == '?': search = search[1 .. ^1]
-  EntryRequest(path: $jsLocationPath(), fragment: hash, query: search)
+  EntryRequest(origin: $jsLocationOrigin(), path: $jsLocationPath(),
+               fragment: hash, query: search)
 
-proc currentEntryResolution*(): EntryResolution =
+proc currentEntryResolution*(descriptor: DeploymentDescriptor
+                            ): EntryResolution =
   ## The arrival, resolved. The one call site that turns a URL into a decision.
   ##
   ## ## Why `LocalState()` and not the store
@@ -614,7 +616,26 @@ proc currentEntryResolution*(): EntryResolution =
   ## all three, so the day the store can answer, this is a one-line change and
   ## not a new branch. An implementation that hard-coded "always the template"
   ## would have to grow rule 5 back later, in a second place.
-  resolveEntry(currentEntryRequest(), LocalState())
+  ##
+  ## ## Why the descriptor is an argument
+  ##
+  ## Because a host can BE a language entry point — `noirstudio.dev` is meant
+  ## to mean what `ide.codetracer.com/noir` means, on the same tree and with
+  ## the visitor staying on the domain they typed — and which hosts those are
+  ## is a DEPLOYMENT fact, declared in the document `boot()` has already read
+  ## out of the DOM.
+  ##
+  ## Taking it as a parameter keeps this proc a function of its inputs and
+  ## keeps `classifyPath` a function of two strings: the origin is compared
+  ## exactly once, in `languageForOrigin`, and never inside the classifier.
+  ##
+  ## It costs no request. This is the same descriptor the toolchain clause is
+  ## built from, read from `<script id="codetracer-deployment">` for the reason
+  ## `ci/test/noir-studio-signed-out.sh` exists — a fetch for the host map
+  ## would be the development loop's first egress site.
+  let request = currentEntryRequest()
+  resolveEntry(request, LocalState(),
+               hostLanguage = languageForOrigin(descriptor, request.origin))
 
 proc describeEntry*(resolution: EntryResolution): string =
   ## The resolution as one clause for the boot line. Names the form AND the
@@ -651,7 +672,7 @@ proc boot*(): Future[WebBoot] {.async.} =
   let delivered = deliveredModulesFrom(deployment)
   # THE SECOND PROBE, and the one this file defined and never called. See
   # `WebBoot.entry`.
-  let entry = currentEntryResolution()
+  let entry = currentEntryResolution(deployment)
   let bridge = newBrowserBridge(volume, granted, answered, delivered,
                                 declaredModuleUrls(deployment))
   let opened = await openWebStore(bridge)
