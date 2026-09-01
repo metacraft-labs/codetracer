@@ -80,7 +80,15 @@ CMAKE = "one CMake project fires three cpp providers — arbitration is required
 LANG_SET = "the Lang enum is the closed set, and it has 41 members"
 LIBTEST = "EMT-A22 a provider's DECLARED capability is not its availability"
 NOIR_REC = "EMT-A21 Noir refuses test RECORDING, in the provider's own words"
-NO_MODE = "the topbar has no mode parameter today, and no command slots"
+# `NO_MODE` — "the topbar has no mode parameter today, and no command slots" —
+# was RETIRED with the check it named. That check recorded §1's defect as the
+# starting state and said in its own comment that it "must go RED when the
+# feature lands, at which point it is deleted with the same change". The
+# feature landed: `tbaBuild`, `tbaRun`, `tbaActionOverflow`, `tbaRunTests` and
+# `tbaRecordTests` are declared, so its five `not declared(...)` assertions are
+# now false by construction. Arm M9 went with it, because an arm whose killer
+# does not exist cannot resolve to exactly one green check — which is the
+# property `verify_arms_are_unambiguous` refuses to start without.
 NO_RUN_KIND = "EMT-A11 no `run` group kind exists, and none may be added"
 GROUPS = "EMT-A9/A10 both group spellings read, and an unknown kind is silent"
 MALFORMED = "EMT-A13 a malformed tasks.json is reported, never silently dropped"
@@ -89,7 +97,7 @@ WASM = "the wasm registry refuses by SUBCOMMAND — the control for A34"
 
 CONTROLS = [
     TRANSCRIPT, PARSERS, CLI_CHAIN, CMAKE, LANG_SET, LIBTEST, NOIR_REC,
-    NO_MODE, NO_RUN_KIND, GROUPS, MALFORMED, PROFILES, WASM,
+    NO_RUN_KIND, GROUPS, MALFORMED, PROFILES, WASM,
 ]
 
 
@@ -196,23 +204,20 @@ MUTATIONS: list[Mutation] = [
         "Remove one of the three colliding detectors. If the check survives, it is "
         "not establishing that three providers fire on one CMake project.",
     ),
-    # --- the topbar's starting state --------------------------------------
-    Mutation(
-        "M9",
-        "src/frontend/viewmodel/viewmodels/topbar_actions.nim",
-        "{tbaDebuggerControls, tbaOmnibar,\n                                    tbaSessionTabs}",
-        "{tbaOmnibar,\n                                    tbaSessionTabs}",
-        NO_MODE,
-        "Drop the stepping buttons from the base set — the exact edit the feature "
-        "will make, minus the mode parameter that should gate it. The "
-        "starting-state check MUST go red here: that is what makes it a check "
-        "with an EXPIRY rather than a permanent assertion that the feature was "
-        "never built. "
-        "NOTE: the first spelling of this arm APPENDED `tbaBuild` to the enum "
-        "instead. That broke one suite's compilation, which the harness then "
-        "mis-scored — see `run_suites`. The arm was replaced with one that "
-        "compiles, because a mutation that cannot compile can never be a kill.",
-    ),
+    # --- the topbar's starting state: RETIRED ------------------------------
+    #
+    # M9 dropped the stepping buttons from `topbarModel`'s base set — the exact
+    # edit the feature would make, minus the mode parameter that should gate
+    # it — and its killer was the starting-state check. Both expired together
+    # when `edit_mode_toolbar.editModeToolbar` landed; see the note beside
+    # `CONTROLS`. The gate that replaced it is EMT-A1/A2/A3/A4, which asserts
+    # the mode decides the set on all four profiles, and which is red rather
+    # than green under exactly the mutation M9 applied.
+    #
+    # (Its history is worth keeping: the FIRST spelling of M9 appended
+    # `tbaBuild` to the enum instead, which broke one suite's compilation and
+    # was mis-scored SURVIVED — see `run_suites`, where per-suite `compiled`
+    # accounting came from.)
     # --- the group vocabulary guard (EMT-A11) ------------------------------
     Mutation(
         "M10",

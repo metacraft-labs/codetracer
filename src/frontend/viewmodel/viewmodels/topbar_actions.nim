@@ -45,7 +45,31 @@ type
     ## Every slot the topbar can carry. Absence is the interesting case: an
     ## action not in the set is not rendered, not rendered-and-disabled.
     tbaDebuggerControls
-      ## Step, reverse-step, continue. Always present — they are the product.
+      ## Step, reverse-step, continue.
+      ##
+      ## They *were* documented here as "always present — they are the
+      ## product", and that was the defect `Edit-Mode-Toolbar.md` §1 is about:
+      ## thirteen stepping buttons painted in Edit mode, where there is no
+      ## session for them to control. They are still unconditional in
+      ## `topbarModel`, which is the **platform** layer and has no business
+      ## knowing about modes; the gate is `viewmodels/edit_mode_toolbar.nim`,
+      ## which composes this set with the mode.
+    tbaBuild
+      ## Edit mode only. Runs the project's declared build task, or the
+      ## conventional command for the recognised project kind.
+    tbaRun
+      ## Edit mode only, and it is a **mode transition**: Run records, and the
+      ## trace it produces is what Debug mode replays (§9).
+    tbaActionOverflow
+      ## Edit mode only. Everything else the project declared, which is a list
+      ## no toolbar can size in advance.
+    tbaRunTests
+      ## Both modes: re-running tests from a session is how you check a fix.
+    tbaRecordTests
+      ## Both modes: recording a test run is one of the two ways into Debug
+      ## mode. Split from `tbaRunTests` per §10.3 — they have different
+      ## backings and different availability, and Noir has the first and
+      ## refuses the second.
     tbaOmnibar
     tbaSessionTabs
     tbaInPageMenu
@@ -134,5 +158,12 @@ proc absentBecause*(profile: PlatformProfile; action: TopbarAction): string =
     if not profile.has(capOpenFileDialog):
       profile.degradedBehaviour(capOpenFileDialog)
     else: ""
+  of tbaBuild, tbaRun, tbaActionOverflow, tbaRunTests, tbaRecordTests:
+    # Absence of a command slot is a decision about the MODE and about what the
+    # project declared, not about the platform, so the profile alone cannot
+    # answer it. `edit_mode_toolbar.editModeToolbar` carries the per-button
+    # `reason`, and EMT-A28 asserts it is never empty. Answering here with a
+    # plausible sentence would put a second, wrong explanation in the tree.
+    ""
   of tbaDebuggerControls, tbaOmnibar, tbaSessionTabs:
     ""

@@ -299,3 +299,79 @@ suite "EMT §11 a nargo failure becomes navigable Problems rows":
     ck not parseBuildLocation("").found
 
     expectCount(16)
+
+  test "the producer carries nargo's severity down from the line above":
+    ## ADDED by the implementation, and it is here because the two EMT-A35
+    ## checks above **cannot pass as written** — which is a defect in them, not
+    ## in the matcher, and it is reported rather than worked around.
+    ##
+    ## Both call `parseBuildLocation` (through `diagnosticLines` and
+    ## `severityOf`) on **one line at a time**, and then require that line to
+    ## yield `nargo`'s severity and `nargo`'s sentence. This file's own header
+    ## explains why nothing can: *"`nargo` puts the keyword on the line ABOVE
+    ## the location"*. The location line is `  ┌─ src/main.nr:1:9` and carries
+    ## neither. The three location lines in the fixture differ only in
+    ## `path:line:col`, so no function of one of them can answer *warning,
+    ## warning, error* — and `parsed.message` is empty for the same reason,
+    ## which is what `not allCharsInSet({'0'..'9'})` fails on, since that
+    ## predicate is vacuously TRUE for `""`.
+    ##
+    ## Satisfying them would need a module-level cache keyed by line text, so
+    ## that a later call returned what an earlier walk had seen. That makes the
+    ## parser answer differently for the same input depending on call history,
+    ## leaks a severity between two concurrent builds, and goes stale across
+    ## runs. It would be contorting the implementation to fit a broken test,
+    ## which is the same defect as loosening the test.
+    ##
+    ## So the property EMT-A35 is *for* is asserted here instead, over the
+    ## producer shape §11.1 actually describes — a scanner the pump drives, one
+    ## line at a time, in order, carrying the header forward. Every field the
+    ## two checks above name is pinned, and the warning/error split is pinned
+    ## in **both** directions.
+    startCount()
+
+    var scanner: BuildLocationScanner
+    var rows: seq[ParsedBuildLocation] = @[]
+    for line in RecordedNargoStderr.splitLines:
+      let parsed = scanner.scan(line)
+      if parsed.found:
+        rows.add parsed
+    # A count, not `>= 1`: three diagnostics are in the fixture.
+    ck rows.len == 3
+
+    var errors, warnings = 0
+    for row in rows:
+      case row.severity
+      of SevError: inc errors
+      of SevWarning: inc warnings
+      of SevInfo: discard
+    # Both halves, so a producer that classified everything as a warning fails
+    # exactly as one that classified everything as an error does. Before the
+    # matcher landed this was 3 and 0.
+    ck errors == 1
+    ck warnings == 2
+
+    # The fields EMT-A35 names, on the compiler's own words.
+    ck rows[0].path == "src/main.nr"
+    ck rows[0].line == 1
+    ck rows[0].col == 9
+    ck rows[0].message == "unused variable x"
+    ck rows[2].line == 3
+    ck rows[2].col == 19
+    ck rows[2].message == "Expected type bool, found type Field"
+
+    # The negative twin, and it is the one that matters for a stateful reader:
+    # a FRESH scanner has no pending keyword to leak onto the first row it
+    # sees. Without this, "the scanner carries severity" would be green over a
+    # scanner that carried it from anywhere, including the previous build.
+    var fresh: BuildLocationScanner
+    ck fresh.scan("  ┌─ src/main.nr:1:9").severity == SevError
+
+    # A header is consumed and is not itself a row, or the count above would
+    # be six; and `Aborting due to 1 previous error` is not a header, which is
+    # what anchoring to the START of the line buys.
+    var other: BuildLocationScanner
+    ck not other.scan("warning: unused variable x").found
+    ck not other.scan("Aborting due to 1 previous error").found
+
+    expectCount(13)
