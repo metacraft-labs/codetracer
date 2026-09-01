@@ -99,16 +99,13 @@ impl SeekableCallStream {
     /// reader. `calls.dat` and `calls.idx` are read through the caller's current
     /// `BlockSource`/overlay instead of re-opening the `.ct` by filesystem path.
     pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<SeekableCallStream>, String> {
-        let meta = match ctfs.read_file("meta.dat") {
-            Ok(meta) => meta,
-            Err(_) => return Ok(None),
-        };
         // Existence is answered by STRUCTURAL PRESENCE of `calls.dat`, never by
         // `meta.dat`'s `has_call_stream` hint bit — a writer may stamp that bit
-        // only at close, so gating on it would refuse a call stream that
-        // structurally exists in a still-recording trace (trace-format spec:
-        // "Stream-presence flags are a hint, not a gate"). `meta.dat` is still
-        // read because `CallStreamReader::from_files` needs it to decode records.
+        // only at close, so gating on it (or on `meta.dat` being present at all,
+        // which the writer also emits only at close) would refuse a call stream
+        // that structurally exists in a still-recording trace (trace-format spec:
+        // "Stream-presence flags are a hint, not a gate"). `CallStreamReader::from_files`
+        // ignores its `_meta` argument, so no `meta.dat` read is needed to decode.
         let dat = match ctfs.read_file("calls.dat") {
             Ok(dat) => dat,
             Err(_) => return Ok(None),
@@ -117,7 +114,7 @@ impl SeekableCallStream {
             .read_file("calls.idx")
             .map_err(|e| format!("calls.idx missing despite calls.dat presence: {e}"))?;
 
-        match CallStreamReader::from_files(&meta, dat, idx)? {
+        match CallStreamReader::from_files(&[], dat, idx)? {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
@@ -219,12 +216,10 @@ impl SeekableCallStream {
 }
 
 fn open_call_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<CallStreamReader>, String> {
-    let meta = match ctfs.read_file("meta.dat") {
-        Ok(meta) => meta,
-        Err(_) => return Ok(None),
-    };
     // Structural presence of `calls.dat` decides existence, not the
-    // `has_call_stream` hint bit (see `SeekableCallStream::open_from_ctfs`).
+    // `has_call_stream` hint bit or `meta.dat` presence — the LIVE refresh path
+    // must serve a still-recording trace whose `meta.dat` is not yet written
+    // (see `SeekableCallStream::open_from_ctfs`). `from_files` ignores `_meta`.
     let dat = match ctfs.read_file("calls.dat") {
         Ok(dat) => dat,
         Err(_) => return Ok(None),
@@ -232,7 +227,7 @@ fn open_call_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<CallStream
     let idx = ctfs
         .read_file("calls.idx")
         .map_err(|e| format!("calls.idx missing despite calls.dat presence: {e}"))?;
-    CallStreamReader::from_files(&meta, dat, idx)
+    CallStreamReader::from_files(&[], dat, idx)
 }
 
 /// Convert a `calls.dat` [`CallStreamRecord`] into the db-backend's [`DbCall`].
