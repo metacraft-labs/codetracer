@@ -2968,6 +2968,26 @@ test-noir-wasm-worker:
   exec > >(tee test-logs/test-noir-wasm-worker.log) 2>&1
   bash ci/test/noir-wasm-worker-e2e.sh
 
+# A wasm-worker SESSION, alive in a real tab over the assembled publish tree.
+#
+# The e2e above drives the node twin and the twin is one-shot: it proves the
+# compile/trace path and says nothing about a job that stays alive. This gate
+# is the other half -- a session that opens, refuses a transaction against a
+# contract it does not know, ACCEPTS the same transaction after a separate
+# round trip registered it, and is then closed with the worker still running.
+#
+# 48 counted assertions with the count itself asserted, a control arm, a
+# backpressure variant, an instrument arm that doubles as the proof that a
+# dead worker reaches its runs, and three mutation arms that each redden the
+# assertion written for them.  Assembles a bundle itself when
+# CT_WEB_BUNDLE_DIR is unset.
+test-wasm-worker-session:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-wasm-worker-session.log) 2>&1
+  bash ci/test/wasm-worker-session.sh
+
 test-renderer-host-budget:
   #!/usr/bin/env bash
   set -euo pipefail

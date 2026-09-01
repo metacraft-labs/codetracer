@@ -434,6 +434,30 @@ proc newWorkerTransport(scriptUrl: string;
     jsWorkerTerminate(worker)
   WasmWorkerTransport(send: send, terminateWorker: terminateWorker)
 
+proc newBrowserWasmWorker*(registry: WasmRegistry; scriptUrl: string;
+                           moduleUrls: seq[tuple[id: string, url: string]] = @[]
+                          ): WasmWorker =
+  ## A `WasmWorker` over a real `Worker` running `scriptUrl`, configured.
+  ##
+  ## Split out of `newBrowserWasmHost` because `WasmHost` is four operations
+  ## and deliberately no more — `wasm_registry.nim` says so on the type, and
+  ## the reason is that a caller able to ask about loading or preloading would
+  ## start depending on the answer. That constraint is right and it is also why
+  ## a `WasmHost` alone cannot reach `sendToSession` / `closeSession`: those are
+  ## a fifth and sixth operation, on a job that is still running.
+  ##
+  ## So a caller that needs a SESSION takes the worker, and a caller that needs
+  ## the four-operation facade takes the host built from it. Neither grows the
+  ## other's surface, and there is still exactly one place a browser `Worker` is
+  ## constructed.
+  var worker: WasmWorker
+  proc onText(message: string) =
+    if not worker.isNil: worker.deliver(message)
+  let transport = newWorkerTransport(scriptUrl, onText)
+  worker = newWasmWorker(registry, transport)
+  worker.configure(moduleUrls)
+  worker
+
 proc newBrowserWasmHost*(registry: WasmRegistry; scriptUrl: string;
                          moduleUrls: seq[tuple[id: string, url: string]] = @[]
                         ): WasmHost =
@@ -448,13 +472,7 @@ proc newBrowserWasmHost*(registry: WasmRegistry; scriptUrl: string;
   ## immediately. See `wasm_worker.configure`: the worker has always expected
   ## this message and nothing sent it, so a correctly deployed pair of modules
   ## would still have failed every run.
-  var worker: WasmWorker
-  proc onText(message: string) =
-    if not worker.isNil: worker.deliver(message)
-  let transport = newWorkerTransport(scriptUrl, onText)
-  worker = newWasmWorker(registry, transport)
-  worker.configure(moduleUrls)
-  worker.asWasmHost()
+  newBrowserWasmWorker(registry, scriptUrl, moduleUrls).asWasmHost()
 
 proc browserWasmHost(delivered: seq[DeliveredWasmModule];
                      moduleUrls: seq[tuple[id: string, url: string]] = @[]
