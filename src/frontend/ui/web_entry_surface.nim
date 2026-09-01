@@ -506,7 +506,7 @@ proc installTemplateHost*(tmpl: ProjectTemplate) =
         value: templateTabInfo(tmpl, $requested)
       }))
 
-proc templateNoTracePayload*(tmpl: ProjectTemplate): JsObject =
+proc templateNoTracePayload*(tmpl: ProjectTemplate; layout: JsObject): JsObject =
   ## The `CODETRACER::no-trace` message, field for field with
   ## `index/startup.nim:249` and `index/traces.nim:1173`.
   ##
@@ -558,7 +558,11 @@ proc templateNoTracePayload*(tmpl: ProjectTemplate): JsObject =
     path: cstring(templateProjectRoot(tmpl)),
     lang: LangNoir,
     home: cstring"",
-    layout: noirStudioEditLayout(),
+    # PASSED IN, not computed here, so the layout the caller checked for nil is
+    # the layout that travels. Building it twice would make the guard a
+    # statement about a different value than the one the payload carries — the
+    # shape of bug that hides until the two disagree.
+    layout: layout,
     helpers: JsAssoc[cstring, Helper]{},
     startOptions: startOptions,
     config: defaultRendererConfig(),
@@ -604,5 +608,5 @@ proc enterTemplateEditMode*(tmpl: ProjectTemplate): bool =
   installTemplateHost(tmpl)
   mountedTemplate = tmpl
   discard data.ipc.deliver(cstring"CODETRACER::no-trace",
-                           templateNoTracePayload(tmpl))
+                           templateNoTracePayload(tmpl, layout))
   true
