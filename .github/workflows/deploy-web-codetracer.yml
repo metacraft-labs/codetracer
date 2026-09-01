@@ -645,12 +645,45 @@ jobs:
           # `node_modules` by name, not dotfiles as a class, so this mirrors
           # that and nothing wider — an over-broad exclusion here is how a real
           # asset stops being checked.
+          # `-exec ... +` and NOT `-printf`, which is GNU-only. The runner has
+          # GNU find, but this block is also the harness a human runs by hand
+          # after a cache purge (ci/test/verify-deployed-bytes.sh), and on
+          # macOS `-printf` is an "unknown primary" — which `find` reports on
+          # stderr while still exiting through the pipeline, producing an EMPTY
+          # manifest and a step that says "ok: 0/0 published files match" and
+          # exits 0. Measured; see the assertion below.
           ( cd site && find . -type f \
               ! -name '_headers' ! -name '_redirects' ! -name 'serve.conf' \
               ! -path '*/.git/*' ! -name '.git' \
               ! -path '*/node_modules/*' \
-              -printf '%P\t%s\n' ) | sort > "$manifest"
-          echo "verifying $(wc -l <"$manifest") published files on each host"
+              -exec sh -c 'for f; do
+                  printf "%s\t%s\n" "${f#./}" "$(wc -c <"$f" | tr -d " ")"
+                done' _ {} + ) | sort > "$manifest"
+          echo "verifying $(wc -l <"$manifest" | tr -d ' ') published files on each host"
+
+          # THE MANIFEST IS NOT EMPTY, AND IT IS THE RIGHT TREE.
+          #
+          # Everything below quantifies over this file, and a universal
+          # quantification over an empty set passes. Measured while testing
+          # this step on macOS: `find -printf` is an unknown primary there, the
+          # manifest came out empty, and the step reported
+          # "ok: 0/0 published files match what was uploaded" for all four
+          # hosts and exited 0. The verdict count did not catch it either,
+          # because zero verdicts for zero files agrees perfectly.
+          #
+          # So the floor is named files rather than a number: `index.html` and
+          # `ui.js` are the two without which there is no product, and a
+          # manifest built from the wrong directory has neither.
+          if [ ! -s "$manifest" ]; then
+            echo "  the publish manifest is EMPTY — nothing would be verified and every check below would pass vacuously" >&2
+            fail=1
+          fi
+          for required_path in index.html ui.js; do
+            if ! cut -f1 "$manifest" | grep -qxF "$required_path"; then
+              echo "  the publish manifest does not contain '$required_path' — it is not describing a deployment of this product" >&2
+              fail=1
+            fi
+          done
 
           # EVERY WORKER REPORTS A VERDICT, and the number of verdicts is
           # asserted against the number of files.
@@ -694,8 +727,58 @@ jobs:
               | xargs -0 -P 16 -n 3 bash -c 'check_one "$0" "$1" "$2"'
           }
 
+          # EVERY HOST THIS DEPLOYMENT CLAIMS TO SERVE, read from the descriptor
+          # it just built rather than written out here.
+          #
+          # This loop named two hosts and `noirstudio.dev` was not one of them,
+          # which is not a gap in a list — it is a gate that could report green
+          # over a broken product. Measured 2026-09-01: after the `2afd0403`
+          # deploy, `ide.codetracer.com` and `noirstudio.dev` were BOTH serving
+          # a stale `assets/wasm-worker.js`, on separate zone caches with
+          # independent ages (~138537s and ~47520s). A purge of the one zone
+          # this step checked would have turned it green while the other host
+          # stayed stale, and nothing here would ever have said so.
+          #
+          # The list is DERIVED for the same reason `webRuntimeAssets()` is a
+          # value rather than a list in a shell script: a hand-written set of
+          # hosts cannot be made to agree with the product. `languageOrigins`
+          # is what makes `noirstudio.dev` the Noir entry point, so a host that
+          # is real enough to appear there is real enough to verify — and one
+          # added there in future is covered without editing this file.
+          python3 - site/index.html > "$RUNNER_TEMP/product-hosts.txt" <<'PY'
+          import json, re, sys
+          html = open(sys.argv[1]).read()
+          m = re.search(r'id="codetracer-deployment"[^>]*>(.*?)</script>', html, re.S)
+          if not m:
+              raise SystemExit('no deployment descriptor in the staged entry document')
+          d = json.loads(m.group(1))
+          hosts, seen = [], set()
+          for origin in [d['origin']] + [o['origin'] for o in d.get('languageOrigins', [])]:
+              if origin and origin not in seen:
+                  seen.add(origin)
+                  hosts.append(origin)
+          print('\n'.join(hosts))
+          PY
+          # The Pages alias is infrastructure rather than a product address —
+          # it is not in the descriptor and never will be — but it is what
+          # BlockTracer fetches cross-origin, so it is verified beside them.
+          hosts=( "https://web-codetracer.pages.dev" )
+          while IFS= read -r h; do
+            [ -n "$h" ] && hosts+=( "$h" )
+          done < "$RUNNER_TEMP/product-hosts.txt"
+          declared_hosts="$(wc -l <"$RUNNER_TEMP/product-hosts.txt" | tr -d ' ')"
+          echo "verifying ${#hosts[@]} hosts: ${hosts[*]}"
+          # A descriptor that declares no origin would silently shrink this to
+          # the Pages alias alone, which is the failure mode this whole comment
+          # is about, one level up.
+          if [ "$declared_hosts" -lt 1 ]; then
+            echo "  the staged descriptor declares no product host — the sweep would cover only the Pages alias" >&2
+            fail=1
+          fi
+
           expected_files="$(wc -l <"$manifest" | tr -d ' ')"
-          for base in "https://web-codetracer.pages.dev" "https://ide.codetracer.com"; do
+          hosts_checked=0
+          for base in "${hosts[@]}"; do
             # Both hosts are REQUIRED now. The asymmetry existed to absorb a
             # propagation window, and the polling above absorbs it properly —
             # demoting a host instead meant a genuinely broken custom domain
@@ -719,7 +802,19 @@ jobs:
                 check "$base" "/$rel" "$(size "$rel")" "$required"
               done <<<"$disagreed"
             fi
+            hosts_checked=$((hosts_checked + 1))
           done
+          # THE COUNT OF HOSTS, asserted like the count of verdicts and for the
+          # same reason: a host that drops out of the list must fail rather
+          # than pass. A loop over an empty or truncated array completes
+          # silently and reports nothing, and "reported nothing" is exactly
+          # what a clean deployment also looks like.
+          if [ "$hosts_checked" -ne "${#hosts[@]}" ]; then
+            echo "  swept $hosts_checked hosts but ${#hosts[@]} were declared — a host was not verified" >&2
+            fail=1
+          else
+            echo "swept all ${#hosts[@]} declared hosts"
+          fi
 
           # THE CAUSE, asserted at the deployment rather than in a unit test.
           #
@@ -742,7 +837,12 @@ jobs:
             if printf '%s' "$base_name" | grep -qE '\.[0-9a-fA-F]{6,}\.'; then
               continue
             fi
-            for base in "https://web-codetracer.pages.dev" "https://ide.codetracer.com"; do
+            # THE SAME DERIVED LIST as the sweep, and not a second literal one.
+            # Each custom domain is a separate zone cache with its own age, so
+            # a stale `immutable` object on one says nothing about the other:
+            # on 2026-09-01 `ide.codetracer.com` and `noirstudio.dev` held
+            # independently poisoned copies, ~138537s and ~47520s old.
+            for base in "${hosts[@]}"; do
               cc="$(curl -fsSI --retry 3 --retry-delay 2 --retry-all-errors \
                       "$base/$rel" | tr -d '\r' \
                     | grep -i '^cache-control:' | cut -d' ' -f2- || true)"

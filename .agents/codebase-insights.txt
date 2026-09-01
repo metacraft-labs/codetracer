@@ -2791,3 +2791,25 @@ commands.
   over-broad exclusion is how a real asset quietly stops being checked.
   Separately: the gitlink has no business in the publish tree at all; the
   staging step's `cp -rL` should not be carrying it. Not fixed here.
+- 2026-09-01: the deploy's verification checked TWO hosts while the deployment
+  declares THREE, and the missing one was independently broken. `origin` plus
+  `languageOrigins` in the descriptor name `ide.codetracer.com`,
+  `noirstudio.dev` and `www.noirstudio.dev`; the step named the first and the
+  Pages alias. All three custom hostnames held separately-cached stale copies
+  of `assets/wasm-worker.js` with DIFFERENT ages (139374s, 48357s, 48081s), so
+  a purge of one zone would have turned the gate green while two hostnames
+  stayed stale. The host list is now derived from the descriptor and the count
+  of hosts swept is asserted against the count declared — a host that drops out
+  of the list fails rather than passes. Consequence for the purge: two zones
+  (codetracer.com, noirstudio.dev) but THREE URLs if purging by URL rather than
+  by zone.
+- 2026-09-01: a counted assertion does not save you from an empty set. The
+  all-files sweep asserts verdicts == manifest entries, and that agrees
+  perfectly at zero: testing the step on macOS, `find -printf` is an unknown
+  primary, the manifest came out EMPTY, and the step printed
+  "ok: 0/0 published files match what was uploaded" for every host and exited
+  0. Nothing was wrong and nothing was checked. Two fixes, both needed: the
+  manifest is now built with `-exec sh -c ... +` (portable, so the same block
+  runs on the workstation), and the floor is asserted by NAME — `index.html`
+  and `ui.js` must appear in the manifest, because a manifest built from the
+  wrong directory has neither and a bare `> 0` would not notice.
