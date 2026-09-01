@@ -2587,10 +2587,46 @@ test-vm: test-vm-native test-vm-js
 # nothing assigned).  Its lane still never RUNS the file — a live round-trip
 # against the production sharing service must not — only compiles it.
 #
-# The six that are GREEN today and could be promoted as-is:
-#   test-common-units  test-ct-cli-units  test-vm-unit  test-book-isonim
+# The five that are GREEN today and could be promoted as-is:
+#   test-common-units  test-ct-cli-units  test-book-isonim
 #   test-online-sharing-compile
 #   test-lane-coverage (already runs, via ci/lint/nim.sh)
+#
+# `test-vm-unit` LEFT that list on 2026-09-01, and `test-vm-unit-js` with it,
+# because Edit-Mode-Toolbar.md's three specifying suites landed ahead of the
+# implementation they specify.  `viewmodel/viewmodels/edit_mode_toolbar.nim`
+# has since landed and 24 of those 27 checks went green.  **Both lanes are
+# still red, on 3 checks, and both are still NOT promotable** — the count is
+# down, the reason has changed, and neither is zero:
+#
+#   src/frontend/viewmodel/tests/unit/test_edit_mode_toolbar_languages.nim
+#       17 OK, 0 FAILED   <- green; its ledger row was deleted
+#   src/frontend/viewmodel/tests/unit/test_edit_mode_toolbar_model.nim
+#       16 OK, 1 FAILED
+#   src/frontend/viewmodel/tests/unit/test_noir_build_diagnostics.nim
+#       4 OK, 2 FAILED
+#
+# All three remaining reds are DEFECTIVE ASSERTIONS, not missing product code,
+# and each is diagnosed at the line and in the ledger row.  Two require a
+# per-line pure function to know a severity and a message that `nargo` puts on
+# the line ABOVE it; the third asserts `declared.build.command != "cargo"`
+# against a fixture whose every task runs `cargo`.  The behaviour all three are
+# about IS asserted and green elsewhere in the same files.
+#
+# They were left failing rather than relaxed to fit.  Correcting an assertion
+# is a decision for whoever owns the suite, and a lane made green by softening
+# the check that caught something is worth less than a red one.
+#
+# Rows, evidence and the retirement condition:
+# codetracer-specs/Testing/Known-Test-Failures.md, "Specifying suites".
+# Mutation arms: src/frontend/viewmodel/tests/unit/run-edit-mode-toolbar-mutations.py
+# (17/18 arms remain; M9 retired with the expired starting-state check it
+#  killed.  17/17 killed, each by its own named check, on both backends.)
+#
+# DO NOT make these lanes green by deleting or skipping a suite.  If one is in
+# your way, the answer is in the ledger row, and `release_gate.nim` will fail
+# the m16 lane if you try — all three are registered in CoreViewModelGateTests
+# for precisely that reason.
 # (`test-lanes` is the thirteenth recipe; it prints lane contents and runs
 #  nothing, so it is neither red nor promotable.)
 #

@@ -79,6 +79,18 @@ type
       ## `options.cwd` when the task set one, otherwise empty, meaning "the
       ## project root". Not resolved here — resolution needs a filesystem.
     group*: ProjectActionGroup
+    isDefault*: bool
+      ## VS Code's `group.isDefault`. Only the object spelling can set it:
+      ## `"group": "build"` is the bare form and carries no such flag, so it
+      ## reads as `false`.
+      ##
+      ## Carried rather than dropped because it is what makes
+      ## `Edit-Mode-Toolbar.md` §7.1 step 1 — *"`group.kind == build` **and**
+      ## `isDefault`"* — expressible at all. `parseGroup` used to read `kind`
+      ## and discard this, so selection had nothing to select on and the only
+      ## remaining rule would have been array position. §7.2 is explicit that
+      ## it must never be: a build that silently ran a different task after
+      ## somebody reordered the file leaves no trace in the UI.
     isBackground*: bool
       ## The task declared itself long-running. Advisory only: §9.3's process
       ## model treats *every* action as potentially long-running, because a
@@ -94,8 +106,8 @@ type
 proc `==`*(a, b: ProjectAction): bool {.noSideEffect.} =
   a.id == b.id and a.label == b.label and a.detail == b.detail and
     a.command == b.command and a.args == b.args and a.cwd == b.cwd and
-    a.group == b.group and a.isBackground == b.isBackground and
-    a.source == b.source
+    a.group == b.group and a.isDefault == b.isDefault and
+    a.isBackground == b.isBackground and a.source == b.source
 
 proc commandLine*(action: ProjectAction): string {.noSideEffect.} =
   ## The action as one line, for display and for the `commandLine` field of a
@@ -129,25 +141,35 @@ proc readJson(text, what: string; doc: var JsonNode): string =
   except:
     return what & " is not valid JSON"
 
-proc parseGroup(node: JsonNode): ProjectActionGroup =
+proc parseGroup(node: JsonNode): tuple[group: ProjectActionGroup;
+                                       isDefault: bool] =
   ## VS Code allows `"group": "test"` and
   ## `"group": {"kind": "test", "isDefault": true}`. Both are common in the
   ## wild, so both are read.
+  ##
+  ## Returns a pair rather than a group: `isDefault` is the field §7.1's first
+  ## selection step is written in terms of, and returning only the kind is what
+  ## made that step inexpressible.
   if node.isNil:
-    return pagNone
+    return (pagNone, false)
   var raw = ""
+  var isDefault = false
   case node.kind
   of JString:
     raw = node.getStr
   of JObject:
     if node.hasKey("kind") and node["kind"].kind == JString:
       raw = node["kind"].getStr
+    if node.hasKey("isDefault") and node["isDefault"].kind == JBool:
+      isDefault = node["isDefault"].getBool
   else:
-    return pagNone
+    return (pagNone, false)
   for value in ProjectActionGroup:
     if $value == raw:
-      return value
-  pagNone
+      return (value, isDefault)
+  # An unknown kind is `pagNone` and not a problem line (EMT-A10), and it
+  # cannot be a default of a group CodeTracer does not understand.
+  (pagNone, false)
 
 proc parseTasksJson*(text: string): ProjectActionSet =
   ## Read a VS Code `tasks.json`.
@@ -217,6 +239,8 @@ proc parseTasksJson*(text: string): ProjectActionSet =
       if options.hasKey("cwd") and options["cwd"].kind == JString:
         cwd = options["cwd"].getStr
 
+    let parsedGroup = parseGroup(if entry.hasKey("group"): entry["group"] else: nil)
+
     result.actions.add ProjectAction(
       id: $pasTasksJson & ":" & label,
       label: label,
@@ -226,7 +250,8 @@ proc parseTasksJson*(text: string): ProjectActionSet =
       command: command,
       args: args,
       cwd: cwd,
-      group: parseGroup(if entry.hasKey("group"): entry["group"] else: nil),
+      group: parsedGroup.group,
+      isDefault: parsedGroup.isDefault,
       isBackground:
         entry.hasKey("isBackground") and entry["isBackground"].kind == JBool and
           entry["isBackground"].getBool,
