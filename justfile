@@ -1232,8 +1232,9 @@ test-frontend-js:
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
   shortcut_bindings_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-bindings-test.XXXXXX.js")"
+  debug_toolbar_tooltips_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-debug-toolbar-tooltips-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$html_sinks_probe"' EXIT
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$debug_toolbar_tooltips_test" "$html_sinks_probe"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1272,6 +1273,18 @@ test-frontend-js:
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$shortcut_bindings_test" js src/frontend/tests/shortcut_bindings_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$shortcut_bindings_test"
+  echo ""
+  # The same property one level up, for the debug toolbar: its tooltips must
+  # NAME the bound chord rather than restate it.  They used to carry it as a
+  # string literal ("Next (F10)"), which the IsoNim DSL paints once and never
+  # updates -- correct by coincidence, and free to start lying the moment
+  # anyone rebound a key.  Asserts all 13 controls resolve to a chord in the
+  # SHIPPED table, and that rebinding one changes the rendered answer.  Same
+  # `window` alias, same `types.nim` reason.
+  echo "Running debug toolbar tooltip chord tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$debug_toolbar_tooltips_test" js src/frontend/tests/debug_toolbar_tooltips_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$debug_toolbar_tooltips_test"
   echo ""
   echo "Running IPC registry rebind tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \

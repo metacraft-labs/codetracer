@@ -49,7 +49,11 @@ proc renderChord*(action: ClientAction; config: Config): string =
   ##
   ## Multiple chords are joined with a space, which is how `forwardContinue`
   ## ("F8 F2") has always been shown in the menu.
-  if config.isNil or config.shortcutMap.actionShortcuts.isNil:
+  # `actionShortcuts` is `array[ClientAction, seq[Shortcut]]` — a value type,
+  # always fully sized and never nil, so only the `Config` ref needs guarding.
+  # It is nil in practice: the toolbar can mount before `CODETRACER::no-trace`
+  # has delivered a config.
+  if config.isNil:
     return ""
   var parts: seq[string] = @[]
   for shortcut in config.shortcutMap.actionShortcuts[action]:
