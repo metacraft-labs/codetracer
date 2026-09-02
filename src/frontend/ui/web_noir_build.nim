@@ -138,6 +138,31 @@ type
       ## if the recording then cannot be opened.
 
 var
+  noirConstraintsSink*: proc(listing: string; packageDir: string;
+                             provenance: string)
+    ## Where a finished COMPILE's constraint listing goes.
+    ##
+    ## The Constraints pane used to be told a number: a compile-time constant
+    ## of `nargo info --json`, measured on a developer's machine because a
+    ## browser has no `nargo`. `Generated-Code-Listing.md` §15.4 records what
+    ## that cost — the constant was produced by the NATIVE toolchain and
+    ## rendered by the WEB engine, two compilers 3,699 commits apart in the
+    ## ACIR-generating paths, so it was wrong by two opcodes for every visitor
+    ## while a gate comparing it against the wrong `nargo` certified it.
+    ##
+    ## So the pane is no longer told. It is handed the listing THIS compile
+    ## produced and counts the rows itself, because one opcode is one row. A
+    ## number the pane computes cannot drift from the thing it describes.
+    ##
+    ## A CALLBACK for `noirTestRunSink`'s reason: this module talks to the
+    ## wasm toolchain and the Constraints pane is a second surface over the
+    ## same compile. `ui_js` installs it, being the one place that can see
+    ## both.
+    ##
+    ## Nil is a real state — a build with no Constraints pane — and an empty
+    ## `listing` is ordinary rather than a fault: a compiler module older than
+    ## `VfsResponse.acir_listing` answers without it, and the pane must then
+    ## say it has no counts rather than show a number from somewhere else.
   noirTestRunSink*: proc(response: NoirTestResponse; packageDir: string)
     ## Where a finished test run's verdicts go, besides the build pane.
     ##
@@ -191,6 +216,12 @@ var
     ## is what a support question is answered from.
 
 proc jsNowMs(): float {.importjs: "Date.now()".}
+
+proc jsLocalTimeText(): cstring {.importjs: "new Date().toLocaleTimeString()".}
+  ## The wall-clock time a compile finished, in the visitor's own locale.
+  ##
+  ## For the Constraints pane's provenance, which must name WHICH compile a
+  ## count came from rather than which command could have produced one.
 
 proc reportBuildDiagnostic(line: cstring) {.importjs: """
 (function (s) {
@@ -358,6 +389,28 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
   let verdict = producer.onExit(exit)
   activeInFlight = false
   report($phase & "-exit", "verdict=" & $verdict & " code=" & $exit.exitCode)
+
+  # THE COUNTS COME OFF THIS COMPILE, before the phase chaining below decides
+  # what happens next. Published on every successful `nbpCompile` regardless of
+  # intent, because Build and Run compile the same program and a visitor who
+  # pressed either has just produced the artefact the pane describes.
+  #
+  # NOT on `nbpTestRecord`, whose artifact is a single test compiled with
+  # `force_brillig` — GCL-D9: that artefact has no located ACIR opcodes at all,
+  # so counting it would replace the program's constraints with a test's, and
+  # a `debug` compile's listing is one row.
+  if phase == nbpCompile and verdict == npvSucceeded and
+     not noirConstraintsSink.isNil:
+    # THE PROVENANCE NAMES THE COMPILE, not the command that could produce one.
+    # GCL-D10: the sentence it replaces was `"nargo info --json, run against
+    # this template at build time"`, which named a command and left two counts
+    # from two different compilers indistinguishable behind it. A wall-clock
+    # time is what makes this name WHICH compile — §15.3's "one artefact, one
+    # provenance, one timestamp", with the timestamp being the only part the
+    # pane could not previously say.
+    noirConstraintsSink(producer.acirListing, tmpl.name,
+                        "compiled in this tab at " & $jsLocalTimeText())
+
   if phase == nbpCompile and verdict == npvSucceeded and
      activeIntent == nriRun:
     startTrace(producer, tmpl)

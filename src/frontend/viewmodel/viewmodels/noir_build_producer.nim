@@ -114,6 +114,22 @@ type
       ## something to send. Cleared at the start of every compile, so a trace
       ## can never be issued against the artifact of a previous, different
       ## build.
+    acirListing*: string
+      ## `VfsResponse.acir_listing` from the same compile as `artifact`.
+      ##
+      ## Carried for the CONSTRAINTS pane, which counts its rows rather than
+      ## being told a number by anyone: one opcode is one row, so the listing
+      ## answers what `nargo info` answers about a program that cannot run
+      ## `nargo info` — see `common/noir_constraints.reportFromAcirListing`
+      ## and `Generated-Code-Listing.md` §15.4 for what the constant it
+      ## replaces cost.
+      ##
+      ## Cleared with `artifact` and for the same reason: a listing outliving
+      ## its compile is exactly the stale-number defect the pane exists to
+      ## avoid, one layer below the pane.
+      ##
+      ## EMPTY IS ORDINARY on a module older than the field, and the pane must
+      ## then say it has no counts rather than show someone else's.
     lastVerdict*: NoirPhaseVerdict
     lastSummary*: NoirTraceSummary
     replayLabel*: string
@@ -407,12 +423,14 @@ proc beginPhase*(producer: NoirBuildProducer; phase: NoirBuildPhase;
   producer.settled = false
   if phase == nbpCompile:
     producer.artifact = nil
+    producer.acirListing = ""
     producer.lastSummary = NoirTraceSummary()
   if phase == nbpTestRecord:
     # A recording replaces whatever artifact was carried. Not left alone like a
     # trace's: the artifact a Build produced compiles `main`, and tracing it
     # here would step the program instead of the test that was clicked.
     producer.artifact = nil
+    producer.acirListing = ""
     producer.lastSummary = NoirTraceSummary()
   if phase == nbpTest:
     # The previous run's verdicts, gone before the new one starts. A pane that
@@ -469,6 +487,7 @@ proc paintCompileResult(producer: NoirBuildProducer;
 
   if response.ok:
     producer.artifact = response.artifact
+    producer.acirListing = response.acirListing
     if response.artifact.isNil:
       # `ok` with no artifact is `mode: "resolve"`, which this product never
       # asks for. Reaching it means the request was not the one this module
@@ -705,6 +724,13 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
       producer.lastVerdict = npvFaulted
     else:
       producer.artifact = response.artifact
+      # `acirListing` is deliberately NOT set here, and was cleared when this
+      # phase started. A recording is a `force_brillig` compile of ONE TEST:
+      # per GCL-D9 that artefact has no located ACIR opcodes at all and its
+      # listing is a single `BRILLIG CALL` row. Carrying it would let the
+      # Constraints pane report a test's shape as the program's constraints —
+      # the exact "confidently wrong" answer §4 refuses, and it would look
+      # entirely plausible.
       for warning in response.warnings:
         producer.paintDiagnostic(warning)
       producer.note("compiled the test for recording")
