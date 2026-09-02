@@ -2554,19 +2554,32 @@ test-vm: test-vm-native test-vm-js
 # nothing compiles.
 #
 # ---------------------------------------------------------------------------
-# DEFERRED, AND SAY SO: NONE OF THE 13 RECIPES BELOW IS IN A PIPELINE YET.
+# DEFERRED, AND SAY SO: ALL BUT ONE OF THE 13 RECIPES NAMED BELOW ARE IN NO
+# PIPELINE YET.
 # ---------------------------------------------------------------------------
-# "Picked up by its lane" is NOT the same as "runs in CI", and for these
-# thirteen the second is currently false.  No workflow, no entry in
-# ci/verdict/required-jobs.txt, and no aggregate recipe invokes any of them —
-# 76 of the 220 files the lane library resolves are in lanes no pipeline runs
-# (`test_lane_all_files | wc -l` for the 220; the reachable 144 are the lanes
-# behind `just test-vm`, `test-cli-record`, `test-ct-trace-units`,
+# "Picked up by its lane" is NOT the same as "runs in CI", and for twelve of
+# the thirteen the second is currently false: no workflow, no entry in
+# ci/verdict/required-jobs.txt, and no aggregate recipe invokes them.  The one
+# exception is `test-lane-coverage` — `ci/lint/nim.sh` runs its script
+# (`ci/test/test-lane-coverage.sh`) as part of the `lint-nim` job, and
+# `lint-nim` IS listed in ci/verdict/required-jobs.txt.  That is repeated in
+# the promotable list further down; both statements are meant to agree.
+#
+# For HOW MUCH of the tree the deferral leaves dark, count it rather than
+# trusting a number written here — the figures that used to stand in this
+# paragraph (76 dark of 220 resolved, 144 reachable) were all stale against
+# the very command they cited.  Run:
+#
+#   source ci/lib/test-lane-files.sh && test_lane_all_files | wc -l
+#
+# for every file the lane library resolves.  The reachable share is whatever
+# the lanes behind `just test-vm`, `test-cli-record`, `test-ct-trace-units`,
 # `test-mcr-enrichment-units`, `test-m16-release-gate`, `test-ct-providers`,
 # `test-visual-replay-gate`, `test-vm-recorder-gated` and
-# `test-no-sidecar-manifests`).  A reader who assumed otherwise would be repeating this
-# campaign's own mistake one level up, so it is written down here rather than
-# left to be discovered.
+# `test-no-sidecar-manifests` resolve to; the rest are in lanes no pipeline
+# runs.  A reader who assumed otherwise would be repeating this campaign's own
+# mistake one level up, so it is written down here rather than left to be
+# discovered.
 #
 # WHY it is deferred: six of these lanes are red for reasons that are not
 # theirs to fix, and wiring a red lane into a required job breaks every build
