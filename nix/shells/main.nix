@@ -162,9 +162,13 @@ mkShell {
     # nix/pre-commit.nix each `cd` to the toplevel to survive that; this is the
     # cause those workarounds were compensating for.
     #
-    # `|| pwd` keeps the old behaviour if the shell is somehow entered outside a
-    # git repo, where `--show-toplevel` fails: previously that left the symlink
-    # in the cwd, and an unguarded empty ROOT_PATH would aim it at `/` instead.
+    # `|| pwd` is a deliberate choice, not a reflex. Outside a git repo
+    # `--show-toplevel` fails; an unguarded ROOT_PATH would then be empty and aim
+    # the symlink at `/`. Failing loudly there was considered and rejected: the
+    # relative form this replaces degraded harmlessly to the cwd, so aborting
+    # would be a behaviour change smuggled in under a path fix, and a dev shell
+    # that refuses to open outside a repo is a worse failure than a symlink in
+    # the wrong directory. The fallback reproduces the old behaviour exactly.
     ROOT_PATH=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 
     # Install pre-commit hooks automatically.
