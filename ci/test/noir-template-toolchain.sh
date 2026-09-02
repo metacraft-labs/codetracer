@@ -431,12 +431,16 @@ else
 fi
 
 provenance="$(grep '^provenance ' "${cache}/control-report.txt" | sed 's/^provenance //')"
+# The string must name the compiler that PRODUCED the shipped number, which is
+# the wasm module this page runs — not `nargo`, whose answer for this template
+# differs. Asserting "nargo info" here is what kept the wrong provenance in
+# place while certifying nothing about the number.
 case "${provenance}" in
-*"nargo info"*)
-	ck ok "the shipped counts carry their provenance: ${provenance}"
+*"compiler this page runs"*)
+	ck ok "the shipped counts name the compiler that produced them: ${provenance}"
 	;;
 *)
-	ck fail "the shipped counts carry no provenance naming nargo info ('${provenance}') — a count a user cannot judge"
+	ck fail "the shipped counts do not name the compiler that produced them ('${provenance}') — a count a user cannot judge, or one attributed to a compiler that returns a different number"
 	;;
 esac
 echo

@@ -370,7 +370,19 @@ const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir",
   ## whatever `wasm_worker_browser.js` dispatches. Read them there.
 
 const noirTemplateConstraintProvenance* =
-  "nargo info --json, run against this template at build time"
+  "measured at build time by the Noir compiler this page runs"
   ## Shown in the pane. A count with no provenance is a count a user cannot
   ## judge: "17" means one thing measured a second ago and another thing
   ## shipped in a bundle, and the pane must not make them look alike.
+  ##
+  ## THIS SAID "nargo info --json, run against this template at build time"
+  ## and that named the wrong compiler. The shipped ACIR total is the WASM
+  ## module's answer; the flake's `nargo` returns a different number for these
+  ## same sources, so a developer who ran the named command got a figure the
+  ## pane never shows and had no way to tell which was wrong. The string now
+  ## names the compiler whose answer the visitor is actually looking at.
+  ##
+  ## `ci/test/noir-template-toolchain.sh` checks this string. It used to assert
+  ## only that it contained "nargo info" — a check that certified the wrong
+  ## provenance and pinned it in place. It now asserts the string names the
+  ## shipping engine, so the two move together.
