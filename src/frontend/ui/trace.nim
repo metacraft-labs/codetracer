@@ -1045,8 +1045,8 @@ var gutterTestLinesProvider*: proc(path: cstring): seq[int]
   ## `editorLineNumber` is here and it is the thing that has to ask. `ui_js`
   ## installs it; `editor.nim` reads it too, so there is one answer and not two.
 
-var gutterTestLines*: JsAssoc[cstring, JsAssoc[int, bool]] =
-  JsAssoc[cstring, JsAssoc[int, bool]]{}
+var gutterTestLines*: JsAssoc[cstring, seq[int]] =
+  JsAssoc[cstring, seq[int]]{}
   ## A CACHE of what the provider said, keyed by the editor's own path.
   ##
   ## Filled lazily, on the first repaint after a provider exists, and never
@@ -1080,23 +1080,20 @@ proc invalidateGutterTestLines*(path: cstring) =
 proc gutterTestLinesFor*(path: cstring): seq[int] =
   ## The provider's answer, cached. Empty — and NOT cached — when no provider
   ## is installed; see `gutterTestLines`.
+  ##
+  ## A `seq[int]` and not a set keyed by line, deliberately: under `nim js` a
+  ## `JsAssoc[int, _]`'s keys come back as JavaScript strings, so iterating one
+  ## to rebuild the list is a coercion this does not need to think about. A file
+  ## has a handful of tests, so the linear search below costs nothing.
   if gutterTestLines.hasKey(path):
-    for line, _ in gutterTestLines[path]:
-      result.add line
-    return
+    return gutterTestLines[path]
   if gutterTestLinesProvider.isNil:
     return @[]
   result = gutterTestLinesProvider(path)
-  var lines = JsAssoc[int, bool]{}
-  for line in result:
-    lines[line] = true
-  gutterTestLines[path] = lines
+  gutterTestLines[path] = result
 
 proc gutterHasTest(path: cstring; line: int): bool =
-  if not gutterTestLines.hasKey(path):
-    discard gutterTestLinesFor(path)
-    if not gutterTestLines.hasKey(path): return false
-  gutterTestLines[path].hasKey(line)
+  line in gutterTestLinesFor(path)
 
 proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDeleteChunk: bool = false, lineNumber: int = NO_LINE): cstring =
   ## The custom gutter, as HTML handed to Monaco's `lineNumbers` callback.
