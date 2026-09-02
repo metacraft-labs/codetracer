@@ -76,12 +76,48 @@ pub fn is_vm_crossing_span(span: &SpanRecord) -> bool {
     span.span_type.starts_with("gdscript") || span.span_type == "vm-crossing"
 }
 
-/// Whether `span` is a VM crossing whose `[start_step, end_step]` covers `step`.
+/// Whether `span` is a VM crossing whose covered step range includes `step`.
 ///
-/// The range is inclusive on both ends: `start_step` is the first step inside
-/// the frame and `end_step` the last (span_stream record model).
+/// For a **closed** crossing the range is inclusive on both ends:
+/// `start_step` is the first step inside the frame and `end_step` the last
+/// (span_stream record model).
+///
+/// For an **open** crossing — the in-flight frame of a load-while-recording
+/// session — `end_step` is `0` (not yet known). Per
+/// `codetracer-trace-format-spec/nested-trace-correlation.md` §1.4 an open
+/// crossing covers `[start_step, recording_head]`, the live edge. Every valid
+/// query step is `<= recording_head` by construction (you cannot query past what
+/// has been recorded), so an open crossing covers `step` iff `start_step <= step`
+/// — there is no upper bound to test. The old `step <= end_step` test would be
+/// false for any `step >= 1` against `end_step == 0`, wrongly resolving the live
+/// frame the user is sitting in to native.
 fn crossing_covers(span: &SpanRecord, step: u64) -> bool {
-    is_vm_crossing_span(span) && span.start_step <= step && step <= span.end_step
+    if !is_vm_crossing_span(span) {
+        return false;
+    }
+    if span.is_open {
+        span.start_step <= step
+    } else {
+        span.start_step <= step && step <= span.end_step
+    }
+}
+
+/// The effective inclusive upper bound of a crossing, for the innermost
+/// tie-break.
+///
+/// A **closed** crossing bounds at its real `end_step`. An **open** crossing
+/// (`codetracer-trace-format-spec/nested-trace-correlation.md` §1.4) covers to
+/// the live edge, which is past every valid query step, so its effective end is
+/// `u64::MAX`. This keeps the "tighter interval wins on a tie" rule correct in
+/// both directions: a closed inner span (a real, smaller `end_step`) is tighter
+/// than an enclosing open span, while a deeper span — open or not — still wins on
+/// the primary `start_step` key before `end_step` is consulted.
+fn effective_end_step(span: &SpanRecord) -> u64 {
+    if span.is_open {
+        u64::MAX
+    } else {
+        span.end_step
+    }
 }
 
 /// The **innermost** VM crossing span covering `step`, or `None` when the moment
@@ -102,9 +138,12 @@ pub fn innermost_crossing_span(spans: &[SpanRecord], step: u64) -> Option<SpanRe
             a.start_step
                 .cmp(&b.start_step)
                 // Larger start_step wins (deeper). On a tie, the smaller
-                // end_step is the tighter interval, so reverse the end_step
-                // comparison to make it the maximum.
-                .then_with(|| b.end_step.cmp(&a.end_step))
+                // effective end_step is the tighter interval, so reverse the
+                // comparison to make it the maximum. `effective_end_step` maps an
+                // open crossing to `u64::MAX` (§1.4) so a closed inner span is
+                // correctly tighter than an enclosing open one. Both keys are
+                // `u64::cmp`, so the ordering is total and consistent.
+                .then_with(|| effective_end_step(b).cmp(&effective_end_step(a)))
         })
         .cloned()
 }
@@ -193,6 +232,21 @@ mod tests {
         }
     }
 
+    /// An OPEN crossing span — the in-flight frame of a load-while-recording
+    /// session. `is_open` is set and `end_step` is 0 (not yet known), matching
+    /// what the recorder appends on entering a crossing
+    /// (`nested-trace-correlation.md` §1.4).
+    fn open_gd_frame(span_id: u64, start_step: u64) -> SpanRecord {
+        SpanRecord {
+            span_id,
+            start_step,
+            end_step: 0,
+            is_open: true,
+            span_type: "gdscript-frame".to_string(),
+            ..SpanRecord::default()
+        }
+    }
+
     /// A non-VM span — must be invisible to every resolver function.
     fn web_span(span_id: u64, start_step: u64, end_step: u64) -> SpanRecord {
         SpanRecord {
@@ -249,6 +303,60 @@ mod tests {
         recompute_release(&mut s, &spans, 8);
         assert_eq!(s.override_span, None);
         assert_eq!(active_altitude(&s, &spans, 8), Altitude::Native);
+    }
+
+    #[test]
+    fn open_crossing_covers_to_the_live_edge() {
+        // The live frame started at step 4 and is still recording (end_step 0).
+        let spans = vec![open_gd_frame(1, 4)];
+        let s = AltitudeState::default();
+
+        // Below start_step: native (the frame has not begun yet).
+        assert!(innermost_crossing_span(&spans, 3).is_none());
+        assert_eq!(active_altitude(&s, &spans, 3), Altitude::Native);
+
+        // At and past start_step: VM, all the way to the live edge — the open
+        // crossing has no upper bound (§1.4).
+        for step in [4u64, 5, 100, u64::MAX] {
+            assert_eq!(
+                innermost_crossing_span(&spans, step).unwrap().span_id,
+                1,
+                "open crossing must cover step {step}"
+            );
+            assert_eq!(
+                active_altitude(&s, &spans, step),
+                Altitude::Vm,
+                "open crossing => VM at step {step}"
+            );
+        }
+    }
+
+    #[test]
+    fn closed_inner_is_tighter_than_open_outer() {
+        // An open outer frame [4, live] with a CLOSED inner frame [6, 8] nested
+        // inside it.
+        let spans = vec![open_gd_frame(1, 4), gd_frame(2, 6, 8)];
+
+        // Inside the inner frame the innermost is the closed inner (id 2): its
+        // real end_step 8 is tighter than the open outer's effective u64::MAX.
+        assert_eq!(innermost_crossing_span(&spans, 7).unwrap().span_id, 2);
+
+        // In the outer-but-not-inner region (>= outer.start_step, past the inner)
+        // only the open outer covers.
+        assert_eq!(innermost_crossing_span(&spans, 9).unwrap().span_id, 1);
+        // Between the outer's start and the inner's start, likewise the outer.
+        assert_eq!(innermost_crossing_span(&spans, 5).unwrap().span_id, 1);
+    }
+
+    #[test]
+    fn deeper_open_span_wins_by_start_step() {
+        // Two open frames: an outer [4, live] and a deeper open inner [6, live].
+        // The deeper one (larger start_step) must win on the primary key even
+        // though both have the same effective end (u64::MAX).
+        let spans = vec![open_gd_frame(1, 4), open_gd_frame(2, 6)];
+        assert_eq!(innermost_crossing_span(&spans, 7).unwrap().span_id, 2);
+        // Before the inner begins, the outer covers.
+        assert_eq!(innermost_crossing_span(&spans, 5).unwrap().span_id, 1);
     }
 
     #[test]
