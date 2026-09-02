@@ -2167,9 +2167,10 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
             req.clone(),
             // The three arguments are all optional (no filters, no paging is a
             // valid "give me everything" request), so a request with no
-            // `arguments` at all must not be an error.
-            req.load_args::<crate::request_spans::LoadRequestSpansArguments>()
-                .unwrap_or_default(),
+            // `arguments` at all must not be an error.  It must not swallow a
+            // MALFORMED `arguments` either: that would answer a narrow filtered
+            // query with the whole recording and report success.
+            req.load_args_or_default::<crate::request_spans::LoadRequestSpansArguments>()?,
             sender.clone(),
         )?,
         // RS-M3 — HTTP Request Panel, live: return only the request spans
@@ -2182,9 +2183,10 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "ct/load-request-spans-since" => handler.load_request_spans_since(
             req.clone(),
             // `cursor` is optional: a first poll with no `arguments` at all is
-            // a valid "give me the snapshot" request.
-            req.load_args::<crate::request_spans::LoadRequestSpansSinceArguments>()
-                .unwrap_or_default(),
+            // a valid "give me the snapshot" request.  A malformed `cursor`,
+            // however, must not silently replay the whole span stream as if it
+            // were a first poll.
+            req.load_args_or_default::<crate::request_spans::LoadRequestSpansSinceArguments>()?,
             sender.clone(),
         )?,
         "ct/seek-to-geid" => handler.seek_to_geid(
