@@ -582,7 +582,6 @@ pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapR
     from_json(json_text)
 }
 
-#[cfg(feature = "browser-transport")]
 /// Answer a message the worker could not decode with a DAP failure response.
 ///
 /// See the call sites in [`setup_onmessage_callback`]: the alternative is
@@ -621,6 +620,7 @@ fn post_decode_failure(scope: &web_sys::DedicatedWorkerGlobalScope, raw: &Value,
     )));
 }
 
+#[cfg(feature = "browser-transport")]
 pub fn setup_onmessage_callback() -> Result<(), DapError> {
     use std::rc::Rc;
 

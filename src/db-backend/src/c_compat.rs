@@ -190,7 +190,7 @@ pub extern "C" fn strerror(_errnum: c_int) -> *mut c_char {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn snprintf(_buf: *mut c_char, _n: usize, _fmt: *const c_char, _arg: usize) -> c_int {
-    unreachable!("Running in wasm mode. Should not be calling `sprintf`");
+    unreachable!("Running in wasm mode. Should not be calling `snprintf`");
 }
 
 // Dummy va_list type for signature compatibility
@@ -210,8 +210,48 @@ pub extern "C" fn abort() -> ! {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn strncmp(_s1: *const c_char, _s2: *const c_char, _n: usize) -> c_int {
-    unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
+/// A real `strncmp`, because the emulator C legitimately calls one.
+///
+/// This was a trapping stub, and it is the bug the browser replay gate found:
+/// every `ct/load-locals` after a step died here with
+/// `entered unreachable code`, six traps for six steps, killing the request
+/// each time. Nothing about `strncmp` needs a host — it is a bounded compare
+/// over two byte strings — so trapping was never a statement about wasm, only
+/// about which stubs had been filled in.
+///
+/// C semantics, exactly: compare at most `n` bytes, stop at the first NUL or
+/// first difference, and return the difference of the bytes as UNSIGNED chars.
+/// Returning a signed difference is the classic way to get this subtly wrong
+/// for bytes above 0x7f.
+///
+/// # Safety
+/// `s1` and `s2` must each be valid for reads up to the first NUL or `n`
+/// bytes, whichever comes first — the same contract libc has.
+pub extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int {
+    if n == 0 {
+        return 0;
+    }
+    if s1.is_null() || s2.is_null() {
+        // libc would fault; a trap here would be the same bug again, so answer
+        // "equal only if both are absent" and let the caller carry on.
+        return if s1.is_null() && s2.is_null() { 0 } else { 1 };
+    }
+    for offset in 0..n {
+        // SAFETY: the caller's contract, above; we stop at the first NUL.
+        let (a, b) = unsafe {
+            (
+                *s1.add(offset) as u8,
+                *s2.add(offset) as u8,
+            )
+        };
+        if a != b {
+            return a as c_int - b as c_int;
+        }
+        if a == 0 {
+            return 0;
+        }
+    }
+    0
 }
 
 #[unsafe(no_mangle)]
@@ -227,22 +267,22 @@ pub extern "C" fn clock() -> c_int {
 
 #[inline]
 fn write_host(_s: &str, _stream: *mut c_void) {
-    unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
+    unreachable!("Running in wasm mode. Should not be calling `write_host`");
 }
 
 /// int fputc(int c, FILE *stream)
 #[unsafe(no_mangle)]
 pub extern "C" fn fputc(_c: c_int, _stream: *mut c_void) -> c_int {
-    unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
+    unreachable!("Running in wasm mode. Should not be calling `fputc`");
 }
 
 /// int fputs(const char *s, FILE *stream)
 #[unsafe(no_mangle)]
 pub extern "C" fn fputs(_s: *const c_char, _stream: *mut c_void) -> c_int {
-    unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
+    unreachable!("Running in wasm mode. Should not be calling `fputs`");
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn fdopen(_fd: c_int, _mode: *const c_char) -> *mut c_void {
-    unreachable!("Running in wasm mode. Should not be calling `vsprintf`");
+    unreachable!("Running in wasm mode. Should not be calling `fdopen`");
 }

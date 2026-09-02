@@ -70,7 +70,19 @@ const describeError = (e) => {
 };
 
 page.on('pageerror', (e) => pageErrors.push(describeError(e)));
-page.on('console', (m) => consoleLines.push(`${m.type()}: ${m.text().slice(0, 500)}`));
+// ERRORS ARE KEPT WHOLE. A 500-character slice is fine for progress chatter
+// and wrong for the one message that matters: `console_error_panic_hook` is
+// installed in the engine (`lib.rs:234`), so a Rust panic in the wasm arrives
+// here as a `console.error` whose FIRST line names the panic site — and the
+// stack that follows it pushed that line out of the slice, leaving this gate
+// reporting six `RuntimeError: unreachable` traps with no identity. That is
+// the fifth time on this gate that the instrument, not the product, was the
+// thing withholding the answer.
+page.on('console', (m) => {
+  const text = m.text();
+  const limit = m.type() === 'error' ? 4000 : 500;
+  consoleLines.push(`${m.type()}: ${text.slice(0, limit)}`);
+});
 page.on('response', (r) => {
   const u = r.url();
   if (!u.endsWith('.wasm')) return;
@@ -500,7 +512,8 @@ report.pageErrors = pageErrors;
 report.consoleLines = consoleLines.filter((l) =>
   l.includes('codetracer-') || l.includes('Error') || l.includes('error:') ||
   l.includes('Mount') || l.includes('mount') || l.includes('isonim') ||
-  l.includes('DebugControls') || l.includes('retries'));
+  l.includes('DebugControls') || l.includes('retries') ||
+  l.includes('panicked') || l.includes('unreachable'));
 
 await browser.close();
 console.log(JSON.stringify(report, null, 2));

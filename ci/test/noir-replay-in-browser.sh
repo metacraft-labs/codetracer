@@ -362,6 +362,33 @@ ck "$([ "${painted_chars}" -gt 40 ] && echo ok || echo no)" \
 ck "$([ "${no_source}" = false ] && echo ok || echo no)" \
 	"and the NO SOURCE view is not what the user is looking at"
 
+# THE REMAINING RED, NAMED (2026-09-02).
+#
+# Six traps inside `db_backend_bg.wasm`, one per step, on the
+# `ct/load-locals` that follows each `next`. The panic message, once the probe
+# stopped truncating `console.error` at 500 characters:
+#
+#   panicked at src/c_compat.rs:214:5:
+#   internal error: entered unreachable code:
+#   Running in wasm mode. Should not be calling `vsprintf`
+#
+# So it is NOT the clock hazard `wall_clock.rs` warns about, which was the
+# obvious guess and names this very request ("`ct/load-locals` via
+# `WallClockDeadline`") among three paths that died that way. It is the wasm
+# C-compat layer: something on the locals path reaches C code that formats a
+# string, and `vsprintf` is a deliberate `unreachable!()` stub in the wasm
+# build. A panic there compiles to `unreachable`, which is why it presents as
+# a trap rather than an error response.
+#
+# MEASURED FIRST, so the next reader does not re-derive it. Driving the NATIVE
+# `replay-server` over DAP with the same launch/next/ct-load-locals sequence:
+#
+#   * absolute-path trace (spike shape), lang 0..20 swept  -> success, no panic
+#   * browser-shaped trace (relative paths, workdir = the
+#     trace folder, no source on disk)                     -> success, no panic
+#
+# Neither the locals logic, nor the `lang` argument, nor the shape of what we
+# hand it. Wasm-specific, and now with a file and a line.
 errors="$(field "${control}" '.pageErrors | length')"
 ck "$([ "${errors}" -eq 0 ] && echo ok || echo no)" \
 	"zero uncaught page errors (${errors})"
@@ -396,11 +423,17 @@ remove_published "${arm_a}" assets/db_backend_bg.wasm || exit 2
 arm_a_out="${cache}/arm-a.json"
 if run_probe "${arm_a}" "${arm_a_out}"; then
 	a_engine="$(field "${arm_a_out}" '.engineFetched')"
-	a_painted="$(field "${arm_a_out}" '.editorPaintedChars')"
+	a_carets="$(field "${arm_a_out}" '.caretPositions | length')"
 	ck "$([ "${a_engine}" = false ] && echo ok || echo no)" \
 		"arm A: the engine was not fetched"
-	ck "$([ "${a_painted}" -le 40 ] && echo ok || echo no)" \
-		"arm A: and no source was painted from a session (${a_painted} chars)"
+	# NOT "no source was painted". The editor paints the bundled template
+	# through `installTemplateHost` whether or not a replay session ever
+	# opens, so that assertion was passing only because the CONTROL painted
+	# nothing either — a vacuous arm that became visible the moment the
+	# control went green. The caret is the discriminating signal: it moves
+	# only when a live engine answers a step.
+	ck "$([ "${a_carets}" -le 1 ] && echo ok || echo no)" \
+		"arm A: and the caret never moved (${a_carets} position(s))"
 	note "arm A engine requests:"
 	jq -r '.engineRequests[] | "        \(.status) \(.contentType) \(.bytes) \(.url)"' <"${arm_a_out}"
 	note "arm A milestones:"
@@ -423,11 +456,12 @@ remove_published "${arm_b}" assets/replay-worker.js || exit 2
 arm_b_out="${cache}/arm-b.json"
 if run_probe "${arm_b}" "${arm_b_out}"; then
 	b_resolved="$(field "${arm_b_out}" '.resolvedCount')"
-	b_painted="$(field "${arm_b_out}" '.editorPaintedChars')"
+	b_carets="$(field "${arm_b_out}" '.caretPositions | length')"
 	ck "$([ "${b_resolved}" -eq 0 ] && echo ok || echo no)" \
 		"arm B: the session resolved nothing (${b_resolved})"
-	ck "$([ "${b_painted}" -le 40 ] && echo ok || echo no)" \
-		"arm B: and no source was painted (${b_painted} chars)"
+	# Same correction as arm A, and for the same reason.
+	ck "$([ "${b_carets}" -le 1 ] && echo ok || echo no)" \
+		"arm B: and the caret never moved (${b_carets} position(s))"
 else
 	ck no "arm B: the probe did not complete"
 fi
