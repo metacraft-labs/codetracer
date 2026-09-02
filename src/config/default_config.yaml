@@ -158,6 +158,44 @@ bindings:
   videoPlayerTogglePicker: "P"
   videoPlayerCancelPicker: "Esc"
 
+  # The five debug-toolbar controls that had no chord to display.
+  #
+  # WHY THESE FIVE AND NOT THE OTHER EIGHT. The toolbar has 13 buttons. Eight
+  # of them — the stepping pairs — already resolve to actions bound above with
+  # the conventional chords (F10/SHIFT+F10, F11/SHIFT+F11, F12/SHIFT+F12,
+  # F8/SHIFT+F8), so the tooltips that had been *restating* those chords as
+  # literal strings could simply start reading them instead. The remaining five
+  # had no `ClientAction` at all, so `loadShortcut` had nothing to return and a
+  # tooltip could only have lied or stayed silent. NOTHING WAS DISPLACED to fit
+  # them in.
+  #
+  # WHY THE CTRL+ALT+<letter> FAMILY. It is the one family this file has
+  # already measured as clean. The build-error-navigation note above records
+  # why the obvious picks are not available: `initShortcutMap`
+  # (`common/config.nim:112-135`) is FIRST-WRITER-WINS and pushes a second
+  # claim into `conflictList`, which nothing reads, so a chord already taken
+  # yields an action with NO chord — and now, therefore, a BLANK TOOLTIP,
+  # indistinguishable from a control that was never wired. Every chord below
+  # was checked against all 57 entries in this file AND against the ~24 chords
+  # hard-bound in `ui/shortcuts.nim` and `ui_js.nim`, which this file cannot
+  # see and which silently win by binding later.
+  #
+  # Arrow keys are deliberately NOT used with CTRL+ALT (GNOME takes
+  # CTRL+ALT+Left/Right for workspace switching), and no chord here is in
+  # `ui/editor.nim`'s MONACO_SHORTCUTS_WHITELIST — Monaco binds no
+  # CTRL+ALT+<letter> natively, so the ALT+F8 double-fire measured by the
+  # error-navigation work cannot recur here.
+  aHistoryBack: "CTRL+ALT+B"        # CTRL+B is `build`; CTRL+ALT+B is free
+  aHistoryForward: "CTRL+ALT+F"     # CTRL+F is `findOrFilter`; CTRL+ALT+F is free
+  aRunToEntry: "CTRL+ALT+E"         # CTRL+E is `switchEdit`, ALT+E is hard-bound
+  aResetOperation: "CTRL+ALT+R"     # CTRL+R is hard-bound to re-record
+  # MOVED HERE OUT OF `ui/shortcuts.nim`, where it was `Mousetrap.bind("alt+l")`
+  # with no `ClientAction` behind it. The chord is unchanged, so no user's
+  # muscle memory moves; what changes is that it is now readable — a hard-bound
+  # chord is invisible to `loadShortcut`, so the Run-tests tooltip could not
+  # have named it without hardcoding it, which is the defect this work removes.
+  aRunTests: "ALT+L"
+
 rrBackend:
   enabled: false
   path: ""

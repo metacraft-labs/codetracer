@@ -277,9 +277,24 @@ proc configureShortcuts* =
   Mousetrap.`bind`("ctrl+r") do ():
     data.reRecordCurrent(projectOnly=false)
 
-  Mousetrap.`bind`("alt+l") do ():
-    let options = RunTestOptions(newWindow: true, path: data.services.debugger.location.path, testName: "")
-    data.runTests(options)
+  # ALT+L (Run tests) MOVED TO `src/config/default_config.yaml` as `aRunTests`.
+  #
+  # It used to be a bare `Mousetrap.bind("alt+l")` here, with a copy of the
+  # `RunTestOptions` body that `ui/debug.nim`'s `action("run-tests")` already
+  # held — that file's copy still carries the comment "copied from alt+l
+  # shortcut handling in shortcuts.nim". Two copies of one behaviour, and a
+  # chord that no `ClientAction` named.
+  #
+  # The reason it had to move is the point of this change rather than tidiness:
+  # a hard-bound chord is INVISIBLE to `menu.nim:151 loadShortcut`, which reads
+  # `config.shortcutMap.actionShortcuts`. The Run-tests toolbar button could
+  # therefore never have displayed its chord without hardcoding the string —
+  # and a hardcoded chord is exactly what goes stale when someone rebinds. The
+  # chord itself is unchanged, so no muscle memory moves.
+  #
+  # The loop at the top of this proc now installs it, and it dispatches through
+  # `data.actions[ClientAction.aRunTests]` into the same `action("run-tests")`
+  # the button uses, so the two paths can no longer drift apart.
 
   # CTRL+B IS A CONFIGURED SHORTCUT, AND THIS LINE SHADOWS IT.
   #
