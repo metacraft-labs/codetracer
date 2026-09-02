@@ -1705,6 +1705,15 @@ proc flowSimpleValue*(
         self.jumpToLocalStep(stepCount)
 
   proc onContextMenu(e: Event, value: Value) =
+    # A SIBLING OF THE EDITOR'S OWN LEAK, and it is inside the editor area: flow
+    # values are inline widgets drawn over the source, so right-clicking one is
+    # "right click in the editor area" as far as the reporter is concerned.  It
+    # stopped propagation but never suppressed the default, so the browser drew
+    # its menu over ours here too.  Shift stands down for the same reason as in
+    # `ui/editor.nim` — see the comment there.
+    if cast[bool](e.toJs.shiftKey):
+      return
+    e.preventDefault()
     e.stopPropagation()
 
     let step = self.flow.steps[stepCount]
