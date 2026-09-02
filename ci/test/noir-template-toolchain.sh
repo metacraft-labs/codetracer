@@ -15,8 +15,11 @@
 #      it twice. A citation of an absent check is worse than no citation: it
 #      reads, in review, exactly like a check.
 #   3. (new) `noirTemplateNargoInfoJson` — the constraint counts the
-#      Constraints pane shows on the web, produced by `nargo info --json` at
-#      build time because a browser has no `nargo`.
+#      Constraints pane shows on the web. They are carried in `nargo info
+#      --json`'s SHAPE, but this gate no longer checks them with `nargo`: the
+#      ACIR total is compared against the wasm module the deploy ships, which
+#      is the only compiler whose answer a visitor can see. The unconstrained
+#      counts are compared against nothing.
 #
 # This gate is all three, plus the one that matters most for NS9:
 #
@@ -53,9 +56,11 @@
 #     reddens the selector-set equality alone — `nargo` then runs 4 tests and
 #     the parser still reports 5, which is precisely the drift claim 4 is
 #     about. The compile and info checks stay green.
-#   * arm I (perturb one opcode count in the shipped constant): reddens the
-#     `nargo info` equality alone. Everything the toolchain says is unchanged;
-#     what changed is the bundle's claim about it.
+#   * arm I (perturb the shipped ACIR total): reddens the engine-equality check
+#     alone — the comparison against the wasm module's own count, NOT a `nargo
+#     info` comparison; there is no longer one. Everything the toolchain says is
+#     unchanged; what changed is the bundle's claim about it. Perturbing an
+#     UNCONSTRAINED count instead reddens nothing, because nothing compares it.
 #   * arm B (break the Noir syntax in `main.nr`): reddens the compile check
 #     first, and the gate says so rather than reporting five confusing
 #     downstream failures.
@@ -74,7 +79,11 @@
 #
 # Usage:  bash ci/test/noir-template-toolchain.sh
 # Env:    CT_NIM_CACHE_ROOT       nim cache root (default /tmp/ct-nim-cache)
-#         CT_NOIR_WASM_COMPILER   noir_wasm.wasm, for arm V (optional)
+#         CT_NOIR_WASM_COMPILER   noir_wasm.wasm (optional). Gates BOTH arm V's
+#                                 verdict diff and the control arm's ACIR
+#                                 comparison — the check that decides whether
+#                                 the pane's number is right. Without it the
+#                                 shipped count is not checked at all.
 
 set -uo pipefail
 
@@ -476,8 +485,8 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-echo "Arm I: MUTATION — the shipped constraint counts drift from the producer"
-echo "    Expect the INFO equality RED, everything else green."
+echo "Arm I: MUTATION — the shipped ACIR total drifts from the shipping engine"
+echo "    Expect the ENGINE ACIR equality RED, everything else green."
 # ---------------------------------------------------------------------------
 # THE PERTURBATION IS DERIVED FROM THE SHIPPED VALUE, NOT WRITTEN HERE.
 #

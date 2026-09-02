@@ -653,8 +653,12 @@ proc templateConstraintReport*(tmpl: ProjectTemplate): ConstraintReport =
   ## `parseNargoInfoJson` the desktop uses on live `nargo info` output — one
   ## parser, one shape, two sources. The counts are a pure function of sources
   ## that are themselves a compile-time constant, and
-  ## `ci/test/noir-template-toolchain.sh` re-runs `nargo info` and fails on any
-  ## drift, so this is a measurement that travels rather than a cached answer.
+  ## `ci/test/noir-template-toolchain.sh` recompiles the template with the wasm
+  ## module the deploy ships and fails if the ACIR total has drifted from it —
+  ## so the headline number is a measurement that travels rather than a cached
+  ## answer. The unconstrained counts are NOT covered by that comparison; see
+  ## `noirTemplateNargoInfoJson`'s docstring for what the gate does and does not
+  ## establish.
   if not tmpl.hasFiles:
     return absentReport("No project is open.")
   parseNargoInfoJson(noirTemplateNargoInfoJson,
