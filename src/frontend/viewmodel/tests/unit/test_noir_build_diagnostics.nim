@@ -177,14 +177,34 @@ suite "EMT §11 a nargo failure becomes navigable Problems rows":
     ## below is pinned to what the compiler actually said.
     startCount()
 
-    let lines = diagnosticLines(RecordedNargoStderr)
+    # THE INSTRUMENT IS THE FIX. This read `parseBuildLocation(raw)` one
+    # location line at a time, and in that form the last of its five field
+    # checks could never pass on any correct parser: `nargo` puts the sentence
+    # and the keyword on the line ABOVE the location, so a function of the
+    # location line alone has no message to return, `message` is `""`, and
+    # `"".allCharsInSet({'0'..'9'})` is vacuously TRUE — which is exactly how
+    # it failed (`parsed.message.allCharsInSet({'0' .. '9'}) was true`, three
+    # times, once per row).
+    #
+    # `BuildLocationScanner` is the reader this family needs and the one this
+    # module's own header prescribes: the producer drives it line by line, in
+    # order, and it carries the header's severity AND sentence onto the
+    # location beneath. Feeding it the whole transcript is therefore not a
+    # weaker test — it is the only shape in which "every diagnostic yields a
+    # row whose fields are the compiler's" is a statement about anything. The
+    # fields below are unchanged; only what produces the rows is.
+    var scanner: BuildLocationScanner
+    var rows: seq[ParsedBuildLocation] = @[]
+    for line in RecordedNargoStderr.splitLines:
+      let scanned = scanner.scan(line)
+      if scanned.found:
+        rows.add scanned
     # A count, not `>= 1` — §4b: "if your loop's membership is knowable,
     # assert the COUNT". Three diagnostics are in the fixture.
-    ck lines.len == 3
+    ck rows.len == 3
 
     when NoirMatcherBuilt:
-      for raw in lines:
-        let parsed = parseBuildLocation(raw)
+      for parsed in rows:
         ck parsed.found
         # The path is the compiler's path, with no box-drawing prefix. This is
         # the field EMT-D20 turns on: a path that does not resolve yields a row
@@ -217,15 +237,31 @@ suite "EMT §11 a nargo failure becomes navigable Problems rows":
     ## warnings in this fixture — is reported as an error today.
     startCount()
 
-    let lines = diagnosticLines(RecordedNargoStderr)
-    ck lines.len == 3
+    # Same correction as the check above, and here the reason is the one this
+    # test's own docstring already states: "`nargo` puts the keyword on the
+    # line ABOVE the location". `severityOf` is a function of ONE line, so it
+    # cannot answer *warning, warning, error* over three lines that differ
+    # only in `path:line:col` — it answered `blsError` three times, which is
+    # `inferSeverity`'s documented fallback and not a parser defect.
+    #
+    # The scanner is what carries the keyword forward, so the severity split
+    # is asserted through it. Both halves stay pinned, so a reader that
+    # called everything a warning fails exactly as one that called everything
+    # an error does.
+    var scanner: BuildLocationScanner
+    var rows: seq[ParsedBuildLocation] = @[]
+    for line in RecordedNargoStderr.splitLines:
+      let scanned = scanner.scan(line)
+      if scanned.found:
+        rows.add scanned
+    ck rows.len == 3
 
     when NoirMatcherBuilt:
       var errors, warnings = 0
-      for raw in lines:
-        case severityOf(raw)
-        of blsError: inc errors
-        of blsWarning: inc warnings
+      for row in rows:
+        case row.severity
+        of SevError: inc errors
+        of SevWarning: inc warnings
         else: discard
       # The fixture is two warnings and one error. Both halves asserted, so a
       # matcher that classified everything as a warning fails too.
