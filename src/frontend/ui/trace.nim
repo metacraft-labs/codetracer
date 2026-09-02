@@ -1049,19 +1049,19 @@ var gutterTestLines*: JsAssoc[cstring, seq[int]] =
   JsAssoc[cstring, seq[int]]{}
   ## A CACHE of what the provider said, keyed by the editor's own path.
   ##
-  ## Filled lazily, on the first repaint after a provider exists, and never
-  ## while one does not — which is what makes the gutter self-healing rather
-  ## than order-dependent. THAT MATTERS BECAUSE THE ORDERING IS GENUINELY
+  ## Filled lazily, on the first repaint that gets a NON-EMPTY answer, and
+  ## never before — which is what makes the gutter self-healing rather than
+  ## order-dependent. THAT MATTERS BECAUSE THE ORDERING IS GENUINELY
   ## UNSPECIFIED: a file can open before the test catalog arrives or after it,
   ## the hooks can be installed before the catalog is delivered or after, and
   ## the template path takes the unlucky branch of both. An eagerly-filled map
   ## would be empty in those cases and nothing would refill it, because
   ## `addTestActions` is not called again for a file already open.
   ##
-  ## Caching only when a provider exists is the load-bearing half. Caching an
-  ## empty answer from a nil provider would freeze the unlucky ordering in
-  ## place, which is the defect this replaces rather than a smaller version of
-  ## it.
+  ## Refusing to cache an EMPTY answer is the load-bearing half. A nil provider
+  ## and a provider whose catalog has not arrived yet both answer nothing, and
+  ## caching either would freeze the unlucky ordering in place — which is the
+  ## defect this replaces rather than a smaller version of it.
 
 var gutterRunningTest*: JsAssoc[cstring, int] = JsAssoc[cstring, int]{}
   ## Which line, per path, has a run in flight.
@@ -1090,6 +1090,15 @@ proc gutterTestLinesFor*(path: cstring): seq[int] =
   if gutterTestLinesProvider.isNil:
     return @[]
   result = gutterTestLinesProvider(path)
+  if result.len == 0:
+    # AN EMPTY ANSWER IS NOT CACHED, and this is the last hole in the ordering
+    # argument rather than an optimisation. A provider can be installed before
+    # the catalog it reads has arrived — that is the template path's actual
+    # order — so the first render after installation would otherwise freeze
+    # `@[]` in place and no later catalog could dislodge it. A file with
+    # genuinely no tests then re-asks on each render, which is a loop over a
+    # handful of catalog items and costs nothing.
+    return
   gutterTestLines[path] = result
 
 proc gutterHasTest(path: cstring; line: int): bool =
