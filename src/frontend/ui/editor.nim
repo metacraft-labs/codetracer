@@ -2190,15 +2190,18 @@ proc isPythonTestLine(lineContent: string): bool =
 # both.
 # ---------------------------------------------------------------------------
 
-var editorTestLinesHook*: proc(path: cstring): seq[int]
-  ## Which lines of `path` declare a test, from the project's real CATALOG.
-  ##
-  ## Nil falls back to the text scan in `addTestActions`, which is what the
-  ## desktop still uses. The two are not equivalent and the catalog is the
-  ## better one: the scan matches `lineStr.strip() == "#[test]"` exactly, so
-  ## `#[test(should_fail)]` and `#[test(should_fail_with = "…")]` get no button
-  ## at all — two of the bundled Noir template's five tests, which are
-  ## precisely the two whose behaviour is worth checking.
+# WHICH LINES DECLARE A TEST is `trace.gutterTestLinesProvider`, and it lives
+# there rather than here because `trace.editorLineNumber` is the thing that has
+# to ask on every repaint. `addTestActions` reads the same one through
+# `trace.gutterTestLinesFor`, so the gutter and the fallback widget cannot
+# disagree about which lines have tests.
+#
+# Nil falls back to the text scan in `addTestActions`, which is what the desktop
+# still uses. The two are not equivalent and the catalog is the better one: the
+# scan matches `lineStr.strip() == "#[test]"` exactly, so `#[test(should_fail)]`
+# and `#[test(should_fail_with = "…")]` get no control at all — two of the
+# bundled Noir template's five tests, and precisely the two whose behaviour is
+# worth checking.
 
 var editorTestSelectorHook*: proc(path: cstring; attrLine: int): cstring
   ## The RUNNER'S OWN NAME for the test declared at `attrLine` — the
@@ -2409,26 +2412,22 @@ proc addTestActions*(self: EditorViewComponent) =
   let lang = fromPath(self.name)
   let isPythonFile = lang == LangPythonDb
 
-  # THE CATALOG FIRST, when a host has one. See `editorTestLinesHook`: the text
+  # THE CATALOG FIRST, when a host has one. See `trace.gutterTestLinesProvider`:
+  # the text
   # scan below cannot see `#[test(should_fail)]`, so on the bundled Noir
   # template it puts a Run button on three of the five tests and none on the
   # two whose behaviour is the most interesting.
-  var catalogLines: seq[int] = @[]
-  var haveCatalog = false
-  if not editorTestLinesHook.isNil:
-    catalogLines = editorTestLinesHook(self.name)
-    haveCatalog = catalogLines.len > 0
+  let catalogLines = trace.gutterTestLinesFor(self.name)
+  let haveCatalog = catalogLines.len > 0
 
   # THE GUTTER GETS THE LINES, and this is what moves the control off the end
   # of the source line and into the strip a reader already looks at for
   # per-line actions. `trace.editorLineNumber` reads this map; a repaint is
   # what makes the slots appear.
   if haveCatalog:
-    var lines = JsAssoc[int, bool]{}
-    for rLine in catalogLines:
-      lines[rLine] = true
-    trace.gutterTestLines[self.name] = lines
-
+    # `gutterTestLinesFor` has already cached the answer the gutter renders
+    # from; nothing to publish here.
+    #
     # AND ANY INLINE WIDGET FROM AN EARLIER PASS GOES. This proc can run twice
     # for one file — once when it opened, and again when the catalog arrived
     # (`refreshEditorTestControls`) — and the first pass may well have taken
@@ -2498,6 +2497,9 @@ proc refreshEditorTestControls*(data: Data) =
     if editor.isNil or editor.monacoEditor.isNil:
       continue
     try:
+      # FORGET FIRST. The cache holds what the provider said last time, and
+      # this proc is called precisely because that answer has changed.
+      trace.invalidateGutterTestLines(editor.name)
       editor.addTestActions()
     except CatchableError:
       cerror "refreshEditorTestControls: " & getCurrentExceptionMsg()

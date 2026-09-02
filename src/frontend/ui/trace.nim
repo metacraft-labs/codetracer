@@ -1038,14 +1038,30 @@ proc refreshLine(self: TraceComponent) =
 # click never reaches us.
 # ---------------------------------------------------------------------------
 
+var gutterTestLinesProvider*: proc(path: cstring): seq[int]
+  ## Which lines of `path` declare a test, from the project's CATALOG.
+  ##
+  ## A `var` in THIS module rather than in `ui/editor.nim` because
+  ## `editorLineNumber` is here and it is the thing that has to ask. `ui_js`
+  ## installs it; `editor.nim` reads it too, so there is one answer and not two.
+
 var gutterTestLines*: JsAssoc[cstring, JsAssoc[int, bool]] =
   JsAssoc[cstring, JsAssoc[int, bool]]{}
-  ## Which lines of which file declare a test, keyed by the editor's own path.
+  ## A CACHE of what the provider said, keyed by the editor's own path.
   ##
-  ## Written by `ui/editor.addTestActions` from the project's CATALOG and read
-  ## here. A `var` in this module rather than a field on the component because
-  ## `editor.nim` imports this file and not the other way round, and because the
-  ## same map serves every editor open on the same path.
+  ## Filled lazily, on the first repaint after a provider exists, and never
+  ## while one does not — which is what makes the gutter self-healing rather
+  ## than order-dependent. THAT MATTERS BECAUSE THE ORDERING IS GENUINELY
+  ## UNSPECIFIED: a file can open before the test catalog arrives or after it,
+  ## the hooks can be installed before the catalog is delivered or after, and
+  ## the template path takes the unlucky branch of both. An eagerly-filled map
+  ## would be empty in those cases and nothing would refill it, because
+  ## `addTestActions` is not called again for a file already open.
+  ##
+  ## Caching only when a provider exists is the load-bearing half. Caching an
+  ## empty answer from a nil provider would freeze the unlucky ordering in
+  ## place, which is the defect this replaces rather than a smaller version of
+  ## it.
 
 var gutterRunningTest*: JsAssoc[cstring, int] = JsAssoc[cstring, int]{}
   ## Which line, per path, has a run in flight.
@@ -1055,8 +1071,31 @@ var gutterRunningTest*: JsAssoc[cstring, int] = JsAssoc[cstring, int]{}
   ## by the next repaint. The running state therefore lives HERE, where the
   ## renderer can read it, and a repaint is how it becomes visible.
 
+proc invalidateGutterTestLines*(path: cstring) =
+  ## Forget what the provider said about `path`, so the next repaint asks again.
+  ## Called when the catalog changes.
+  if gutterTestLines.hasKey(path):
+    gutterTestLines.del(path)
+
+proc gutterTestLinesFor*(path: cstring): seq[int] =
+  ## The provider's answer, cached. Empty — and NOT cached — when no provider
+  ## is installed; see `gutterTestLines`.
+  if gutterTestLines.hasKey(path):
+    for line, _ in gutterTestLines[path]:
+      result.add line
+    return
+  if gutterTestLinesProvider.isNil:
+    return @[]
+  result = gutterTestLinesProvider(path)
+  var lines = JsAssoc[int, bool]{}
+  for line in result:
+    lines[line] = true
+  gutterTestLines[path] = lines
+
 proc gutterHasTest(path: cstring; line: int): bool =
-  if not gutterTestLines.hasKey(path): return false
+  if not gutterTestLines.hasKey(path):
+    discard gutterTestLinesFor(path)
+    if not gutterTestLines.hasKey(path): return false
   gutterTestLines[path].hasKey(line)
 
 proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDeleteChunk: bool = false, lineNumber: int = NO_LINE): cstring =

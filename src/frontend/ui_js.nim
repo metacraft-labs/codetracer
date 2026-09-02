@@ -5095,7 +5095,7 @@ when defined(ctWeb):
         # the runner would leave the button on three of the template's five
         # tests (the text scan cannot see `#[test(should_fail)]`) and would run
         # them by a bare function name rather than by the runner's own selector.
-        editor.editorTestLinesHook = proc(path: cstring): seq[int] =
+        trace.gutterTestLinesProvider = proc(path: cstring): seq[int] =
           let relative = projectRelative(currentProject(), $path)
           if relative.len == 0 or test_results.testResultsVMInstance.isNil:
             return @[]
