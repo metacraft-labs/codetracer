@@ -479,11 +479,17 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/web-renderer-mounts.sh
           '
 
-      - name: Upload what the pre-publish browser saw
+      - name: Upload what the pre-publish browser saw and reported
+        # BOTH FORMS. This step shipped sixteen PNGs and no JSON, which made a
+        # DOM failure undiagnosable by construction: the run-control check
+        # reads a class name and a `title`, and a screenshot of a ▶ is
+        # identical whether the control is live or dead. The probe already
+        # wrote its report per arm; it was landing in a temp dir and being
+        # thrown away before anyone could read it.
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pre-publish-mount-screenshots
+          name: pre-publish-mount-observations
           path: mount-shots/
           if-no-files-found: ignore
 
