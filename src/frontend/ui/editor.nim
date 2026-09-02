@@ -2428,6 +2428,23 @@ proc addTestActions*(self: EditorViewComponent) =
     for rLine in catalogLines:
       lines[rLine] = true
     trace.gutterTestLines[self.name] = lines
+
+    # AND ANY INLINE WIDGET FROM AN EARLIER PASS GOES. This proc can run twice
+    # for one file — once when it opened, and again when the catalog arrived
+    # (`refreshEditorTestControls`) — and the first pass may well have taken
+    # the fallback branch and painted inline widgets. Leaving them would put a
+    # control in the gutter AND one at the end of the source line for the same
+    # test, which is two affordances for one action and a reader having to
+    # decide which is real.
+    #
+    # Not `clearTest`, which is declared below this proc; the same three lines,
+    # here, rather than reordering a file this size.
+    for testLine in self.testLines:
+      if not testLine.contentWidget.isNil:
+        self.monacoEditor.removeContentWidget(testLine.contentWidget.toJs)
+        testLine.contentWidget = nil
+    self.testDom = JsAssoc[int, Node]{}
+
     self.updateLineNumbersOnly()
 
   for i, line in self.tabInfo.sourceLines:
