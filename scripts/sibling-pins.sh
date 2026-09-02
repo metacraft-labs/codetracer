@@ -67,6 +67,22 @@
 # Pinning inputs does not touch that and does not claim to. What it buys is
 # that the QUESTION "what should this commit produce?" now has an answer.
 #
+# AND IT DOES NOT COVER THE TOOLCHAIN. `SIBLINGS` below is a list of three
+# REPOSITORIES. The compilers that read them are not in it, and a PASS here is
+# therefore not a statement that two builds will agree. There is a live,
+# unclosed hypothesis that the Nim compiler is a fourth unpinned input: two
+# builds that both claimed all three sources at their pins differed by 60,920
+# bytes, and the two environments were observed running different Nim versions
+# (`Nim 2.2.4` from `~/.nix-profile/bin/nim` against `nim-unwrapped-2.2.10`).
+# If that is the cause, every check in this file passes over it, because the
+# thing that differed is not a thing this file looks at.
+#
+# This is called out here, and again on the PASSED line, for one reason: the
+# failure mode of a scoped guard is that its scope is forgotten and its green
+# tick is read as "the build is reproducible". It does not mean that. It means
+# the three named repositories are at the commits `flake.lock` specifies.
+# Pinning the toolchain is separate work and is NOT done here.
+#
 # ## Modes
 #
 #   sibling-pins.sh                      -> `name=rev` lines, one per sibling
@@ -288,6 +304,14 @@ verify() {
 		exit 1
 	fi
 	printf 'RESULT: PASSED — all %d declared sibling(s) are at the revision this commit pins.\n' "$checked"
+	# The scope, printed on every pass. See "What this does NOT buy" in the
+	# header. A scoped guard whose scope is forgotten gets read as a
+	# reproducibility claim, and this one is not one: it covers repositories,
+	# not the compilers that read them.
+	printf '        SCOPE: %d repositories, not the toolchain. This is NOT a claim that the\n' "$checked"
+	printf '        build is reproducible — the Nim compiler is not pinned by this check and\n'
+	printf '        is a live suspect in a 60,920-byte gap between two builds that both had\n'
+	printf '        all three siblings at their pins.\n'
 }
 
 # --- entry point ------------------------------------------------------------
