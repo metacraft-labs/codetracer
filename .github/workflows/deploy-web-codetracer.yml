@@ -1049,50 +1049,165 @@ jobs:
         # requires the entry document "served 200 rather than 302"; this is
         # that clause, measured on the deployment.
         #
-        # `web-codetracer.pages.dev` is REQUIRED and `ide.codetracer.com` is
-        # advisory, for the same propagation reason the size checks above draw
-        # that line: the two are one deployment and the custom domain has been
-        # observed to lag.
+        # EVERY REACHABLE HOST IS REQUIRED, and the host list is DERIVED.
+        #
+        # Both of those were the opposite until 2026-09-02, and the first run
+        # that ever reached this step is what exposed them — every deploy
+        # before it failed at the size sweep above, so this step was skipped
+        # and nobody had read its output. It passed. It could also barely have
+        # failed:
+        #
+        #   * `web-codetracer.pages.dev` was the ONLY `required` row.
+        #     `ide.codetracer.com` was `advisory` and `noirstudio.dev`
+        #     `skippable`, so a FAIL on either printed and left `fail` at 0.
+        #     The one host that could redden this gate is the Pages alias —
+        #     infrastructure, not an address any user types. A blank
+        #     `noirstudio.dev` was a green deploy.
+        #
+        #   * The list was three literal rows and `www.noirstudio.dev` was not
+        #     one of them, so it was byte-verified by the sweep above and never
+        #     loaded in a browser — and it was one of the three hosts serving a
+        #     stale `wasm-worker.js` through the cache incident.
+        #
+        # The size sweep above already fixed exactly this pair for itself
+        # ("Both hosts are REQUIRED now", and a host list read from the
+        # descriptor). This step now draws from the same source and the same
+        # rule, because a hand-written set of hosts cannot be made to agree
+        # with the product — which is the sentence that step wrote about its
+        # own version of this bug, one step above where the bug still lived.
+        #
+        # OPTIONAL IS A PROPERTY OF RESOLUTION, NOT OF IDENTITY. A host that
+        # does not serve yet cannot be loaded, and a check that cannot reach
+        # its subject must say so rather than fail as though the product were
+        # broken. But that is decided by probing the host, not by which name it
+        # has: the moment a declared domain resolves it becomes a required
+        # assertion with no edit here. `skippable` as a per-host label is gone.
         shell: bash
         run: |
           set -uo pipefail
           mkdir -p deployed-shots
           fail=0
-          # base|required|route:want,route:want
+
+          # THE HOSTS COME FROM THE DESCRIPTOR THE BUILD JUST STAGED, which is
+          # the same file and the same field the size sweep reads. The route
+          # expectation is derived with them, because which surface a host owes
+          # at `/` is a fact about the host's ROLE:
           #
-          # THE THIRD ROW IS THE SECOND DOMAIN. On `noirstudio.dev` the ROOT is
-          # the Noir entry point — that is the whole of what "landing there is
-          # equivalent to /noir" means — and `/noir` still works there, because
-          # rule 0 makes `/noir` a spelling of an entry point rather than a
-          # namespace, and links get pasted between hosts by people who do not
-          # know there are two.
+          #   * the language-neutral origin names no language, so `/` is the
+          #     welcome screen (Noir-Studio.md §1b.0 rule 0);
+          #   * a `languageOrigins` entry IS a language entry point, so landing
+          #     on its root is equivalent to `/noir` — that is the whole of
+          #     what declaring it there means;
+          #   * `/noir` is a spelling of an entry point rather than a
+          #     namespace, so it must show the template on EVERY host, because
+          #     links get pasted between hosts by people who do not know there
+          #     are two.
           #
-          # It is `skippable`: until the domain is added to the Pages project
-          # and DNS points at it there is nothing to load, and a check that
-          # cannot reach its subject must SAY so rather than fail as though the
-          # product were broken. The moment the domain resolves this becomes a
-          # real assertion with no further change here.
-          for row in \
-            "https://web-codetracer.pages.dev|required|/:welcome,/noir:template" \
-            "https://ide.codetracer.com|advisory|/:welcome,/noir:template" \
-            "https://noirstudio.dev|skippable|/:template,/noir:template"; do
-            base="${row%%|*}"
-            rest="${row#*|}"
-            required="${rest%%|*}"
-            routes="${rest#*|}"
-            echo "== $base =="
-            if [ "$required" = skippable ]; then
-              if ! curl -sf -o /dev/null --max-time 15 "$base/" 2>/dev/null; then
-                echo "  SKIPPED — $base does not resolve or does not serve yet."
-                echo "  A human must add it to the web-codetracer Pages project"
-                echo "  (Custom domains) and point DNS at it. The bundle already"
-                echo "  DECLARES it: see CT_WEB_LANGUAGE_ORIGINS above, and the"
-                echo "  languageOrigins entry in the served index.html. No"
-                echo "  redeploy is needed once the domain is attached."
-                continue
-              fi
-              required=advisory
+          # Asserting `/` and `/noir` show DIFFERENT surfaces on the neutral
+          # origin is what catches a build that ignores the URL; asserting they
+          # show the SAME surface on a language origin is what catches one that
+          # ignores the host.
+          python3 - site/index.html > "$RUNNER_TEMP/browser-hosts.tsv" <<'PY'
+          import json, re, sys
+          html = open(sys.argv[1]).read()
+          m = re.search(r'id="codetracer-deployment"[^>]*>(.*?)</script>', html, re.S)
+          if not m:
+              raise SystemExit('no deployment descriptor in the staged entry document')
+          d = json.loads(m.group(1))
+          rows, seen = [], set()
+          def add(origin, routes):
+              if not origin:
+                  raise SystemExit('the descriptor declares an empty origin')
+              if origin in seen:
+                  raise SystemExit('the descriptor declares %s twice' % origin)
+              seen.add(origin)
+              rows.append((origin, routes))
+          # The Pages alias is infrastructure rather than a product address --
+          # it is not in the descriptor and never will be -- but it is what
+          # BlockTracer fetches cross-origin, so it is loaded beside them.
+          add('https://web-codetracer.pages.dev', '/:welcome,/noir:template')
+          add(d['origin'], '/:welcome,/noir:template')
+          for o in d.get('languageOrigins', []):
+              add(o['origin'], '/:template,/noir:template')
+          # One row per declared host, and the count is asserted below against
+          # the set the size sweep swept: two steps reading one descriptor must
+          # not be able to disagree about what this deployment serves.
+          if len(rows) < 2:
+              raise SystemExit('only %d host(s) derived -- the descriptor '
+                               'declares no product origin' % len(rows))
+          for origin, routes in rows:
+              print('%s\t%s' % (origin, routes))
+          PY
+
+          # THE LIST IS NOT EMPTY. `set -e` is deliberately not in force here,
+          # so a descriptor this parse rejects leaves an EMPTY file and the
+          # loop below quantifies over nothing -- which is the shape every
+          # check in this workflow has had to be taught to refuse. The counts
+          # further down would also catch it; this names it at the point it
+          # happened rather than three assertions later.
+          if [ ! -s "$RUNNER_TEMP/browser-hosts.tsv" ]; then
+            echo "  the descriptor yielded no hosts — nothing would be loaded and every check below would pass vacuously" >&2
+            fail=1
+          fi
+
+          declared="$(wc -l <"$RUNNER_TEMP/browser-hosts.tsv" | tr -d ' ')"
+          echo "browser-verifying $declared declared host(s):"
+          cut -f1 "$RUNNER_TEMP/browser-hosts.tsv" | sed 's/^/  /'
+
+          # THE TWO STEPS MUST AGREE ON WHAT THIS DEPLOYMENT SERVES. The sweep
+          # above wrote the product hosts it derived; this compares the set
+          # rather than trusting that two copies of the same parse stayed in
+          # step. A divergence here means one of them is checking a host the
+          # other believes does not exist, which is the state that let
+          # `www.noirstudio.dev` be swept but never loaded.
+          if [ -s "$RUNNER_TEMP/product-hosts.txt" ]; then
+            if ! diff -u \
+                 <(sort "$RUNNER_TEMP/product-hosts.txt") \
+                 <(cut -f1 "$RUNNER_TEMP/browser-hosts.tsv" \
+                     | grep -vx 'https://web-codetracer.pages.dev' | sort) \
+                 >"$RUNNER_TEMP/host-set-diff.txt"; then
+              echo "  the browser gate and the size sweep disagree about the declared hosts:" >&2
+              sed 's/^/    /' "$RUNNER_TEMP/host-set-diff.txt" >&2
+              fail=1
+            else
+              echo "  ok: the same host set the size sweep verified"
             fi
+          else
+            echo "  the size sweep left no host list -- it did not run, and this" >&2
+            echo "  step cannot confirm it is checking the same deployment" >&2
+            fail=1
+          fi
+
+          # EVERY HOST REPORTS A VERDICT, and the verdicts are counted against
+          # the number declared. A loop that aborted mid-way, or a `continue`
+          # that skipped a host quietly, is otherwise indistinguishable from a
+          # clean pass -- the same reason the size sweep counts its workers.
+          checked=0
+          skipped=0
+          verdicts=0
+          # `<&3` and NOT a pipe: a pipe would run this loop in a subshell and
+          # every counter incremented below would be discarded at `done`,
+          # leaving the assertions reading zeros. Reading from fd 3 rather than
+          # stdin additionally keeps `curl` and `node` inside the loop from
+          # swallowing the host list.
+          while IFS=$'\t' read -r base routes <&3; do
+            [ -n "$base" ] || continue
+            verdicts=$((verdicts + 1))
+            echo "== $base =="
+            # RESOLUTION, NOT IDENTITY. A declared host that does not serve yet
+            # is reported and skipped; one that answers is required, whatever
+            # it is called.
+            if ! curl -sf -o /dev/null --max-time 15 "$base/" 2>/dev/null; then
+              skipped=$((skipped + 1))
+              echo "  SKIPPED — $base does not resolve or does not serve yet."
+              echo "  A human must add it to the web-codetracer Pages project"
+              echo "  (Custom domains) and point DNS at it. The bundle already"
+              echo "  DECLARES it: see CT_WEB_LANGUAGE_ORIGINS above, and the"
+              echo "  languageOrigins entry in the served index.html. No"
+              echo "  redeploy is needed once the domain is attached."
+              continue
+            fi
+            checked=$((checked + 1))
 
             # (1) The hosting contract, at HTTP level. Every entry prefix must
             #     answer 200 with no redirect. `--max-redirs 0` rather than
@@ -1106,7 +1221,7 @@ jobs:
               else
                 echo "  [FAIL] $path -> $code (want 200; a 3xx means the rewrite" \
                      "became a redirect and the address the user typed is lost)"
-                [ "$required" = required ] && fail=1
+                fail=1
               fi
             done
 
@@ -1121,7 +1236,7 @@ jobs:
                   node ci/test/web_renderer_probe.mjs "$base$path" 12000 >"$report" || true
               if [ ! -s "$report" ]; then
                 echo "  the probe produced no report for $base$path" >&2
-                [ "$required" = required ] && fail=1
+                fail=1
                 continue
               fi
               verdict="$(CT_WANT="$want" python3 - "$report" <<'PY'
@@ -1181,16 +1296,32 @@ jobs:
               echo "$verdict" | sed 's/^/     /'
               case "$verdict" in
                 OK*) : ;;
-                *) [ "$required" = required ] && fail=1 ;;
+                *) fail=1 ;;
               esac
             done
-          done
+          done 3<"$RUNNER_TEMP/browser-hosts.tsv"
+
+          # THE COUNTS, ASSERTED. Everything above is of the form "each host
+          # that answered showed the right thing", and that is vacuously true
+          # of a loop that visited nothing. These three lines are what stop a
+          # silent demotion to zero from reading as a pass.
+          echo "== hosts =="
+          echo "  declared $declared, browser-verified $checked, unreachable $skipped"
+          if [ "$verdicts" -ne "$declared" ]; then
+            echo "  $verdicts host(s) reported a verdict but $declared were declared — the loop did not finish" >&2
+            fail=1
+          fi
+          if [ "$checked" -lt 1 ]; then
+            echo "  every declared host was unreachable, so this step loaded NOTHING and asserted NOTHING" >&2
+            fail=1
+          fi
+
           [ "$fail" -eq 0 ] || {
             echo "the deployed pages do not show the product the URL calls for" >&2
             exit 1
           }
-          echo "a browser loaded each reachable host's entry routes on the"
-          echo "deployed site and found the product the URL calls for on each."
+          echo "a browser loaded all $checked reachable declared host(s) and found"
+          echo "the product the URL calls for on each. Every one of them was required."
 
       - name: Upload what the browser saw on the deployed page
         if: always()
