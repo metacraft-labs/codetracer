@@ -112,8 +112,9 @@ which halves have been seen. A dropped request was the whole reason this cost a
 day to find.
 
 **Status: fixed.** `dap_server.rs::browser_setup_from_vfs_when_ready`. Tests:
-`dap_server.rs` `mod browser_handshake` (6 cases, both orders end-to-end through
-a real `setup_from_vfs`), run with
+`dap_server.rs` `mod browser_handshake` (both orders end-to-end through a real
+`setup_from_vfs`; the cases are the `#[test]` fns in that module — run them
+rather than counting from here), run with
 `cargo test --features browser-transport --lib browser_handshake`.
 
 ---
@@ -152,7 +153,7 @@ it — for the VFS only.
 | # | command | trap | consequence |
 | --- | --- | --- | --- |
 | D1 | `ct/load-locals` | `origin_query.rs:260` | **the State pane cannot work at all** |
-| D2 | any step reaching a **trace boundary** | `task.rs:1960` | reverse stepping dies at the ends of the trace |
+| D2 | any step reaching a **trace boundary** | `task.rs::Notification::new` | reverse stepping dies at the ends of the trace |
 | D3 | `ct/originChain` | `origin_query.rs:260`/`:266` | Value-Origin-Tracking's query surface |
 | D4 | `disconnect` | `dap_server.rs:2613` | **every session teardown** |
 
@@ -168,12 +169,12 @@ because it is easy to get wrong:
 
 The guard at `dap_handler.rs:978` is `trace_kind == TraceKind::Materialized`,
 which the browser path *always* satisfies (`dap_server.rs:1589-1590`, inside
-`setup_from_vfs`). It is **not** reached via `HistoryResult::new` (`task.rs:1416`),
+`setup_from_vfs`). It is **not** reached via `HistoryResult::new` (`task.rs`),
 which has the same hazardous body but is dead code — zero callers in the crate —
 nor via `db.rs:2519`, which is `load_history`, a different command.
 
 **D2** is `dap_handler.rs:2096` choosing `"beginning"`/`"end"`, then `:2097`
-calling `send_notification` -> `Notification::new` (`task.rs:1960`). The blast
+calling `send_notification` -> `Notification::new` (`task.rs`). The blast
 radius is wider than stepping: `send_notification` has 13 call sites in
 `dap_handler.rs`, including `"No breakpoints were hit!"` (`:3734`) and
 `"can't jump to line"` (`:3829`). Reverse stepping **mid-trace works** — the e2e
@@ -195,7 +196,7 @@ exits and `thread::sleep` (`:2613`) traps at
 in normal use the adapter *masks* D4. The engine defect is real regardless, and
 any consumer that awaits a `disconnect` response hangs.
 
-`Stop::new` (`task.rs:1347`) shares the pattern and is live (called from
+`Stop::new` (`task.rs`) shares the pattern and is live (called from
 `dap_handler.rs:4337`, `event_db.rs:595`). `Instant::now()` — equally unsupported
 — appears at `emulator_origin.rs:283`, `omniscient_origin.rs:319`,
 `recreator_origin.rs:233`/`:345`.
@@ -256,7 +257,8 @@ but the string is linked either way.
       "flowMode": modeStr,      # $mode -> "fmCall"
     }
 
-The engine wants `CtLoadFlowArguments` (`src/db-backend/src/task.rs:58-64`):
+The engine wants `CtLoadFlowArguments` (`src/db-backend/src/task.rs`), which at
+the time of this write-up read:
 
     #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
     #[serde(rename_all = "camelCase")]
@@ -267,14 +269,19 @@ The engine wants `CtLoadFlowArguments` (`src/db-backend/src/task.rs:58-64`):
 
 Three separate disagreements:
 
-1. **`flowMode` encoding.** Rust's `FlowMode` (`task.rs:49-56`) derives
-   `Deserialize_repr` with `#[repr(u8)]` — it accepts a JSON **number only**. The
-   string `"fmCall"` fails with *invalid type: string, expected variant index*.
+1. **`flowMode` encoding.** Rust's `FlowMode` (`task.rs`) derived
+   `Deserialize_repr` with `#[repr(u8)]` — it accepted a JSON **number only**.
+   The string `"fmCall"` failed with *invalid type: string, expected variant
+   index*.
 2. **`location` is required**, not `Option`. No `#[serde(default)]` at container
    or field level.
 3. **`rrTicks` is at the wrong level.** The struct does not declare it; the real
-   tick lives *inside* `Location` (`task.rs:400`). There is no
-   `deny_unknown_fields` here, so the top-level `rrTicks` is silently discarded.
+   tick lives *inside* `Location` (`task.rs`). At the time there was no
+   `deny_unknown_fields` on this struct, so the top-level `rrTicks` was silently
+   discarded. That is no longer true: b6f39ca7 added
+   `#[serde(deny_unknown_fields)]` to `CtLoadFlowArguments`, so a stray
+   top-level `rrTicks` is now a hard deserialisation error rather than a silent
+   drop — see the Status below, where the sender stopped sending it.
 
 **The vocabularies also differ in size:** Rust `FlowMode` is `Call | Diff`;
 Nim's (`flow_vm.nim:50-54`) is `fmCall | fmLine | fmFunction`. Two of Nim's three
