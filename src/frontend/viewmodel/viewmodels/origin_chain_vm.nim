@@ -213,8 +213,24 @@ proc onSeekToHop*(vm: OriginChainVM; hop: OriginHop) =
     return
   if vm.store.isNil or vm.store.backend.isNil:
     return
-  # Fallback: forward the seek as a history-jump request so the
-  # existing backend dispatcher (`ct/history-jump`) handles it.
+  # Fallback: forward the seek as a `ct/history-jump` request.
+  #
+  # KNOWN DEFECT — THE DISPATCHER RUNS AND THE SEEK TARGET IS DISCARDED.
+  # This used to say the existing dispatcher "handles it". It does not.
+  # `ct/history-jump` deserialises its arguments as the engine's `Location`
+  # (`dap_server.rs` dispatch -> `dap_handler.rs`'s `Handler::history_jump`),
+  # and `Location` carries `#[serde(default)]` at the container level. The
+  # object below is a DIFFERENT SHAPE: `path`/`line`/`rrTicks` are nested
+  # under `location`, and `expression`/`stepId` are not `Location` fields at
+  # all. Nothing binds, so the engine constructs a fully zeroed `Location`
+  # and `location_jump` reads only `rr_ticks` — it jumps to step 0, the start
+  # of the trace, and reports success. `task.rs`'s `Location` doc comment
+  # records this same mismatch from the engine side and names this literal.
+  #
+  # Closing it means either flattening this payload into `Location`'s own
+  # fields or giving `ct/history-jump` an argument type of its own. Neither
+  # has been done; until then the host bridge above is the only path that
+  # actually seeks.
   let args = %*{
     "expression": hop.targetExpr,
     "location": %*{
