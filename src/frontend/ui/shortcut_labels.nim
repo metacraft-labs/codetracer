@@ -19,6 +19,25 @@
 ## a menu item and a toolbar tooltip showing "the shortcut for Next" are
 ## showing one string produced once.
 ##
+## ## THE ARGUMENT FOR THIS DESIGN, AS AN OUTCOME RATHER THAN A PRINCIPLE
+##
+## The two specs that state these bindings **already contradict each other**,
+## and the contradiction is live in the repository right now:
+##
+## - `GUI/Debugging-Features/Debugger-Controls.md:22` gives Reverse Continue as
+##   `Shift+F5` — and line 28 gives `Shift+F5` to Stop as well, in the same
+##   table. Line 26 gives Run to Cursor `F8`, which `forwardContinue` holds.
+## - `GUI/Keyboard-Shortcuts-System.md:112` gives `reverseContinue: SHIFT+F8`
+##   and `stop: SHIFT+F5`.
+##
+## A label copied from either document is wrong somewhere, and the copy is the
+## one the user believes. **Because the tooltip reads the config, it is right
+## without anyone adjudicating** — nobody had to decide which spec wins in
+## order for the toolbar to stop lying, and nobody has to revisit this file
+## when they do decide. That is the whole return on the indirection, and it is
+## why "just write the correct string in" is not the cheaper version of this
+## change: there is no correct string to write.
+##
 ## ## The table
 ##
 ## `debugToolbarActions` is the toolbar's 13 controls, in the order the toolbar
