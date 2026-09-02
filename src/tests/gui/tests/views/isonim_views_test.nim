@@ -5380,11 +5380,26 @@ suite "IsoNim Errors Panel — group-by-file":
 
 suite "IsoNim Errors Panel — interactions":
 
-  test "row click dispatches ct/jump-location with path + line":
+  # These two used to assert that the click enqueued `ct/jump-location` on the
+  # mock backend. It did — and nothing implemented it, so the row click moved
+  # no caret in the product while both cases stayed green. `dap_dialect.md` §7
+  # lists the command among nine with no engine implementation, and
+  # `ErrorsVM.jumpToProblem` no longer dispatches it.
+  #
+  # The jump is the host's, through `onJumpToProblem` (installed by
+  # `ui/errors.nim`). So the assertion is now on the OUTCOME — what the host
+  # was actually asked to open — which is the thing that was never checked and
+  # the reason a dead control looked wired.
+
+  test "row click asks the host to open the problem's path + line":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createErrorsVM(store)
       let r = MockRenderer()
+
+      var opened: seq[(string, int, int)] = @[]
+      vm.onJumpToProblem = proc(path: string; line: int; col: int) =
+        opened.add((path, line, col))
 
       let panel = renderErrorsPanel(r, vm)
 
@@ -5397,10 +5412,15 @@ suite "IsoNim Errors Panel — interactions":
       let row = listContainer.children[0]
       row.fireEvent("click")
 
-      let req = mock.findCommand("ct/jump-location")
-      check req.isSome
-      check req.get.args{"path"}.getStr == "src/main.nim"
-      check req.get.args{"line"}.getInt == 17
+      # Exactly one jump, carrying exactly this location. A count of one is
+      # asserted because "at least one" would pass for a row that fired twice.
+      check opened.len == 1
+      check opened[0][0] == "src/main.nim"
+      check opened[0][1] == 17
+
+      # And nothing went to the backend: the Problems pane is editor
+      # navigation, not a debugger move.
+      check mock.receivedCommands.len == 0
 
       dispose()
 
@@ -5409,6 +5429,10 @@ suite "IsoNim Errors Panel — interactions":
       let (store, mock) = makeStoreWithMock()
       let vm = createErrorsVM(store)
       let r = MockRenderer()
+
+      var opened: seq[(string, int, int)] = @[]
+      vm.onJumpToProblem = proc(path: string; line: int; col: int) =
+        opened.add((path, line, col))
 
       let panel = renderErrorsPanel(r, vm)
 
@@ -5426,10 +5450,33 @@ suite "IsoNim Errors Panel — interactions":
       check bGroupRows.len == 1
       bGroupRows[0].fireEvent("click")
 
-      let req = mock.findCommand("ct/jump-location")
-      check req.isSome
-      check req.get.args{"path"}.getStr == "b.nim"
-      check req.get.args{"line"}.getInt == 9
+      check opened.len == 1
+      check opened[0][0] == "b.nim"
+      check opened[0][1] == 9
+      check mock.receivedCommands.len == 0
+
+      dispose()
+
+  test "a row click with no host installed opens nothing and dispatches nothing":
+    ## The case the old `ct/jump-location` fallback was hiding. Without a host
+    ## there is no way to open a file, and the honest outcome is that nothing
+    ## happens — not a request to a command no engine has.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createErrorsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderErrorsPanel(r, vm)
+      vm.setProblems(@[
+        makeProblem(blsError, path = "src/main.nim", line = 17),
+      ])
+      mock.clearReceivedCommands()
+
+      check vm.onJumpToProblem.isNil
+      let listContainer = findByClass(panel, "problems-list")
+      listContainer.children[0].fireEvent("click")
+
+      check mock.receivedCommands.len == 0
 
       dispose()
 
@@ -5969,11 +6016,19 @@ suite "IsoNim Search Results Panel — filter behaviour":
 
 suite "IsoNim Search Results Panel — interactions":
 
-  test "row click dispatches ct/jump-location with path + line":
+  # As with the Problems pane above: these asserted the `ct/jump-location`
+  # dispatch, which reaches no engine handler (`dap_dialect.md` §7). Opening a
+  # file is `onJumpToResult`'s job, so that is what is asserted now.
+
+  test "row click asks the host to open the result's path + line":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
+
+      var opened: seq[(string, int)] = @[]
+      vm.onJumpToResult = proc(path: string; line: int) =
+        opened.add((path, line))
 
       let panel = renderSearchResultsPanel(r, vm)
 
@@ -5985,10 +6040,10 @@ suite "IsoNim Search Results Panel — interactions":
       check rows.len == 1
       rows[0].fireEvent("click")
 
-      let req = mock.findCommand("ct/jump-location")
-      check req.isSome
-      check req.get.args{"path"}.getStr == "src/main.nim"
-      check req.get.args{"line"}.getInt == 17
+      check opened.len == 1
+      check opened[0][0] == "src/main.nim"
+      check opened[0][1] == 17
+      check mock.receivedCommands.len == 0
 
       dispose()
 
@@ -5997,6 +6052,10 @@ suite "IsoNim Search Results Panel — interactions":
       let (store, mock) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
+
+      var opened: seq[(string, int)] = @[]
+      vm.onJumpToResult = proc(path: string; line: int) =
+        opened.add((path, line))
 
       let panel = renderSearchResultsPanel(r, vm)
 
@@ -6009,7 +6068,7 @@ suite "IsoNim Search Results Panel — interactions":
 
       # Click the third row, which lives under the second file group.  The
       # closure each row captures must be its own: a shared loop variable
-      # would dispatch b.nim:9 (or a.nim:5) from this click and nothing
+      # would open b.nim:9 (or a.nim:5) from this click and nothing
       # about the rendered markup would look wrong.
       let groups = findAllByClass(panel, "fif-file-group")
       check groups.len == 2
@@ -6017,10 +6076,10 @@ suite "IsoNim Search Results Panel — interactions":
       check bGroupRows.len == 2
       bGroupRows[1].fireEvent("click")
 
-      let req = mock.findCommand("ct/jump-location")
-      check req.isSome
-      check req.get.args{"path"}.getStr == "b.nim"
-      check req.get.args{"line"}.getInt == 12
+      check opened.len == 1
+      check opened[0][0] == "b.nim"
+      check opened[0][1] == 12
+      check mock.receivedCommands.len == 0
 
       dispose()
 

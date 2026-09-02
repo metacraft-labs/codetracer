@@ -123,12 +123,12 @@ type
       ## Move the editor caret to a diagnostic and focus the editor.
       ##
       ## The pair of ``SearchResultsVM.onJumpToResult``, and added for the
-      ## same reason it was: the `else` branch below dispatches
+      ## same reason it was: the jump used to fall back to
       ## ``ct/jump-location``, a command **no backend in this repo
       ## implements** (`backend/dap_dialect.md` §7 lists it among nine such).
-      ## A host that installs this owns the jump; a host that does not gets
-      ## the historical no-op rather than a crash, which is what the
-      ## mock-backend view tests still assert.
+      ## That fallback is gone — see ``jumpToProblem`` — so this callback is
+      ## now the only way the Problems pane navigates. A host that installs it
+      ## owns the jump; a host that does not gets an explicit no-op.
     onRevealPanel*: proc()
       ## Reveal the Problems pane without focusing it.  Navigation works
       ## whether or not the pane is on screen (EMT-D22.4), so the command
@@ -198,19 +198,29 @@ proc isNavigable*(problem: BuildProblemLine): bool =
 proc jumpToProblem*(vm: ErrorsVM; problem: BuildProblemLine) =
   ## Move the editor to a diagnostic.
   ##
-  ## Prefers the host-installed ``onJumpToProblem``.  Falls back to the
-  ## historical ``ct/jump-location`` dispatch, which reaches no handler in
-  ## this repo (see the field's doc comment) — the fallback exists so a VM
-  ## with no host behaves as it always did rather than crashing, and is not
-  ## a working jump.
-  if not vm.onJumpToProblem.isNil:
-    vm.onJumpToProblem(problem.path, problem.line, problem.col)
+  ## The jump belongs to the host: ``onJumpToProblem`` is installed by
+  ## ``ui/errors.nim`` and calls ``data.openLocation``, the same path the
+  ## editor uses for every other file navigation.
+  ##
+  ## There is deliberately **no backend fallback**. This used to dispatch
+  ## ``ct/jump-location`` when no host was installed — a command
+  ## `backend/dap_dialect.md` §7 records as having no engine implementation
+  ## anywhere: absent from ``VALID_DAP_COMMANDS``, from
+  ## ``EVENT_KIND_TO_DAP_MAPPING``, and from both Rust dispatch tables in
+  ## ``dap_server.rs``. It never jumped. What it did do was make a VM with no
+  ## host *look* like it had acted, which is exactly what kept the row-click
+  ## tests green over a control that did nothing.
+  ##
+  ## Nor is some other DAP command the right fallback. A build diagnostic can
+  ## name a file the recording never executed, so moving the *debugger* — what
+  ## ``ct/source-line-jump`` does — is a different action, not a substitute for
+  ## editor navigation.
+  ##
+  ## With no host installed this is a no-op, and is now honestly shaped like
+  ## one instead of dispatching into the void.
+  if vm.onJumpToProblem.isNil:
     return
-  let args = %*{
-    "path": problem.path,
-    "line": problem.line,
-  }
-  discard vm.store.backend.send("ct/jump-location", args)
+  vm.onJumpToProblem(problem.path, problem.line, problem.col)
 
 proc navigableErrors*(vm: ErrorsVM): seq[ProblemRef] =
   ## The rows ``gotoError`` ranges over, with their master indices.

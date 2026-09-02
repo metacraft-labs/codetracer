@@ -169,14 +169,17 @@ proc jumpToResult*(vm: SearchResultsVM; res: SearchResultLine) =
   ## Open the source file at the matched line.  Delegates to the
   ## ``onJumpToResult`` callback installed by the wiring layer
   ## (``search_results.nim``) which calls ``data.openLocation`` — the
-  ## same path the editor uses for file navigation.  Falls back to the
-  ## backend ``ct/jump-location`` request when no callback is wired
-  ## (e.g. in headless tests).
-  if not vm.onJumpToResult.isNil:
-    vm.onJumpToResult(res.path, res.line)
-  else:
-    let args = %*{"path": res.path, "line": res.line}
-    discard vm.store.backend.send("ct/jump-location", args)
+  ## same path the editor uses for file navigation.
+  ##
+  ## There is deliberately **no backend fallback**. This used to dispatch
+  ## ``ct/jump-location`` when no callback was wired, which
+  ## `backend/dap_dialect.md` §7 records as reaching no engine handler at all;
+  ## the request went nowhere and the click did nothing, while the view tests
+  ## asserting the dispatch stayed green. Opening a file is the host's job,
+  ## and a VM without a host does not have one to do.
+  if vm.onJumpToResult.isNil:
+    return
+  vm.onJumpToResult(res.path, res.line)
 
 # ---------------------------------------------------------------------------
 # Helpers
