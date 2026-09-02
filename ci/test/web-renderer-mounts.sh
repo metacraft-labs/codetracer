@@ -1833,11 +1833,11 @@ print(" ".join(r["name"] + "=" + r["count"] + "(" + r["kind"] + ")" for r in row
 	esac
 	r_prov="$(jsonraw route dom.constraintProvenance)"
 	case "${r_prov}" in
-	*"nargo info"*)
-		ck ok "arm R: the counts carry their provenance, so a reader can judge them: ${r_prov}"
+	*"compiler this page runs"*)
+		ck ok "arm R: the counts name the compiler that produced them, so a reader can judge them: ${r_prov}"
 		;;
 	*)
-		ck fail "arm R: the constraint counts carry no provenance (${r_prov}) — a number a user cannot judge"
+		ck fail "arm R: the constraint counts do not name the compiler that produced them (${r_prov}) — a number a user cannot judge"
 		;;
 	esac
 
