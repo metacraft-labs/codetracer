@@ -116,6 +116,15 @@ type
       ## build.
     lastVerdict*: NoirPhaseVerdict
     lastSummary*: NoirTraceSummary
+    replayLabel*: string
+      ## What a session opened from this producer is OF — a test's selector, or
+      ## "" for a Run of `main`. Set by the caller before the trace phase; only
+      ## the caller knows which gesture is in flight.
+    replayInNewSessionTab*: bool
+      ## Whether that session should open beside the current one rather than
+      ## replacing it. See `ReplaySessionRequest.newSessionTab`: it is a
+      ## REQUEST, and a host that cannot hold two live sessions refuses it
+      ## rather than opening one tab over a dead engine.
     lastTests*: NoirTestResponse
       ## What the last `nbpTest` phase decoded, whole.
       ##
@@ -752,13 +761,15 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
       # steps looking like it was still running. Measured exactly that way:
       # the rows painted, the two `note` calls below never ran, and the tab
       # reported one uncaught page error with no message a user could read.
-      var opened = false
+      var outcome = rsoNoHost
       var refusal = ""
       try:
-        opened = requestReplaySession(ReplaySessionRequest(
+        outcome = openReplaySession(ReplaySessionRequest(
           rawMemoryTrace: producer.stdoutText,
           packageDir: producer.packageDir,
-          projectRoot: producer.projectRoot))
+          projectRoot: producer.projectRoot,
+          label: producer.replayLabel,
+          newSessionTab: producer.replayInNewSessionTab))
       except CatchableError as e:
         refusal = e.msg
       except:
@@ -766,8 +777,20 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
         # neither `CatchableError`, and the whole point of this block is that
         # nothing gets past it.
         refusal = "the replay host raised a value that is not an exception"
-      if opened:
-        producer.note("opening a replay session over this trace")
+      if outcome == rsoOpened:
+        producer.note(
+          "opening a replay session over this trace" &
+          (if producer.replayLabel.len > 0: " (" & producer.replayLabel & ")"
+           else: ""))
+      elif outcome == rsoNoSecondSession:
+        # REFUSED BY NAME, and nothing was opened. Falling back to the current
+        # tab would destroy the session the user asked to keep beside this one,
+        # which is the entire reason they asked for a new tab.
+        producer.note(
+          "a NEW session tab was asked for and this build holds one live " &
+          "session at a time, so nothing was opened. Ask again without the " &
+          "new-tab option to replace the current session; the rows above are " &
+          "what the trace contains.")
       elif refusal.len > 0:
         producer.note("a replay session could not be started: " & refusal)
       else:

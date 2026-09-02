@@ -288,5 +288,20 @@ proc installReplayHost*() =
   ## Called from `enterTemplateEditMode`, beside `installTemplateHost`, and for
   ## the same reason its own comment gives: registered BEFORE the `no-trace`
   ## delivery, so the responder exists before anything can ask.
-  installReplaySessionService(ReplaySessionService(startProc: openSession))
+  installReplaySessionService(ReplaySessionService(
+    startProc: openSession,
+    # ONE LIVE SESSION, and this answers the question rather than leaving a
+    # caller to assume. `openSession` terminates any previous engine before
+    # starting one — "two engines answering one store would interleave two
+    # recordings into one timeline" — so a second tab would carry a dead
+    # engine, which is a dead affordance with a tab bar to make it convincing.
+    #
+    # WHAT WOULD MAKE THIS TRUE, named so it is a unit of work rather than a
+    # wall: `activeReplayTerminate` becomes one entry per session,
+    # `deliverFrame` gates on the frame's own session rather than delivering
+    # into whichever is active, and the `CODETRACER::dap-raw-message` responder
+    # routes outbound packets by the `sessionId` `DapApi` already stamps on
+    # them. `ui/session_switch.createNewSession` — the tab half — is already
+    # implemented and generic; it is the ENGINE that is singular, not the tab.
+    canOpenSecondSession: proc(): bool = false))
   report("host installed")

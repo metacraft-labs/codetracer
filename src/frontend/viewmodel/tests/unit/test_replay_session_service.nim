@@ -21,7 +21,14 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 18
+const ExpectedAssertions = 36
+
+proc hostWithSecondSession(): bool = true
+proc hostWithoutSecondSession(): bool = false
+  ## Named rather than written inline at each call site: a `proc(): bool =
+  ## false` inside a constructor argument list is where Nim's parser wants a
+  ## block, and the error it gives names an indentation problem four lines from
+  ## the actual one.
 
 proc request(raw: string): ReplaySessionRequest =
   ReplaySessionRequest(
@@ -82,6 +89,75 @@ suite "the Run path can ask for a replay session without knowing how to open one
     counted replaySessionServiceInstalled()
     resetReplaySessionServiceForTests()
     counted not replaySessionServiceInstalled()
+
+  test "a new session tab is a REQUEST, and a refusal opens nothing":
+    # §9.1 wants two tests open in two tabs. This host holds one live session —
+    # `web_replay_host.openSession` terminates any previous engine, because two
+    # engines answering one store would interleave two recordings into one
+    # timeline — so the request is refused BY NAME.
+    #
+    # THE ASSERTION THAT MATTERS IS `seen.len == 0`. Falling back to the current
+    # tab would answer a different question than the one asked and destroy the
+    # session the user wanted to keep beside this one, which is the entire
+    # reason they asked for a new tab. A refusal that opened something anyway
+    # would satisfy every other check here.
+    resetReplaySessionServiceForTests()
+    var seen: seq[ReplaySessionRequest]
+    installReplaySessionService(ReplaySessionService(
+      # PARENTHESISED. Without them the `,` is read as another argument to
+      # `seen.add`, and the next field is swallowed into the proc body — the
+      # error names a type mismatch inside `add`, four lines from the cause.
+      startProc: (proc(r: ReplaySessionRequest) = seen.add r),
+      canOpenSecondSession: hostWithoutSecondSession))
+    counted not canOpenSecondReplaySession()
+
+    var wanted = request("{\"events\":[1]}")
+    wanted.newSessionTab = true
+    counted openReplaySession(wanted) == rsoNoSecondSession
+    counted seen.len == 0
+
+    # CONTROL: the same trace WITHOUT the new-tab request opens. So the refusal
+    # is about the tab and not about the service being broken.
+    counted openReplaySession(request("{\"events\":[1]}")) == rsoOpened
+    counted seen.len == 1
+    counted not seen[0].newSessionTab
+
+    # MIRROR: a host that CAN hold a second session gets the request through
+    # unchanged, so this vocabulary is not a permanent no.
+    resetReplaySessionServiceForTests()
+    var seen2: seq[ReplaySessionRequest]
+    installReplaySessionService(ReplaySessionService(
+      startProc: (proc(r: ReplaySessionRequest) = seen2.add r),
+      canOpenSecondSession: hostWithSecondSession))
+    counted canOpenSecondReplaySession()
+    counted openReplaySession(wanted) == rsoOpened
+    counted seen2.len == 1
+    counted seen2[0].newSessionTab
+
+    # A service with no predicate has not ESTABLISHED that it can, so it
+    # cannot. Nil is read as no in both directions.
+    resetReplaySessionServiceForTests()
+    installReplaySessionService(ReplaySessionService(
+      startProc: proc(r: ReplaySessionRequest) = discard))
+    counted not canOpenSecondReplaySession()
+    counted openReplaySession(wanted) == rsoNoSecondSession
+
+  test "the outcome vocabulary tells the four answers apart":
+    # `bool` collapsed three different states into `false`, and a caller shows
+    # different things for them: no host at all, nothing to open, and a tab
+    # that could not be made.
+    resetReplaySessionServiceForTests()
+    counted openReplaySession(request("{\"events\":[1]}")) == rsoNoHost
+    installReplaySessionService(ReplaySessionService(
+      startProc: (proc(r: ReplaySessionRequest) = discard),
+      canOpenSecondSession: hostWithSecondSession))
+    counted openReplaySession(request("")) == rsoEmptyTrace
+    counted openReplaySession(request("   \n\t ")) == rsoEmptyTrace
+    counted openReplaySession(request("{}")) == rsoOpened
+    # And the two-valued form still agrees with it, so the older callers that
+    # only ask "did a debugger open" cannot drift from this.
+    counted requestReplaySession(request("{}"))
+    counted not requestReplaySession(request(""))
 
   test "the assertion count is measured":
     check countedAssertions == ExpectedAssertions

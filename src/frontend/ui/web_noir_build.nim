@@ -90,6 +90,12 @@ import ../viewmodel/platform/noir_template
 import ./web_project_store
 import ../viewmodel/platform/noir_build
 import ../viewmodel/viewmodels/noir_build_producer
+# The one predicate this module asks of the replay host: can it hold a SECOND
+# live session? `noir_build_producer` imports the service for the request type
+# and does not re-export it, so the question is imported here directly rather
+# than widening that module's export surface for one proc.
+from ../viewmodel/backend/replay_session_service import
+  canOpenSecondReplaySession
 from ../viewmodel/viewmodels/build_vm import BuildVM
 import ./build as build_pane
 # The PROBLEMS pane's mirror of the same diagnostics. `from ... import` to keep
@@ -155,6 +161,13 @@ var
     ## pane left `inFlight` would disable its own button permanently.
 
 var
+  activeRecordInNewTab = false
+    ## Whether the in-flight `nriTestRecord` gesture asked for a NEW session
+    ## tab. §9.1's interaction — "a developer comparing a passing and a failing
+    ## case does not lose one to look at the other" — and a REQUEST rather than
+    ## a command: `openReplaySession` refuses it by name on a host that holds
+    ## one live session, and nothing is opened.
+
   activeRecordSelector = ""
     ## Which test the in-flight `nriTestRecord` gesture is about. Held here
     ## rather than derived from the response because the RECORD dispatch needs
@@ -375,6 +388,8 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
       # THE ARTIFACT IS THE TEST'S, so the trace is of the test and not of
       # `main`. Empty inputs: a `#[test]` takes no arguments and the module
       # refuses to record one that does, so its ABI has nothing to encode.
+      producer.replayLabel = activeRecordSelector
+      producer.replayInNewSessionTab = activeRecordInNewTab
       dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
                $noirTraceRequest(producer.artifact, noirTestRecordInputs),
                "nargo trace " & activeRecordSelector)
@@ -641,7 +656,17 @@ proc startNoirTests*(saved: seq[string] = @[]; only: seq[string] = @[]) =
     if not noirTestRunSettled.isNil:
       noirTestRunSettled()
 
-proc startNoirTestRecording*(selector: string) =
+proc canRecordTestInNewSessionTab*(): bool =
+  ## Whether "run this test in a NEW session tab" can be offered.
+  ##
+  ## ASKED BEFORE THE GESTURE IS OFFERED, so a menu never shows an option that
+  ## will be refused — which is the dead-affordance shape with a tab bar to
+  ## make it convincing. `ui/web_replay_host` answers `false` today and its
+  ## comment names exactly what would make it true.
+  canOpenSecondReplaySession()
+
+proc startNoirTestRecording*(selector: string;
+                             newSessionTab: bool = false) =
   ## RUN ONE TEST IN THE DEBUGGER — the editor's Run-test control.
   ##
   ## "Running a test" in this product means recording it and replaying it: the
@@ -668,8 +693,15 @@ proc startNoirTestRecording*(selector: string) =
   if producer.isNil:
     report("test-record-refused", "reason=no-build-vm")
     return
+  if newSessionTab and not canRecordTestInNewSessionTab():
+    # REFUSED BEFORE ANYTHING RUNS. Compiling, running and tracing a test and
+    # only then discovering the session cannot be opened where it was asked for
+    # would spend seconds to reach a refusal that was knowable at the click.
+    report("test-record-refused", "reason=no-second-session")
+    return
   activeIntent = nriTestRecord
   activeRecordSelector = selector
+  activeRecordInNewTab = newSessionTab
   if not noirTestRunStarted.isNil:
     noirTestRunStarted()
   dispatch(producer, tmpl, nbpTest, noirTestArgs(),
