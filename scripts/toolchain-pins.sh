@@ -731,7 +731,7 @@ verify_tool() {
 		;;
 	unknown)
 		fail "$name resolves to $T_WHERE, which this guard cannot attribute." \
-			"It is neither a /nix/store path nor a build inside a git checkout under" \
+			"It is neither a $STORE_PREFIX path nor a build inside a git checkout under" \
 			"$WORKSPACE_ROOT, so nothing here can say which commit produced it."
 		return
 		;;
@@ -771,12 +771,14 @@ verify_tool() {
 				"There is no evidence available here that it corresponds to $T_HEAD."
 		fi
 		# Divergence from the flake pin: reported in --verify, refused in --strict.
+		local pin_compared=0
 		if [ -n "$flake_input" ] && [ -n "$T_HEAD" ]; then
 			local pin=""
 			case "$flake_input" in
 			noir) pin="$LOCK_NOIR" ;;
 			esac
 			if [ -n "$pin" ]; then
+				pin_compared=1
 				if git -C "$T_REPO" merge-base --is-ancestor "$pin" "$T_HEAD" 2>/dev/null; then
 					ok "$name at $T_VERSION from $T_REPO@$(short "$T_HEAD"), a descendant of the flake '$flake_input' pin $(short "$pin")"
 				else
@@ -802,7 +804,14 @@ verify_tool() {
 				fi
 			fi
 		fi
-		[ "$bad" -eq 0 ] && [ -z "$flake_input" ] && ok "$name at $T_VERSION from $T_REPO@$(short "$T_HEAD") (clean, binary matches HEAD)"
+		# One line per tool, always. The pin comparison above prints its own `ok`
+		# when it ran; this covers the cases where it did not — no flake input is
+		# declared for the tool, or one is but its pin could not be resolved. A
+		# tool that passes SILENTLY is indistinguishable from one that was never
+		# looked at, and the whole subject of this file is telling those apart.
+		if [ "$bad" -eq 0 ] && [ "$pin_compared" -eq 0 ]; then
+			ok "$name at $T_VERSION from $T_REPO@$(short "$T_HEAD") (clean, binary matches HEAD; no flake pin to compare against)"
+		fi
 		return
 		;;
 	esac
