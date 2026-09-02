@@ -31,6 +31,7 @@ import { _electron, chromium } from "playwright";
 
 import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
+import { formatErrorGroups } from "./error-grouping";
 import { requiresRR } from "./lang-support";
 import {
   ensureDefaultConfig,
@@ -1983,12 +1984,17 @@ export const test = base.extend<
             }).catch(() => "(page closed)");
             console.log(`  FAIL scripts: ${scriptStatus}`);
           } catch { /* page may be closed */ }
-          // Report collected JS errors from the renderer
-          if (result.consoleErrors.length > 0) {
-            console.log(`  FAIL JS errors (${result.consoleErrors.length}):`);
-            for (const err of result.consoleErrors.slice(0, 50)) {
-              console.log(`    ${err}`);
-            }
+          // Report collected JS errors from the renderer.
+          //
+          // A COUNT cannot distinguish one cause from many. A single throw on
+          // a reactive write re-fires on every subsequent write, so "1257 JS
+          // errors" is one defect reported 1257 times -- and printing the
+          // first 50 of them prints the same line 50 times while the *second*
+          // distinct fault, the one that would name the real cause, scrolls
+          // past unseen. Group by signature first, then print the FIRST
+          // occurrence of each group with its stack.
+          for (const line of formatErrorGroups(result.consoleErrors)) {
+            console.log(line);
           }
           // Report main process output (backend-manager, socket, init flow)
           if (result.mainProcessOutput.length > 0) {
