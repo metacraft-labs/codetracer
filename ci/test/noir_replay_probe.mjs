@@ -150,6 +150,7 @@ const report = {
   editorRejected: [],
   editorWidgetCount: -1,
   stepButtonPresent: false,
+  caretPositions: [],
   gestureError: '',
   noSourceVisible: false,
   openTabTitles: [],
@@ -307,7 +308,27 @@ try {
   // harness failure: whether a replay session brings the debugger panes up is
   // itself part of what this gate measures, and a probe that forced them open
   // would be measuring its own click.
+  // WHERE THE CARET IS, read the way a user sees it. `editor.nim:675` gives
+  // the current step's line the Monaco decoration class `on`, so the overlay
+  // element carrying it IS the highlight on screen. Its vertical offset is
+  // recorded after every step: a set of distinct offsets larger than one is
+  // the caret having MOVED, which is the gesture under test — "a step control
+  // exists" and "stepping moves the caret in the painted editor" are different
+  // claims, and only the second is a debugger.
+  const caretTop = () => page.evaluate(() => {
+    const marks = document.querySelectorAll('.view-overlays .on, .view-line .on, .on');
+    for (const m of marks) {
+      const r = m.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      return Math.round(r.y);
+    }
+    return -1;
+  });
+
   if (report.stepButtonPresent) {
+    const tops = new Set();
+    const first = await caretTop();
+    if (first >= 0) tops.add(first);
     for (let i = 0; i < steps; i += 1) {
       try {
         await page.click('.step-forward', { timeout: 3000 });
@@ -316,7 +337,10 @@ try {
         break;
       }
       await page.waitForTimeout(900);
+      const t = await caretTop();
+      if (t >= 0) tops.add(t);
     }
+    report.caretPositions = Array.from(tops);
   } else {
     report.gestureError = 'no .step-forward control is mounted in this layout';
   }

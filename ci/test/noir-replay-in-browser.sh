@@ -331,6 +331,19 @@ ck "$([ "${missing}" -eq 0 ] && echo ok || echo no)" \
 ck "$([ "${distinct}" -gt 1 ] && echo ok || echo no)" \
 	"stepping advanced through ${distinct} distinct position(s)"
 
+# AND THE CARET MOVED IN THE EDITOR THE USER IS LOOKING AT. `editor.nim:675`
+# gives the current step's line the Monaco class `on`, so this reads the
+# highlight itself rather than the engine's opinion of where it is. "A step
+# control exists" and "stepping moves the caret in the painted editor" are
+# different claims, and only the second is a debugger — a session can advance
+# its position and leave the editor on line 1 forever.
+step_button="$(field "${control}" '.stepButtonPresent')"
+carets="$(field "${control}" '.caretPositions | length')"
+ck "$([ "${step_button}" = true ] && echo ok || echo no)" \
+	"the debugger's step control is mounted (Run leaves edit mode)"
+ck "$([ "${carets}" -gt 1 ] && echo ok || echo no)" \
+	"and stepping moved the painted caret through ${carets} position(s)"
+
 painted_chars="$(field "${control}" '.editorPaintedChars')"
 raw_lines="$(field "${control}" '.editorRawLineCount')"
 editors="$(field "${control}" '.editorWidgetCount')"
