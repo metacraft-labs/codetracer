@@ -299,7 +299,12 @@ proc fileContent*(tmpl: ProjectTemplate; path: string): string =
 # ---------------------------------------------------------------------------
 
 const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir","functions":[{"name":"main","opcodes":17}],"unconstrained_functions":[{"name":"directive_invert","opcodes":9},{"name":"directive_integer_quotient","opcodes":8}]}]}"""
-  ## The bundled template's `nargo info --json`, verbatim.
+  ## The bundled template's constraint counts, in `nargo info --json`'s shape
+  ## so one parser serves both hosts. It is no longer one command's verbatim
+  ## output: the ACIR total is maintained against the wasm compiler the browser
+  ## runs (which is not the flake's `nargo` — the two disagree on this
+  ## template), while the unconstrained counts still carry `nargo info`'s
+  ## figures. See the drift section below for which half a gate checks.
   ##
   ## ## Why a constant is the honest representation, and not a cached answer
   ##
@@ -310,12 +315,22 @@ const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir",
   ## function of a constant is a constant, so carrying the answer is the same
   ## kind of claim as carrying the files.
   ##
-  ## What would make it dishonest is drift, and what prevents it is
-  ## `ci/test/noir-template-toolchain.sh`: it writes this template to a
-  ## temporary directory, runs `nargo info --json` against it, and fails if the
-  ## bytes differ. So editing `main.nr` without re-measuring fails a gate
-  ## instead of shipping a number that is quietly wrong — the same gate that
-  ## checks the crate compiles and its five tests pass.
+  ## What would make it dishonest is drift, and what partly prevents it is
+  ## `ci/test/noir-template-toolchain.sh`. Be exact about how much it covers,
+  ## because it is less than this whole constant:
+  ##
+  ## * The **ACIR total** — the sum of `programs[].functions[].opcodes`, `17`
+  ##   here — is compiled from this template by the shipping wasm module and
+  ##   compared as an integer. That comparison is the one that decides whether
+  ##   the pane's headline number is right.
+  ## * The **unconstrained counts** (`directive_invert`, `directive_integer_quotient`)
+  ##   are compared against nothing. Editing them, or editing `main.nr` in a way
+  ##   that only moves them, passes the gate.
+  ##
+  ## It does not diff these bytes and it does not run `nargo info` — see that
+  ## script's own note at the ACIR comparison ("Only the ACIR total is
+  ## compared"). The gate that checks the crate compiles and its five tests pass
+  ## is the same script, in its other arms.
   ##
   ## THIS NAMED `test_noir_template_constraints.nim` UNTIL 09-02, AND NO SUCH
   ## FILE HAS EVER EXISTED. The description was accurate and the filename was
@@ -334,18 +349,25 @@ const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir",
   ##
   ## ## And why the web needs it at all
   ##
-  ## `nargo` is not in a browser, and the wasm compiler has no `info`
-  ## operation: `compile_vfs.rs` exports `nv_compile_vfs` and `nv_test_vfs` and
-  ## nothing else, the worker dispatches `compile`, `test` and `trace`, and the
-  ## only compile a tracer host asks for sets `force_brillig: true` — so even
-  ## decoding its artifact would answer about an all-unconstrained build rather
-  ## than the circuit. Producing this number in a tab needs a new wasm export
-  ## and a new worker branch; until then the answer travels with the sources it
-  ## is an answer about.
+  ## `nargo` is not in a browser and the wasm module has no `info` export, so
+  ## the number cannot be *asked for* by that name. It can still be COMPUTED:
+  ## `ci/test/noir-template-acir-count.mjs` gets exactly this ACIR total from
+  ## the shipping module over the existing ABI, and `web_noir_build.nim` already
+  ## issues a program-mode (`nbmProgram`) compile through the worker from a tab.
   ##
-  ## THE SAME SENTENCE WAS TRUE OF `nargo test` AND IS NOT ANY MORE, which is
-  ## why the list above is spelled out rather than left as "exactly two". A
-  ## count goes stale silently; a list names what it is missing.
+  ## SO THE REASON THIS IS A CONSTANT IS NOT THAT COMPUTING IT IS BLOCKED.
+  ## Nothing new has to be exported and no worker branch has to be added. The
+  ## reason is rule 5's: a constant costs no storage, needs no network, and is
+  ## already correct on first paint, whereas computing it would make the pane
+  ## wait for a compile to display a property of files that cannot change.
+  ##
+  ## THIS PARAGRAPH HAS BEEN WRONG TWICE. It once said the same of `nargo test`;
+  ## it then said producing the count "needs a new wasm export and a new worker
+  ## branch", which told a reader that work was expensive when it was nearly
+  ## free. Do not restate the module's exports or the worker's subcommand list
+  ## here — both have grown since each was last written down. The exports are
+  ## whatever `ci/test/noir-wasm-worker/worker.mjs` binds; the subcommands are
+  ## whatever `wasm_worker_browser.js` dispatches. Read them there.
 
 const noirTemplateConstraintProvenance* =
   "nargo info --json, run against this template at build time"

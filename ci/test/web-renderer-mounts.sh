@@ -809,14 +809,17 @@ PY2
 
 # Arm N — THE CONSTRAINT COUNTS THE BUNDLE SHIPS ARE WRONG.
 #
-# The web build cannot run `nargo`: there is no subprocess in a tab, the wasm
-# compiler exports no `info` operation, and the only compile a tracer host asks
-# for sets `force_brillig`, so even decoding its artifact would answer about an
-# all-unconstrained build. The counts therefore travel with the sources they
-# describe, produced by `nargo info --json` at build time
-# (`platform/noir_template.noirTemplateNargoInfoJson`), and
-# `ci/test/noir-template-toolchain.sh` re-runs the producer on every CI run and
-# fails on drift.
+# The web build cannot run `nargo` — there is no subprocess in a tab, and the
+# wasm module has no `info` export — so the counts travel with the sources they
+# describe (`platform/noir_template.noirTemplateNargoInfoJson`). That is a
+# packaging choice, not an impossibility: the ACIR total CAN be computed in the
+# browser over the existing ABI, and `ci/test/noir-template-acir-count.mjs`
+# does exactly that. See that constant's docstring before concluding the number
+# is expensive to produce.
+#
+# `ci/test/noir-template-toolchain.sh` is what checks it, in the web-deploy
+# lane only (`deploy-web-codetracer.yml`) — NOT on every CI run — and it
+# compares the ACIR total alone.
 #
 # THIS arm is the other half of that: it perturbs the shipped constant and
 # requires the PANE to disagree. Without it, arm R's opcode-count check
@@ -1680,10 +1683,12 @@ print(len(boxes), len(bad), len(zero))
 		ck fail "arm R: ${1:-0} run control(s) measured, ${2:-?} overlapping the breakpoint marker and ${3:-?} with no width — a control a click cannot reach, or one that steals the breakpoint's"
 	fi
 
-	# CONSTRAINTS SHOWS A MEASURED NUMBER. 17 is `nargo info --json`'s answer
-	# for this template; `ci/test/noir-template-toolchain.sh` re-runs the
-	# producer and fails if the bundle's copy has drifted from it, so the
-	# number written here is pinned by a measurement rather than by taste.
+	# CONSTRAINTS SHOWS A MEASURED NUMBER. 17 is the ACIR total the SHIPPING
+	# wasm compiler computes for this template — NOT the flake `nargo`'s answer,
+	# which differs for these same sources; that disagreement is why the gate
+	# was moved onto the shipping engine. `ci/test/noir-template-toolchain.sh`
+	# recompiles with that module and fails if the bundle's copy has drifted, so
+	# the number written here is pinned by a measurement rather than by taste.
 	r_constraints="$(python3 -c '
 import json, sys
 rows = json.load(open(sys.argv[1]))["dom"].get("constraintRows") or []
