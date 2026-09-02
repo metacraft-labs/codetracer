@@ -3184,12 +3184,7 @@ impl MaterializedReplaySession {
                 }
             };
             let path_str = self.reader.path(step_record.path_id).unwrap_or("").to_string();
-            let workdir_path = self.reader.workdir().join(&path_str);
-            let probe_path = if workdir_path.exists() {
-                workdir_path.clone()
-            } else {
-                PathBuf::from(&path_str)
-            };
+            let probe_path = source_probe_path(self.reader.workdir(), &path_str);
             // Spec §6.1.0 monotonicity: `last_change_step` is the step at
             // which the post-write value first becomes observable in
             // `Db.variables`. For recorders that snapshot variables
@@ -3856,12 +3851,7 @@ impl MaterializedReplaySession {
             return None;
         }
         let path_str = self.reader.path(step.path_id)?.to_string();
-        let workdir_path = self.reader.workdir().join(&path_str);
-        let probe_path = if workdir_path.exists() {
-            workdir_path
-        } else {
-            PathBuf::from(&path_str)
-        };
+        let probe_path = source_probe_path(self.reader.workdir(), &path_str);
         let row = step.line.0.max(0) as usize;
         let (line_text, origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
         if origin == SourceOrigin::Unavailable || line_text.trim().is_empty() {
@@ -3889,12 +3879,7 @@ impl MaterializedReplaySession {
             };
             if step.call_key == caller_frame {
                 let path_str = self.reader.path(step.path_id)?.to_string();
-                let workdir_path = self.reader.workdir().join(&path_str);
-                let probe_path = if workdir_path.exists() {
-                    workdir_path
-                } else {
-                    PathBuf::from(&path_str)
-                };
+                let probe_path = source_probe_path(self.reader.workdir(), &path_str);
                 let row = step.line.0.max(0) as usize;
                 let (line_text, origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
                 let trimmed = line_text.trim();
@@ -4049,12 +4034,7 @@ impl MaterializedReplaySession {
             if classifier_lang_for_path(path_str) != Some(ClassifierLang::Ruby) {
                 return None;
             }
-            let workdir_path = self.reader.workdir().join(path_str);
-            let probe_path = if workdir_path.exists() {
-                workdir_path
-            } else {
-                PathBuf::from(path_str)
-            };
+            let probe_path = source_probe_path(self.reader.workdir(), path_str);
             let row = step.line.0.max(0) as usize;
             let (line_text, origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
             if origin == SourceOrigin::Unavailable {
@@ -4170,6 +4150,54 @@ fn default_type_record() -> codetracer_trace_types::TypeRecord {
         kind: TypeKind::None,
         lang_type: "<none>".to_string(),
         specific_info: TypeSpecificInfo::None,
+    }
+}
+
+/// Choose which spelling of a recorded path the §6.1 origin chain hands to
+/// [`ExprLoader::get_source_line_v2`].
+///
+/// A trace records `path_str` however its recorder spelled it — absolute for
+/// the Noir wasm tracer, relative (`hello_noir/src/main.nr`) for the browser
+/// Noir compiler. The engine therefore has two candidate spellings, and the
+/// question this answers is which one it can actually read.
+///
+/// ## Why this is not `workdir_path.exists()`
+///
+/// It was, at four call sites, and on `wasm32-unknown-unknown`
+/// `Path::exists()` is hardwired `false` — so in a browser the ternary could
+/// only ever take the else and probe the bare recorded path. For an ABSOLUTE
+/// recorded path that is harmless: `PathBuf::join` discards the workdir, so
+/// both arms are the same string. For a RELATIVE one the two arms are
+/// genuinely different keys, and a host that had written the joined form into
+/// the VFS was probed with the bare form and missed, every time, while its
+/// text sat in memory under the other key.
+///
+/// This is the identical defect that [`crate::expr_loader::source_is_reachable`]
+/// was introduced to remove from `Location::missing_path`; it was still
+/// present one layer down, in the probe that feeds the classifier.
+///
+/// ## The property to preserve
+///
+/// The fallback ORDER is unchanged — joined first, bare second — so this only
+/// ever converts a miss into a hit:
+///
+/// * VFS holds the joined form → reachable → probe joined → resolves (this is
+///   the case that was broken).
+/// * VFS holds only the bare form → joined is unreachable → fall through to
+///   bare → resolves. A host that deliberately writes at the recorded
+///   relative path stays correct rather than becoming wrong.
+/// * Native → `exists()` answers first and the behaviour is byte-identical.
+/// Public so the browser acceptance test can assert the CHOICE directly. The
+/// four call sites feed their result straight into `get_source_line_v2`, whose
+/// failure mode is an empty string and `SourceOrigin::Unavailable` — the same
+/// answer a resolved-but-blank line gives. Asserting the chosen spelling and
+/// the resolved line separately is what keeps those two apart.
+pub fn source_probe_path(workdir: &Path, path_str: &str) -> PathBuf {
+    let workdir_path = workdir.join(path_str);
+    if crate::expr_loader::source_is_reachable(&workdir_path) {
+        workdir_path
+    } else {
+        PathBuf::from(path_str)
     }
 }
 

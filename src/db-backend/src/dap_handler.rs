@@ -3368,6 +3368,39 @@ impl Handler {
     /// by [`Self::load_source_views`]) are left alone. A trace that bundled no
     /// raw sources leaves `bundled_sources_root` `None`, preserving the prior
     /// filesystem-read behaviour exactly.
+    ///
+    /// # Native only — do not wire this into the browser path
+    ///
+    /// This function is filesystem-bound end to end and CANNOT be made to work
+    /// in a browser by calling it from `dap_server::setup_from_vfs`. Every
+    /// stage is a `std` filesystem call that is a no-op or an error on
+    /// `wasm32-unknown-unknown`:
+    ///
+    /// * [`find_ct_container`] discovers the container with `is_file()` /
+    ///   `is_dir()` / `std::fs::read_dir` — `false`, `false`, `Err`. It returns
+    ///   `None` and the function exits at its first line. In the browser the
+    ///   container is not on disk at all; it is a `Vec<u8>` in the VFS.
+    /// * The extraction loop writes each view with `std::fs::create_dir_all` +
+    ///   `std::fs::write` under `std::env::temp_dir()` — `Unsupported`, so
+    ///   `extracted` stays `0` and `bundled_sources_root` stays `None`.
+    /// * `bundled_sources_root` is consumed as a filesystem root by
+    ///   [`Self::meta_dat_sources_root`], which hands it to
+    ///   `ExprLoader::get_source_line_v2`'s bundled branch.
+    ///
+    /// So the answer to "should the browser path call this?" is no — calling it
+    /// would be three guaranteed no-ops in a row and would look like the
+    /// capability had been wired.
+    ///
+    /// The capability is NOT superseded by the VFS route, though: the VFS
+    /// serves source text a HOST pushed in, and nothing on the browser path
+    /// read `srcviews.dat` out of the container, so a container that shipped
+    /// its own sources really was unreachable there. What supersedes is the
+    /// *materialisation strategy*, not the feature. The browser equivalent is
+    /// [`Self::load_bundled_sources_from_vfs`], which takes the container bytes
+    /// the caller already holds and writes the same kind-0 views into the VFS
+    /// at the same [`crate::expr_loader::bundled_source_path`] layout — so both
+    /// entry points converge on one read side and one origin kind
+    /// (`BundledMetaData`).
     pub fn load_bundled_sources(&mut self, trace_dir: &Path) {
         let Some(ct_path) = find_ct_container(trace_dir) else {
             return;
@@ -3438,6 +3471,88 @@ impl Handler {
             );
             self.bundled_sources_root = Some(root);
         }
+    }
+
+    /// §5.2, browser path — the VFS-targeted sibling of
+    /// [`Self::load_bundled_sources`].
+    ///
+    /// `setup_from_vfs` already holds the container's bytes (it read them out
+    /// of the VFS to sniff the CTFS magic), so there is nothing to discover on
+    /// disk and no reason to touch the filesystem. This extracts the same
+    /// kind-0 raw views and `vfs_write`s them at exactly the paths
+    /// [`crate::expr_loader::bundled_source_path`] derives — the same layout
+    /// the native extraction writes to disk — then sets
+    /// `bundled_sources_root` to the same virtual root the read side probes.
+    ///
+    /// The read side needs no second implementation:
+    /// `get_source_line_v2`'s bundled branch now reads through
+    /// `expr_loader::source_text`, which tries the filesystem and then the VFS.
+    /// A native session finds the extracted file; a browser session finds the
+    /// VFS entry; both report `SourceOrigin::BundledMetaData`, so provenance is
+    /// not silently downgraded to `Filesystem` in one of the two.
+    ///
+    /// `root` is a virtual key prefix, not a path that will ever be created.
+    /// It is namespaced per container so two traces open in the same tab cannot
+    /// collide, matching the native hashing for the same reason.
+    ///
+    /// Returns the number of views written, so a caller (and a test) can assert
+    /// the count rather than infer it from a side effect.
+    pub fn load_bundled_sources_from_vfs(&mut self, container_key: &str, container_bytes: Vec<u8>) -> usize {
+        let mut reader = match CtfsReader::from_bytes(container_bytes) {
+            Ok(r) => r,
+            Err(e) => {
+                debug!("bundled-sources(vfs): not a readable CTFS container at {container_key}: {e}");
+                return 0;
+            }
+        };
+        let views = match crate::source_views::SourceViews::load_from_reader(&mut reader) {
+            Ok(v) => v,
+            // Pre-extension trace (no srcviews) — the common case; silent.
+            Err(crate::source_views::SourceViewsError::Absent) => return 0,
+            Err(e) => {
+                debug!("bundled-sources(vfs): failed to read srcviews from {container_key}: {e}");
+                return 0;
+            }
+        };
+        if views.is_empty() {
+            return 0;
+        }
+
+        let path_strings: HashMap<u64, String> = self
+            .reader
+            .path_entries_iter()
+            .map(|(p, id)| (id.0 as u64, p.to_string()))
+            .collect();
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&container_key, &mut hasher);
+        let key = std::hash::Hasher::finish(&hasher);
+        let root = std::path::PathBuf::from(format!("/codetracer-bundled-sources/{key:016x}"));
+
+        let mut extracted = 0usize;
+        for sv in views.entries() {
+            // Only raw (kind 0) views are the source itself; skip formatted
+            // deminification views, exactly as the native path does.
+            if sv.view_kind != 0 {
+                continue;
+            }
+            let Some(recorded_path) = path_strings.get(&sv.path_id) else {
+                warn!("bundled-sources(vfs): srcview references unknown path_id {}", sv.path_id);
+                continue;
+            };
+            let dest = crate::expr_loader::bundled_source_path(&root, Path::new(recorded_path));
+            crate::vfs::vfs_write(dest.to_string_lossy().as_ref(), sv.content.clone());
+            extracted += 1;
+        }
+
+        if extracted > 0 {
+            info!(
+                "bundled-sources(vfs): extracted {extracted} bundled source(s) from {container_key} to {}",
+                root.display()
+            );
+            self.bundled_sources_root = Some(root);
+        }
+        extracted
     }
 
     /// Load the layered origin-pattern set per spec §7.4.
