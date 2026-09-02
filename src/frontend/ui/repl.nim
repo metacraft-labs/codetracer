@@ -297,6 +297,37 @@ else:
 # render.  Generic callers are expected to use direct IsoNim mount paths.
 # ---------------------------------------------------------------------------
 
+method unregister*(self: ReplComponent) =
+  ## Release the module-global slot and the mounted marker before the base
+  ## implementation drops the event-bus subscriptions.
+  ##
+  ## WITHOUT THIS THE PANE COMES BACK BLANK, PERMANENTLY, AND SILENTLY. Both
+  ## globals are write-once: `register` assigns `replComponentRef` only
+  ## `if isNil`, and the mount returns early at its
+  ## `isoNimReplMountedIds.hasKey` guard. Neither was ever cleared. After a
+  ## teardown `replComponentRef` still points at a component whose DOM
+  ## container is gone, and the marker for its id survives into the next
+  ## component handed the same id — GoldenLayout reuses them, and ids restart
+  ## from 0 after a layout reset — whose mount then returns at the guard and
+  ## draws nothing.
+  ##
+  ## It is an ordinary transition, not an exotic one:
+  ## `ui/session_switch.nim:337` unregisters EVERY component of a closing
+  ## session and `ui/layout.nim` unregisters a closed panel. And the failure is
+  ## silent, which is what made it survive — a pane that returns early at a
+  ## guard is indistinguishable from a pane with nothing to show.
+  ##
+  ## The VM is deliberately NOT reset: it is a singleton by design and holds
+  ## state about the trace rather than about this panel, so dropping it would
+  ## make closing and reopening the pane lose data that is still true.
+  ##
+  ## Modelled on `ui/constraints.nim`, which is the worked example, and
+  ## `ui/scratchpad.nim`, which is the original.
+  if replComponentRef == self:
+    replComponentRef = nil
+  discard jsDelete(isoNimReplMountedIds[self.id])
+  procCall unregister(Component(self))
+
 method register*(self: ReplComponent, api: MediatorWithSubscribers) =
   ## Register the ReplComponent with the mediator.  Bring up the
   ## IsoNim ReplVM lazily so the mount procedure can find it; the

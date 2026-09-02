@@ -1,0 +1,37 @@
+# frontend-reachability-allowlist.txt
+#
+# Exported frontend symbols that legitimately have no cross-module product
+# reader. Read by `ci/test/frontend-reachability-guard.py`.
+#
+# FORMAT
+#     <symbol>  # <reason>
+#
+# The reason is MANDATORY and is checked: an entry without one, or with one
+# shorter than twelve characters, fails the guard outright — not as part of the
+# backlog, but as a defect in this file. That check exists because an
+# allow-list which grows without review becomes the thing it was meant to
+# prevent. "known issue", "ok" and "see ticket" are not reasons; write what
+# reaches the symbol instead, and why that reach is invisible to a name scan.
+#
+# Entries naming a symbol that is no longer declared anywhere are also
+# reported, so this file cannot quietly become a record of deleted code.
+#
+# WHEN AN ENTRY IS CORRECT
+#     * The symbol is reached by something that is not a Nim name: an IPC
+#       message handler resolved by string, a `{.exportc.}` boundary, a
+#       dispatch table built at runtime, a Karax/IsoNim view mounted by id.
+#     * The symbol is a published API this repository is not the only consumer
+#       of — the Embed SDK surface, an extension entry point.
+#     * The symbol is one arm of a deliberately total interface (every case of
+#       an enum, every accessor of a facade) where the unused arms exist so the
+#       interface cannot drift.
+#
+# WHEN AN ENTRY IS WRONG
+#     * "It will be used soon." Then it is not reached today, and the pane it
+#       belongs to looks present and does nothing. Delete it or wire it.
+#     * "The test covers it." That is the defect, not the exemption. A tested
+#       capability nothing reaches is exactly what this guard is for.
+#
+# The list starts empty on purpose. The first run reports 1180 findings across
+# buckets A and B; adding entries before those are triaged would be recording
+# the backlog rather than clearing it.

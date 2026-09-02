@@ -41,6 +41,51 @@ var buildVMStore: ReplayDataStore
 var buildComponentRef: BuildComponent
 var isoNimBuildMounted*: bool = false
 
+var buildDiagnosticScanner: BuildLocationScanner
+  ## THE READER THE `nargo` FAMILY NEEDS, and the reason this pane cannot use
+  ## `parseBuildLocation` alone.
+  ##
+  ## `parseBuildLocation` is a function of ONE line. `nargo` — and every other
+  ## `codespan-reporting` / `ariadne` producer — puts the severity keyword and
+  ## the compiler's sentence on the line ABOVE the location:
+  ##
+  ##     warning: unused variable x
+  ##       ┌─ src/main.nr:1:9
+  ##
+  ## so `parseNoirLocation` has nothing to read on the location line and
+  ## returns the struct's zero value, `SevError`. Every Noir diagnostic
+  ## therefore reached `buildSeverityToProblem` as an error, warnings included
+  ## — measured on `test-programs/noir_build_error`: three diagnostics, two of
+  ## them `warning:`, all three painted red in PROBLEMS. A warning presented as
+  ## an error is a false alarm, and a pane that raises them stops being read.
+  ##
+  ## `BuildLocationScanner` was written for exactly this and had no product
+  ## caller until this one: it was reached only from
+  ## `viewmodel/tests/unit/test_noir_build_diagnostics.nim`.
+  ##
+  ## ## Why a module-level var here, when the type's own docs argue against one
+  ##
+  ## They argue against a global in `build_location_parser`, so that
+  ## `parseBuildLocation` cannot answer differently for the same input
+  ## depending on call history — the property that makes the parser testable.
+  ## That is preserved: the state lives here, in the caller, exactly as the
+  ## type prescribes.
+  ##
+  ## It is module-level rather than a `BuildComponent` field because this pane
+  ## is a singleton and its producer is serial — `buildVMInstance`,
+  ## `buildVMStore` and `buildComponentRef` above are module-level for the same
+  ## reason. The two hazards the type names are both closed:
+  ##   * a rerun inheriting the previous run's keyword — `onBuildCommand`
+  ##     resets it, at the same instant it clears the pane;
+  ##   * two concurrent builds colouring each other's rows — `onBuildCommand`
+  ##     already calls `clearOutput`, so this pane cannot represent two builds
+  ##     at once in the first place.
+  ##
+  ## The BULK-REPLAY path (`syncLegacyBuildIntoVM`) deliberately does NOT use
+  ## this one. It walks a whole stored transcript from the start, so it owns a
+  ## fresh local scanner; sharing this one would let a replay consume the live
+  ## build's pending keyword.
+
 proc tryMountIsoNimBuildPanel*()
 proc parserSeverityToVM(sev: BuildSeverity): BuildLineSeverity
 proc ansiToHtml(raw: cstring): cstring
@@ -163,11 +208,16 @@ proc syncLegacyBuildIntoVM*(self: BuildComponent) =
   buildVMInstance.setCommand(safeStr(self.build.command))
   buildVMInstance.setRunning(self.build.running)
   buildVMInstance.setCode(self.build.code)
+  # A FRESH scanner, local to this replay. `self.build.output` is walked whole
+  # and from the start, so it is its own transcript; borrowing the live
+  # producer's scanner would let a replay eat a pending keyword that belongs to
+  # the build currently running.
+  var replayScanner: BuildLocationScanner
   for entry in self.build.output:
     let raw = entry[0]
     let isStdout = entry[1]
     let rawText = safeStr(raw)
-    let parsed = parseBuildLocation(rawText)
+    let parsed = replayScanner.scan(rawText)
     var sevTag = blsNone
     var locPath = ""
     var locLine = 0
@@ -429,12 +479,19 @@ proc syncBuildOutputAppend(self: BuildComponent, htmlText: cstring,
 
 template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): untyped =
   let klass = if stdout: "build-stdout" else: "build-stderr"
+  # EVERY line of the child's output goes through the scanner, in order, and
+  # exactly once — including the lines that carry no location, because those
+  # are where `nargo`'s severity keyword lives. A reader that only fed it lines
+  # it had already decided were locations would never see a keyword at all.
+  #
+  # This call is what makes `buildDiagnosticScanner` reachable; see its
+  # declaration for the defect that existed while it was not.
+  let scanned = buildDiagnosticScanner.scan(buildLine)
   let (match, location, rawLocation, other) = self.matchLocation(buildLine)
   if match:
     if rawLocation.len > 0:
       self.build.output.add((rawLocation, stdout))
-      let parsed0 = parseBuildLocation(buildLine)
-      let sevTag = if parsed0.found: parserSeverityToVM(parsed0.severity) else: blsNone
+      let sevTag = if scanned.found: parserSeverityToVM(scanned.severity) else: blsNone
       self.syncBuildOutputAppend(rawLocation, stdout, sevTag, location.path, location.line)
     if other.len > 0:
       self.build.output.add((other, stdout))
@@ -448,7 +505,13 @@ template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): unt
         other: $other))
 
     # BP-M4: Publish a structured Problem for the Problems panel.
-    let parsed = parseBuildLocation(buildLine)
+    #
+    # From `scanned`, NOT from a second `parseBuildLocation(buildLine)` call.
+    # The two differ on exactly the family this pane gets wrong without the
+    # scanner: for a `┌─ path:line:col` line the stateless call returns
+    # `SevError` and an empty message, so a `warning:` became a red row with
+    # nothing written on it. `scanned` carries both down from the header.
+    let parsed = scanned
     if parsed.found:
       self.build.problems.add(BuildProblem(
         severity: buildSeverityToProblem(parsed.severity),
@@ -481,6 +544,11 @@ template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): unt
 
 method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
   self.build.command = response.command
+  # A NEW BUILD STARTS WITH NO PENDING KEYWORD. Without this, a run whose last
+  # diagnostic header had no location line beneath it would hand its severity
+  # to the FIRST located line of the next run — a warning from the previous
+  # build painting this build's error orange, or the reverse.
+  buildDiagnosticScanner.reset()
   # Initialise auto-scroll to on and record the build start time.
   self.build.autoScroll = true
   self.build.buildStartTime = dateNowMs()
