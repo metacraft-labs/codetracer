@@ -168,6 +168,26 @@ const report = {
   gestureError: '',
   noSourceVisible: false,
   openTabTitles: [],
+  // THE ROUND TRIP: edit, Run, step, return — and the edit is still there.
+  //
+  // Everything else in this file proves the MIDDLE. The two ends are what
+  // "full surface, returnable" (`web_entry_surface.noirStudioDebugLayout`)
+  // actually promises, and until edit persistence landed the return half was
+  // satisfied by nothing being changeable: a project that cannot be edited
+  // trivially comes back "as it was". With an edit in it the claim has
+  // content, and this is where it is measured.
+  editMarker: '',
+  editReachedModel: false,
+  editedContentBeforeRun: '',
+  returnGestureSent: false,
+  returnedToEditMode: false,
+  editorEditableAfterReturn: false,
+  editStillPresentAfterReturn: false,
+  contentAfterReturn: '',
+  // Every input to the two mode verdicts, so a red names which half failed
+  // and whether the instrument that measured it existed at all.
+  modeStateAfterReturn: null,
+  roundTripError: '',
   pageErrors: [],
   thrown: [],
   consoleLines: [],
@@ -278,6 +298,49 @@ try {
   // auto-hide panes on a `setTimeout` after GoldenLayout has built every
   // container, and a gesture issued into the middle of that races it.
   await page.waitForTimeout(2500);
+
+  // ── THE FIRST END OF THE ROUND TRIP: an edit, before anything runs ──
+  //
+  // Typed as KEYSTROKES into the mounted editor, not `model.setValue`: the
+  // point is that what the user typed is what Run compiles and what comes
+  // back, and `setValue` bypasses the change events the save path and the
+  // build path both listen to. Same reasoning as `noir_edit_persists_probe`.
+  //
+  // A PREPENDED COMMENT, not a replacement. The edit has to still COMPILE --
+  // Run has to reach a trace for the middle of this probe to mean anything --
+  // so the marker goes in as a `//` line at the top of `main.nr` and the
+  // program underneath is untouched. An edit that broke the build would make
+  // this gate red for a reason that has nothing to do with the round trip.
+  const marker = `ROUNDTRIP_${Date.now().toString(36).toUpperCase()}`;
+  report.editMarker = marker;
+  try {
+    const lineTarget = await page.$('.view-line');
+    if (lineTarget) {
+      await lineTarget.click({ timeout: 3000 });
+    } else {
+      await page.click('#editorComponent-0', { timeout: 3000 });
+    }
+    // To the very top, then type the comment and a newline. `Control+Home` is
+    // Monaco's "start of file" on Linux/Windows; the CI browser is Chromium on
+    // Linux, which is the platform this gate runs on.
+    await page.keyboard.press('Control+Home');
+    await page.keyboard.type(`// ${marker}\n`);
+    await page.waitForTimeout(400);
+    report.editedContentBeforeRun = await page.evaluate((mk) => {
+      const m = (window.monaco?.editor?.getModels() || [])
+        .find((x) => x.getValue().includes(mk));
+      return m ? m.getValue() : '';
+    }, marker);
+    report.editReachedModel = report.editedContentBeforeRun.includes(marker);
+    // Save it, because the claim under test is about the project the user is
+    // working on rather than an unsaved buffer. Best-effort and recorded: the
+    // dedicated persistence gate is what asserts Ctrl+S is answered, and a
+    // save that failed must not be mistaken here for a round trip that did.
+    await page.keyboard.press('Control+S');
+    await page.waitForTimeout(600);
+  } catch (e) {
+    report.roundTripError = `edit before Run: ${e.message}`;
+  }
 
   // Blur the editor before a chord: Mousetrap's default `stopCallback`
   // ignores one raised inside a TEXTAREA, and Monaco's input surface is one.
@@ -433,6 +496,91 @@ try {
   report.runVerdictRows = rowReport.rows;
   report.runVerdictRowsAll = rowReport.all;
   report.runVerdictRowCount = rowReport.count;
+
+  // ── THE SECOND END: return, and the edit is still there ──
+  //
+  // LAST, and deliberately so. The return is a MODE SWITCH: `switchToEdit`
+  // (`ui_js.nim:1191`) restores `lastUsedEditLayout` and clears every mapped
+  // component, so the debug panes and the BUILD rows measured above stop
+  // existing. Taking those measurements first is what keeps this addition from
+  // changing what the rest of the gate reports.
+  //
+  // `ctrl+f5` is the bound gesture (`ui_js.nim:1293` -> `data.toggleMode()`),
+  // and it is a REAL keystroke rather than a direct call to `switchToEdit` for
+  // the reason this whole file exists: a mode the product cannot be driven
+  // into by a user is not a mode the user has. The editor is blurred first
+  // because Monaco's input surface swallows the chord otherwise -- the same
+  // reason the Run gesture above blurs it.
+  try {
+    try {
+      await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
+    } catch (e) { /* reported through returnedToEditMode below */ }
+    await page.keyboard.press('Control+F5');
+    report.returnGestureSent = true;
+    await page.waitForTimeout(2000);
+
+    // WHAT "BACK IN EDIT MODE" MEANS, read off the product rather than
+    // asserted from the gesture having been sent. `switchToEdit` does two
+    // things a probe can see: it makes the editors writable again
+    // (`setEditorsReadOnlyState(false)`) and it restores the edit layout,
+    // whose defining property is that the debugger-only panes are gone.
+    // EVERY INPUT TO THE VERDICT IS RECORDED, not just the verdict.
+    //
+    // The first version of this reported one boolean per claim, and the first
+    // run produced `editorEditableAfterReturn: false` beside
+    // `editorWidgetCount: 1` — which is consistent with BOTH "the editor came
+    // back read-only" (a product defect) and "`monaco.editor.getEditors` is
+    // not a function in this Monaco build, so the probe asked nothing and read
+    // an empty list" (a defect in this file). Those need opposite fixes, and a
+    // bare `false` cannot tell them apart. So the instrument reports whether
+    // its own instrument existed.
+    const modeState = await page.evaluate(() => {
+      const ed = window.monaco?.editor;
+      const models = ed?.getModels?.() || [];
+      const hasGetEditors = typeof ed?.getEditors === 'function';
+      const editors = hasGetEditors ? (ed.getEditors() || []) : [];
+      const panes = ['#stateComponent-0', '#calltraceComponent-0',
+                     '#eventLogComponent-0', '#traceComponent-0'];
+      return {
+        hasGetEditors,
+        editorCount: editors.length,
+        // The raw option per editor, so "no editors" and "read-only editors"
+        // are distinguishable in the report itself.
+        readOnlyFlags: editors.map((e) => {
+          try { return e.getRawOptions?.().readOnly; } catch (err) { return 'threw'; }
+        }),
+        anyEditable: editors.some((e) => {
+          try { return e.getRawOptions?.().readOnly === false; } catch (err) { return false; }
+        }),
+        domEditors: document.querySelectorAll('.monaco-editor').length,
+        modelCount: models.length,
+        // A debugger-only pane still on screen means the edit layout did not
+        // come back, whatever the mode flag says.
+        debugPanesPresent: panes.filter((s) => document.querySelector(s)),
+      };
+    });
+    report.modeStateAfterReturn = modeState;
+    report.editorEditableAfterReturn = modeState.anyEditable;
+    report.returnedToEditMode =
+      modeState.anyEditable && modeState.debugPanesPresent.length === 0;
+
+    // AND THE EDIT ITSELF. Read from the Monaco model, which is what the user
+    // is looking at and what a subsequent Ctrl+S would write -- not from the
+    // store, which would prove persistence rather than the round trip.
+    report.contentAfterReturn = await page.evaluate((mk) => {
+      const models = window.monaco?.editor?.getModels() || [];
+      const m = models.find((x) => x.getValue().includes(mk));
+      if (m) return m.getValue();
+      // Report SOMETHING when the marker is gone, so a failure can say what
+      // the editor holds instead of only that the marker is missing.
+      return models.length ? models[0].getValue() : '';
+    }, marker);
+    report.editStillPresentAfterReturn =
+      report.contentAfterReturn.includes(marker);
+  } catch (e) {
+    report.roundTripError = `return after step: ${e.message}`;
+  }
+
   report.workerMessages = await page.evaluate(
     () => (window.__ctWorkerMessages || []).slice());
   report.vfsWrites = await page.evaluate(

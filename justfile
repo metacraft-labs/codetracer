@@ -3069,6 +3069,37 @@ test-noir-build-in-browser:
   exec > >(tee test-logs/test-noir-build-in-browser.log) 2>&1
   bash ci/test/noir-build-in-browser.sh
 
+# EDIT, RUN, STEP, RETURN — AND THE EDIT IS STILL THERE.
+#
+# The Run/step half has been assertable for a while; the two ends only became
+# so when edit persistence landed, because until then "comes back with the
+# project as it was" was satisfied by nothing being changeable. This recipe
+# exists because the script did not have one: `ci/test/noir-replay-in-browser.sh`
+# and `ci/test/noir-edit-persists.sh` were both reachable only by typing their
+# paths, which is the same coverage shape as a gate that never runs.
+#
+# Needs the two Noir modules, like `test-noir-build-in-browser`: set
+# CT_NOIR_WASM_COMPILER / CT_NOIR_WASM_TRACER, or CT_WEB_BUNDLE_DIR at a tree
+# that already has them. It EXITS 2 rather than passing when they are absent.
+test-noir-replay-in-browser:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-replay-in-browser.log) 2>&1
+  bash ci/test/noir-replay-in-browser.sh
+
+# The studio keeps what you type, across a reload that destroys every JS value.
+#
+# The persistence half on its own: 16 counted assertions with three reddening
+# arms. `test-noir-replay-in-browser` is what asserts the same edit survives the
+# Run/return round trip; this is what asserts it survives the browser.
+test-noir-edit-persists:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-edit-persists.log) 2>&1
+  bash ci/test/noir-edit-persists.sh
+
 # A failed build, a keystroke, and a caret that lands on the error. In a real
 # browser tab, against the assembled publish tree.
 #

@@ -393,6 +393,63 @@ errors="$(field "${control}" '.pageErrors | length')"
 ck "$([ "${errors}" -eq 0 ] && echo ok || echo no)" \
 	"zero uncaught page errors (${errors})"
 
+# ---------------------------------------------------------------------------
+# THE ROUND TRIP: edit, Run, step, return — and the edit is still there.
+#
+# Everything above proves the MIDDLE of that sentence. `web_entry_surface`'s
+# `noirStudioDebugLayout` states the whole of it — "Full surface, returnable —
+# Run leaves edit mode for the normal CodeTracer debugging layout, and an
+# explicit action comes back with the project as it was" — and calls itself
+# "the first half".
+#
+# THE RETURN HALF WAS UNASSERTABLE UNTIL NOW, and not for want of trying: with
+# no persistence, "comes back with the project as it was" was satisfied by
+# nothing being changeable. A project that cannot be edited trivially returns
+# unchanged, and every check of it would have passed against a product that
+# threw the user's work away, because there was no work to throw. Edit
+# persistence is what gives the claim content, which is why this assertion
+# lands with it and not before.
+#
+# FOUR CLAIMS, because the round trip has four places to break and three of
+# them read as success from the others' point of view:
+#   1. the edit reached the model at all (otherwise everything below is
+#      vacuous — "the marker survived" is trivially true of a marker that was
+#      never typed, and `editStillPresentAfterReturn` would be comparing two
+#      absences);
+#   2. the return GESTURE was delivered (a chord swallowed by Monaco leaves
+#      the tab in debug mode, which is not the product refusing to return);
+#   3. the tab is genuinely back in edit mode — writable editors AND no
+#      debugger-only pane still mounted, because `data.ui.mode` flipping is
+#      not the same as the layout coming back;
+#   4. and the edit is still there.
+edit_reached="$(field "${control}" '.editReachedModel')"
+return_sent="$(field "${control}" '.returnGestureSent')"
+returned="$(field "${control}" '.returnedToEditMode')"
+editable="$(field "${control}" '.editorEditableAfterReturn')"
+survived="$(field "${control}" '.editStillPresentAfterReturn')"
+rt_error="$(field "${control}" '.roundTripError')"
+marker="$(field "${control}" '.editMarker')"
+[ "${rt_error}" = "" ] || note "round-trip error: ${rt_error}"
+note "round trip marker: ${marker}"
+# THE INPUTS TO THE MODE VERDICT, printed before the assertions that read them.
+# `editorEditableAfterReturn: false` beside `editorWidgetCount: 1` is equally
+# consistent with "the editor came back read-only" and "`getEditors` is not a
+# function in this Monaco build, so the probe measured nothing" -- and those
+# need opposite fixes. `hasGetEditors` is what separates them.
+note "mode after return: $(jq -c '.modeStateAfterReturn' <"${control}")"
+
+ck "$([ "${edit_reached}" = true ] && echo ok || echo no)" \
+	"the user's edit reached the editor's model before Run (so the checks below are not comparing two absences)"
+ck "$([ "${return_sent}" = true ] && echo ok || echo no)" \
+	"the return gesture (ctrl+f5) was delivered"
+ck "$([ "${editable}" = true ] && echo ok || echo no)" \
+	"the editors are writable again — switchToEdit ran, not just the mode flag"
+ck "$([ "${returned}" = true ] && echo ok || echo no)" \
+	"and the edit layout came back: no debugger-only pane is still mounted"
+# THE SENTENCE ITSELF.
+ck "$([ "${survived}" = true ] && echo ok || echo no)" \
+	"edit, Run, step, return — and the edit is STILL THERE"
+
 note "replay milestones:"
 jq -r '.replayLines[]' <"${control}" | sed 's/^/        /'
 note "engine requests:"
@@ -464,6 +521,72 @@ if run_probe "${arm_b}" "${arm_b_out}"; then
 		"arm B: and the caret never moved (${b_carets} position(s))"
 else
 	ck no "arm B: the probe did not complete"
+fi
+echo
+
+# ---------------------------------------------------------------------------
+echo "Mutation arm C: the return throws the user's work away"
+echo "    Reddens the ROUND TRIP assertion, and only that one. 'The edit is"
+echo "    still there' is a claim about a product that could have discarded"
+echo "    it — switchToEdit clears every mapped component — so the assertion"
+echo "    has to be shown failing against a return that does."
+# ---------------------------------------------------------------------------
+arm_c="${cache}/arm-c"
+rm -rf "${arm_c}"
+cp -RL "${bundle}" "${arm_c}" 2>/dev/null
+chmod -R u+w "${arm_c}"
+[ -s "${arm_c}/index.html" ] || {
+	echo "  arm C: no index.html to instrument" >&2
+	exit 2
+}
+python3 - "${arm_c}/index.html" <<'PY'
+import sys
+path = sys.argv[1]
+html = open(path).read()
+# Capture phase, so it runs whatever the product binds afterwards. The timer
+# lets the product's own ctrl+f5 handling finish first: the arm simulates a
+# RETURN THAT LOSES THE EDIT, not a keystroke that never arrives.
+inject = """<script>
+/* ARM C INSTRUMENT — a return that discards the user's edit. */
+window.addEventListener('keydown', function (e) {
+  if (e.ctrlKey && (e.key === 'F5' || e.keyCode === 116)) {
+    setTimeout(function () {
+      var ms = (window.monaco && window.monaco.editor
+                && window.monaco.editor.getModels()) || [];
+      ms.forEach(function (m) { try { m.setValue(''); } catch (err) {} });
+    }, 400);
+  }
+}, true);
+</script>"""
+if '</body>' in html:
+    html = html.replace('</body>', inject + '</body>', 1)
+else:
+    html += inject
+open(path, 'w').write(html)
+PY
+# THE INSTRUMENT MUST BE IN THE FILE. The same lesson `remove_published`
+# records one arm up: a mutation that silently did nothing runs the probe
+# against a pristine tree and grades the control a second time.
+grep -q 'ARM C INSTRUMENT' "${arm_c}/index.html" || {
+	echo "  arm C: the instrument was not injected — this arm would grade the control" >&2
+	exit 2
+}
+arm_c_out="${cache}/arm-c.json"
+if run_probe "${arm_c}" "${arm_c_out}"; then
+	c_reached="$(field "${arm_c_out}" '.editReachedModel')"
+	c_sent="$(field "${arm_c_out}" '.returnGestureSent')"
+	c_survived="$(field "${arm_c_out}" '.editStillPresentAfterReturn')"
+	# THE ARM BREAKS ONE THING. If the typing or the gesture broke too, the
+	# red below would not be evidence that the round-trip assertion works —
+	# it would be evidence that the arm broke the probe.
+	ck "$([ "${c_reached}" = true ] && echo ok || echo no)" \
+		"arm C: the edit still reached the model (the arm breaks the RETURN, not the typing)"
+	ck "$([ "${c_sent}" = true ] && echo ok || echo no)" \
+		"arm C: the return gesture was still delivered"
+	ck "$([ "${c_survived}" = false ] && echo ok || echo no)" \
+		"arm C: reddens 'the edit is STILL THERE' — that assertion can fail"
+else
+	ck no "arm C: the probe did not complete"
 fi
 echo
 
