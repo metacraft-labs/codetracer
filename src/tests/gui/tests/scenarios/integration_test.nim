@@ -756,10 +756,24 @@ suite "Integration: all ViewModel commands are valid DAP commands":
       drain()
 
       check mock.findCommand("ct/pairIndexLookup").isSome
-      check mock.findCommand("ct/goto-ticks").isSome
       check mock.receivedCommands.len >= 2
       for cmd in mock.receivedCommands:
         check cmd.command.isValidDapCommand
+
+      # The PAYLOAD, not just the dispatch. This assertion is here because its
+      # absence is exactly how the defect survived: the check used to be
+      # `findCommand("ct/goto-ticks").isSome`, which is true of a request the
+      # engine refuses outright. `GoToTicksArguments` has no
+      # `#[serde(default)]`, so a `ct/goto-ticks` without `threadId` fails
+      # `load_args` with `missing field threadId` and the session never moves.
+      let goto = mock.findCommand("ct/goto-ticks")
+      check goto.isSome
+      check goto.get.args.hasKey("threadId")
+      # 48 is the COUNTERPART's stepId, not the clicked row's 17. That
+      # distinction is the gesture's whole point — the chip walks to the other
+      # side of the boundary — so asserting the number discriminates between
+      # "jumped to the counterpart" and "jumped to where we already were".
+      check goto.get.args{"ticks"}.getInt == 48
 
       # And the gesture's whole point: the session rotates to the
       # recording the counterpart lives in.
