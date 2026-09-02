@@ -455,6 +455,10 @@ expect_rc 0 "--require can be scoped to the tools a measurement actually used"
 expect_says "TOOLCHAIN: rustc=1.96.0" "and prints the stamp for those"
 expect_says "not-verified:" "and lists the tools it did NOT hold to anything"
 expect_says "not-verified: nim=" "naming nim among them"
+# --require implies --strict, and the strict arm is nim-specific. It must
+# respect the scope too: refusing a caller that never invokes nim, over nim,
+# would be the guard reporting on an input outside its own stated scope.
+expect_says "not applicable: nim is outside this run's scope" "and the nim-specific strict arm stands down rather than judging out of scope"
 
 # -----------------------------------------------------------------------------
 # 15. THE VACUITY ARMS. A universal claim over an empty set is TRUE.

@@ -935,8 +935,26 @@ verify() {
 		exit 1
 	fi
 
+	# The exact arm is about NIM specifically (it is the one tool that
+	# self-reports no revision, so a store-path comparison is the only identity
+	# available for it). It therefore has to respect the scope: a
+	# `--require rustc cargo` run must not fail on nim, or a caller that never
+	# invokes nim is refused for a compiler it did not use — which is a guard
+	# reporting on an input outside its own stated scope, the mirror image of
+	# reporting success over one inside it.
 	if [ "$strict" = strict ]; then
-		verify_store_paths
+		local nim_in_scope=1 want
+		if [ "${#wanted[@]}" -gt 0 ]; then
+			nim_in_scope=0
+			for want in "${wanted[@]}"; do
+				[ "$want" = nim ] && nim_in_scope=1
+			done
+		fi
+		if [ "$nim_in_scope" -eq 1 ]; then
+			verify_store_paths
+		else
+			STRICT_STORE_NOTE="not applicable: nim is outside this run's scope"
+		fi
 	fi
 
 	if [ "$FAILED" -ne 0 ]; then
