@@ -556,21 +556,54 @@ allow-lists were touched, and no command string was added anywhere.
 | --- | --- | --- |
 | `ct/jump-location` | **product code was wrong** — the Problems and Find-in-Files row click is *editor navigation*, which only the host can do. The dispatch was a fallback that ran when no host was installed, so it never jumped. | **Fixed.** Fallback removed from `errors_vm.nim` / `search_results_vm.nim`; the 4 tests now assert what the host was asked to open. No DAP command substituted: a build diagnostic can name a file the recording never executed, so `ct/source-line-jump` (a *debugger* move) is a different action, not a synonym. |
 | `ct/build-cancel` | **product code was wrong**, and its comment doubly so — it called this a "legacy IPC channel" that "production code also calls directly from the view". It is not an IPC channel, and no view calls one. | **Fixed, and a defect named.** Dispatch removed; the test asserts `cancelBuildProc` is invoked. **Only `ui/web_noir_build.nim` installs that**, so ■ Stop does not stop a *desktop* build. Needs a real desktop cancellation path. |
-| `ct/load-recent-trace` | **wrong transport.** `welcome_screen_vm.nim`'s own doc comment says "the legacy `CODETRACER::load-recent-trace` flow" — an **Electron IPC channel**, live in `ui/welcome_screen.nim:281` and `ui_js.nim:3314`. The ViewModel routes the same payload through the DAP backend instead, where nothing handles it. | **Known failure.** The replay engine should never implement these; they are main-process concerns. `WelcomeScreenVM` has **no host-callback seam at all**, so the fix is four new seams plus host wiring — a product change, not a rename. |
-| `ct/load-recent-folder` | same — `CODETRACER::load-recent-folder`, `ui/welcome_screen.nim:286` | same |
-| `ct/new-record` | same — `CODETRACER::new-record`, `ui/welcome_screen.nim:412`, `renderer.nim:1802`. `re_record_queue_vm_test.nim` already models the right shape: the VM returns effects by value and the adapter performs the IPC. | same |
-| `ct/launch-config` | same family; the main process already answers `CODETRACER::launch-configs-loaded` (`index/traces.nim:1031`), so the request half is the missing piece. | same |
+| `ct/load-recent-trace` | **wrong transport.** `welcome_screen_vm.nim`'s own doc comment said "the legacy `CODETRACER::load-recent-trace` flow" — an **Electron IPC channel**, live in `ui/welcome_screen.nim` and `ui_js.nim`. The ViewModel routed the same payload through the DAP backend instead, where nothing handled it. | **FIXED.** `WelcomeScreenVM.onLoadRecentTrace`, installed by `installWelcomeVMCallbacks`. |
+| `ct/load-recent-folder` | same — `CODETRACER::load-recent-folder` | **FIXED.** `onLoadRecentFolder`. |
+| `ct/new-record` | same — `CODETRACER::new-record` | **FIXED.** `onSubmitNewRecord`, carrying a `NewRecordRequest`. |
+| `ct/launch-config` | same family; the main process already answers `CODETRACER::launch-configs-loaded` (`index/traces.nim`), so the request half was the missing piece. | **FIXED.** `onLaunchConfig`, carrying a `LaunchConfigRequest`. The one real mismatch: the VM is keyed by `slug`, the IPC by `configIndex`, so the request carries the entry's position in the list the host installed. |
+
+> **The "four new seams" estimate in this table was wrong, and worth recording
+> as a reading error rather than quietly deleting.** It said `WelcomeScreenVM`
+> "has **no host-callback seam at all**". The seam existed:
+> `WelcomeScreenCallbacks` already declared three of the four,
+> `buildWelcomeCallbacks` already filled them with the live `CODETRACER::...`
+> sends, and the view already *preferred* them, falling back to the VM only
+> when a callback was nil. It sat on the **view's** callbacks record, not on
+> the VM's type — so an inspection that read the VM declaration and stopped
+> saw nothing and concluded there was nothing. The DAP path was also already
+> dead in production: this VM's backend is a stub resolving `{}` for every
+> command (`ui/welcome_screen.nim`'s `ensureWelcomeScreenVm`), so the four
+> sends reached nothing whether or not the mock accepted them.
+>
+> Same shape as `CODETRACER::save-file` "having no web host", which turned out
+> to be five zero-caller sites behind a complete, tested storage layer. When an
+> estimate says a seam must be built, look for the seam first.
+
+**Note the four are still absent from `VALID_DAP_COMMANDS`, deliberately.** The
+fix was to stop sending them, not to bless them; §7's nine are still nine and
+`test_mock_backend_validates_dap_commands.nim` still rejects all nine with its
+count asserted.
 | `ct/line-step-jump` | **genuinely dead, and NOT a rename of `ct/local-step-jump`.** That arm deserialises `LocalStepJump` (`task.rs:2578`), which needs `step_count`, `target_iteration`, `first_loop_line`, `active_iteration` and `reverse`. `StepListVM` sends `delta`/`path`/`line`/`rrTicks` and has none of the loop-iteration context. Redirecting it would fail `load_args` at runtime. | **Known failure.** The engine needs a command for this, or the VM needs the iteration model. This is exactly why the nearest-name substitution is the wrong instinct. |
 | `ct/load-step-lines` | **genuinely dead.** No engine arm loads step lines for a location; there is no analogue to redirect to. | **Known failure.** |
 | `ct/asm-instruction-jump` | **genuinely dead.** No engine arm. `low_level_code_vm.nim`'s comment hopes it will "either jump to the corresponding source line or step to the matching asm offset" — two different commands, neither chosen. | **Known failure.** |
 
-**Tests deliberately left red** (15), each asserting a command with no engine
-implementation. They are *not* weakened to green, because a test that asserts
-wrong behaviour misleads the next reader more than a red one does:
+**Tests deliberately left red.** They are *not* weakened to green, because a
+test that asserts wrong behaviour misleads the next reader more than a red one
+does. The executable list is `ci/lib/known-test-failures.tsv`; as of 2026-09-02
+it holds **4 rows — 2 cases × 2 lanes**, both in `views/isonim_views_test.nim`
+and both asserting `ct/load-step-lines`:
 
-- `views/isonim_views_test.nim` — 6: `ct/load-step-lines` ×2,
-  `ct/line-step-jump` ×2, `ct/asm-instruction-jump` ×2
-- `welcome-screen/welcome_screen_vm_test.nim` — 9: the four IPC commands above
+- `loadStepLinesFor emits ct/load-step-lines with location + count`
+- `loadStepLinesFor falls back to default panel height when unset`
+
+This paragraph previously claimed 15, split as "`isonim_views_test.nim` — 6:
+`ct/load-step-lines` ×2, `ct/line-step-jump` ×2, `ct/asm-instruction-jump` ×2"
+and "`welcome_screen_vm_test.nim` — 9". The second half is now fixed and its 18
+rows (9 cases × 2 lanes) are removed. The first half's 6 was already wrong when
+written: `ct/line-step-jump` and `ct/asm-instruction-jump` appear in that file
+only in **comments**, never in a registered case, so only the two
+`ct/load-step-lines` cases were ever in the ledger. Trust the `.tsv` over any
+count written in prose here — it is the artifact CI reconciles against, and
+this is the second hand-maintained tally in this document to have drifted.
 
 **A second drift, in the opposite direction. FIXED — and it was TEN, not nine.**
 The engine implemented commands that `VALID_DAP_COMMANDS` did not list, so

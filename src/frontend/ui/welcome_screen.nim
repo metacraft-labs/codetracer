@@ -19,6 +19,10 @@ from ../viewmodel/viewmodels/welcome_screen_vm import
   setRecentFolders, setStartOptions, setMode, updateNewRecord,
   syncLoadingState, setRecordBackendAvailability, recordBackendWireName,
   recordBackendChoiceFromWireName,
+  # The host seam's payloads. `installWelcomeVMCallbacks` fills the four
+  # `on*` fields these describe; without them the welcome screen's
+  # main-process flows have no transport at all.
+  LaunchConfigRequest, NewRecordRequest,
   setOnlineTraceInput
 from ../viewmodel/viewmodels/welcome_screen_vm import optionKey, NO_LOADING_RECORDING
 when defined(js):
@@ -182,11 +186,17 @@ proc currentWelcomeMode(self: WelcomeScreenComponent): WelcomeScreenMode =
   else:
     wsmWelcome
 
+# Defined below, once the IPC helpers it closes over are in scope. Declared
+# here because `syncLegacyWelcomeScreenIntoVM` is the one place that has both
+# a live component and a live VM, and so is where the seam gets installed.
+proc installWelcomeVMCallbacks*(self: WelcomeScreenComponent)
+
 proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
   if self.isNil:
     return
   ensureWelcomeScreenVm()
   welcomeScreenComponentRef = self
+  self.installWelcomeVMCallbacks()
   self.showTraceSharing =
     (not self.data.isNil and not self.data.config.isNil and
      self.data.config.traceSharing.enabled)
@@ -335,6 +345,77 @@ proc prepareArgs(self: WelcomeScreenComponent): seq[cstring] =
   args.add(self.newRecord.executable)
 
   return args.concat(self.newRecord.args)
+
+when not defined(js):
+  # The seam's four flows are all Electron main-process IPC, which does not
+  # exist on the native target. The VM's callbacks simply stay nil there, and
+  # `loadRecentTrace` and friends become the explicit no-op their doc comments
+  # promise rather than a command nothing answers.
+  proc installWelcomeVMCallbacks*(self: WelcomeScreenComponent) = discard
+
+when defined(js):
+  proc installWelcomeVMCallbacks*(self: WelcomeScreenComponent) =
+    ## Install the host seam on `WelcomeScreenVM`.
+    ##
+    ## The four flows below are Electron main-process concerns, and the VM used
+    ## to reach for them by sending `ct/load-recent-trace`,
+    ## `ct/load-recent-folder`, `ct/launch-config` and `ct/new-record` through
+    ## `store.backend`. No engine implements any of those four
+    ## (`backend/dap_dialect.md` §7), and this VM's backend is the stub in
+    ## `ensureWelcomeScreenVm` that resolves `%*{}` for everything — so in
+    ## production those sends reached nothing while the mock-backend tests
+    ## stayed green. Same failure as `ErrorsVM`'s `ct/jump-location`, same fix:
+    ## the host owns the IPC, the VM owns the decision.
+    ##
+    ## The closures here are the ones `buildWelcomeCallbacks` already installs
+    ## on the VIEW's callbacks record. That record stays as it is — the view
+    ## prefers it and falls back to the VM — so both paths now reach the same
+    ## main-process handlers instead of one of them reaching a stub.
+    if self.isNil or welcomeScreenVMInstance.isNil:
+      return
+
+    welcomeScreenVMInstance.onLoadRecentTrace = proc(recordingId: string) =
+      # M-REC-3: VM callbacks pass `string` recording-ids; the legacy IPC hop
+      # expects `cstring`, so we convert at the boundary.
+      self.loadRecentTraceFromWelcome(cstring(recordingId))
+
+    welcomeScreenVMInstance.onLoadRecentFolder = proc(folderPath: string) =
+      self.loadRecentFolderFromWelcome(folderPath)
+
+    welcomeScreenVMInstance.onLaunchConfig = proc(request: LaunchConfigRequest) =
+      # The one genuine impedance mismatch in this change. Everything on the
+      # VM side is keyed by `slug`; `CODETRACER::record-with-launch-config` is
+      # keyed by an index into `getLaunchConfigsForWorkspace`
+      # (`index/traces.nim:1034`, which rejects out-of-range). `configIndex` is
+      # the entry's position in the list the host itself installed via
+      # `setLaunchConfigs`, so the two agree as long as that list is installed
+      # in main-process order — which is what `CODETRACER::launch-configs-loaded`
+      # delivers, `index` field and all.
+      self.data.ipc.send("CODETRACER::record-with-launch-config",
+        js{ configIndex: request.configIndex })
+
+    welcomeScreenVMInstance.onSubmitNewRecord = proc(request: NewRecordRequest) =
+      # `request` carries the VM's decision (target kind, record backend,
+      # session mode); the payload itself is still built from the legacy form
+      # state, which is what `prepareArgs` reads and what the main process has
+      # always been sent.
+      if self.newRecord.isNil:
+        return
+      self.newRecord.status.kind = InProgress
+      let workDir =
+        if self.newRecord.workDir.isNil or self.newRecord.workDir.len == 0:
+          jsUndefined
+        else:
+          cast[JsObject](self.newRecord.workDir)
+      self.data.ipc.send(
+        "CODETRACER::new-record", js{
+          filename: self.newRecord.executable,
+          args: prepareArgs(self),
+          options: js{ cwd: workDir },
+          projectOnly: false,
+          recordBackend: cstring(request.recordBackend),
+        }
+      )
 
 when defined(js):
   proc buildWelcomeCallbacks(self: WelcomeScreenComponent):
