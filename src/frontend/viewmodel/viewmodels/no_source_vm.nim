@@ -126,6 +126,17 @@ proc jumpBack*(vm: NoSourceVM) =
   ## safe to call from the view's click handler regardless of the
   ## current state — the view simply hides the button when there is
   ## no history.
+  ##
+  ## KNOWN DEFECT — THE REQUEST IS ACCEPTED AND THE TARGET IS DISCARDED.
+  ## ``ct/history-jump`` deserialises its arguments as the engine's
+  ## ``Location``, which is ``#[serde(default)]`` at the container level and
+  ## has no ``deny_unknown_fields``.  ``{previousPath, action}`` shares none
+  ## of ``Location``'s field names, so every field defaults: the engine gets
+  ## a zeroed ``Location`` and ``location_jump`` uses only ``rr_ticks``,
+  ## which means it jumps to step 0 and answers success.  Nothing here
+  ## reaches the previous path.  ``task.rs``'s ``Location`` doc comment
+  ## records the same mismatch from the engine side and names this literal.
+  ## ``origin_chain_vm.onSeekToHop`` has the identical bug.
   let history = vm.history.val
   if not history.hasHistory:
     return
