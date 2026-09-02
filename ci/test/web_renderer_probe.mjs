@@ -197,6 +197,64 @@ try {
         }
         return painted;
       })(),
+      // NOTHING MAY COVER THE STATUS BAR — a standing guard, not a check on
+      // any one surface.
+      //
+      // It exists because a surface reached for the bottom of the screen and
+      // got it: the storage-durability notice was painted into a bespoke
+      // `<div id="codetracer-durability">` at `position:fixed; bottom:0;
+      // z-index:2147483646`, which is where `#status` lives, so the product
+      // covered its own footer on every first visit. That one is fixed — the
+      // sentence goes through `ui/status.nim`'s notification stack now, which
+      // sits at `bottom:38px` — and this field is here so the NEXT one is
+      // caught by a gate rather than by a person noticing.
+      //
+      // `footer-visibility-css-guard.spec.ts` names this family as unguarded
+      // in its own "WHERE IT STOPS" section: asking for a box catches
+      // regressions that change LAYOUT and none that change only PAINTING,
+      // and an occluded footer keeps a full-size box. Playwright calls it
+      // visible. `readyOnEntryTest` passes. This asks the browser what is
+      // actually at those pixels.
+      //
+      // THE WALK IS UPWARD, and that is the whole design. `bar.contains(hit)`
+      // would be satisfied vacuously by `document.body`, which contains every
+      // overlay too; requiring `#status` on the ancestor chain of whatever
+      // `elementFromPoint` returns asks the only question worth asking —
+      // "does the pixel at this point belong to the status bar".
+      //
+      // THREE POINTS, not one. The banner spanned the full width, but an
+      // overlay covering only the location readout on the right would be as
+      // much of a defect and a single centre probe would walk past it.
+      statusBar: (() => {
+        const bar = document.getElementById('status-base');
+        if (!bar) return { found: false, unobscured: false, points: 0, coveredBy: [] };
+        const r = bar.getBoundingClientRect();
+        const rect = { x: r.left, y: r.top, w: r.width, h: r.height };
+        if (r.width < 1 || r.height < 1) {
+          return { found: true, unobscured: false, points: 0, coveredBy: ['zero-sized'], rect };
+        }
+        const owned = (node) => {
+          let n = node;
+          while (n) { if (n.id === 'status') return true; n = n.parentElement; }
+          return false;
+        };
+        const describe = (n) => !n ? 'nothing' :
+          (n.tagName.toLowerCase() +
+           (n.id ? '#' + n.id : '') +
+           (typeof n.className === 'string' && n.className
+             ? '.' + n.className.trim().split(/\s+/).join('.') : ''));
+        const cy = r.top + r.height / 2;
+        const coveredBy = [];
+        let points = 0;
+        for (const f of [0.15, 0.5, 0.85]) {
+          const cx = r.left + r.width * f;
+          if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) continue;
+          points += 1;
+          const hit = document.elementFromPoint(cx, cy);
+          if (!owned(hit)) coveredBy.push(describe(hit));
+        }
+        return { found: true, unobscured: points > 0 && coveredBy.length === 0, points, coveredBy, rect };
+      })(),
       // NS9'S TWO PANES. §1a's first screen is "Filesystem, Editor, Test
       // Results, Constraints", and until this campaign the last two existed on
       // no platform. They are ordinary CodeTracer panes now — `Content`
