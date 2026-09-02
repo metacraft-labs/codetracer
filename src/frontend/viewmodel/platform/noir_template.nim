@@ -128,6 +128,49 @@ proc noirHelloWorld*(): ProjectTemplate =
     language: "noir",
     name: noirTemplateName,
     entryFile: noirEntryFile,
+    # EVERY `content:` STRING BELOW IS ASCII ON PURPOSE, and the reason is a
+    # toolchain gap rather than a rule of the Noir language. Do not restore the
+    # typography without reading this.
+    #
+    # The prose in these strings spells `§1a` as "section 1a" and uses `-`
+    # where an em dash would read better. That is not style: it is an
+    # accommodation of ONE of the two Noir engines this product ships against.
+    #
+    # `noirc_frontend`'s lexer used to refuse a non-ASCII byte anywhere in a
+    # comment --
+    #
+    #     Invalid comment character: only ASCII is currently supported.
+    #
+    # -- and the `nargo` from `flake.nix`'s `noir` pin (5e98f904, beta.2) still
+    # does. UPSTREAM RETIRED THAT RESTRICTION DELIBERATELY, in 93bb72f8
+    # "feat!: allow UTF-8 in comments (#12699)" on 2026-05-18, so the wasm
+    # module the browser downloads (`ci/deploy/noir-wasm.pin`, fd96a7d4,
+    # beta.26) accepts these characters and is the engine that matches current
+    # Noir. The engine that refuses is the STALE one.
+    #
+    # WHAT WENT WRONG WHEN THIS WAS NOT WRITTEN DOWN. `src/tests.nr` carried
+    # two section signs and an em dash. The browser reported five passing tests
+    # while `nargo` refused the file outright, and a deploy carrying a template
+    # that does not compile went live and stayed live for about a day (46ac63a1
+    # is the repair). Nothing in the gate could see it, because the gate
+    # compared VERDICT LISTS and a refused file has none.
+    #
+    # WHEN THIS CONSTRAINT DISAPPEARS: when the flake pin moves past 93bb72f8.
+    # Then `§` and em dashes become legal Noir again and this paragraph can go.
+    # Until then, re-adding one breaks the CONTROL arm of
+    # `ci/test/noir-template-toolchain.sh` against `ourPkgs.noir` -- and note
+    # that it may still pass on a workstation, because the workspace `.envrc`
+    # puts a sibling checkout's newer `nargo` ahead of the flake's on PATH. A
+    # green local run is not evidence here; the gate prints which binary
+    # answered so that can be checked.
+    #
+    # Arm U of that gate is what watches the DIVERGENCE itself: it asks both
+    # engines whether a non-ASCII comment is valid Noir at all and requires
+    # them to give the same answer.
+    #
+    # This applies only to the `content:` strings, which nargo compiles. The
+    # Nim comments around them -- including this one -- are not compiled by
+    # nargo and keep their typography.
     files: @[
       TemplateFile(
         path: "Nargo.toml",
