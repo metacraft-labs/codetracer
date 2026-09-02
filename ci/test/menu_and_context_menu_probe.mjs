@@ -150,6 +150,73 @@ try {
         return out;
       });
 
+      // ---- THE MIXIN'S PRECONDITION, as a standing check ------------------
+      // `dropdown-surface()` carries `overflow: hidden`, which clips EVERY
+      // descendant and not just the rows.  That is what deleted the submenus.
+      // This asks the general question of every dropdown surface currently on
+      // screen — does any of them clip an absolutely-positioned child? — so a
+      // future caller that acquires such a child is caught by this gate rather
+      // than by a user.
+      //
+      // It cannot be asked of the stylesheet: a static pass over the compiled
+      // CSS reports ZERO escaping children even for `#menu-main`, because
+      // `.menu-nested-elements` is a sibling RULE and a child only in the DOM.
+      report.menu.clipCheck = await page.evaluate((SURFACES) => {
+        const containers = [];
+        const escapes = [];
+        for (const sel of SURFACES) {
+          for (const c of document.querySelectorAll(sel)) {
+            const cs = getComputedStyle(c);
+            const cr = c.getBoundingClientRect();
+            if (cr.width === 0 || cr.height === 0) continue;
+            const abs = [...c.querySelectorAll("*")].filter((d) => {
+              const p = getComputedStyle(d).position;
+              return p === "absolute" || p === "fixed";
+            });
+            containers.push({
+              sel,
+              overflow: `${cs.overflowX}/${cs.overflowY}`,
+              absDescendants: abs.length,
+            });
+            const clipX = cs.overflowX !== "visible";
+            const clipY = cs.overflowY !== "visible";
+            for (const d of abs) {
+              const dr = d.getBoundingClientRect();
+              if (dr.width === 0 || dr.height === 0) continue;
+              const outX = clipX && (dr.right <= cr.left + 1 || dr.left >= cr.right - 1);
+              const outY = clipY && (dr.bottom <= cr.top + 1 || dr.top >= cr.bottom - 1);
+              if (outX || outY) {
+                escapes.push({
+                  container: sel,
+                  child: `${d.tagName}#${d.id}.${typeof d.className === "string" ? d.className.slice(0, 40) : ""}`,
+                  axis: outX ? "x" : "y",
+                  childRect: { x: Math.round(dr.x), y: Math.round(dr.y), w: Math.round(dr.width), h: Math.round(dr.height) },
+                  containerRect: { x: Math.round(cr.x), y: Math.round(cr.y), w: Math.round(cr.width), h: Math.round(cr.height) },
+                });
+              }
+            }
+          }
+        }
+        return {
+          containersExamined: containers.length,
+          // NON-VACUITY: at least one of them must actually HOLD an
+          // absolutely-positioned child, or "nothing escaped" is a statement
+          // about an empty set.
+          withAbsoluteChildren: containers.filter((c) => c.absDescendants > 0).length,
+          containers,
+          escapes,
+        };
+      }, [
+        "#menu-main",
+        ".menu-nested-elements",
+        "#context-menu-container",
+        ".command-results",
+        ".layout-dropdown",
+        ".ct-picker-dropdown",
+        ".session-tab-overflow-menu",
+        ".vcs-branch-dropdown",
+      ]);
+
       // ---- the flicker: sample the menu's opacity across a pointer sweep --
       const others = items.filter((i) => i.label !== folder.label);
       await page.evaluate(() => {

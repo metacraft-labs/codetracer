@@ -2999,6 +2999,56 @@ test-chord-and-pane-uniqueness:
   exec > >(tee test-logs/test-chord-and-pane-uniqueness.log) 2>&1
   bash ci/test/chord-and-pane-uniqueness.sh
 
+# A SUBMENU YOU CAN CLICK, A BAR THAT DOES NOT FLICKER, AND ONE MENU ON RIGHT-CLICK.
+#
+# Three defects reported by one user against the deployed `ide.codetracer.com`
+# on 2026-09-02, none of which any existing check could have caught, because
+# every one of them is invisible to a markup or model assertion.
+#
+# The submenus were IN THE DOM, with the right rows, at the right coordinates —
+# and clipped out of existence by the `overflow: hidden` that `dropdown-surface()`
+# carried onto `#menu-main` at 09bc09b7.  Measured on the deployed revision:
+# `#menu-main` at x = 10..180, `#menu-nested-elements-1` at x = 181..356 with
+# nine rows, `elementFromPoint` at the centre of the first returning
+# `section.lm_tabs`.  The same mixin's reveal animation replayed from
+# `opacity: 0` on every rebuild of the shell — ten reveals across five pointer
+# transitions — which is the flicker, and `opacity: 0` is literally the reported
+# "briefly displaying the content below it".
+#
+# So this gate refuses to assert presence or markup.  Its subjects are a HIT
+# TEST (`elementFromPoint` at the row's own painted centre, walked UP to the
+# submenu, because `contains()` passes vacuously on `document.body`) and an
+# OPACITY SAMPLE taken every animation frame, because a screenshot before and
+# after the sweep shows a perfectly good menu both times and the flicker lives
+# between the frames.
+#
+# The context-menu half asserts `defaultPrevented` read by a document-level
+# bubble listener.  The native menu is browser chrome, outside the document, and
+# is suppressed under automation in every engine, so it cannot be counted — this
+# is the observable that decides whether it is drawn, and the gate says so
+# rather than pretending to count two menus.
+#
+# It also carries a STANDING check on the mixin's precondition, asked of every
+# dropdown surface on screen rather than of the one that was reported: does any
+# of them clip an absolutely-positioned child?  That question cannot be asked of
+# the stylesheet — a static pass over the compiled CSS reports zero escaping
+# children even for `#menu-main`, because `.menu-nested-elements` is a sibling
+# RULE and a child only in the DOM.
+#
+# Counted assertions with the count asserted, and five mutation arms each
+# verified to redden exactly its own check and nothing else.  Builds its own
+# `ui.js` and stylesheet into a copy of the bundle: a gate that measured a
+# pre-assembled tree would be reporting on code nobody edited.
+#
+# Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
+# otherwise.
+test-menu-and-context-menu:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-menu-and-context-menu.log) 2>&1
+  bash ci/test/menu-and-context-menu-in-browser.sh
+
 # THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
 # which said in its own words: "no CI recipe produces a web bundle, so
 # `test_one_codebase_two_platforms` is unasserted, and nothing calls the web
