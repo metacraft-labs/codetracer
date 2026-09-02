@@ -57,7 +57,11 @@
  *
  * Arms S3-S5 are the bounded negative.  S3 pins the WHOLE `innerHTML`
  * population — 48 writes, 14 of them non-clearing, every one triaged — so a
- * forty-ninth is a red run.  S4 sweeps the other ways in (`outerHTML`,
+ * forty-ninth is a red run.  It pins them as a TABLE of files and a TRANSCRIPT
+ * of the fourteen live writes, not as the number 48, so the red run names the
+ * file that grew and quotes the line that did it: a budget whose failure
+ * cannot say what it found is a budget the next reader bumps.  S4 sweeps the
+ * other ways in (`outerHTML`,
  * `insertAdjacentHTML`, `document.write`, `srcdoc`, `<webview>`, `eval`,
  * `new Function`, string-bodied timers, karax's `verbatim`) and finds none,
  * with each pattern proved against a sample so an empty result cannot be an
@@ -601,7 +605,7 @@ assert(/rowsCount\*: int\n\s+startRow\*: int\n\s+endRow\*: int/.test(
   sources.get('src/frontend/types.nim')),
   'and those fields are declared `int`, so `$` cannot produce a `<`');
 
-// --- ui/editor.nim: a three-frame literal animation ------------------------
+// --- ui/editor.nim: a three-frame literal animation, and the label under it -
 {
   const editorNim = sources.get('src/frontend/ui/editor.nim');
   assert(/let frames = \["Running\.  ", "Running\.\. ", "Running\.\.\."\]/.test(editorNim),
@@ -609,6 +613,22 @@ assert(/rowsCount\*: int\n\s+startRow\*: int\n\s+endRow\*: int/.test(
   assertEqual(matchesAcross(/el\.innerHTML = [A-Za-z]+\[i\]/g),
     'src/frontend/ui/editor.nim:el.innerHTML = frames[i]',
     'and that list is the only thing it assigns');
+
+  // The forty-ninth write, named here rather than absorbed into a bumped
+  // budget.  `restoreTestButton` puts the Run-test control back the way it
+  // was, and `8df2b765` wrote its label with `innerHTML`.  Every value that
+  // reaches it TODAY is a literal — `""`, `"Run test (timed out)"`, and the
+  // defaulted `settleEditorTestRun()` — so the sink was not exploitable when
+  // it landed.  It was still wrong: `note` is a sentence, the button's resting
+  // label is built with `createTextNode`, and `settleEditorTestRun` is
+  // EXPORTED with a defaulted parameter, so the population is decided by
+  // whoever calls it next.  A host that wanted to say why a run was refused —
+  // a compiler diagnostic, a recorded program's own stderr — would have been
+  // writing markup.  So the sink was removed rather than budgeted for, and
+  // this line is what keeps it removed.
+  assertEqual(matchesAcross(/el\.(innerHTML|textContent) = if note\.len > 0/g),
+    'src/frontend/ui/editor.nim:el.textContent = if note.len > 0',
+    "the Run-test button's label is restored as text, not as markup");
 }
 
 // --- the `setInnerHtml` helpers: a constant chevron, and a CLOSED call set --
@@ -633,16 +653,80 @@ assertEqual(matchesAcross(/^const chevron(Up|Down)Svg/gm),
 describe('S3. The whole innerHTML population, pinned');
 
 // Six sites were fixed by looking at the ones a trail led to.  That is not the
-// same as knowing how many there are.  This counts every `innerHTML` write in
-// the shipped front end and pins the number, so a seventh is a red run rather
+// same as knowing how many there are.  This enumerates every `innerHTML` write
+// in the shipped front end and pins the LIST, so a seventh is a red run rather
 // than an unnoticed addition.
 //
 // Comment lines are excluded deliberately: `ui/trace.nim` carries two
 // commented-out writes, and counting those would mean un-commenting one moved
 // nothing.
 
-let innerHtmlTotal = 0;
-const innerHtmlLive = new Map();
+// A TABLE AND A TRANSCRIPT, NOT TWO NUMBERS.  This arm used to assert
+// `total === 48`, and the first time it moved it said "expected 48, got 49" —
+// which tells the reader that a forty-ninth write exists and nothing whatever
+// about where it is or what it writes.  Re-deriving that by hand is work, and
+// the cheap way out of work is to bump the number, which turns the budget into
+// a rubber stamp and makes the next genuinely new sink invisible.  So both
+// halves below assert a VALUE that names its members: when one moves, the
+// failure prints the file that grew and the line of source that did it, and
+// triage starts from a diff instead of a hunt.
+//
+// The 48 in this file's header is DERIVED from the table rather than written
+// twice, so the prose and the pin cannot drift apart.
+
+/** Every shipped front-end file that writes innerHTML: `[file, clears, live]`. */
+const INNER_HTML_BY_FILE = [
+  ['src/frontend/renderer.nim', 1, 0],
+  ['src/frontend/storybook_components.nim', 7, 2],
+  ['src/frontend/subwindow.nim', 1, 0],
+  ['src/frontend/ui/auto_hide_overlay.nim', 1, 0],
+  ['src/frontend/ui/auto_hide.nim', 3, 1],
+  ['src/frontend/ui/calltrace.nim', 2, 0],
+  ['src/frontend/ui/datatable.nim', 0, 2],
+  ['src/frontend/ui/editor.nim', 0, 1],
+  ['src/frontend/ui/event_log.nim', 1, 0],
+  ['src/frontend/ui/file_conflict_dialog.nim', 0, 1],
+  ['src/frontend/ui/flow.nim', 2, 0],
+  ['src/frontend/ui/layout.nim', 3, 0],
+  ['src/frontend/ui/request_panel.nim', 1, 0],
+  ['src/frontend/ui/scratchpad.nim', 1, 0],
+  ['src/frontend/ui/state.nim', 1, 0],
+  ['src/frontend/ui/terminal_output.nim', 1, 0],
+  ['src/frontend/ui/trace.nim', 6, 3],
+  ['src/frontend/ui/welcome_screen.nim', 2, 0],
+  ['src/frontend/viewmodel/views/context_menu_bridge.nim', 1, 0],
+  ['src/frontend/viewmodel/views/isonim_build_view.nim', 0, 1],
+  ['src/frontend/viewmodel/views/isonim_request_panel_view.nim', 0, 1],
+  ['src/frontend/viewmodel/views/isonim_terminal_output_view.nim', 0, 1],
+  ['src/frontend/viewmodel/views/isonim_vcs_view.nim', 0, 1],
+];
+
+/**
+ * The source text of every NON-CLEARING write, verbatim.
+ *
+ * The clears are counted but not transcribed: `x.innerHTML = cstring""` cannot
+ * carry a payload, and `isClear` is what says so.  These fourteen are the
+ * actual sinks, and each one is triaged by name in arm S or S2 above.
+ */
+const INNER_HTML_LIVE_WRITES = [
+  'src/frontend/storybook_components.nim: denseHost.innerHTML = `denseHtml`;',
+  'src/frontend/storybook_components.nim: if (detailedHost) detailedHost.innerHTML = `detailedHtml`;',
+  'src/frontend/ui/auto_hide.nim: pinBtn.innerHTML = cstring"&#x2715;"  # X close/dismiss icon',
+  'src/frontend/ui/datatable.nim: endRowField.innerHTML = cstring($(self.endRow))',
+  'src/frontend/ui/datatable.nim: rowsCountField.innerHTML = cstring($(self.rowsCount))',
+  'src/frontend/ui/editor.nim: el.innerHTML = frames[i]',
+  'src/frontend/ui/file_conflict_dialog.nim: overlay.innerHTML = cstring(FileConflictDialogMarkup)',
+  'src/frontend/ui/trace.nim: self.kindSwitchButton.innerHTML =',
+  'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = "Loading..."',
+  'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = NO_RESULTS_MESSAGE',
+  'src/frontend/viewmodel/views/isonim_build_view.nim: lineNode.innerHTML = cstring(lineCopy.htmlText)',
+  'src/frontend/viewmodel/views/isonim_request_panel_view.nim: node.innerHTML = cstring(html)',
+  'src/frontend/viewmodel/views/isonim_terminal_output_view.nim: contentNode.innerHTML = cstring(frag.htmlText)',
+  'src/frontend/viewmodel/views/isonim_vcs_view.nim: node.innerHTML = cstring(html)',
+];
+
+const foundByFile = new Map();
+const foundLive = [];
 for (const [rel, text] of sources) {
   if (!path.join(REPO, rel).startsWith(FRONTEND)) continue;
   if (rel.includes('/tests/')) continue;
@@ -650,28 +734,35 @@ for (const [rel, text] of sources) {
     if (isComment(line)) continue;
     const m = /\.innerHTML\s*=(.*)$/.exec(line);
     if (!m) continue;
-    innerHtmlTotal++;
-    if (isClear(m[1])) continue;
-    innerHtmlLive.set(rel, (innerHtmlLive.get(rel) ?? 0) + 1);
+    const tally = foundByFile.get(rel) ?? { clears: 0, live: 0 };
+    if (isClear(m[1])) {
+      tally.clears++;
+    } else {
+      tally.live++;
+      foundLive.push(`${rel}: ${line.trim()}`);
+    }
+    foundByFile.set(rel, tally);
   }
 }
 
-assertEqual(innerHtmlTotal, 48,
-  'the shipped front end performs exactly this many innerHTML writes');
+const asTable = (rows) => rows
+  .map(([rel, clears, live]) => `${rel} ${clears} clear + ${live} live`)
+  .sort().join('\n');
+
+const innerHtmlTotal = INNER_HTML_BY_FILE.reduce((n, [, c, l]) => n + c + l, 0);
+console.log(`  \x1b[2minnerHTML writes pinned: ${innerHtmlTotal} `
+  + `(${INNER_HTML_LIVE_WRITES.length} non-clearing) across `
+  + `${INNER_HTML_BY_FILE.length} files\x1b[0m`);
+
 assertEqual(
-  [...innerHtmlLive.entries()].sort(([a], [b]) => a.localeCompare(b))
-    .map(([rel, n]) => `${rel}=${n}`).join(' '),
-  'src/frontend/storybook_components.nim=2 '
-  + 'src/frontend/ui/auto_hide.nim=1 '
-  + 'src/frontend/ui/datatable.nim=2 '
-  + 'src/frontend/ui/editor.nim=1 '
-  + 'src/frontend/ui/file_conflict_dialog.nim=1 '
-  + 'src/frontend/ui/trace.nim=3 '
-  + 'src/frontend/viewmodel/views/isonim_build_view.nim=1 '
-  + 'src/frontend/viewmodel/views/isonim_request_panel_view.nim=1 '
-  + 'src/frontend/viewmodel/views/isonim_terminal_output_view.nim=1 '
-  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim=1',
-  'and every non-clearing one is in a file this suite has triaged');
+  asTable([...foundByFile.entries()].map(([rel, t]) => [rel, t.clears, t.live])),
+  asTable(INNER_HTML_BY_FILE),
+  `the innerHTML population is these ${innerHtmlTotal} writes in these `
+  + `${INNER_HTML_BY_FILE.length} files`);
+assertEqual(
+  foundLive.sort().join('\n'),
+  [...INNER_HTML_LIVE_WRITES].sort().join('\n'),
+  `and the ${INNER_HTML_LIVE_WRITES.length} non-clearing ones are written exactly this way`);
 
 // The four that arm S/S2 do not already name, so all fourteen are accounted
 // for rather than merely counted.
@@ -790,7 +881,7 @@ assertEqual(shippedMatchesAcross(/"nodeIntegration": true/g),
 
 // ---------------------------------------------------------------------------
 
-const EXPECTED_ASSERTIONS = 157;
+const EXPECTED_ASSERTIONS = 158;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.

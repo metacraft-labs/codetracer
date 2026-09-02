@@ -2194,7 +2194,17 @@ proc restoreTestButton(self: EditorViewComponent; note: cstring) =
   if el.isNil:
     return
   el.classList.remove(cstring"active-test-button")
-  el.innerHTML = if note.len > 0: note else: cstring"Run test"
+  # TEXT, NOT MARKUP. `note` is a sentence, and `makeTestAction` builds this
+  # button's resting label with `createTextNode(cstring"Run test")` — so
+  # `textContent` restores it to exactly the node the button was made with,
+  # and does it without opening an `innerHTML` sink on a parameter whose
+  # population is only literal TODAY. `settleEditorTestRun` is exported with a
+  # defaulted `note`, so the next caller decides what lands here; a compiler
+  # diagnostic or a recorded program's own error text is the obvious thing to
+  # want to show, and through `innerHTML` that would be markup. See
+  # `frontend/tests/htmlSinks.test.mjs`, which pins the whole `innerHTML`
+  # population precisely so this line has to be argued for rather than added.
+  el.textContent = if note.len > 0: note else: cstring"Run test"
 
 proc settleEditorTestRun*(note: cstring = cstring"") =
   ## Stop every spinning Run-test button, however the run ended.
