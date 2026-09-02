@@ -99,9 +99,16 @@ workspace_root="$(cd "$repo_root/.." && pwd)"
 # -----------------------------------------------------------------------------
 main_workspace_root=""
 main_repo_name=""
+# What the worktree test actually READ, kept so the diagnostics below can print
+# their inputs rather than only their verdict. `worktree_test_note` records why
+# the test came out negative, for the near-miss report.
+git_common_dir_value=""
+main_repo_root_value=""
+worktree_test_note="git is unavailable, so the worktree test did not run"
 detect_main_workspace_root() {
 	local common_dir main_repo_root
 	command -v git >/dev/null 2>&1 || return 0
+	worktree_test_note='`git rev-parse --git-common-dir` gave no answer here (not a git checkout?)'
 	common_dir="$(cd "$repo_root" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null)" || return 0
 	[ -n "$common_dir" ] || return 0
 	case "$common_dir" in
@@ -109,15 +116,21 @@ detect_main_workspace_root() {
 	*) common_dir="$repo_root/$common_dir" ;;
 	esac
 	common_dir="$(cd "$common_dir" 2>/dev/null && pwd)" || return 0
+	git_common_dir_value="$common_dir"
 	main_repo_root="$(cd "$common_dir/.." 2>/dev/null && pwd)" || return 0
+	main_repo_root_value="$main_repo_root"
+	worktree_test_note="this IS the main checkout ($main_repo_root), not a linked worktree"
 	# Same directory => this IS the main checkout, not a linked worktree.
 	[ "$main_repo_root" != "$repo_root" ] || return 0
 	main_workspace_root="$(cd "$main_repo_root/.." 2>/dev/null && pwd)" || return 0
 	main_repo_name="${main_repo_root##*/}"
 	# A worktree that is already beside the siblings is correctly placed.
 	if [ "$main_workspace_root" = "$workspace_root" ]; then
+		worktree_test_note="this is a linked worktree, but it is ALREADY beside the siblings ($workspace_root)"
 		main_workspace_root=""
 		main_repo_name=""
+	else
+		worktree_test_note=""
 	fi
 }
 detect_main_workspace_root
@@ -297,21 +310,91 @@ missing_names=()
 missing_rows=()
 missing_report=""
 
-# True when EVERY required sibling missing from this checkout's parent is
-# present under the main checkout's workspace root -- i.e. the workspace is
-# complete and this worktree is simply not in it. That is the whole test for
-# "misplaced worktree, not broken checkout", and it is deliberately ALL rather
-# than ANY: if even one sibling is missing from the real workspace too, the
-# workspace is genuinely incomplete and the generic report is the honest one.
-misplacement_explains_everything() {
+# The verdict below is a CONJUNCTION -- this checkout is a linked worktree whose
+# main checkout lives elsewhere, AND every sibling missing from this parent is
+# present under that other workspace root. A conjunction that reports only its
+# verdict is the kind of instrument nobody can falsify, so this pass records
+# WHICH HALF HELD, per sibling, and every report below prints the paths it
+# probed rather than asserting a conclusion about them.
+#
+# ALL rather than ANY is deliberate: if even one sibling is missing from the
+# real workspace too, the workspace is genuinely incomplete and the generic
+# report is the honest one. The partial case still gets a note -- see
+# `report_partial_misplacement` -- because silence there would be the same
+# unfalsifiable failure in the other direction.
+mw_present=() # "name|probe" found under the main workspace root
+mw_absent=()  # "name|probe" missing there too
+classify_missing_against_workspace() {
 	local row name probe
-	[ -n "$main_workspace_root" ] || return 1
-	[ ${#missing_rows[@]} -gt 0 ] || return 1
+	mw_present=()
+	mw_absent=()
+	[ -n "$main_workspace_root" ] || return 0
+	[ ${#missing_rows[@]} -gt 0 ] || return 0
 	for row in "${missing_rows[@]}"; do
 		IFS='|' read -r name probe _ _ <<<"$row"
-		sibling_dir_has_probe "$main_workspace_root/$name" "$probe" || return 1
+		if sibling_dir_has_probe "$main_workspace_root/$name" "$probe"; then
+			mw_present+=("$name|$probe")
+		else
+			mw_absent+=("$name|$probe")
+		fi
 	done
+}
+
+misplacement_explains_everything() {
+	[ -n "$main_workspace_root" ] || return 1
+	[ ${#mw_present[@]} -gt 0 ] || return 1
+	[ ${#mw_absent[@]} -eq 0 ] || return 1
 	return 0
+}
+
+# The evidence block. Printed by BOTH the full and the partial report, so the
+# reader always sees the two paths that were compared for each repo -- the one
+# that was not there, and the one that was.
+print_measured_siblings() {
+	local entry name probe
+	echo "  measured -- each sibling missing from this parent, re-probed under the workspace:"
+	for entry in ${mw_present[@]+"${mw_present[@]}"}; do
+		IFS='|' read -r name probe <<<"$entry"
+		echo "    * $name  -- FOUND up there"
+		echo "        not here: $workspace_root/$name/$probe"
+		echo "        found:    $main_workspace_root/$name/$probe"
+	done
+	for entry in ${mw_absent[@]+"${mw_absent[@]}"}; do
+		IFS='|' read -r name probe <<<"$entry"
+		echo "    * $name  -- ALSO MISSING up there"
+		echo "        not here: $workspace_root/$name/$probe"
+		echo "        nor:      $main_workspace_root/$name/$probe"
+	done
+	echo
+	echo "  worktree test:  git rev-parse --git-common-dir  (run in $repo_root)"
+	echo "                  -> $git_common_dir_value"
+	echo "                  whose checkout is $main_repo_root_value,"
+	echo "                  which is not this directory, so this is a LINKED WORKTREE."
+	echo
+}
+
+# The near miss. Reached when this IS a misplaced worktree but the workspace it
+# came from is itself incomplete, so moving the worktree alone will not fix the
+# build. Both facts are true and the reader needs both; printing only the
+# generic report here would hide the location half entirely.
+report_partial_misplacement() {
+	cat <<EOF
+
+NOTE -- BOTH THINGS ARE TRUE HERE, and neither alone is the whole fix.
+
+  this worktree:  $repo_root
+  its parent:     $workspace_root
+  the workspace:  $main_workspace_root
+
+${#mw_present[@]} of the ${#missing_names[@]} missing repo(s) ARE present under the workspace root, so this
+checkout is a worktree outside the workspace and moving it is part of the fix
+(see AGENTS.md, "Where a checkout -- or a worktree -- has to live"). But
+${#mw_absent[@]} of them cannot be found there either, so that workspace is genuinely
+incomplete and the remedies above are needed as well -- run them against
+$main_workspace_root, NOT against $workspace_root.
+
+EOF
+	print_measured_siblings
 }
 
 # The one diagnostic this script exists to add: name the location, not the
@@ -330,6 +413,9 @@ checkout: all ${#missing_names[@]} of the repos named above are present, one dir
   the workspace:  $main_workspace_root
                   ^ where the main checkout and every sibling actually are
 
+EOF
+	print_measured_siblings
+	cat <<EOF
 A checkout of this repo -- INCLUDING A WORKTREE -- must sit directly under the
 workspace root, beside the sibling repos. The parent directory of a checkout is
 the workspace root by definition for four independent resolvers, none of which
@@ -383,6 +469,9 @@ for row in "${required_siblings[@]}"; do
 	missing_rows+=("$row")
 	describe_missing "$name" "$probe" "$overrides" "$reason"
 done
+
+# Classify once, so every report below prints the same measurements.
+classify_missing_against_workspace
 
 # The escape hatch is honoured HERE rather than at the top of the script, so
 # that the one diagnosis it cannot help with still gets said. A misplaced
@@ -453,6 +542,16 @@ if misplacement_explains_everything; then
 	exit 1
 fi
 
+# Where the remedies below should be RUN. Normally this checkout's parent, which
+# is the workspace. But in the near-miss case -- a misplaced worktree whose real
+# workspace is itself incomplete -- cloning into this parent would still be
+# building a duplicate workspace in the wrong place, so the commands are aimed at
+# the real one and `report_partial_misplacement` explains why.
+remedy_root="$workspace_root"
+if [ -n "$main_workspace_root" ] && [ ${#mw_present[@]} -gt 0 ]; then
+	remedy_root="$main_workspace_root"
+fi
+
 {
 	echo "Cannot start the CodeTracer build: ${#missing_names[@]} required sibling repo(s) are missing."
 	echo
@@ -462,12 +561,12 @@ fi
 	printf '%s' "$missing_report"
 	echo "Fix it by completing the workspace. Either let reprobuild converge it:"
 	echo
-	echo "    cd $workspace_root && repro ws enable codetracer"
+	echo "    cd $remedy_root && repro ws enable codetracer"
 	echo
 	echo "or clone the missing repos by hand:"
 	echo
 	for name in "${missing_names[@]}"; do
-		echo "    git clone $sibling_remote_org/$name $workspace_root/$name"
+		echo "    git clone $sibling_remote_org/$name $remedy_root/$name"
 	done
 	echo
 	cat <<'EOF'
@@ -483,5 +582,16 @@ vendored source tree, a Nix build that pre-stages the paths), set the
 per-repo override shown above, or bypass the whole check with
 CODETRACER_SKIP_SIBLING_CHECK=1.
 EOF
+	# Say why the misplaced-worktree diagnosis did NOT fire, so a negative
+	# verdict is as checkable as a positive one. Exactly one of these two runs:
+	# `worktree_test_note` is set when the location test itself came out
+	# negative, and empty when it came out positive -- in which case this is the
+	# near miss, and the sibling half is what did not hold.
+	if [ -n "$worktree_test_note" ]; then
+		echo
+		echo "Not reported as a misplaced worktree, because $worktree_test_note."
+	else
+		report_partial_misplacement
+	fi
 } >&2
 exit 1
