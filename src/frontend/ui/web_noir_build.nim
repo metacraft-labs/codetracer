@@ -349,17 +349,32 @@ proc ensureBuildPaneVisible() =
   build_pane.tryMountIsoNimBuildPanel()
 
 proc producerFor(tmpl: ProjectTemplate): NoirBuildProducer =
-  ## One producer per pane, rebuilt if the VM was replaced underneath it.
+  ## One producer per pane, rebuilt if the VM was replaced underneath it OR if
+  ## it is holding a different project's paths.
   ##
   ## `initBuildVMWithStore` replaces `buildVMInstance` when the shared store
   ## arrives, so a producer captured earlier would be writing into a VM no
   ## view is bound to — a build that ran, succeeded, and painted nothing.
+  ##
+  ## THE SECOND CLAUSE IS THE SAME FROZEN-VALUE SHAPE, one layer down, and it
+  ## is closed here rather than left latent. `projectRoot` and `packageDir` are
+  ## COPIES of a `ProjectTemplate`'s fields taken at construction; a producer
+  ## built for one project and reused for another would map every diagnostic's
+  ## VFS path against the wrong root, so a click on an error would open nothing
+  ## and the pane would look broken rather than wrong. Reachable only through a
+  ## second `setCurrentProject` in one session — which today means a reload, so
+  ## this is a latent member of the class rather than a live defect. It is
+  ## still a member, and the test for it is one comparison.
   if build_pane.buildVMInstance.isNil:
     return nil
-  if activeProducer.isNil or activeProducer.vm != build_pane.buildVMInstance:
+  let root = templateProjectRoot(tmpl)
+  if activeProducer.isNil or
+     activeProducer.vm != build_pane.buildVMInstance or
+     activeProducer.projectRoot != root or
+     activeProducer.packageDir != tmpl.name:
     activeProducer = newNoirBuildProducer(
       build_pane.buildVMInstance,
-      projectRoot = templateProjectRoot(tmpl),
+      projectRoot = root,
       packageDir = tmpl.name)
     # FEED THE PROBLEMS PANE TOO. Without these two the browser arm painted
     # diagnostics in the BUILD pane and left PROBLEMS empty, so error
@@ -805,6 +820,15 @@ proc stopNoirBuild*() =
 # Installation
 # ---------------------------------------------------------------------------
 
+var editToolbarInvoke: proc(id: string)
+  ## The `invoke` the last `installEditModeToolbar` was given.
+  ##
+  ## Held so `refreshEditModeToolbar` can RECOMPOSE without the caller having
+  ## to supply it again — and, more to the point, so a refresh is possible at
+  ## all from a site that does not have it. `onSavedFile` is in `ui_js` and the
+  ## thing a Build button must do lives there too, but the save handler has no
+  ## reason to know about toolbar wiring.
+
 proc installEditModeToolbar*(invoke: proc(id: string)) =
   ## Compose the edit-mode topbar from what this tab actually is, and hand it
   ## to the mount.
@@ -836,6 +860,19 @@ proc installEditModeToolbar*(invoke: proc(id: string)) =
   ##
   ## Called on every install and after every save, so a file that adds a
   ## `Nargo.toml` changes the toolbar rather than waiting for a reload.
+  ##
+  ## THAT SENTENCE WAS FALSE WHEN IT WAS WRITTEN. This proc had exactly one
+  ## call site — the one-shot `if wantsTemplate and mounted:` block in `ui_js`
+  ## — and `EditToolbarModel` is a plain `object`, so `debug.editToolbarModel`
+  ## held a snapshot composed from the startup listing and the startup mode.
+  ## `debug.setEditModeToolbar`'s own comment made the matching assumption
+  ## ("every change a user makes that could alter it... arrives as a NEW model")
+  ## and no new model ever arrived. A visitor who created a `Nargo.toml`
+  ## mid-session got a toolbar computed before it existed.
+  ##
+  ## `refreshEditModeToolbar` below is what makes the sentence true, and
+  ## `onSavedFile` is what calls it — beside the `ns9-panes` re-ask it already
+  ## makes, because a save is the same event for the same reason.
   let platform = ctPlatform()
   let project = currentProject()
   var listing: seq[string] = @[]
@@ -848,11 +885,40 @@ proc installEditModeToolbar*(invoke: proc(id: string)) =
     listing = listing,
     wasm = currentWasmRegistry())
 
+  editToolbarInvoke = invoke
   debug.setEditModeToolbar(model, invoke)
   report("edit-toolbar", "buttons=" & $model.buttons.len &
     " kinds=" & $model.kinds.len & " group=" & $model.commandGroupVisible)
 
-proc installNoirBuildCommands*(tmpl: ProjectTemplate) =
+proc refreshEditModeToolbar*() =
+  ## Recompose the edit-mode topbar from the project as it is NOW.
+  ##
+  ## Every input `installEditModeToolbar` reads can change during a session:
+  ## the LISTING (a save can add `Nargo.toml`, which is what `projectKinds`
+  ## recognises), the MODE (a Run leaves edit mode and an explicit action
+  ## returns), and the REGISTRY (a module can finish loading). The model is a
+  ## value, so none of those reach a toolbar already mounted.
+  ##
+  ## A no-op before the first install, which is the honest answer rather than
+  ## composing a toolbar for a session that has not started: `invoke` is the
+  ## caller's and this module cannot invent one.
+  if editToolbarInvoke.isNil:
+    return
+  installEditModeToolbar(editToolbarInvoke)
+
+proc installNoirBuildCommands*() =
+  ## TAKES NO PROJECT, and that is the point rather than a tidy-up.
+  ##
+  ## It used to take one and cache it (`buildTemplate = tmpl`), which was the
+  ## frozen-value defect its own comment below records. The cure was applied by
+  ## reading `currentProject()` in the callbacks instead — a HABIT, which is
+  ## why the same defect then recurred in `installTemplatePaneHost`, 140 lines
+  ## below an `installTemplateHost` whose header is entirely about it.
+  ##
+  ## A habit is not checkable. A SIGNATURE is: with no parameter there is
+  ## nothing to capture, so the defect is unrepresentable here rather than
+  ## merely absent, and a reader confirms it from one line instead of three
+  ## headers.
   ## Point the BUILD pane's ▶ and ■ at the wasm toolchain.
   ##
   ## Called after `enterTemplateEditMode`, which is when `buildVMInstance`
@@ -880,4 +946,6 @@ proc installNoirBuildCommands*(tmpl: ProjectTemplate) =
     return
   build_pane.buildVMInstance.runBuild = proc() = startNoirBuild()
   build_pane.buildVMInstance.cancelBuildProc = proc() = stopNoirBuild()
-  report("installed", "files=" & $tmpl.files.len & " package=" & tmpl.name)
+  let project = currentProject()
+  report("installed",
+         "files=" & $project.files.len & " package=" & project.name)

@@ -515,7 +515,7 @@ proc templateTabInfo*(tmpl: ProjectTemplate; path: string): TabInfo =
     path: cstring(path),
     lang: toLangFromFilename(cstring(path)))
 
-proc installTemplateHost*(tmpl: ProjectTemplate) =
+proc installTemplateHost*() =
   ## Answer the one question edit mode asks that only a host can answer.
   ##
   ## `utils.asyncSend "tab-load"` registers a future keyed by the tab's path,
@@ -545,7 +545,12 @@ proc installTemplateHost*(tmpl: ProjectTemplate) =
   ## back — their edit still in the store, still in what Build compiles, and
   ## silently absent from the editor that reopened it. Reading the accessor
   ## keeps the tab, the build and the store one value.
-  discard tmpl
+  ##
+  ## THE PARAMETER IS GONE, not merely discarded. `discard tmpl` said "do not
+  ## capture this" to a reader who was already reading; a signature with
+  ## nothing to capture says it to one who is not. The defect recurred once in
+  ## this very file despite the paragraph above, which is the measurement that
+  ## a comment was not enough.
   data.ipc.respond(cstring"CODETRACER::tab-load",
     proc(sender: js, payload: JsObject) =
       let location = cast[types.Location](payload["location"])
@@ -655,7 +660,7 @@ proc templateConstraintReport*(tmpl: ProjectTemplate): ConstraintReport =
   parseNargoInfoJson(noirTemplateNargoInfoJson,
                      noirTemplateConstraintProvenance)
 
-proc installTemplatePaneHost*(tmpl: ProjectTemplate) =
+proc installTemplatePaneHost*() =
   ## Answer `CODETRACER::ns9-panes` for the bundled template.
   ##
   ## The web platform's half of the one message NS9's panes are fed by; the
@@ -676,12 +681,18 @@ proc installTemplatePaneHost*(tmpl: ProjectTemplate) =
   ## and the gutter would both quietly refuse to notice what they had just
   ## written. `currentProject()` is what the editor last saved.
   ##
-  ## The parameter stays because the constraint half genuinely is about the
-  ## bundled template: `noirTemplateNargoInfoJson` is a compile-time constant
-  ## measured against those sources, and re-deriving it for edited ones is not
-  ## something a browser can do (there is no `nargo info` in the wasm module).
-  ## So the two halves answer about different things ON PURPOSE, and the
-  ## constraint pane's provenance string says which.
+  ## IT TAKES NO PROJECT, exactly as `installTemplateHost` takes none — see
+  ## that proc's header, which was written about this same defect and which
+  ## this proc, 140 lines below it in the same file, captured anyway.
+  ##
+  ## The constraint half still answers about the BUNDLED template's numbers,
+  ## and that is deliberate rather than a leftover capture:
+  ## `noirTemplateNargoInfoJson` is a compile-time constant measured by a real
+  ## `nargo info` against those sources, and there is no `nargo info` in the
+  ## wasm module to re-derive it from edited ones. It reads `currentProject()`
+  ## only to decide whether a project is open at all. The constraint pane's
+  ## provenance string is what tells a reader which sources the counts are
+  ## about, and it says so on the pane rather than only here.
   data.ipc.respond(cstring"CODETRACER::ns9-panes",
     proc(sender: js, payload: JsObject) =
       data.ipc.deliver(cstring"CODETRACER::ns9-panes-catalog", js{
@@ -691,7 +702,7 @@ proc installTemplatePaneHost*(tmpl: ProjectTemplate) =
         # did not — see `noirTestRunAbsence`.
         absence: cstring(noirTestRunAbsence())
       })
-      let report = templateConstraintReport(tmpl)
+      let report = templateConstraintReport(currentProject())
       data.ipc.deliver(cstring"CODETRACER::ns9-panes-constraints", js{
         info: cstring(noirTemplateNargoInfoJson),
         provenance: cstring(noirTemplateConstraintProvenance),
@@ -810,9 +821,9 @@ proc enterTemplateEditMode*(tmpl: ProjectTemplate): bool =
     setCurrentProject(tmpl)
   let effective = currentProject()
 
-  installTemplateHost(effective)
+  installTemplateHost()
   installProjectSaveHost()
-  installTemplatePaneHost(effective)
+  installTemplatePaneHost()
   # The replay host, registered here for the reason `installTemplateHost`'s
   # own header gives about itself: before the `no-trace` delivery, so it
   # exists before anything can ask. Nothing asks until a Run has produced a
