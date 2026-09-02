@@ -40,12 +40,29 @@
 ##                              request through the backend lets
 ##                              headless tests verify the end-to-end
 ##                              flow without depending on Karax.
-## - ``jumpToStepLine``       — emit a ``ct/line-step-jump`` request
-##                              carrying the row's ``delta`` /
-##                              ``rrTicks`` so the live debugger can
-##                              advance to the corresponding step.
-##                              This is the same wire shape Errors and
-##                              Search Results use for navigation.
+## - ``jumpToStepLine``       — emit a ``ct/goto-ticks`` request
+##                              carrying the row's ``rrTicks`` so the
+##                              live debugger jumps to that step.
+##
+## REACHABILITY, so the next reader does not assume more than is true:
+## this pane cannot currently be opened by a user.  Its menu entry is
+## commented out (``ui_js.nim``, ``# element "Step List", aStepList``),
+## ``aStepList`` has no binding in ``config/default_config.yaml``, the
+## pane is absent from ``config/default_layout.json`` (which is also
+## what the web bundle loads), and ``Content.StepList`` is listed in
+## ``editModeHiddenContentIds()``.  Even when opened programmatically it
+## renders no rows: ``lineSteps`` is only ever filled by
+## ``ui/step_list.nim``'s ``onUpdatedLoadStepLines``, whose producer —
+## ``dap_handler.rs::load_step_lines`` — is a stub that builds
+## ``vec![]`` and has its ``send_event`` commented out, while the
+## ``ct/load-step-lines`` DAP command has no arm at all.
+##
+## The ``jumpToStepLine`` fix below is therefore a latent-defect fix,
+## not a live one.  It is still worth having — the command it used to
+## send could never have worked — but do not un-comment the menu entry
+## to "make it reachable" until ``load_step_lines`` actually returns
+## rows, or the pane will open empty and the gesture will still be
+## untestable.
 ##
 ## The VM consumes the same ``LoadStepLinesUpdate`` semantics as the
 ## legacy component: ``onUpdatedLoadStepLines`` would call
@@ -170,20 +187,69 @@ proc loadStepLinesFor*(vm: StepListVM; loc: StepLineLocation) =
   discard vm.store.backend.send("ct/load-step-lines", args)
 
 proc jumpToStepLine*(vm: StepListVM; line: StepLine) =
-  ## Dispatch a ``ct/line-step-jump`` request for the given row.  The
-  ## legacy view called ``data.services.debugger.lineStepJump(line)``;
-  ## routing this via the backend keeps the signal flow self-contained
-  ## for headless tests.  The same ``delta`` / ``rrTicks`` payload is
-  ## what the live debugger needs to translate the click into either a
-  ## ``StepIn`` repeat or a ``jumpToLocalStep`` based on the trace
-  ## kind.
+  ## Move the debugger to the step the clicked row names.
+  ##
+  ## Emits ``ct/goto-ticks`` — the same command the Event Log row click
+  ## already uses (``event_log_vm.jumpToCounterpart``) for this exact
+  ## gesture-class: "put the session on the tick this row names".
+  ##
+  ## WHY NOT ``ct/local-step-jump``, which is what the legacy view used
+  ## (``DebuggerService.lineStepJump`` → ``jumpToLocalStep(..., rrTicks =
+  ## lineStep.location.rrTicks)``): the two handlers do the *same work*
+  ## on a materialized trace —
+  ##
+  ##     local_step_jump: replay.jump_to(StepId(arg.rr_ticks));
+  ##                      complete_move(...)
+  ##     goto_ticks:      replay.jump_to(StepId(arg.ticks));
+  ##                      complete_move(...); respond_dap(...)
+  ##
+  ## — but only ``goto_ticks`` answers the request.  ``local_step_jump``
+  ## takes its request as ``_req`` and never calls ``respond_dap``, so
+  ## the caller's future never settles.  That is not academic: the native
+  ## ``BackendService`` built by ``stdio_backend.toBackendService``
+  ## implements ``send`` as a *blocking* ``sendDapRequest``, so routing
+  ## this click at ``ct/local-step-jump`` hangs any native/headless
+  ## caller outright (measured — it deadlocked the test in this commit's
+  ## first draft), and leaves an unsettled promise on the JS path.
+  ## ``ct/goto-ticks`` is dispatched, moves the session, AND responds.
+  ##
+  ## ``threadId`` is sent explicitly and is NOT optional: Rust's
+  ## ``GoToTicksArguments`` has no ``#[serde(default)]``, so omitting it
+  ## fails the whole request with ``missing field `threadId``` (that is a
+  ## live bug in ``event_log_vm``'s copy of this payload, which sends
+  ## ``rrTicks``/``ticks`` and no ``threadId``).  ``dap.nim`` only stamps
+  ## a ``threadId`` when a *multi-process* session is active
+  ## (``activeSessionThreadId != 0``), and overwrites ours when it does —
+  ## which is the desired precedence, since that value is the routing id.
+  ##
+  ## KNOWN GAP, deliberately not papered over: legacy's *non*-materialized
+  ## arm did ``step(StepIn, repeat = delta, reverse = delta < 0)``, and
+  ## DAP has no repeat count — ``dap_command_to_step_action`` maps
+  ## ``"stepIn"`` to ``(Action::StepIn, false)`` with no way to express
+  ## ``repeat``.  A tick jump is the right answer for materialized
+  ## traces (the only kind the web product replays); reproducing legacy's
+  ## rr/gdb semantics needs an engine-side arm that branches on
+  ## ``trace_kind``.  Recorded rather than guessed at, because this pane
+  ## is not reachable today (see the module header).
+  ##
+  ## This used to emit ``ct/line-step-jump`` — a string absent from
+  ## ``EVENT_KIND_TO_DAP_MAPPING``, from ``VALID_DAP_COMMANDS`` and from
+  ## both dispatch tables in ``dap_server.rs``.  ``ui_js.nim``'s
+  ## production ``sendProc`` resolves the command through
+  ## ``dapCommandToEventKind`` before any transport is touched, and that
+  ## raises ``ValueError`` on an unmapped string, so the call threw
+  ## synchronously out of the click handler rather than failing on the
+  ## wire.
+  let threadId =
+    if vm.store.debugger.val.threadId != 0'u32:
+      int(vm.store.debugger.val.threadId)
+    else:
+      1
   let args = %*{
-    "delta": line.delta,
-    "path": line.location.path,
-    "line": line.location.line,
-    "rrTicks": line.location.rrTicks,
+    "threadId": threadId,
+    "ticks": line.location.rrTicks,
   }
-  discard vm.store.backend.send("ct/line-step-jump", args)
+  discard vm.store.backend.send("ct/goto-ticks", args)
 
 # ---------------------------------------------------------------------------
 # Factory
