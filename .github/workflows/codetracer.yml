@@ -5,9 +5,46 @@ on:
       - main
       - dev
       - stable
+      # WHY `cloud` IS ON THIS LIST.
+      #
+      # `cloud` is the web branch, and until this entry existed the ONLY
+      # workflow a push to it triggered was `deploy-web-codetracer.yml`. That
+      # workflow builds the Embed SDK bundle and ships it to Cloudflare Pages.
+      # It runs no test lane at all -- not `vm-native`, not `vm-js`, not the
+      # known-failure ledger, not the lane-coverage guard, not the
+      # dap-command-sync guard. So everything landing on `cloud` was verified by
+      # local runs only, and a green deploy corroborated none of it: it says the
+      # bundle built, which is a strictly weaker claim than the one a reader
+      # takes from a green check next to a commit.
+      #
+      # The sharpest form of the problem was that THREE OF THOSE GUARDS LIVE
+      # ONLY ON THIS BRANCH. `cloud` carries 64 lines of this file that `dev`
+      # does not -- "The web bundle mounts a product", "A registered known
+      # failure signals when it goes green", "One press, one action; one pane
+      # id, one node". They were added here, they are not on `dev`, and with no
+      # trigger on `cloud` they could not run anywhere at all. A guard that
+      # cannot run is a comment.
+      #
+      # WHY NOT THE ALTERNATIVES. Merging `cloud` into `dev` regularly would let
+      # the lanes see the code, but only after it landed, and only for as long
+      # as somebody kept doing it -- verification that depends on a habit is the
+      # thing this workflow exists to replace, and it would still leave `cloud`
+      # itself unverified between merges. Accepting the gap deliberately was the
+      # honest third option and is what was in force by default; it is not worth
+      # keeping now that the guards intended to run here are sitting here unrun.
+      #
+      # THE COST IS REAL AND IS PAID FOR BELOW. `cloud` deploys on every push,
+      # so it is pushed often and in bursts, and this is the widest workflow in
+      # the repository. Adding it here means every one of those pushes now also
+      # starts a full three-platform matrix. The `concurrency` block is what
+      # makes that affordable: unlike `main`/`dev`/`stable`, a superseded
+      # `cloud` run is cancelled, so a burst of five pushes leaves one live run
+      # rather than five. See the note there for why the mainline branches must
+      # NOT be treated that way.
+      - cloud
   pull_request:
 
-# Collapse superseded pull-request runs only.
+# Collapse superseded pull-request runs -- and superseded `cloud` runs.
 #
 # This is the widest workflow in the repository -- Windows, Linux and macOS
 # legs across three runner classes -- so a superseded pull-request run is the
@@ -20,8 +57,21 @@ on:
 # cancelled. That is deliberate -- `dev` is the integration branch and each
 # commit's build result is independently meaningful for bisecting, so
 # collapsing mainline pushes would destroy history rather than save capacity.
+#
+# `cloud` is grouped by NAME instead, so its pushes DO cancel each other. The
+# distinction is what the branch is for. `dev` is bisected; the per-commit
+# result is the product. `cloud` is a deploy branch -- what matters is whether
+# the tip is good, because the tip is what is serving ide.codetracer.com, and
+# `deploy-web-codetracer.yml` already groups it exactly this way for exactly
+# this reason. Cancelling a superseded `cloud` run therefore discards a result
+# nobody would have read, which is what keeps a per-push test lane on a
+# per-push deploy branch affordable.
+#
+# The expression: `head_ref` is empty on push, so it falls through; on a `cloud`
+# push `(github.ref_name == 'cloud' && 'cloud')` yields the string `cloud`; on
+# any other push it yields `false` and falls through to `run_id`.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.head_ref || (github.ref_name == 'cloud' && 'cloud') || github.run_id }}
   cancel-in-progress: true
 
 permissions:
