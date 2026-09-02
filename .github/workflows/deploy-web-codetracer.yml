@@ -142,8 +142,113 @@ permissions:
   deployments: write
 
 jobs:
+  # WHY A RUN THAT IS NO LONGER THE TIP STOPS HERE INSTEAD OF BUILDING
+  #
+  # `cancel-in-progress: false` above is correct and stays: a deploy that is
+  # building must not be killed. But it has a cost that was MEASURED on
+  # 2026-09-02, and this job pays it down without touching that policy.
+  #
+  # A run does not start when it is created. It waits for an `eph-linux-x64`
+  # runner, and that wait is where staleness accumulates:
+  #
+  #     21:20:13  run created for 577912f7   <- 577912f7 was the tip
+  #     21:58:37  its job finally STARTS     <- 38 minutes later; by now four
+  #                                             newer commits had landed and
+  #                                             577912f7 was 20 commits behind
+  #     22:14     still running, step 9 of 25, nowhere near "Deploy to
+  #               Cloudflare Pages" (step 22)
+  #
+  # So the single in-flight deploy slot was spent building a bundle that was
+  # already obsolete when it started, while the run holding the actual tip sat
+  # PENDING behind it. That is the shape the user experiences as "the deploy has
+  # been pending for hours": not a starved deploy, a slot occupied by a stale one.
+  #
+  # The fix is to re-ask, AT JOB START, the question that was last answered when
+  # the run was CREATED: is this commit still the tip? If it is not, a newer run
+  # for a newer commit already exists, and building this one publishes something
+  # nobody asked for while delaying the thing they did. Skipping takes ~30s
+  # instead of ~60min, so a backlog drains to the tip in seconds.
+  #
+  # THIS IS DELIBERATELY NOT `cancel-in-progress: true`. Nothing here cancels
+  # anything. That distinction is the whole point: the five-hour outage
+  # documented above was invisible precisely BECAUSE its runs concluded
+  # `cancelled`, which reads as a deliberate act. A superseded run here concludes
+  # `success` with a skipped deploy job and a step summary saying which commit
+  # superseded it — visible, and impossible to confuse with a failure.
+  #
+  # It runs on `ubuntu-latest` (GitHub-hosted) on purpose: it must not queue
+  # behind the very pool it exists to stop wasting.
+  freshness:
+    name: Is this commit still the tip?
+    runs-on: ubuntu-latest
+    outputs:
+      fresh: ${{ steps.check.outputs.fresh }}
+    steps:
+      - name: Compare this run's commit against the branch tip
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -uo pipefail
+
+          # A `workflow_dispatch` is someone deliberately asking for THIS ref.
+          # Re-deploying a known-older commit is a legitimate thing to ask for,
+          # so the guard never second-guesses a manual run.
+          if [ "$EVENT" != "push" ]; then
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run (\`$EVENT\`) — deploying \`$SHA\` as asked." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          tip="$(gh api "repos/$GITHUB_REPOSITORY/commits/$BRANCH" -q .sha 2>/dev/null)" || tip=""
+
+          # FAIL OPEN. If the tip cannot be read, deploy. A guard that blocks the
+          # deploy when it is merely unsure would reproduce the outage above by a
+          # different route.
+          if [ -z "$tip" ]; then
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+            echo "Could not read the tip of \`$BRANCH\` — deploying \`$SHA\` rather than blocking." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$tip" = "$SHA" ]; then
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+            echo "\`$SHA\` is the tip of \`$BRANCH\` — deploying." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Superseded — not deployed"
+              echo
+              echo "This run is for \`$SHA\`, but \`$BRANCH\` has since moved to \`$tip\`."
+              echo "A newer run is deploying that commit, so this one skipped its"
+              echo "build instead of spending the single in-flight deploy slot on a"
+              echo "bundle that is already obsolete."
+              echo
+              echo "**This is not a failure and nothing was cancelled.**"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   deploy:
     name: Build bundle + deploy to Cloudflare Pages
+    needs: freshness
+    # FAIL OPEN, and note the shape of this condition carefully.
+    #
+    # `needs.freshness.outputs.fresh == 'true'` would have been the obvious
+    # spelling and it is WRONG, because a job that errors produces no outputs:
+    # if the freshness check itself broke, every deploy would silently skip and
+    # the site would go stale with no failure reported — which is precisely the
+    # five-hour outage described above, reintroduced through a new door.
+    #
+    # So: deploy UNLESS the check positively said this commit is superseded.
+    # `always()` is required for the job to be considered at all when `needs`
+    # did not succeed; `!= 'false'` then treats "errored", "timed out" and
+    # "never ran" identically to "fresh" — the safe direction, because the cost
+    # of a redundant deploy is a wasted build, and the cost of a skipped one is
+    # a stale product nobody is told about.
+    if: always() && needs.freshness.outputs.fresh != 'false'
     runs-on: eph-linux-x64  # CIP-5: nix job (setup-dev-env) → eph-linux-x64
     environment:
       name: cloud
