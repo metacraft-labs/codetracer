@@ -396,6 +396,23 @@ type
     hasHistory*: bool
     previousPath*: string
     action*: string
+    previousLine*: int
+    previousRRTicks*: int
+      ## THE DESTINATION, and the reason `jumpBack` can name one.
+      ##
+      ## `previousPath` is a caption — it is what the panel prints in
+      ## "We were in '…'".  It is not a place the debugger can go: the
+      ## backend navigates by ticks, not by path.  `jumpBack` used to send
+      ## `{previousPath, action}` at `ct/history-jump`, a payload sharing no
+      ## field name at all with the `task::Location` that command
+      ## deserialises into, which defaulted to `rrTicks = 0` and jumped to
+      ## the start of the recording (codetracer#698).  Carrying the previous
+      ## entry's ticks alongside its path is what makes the button able to
+      ## ask for the step it is describing.
+      ##
+      ## Zero when there is no history — `hasHistory` is what says whether
+      ## these mean anything, and the backend refuses a jump payload whose
+      ## `rrTicks` is absent, so an unpopulated one cannot silently seek.
 
   # -------------------------------------------------------------------
   # Step List panel value types

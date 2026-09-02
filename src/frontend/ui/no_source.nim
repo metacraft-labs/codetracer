@@ -112,6 +112,13 @@ proc syncNoSourceVM*(self: NoSourceComponent) =
       hasHistory: true,
       previousPath: $prev.path,
       action: $action,
+      # THE DESTINATION, not only the caption. `prev` is a full
+      # `types.Location`; the panel used to keep its path for the "We were
+      # in '…'" line and drop everything the debugger navigates by, so the
+      # Jump-back button had nowhere to send anyone. See
+      # `NoSourceHistoryInfo.previousRRTicks`.
+      previousLine: prev.line,
+      previousRRTicks: prev.rrTicks,
     ))
   else:
     noSourceVMInstance.setHistory(vmtypes.NoSourceHistoryInfo())

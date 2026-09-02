@@ -759,7 +759,9 @@ proc applyNoSource(vm: NoSourceVM) =
                                       path: "/usr/lib/libc.so", line: -1))
   vm.setHistory(NoSourceHistoryInfo(hasHistory: true,
                                     previousPath: "src/main.nr",
-                                    action: "step in"))
+                                    action: "step in",
+                                    previousLine: 12,
+                                    previousRRTicks: 4200))
   vm.setOriginatingAddress("0x4010af")
 
 proc applyLowLevelCode(vm: LowLevelCodeVM) =

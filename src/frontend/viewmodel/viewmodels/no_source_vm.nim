@@ -34,6 +34,8 @@
 ##     hasHistory: true,
 ##     previousPath: "src/main.nim",
 ##     action: "step",
+##     previousLine: 42,
+##     previousRRTicks: 1337,
 ##   ))
 ##   vm.setOriginatingAddress("0x1234")
 ##   echo vm.message.val
@@ -120,18 +122,35 @@ proc setStopSignalText*(vm: NoSourceVM; text: string) =
 
 proc jumpBack*(vm: NoSourceVM) =
   ## Trigger the "Jump back" action.  Forwards to the backend via
-  ## ``ct/history-jump`` carrying the previous-path metadata.
+  ## ``ct/history-jump`` carrying the previous entry as a `Location`.
   ##
   ## When ``hasHistory`` is false this is a no-op so the action is
   ## safe to call from the view's click handler regardless of the
   ## current state — the view simply hides the button when there is
   ## no history.
+  ##
+  ## THE PAYLOAD IS A `Location`, because `ct/history-jump` deserialises
+  ## one.  This used to send ``{previousPath, action}`` — two field names
+  ## invented here, neither of which appears anywhere in the backend's
+  ## `task::Location`.  That struct is `#[serde(default)]` at container
+  ## level, so the backend did not reject it: it built a fully zeroed
+  ## `Location`, seeked to ``rrTicks = 0``, and answered ``success``.  Every
+  ## click of "Jump back" went to the first step of the recording and said
+  ## it had worked (codetracer#698).
+  ##
+  ## ``rrTicks`` is the field `db.rs`'s ``location_jump`` navigates by, and
+  ## the backend now refuses a jump payload without it, so a payload that
+  ## names no destination is an error the user can see rather than a silent
+  ## seek to the beginning.
   let history = vm.history.val
   if not history.hasHistory:
     return
   let args = %*{
-    "previousPath": history.previousPath,
-    "action": history.action,
+    "path": history.previousPath,
+    "line": history.previousLine,
+    "rrTicks": history.previousRRTicks,
+    "highLevelPath": history.previousPath,
+    "highLevelLine": history.previousLine,
   }
   vm.store.requestHistoricalNavigation("ct/history-jump", args)
 

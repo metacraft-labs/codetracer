@@ -215,14 +215,27 @@ proc onSeekToHop*(vm: OriginChainVM; hop: OriginHop) =
     return
   # Fallback: forward the seek as a history-jump request so the
   # existing backend dispatcher (`ct/history-jump`) handles it.
+  #
+  # A FLAT `Location`, because that is what the command deserialises into.
+  # This used to send `{expression, location: {path, line, rrTicks}, stepId}`
+  # — a shape invented here, whose only field name in common with the
+  # backend's `task::Location` is `expression`, which decides nothing.  The
+  # destination fields sat one level down under `location` and so were never
+  # read.  `Location` is `#[serde(default)]` at container level, so the
+  # backend did not reject the payload: it deserialised a fully zeroed
+  # location and seeked to `rrTicks = 0`, landing every hop click on the
+  # first step of the recording and answering `success` (codetracer#698).
+  #
+  # `rrTicks` is the field `db.rs`'s `location_jump` actually navigates by,
+  # and the backend now REFUSES a jump payload that omits it, so this shape
+  # cannot silently regress to the nested one.
   let args = %*{
+    "path": hop.location.path,
+    "line": hop.location.line,
+    "rrTicks": hop.location.rrTicks,
+    "highLevelPath": hop.location.path,
+    "highLevelLine": hop.location.line,
     "expression": hop.targetExpr,
-    "location": %*{
-      "path": hop.location.path,
-      "line": hop.location.line,
-      "rrTicks": hop.location.rrTicks,
-    },
-    "stepId": hop.stepId,
   }
   vm.store.requestHistoricalNavigation("ct/history-jump", args)
 

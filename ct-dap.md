@@ -46,10 +46,10 @@ response behavior per command.
 | `ct/collapse-calls` | `CollapseCallsArgs` | Updates internal calltrace state. |
 | `ct/expand-calls` | `CollapseCallsArgs` | Updates internal calltrace state. |
 | `ct/load-calltrace-section` | `CalltraceLoadArgs` | Emits `ct/updated-calltrace`. |
-| `ct/calltrace-jump` | `Location` | Emits `stopped`, `ct/complete-move`, `output`. |
+| `ct/calltrace-jump` | `Location` (must carry `rrTicks`) | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/event-jump` | `ProgramEvent` | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/load-history` | `LoadHistoryArg` | Emits `ct/updated-history`. |
-| `ct/history-jump` | `Location` | Emits `stopped`, `ct/complete-move`, `output`. |
+| `ct/history-jump` | `Location` (must carry `rrTicks`) | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/search-calltrace` | `CallSearchArg` | Emits `ct/calltrace-search-res`. |
 | `ct/source-line-jump` | `SourceLocation` | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/source-call-jump` | `SourceCallJumpTarget` | Emits `stopped`, `ct/complete-move`, `output`, and may emit `ct/notification` on failure. |
@@ -64,6 +64,29 @@ response behavior per command.
 | `ct/load-asm-function` | `FunctionLocation` | Response body `Instructions`. |
 | `ct/reverseStepIn` | none | Reverse step-in; emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/reverseStepOut` | none | Reverse step-out; emits `stopped`, `ct/complete-move`, `output`. |
+
+### A jump payload must name a destination
+
+`ct/history-jump` and `ct/calltrace-jump` both deserialise their arguments into
+`task::Location`, and both navigate by **`rrTicks`** — `db.rs`'s `location_jump`
+is `self.jump_to(StepId(location.rr_ticks.0))`, and nothing else in the payload
+moves the debugger.
+
+`Location` carries `#[serde(default)]` at container level, which makes
+`serde_json::from_value::<Location>` succeed for *any* JSON object at all,
+including one written against a completely different struct, returning a fully
+zeroed location.  For most of `Location`'s uses that permissiveness is wanted —
+it is deserialised from trace files and from the native backend, both of which
+carry fields a given build may not know.  At a jump command it meant a payload
+the backend could not read was a jump to **step 0** that answered `success`, and
+a handler that cannot distinguish jump-to-step-500 from jump-to-step-0
+(codetracer#698: every no-source "Jump back" and every origin-chain hop click).
+
+Both commands therefore REFUSE a payload with no `rrTicks`, naming the fields
+that were present instead — see `task::location_from_jump_arguments`.  Extra
+fields are still accepted (`headless_session` sends `file`; the calltrace pane
+sends `codeGeneration`), because the check is "does this name a destination",
+not "is this exactly a `Location`".
 
 ## Custom Events
 

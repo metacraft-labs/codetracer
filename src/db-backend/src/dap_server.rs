@@ -27,6 +27,7 @@ use crate::recreator_session::RecreatorArgs;
 // `Handler` so requests can route per-thread to the owning trace.
 use crate::session_handler::{SessionHandler, TraceSlot, compose_thread_id, decompose_thread_id};
 use crate::session_manifest::SessionManifest;
+use crate::task;
 use crate::task::{
     Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
     FunctionLocation, GoToTicksArguments, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
@@ -2088,7 +2089,17 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "ct/load-terminal" => handler.load_terminal(req.clone(), sender.clone())?,
         "ct/collapse-calls" => handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
         "ct/expand-calls" => handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
-        "ct/calltrace-jump" => handler.calltrace_jump(req.clone(), req.load_args::<Location>()?, sender.clone())?,
+        // NOT `req.load_args::<Location>()`. `Location` is `#[serde(default)]`
+        // at container level, so that call succeeds on ANY JSON object and
+        // hands the handler a zeroed location — `rr_ticks == 0`, which
+        // `location_jump` seeks to as step 0 while the response says
+        // `success`. See `task::location_from_jump_arguments` for the full
+        // account (codetracer#698).
+        "ct/calltrace-jump" => handler.calltrace_jump(
+            req.clone(),
+            task::location_from_jump_arguments(&req.command, &req.arguments)?,
+            sender.clone(),
+        )?,
         "ct/event-jump" => handler.event_jump(req.clone(), req.load_args::<ProgramEvent>()?, sender.clone())?,
         "ct/load-history" => handler.load_history(req.clone(), req.load_args::<LoadHistoryArg>()?, sender.clone())?,
         // Value Origin Tracking — `ct/originChain` (spec §5.3) and
@@ -2118,7 +2129,15 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
             req.load_args::<crate::dap_handler::PairIndexLookupArguments>()?,
             sender.clone(),
         )?,
-        "ct/history-jump" => handler.history_jump(req.clone(), req.load_args::<Location>()?, sender.clone())?,
+        // Same guard, and this is the command the defect was filed against:
+        // two of its three callers sent payloads with no field in common with
+        // `Location`, and every "Jump back" and every origin-chain hop seek
+        // landed on step 0 and reported success.
+        "ct/history-jump" => handler.history_jump(
+            req.clone(),
+            task::location_from_jump_arguments(&req.command, &req.arguments)?,
+            sender.clone(),
+        )?,
         "ct/search-calltrace" => {
             handler.calltrace_search(req.clone(), req.load_args::<CallSearchArg>()?, sender.clone())?
         }

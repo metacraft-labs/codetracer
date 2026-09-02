@@ -169,7 +169,7 @@ suite "M4 — OriginChainVM.onSeekToHop reuses goto-ticks/history-jump":
       targetExpr: "b",
       sourceExpr: "a",
       stepId: 47,
-      location: OriginLocation(path: "main.py", line: 5),
+      location: OriginLocation(path: "main.py", line: 5, rrTicks: 47),
     )
     originVM.onSeekToHop(hop)
     check observedStep == 47
@@ -178,10 +178,51 @@ suite "M4 — OriginChainVM.onSeekToHop reuses goto-ticks/history-jump":
     # And when no bridge is installed, the fallback path emits a
     # `ct/history-jump` request through the existing
     # historical-navigation pipeline.
+    #
+    # THE REQUEST MUST NAME THE HOP'S OWN STEP, and this is the assertion
+    # this test used to be missing.  It checked `findCommand(...).isSome` —
+    # that a command was sent — and stayed green for months while the payload
+    # was `{expression, location: {…}, stepId}`, a shape whose only field
+    # name in common with the `task::Location` the backend deserialises is
+    # `expression`.  `Location` is `#[serde(default)]` at container level, so
+    # the backend accepted it, built a zeroed location, seeked to
+    # `rrTicks = 0` and answered `success`: every hop click landed on the
+    # first step of the recording (codetracer#698).  "A command was sent" and
+    # "the status was success" are both exactly what the defect did, so
+    # neither can be the assertion — the destination has to be.
     let (originVM2, _, _, mock2) = makeOriginVM()
     originVM2.onSeekToHop(hop)
     drain()
-    check mock2.findCommand("ct/history-jump").isSome
+    let seek = mock2.findCommand("ct/history-jump")
+    check seek.isSome
+    let seekArgs = seek.get.args
+    check seekArgs.hasKey("rrTicks")
+    check seekArgs["rrTicks"].getBiggestInt == 47
+    check seekArgs["path"].getStr == "main.py"
+    check seekArgs["line"].getInt == 5
+    # And the destination is at the TOP level, where the command reads it.
+    # The pre-fix payload carried the same numbers one level down under
+    # `location`, which is why it read as a jump to nowhere.
+    check not seekArgs.hasKey("location")
+
+    # A SECOND HOP, at a different step and a different path, because a
+    # single case cannot distinguish "reads the hop" from "returns a
+    # constant" — and 47 was already the value the bridge assertion above
+    # uses.
+    let (originVM3, _, _, mock3) = makeOriginVM()
+    originVM3.onSeekToHop(OriginHop(
+      kind: okTrivialCopy,
+      targetExpr: "total",
+      sourceExpr: "subtotal",
+      stepId: 512,
+      location: OriginLocation(path: "lib/acc.py", line: 91, rrTicks: 512),
+    ))
+    drain()
+    let secondSeek = mock3.findCommand("ct/history-jump")
+    check secondSeek.isSome
+    check secondSeek.get.args["rrTicks"].getBiggestInt == 512
+    check secondSeek.get.args["path"].getStr == "lib/acc.py"
+    check secondSeek.get.args["line"].getInt == 91
 
 # ---------------------------------------------------------------------------
 # M4 V#4: test_origin_chain_vm_pin_chain_persists_in_scratchpad

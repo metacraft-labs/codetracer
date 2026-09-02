@@ -4725,3 +4725,300 @@ mod breakpoint_condition_tests {
         assert!(result);
     }
 }
+
+/// codetracer#698 — a jump request must land on the step it names.
+///
+/// `ct/history-jump` and `ct/calltrace-jump` both deserialise their arguments
+/// into [`crate::task::Location`], which carries `#[serde(default)]` at
+/// CONTAINER level.  That makes `serde_json::from_value::<Location>` succeed
+/// for any JSON object at all — including one written against a completely
+/// different struct — and return a fully zeroed location.  Since
+/// [`MaterializedReplaySession::location_jump`] navigates by
+/// `location.rr_ticks`, a payload serde could not read was a jump to STEP 0
+/// that answered `success`.
+///
+/// These tests observe THE STEP THE SESSION ENDED ON, not whether a call was
+/// made and not whether a status was `success` — "reports success" is the
+/// defect.  Each fix case has a pre-fix twin driven through the same session,
+/// so the defect is demonstrated on the same instrument that shows the fix.
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod jump_destination_tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use codetracer_trace_types::{CallKey, FunctionId, FunctionRecord, Line, PathId, StepId, TypeId, ValueRecord};
+    use serde_json::json;
+
+    use crate::db::{Db, DbCall, DbStep, EndOfProgram, MaterializedReplaySession};
+    use crate::in_memory_trace_reader::InMemoryTraceReader;
+    use crate::replay::ReplaySession;
+    use crate::task::{self, Location};
+    use crate::trace_reader::TraceReader;
+
+    const TEST_PATH: &str = "synthetic.src";
+
+    /// A replay session over `step_count` recorded steps, one per line.
+    ///
+    /// Steps and not a single step, deliberately: with a one-step trace every
+    /// destination IS step 0 and "landed on the step it named" cannot fail.
+    fn session_with_steps(step_count: i64) -> MaterializedReplaySession {
+        let mut db = Db::new(&PathBuf::from("/tmp/ct-698-jump-destination"));
+
+        // PathId(0) is the sentinel the CTFS loader reserves.
+        db.paths.push(String::new());
+        db.paths.push(TEST_PATH.to_string());
+        db.path_map.insert(TEST_PATH.to_string(), PathId(1));
+        db.variable_names.push("<sentinel>".to_string());
+
+        db.functions.push(FunctionRecord {
+            path_id: PathId(1),
+            line: Line(1),
+            name: "<top-level>".to_string(),
+        });
+        let call_key = CallKey(0);
+        db.calls.push(DbCall {
+            key: call_key,
+            function_id: FunctionId(0),
+            args: Vec::new(),
+            return_value: ValueRecord::None { type_id: TypeId(0) },
+            step_id: StepId(0),
+            depth: 0,
+            parent_key: CallKey(-1),
+            children_keys: Vec::new(),
+        });
+
+        let mut path1_map: HashMap<usize, Vec<DbStep>> = HashMap::new();
+        for i in 0..step_count {
+            let step = DbStep {
+                step_id: StepId(i),
+                path_id: PathId(1),
+                line: Line(i + 1),
+                column: Some(Line(1)),
+                call_key,
+                global_call_key: call_key,
+            };
+            db.steps.push(step);
+            db.variables.push(Vec::new());
+            db.instructions.push(Vec::new());
+            db.compound.push(HashMap::new());
+            db.cells.push(HashMap::new());
+            db.variable_cells.push(HashMap::new());
+            path1_map.insert((i + 1) as usize, vec![step]);
+        }
+
+        db.step_map.push(HashMap::new()); // sentinel for PathId(0)
+        db.step_map.push(path1_map);
+        db.end_of_program = EndOfProgram::Normal;
+
+        let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db));
+        MaterializedReplaySession::new(reader)
+    }
+
+    /// Where does a session end up when it is handed `arguments` the way the
+    /// pre-fix dispatcher did — `req.load_args::<Location>()`, no validation?
+    ///
+    /// This is the DEFECT, reproduced: it is the one line `dap_server.rs` used
+    /// to run.  Every test that asserts a refusal drives this too, so the
+    /// refusal is measured against a demonstrated wrong destination rather
+    /// than against an assumption.
+    fn destination_of_prefix_dispatch(arguments: &serde_json::Value, parked_at: i64) -> StepId {
+        let mut session = session_with_steps(16);
+        // Park away from 0 first: on a session already at 0, "landed on 0"
+        // and "did not move" are the same observation and the assertion is
+        // free.
+        session.jump_to(StepId(parked_at)).expect("park");
+        assert_eq!(session.current_step_id(), StepId(parked_at), "the session parked where asked");
+        let defaulted: Location =
+            serde_json::from_value(arguments.clone()).expect("Location deserialises from ANY object — that is the bug");
+        session.location_jump(&defaulted).expect("the pre-fix jump reported success");
+        session.current_step_id()
+    }
+
+    /// Where does a session end up when the arguments go through the guard?
+    fn destination_of_guarded_dispatch(command: &str, arguments: &serde_json::Value, parked_at: i64) -> StepId {
+        let mut session = session_with_steps(16);
+        session.jump_to(StepId(parked_at)).expect("park");
+        let location = task::location_from_jump_arguments(command, arguments).expect("the guard accepted the payload");
+        session.location_jump(&location).expect("jump");
+        session.current_step_id()
+    }
+
+    /// The fixture has to be able to show a step that is not 0, or every
+    /// assertion below passes for the wrong reason.
+    #[test]
+    fn the_session_can_be_observed_at_a_step_that_is_not_zero() {
+        let mut session = session_with_steps(16);
+        session.jump_to(StepId(9)).expect("park");
+        assert_eq!(session.current_step_id(), StepId(9));
+        let named_step_9 = Location {
+            path: TEST_PATH.to_string(),
+            line: 10,
+            rr_ticks: crate::task::RRTicks(9),
+            ..Location::default()
+        };
+        session.jump_to(StepId(0)).expect("park at 0");
+        session.location_jump(&named_step_9).expect("jump");
+        assert_eq!(
+            session.current_step_id(),
+            StepId(9),
+            "a location_jump naming step 9 must land on step 9 — if this fails the \
+             fixture cannot observe a destination at all and nothing below means anything"
+        );
+    }
+
+    /// `no_source_vm.nim`'s "Jump back", as it was sent before this fix.
+    ///
+    /// `{previousPath, action}` shares NO field name with `Location`.  Both
+    /// halves are asserted: the destination it actually reached, and that the
+    /// guard now refuses it instead.
+    #[test]
+    fn the_no_source_jump_back_payload_used_to_land_on_step_zero_and_is_now_refused() {
+        let prefix_payload = json!({ "previousPath": "src/main.nim", "action": "step" });
+
+        assert_eq!(
+            destination_of_prefix_dispatch(&prefix_payload, 11),
+            StepId(0),
+            "THE DEFECT: a payload naming no destination deserialised to a zeroed Location \
+             and the session landed on step 0, from step 11, without an error"
+        );
+
+        let refusal = task::location_from_jump_arguments("ct/history-jump", &prefix_payload)
+            .expect_err("a payload that names no destination must be refused");
+        assert!(
+            refusal.contains("rrTicks"),
+            "the refusal must name the field that was missing; got: {refusal}"
+        );
+        assert!(
+            refusal.contains("previousPath") && refusal.contains("action"),
+            "and must list the fields that WERE present, because the failure mode is a payload \
+             written against a different struct; got: {refusal}"
+        );
+    }
+
+    /// `origin_chain_vm.nim`'s hop seek, as it was sent before this fix.
+    ///
+    /// A different shape from the case above: this one DOES carry the
+    /// destination — nested one level down under `location`, where the
+    /// top-level `Location` deserialisation never looks.  Its only matching
+    /// field name is `expression`, which decides nothing.
+    #[test]
+    fn the_origin_chain_hop_payload_used_to_ignore_its_own_nested_destination() {
+        let prefix_payload = json!({
+            "expression": "total",
+            "location": { "path": TEST_PATH, "line": 6, "rrTicks": 5 },
+            "stepId": 5,
+        });
+
+        assert_eq!(
+            destination_of_prefix_dispatch(&prefix_payload, 11),
+            StepId(0),
+            "THE DEFECT: the hop named step 5 in a nested object and the session landed on step 0"
+        );
+
+        let refusal = task::location_from_jump_arguments("ct/history-jump", &prefix_payload)
+            .expect_err("a nested destination is no destination at this command");
+        assert!(
+            refusal.contains("rrTicks"),
+            "the refusal must name the missing top-level field; got: {refusal}"
+        );
+        assert!(
+            refusal.contains("location") && refusal.contains("stepId"),
+            "and list what was sent instead; got: {refusal}"
+        );
+    }
+
+    /// The shape both callers send now: a flat `Location`.
+    #[test]
+    fn a_flat_location_payload_lands_on_the_step_it_names() {
+        // What `origin_chain_vm.onSeekToHop` now sends for a hop at ticks 5.
+        let hop_seek = json!({
+            "path": TEST_PATH,
+            "line": 6,
+            "rrTicks": 5,
+            "highLevelPath": TEST_PATH,
+            "highLevelLine": 6,
+            "expression": "total",
+        });
+        assert_eq!(
+            destination_of_guarded_dispatch("ct/history-jump", &hop_seek, 11),
+            StepId(5),
+            "the origin-chain hop seek must land on the step the hop names"
+        );
+
+        // What `no_source_vm.jumpBack` now sends for a previous entry at
+        // ticks 12.  A DIFFERENT destination and a different field set, so
+        // neither case can pass by both being the same number.
+        let jump_back = json!({
+            "path": "src/main.nim",
+            "line": 42,
+            "rrTicks": 12,
+            "highLevelPath": "src/main.nim",
+            "highLevelLine": 42,
+        });
+        assert_eq!(
+            destination_of_guarded_dispatch("ct/history-jump", &jump_back, 3),
+            StepId(12),
+            "Jump back must land on the previous history entry, not on the start of the recording"
+        );
+    }
+
+    /// `ct/calltrace-jump` carries the same guard, and its callers already
+    /// sent a flat `Location` — so the guard must not have broken them.
+    #[test]
+    fn the_calltrace_jump_payloads_the_front_end_already_sent_still_work() {
+        // `calltrace_vm.doubleClickEntry`.
+        let double_click = json!({
+            "path": TEST_PATH,
+            "line": 8,
+            "highLevelPath": TEST_PATH,
+            "highLevelLine": 8,
+            "rrTicks": 7,
+            "callstackDepth": 0,
+            "sourceGeneration": 0,
+            "sourceDigest": "",
+            "codeGeneration": 0,
+        });
+        assert_eq!(
+            destination_of_guarded_dispatch("ct/calltrace-jump", &double_click, 1),
+            StepId(7)
+        );
+
+        // `isonim_calltrace_view`'s search result — `{rrTicks}` and nothing
+        // else.  The minimum a jump payload may be, and it must still pass.
+        assert_eq!(
+            destination_of_guarded_dispatch("ct/calltrace-jump", &json!({ "rrTicks": 14 }), 1),
+            StepId(14),
+            "a payload that is nothing but a destination is a valid jump"
+        );
+
+        // `headless_session.calltraceJump` — carries `file`, which is not a
+        // `Location` field, alongside a real `rrTicks`.  The guard checks for
+        // a destination, not for the absence of extra keys, so this must
+        // still land: `deny_unknown_fields` here would have broken it.
+        assert_eq!(
+            destination_of_guarded_dispatch(
+                "ct/calltrace-jump",
+                &json!({ "file": TEST_PATH, "line": 5, "rrTicks": 4 }),
+                1
+            ),
+            StepId(4),
+            "an unrecognised extra field is not a reason to refuse a payload that names a destination"
+        );
+    }
+
+    /// A non-object payload is refused too, rather than panicking or
+    /// defaulting.
+    #[test]
+    fn a_payload_that_is_not_an_object_is_refused() {
+        for arguments in [json!(null), json!(5), json!("ct/history-jump"), json!([1, 2])] {
+            let refusal = task::location_from_jump_arguments("ct/history-jump", &arguments)
+                .expect_err("a non-object `arguments` names no destination either");
+            assert!(
+                refusal.contains("Location object"),
+                "got: {refusal} for {arguments}"
+            );
+        }
+    }
+}

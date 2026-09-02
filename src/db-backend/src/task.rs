@@ -608,6 +608,72 @@ impl Location {
     }
 }
 
+/// The one field a `Location`-shaped jump payload must carry, because it is
+/// the one every jump consumer actually reads.
+pub const JUMP_DESTINATION_FIELD: &str = "rrTicks";
+
+/// Read a jump destination out of a DAP request's `arguments`, REFUSING a
+/// payload that names none.
+///
+/// # Why this exists rather than `req.load_args::<Location>()`
+///
+/// [`Location`] carries `#[serde(default)]` at CONTAINER level, so
+/// `serde_json::from_value::<Location>(v)` succeeds for **any** JSON object —
+/// including one that shares not a single field name with it — and hands back
+/// a fully zeroed location.  Every consumer of a jump payload navigates by
+/// `rr_ticks`; `db.rs`'s `location_jump` is literally
+/// `self.jump_to(StepId(location.rr_ticks.0))`.  So a payload serde could not
+/// read was a jump to **step 0**, executed on a zeroed position, answered with
+/// `success`.
+///
+/// That is codetracer#698.  `ct/history-jump` had three front-end callers
+/// sending three different shapes at one command: `middleware.nim` sent a
+/// serialised `Location` (correct), while `no_source_vm.nim`'s Jump-back sent
+/// `{previousPath, action}` — no field in common with `Location` at all — and
+/// `origin_chain_vm.nim`'s hop seek sent `{expression, location: {…}, stepId}`,
+/// whose only matching name is `expression`, which decides nothing.  Both of
+/// the latter two silently defaulted and jumped to the start of the recording
+/// while reporting that they had worked.  A handler cannot tell a
+/// jump-to-step-500 from a jump-to-step-0 when the arguments deserialise the
+/// same either way.
+///
+/// # Why the check is this shape and not `deny_unknown_fields`
+///
+/// `#[serde(deny_unknown_fields)]` on `Location` is not available: the struct
+/// is deserialised from trace files written by other CodeTracer versions and
+/// from the native backend's own JSON, both of which legitimately carry fields
+/// a given build does not know, and a repo-wide flip would reject working
+/// traces to fix two call sites.  Dropping the container-level `default` is
+/// likewise too wide — `Location` is a field of `MoveState`,
+/// `LocationWithSourcemap` and the flow structures, all of which rely on
+/// partial payloads.
+///
+/// So the refusal is narrowed to the ONE field that decides where the jump
+/// lands, at the two commands that jump by it.  A payload without it named no
+/// destination, and the honest answer to "jump to nowhere" is an error the
+/// user can see, not a silent seek to the beginning.
+///
+/// The message names the fields that WERE present, because the whole failure
+/// mode is a payload written against a different struct: the reader needs to
+/// see which struct it was written against.
+pub fn location_from_jump_arguments(command: &str, arguments: &serde_json::Value) -> Result<Location, String> {
+    let object = arguments.as_object().ok_or_else(|| {
+        format!("{command} expects a Location object in `arguments`; got {arguments}")
+    })?;
+    if !object.contains_key(JUMP_DESTINATION_FIELD) {
+        let present: Vec<&str> = object.keys().map(String::as_str).collect();
+        return Err(format!(
+            "{command} was sent a payload with no `{JUMP_DESTINATION_FIELD}`, so it names no \
+             destination. Fields present: [{}]. Refusing rather than deserialising a defaulted \
+             Location, which would have jumped to step 0 and reported success. Expected a \
+             serialised `Location` (`path`, `line`, `{JUMP_DESTINATION_FIELD}`, …).",
+            present.join(", ")
+        ));
+    }
+    serde_json::from_value::<Location>(arguments.clone())
+        .map_err(|e| format!("{command} could not read its `Location` payload: {e}"))
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct MoveState {
