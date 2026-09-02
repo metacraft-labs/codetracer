@@ -42,6 +42,26 @@
         <link rel="stylesheet" href="public/third_party/devicon-base.css" type="text/css" />
 
         <script>
+          // V8 keeps only the innermost 10 frames by default, and this
+          // renderer's frames are Nim runtime helpers: a reactive write
+          // spends `nimCopy` -> `nimCopyAux` -> `nimCopy` -> the generic
+          // store before it reaches a single line of application code.
+          // Ten frames therefore truncate *exactly* at the runtime/app
+          // boundary, and the report names the helper that threw while
+          // hiding the caller that chose the arguments.
+          //
+          // That is not hypothetical: the editor-mount defect (a JS name
+          // collision under `--hotCodeReloading`, see `repro.nim`) was
+          // only identifiable once the caller's frame was visible, and a
+          // day of hypotheses was built on a stack that stopped one frame
+          // short of the answer.  The cost is a deeper array on thrown
+          // errors; this renderer already serialises stacks through its
+          // BROWSER_ERROR_INSPECT reporter, so deeper is strictly better.
+          //
+          // Set first, before any other statement, so it also covers
+          // throws from the bootstrap below.
+          Error.stackTraceLimit = 200;
+
           self.module = undefined
           self.process.browser = true
 

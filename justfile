@@ -1350,6 +1350,23 @@ test-frontend-js:
     --out:"$html_sinks_probe" js src/frontend/tests/html_sinks_probe.nim
   node --no-warnings src/frontend/tests/htmlSinks.test.mjs "$html_sinks_probe"
 
+# Run the Playwright suite. Args are forwarded to `npx playwright test`.
+#
+# QUOTING: `{{args}}` interpolates the arguments *unquoted*, so a
+# multi-word value is re-split by the shell here. This does NOT fail
+# loudly — Playwright treats the stray words as additional FILE filters,
+# collects every spec they match, and then dies inside some unrelated
+# spec's module-level setup (a missing recorder, an unbuilt sibling).
+# The error names a file you never asked for, so it looks like a broken
+# tree rather than a mis-parsed filter.
+#
+#   WRONG:  just test-e2e tests/foo.spec.ts -g "welcome open folder"
+#           -> `-g welcome` plus file filters `open`, `folder`
+#   RIGHT:  just test-e2e tests/foo.spec.ts -g handoff
+#           (a single-token regex; `.` matches a space if you need one)
+#
+# For anything that must contain a space, call Playwright directly:
+#   cd src/tests/gui && npx playwright test <file> -g "two words"
 test-e2e *args:
   #!/usr/bin/env bash
   set -e
