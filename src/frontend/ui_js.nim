@@ -3472,6 +3472,13 @@ proc onNs9PanesCatalog(
   try:
     test_results.testResultsVMInstance.setCatalog(
       testCatalogFromJson(parseJson(raw)))
+    # THE EDITOR'S RUN CONTROLS COME FROM THIS CATALOG, and nothing sequences
+    # its arrival against a file being opened. An editor that opened first read
+    # an empty catalog, took the fallback branch, and would never have
+    # re-derived — `addTestActions` is not called again for a file already
+    # open. This is the moment the answer changes, so this is where the gutter
+    # is re-derived.
+    editor.refreshEditorTestControls(data)
   except CatchableError:
     # A catalog that will not parse is a host fault, and the pane must not
     # pretend the project has no tests because of it — that is the reading
@@ -5125,6 +5132,19 @@ when defined(ctWeb):
             # fills the Test Results pane, the session is what was asked for.
             web_noir_build.startNoirTestRecording($selector)
             cstring""
+
+        # AND RE-DERIVE, because the catalog has almost certainly already
+        # arrived. `enterTemplateEditMode` above installs the pane host, which
+        # answers `CODETRACER::ns9-panes` synchronously, so `onNs9PanesCatalog`
+        # has already run — with these three hooks still nil, which makes it
+        # take the fallback branch and paint the legacy inline widget.
+        #
+        # BOTH ORDERS ARE NOW COVERED and neither is left to luck: the catalog
+        # arriving after the hooks is handled where the catalog lands, and the
+        # hooks arriving after the catalog is handled here. A single call in
+        # either place alone leaves the other order with no run controls in the
+        # gutter and nothing that would ever re-derive them.
+        editor.refreshEditorTestControls(data)
 
         # THE EDIT-MODE TOPBAR, and the reason it is installed HERE.
         #

@@ -2404,7 +2404,7 @@ proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
     loopStepCounts: JsAssoc[int, seq[int]]{}
   )
 
-proc addTestActions(self: EditorViewComponent) =
+proc addTestActions*(self: EditorViewComponent) =
   # Determine if this is a Python file
   let lang = fromPath(self.name)
   let isPythonFile = lang == LangPythonDb
@@ -2460,6 +2460,32 @@ proc addTestActions(self: EditorViewComponent) =
 
       testContainer.appendChild(testNode)
       parentContainer.appendChild(testContainer)
+
+proc refreshEditorTestControls*(data: Data) =
+  ## Re-derive every open editor's run-test controls from the CATALOG.
+  ##
+  ## WHY THIS HAS TO EXIST, and it is an ordering fact rather than a nicety.
+  ## `addTestActions` runs when a file is opened; the project's test catalog
+  ## arrives separately, on `CODETRACER::ns9-panes-catalog`. Nothing sequences
+  ## the two. An editor that opened first read an EMPTY catalog, took the
+  ## fallback branch, and painted the legacy inline widget — so the gutter had
+  ## no run controls at all, and nothing would ever have re-derived them
+  ## because `addTestActions` is not called again for a file already open.
+  ##
+  ## `onNs9PanesCatalog` calls this after `setCatalog`, which is the moment the
+  ## answer changes. Idempotent by construction: it rebuilds the line map from
+  ## the catalog rather than adding to it.
+  if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+    return
+  for editorId, editor in data.ui.editors:
+    if editor.isNil or editor.monacoEditor.isNil:
+      continue
+    try:
+      editor.addTestActions()
+    except CatchableError:
+      cerror "refreshEditorTestControls: " & getCurrentExceptionMsg()
+    except:
+      cerror "refreshEditorTestControls: a non-Nim value was raised"
 
 proc clearTest(self: EditorViewComponent) =
   for testLine in self.testLines:
