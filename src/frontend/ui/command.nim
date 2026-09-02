@@ -588,5 +588,21 @@ method register*(self: CommandPaletteComponent, api: MediatorWithSubscribers) =
   self.api = api
   initCommandPaletteVM()
   commandPaletteComponentRef = self
+  # THE MARKER GOES WITH THE REF, and until now only half of the pair was
+  # maintained. This method already adopts the NEWEST registration
+  # unconditionally, so `commandPaletteComponentRef` was never stale — but
+  # `isoNimCommandPaletteMountedIds` was never cleared by anything, and
+  # `tryMountIsoNimCommandPalettePanel` returns at its `hasKey` guard. Ids are
+  # reused: GoldenLayout hands a re-created panel the same number, and they
+  # restart from 0 after a layout reset. So a palette closed and reopened
+  # adopted the new component, skipped the mount, and came back blank — with
+  # no error, because returning early at a guard looks exactly like having
+  # nothing to show.
+  #
+  # Cleared HERE rather than in an `unregister` override, matching this
+  # module's own idiom and `ui/verification.nim`'s: a clear on the way IN does
+  # not depend on teardown having run, which matters because a panel can be
+  # destroyed by paths that do not unregister it.
+  discard jsDelete(isoNimCommandPaletteMountedIds[self.id])
   self.wireCommandPaletteResultRunner()
   tryMountIsoNimCommandPalettePanel()
