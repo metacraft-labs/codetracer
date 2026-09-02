@@ -119,14 +119,44 @@ suite "Live constraints — the pane computes what it compiled":
     check report.unconstrainedTotal() == 17
 
   test "live_the_two_currencies_are_still_never_summed":
-    # 17 ACIR and 17 unconstrained is a COINCIDENCE on this program, and it is
-    # the most dangerous shape available for a test of this: a total that
-    # summed across the kinds would read 34, and one that returned either half
-    # would read 17 and look right. Both are checked.
+    # ## DO NOT DELETE EITHER 17. THEY ARE DIFFERENT NUMBERS.
+    #
+    # This test looks redundant and is not, and the redundancy argument is the
+    # thing most likely to break it. `acirTotal()` and `unconstrainedTotal()`
+    # both read 17 here, so a future reader will see two assertions where one
+    # would "obviously" do — and deleting either removes ALL coverage of one of
+    # the two currencies, on the one fixture where that deletion is invisible.
+    #
+    # The equality is a COINCIDENCE OF THIS TEMPLATE. 17 constrained ACIR
+    # opcodes is the circuit; 17 unconstrained is `directive_invert`'s 9 plus
+    # `directive_integer_quotient`'s 8. Two different quantities, in two
+    # currencies the pane must never add (`common/noir_constraints`'s whole
+    # reason for `ConstraintFunctionKind`), that happen to collide on this one
+    # program. Any other program separates them and this test stops being
+    # subtle; on THIS program every wrong implementation returns a plausible
+    # number:
+    #
+    #   * one that sums across kinds returns 34 for both totals
+    #   * one that returns the ACIR half for both reads 17, and looks right
+    #   * one that returns the Brillig half for both reads 17, and looks right
+    #
+    # The last two are why the value assertions alone are not enough, and why
+    # the SHAPE is asserted below: one ACIR function and two unconstrained
+    # ones, which no half-returning implementation can satisfy. That is the
+    # assertion to keep if anyone ever trims this test.
     let report = reportFromAcirListing(
       TemplateAcirListing, "hello_noir", "compiled here")
+
+    var acirFns, brilligFns = 0
+    for fn in report.functions:
+      if fn.kind == cfkAcir: acirFns += 1 else: brilligFns += 1
+    check acirFns == 1
+    check brilligFns == 2
+
     check report.acirTotal() == 17
     check report.unconstrainedTotal() == 17
+    # Stated so the collision is visible in the test rather than inferred: the
+    # two 17s are not the same 17, and a reader who doubts it can read 34.
     check report.acirTotal() + report.unconstrainedTotal() == 34
     check headlineFor(report).contains("17 ACIR opcodes")
     check headlineFor(report).contains("17 unconstrained")
