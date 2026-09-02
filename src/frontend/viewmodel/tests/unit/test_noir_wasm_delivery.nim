@@ -101,10 +101,13 @@ suite "the Noir wasm registry follows the delivery (NS3)":
       noirToolchainCommand, @["compile"]).kind == wrResolved
 
   test "a full delivery declares exactly the three subcommands the worker routes":
-    # `wasm_worker_browser.js` routes `compile` -> `compileVfs`,
-    # `test` -> `testVfs` and `trace` -> `traceArtifact`, and nothing else.
-    # Declaring a fourth would produce a run that reaches the worker and dies
-    # there.
+    # Three is the NARGO module's share of the worker's routing: `compile` ->
+    # `compileVfs`, `test` -> `testVfs`, `trace` -> `traceArtifact`. The file
+    # routes more than that — `transpile` belongs to the avm-transpiler module,
+    # and session subcommands are dispatched before the one-shot chain — so the
+    # number here is about this delivery, not about the worker. Declaring a
+    # fourth subcommand for THIS module would produce a run that reaches the
+    # worker and dies there.
     let registry = noirWasmRegistry(bothModules())
     counted registry.modules.len == 1
 

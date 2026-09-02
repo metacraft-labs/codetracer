@@ -10,8 +10,16 @@ name: Deploy ide.codetracer.com
 # NAMES (2026-08-29): the hosted CodeTracer web product's domain is
 # https://ide.codetracer.com. An earlier plan put it on `web.codetracer.com` and
 # a later note here described `web.` as a separate authenticated application that
-# had to keep working; both are superseded — `ide.` is the product's one domain,
-# and `web.codetracer.com` is not a name this repo targets any more. Unchanged by
+# had to keep working; both are superseded — `ide.` is the product's PRIMARY
+# domain, and `web.codetracer.com` is not a name this repo targets any more.
+#
+# `ide.` is NOT the only host this deployment serves, and reading this header as
+# if it were is how the verify step came to check two hosts while the deployment
+# declared three. The authoritative list is the descriptor's `origin` plus every
+# `languageOrigins[].origin` — see `CT_WEB_LANGUAGE_ORIGINS` below, which today
+# adds `noirstudio.dev` and `www.noirstudio.dev`. Anything that enumerates hosts
+# (a cache purge, a reachability check) must derive them from that variable and
+# not from this paragraph. Unchanged by
 # that decision: the Cloudflare Pages PROJECT is still named `web-codetracer`,
 # this workflow file is still `deploy-web-codetracer.yml`, and the preview host is
 # still `web-codetracer.pages.dev` — those are infrastructure identifiers, not the
@@ -81,8 +89,10 @@ name: Deploy ide.codetracer.com
 #
 # ONE ENVIRONMENT / ONE PROJECT
 #   The `web-codetracer` Pages project's PRODUCTION branch is `cloud`. Merging
-#   to `cloud` publishes a production deployment served on ide.codetracer.com
-#   (and web-codetracer.pages.dev).
+#   to `cloud` publishes a production deployment served on ide.codetracer.com,
+#   on web-codetracer.pages.dev, and on every host in CT_WEB_LANGUAGE_ORIGINS
+#   (currently noirstudio.dev and www.noirstudio.dev) — one bundle, several
+#   hostnames, each with its own Cloudflare cache.
 #   (Cloudflare decides production-vs-preview by comparing the deployed branch
 #   to the project's configured production branch — see metacraft-labs/web-site
 #   DEPLOY.md.) Create the project once with wrangler before the first run; this

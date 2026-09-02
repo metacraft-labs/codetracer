@@ -76,9 +76,15 @@ After that landing, `scripts/sibling-pins.sh` on `cloud` is a strict superset
 of the twin's version — a line-level diff shows **0 lines present only in the
 twin** — and `ci/test/sibling-pins-test.sh` is byte-identical between them.
 
-**`fix/sibling-pin-assert` must still be kept.** `origin/dev` and `origin/main`
-do **not** carry either file, so the branch-tip-instead-of-commit defect
-remains open on `dev`. Delete it only once an equivalent guard is on `dev`.
+**`fix/sibling-pin-assert` is no longer the sole carrier for `dev`.** This
+section previously said `origin/dev` did not carry either file. It does, and
+did when that sentence was written: `git ls-tree -r origin/dev` lists both
+`scripts/sibling-pins.sh` and `ci/test/sibling-pins-test.sh`, and both are
+byte-identical to `cloud`'s copies. `origin/main` genuinely carries neither.
+
+So the guard is on `dev` and the defect is closed there; what is still open is
+`main`. Keep or delete the branch on that basis, not on the one this paragraph
+used to give.
 
 ## Why this mattered
 

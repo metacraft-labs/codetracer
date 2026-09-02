@@ -13,10 +13,20 @@
 ## The counts describe a set of sources. The moment a visitor edits one they
 ## describe a project that no longer exists, and an unlabelled stale number is
 ## worse than no number because it is indistinguishable from a current one.
-## `markStale` is therefore called from the editor's change hook, and the view
-## says so. On a host that cannot recompute — a browser, today — being stale is
-## permanent until the sources are restored, and the pane says that too rather
-## than showing a spinner nothing will ever resolve.
+## `markStale` is the flag for that, and it is wired as far as the view: it sets
+## `report.stale` without discarding the counts, and the `headline` memo runs
+## `headlineFor`, which appends " (stale)".
+##
+## NOTHING CALLS IT. `markStale` occurs three times in the whole tree — its
+## definition, one re-export in `ui/constraints.nim`, and this sentence. It has
+## no call site, so the editor's change hook does not reach it and a visitor who
+## edits a source still sees an unlabelled count: exactly the state the
+## paragraph above calls worse than no number. What is missing is not the
+## mechanism but the one call that decides when to use it.
+##
+## On a host that cannot recompute — a browser, today — being stale would be
+## permanent until the sources are restored, which is why the pane is built to
+## say so rather than show a spinner nothing will ever resolve.
 
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel

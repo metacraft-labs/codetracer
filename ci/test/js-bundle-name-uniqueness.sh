@@ -146,7 +146,10 @@ if [ "${failed}" -ne 0 ]; then
 	echo "${failed} failure(s).  A duplicated name means one definition silently" >&2
 	echo "replaced another and its callers now run the wrong body.  If this" >&2
 	echo "started after a build change, check for '--hotCodeReloading' being" >&2
-	echo "re-enabled on a JS bundle in repro.nim." >&2
+	echo "re-enabled on a JS bundle. TWO places set it, and repro.nim is only" >&2
+	echo "one of them: repro.nim's hotCodeReloadingOnValue, and the justfile's" >&2
+	echo "build-ui-js / build-ui-js-hmr recipes, which pass" >&2
+	echo "--hotCodeReloading:on while compiling src/frontend/ui_js.nim." >&2
 	exit 1
 fi
 
