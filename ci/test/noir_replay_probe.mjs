@@ -151,6 +151,7 @@ const report = {
   editorWidgetCount: -1,
   stepButtonPresent: false,
   stepButtonWaitMs: -1,
+  debugHost: '',
   caretPositions: [],
   gestureError: '',
   noSourceVisible: false,
@@ -317,11 +318,33 @@ try {
   {
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
-      if (await page.evaluate(() => !!document.querySelector('.step-forward'))) break;
+      if (await page.evaluate(() => !!document.querySelector('#next-image'))) break;
       await page.waitForTimeout(500);
     }
+    // `#next-image`, NOT `.step-forward`. Both live in
+    // `isonim_debug_controls_view.nim`; only one is what production renders.
+    // The `.step-forward` variant is the other shape in that file, and asking
+    // for it reported "the toolbar is not mounted" for three passes over a
+    // toolbar that was mounted, stable, and on screen — the fourth time on
+    // this gate that the MEASUREMENT was the broken thing. `#next-image` is
+    // Next (F10), whose click runs `stepClick(vm, "next")`: the gesture a
+    // user performs to step over.
     report.stepButtonPresent = await page.evaluate(
-      () => !!document.querySelector('.step-forward'));
+      () => !!document.querySelector('#next-image'));
+    // WHAT IS ACTUALLY IN THE HOST. The toolbar reports `mount COMPLETE` and
+    // stays mounted, so "no `.step-forward`" is a claim about the mounted
+    // CONTENT, not about whether a mount happened — and those need different
+    // fixes. Reporting the host's own children turns the next question from a
+    // guess into a read, which is how the previous three faults on this gate
+    // were found.
+    report.debugHost = await page.evaluate(() => {
+      const host = document.getElementById('isonim-debug-controls');
+      if (!host) return 'NO HOST ELEMENT';
+      const kids = Array.from(host.querySelectorAll('*'))
+        .slice(0, 12)
+        .map((e) => e.tagName + '.' + String(e.className || ''));
+      return `children=${host.children.length} :: ${kids.join(' | ')}`.slice(0, 600);
+    });
     report.stepButtonWaitMs = 20000 - Math.max(0, deadline - Date.now());
   }
   // The debug controls live in a pane the EDIT layout does not mount, so the
@@ -352,7 +375,7 @@ try {
     if (first >= 0) tops.add(first);
     for (let i = 0; i < steps; i += 1) {
       try {
-        await page.click('.step-forward', { timeout: 3000 });
+        await page.click('#next-image', { timeout: 3000 });
       } catch (e) {
         report.gestureError = String((e && e.message) || e).slice(0, 200);
         break;
@@ -363,7 +386,7 @@ try {
     }
     report.caretPositions = Array.from(tops);
   } else {
-    report.gestureError = 'no .step-forward control is mounted in this layout';
+    report.gestureError = 'no #next-image control is mounted in this layout';
   }
 
   // MEASURED TWICE, BEFORE AND AFTER THE USER'S NEXT GESTURE.

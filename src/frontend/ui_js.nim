@@ -4941,6 +4941,23 @@ when defined(ctWeb):
             # aborting the construction of the seven live ones.
             for declared in web_entry_surface.layoutComponents(debugLayout):
               if declared.content == ord(Content.Trace): continue
+              # ONLY THE ONES THAT DO NOT EXIST YET, which is the guard
+              # `reopenAuxiliaryPanels` already uses two hundred lines up and
+              # which this loop was missing.
+              #
+              # Constructing a component that already exists does not replace
+              # it, it makes a SECOND one — and for the menu that is a second
+              # gate owner. `ui/menu.nim` invalidates the render gate whenever
+              # `menuShellGateOwner != self`, so two owners alternate and
+              # invalidate on every redraw; the shell is then rebuilt every
+              # time, `renderMenuShellInto` clears `#isonim-debug-controls` on
+              # each rebuild, and the debug toolbar is torn down as fast as it
+              # is mounted. Measured as issue #555's storm returning under a
+              # new trigger: `mount COMPLETE` four times in twenty seconds and
+              # no toolbar on screen at the end of it.
+              if data.ui.componentMapping[Content(declared.content)]
+                   .hasKey(declared.id):
+                continue
               try:
                 discard data.makeComponent(Content(declared.content), declared.id)
               except CatchableError as e:
