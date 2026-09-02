@@ -40,22 +40,53 @@ const
   IndexPath = "src/frontend/index.nim"
   IndexTracesPath = "src/frontend/index/traces.nim"
   IndexConfigPath = "src/frontend/index/config.nim"
+  ## `editModeHiddenContentIds` MOVED, and this grep did not follow it.
+  ##
+  ## It was `index/config.nim`'s until `42991d08`, which relocated it beside the
+  ## `Content` enum it describes — `index/config.nim` imports `electron_lib`,
+  ## which is `{.error.}` under `-d:ctWeb`, so the web build could not ask which
+  ## panes edit mode hides without either importing Electron or writing the list
+  ## a second time. It also gained an export marker on the way, so the old
+  ## literal `proc editModeHiddenContentIds(): seq[int] =` now matches at
+  ## NEITHER location.
+  FrontendFeaturesPath =
+    "src/common/common_types/codetracer_features/frontend.nim"
   UiJsPath = "src/frontend/ui_js.nim"
 
 proc sectionBetween(source, startMarker, endMarker: string): string =
+  ## RAISES on a marker it cannot find, and that is the fix rather than a
+  ## style preference.
+  ##
+  ## This used `check` and then carried on with a fallback slice. `check`
+  ## expands against the `testStatusIMPL` of the `test` block it is written
+  ## in; from a top-level proc there is no such block, so a failed `check`
+  ## here did NOT fail the calling test. Measured 2026-09-02: the second
+  ## caller below printed
+  ##
+  ##   Check failed: stop > bodyStart
+  ##   stop was -1
+  ##
+  ## and the case reported `[OK]` anyway, because its own in-block checks then
+  ## ran against the fallback slice — the whole rest of the file — and passed.
+  ## A grep for a proc body that silently becomes "the entire module" cannot
+  ## fail the way the product fails: it went on passing after the proc it was
+  ## reading had moved to another file.
+  ##
+  ## `raise` cannot be swallowed that way: unittest catches it and fails the
+  ## case that called this.
   let start = source.find(startMarker)
-  check start >= 0
   if start < 0:
-    return ""
+    raise newException(ValueError,
+      "sectionBetween: start marker not found: " & startMarker)
 
   let bodyStart = start + startMarker.len
   if endMarker.len == 0:
     return source[bodyStart .. ^1]
 
   let stop = source.find(endMarker, bodyStart)
-  check stop > bodyStart
   if stop <= bodyStart:
-    return source[bodyStart .. ^1]
+    raise newException(ValueError,
+      "sectionBetween: end marker not found after the start marker: " & endMarker)
 
   source[bodyStart ..< stop]
 
@@ -379,10 +410,13 @@ else:
       ## runs on the JavaScript backend at the top of this file against the
       ## real `index/layout_config_repair` module.  The two halves are paired
       ## by these `Content` members and their ordinals.
-      let source = readFile(IndexConfigPath)
+      let source = readFile(FrontendFeaturesPath)
+      # The proc is the last declaration in that module, so the section runs to
+      # end of file; an empty end marker is what `sectionBetween` takes for
+      # that, rather than naming whatever happens to follow it today.
       let hiddenBody = sectionBetween(source,
-        "proc editModeHiddenContentIds(): seq[int] =",
-        "proc stringifyJson")
+        "proc editModeHiddenContentIds*(): seq[int] =",
+        "")
 
       for contentName in [
         "Content.Trace",
@@ -412,9 +446,14 @@ else:
       let source = readFile(IndexConfigPath)
       check source.contains("./layout_config_repair,")
 
+      # The end marker used to be `proc editModeHiddenContentIds(): seq[int] =`,
+      # which left this module with the proc and so matched nothing — and the
+      # `check` that noticed could not fail this case (see `sectionBetween`).
+      # `proc stringifyJson` is the next declaration after
+      # `sanitizeEditLayoutConfig` and is still here.
       let sanitizeBody = sectionBetween(source,
         "proc sanitizeEditLayoutConfig*(config: js; editorContent: int;",
-        "proc editModeHiddenContentIds(): seq[int] =")
+        "proc stringifyJson")
       check sanitizeBody.contains("sanitizeLayoutConfig(config, editorContent, hiddenContents)")
 
       # Every edit-mode call site — the save path, both load paths and (since
