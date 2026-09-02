@@ -446,6 +446,36 @@ expect_rc 1 "--require refuses the same divergence"
 expect_says "--require refuses this because a number produced by it" "and says why the measurement arm is stricter"
 expect_silent_on "TOOLCHAIN:" "and prints NO stamp — there is no path to the line without the refusal"
 
+# ...and the other side of that branch, which is the one a healthy workspace is
+# in: a sibling AHEAD of the flake pin but descended from it. It must pass with
+# no divergence note at all, or the arms above would be satisfied by a guard
+# that simply always complains.
+make_fixture
+seed_store_tools
+make_sibling_noir fresh false clean
+# Both files, together. Moving flake.lock alone would trip the declaration
+# cross-check instead -- correctly, which is arm 7's subject -- and this arm
+# would then redden for a reason that has nothing to do with what it is testing.
+python3 - "$REPO/flake.lock" "$REPO/ci/toolchain.pin" "$(git -C "$WS/noir" rev-parse HEAD~1)" <<'PY'
+import json, re, sys
+lock, pin, rev = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(lock) as handle:
+    data = json.load(handle)
+data["nodes"]["noir"]["locked"]["rev"] = rev
+with open(lock, "w") as handle:
+    json.dump(data, handle)
+text = open(pin).read()
+new, n = re.subn(r"^LOCK_NOIR=.*$", "LOCK_NOIR=%s" % rev, text, count=1, flags=re.M)
+if n != 1:
+    sys.exit("could not rewrite LOCK_NOIR in the fixture declaration")
+open(pin, "w").write(new)
+PY
+run_guard --require nargo
+expect_rc 0 "a sibling descended FROM the flake pin passes even the measurement arm"
+expect_says "a descendant of the flake 'noir' pin" "and is described as a descendant"
+expect_silent_on "DIVERGED" "with no divergence reported"
+expect_says "TOOLCHAIN: nargo=" "and the stamp is printed"
+
 # -----------------------------------------------------------------------------
 # 14. THE SCOPED STAMP MUST NOT VOUCH FOR WHAT IT DID NOT CHECK.
 # -----------------------------------------------------------------------------
