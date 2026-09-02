@@ -53,12 +53,39 @@
 ## - ``setNoirProject``      — toggle the Noir offset rendering.
 ## - ``loadAsmFor``          — emit a ``ct/load-asm-function`` request
 ##                             (mirrors the legacy ``loadAsm`` proc).
-## - ``jumpToInstruction``   — emit a ``ct/asm-instruction-jump``
-##                             request carrying the row's ``offset`` /
-##                             ``highLevelPath`` / ``highLevelLine``.
-##                             Used by the IsoNim row click handler so
-##                             headless tests can verify the wire
-##                             shape.
+## - ``jumpToInstruction``   — move the debugger to the source line the
+##                             clicked instruction was generated from,
+##                             by emitting ``ct/source-line-jump``.
+##                             Used by the IsoNim row click handler.
+##
+##                             This used to emit ``ct/asm-instruction-jump``,
+##                             a command with no entry in
+##                             ``EVENT_KIND_TO_DAP_MAPPING``, no entry in
+##                             ``VALID_DAP_COMMANDS`` and no arm in
+##                             ``dap_server.rs``.  The production
+##                             ``sendProc`` (``ui_js.nim``) resolves the
+##                             command string through
+##                             ``dapCommandToEventKind`` *before* it
+##                             reaches any transport, and that proc
+##                             raises ``ValueError`` for an unmapped
+##                             string — so every row click in this pane
+##                             threw synchronously, out of the click
+##                             handler, on both desktop and web.  The
+##                             pane is reachable (``Alt+1`` →
+##                             ``openLowLevelCode``) and its rows really
+##                             populate (via ``ct/load-asm-function``),
+##                             so this was a live crash on an ordinary
+##                             gesture.
+##
+##                             ``ct/source-line-jump`` is what the legacy
+##                             Karax editor dispatched for exactly this
+##                             gesture (``ui/editor.nim`` ``editorLineJump``
+##                             → ``sourceLineJump(path, instructions[i]
+##                             .highLevelLine, ...)``), and unlike
+##                             ``ct/local-step-jump`` it both moves the
+##                             session *and* answers the request
+##                             (``dap_handler.rs::source_line_jump`` ends
+##                             in ``respond_dap``).
 
 import std/json
 
@@ -213,19 +240,39 @@ proc loadAsmFor*(vm: LowLevelCodeVM; path: string; functionName: string;
   discard vm.store.backend.send("ct/load-asm-function", args)
 
 proc jumpToInstruction*(vm: LowLevelCodeVM; instr: LowLevelInstruction) =
-  ## Dispatch a ``ct/asm-instruction-jump`` request for the given row.
-  ## Used by the IsoNim row click handler.  Carries the row's
-  ## ``offset`` plus the instruction's ``highLevelPath`` /
-  ## ``highLevelLine`` so the live debugger can either jump to the
-  ## corresponding source line (the legacy editor used Monaco's click
-  ## handler to call ``self.sourceLineJump``) or step to the matching
-  ## asm offset.
+  ## Move the debugger to the source line ``instr`` was generated from.
+  ##
+  ## Emits ``ct/source-line-jump`` with the ``SourceLocation`` shape
+  ## ``dap_server.rs`` deserialises for that arm
+  ## (``{"path": string, "line": usize}``) — the same request the legacy
+  ## Karax editor sent for this gesture.  ``line`` is ``usize`` on the
+  ## Rust side, so a row without a usable back-pointer must not be put
+  ## on the wire: the engine would answer ``unknown location`` at best
+  ## and fail to deserialise at worst.
+  ##
+  ## ``highLevelPath`` is forwarded VERBATIM and must stay that way.
+  ## ``dap_handler.rs::load_asm_function`` fills it from
+  ## ``self.reader.path(step.path_id)`` — the trace's raw path table —
+  ## and ``get_closest_step_id`` matches against that same table.  Note
+  ## that ``ct/complete-move`` reports the *same file* with a ``./``
+  ## prefix; normalising this path towards the reported form would break
+  ## the lookup (``unknown location: ./foo.rs:18``).
+  ##
+  ## A row can legitimately lack a back-pointer (asm generated from a
+  ## function with no debug info).  That case reports through
+  ## ``errorMessage`` rather than returning silently, so a click that
+  ## cannot move the session says so in the pane instead of looking
+  ## like a click that was never registered.
+  if instr.highLevelPath.len == 0 or instr.highLevelLine <= 0:
+    vm.setErrorMessage(
+      "no source line recorded for this instruction — nothing to jump to")
+    return
+  vm.setErrorMessage("")
   let args = %*{
-    "offset": instr.offset,
-    "highLevelPath": instr.highLevelPath,
-    "highLevelLine": instr.highLevelLine,
+    "path": instr.highLevelPath,
+    "line": instr.highLevelLine,
   }
-  discard vm.store.backend.send("ct/asm-instruction-jump", args)
+  discard vm.store.backend.send("ct/source-line-jump", args)
 
 # ---------------------------------------------------------------------------
 # Anchoring
