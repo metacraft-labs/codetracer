@@ -1,6 +1,7 @@
 from std / dom import Document
 import
   ui_imports, debug, command
+from shortcut_labels import renderChord
 
 # NS1 / Noir-Studio.md §1a.2. Three decisions below used to be build checks
 # (`defined(ctmacos)`, `electron_lib.inElectron`); they are now capability
@@ -150,22 +151,14 @@ proc openMainMenu(self: MenuComponent) =
   self.activePathOffsets = JsAssoc[int, int]{}
 
 proc loadShortcut*(action: ClientAction, config: Config): cstring =
-  # load a shortcut for this node from config
-  # if we update config it should effect it
-  result = cstring""
-
-  for index, shortcutValue in config.shortcutMap.actionShortcuts[action]:
-    var shortcutName = shortcutValue.renderer.toUpperCase()
-
-    if shortcutName == "CTRL+PAGEUP":
-      shortcutName = "CTRL+PGUP"
-    elif shortcutName == "CTRL+PAGEDOWN":
-      shortcutName = "CTRL+PGDN"
-
-    if index == 0:
-      result = result & shortcutName
-    else:
-      result = result & cstring" " & shortcutName
+  ## The chord shown beside a menu item, from the live config.
+  ##
+  ## The body moved to `ui/shortcut_labels.nim` so the debug toolbar's
+  ## tooltips render chords through the SAME code. They previously did not
+  ## render them at all — the tooltips carried the chord as a hardcoded
+  ## literal — and two implementations of "spell this binding" would have been
+  ## free to disagree about the very strings this is here to keep honest.
+  cstring(renderChord(action, config))
 
 proc iconClass(name: cstring): cstring =
   ui_imports.jslib.join(name.toLowerCase().split(" "), "-")

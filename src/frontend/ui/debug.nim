@@ -5,6 +5,8 @@ import
   ../[ renderer, communication, event_helpers ],
   ../../common/ct_event
 from menu_render_gate import shouldRemountDebugControls
+from shortcut_labels import toolbarChord
+from isonim/core/signals import Signal, val, `val=`
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — wired in parallel with the legacy event-bus code.
@@ -16,6 +18,8 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/debug_controls_vm import
   DebugControlsVM, createDebugControlsVM, invokeToolbarStep
+# `shortcutFor` / `shortcutsRevision` are FIELDS of `DebugControlsVM`, not
+# procs, so they arrive with the type and must not be named here.
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_debug_controls_view import
   mountIsoNimDebugControls
@@ -44,6 +48,31 @@ var debugShellMountedCommandPaletteId: int = -2
 # never reach the backend.
 var debugComponentForBridge: DebugComponent
 var debugApiForBridge: MediatorWithSubscribers
+
+proc wireDebugToolbarShortcuts() =
+  ## Give the toolbar's tooltips a way to read the chords that are actually
+  ## bound, and tell them the answer may have changed.
+  ##
+  ## Called from every site that (re)wires `onDapStep` / `onAction`, because
+  ## those are exactly the moments a new `DebugControlsVM` exists or a new
+  ## `Config` has landed — `data.config` arrives as one field of the
+  ## `CODETRACER::no-trace` payload, so it is genuinely not constant.
+  ##
+  ## THE BUMP IS NOT OPTIONAL. `shortcutFor` is an opaque closure as far as the
+  ## reactive graph is concerned; nothing in it is a signal, so a tooltip's
+  ## render effect cannot discover on its own that the config underneath
+  ## changed. Without the bump the toolbar would paint the chords that were
+  ## bound at mount time and keep painting them forever, which is the same
+  ## stale-label failure as the hardcoded strings this replaced.
+  if debugControlsVMInstance.isNil:
+    return
+  debugControlsVMInstance.shortcutFor = proc(actionId: string): string =
+    # Read `data.config` at CALL time, not capture time: `configureShortcuts`
+    # runs again from `onNoTrace` and `onWelcomeScreen`, and the config object
+    # is replaced rather than mutated.
+    toolbarChord(data.config, actionId)
+  debugControlsVMInstance.shortcutsRevision.val =
+    debugControlsVMInstance.shortcutsRevision.val + 1
 
 # Forward declarations: `initDebugControlsVMWithStore` (defined below)
 # needs to call `dapStep` and `action` (both also below) when
@@ -225,6 +254,7 @@ proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
       dapStep(api, action)
     debugControlsVMInstance.onAction = proc(id: string) =
       component.action(id)
+    wireDebugToolbarShortcuts()
     clog "DebugControlsVM: re-wired onDapStep/onAction bridge after replacement"
   tryMountIsoNimDebugControls()
 
@@ -334,6 +364,7 @@ proc rewireDebugControlsBridgeForActiveSession*(data: Data) =
       dapStep(component.api, action)
     debugControlsVMInstance.onAction = proc(id: string) =
       component.action(id)
+    wireDebugToolbarShortcuts()
 
 proc jumpBeforeList*(self: DebugComponent) =
   self.after = false
@@ -422,6 +453,24 @@ proc action(self: DebugComponent, id: string) =
 
   else:
     discard
+
+proc invokeDebugToolbarAction*(id: string) =
+  ## Run a debug-toolbar action by the SAME id the toolbar button dispatches.
+  ##
+  ## This exists so a keyboard chord and a click cannot diverge. The five
+  ## toolbar controls that gained chords (`history-back`, `history-forward`,
+  ## `run-to-entry`, `reset-operation`, `run-tests`) are dispatched by their
+  ## buttons through `DebugControlsVM.onAction`, which every bridge site in
+  ## this module wires to `component.action(id)` — the private `case` above.
+  ## Routing `data.actions[...]` here rather than reimplementing the bodies
+  ## means the tooltip's promise ("this chord does what this button does") is
+  ## true by construction rather than by two copies agreeing.
+  ##
+  ## No-ops before a `DebugComponent` is registered — the same nil-guard shape
+  ## the `onAction` bridge sites above already use. A chord pressed on the
+  ## welcome screen does nothing, which is what the disabled button does too.
+  if not debugComponentForBridge.isNil:
+    debugComponentForBridge.action(id)
 
 func toDapStepActionEnum(action: cstring): Result[CtEventKind, cstring] =
   case $action:
@@ -562,3 +611,4 @@ method register*(self: DebugComponent, api: MediatorWithSubscribers) =
       dapStep(api, action)
     debugControlsVMInstance.onAction = proc(id: string) =
       self.action(id)
+    wireDebugToolbarShortcuts()
