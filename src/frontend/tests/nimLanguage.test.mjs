@@ -4,8 +4,8 @@
  * These tests verify that the Nim tokenizer correctly tokenizes
  * various Nim language constructs.
  *
- * Run with: node --experimental-vm-modules nimLanguage.test.js
- * Or use a test runner like Mocha/Jest
+ * Run with: node src/frontend/tests/nimLanguage.test.mjs (from the repo root).
+ * `just test-frontend-js` runs it in that lane; it needs no node flags.
  */
 
 import { nimConf, nimLanguage } from '../languages/nimLanguage.js';

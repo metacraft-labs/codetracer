@@ -154,8 +154,9 @@ proc detectLangFromPath*(path: string, isWasm: bool): Lang =
   ## The explicit return is required **regardless of which value is ordinal
   ## zero**.  A proc whose correctness depends on the enum's declaration order
   ## is not correct; it is merely lucky, and the luck is invisible at the call
-  ## site.  `lang_detection_test.nim` asserts the returned value directly so a
-  ## future reordering of `Lang` cannot quietly reintroduce the defect.
+  ## site.  `src/tests/cli/lang_enum_contract_test.nim` asserts the returned
+  ## value directly so a future reordering of `Lang` cannot quietly reintroduce
+  ## the defect.
   let ext = path.splitFile.ext
   if ext.len <= 1:
     return LangUnknown
