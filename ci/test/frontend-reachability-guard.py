@@ -334,11 +334,18 @@ def mentions_in(text: str, skip_lines: set[int]) -> set[str]:
 
     * **`import` / `export` / `from` statements, including their continuation
       lines.**  This is the one that matters most and the one that is easiest
-      to get wrong.  ``constraints_vm.markStale`` has ZERO call sites
-      tree-wide, and the only mention of it outside its own declaration is
-      ``ui/constraints.nim:21``, a `from ... import` list.  Naming a symbol in
-      an import list is not calling it; a guard that counted it reported
-      `markStale` as reached, which is exactly backwards.
+      to get wrong.  Naming a symbol in an import list is not calling it, and
+      a guard that counts the mention reports an unreached symbol as reached,
+      which is exactly backwards.
+
+      The instance this rule was derived from: ``constraints_vm.markStale``
+      then had ZERO call sites tree-wide, and its only mention outside its own
+      declaration was ``ui/constraints.nim``'s `from ... import` list — a
+      symbol imported, never applied, for the whole life of the pane whose
+      staleness label it was supposed to set.  It has since been wired
+      (`constraints_vm.noteSourceEdited` calls it, and `ui/constraints`
+      imports THAT), and the import list no longer names it.  The example is
+      kept because the rule is not: an import list still is not a call site.
     """
     found: set[str] = set()
     import_depth = 0
@@ -354,14 +361,17 @@ def mentions_in(text: str, skip_lines: set[int]) -> set[str]:
               ../[ types, communication ]
 
             from ../viewmodel/viewmodels/constraints_vm import
-              ConstraintsVM, createConstraintsVM, setReport, markStale
+              ConstraintsVM, createConstraintsVM, setReport, setAbsence,
+              noteSourceEdited
 
             import viewmodels/trace_log_vm except NO_SELECTED_INDEX
 
         The second is the one that matters: it ends on the keyword ``import``
         with nothing after it, so a continuation rule keyed only on a trailing
-        comma stops at the wrong line and counts `markStale` — a symbol with
-        zero call sites — as reached.
+        comma stops at the wrong line and counts every name on the following
+        line as reached.  When this was written that line ended in
+        ``markStale``, a symbol with zero call sites, and counting it made the
+        guard green over precisely the defect it exists to find.
         """
         tail = line.rstrip()
         if depth > 0:

@@ -5348,6 +5348,17 @@ when defined(ctWeb) and not defined(ctInExtension):
                 return cstring(item.selector)
             cstring""
 
+        # THE CONSTRAINTS PANE LEARNS THAT THE SOURCES MOVED.
+        #
+        # `constraints_vm.markStale` and the `(stale)` suffix it sets have been
+        # implemented, tested and documented since the pane landed, and had
+        # ZERO CALLERS — so the pane never once labelled a count, and showed
+        # bundle-shipped or last-compile numbers beside sources the visitor had
+        # since rewritten. That is the exact state the pane's own header argues
+        # is worse than showing no number at all, because the reader cannot
+        # tell. This line is the caller.
+        editor.editorSourceChangedHook = constraints.noteEditorSourceChanged
+
         editor.editorTestRunHook =
           proc(path: cstring; selector: cstring; line: int): cstring =
             # REFUSE BEFORE ANIMATING. The caller starts no spinner when this

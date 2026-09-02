@@ -4,7 +4,7 @@
 ##
 ## Structure, both renderers::
 ##
-##   div.component-container.constraints
+##   div.component-container.constraints[.stale]
 ##     div.constraints-headline    text "17 ACIR opcodes, 17 unconstrained"
 ##     div.constraints-body
 ##       div.constraints-row.acir
@@ -32,24 +32,27 @@
 ## claims, and only one of them survives an edit. The pane always says which
 ## it has.
 ##
-## THE `(stale)` HALF IS NOT REACHED. `headlineFor` appends it whenever
-## `report.stale` is set; the only thing in `src/` that sets it is
-## `constraints_vm.markStale`, WHICH HAS NO CALLERS. This paragraph used to say
-## the headline is appended "when the sources have moved on"; the sources moving
-## on is precisely the event nothing observes.
+## ## The `(stale)` half, and what it took to reach it
 ##
-## The branch is nonetheless GREEN, which is how it stayed invisible:
-## `test_ns9_panes_vm`'s staleness test assigns `report.stale = true` itself and
-## checks the suffix. It covers `headlineFor`; it cannot cover a caller that is
-## not there. Any test that would have caught this has to start from an edit,
-## not from the flag.
+## `headlineFor` appends `(stale)` whenever `report.stale` is set, and the
+## container carries a `stale` class so the rows can be dimmed beside the
+## label. The flag is set by `constraints_vm.markStale`, which is reached from
+## `constraints_vm.noteSourceEdited` — the editor's change hook, at last
+## actually wired. See that module's header for the three decisions behind it:
+## which edits invalidate, what the pane keeps while stale, and why an
+## in-flight recompile does NOT clear the mark.
 ##
-## So the failure mode named below — an unlabelled stale count, indistinguishable
-## from a current one — is the pane's CURRENT behaviour rather than the one it
-## avoids. The mechanism is built and correct; the trigger is an open decision,
-## because "stale" means different things for a bundled constant and for a real
-## compile. See `viewmodels/constraints_vm.nim`'s header and
-## `Generated-Code-Listing.md` §15.
+## THE LABEL WAS UNREACHABLE FOR THE WHOLE OF ITS FIRST LIFE, and the way its
+## test stayed green is worth keeping in view: `test_ns9_panes_vm`'s staleness
+## case assigns `report.stale = true` itself and checks the suffix. That covers
+## `headlineFor` and cannot cover a caller that is not there — so the pane's
+## actual behaviour was the failure mode the paragraph above argues against,
+## an unlabelled stale count, for as long as the branch was green.
+##
+## Any check on this has to START FROM AN EDIT and end at painted text, which
+## is what `test_constraints_stale_on_edit.nim` does. A check that sets the
+## flag, and a spy that watches `markStale` get called, are both blind in the
+## same way: they move with the thing they measure.
 
 import std/strutils
 
@@ -72,6 +75,19 @@ proc kindLabel*(kind: ConstraintFunctionKind): string =
   case kind
   of cfkAcir: "acir"
   of cfkUnconstrained: "unconstrained"
+
+proc containerClass*(report: ConstraintReport): string =
+  ## `stale` beside the base class, so CSS can dim the rows while the headline
+  ## says why they are dim.
+  ##
+  ## THE CLASS IS NOT THE EVIDENCE. `headlineFor`'s `(stale)` suffix is the
+  ## part a reader without CSS still gets, and it is what the checks assert;
+  ## this only exists so the dimming and the label cannot disagree about which
+  ## state the pane is in.
+  if report.stale and report.absence.len == 0:
+    ConstraintsContainerClass & " stale"
+  else:
+    ConstraintsContainerClass
 
 # ---------------------------------------------------------------------------
 # Mock renderer
@@ -108,6 +124,8 @@ proc renderConstraintsPanel*(r: MockRenderer; vm: ConstraintsVM): MockNode =
 
   createRenderEffect proc() =
     let report = vm.report.val
+
+    r.setAttribute(panel, "class", containerClass(report))
 
     r.clearChildren(headlineNode)
     r.appendChild(headlineNode, r.createTextNode(vm.headline.val))
@@ -193,6 +211,9 @@ when defined(js):
 
     createRenderEffect proc() =
       let report = vm.report.val
+
+      isonim_dom.setAttribute(panel, cstring"class",
+                              cstring(containerClass(report)))
 
       setWebText(headlineNode, vm.headline.val)
 

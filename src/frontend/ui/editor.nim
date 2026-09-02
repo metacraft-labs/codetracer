@@ -2147,6 +2147,20 @@ var editorTestRunHook*: proc(path: cstring; selector: cstring;
   ## Nil means no host installed one, and the desktop `CODETRACER::run-test`
   ## path applies unchanged.
 
+var editorSourceChangedHook*: proc(path: cstring)
+  ## A VISITOR EDITED `path`. Fired from Monaco's `onDidChangeContent`, once
+  ## per change, for genuine edits only.
+  ##
+  ## "Genuine" is the whole reason this is a hook here rather than a poll of
+  ## `tabInfo.changed` somewhere else: the firing site sits inside the existing
+  ## `reloadChange` guard, so a `setValue` performed while reloading a tab —
+  ## which is a content change and is not an edit — does not reach it. A
+  ## consumer that watched the model directly would have to re-derive that
+  ## distinction and would get it wrong.
+  ##
+  ## Nil means no host installed one, which is the desktop's state and the
+  ## state of every build before the Constraints pane needed to know.
+
 const editorTestRunFrames = 400
   ## 400 × 300 ms = two minutes. Long enough for a cold 16 MB wasm compiler to
   ## be fetched, instantiated and run over a project; short enough that a
@@ -2918,7 +2932,15 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     if tabInfo.reloadChange:
       tabInfo.reloadChange = false
     else:
-      tabInfo.changed = true)
+      tabInfo.changed = true
+      # THE SOURCES MOVED ON, and this is the event that says so. It is placed
+      # beside `changed = true` because it is the same fact: everything that
+      # makes this tab dirty makes a constraint count taken before it obsolete,
+      # and everything the `reloadChange` guard excludes from one must be
+      # excluded from the other. Two separate subscriptions could drift; this
+      # cannot.
+      if not editorSourceChangedHook.isNil:
+        editorSourceChangedHook(self.name))
 
   console.log("DELEGATING SHORTCUTS")
 

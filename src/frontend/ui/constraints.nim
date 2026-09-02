@@ -17,8 +17,13 @@ import
   ui_imports,
   ../[ types, communication ]
 
+# `markStale` WAS in this list and was never applied — an import that read,
+# for the whole life of the pane, exactly like the caller it was standing in
+# for. `noteSourceEdited` replaces it because that is the proc this module
+# actually calls; `markStale` is reached through it, inside the viewmodel,
+# where the rule about which edits count can be driven by a headless lane.
 from ../viewmodel/viewmodels/constraints_vm import
-  ConstraintsVM, createConstraintsVM, setReport, setAbsence, markStale
+  ConstraintsVM, createConstraintsVM, setReport, setAbsence, noteSourceEdited
 when defined(js):
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_constraints_view import
@@ -41,6 +46,25 @@ proc initConstraintsVM*() =
   constraintsVMInstance = createConstraintsVM()
   clog "ConstraintsVM: instance created"
   tryMountIsoNimConstraintsPanel()
+
+proc noteEditorSourceChanged*(path: cstring) =
+  ## A visitor edited `path`, so the counts on screen may no longer describe
+  ## the program on screen.
+  ##
+  ## Installed into `ui/editor.editorSourceChangedHook` by `ui_js`, which is
+  ## where every other cross-module editor hook is installed. Kept as a named
+  ## proc here rather than written as a closure at the install site so that the
+  ## call from the editor to this pane is a thing a reader (and the
+  ## reachability guard) can SEE — an anonymous `proc` in a 400-line install
+  ## block is how the previous version of this wiring managed to not exist for
+  ## as long as it did.
+  ##
+  ## Silent when there is no VM. The pane is created lazily by
+  ## `initConstraintsVM`, and it is not this hook's business to force it into
+  ## existence: a project with no constraint report has no count to invalidate.
+  if constraintsVMInstance.isNil:
+    return
+  constraintsVMInstance.noteSourceEdited($path)
 
 when defined(js):
   proc tryMountIsoNimConstraintsPanel*() =

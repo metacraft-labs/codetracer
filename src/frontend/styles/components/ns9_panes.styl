@@ -179,6 +179,18 @@ ns9-row-padding = 2px 8px
   &:hover
     background-color: colors-ui-surface-base-card
 
+// COUNTS THAT NO LONGER DESCRIBE THE SOURCE ON SCREEN. The rows are dimmed
+// and the headline says `(stale)` beside them — both, not either. Dimming
+// alone would be a change a reader cannot name, and the label alone leaves a
+// column of confident-looking numbers at full contrast above it.
+//
+// The rows are dimmed and NOT hidden: the last count the project actually had
+// is still the best available answer to "how big is this circuit", and
+// blanking the pane on a keystroke would throw it away. See
+// `viewmodel/viewmodels/constraints_vm.nim`'s decision 2.
+.constraints.stale .constraints-body
+  opacity: 0.45
+
 .constraints-name
   overflow: hidden
   text-overflow: ellipsis
