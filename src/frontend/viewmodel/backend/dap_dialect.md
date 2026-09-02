@@ -499,10 +499,66 @@ tables too, so they have no engine implementation at all:
 
 This is precisely the drift `dap_commands.nim`'s header says the module exists to
 prevent, and the file already records one prior instance (`ct/listProcesses`, at
-`dap_commands.nim:102-106`). It survives because all nine are exercised only
-through `mock_backend`, which does not validate against `VALID_DAP_COMMANDS`.
+`dap_commands.nim:102-106`). It survived because all nine were exercised only
+through `mock_backend`, which did not validate against `VALID_DAP_COMMANDS`.
 Against a real adapter, an unlisted string reaches `dapCommandToEventKind`
 (`src/frontend/dap.nim:234`) and raises `ValueError`.
+
+---
+
+### 7b. The mock validates now — and what that turned up
+
+`MockBackendService.send` checks its command against `VALID_DAP_COMMANDS` and
+raises `InvalidDapCommandDefect` on a miss. The raise is **synchronous, not a
+failed future**: nearly every send site reads `discard vm.store.backend.send(...)`,
+and a failed future handed to `discard` is dropped without a word — which would
+have reproduced, inside the validator, the exact silence it exists to break.
+
+`src/frontend/viewmodel/tests/unit/test_mock_backend_validates_dap_commands.nim`
+proves the validator can reject *and* can accept, pins all nine commands below,
+and **asserts the count is nine** — so allow-listing one of them to turn some
+other test green reddens that case by name instead of passing unnoticed. Adding
+a string to `VALID_DAP_COMMANDS` is not a fix: the list describes what the
+engine implements, and editing it implements nothing.
+
+Turning the mock strict reddened 26 cases in three files. None of the four
+allow-lists were touched, and no command string was added anywhere.
+
+| command | verdict | disposition |
+| --- | --- | --- |
+| `ct/jump-location` | **product code was wrong** — the Problems and Find-in-Files row click is *editor navigation*, which only the host can do. The dispatch was a fallback that ran when no host was installed, so it never jumped. | **Fixed.** Fallback removed from `errors_vm.nim` / `search_results_vm.nim`; the 4 tests now assert what the host was asked to open. No DAP command substituted: a build diagnostic can name a file the recording never executed, so `ct/source-line-jump` (a *debugger* move) is a different action, not a synonym. |
+| `ct/build-cancel` | **product code was wrong**, and its comment doubly so — it called this a "legacy IPC channel" that "production code also calls directly from the view". It is not an IPC channel, and no view calls one. | **Fixed, and a defect named.** Dispatch removed; the test asserts `cancelBuildProc` is invoked. **Only `ui/web_noir_build.nim` installs that**, so ■ Stop does not stop a *desktop* build. Needs a real desktop cancellation path. |
+| `ct/load-recent-trace` | **wrong transport.** `welcome_screen_vm.nim`'s own doc comment says "the legacy `CODETRACER::load-recent-trace` flow" — an **Electron IPC channel**, live in `ui/welcome_screen.nim:281` and `ui_js.nim:3314`. The ViewModel routes the same payload through the DAP backend instead, where nothing handles it. | **Known failure.** The replay engine should never implement these; they are main-process concerns. `WelcomeScreenVM` has **no host-callback seam at all**, so the fix is four new seams plus host wiring — a product change, not a rename. |
+| `ct/load-recent-folder` | same — `CODETRACER::load-recent-folder`, `ui/welcome_screen.nim:286` | same |
+| `ct/new-record` | same — `CODETRACER::new-record`, `ui/welcome_screen.nim:412`, `renderer.nim:1802`. `re_record_queue_vm_test.nim` already models the right shape: the VM returns effects by value and the adapter performs the IPC. | same |
+| `ct/launch-config` | same family; the main process already answers `CODETRACER::launch-configs-loaded` (`index/traces.nim:1031`), so the request half is the missing piece. | same |
+| `ct/line-step-jump` | **genuinely dead, and NOT a rename of `ct/local-step-jump`.** That arm deserialises `LocalStepJump` (`task.rs:2578`), which needs `step_count`, `target_iteration`, `first_loop_line`, `active_iteration` and `reverse`. `StepListVM` sends `delta`/`path`/`line`/`rrTicks` and has none of the loop-iteration context. Redirecting it would fail `load_args` at runtime. | **Known failure.** The engine needs a command for this, or the VM needs the iteration model. This is exactly why the nearest-name substitution is the wrong instinct. |
+| `ct/load-step-lines` | **genuinely dead.** No engine arm loads step lines for a location; there is no analogue to redirect to. | **Known failure.** |
+| `ct/asm-instruction-jump` | **genuinely dead.** No engine arm. `low_level_code_vm.nim`'s comment hopes it will "either jump to the corresponding source line or step to the matching asm offset" — two different commands, neither chosen. | **Known failure.** |
+
+**Tests deliberately left red** (15), each asserting a command with no engine
+implementation. They are *not* weakened to green, because a test that asserts
+wrong behaviour misleads the next reader more than a red one does:
+
+- `views/isonim_views_test.nim` — 6: `ct/load-step-lines` ×2,
+  `ct/line-step-jump` ×2, `ct/asm-instruction-jump` ×2
+- `welcome-screen/welcome_screen_vm_test.nim` — 9: the four IPC commands above
+
+**A second drift, in the opposite direction.** The engine implements nine
+commands that `VALID_DAP_COMMANDS` does not list, so `isValidDapCommand` would
+reject traffic that works: `scopes`, `threads`, `stackTrace`, `variables`,
+`restart`, `ct/originMode`, `ct/load-request-spans`, `ct/set-active-source-view`,
+`ct/install-source-view`. Nothing sends them through `BackendService` today
+(`worker_backend.nim` reaches the engine directly), so nothing is broken by it —
+but the module header promises these lists stay in sync, and in both directions
+they do not. Adding them is a real change to what the mock accepts and belongs
+in its own commit, with the `EVENT_KIND_TO_DAP_MAPPING` half checked too.
+
+**One thing the strict mock nearly hid.** `store/backend_test.nim`'s "strict mode
+rejects unexpected commands" sent `ct/unknown` and expected an `AssertionDefect`.
+`InvalidDapCommandDefect` *is* an `AssertionDefect`, so that case stayed green
+while silently measuring validation instead of strict mode. It sends `stepIn`
+now — a real command, genuinely unexpected — so it measures what its name says.
 
 ---
 
