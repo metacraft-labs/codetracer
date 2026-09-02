@@ -268,8 +268,8 @@ ck "$([ "${pre_ok}" = "yes" ] && echo ok || echo fail)" \
 # THE SUBJECT COUNT, asserted before anything is asserted ABOUT the subjects.
 # "every chord delivered once" is true of zero chords.
 n_results="$(jq_py 'import json,sys;print(len(json.load(open(sys.argv[1]))["results"]))' chords)"
-ck "$([ "${n_results}" = "20" ] && echo ok || echo fail)" \
-	"20 presses were measured (10 whitelisted chords x 2 focus contexts), got ${n_results}"
+ck "$([ "${n_results}" = "22" ] && echo ok || echo fail)" \
+	"22 presses were measured (11 whitelisted chords x 2 focus contexts), got ${n_results}"
 
 # Both focus contexts have to have actually been entered, or half the presses
 # were measured in the wrong place and would report a single delivery for a

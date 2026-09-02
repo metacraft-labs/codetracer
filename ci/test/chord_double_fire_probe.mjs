@@ -75,6 +75,24 @@ const CHORDS = [
   { key: 'Shift+F11', action: 'reverseStep', index: 5 },
   { key: 'Shift+F12', action: 'reverseStepOut', index: 7 },
   { key: 'Control+s', action: 'aSave', index: 43 },
+  // CTRL+B — the chord this gate was extended for, and the one that proves the
+  // exclusivity claim is about MONACO and not about `stopCallback`.
+  //
+  // It joined MONACO_SHORTCUTS_WHITELIST because measurement on the deployed
+  // site said the global bind alone does not reach it: caret in `src/main.nr`,
+  // `Ctrl+B`, and there was no `shortcuts: global handle ctrl+b build` line and
+  // no `nargo compile` worker start — while the same press with focus on
+  // `<body>` built the project. The keydown arrives at `document` in the
+  // CAPTURE phase and never returns in the BUBBLE phase, which is where
+  // Mousetrap listens, so in the `editor` context the Monaco path is the only
+  // live one and in `outside` the Mousetrap path is.
+  //
+  // Unlike ALT+F8 there is no native Monaco binding to double with: the
+  // standalone editor's keybinding resolver, queried on the live page, returns
+  // an EMPTY list for Ctrl+B/Cmd+B. That is exactly what this entry pins, so a
+  // future Monaco upgrade that DOES bind `ctrl+b` reddens here rather than
+  // silently compiling the project twice per press.
+  { key: 'Control+b', action: 'build', index: 9 },
 ];
 
 // The two places a caret can be when a chord is pressed, because the whole
