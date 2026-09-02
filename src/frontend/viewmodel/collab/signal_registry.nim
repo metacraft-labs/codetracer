@@ -371,6 +371,13 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "subprocess, a desktop host does. It is a statement about the local " &
     "platform, so publishing it would tell a desktop participant that their " &
     "own machine cannot run tests because someone else's tab cannot.")
+  entries.addEntry("TestResultsVM", "runTests", vscRendererLocal,
+    "WHICH runner this renderer was given, which is a fact about the host " &
+    "and not about the project: the web arm installs " &
+    "`web_noir_build.startNoirTests` and a desktop host installs its own. " &
+    "Publishing it would hand one participant a closure that only means " &
+    "anything inside another participant's process. Classified for the same " &
+    "reason `runAbsence` is — the pair answers 'can a run start HERE'.")
   entries.addDerived("TestResultsVM", ["rows", "isEmpty", "headline"])
 
   entries.addMany("ConstraintsVM", ["report", "projectName"],
