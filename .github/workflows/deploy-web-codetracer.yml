@@ -94,10 +94,37 @@ on:
     branches: [cloud]
   workflow_dispatch:
 
-# One in-flight deploy; cancel superseded runs on the same ref.
+# One in-flight deploy, and SUPERSEDED RUNS WAIT RATHER THAN KILLING THE ONE
+# THAT IS BUILDING.
+#
+# This said `cancel-in-progress: true`, which is the right policy for a CI check
+# — there is no value in finishing a lint of a commit nobody will look at. It is
+# the wrong policy for a DEPLOY, because a deploy's whole purpose is to reach a
+# server, and a cancelled one reaches nothing.
+#
+# MEASURED, 2026-09-02. `cloud` took a push roughly every three minutes from
+# early afternoon, and this workflow takes longer than three minutes, so every
+# run was cancelled by the next push before it could publish:
+#
+#     12:09  4581a45f  success      <- the last deploy that ever landed
+#     12:58  53fec4d8  cancelled
+#     13:03  10626029  cancelled
+#     ... fifteen consecutive cancellations ...
+#     13:46  af31fa82  cancelled
+#
+# For nearly five hours `noirstudio.dev` served `4581a45f` while sixteen newer
+# commits sat in `cloud`, and NOTHING REPORTED A FAILURE — every run's
+# conclusion was `cancelled`, which reads in the UI as a deliberate act rather
+# than as a deploy that starved. The site being stale was invisible from the
+# workflow's own history.
+#
+# With `false`, GitHub keeps one run in flight and at most one PENDING; a newer
+# push replaces the pending one. So a busy mainline converges on its latest
+# commit instead of deploying none of them, and no single deploy can be starved
+# by a mainline that is merely active.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
