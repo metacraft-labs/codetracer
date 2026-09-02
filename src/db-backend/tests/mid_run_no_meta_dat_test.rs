@@ -142,7 +142,14 @@ fn mid_run_container_without_meta_dat_serves_all_streams() {
             r.read_file("meta.dat").is_err(),
             "the mid-run fixture must NOT carry meta.dat"
         );
-        for f in ["steps.dat", "steps.idx", "values.dat", "values.idx", "calls.dat", "calls.idx"] {
+        for f in [
+            "steps.dat",
+            "steps.idx",
+            "values.dat",
+            "values.idx",
+            "calls.dat",
+            "calls.idx",
+        ] {
             assert!(r.read_file(f).is_ok(), "mid-run fixture must carry {f}");
         }
     }
@@ -264,9 +271,9 @@ fn live_refresh_without_meta_dat_keeps_streams_populated() {
     assert_eq!(calls.call_count(), call_count, "call count survives live refresh");
 
     // And the refreshed sources still serve real records.
-    assert!(steps.step_line(StepId(0)).is_some(), "refreshed step stream serves records");
     assert!(
-        calls.call(CallKey(0)).is_some(),
-        "refreshed call stream serves records"
+        steps.step_line(StepId(0)).is_some(),
+        "refreshed step stream serves records"
     );
+    assert!(calls.call(CallKey(0)).is_some(), "refreshed call stream serves records");
 }

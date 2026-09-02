@@ -304,8 +304,8 @@ fn a_production_bundle_uses_the_plain_record_layout() {
 /// `events.log` bundle. If it is missing this FAILS rather than skipping.
 #[test]
 fn a_legacy_container_without_tables_yields_none() {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/stylus-fund-trace/stylus_fund_tracking_demo.ct");
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stylus-fund-trace/stylus_fund_tracking_demo.ct");
     assert!(
         fixture.is_file(),
         "the legacy fixture {} is required by this case; without it there is nothing to test",
@@ -318,9 +318,7 @@ fn a_legacy_container_without_tables_yields_none() {
         "the fixture must genuinely lack the binary tables, or this case has no subject"
     );
     assert!(
-        InterningTables::open_from_ctfs(&mut ctfs)
-            .expect("no error")
-            .is_none(),
+        InterningTables::open_from_ctfs(&mut ctfs).expect("no error").is_none(),
         "a container without the tables must yield None, not an error"
     );
 }

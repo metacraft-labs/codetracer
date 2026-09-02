@@ -146,7 +146,8 @@ fn the_threaded_build_path_stays_gated_for_wasm32() {
             .unwrap_or_else(|| panic!("{what} ({marker}) not found in {}", path.display()));
         let preceding = &text[index.saturating_sub(400)..index];
         assert!(
-            preceding.contains("cfg(not(target_arch = \"wasm32\"))") || preceding.contains("cfg(target_arch = \"wasm32\")"),
+            preceding.contains("cfg(not(target_arch = \"wasm32\"))")
+                || preceding.contains("cfg(target_arch = \"wasm32\")"),
             "{what} is not target-gated; wasm32 has no threads, so it must be"
         );
     }

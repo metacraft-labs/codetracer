@@ -613,7 +613,11 @@ impl DapStdioClient {
         self.dap_step_with_timeout(command, scaled(Duration::from_secs(10)))
     }
 
-    pub fn dap_step_with_timeout(&mut self, command: &str, timeout: Duration) -> Result<MoveState, BoxError> {
+    pub fn dap_step_with_timeout(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<MoveState, BoxError> {
         self.send_request(command, json!({"threadId": 1}))?;
         self.wait_for_stopped(timeout)?;
         let event = self.recv_event("ct/complete-move", timeout)?;
@@ -629,7 +633,10 @@ impl DapStdioClient {
         self.dap_step("reverseContinue")
     }
 
-    pub fn dap_reverse_continue_with_timeout(&mut self, timeout: Duration) -> Result<MoveState, BoxError> {
+    pub fn dap_reverse_continue_with_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<MoveState, BoxError> {
         self.dap_step_with_timeout("reverseContinue", timeout)
     }
 

@@ -88,7 +88,11 @@ fn open_reader() -> Arc<dyn TraceReader> {
 
 /// 1-based source line recorded at `step`.
 fn line_at(reader: &Arc<dyn TraceReader>, step: StepId) -> i64 {
-    reader.step(step).unwrap_or_else(|| panic!("no step at {step:?}")).line.0
+    reader
+        .step(step)
+        .unwrap_or_else(|| panic!("no step at {step:?}"))
+        .line
+        .0
 }
 
 /// Read the integer value of local `name` recorded AT `step`.
@@ -160,13 +164,15 @@ fn verify_gdscript_records_await_coroutine_continuation_link() {
     // async_links_to(continuation) resolves back — the §5.2 omniscient queries.
     let from = async_links_from(&links, coroutine_link.registration.step_id);
     assert!(
-        from.iter().any(|r| r.continuation_step == coroutine_link.continuation.step_id),
+        from.iter()
+            .any(|r| r.continuation_step == coroutine_link.continuation.step_id),
         "async_links_from(registration) must resolve to the resume step"
     );
     assert_eq!(from[0].link_type, 0, "AsyncLinkRecord.link_type await == 0");
     let to = async_links_to(&links, coroutine_link.continuation.step_id);
     assert!(
-        to.iter().any(|r| r.registration_step == coroutine_link.registration.step_id),
+        to.iter()
+            .any(|r| r.registration_step == coroutine_link.registration.step_id),
         "async_links_to(continuation) must resolve back to the registration step"
     );
 
@@ -212,8 +218,8 @@ fn verify_gdscript_await_signal_suspend_resume_balanced() {
 
     // The pre-await local `base` SURVIVES the suspension: on resume `kept` is
     // set from `base` and equals 10.
-    let kept = local_int_at(&reader, signal_link.continuation.step_id, "kept")
-        .expect("kept captured on the resume step");
+    let kept =
+        local_int_at(&reader, signal_link.continuation.step_id, "kept").expect("kept captured on the resume step");
     assert_eq!(kept, 10, "pre-await local `base` (==10) survived the suspension");
 
     // Call/return stays BALANCED across the yield: every call has a matching
@@ -227,17 +233,14 @@ fn verify_gdscript_await_signal_suspend_resume_balanced() {
     // async_links_from and confirm it is the same context on both ends.
     let from = async_links_from(&links, signal_link.registration.step_id);
     assert!(
-        from.iter().any(|r| r.context_id == signal_link.context_id
-            && r.continuation_step == signal_link.continuation.step_id),
+        from.iter()
+            .any(|r| r.context_id == signal_link.context_id && r.continuation_step == signal_link.continuation.step_id),
         "the registration and continuation share the same CallState context_id"
     );
 
     eprintln!(
         "[GF10 signal link] ctx=0x{:x} suspend=step{}(line45) < resume=step{}(line46) kept={} (base survived); calls balanced",
-        signal_link.context_id,
-        signal_link.registration.step_id.0,
-        signal_link.continuation.step_id.0,
-        kept
+        signal_link.context_id, signal_link.registration.step_id.0, signal_link.continuation.step_id.0, kept
     );
 }
 
@@ -257,7 +260,9 @@ fn assert_balanced_calls(reader: &Arc<dyn TraceReader>) {
     let mut work_frames = 0usize;
     let mut init_frames = 0usize;
     for i in 0..count {
-        let c = reader.call(CallKey(i as i64)).unwrap_or_else(|| panic!("call {i} resolves"));
+        let c = reader
+            .call(CallKey(i as i64))
+            .unwrap_or_else(|| panic!("call {i} resolves"));
         // Every frame is well-formed: an in-range entry step and a consistent
         // parent (an unbalanced/orphaned suspend would have failed the tree
         // build, so a resolvable DbCall IS a balanced frame).
@@ -275,7 +280,10 @@ fn assert_balanced_calls(reader: &Arc<dyn TraceReader>) {
     }
     // Each coroutine suspended exactly once, so each records as two balanced
     // frames (suspend-portion + resume-portion).
-    assert_eq!(work_frames, 2, "coroutine `work` records as two balanced frames across its yield");
+    assert_eq!(
+        work_frames, 2,
+        "coroutine `work` records as two balanced frames across its yield"
+    );
     assert_eq!(
         init_frames, 2,
         "`_initialize` records as two balanced frames across its `await work()` yield"

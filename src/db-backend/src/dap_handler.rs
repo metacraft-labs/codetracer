@@ -12,6 +12,8 @@ use std::sync::mpsc::Sender;
 use codetracer_trace_types::{CallKey, EventLogKind, Line, NO_KEY, PathId, StepId, TypeKind, VariableId};
 
 use crate::calltrace::Calltrace;
+use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
+use crate::ctfs_trace_reader::span_stream::{SpanRecord, SpanStreamReader};
 use crate::dap::{self, DapClient, DapMessage};
 use crate::db::{Db, DbCall, DbRecordEvent, MaterializedReplaySession};
 use crate::event_db::{EventDb, SingleTableId};
@@ -19,10 +21,8 @@ use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::in_memory_trace_reader::InMemoryTraceReader;
 use crate::lang::{Lang, lang_from_context};
-use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
-use crate::ctfs_trace_reader::span_stream::{SpanRecord, SpanStreamReader};
 use crate::macro_sourcemap::{self, MacroSourceMapCollection, UpdateExpansionArgs};
-use crate::mixed_altitude::{active_altitude, is_vm_crossing_span, Altitude, AltitudeState};
+use crate::mixed_altitude::{Altitude, AltitudeState, active_altitude, is_vm_crossing_span};
 use crate::program_search_tool::ProgramSearchTool;
 use crate::recreator_session::{RecreatorArgs, RecreatorReplaySession};
 use crate::replay::ReplaySession;
@@ -902,8 +902,7 @@ impl Handler {
             (None, None)
         } else {
             let altitude = active_altitude(&self.altitude_state, &self.crossing_spans, step);
-            let span_id = crate::mixed_altitude::innermost_crossing_span(&self.crossing_spans, step)
-                .map(|s| s.span_id);
+            let span_id = crate::mixed_altitude::innermost_crossing_span(&self.crossing_spans, step).map(|s| s.span_id);
             let label = match altitude {
                 Altitude::Vm => "vm",
                 Altitude::Native => "native",
@@ -3377,7 +3376,10 @@ impl Handler {
             // Pre-extension trace (no srcviews) — the common case; silent.
             Err(crate::source_views::SourceViewsError::Absent) => return,
             Err(e) => {
-                debug!("bundled-sources: failed to read srcviews from {}: {e}", ct_path.display());
+                debug!(
+                    "bundled-sources: failed to read srcviews from {}: {e}",
+                    ct_path.display()
+                );
                 return;
             }
         };

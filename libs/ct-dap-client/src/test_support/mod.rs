@@ -86,9 +86,7 @@ pub(crate) fn find_ct_native_replay() -> Result<PathBuf, BoxError> {
     // 2. Sibling repo build output.
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
         let manifest = PathBuf::from(&manifest_dir);
-        let names_and_repos: &[(&str, &str)] = &[
-            ("ct-native-replay", "codetracer-native-backend"),
-        ];
+        let names_and_repos: &[(&str, &str)] = &[("ct-native-replay", "codetracer-native-backend")];
         for &(bin, repo) in names_and_repos {
             let exe_name = format!("{bin}{}", std::env::consts::EXE_SUFFIX);
             // When running from the backend repo itself

@@ -884,7 +884,6 @@ impl CTFSTraceReader {
             std::sync::Arc<codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder>,
         >,
     ) -> Result<Self, Box<dyn Error>> {
-
         // M17b / M8 — attach the SEEKABLE `calls.dat` call-tree source when the
         // container advertises one. This is the path that lets a network-loaded
         // `.ct` serve its call tree on-demand without materializing the whole
@@ -1218,9 +1217,11 @@ impl CTFSTraceReader {
         // trace-format spec, "Stream presence is structural, not flag-gated".
         let has_materialized_execution = ctfs.has_file("steps.dat") || ctfs.has_file("events.log");
         if !has_materialized_execution && meta.flags & meta_dat::FLAG_HAS_MCR_FIELDS != 0 {
-            return Err("this is an MCR (live-recording) container; it needs the emulator replay session, \
+            return Err(
+                "this is an MCR (live-recording) container; it needs the emulator replay session, \
                         not the materialized CTFS reader"
-                .into());
+                    .into(),
+            );
         }
 
         let workdir = if meta.workdir.is_empty() {
@@ -1268,9 +1269,9 @@ impl CTFSTraceReader {
         // line-only decode entirely untouched, which is what keeps OLD-FORMAT
         // containers (the Aztec chain traces, which report `Line(pc)` in a
         // `.avm` path by design) reading exactly as they do today.
-        let mut position_decoder: Option<std::sync::Arc<
-            codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder,
-        >> = None;
+        let mut position_decoder: Option<
+            std::sync::Arc<codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder>,
+        > = None;
 
         match tables {
             Some(tables) => {
@@ -1359,9 +1360,11 @@ impl CTFSTraceReader {
             // `is_new_format` keyed off `steps.dat` being present, so a
             // container that reaches here without a readable step stream is
             // internally inconsistent.
-            return Err("new-format container advertises steps.dat but no seekable step stream could be opened; \
+            return Err(
+                "new-format container advertises steps.dat but no seekable step stream could be opened; \
                         the container is inconsistent"
-                .into());
+                    .into(),
+            );
         };
         // Tell the stream which encoding its records are in, BEFORE anything
         // reads a step through it.
@@ -1436,36 +1439,39 @@ impl CTFSTraceReader {
         // answers it exactly, without decoding the rest.
         db.end_of_program = Self::end_of_program_from_last_event(ctfs, step_count);
 
-        Ok((CTFSTraceReader {
-            db,
-            // The column-aware capability bits come from `meta.dat`'s flags.
-            column_capabilities: ColumnAwareCapabilities {
-                supports_column_breakpoints: meta.flags & meta_dat::FLAG_SUPPORTS_COLUMN_BREAKPOINTS != 0,
-                supports_column_motions: meta.flags & meta_dat::FLAG_SUPPORTS_COLUMN_MOTIONS != 0,
+        Ok((
+            CTFSTraceReader {
+                db,
+                // The column-aware capability bits come from `meta.dat`'s flags.
+                column_capabilities: ColumnAwareCapabilities {
+                    supports_column_breakpoints: meta.flags & meta_dat::FLAG_SUPPORTS_COLUMN_BREAKPOINTS != 0,
+                    supports_column_motions: meta.flags & meta_dat::FLAG_SUPPORTS_COLUMN_MOTIONS != 0,
+                },
+                // Every seekable source is attached by `attach_seekable_sources`
+                // immediately after this returns, so they are left unset here
+                // exactly as the other constructors leave them.
+                call_stream: None,
+                step_stream: None,
+                value_stream: None,
+                event_stream: None,
+                lazy_events_full: None,
+                lazy_values,
+                lazy_steps_full: Some(std::sync::OnceLock::new()),
+                lazy_steps: Some(lazy_steps),
+                // There are no threads in the browser, and this reader's whole
+                // point is that it may be running there; the strategy's own
+                // wasm32 arm resolves to a single-threaded (sequential) build.
+                step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+                step_map: None,
+                linehits_db: None,
+                follow_ctfs: None,
+                follow_path: None,
+                #[cfg(feature = "nim-reader")]
+                nim_reader: None,
+                call_ranges,
             },
-            // Every seekable source is attached by `attach_seekable_sources`
-            // immediately after this returns, so they are left unset here
-            // exactly as the other constructors leave them.
-            call_stream: None,
-            step_stream: None,
-            value_stream: None,
-            event_stream: None,
-            lazy_events_full: None,
-            lazy_values,
-            lazy_steps_full: Some(std::sync::OnceLock::new()),
-            lazy_steps: Some(lazy_steps),
-            // There are no threads in the browser, and this reader's whole
-            // point is that it may be running there; the strategy's own
-            // wasm32 arm resolves to a single-threaded (sequential) build.
-            step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
-            step_map: None,
-            linehits_db: None,
-            follow_ctfs: None,
-            follow_path: None,
-            #[cfg(feature = "nim-reader")]
-            nim_reader: None,
-            call_ranges,
-        }, position_decoder))
+            position_decoder,
+        ))
     }
 
     /// Decide `end_of_program` by reading ONLY the last I/O event.

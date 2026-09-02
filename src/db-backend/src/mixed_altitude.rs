@@ -113,11 +113,7 @@ fn crossing_covers(span: &SpanRecord, step: u64) -> bool {
 /// than an enclosing open span, while a deeper span — open or not — still wins on
 /// the primary `start_step` key before `end_step` is consulted.
 fn effective_end_step(span: &SpanRecord) -> u64 {
-    if span.is_open {
-        u64::MAX
-    } else {
-        span.end_step
-    }
+    if span.is_open { u64::MAX } else { span.end_step }
 }
 
 /// The **innermost** VM crossing span covering `step`, or `None` when the moment
