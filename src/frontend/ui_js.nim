@@ -4813,7 +4813,26 @@ data.actions[ClientAction.aGotoNextError] = proc(actionData: JsObject) =
 data.actions[ClientAction.aGotoPreviousError] = proc(actionData: JsObject) =
   errors.gotoPreviousBuildError()
 
-when defined(ctWeb):
+when defined(ctWeb) and not defined(ctInExtension):
+  # `not defined(ctInExtension)` for the same reason the other two ENTRY arms
+  # carry it — `when not defined(ctInExtension) and not defined(ctWeb)` (the
+  # dev server) and `when defined(ctInExtension)` (the extension), both below —
+  # and it is a structural point rather than a tidy-up: the three entry arms
+  # must be MUTUALLY EXCLUSIVE. The defect this arm was added to fix IS an
+  # entry-arm structure problem: "not Electron" was written as though it meant
+  # "the browsersync dev server", the web build fell into it by default, and
+  # the page could not start. Three arms that are not mutually exclusive is the
+  # same mistake with the sign flipped. No build defines both `ctWeb` and
+  # `ctInExtension` today, which is exactly why it is worth closing — one
+  # clause makes the property hold by construction rather than by nobody having
+  # tried the combination.
+  #
+  # (The `when defined(ctWeb)` / `when defined(ctInExtension)` arms at the top
+  # of this file are IMPORT arms, not entry arms, and are deliberately left
+  # alone. Two import arms both selecting is harmless — it brings in names, it
+  # does not run anything — so exclusivity is only load-bearing here, where the
+  # arm decides which entry point starts the application.)
+  #
   # The entry layer, imported HERE and not in the module's import list, because
   # it is web-only: `ui/web_entry_surface.nim` reads `window.location` and
   # mounts the bundled template, neither of which an Electron renderer build
