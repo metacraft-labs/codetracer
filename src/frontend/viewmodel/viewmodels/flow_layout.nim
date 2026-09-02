@@ -484,9 +484,11 @@ func sourceIndentLevel*(text: string; tabSize: int = 4): int =
   ## rendered `.cigr` indent-guide elements in the line's view overlay — a
   ## measurement of the editor's DOM, available to no other renderer.
   ##
-  ## **That proc had no call site.** It was declared at `ui/flow.nim:212`,
-  ## defined at 4358, and never invoked from anywhere in the tree; `FlowLine`'s
-  ## matching `indentationsCount` field was never read either. So the spec's
+  ## **That proc had no call site.** It was forward-declared, defined, and
+  ## invoked from nowhere in the tree; `FlowLine`'s matching
+  ## `indentationsCount` field (`types.nim`) was never read either, and still
+  ## is not. The proc itself is gone now — `ui/flow.nim` carries a tombstone
+  ## comment where it stood, next to `createFlowViewZone`. So the spec's
   ## third positioning rule was, on the desktop, computed by nothing — which is
   ## also why replacing it here cannot change what the desktop draws.
   ##

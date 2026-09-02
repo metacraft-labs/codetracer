@@ -406,8 +406,15 @@ method register*(self: SearchResultsComponent, api: MediatorWithSubscribers) =
 # import this module directly (cycle: ``ui_imports`` → ``renderer`` →
 # ``search_service`` → ``search_results`` → ``ui_imports``), so it
 # declares ``syncSearchResults*Hook`` proc variables and we install the
-# concrete implementations at module-init time here.  The hooks are
-# called from ``onSearchResultsUpdated`` in ``search_service.nim``.
+# concrete implementations at module-init time here.
+#
+# TWO of the three are called: ``onSearchResultsUpdated`` in
+# ``search_service.nim`` invokes the append-batch and set-query hooks.
+# ``syncSearchResultsClearHook`` is declared there and assigned below but
+# has NO call site anywhere in the tree — installing it currently wires
+# nothing up. Either give the service a path that clears the VM, or drop
+# the variable; do not read the assignment below as evidence that clearing
+# happens.
 # ---------------------------------------------------------------------------
 
 syncSearchResultsAppendBatchHook = syncSearchResultsAppendBatch
