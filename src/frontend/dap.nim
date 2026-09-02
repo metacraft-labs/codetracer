@@ -479,6 +479,31 @@ when not defined(ctInExtension):
 else:
   proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject)
 
+  proc resolvePendingDapResponse*(dap: DapApi, raw: JsObject) =
+    ## The extension arm's counterpart to M49's continuation table, and it is
+    ## deliberately a no-op RATHER THAN ABSENT.
+    ##
+    ## There is nothing to settle here. In `-d:ctInExtension` builds
+    ## `asyncSendCtRequest` is `vscode.debug.activeDebugSession.customRequest`,
+    ## whose promise VS Code resolves with the response itself, so this arm's
+    ## `DapApi` carries no `pendingResponses` field and no request `seq` — the
+    ## correlation M49 has to reconstruct for Electron's one-way IPC is done
+    ## for us by the debug adapter protocol client.
+    ##
+    ## It exists because `ui_js.nim`'s `onDapReceiveResponse` calls it
+    ## unconditionally, and the ALTERNATIVE — guarding that one call site with
+    ## a `when` — puts a second copy of this reasoning in a renderer file that
+    ## has no business knowing how either transport correlates responses. When
+    ## M49 landed, the proc was added to the non-extension arm only and the
+    ## renderer stopped compiling under `-d:ctInExtension`:
+    ##
+    ##     src/frontend/ui_js.nim(1791, 3)
+    ##     Error: undeclared identifier: 'resolvePendingDapResponse'
+    ##
+    ## Nothing in CI compiled that configuration, so it sat broken on a
+    ## mainline. `ci/test/renderer-extension-build.sh` compiles it now.
+    discard
+
   proc asyncSendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject): Future[JsObject] {.async.} =
     console.log cstring"-> dap request: ", toDapCommandOrEvent(kind), rawValue
     return await dap.vscode.debug.activeDebugSession.customRequest(toDapCommandOrEvent(kind), rawValue)

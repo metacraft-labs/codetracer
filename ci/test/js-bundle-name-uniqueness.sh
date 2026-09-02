@@ -146,10 +146,14 @@ if [ "${failed}" -ne 0 ]; then
 	echo "${failed} failure(s).  A duplicated name means one definition silently" >&2
 	echo "replaced another and its callers now run the wrong body.  If this" >&2
 	echo "started after a build change, check for '--hotCodeReloading' being" >&2
-	echo "re-enabled on a JS bundle. TWO places set it, and repro.nim is only" >&2
-	echo "one of them: repro.nim's hotCodeReloadingOnValue, and the justfile's" >&2
-	echo "build-ui-js / build-ui-js-hmr recipes, which pass" >&2
-	echo "--hotCodeReloading:on while compiling src/frontend/ui_js.nim." >&2
+	echo "re-enabled on a JS bundle. TWO places can set it and neither does" >&2
+	echo "today: repro.nim's hotCodeReloadingOnValue, and the justfile's" >&2
+	echo "build-ui-js / build-ui-js-hmr recipes, which compile the same" >&2
+	echo "src/frontend/ui_js.nim and passed it until it was measured at 112" >&2
+	echo "duplicated names in their output. Those two recipes build to a" >&2
+	echo "temporary path, so THIS gate never sees them:" >&2
+	echo "ci/test/renderer-extension-build.sh is what holds them to the same" >&2
+	echo "rule." >&2
 	exit 1
 fi
 

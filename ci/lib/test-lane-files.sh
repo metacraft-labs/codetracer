@@ -282,8 +282,18 @@ test_lane_extra_flags() {
 		#                            `std/os` file sinks into a browser bundle.
 		#
 		# Deliberately NOT `-d:ctInExtension`: that is the VS Code extension
-		# build, a third product, and it is currently broken for an unrelated
-		# reason (see this lane's file list).
+		# build, a third product, and this lane's subject is what SHIPS as
+		# CodeTracer.
+		#
+		# This note used to end "and it is currently broken for an unrelated
+		# reason", which was true and then stayed true for as long as nobody
+		# compiled it — the extension arm was broken twice over (an internal
+		# `nim js` codegen error in `ui/trace.nim` and an identifier M49 added
+		# to only one of `dap.nim`'s arms) and no gate could see it. It is
+		# fixed, and `ci/test/renderer-extension-build.sh` (`just
+		# test-renderer-extension-build`) compiles it now, in the exact
+		# configuration `just build-ui-js` uses, so the sentence cannot rot
+		# back into a description of a build nobody runs.
 		echo "-d:chronicles_enabled=off -d:ctRenderer"
 		;;
 	renderer-web)

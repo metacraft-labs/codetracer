@@ -1825,6 +1825,22 @@ jobs:
         # wants to learn after twenty minutes of suites.
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-browser
 
+      - name: Compile the renderer the way a developer builds it
+        # THE STEP ABOVE COMPILES WHAT SHIPS, AND THAT IS NOT WHAT ANYONE TYPES.
+        # `just build-ui-js` adds `-d:ctInExtension` and
+        # `--hotCodeReloading:on`; nothing ran it, and `cloud` carried it broken
+        # two ways at once — an internal Nim JS codegen error in `ui/trace.nim`
+        # (an `{.exportc.}` routine generated at its own line, reaching a `var`
+        # declared 800 lines later) and an identifier M49 added to only one of
+        # dap.nim's two arms. Both are compile errors; the whole check takes
+        # about ten seconds.
+        #
+        # It asserts the BYTES — over 1 MB, `node --check` parses them, and four
+        # symbols that vanish under the wrong configuration — not the recipe's
+        # exit status, and it re-reads `justfile` so the gate cannot be made
+        # green by deleting the defines that make the build hard.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-extension-build
+
       - name: Assemble the web bundle's runtime assets (NS3 delivery)
         # NS3 was never short of a LOADER. `host/web_browser.nim` carries the
         # registry, the worker transport and `newBrowserWasmHost`, all tested,
