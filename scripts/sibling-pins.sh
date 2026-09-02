@@ -60,12 +60,18 @@
 #
 # ## What this does NOT buy
 #
-# Input determinism, not bit-identical output. `ci/deploy/noir-wasm.pin`
-# records the measured reason: building one revision twice from two different
-# checkout DIRECTORIES gave 15862494 vs 15862541 bytes, because rustc embeds
-# source paths and the length of the build directory reaches the artifact.
-# Pinning inputs does not touch that and does not claim to. What it buys is
-# that the QUESTION "what should this commit produce?" now has an answer.
+# Input determinism, not bit-identical output. The reason is rustc: it embeds
+# source paths, so the LENGTH OF THE BUILD DIRECTORY reaches the artifact, and
+# one revision built twice from two different checkout directories produces two
+# different byte counts. Pinning inputs does not touch that and does not claim
+# to. What it buys is that the QUESTION "what should this commit produce?" now
+# has an answer.
+#
+# This used to cite `ci/deploy/noir-wasm.pin` for the measured byte counts.
+# There is no such file on this branch — it belongs to the Noir Studio wasm
+# deploy work, which has not landed here — so the figures cannot be checked
+# from this checkout and are not repeated. The mechanism above is the part
+# this script depends on, and it does not need a number.
 #
 # AND IT DOES NOT COVER THE TOOLCHAIN. `SIBLINGS` below is a list of three
 # REPOSITORIES. The compilers that read them are not in it, and a PASS here is
