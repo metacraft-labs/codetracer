@@ -46,8 +46,15 @@ import ../../viewmodels/build_vm
 import ../../viewmodels/noir_build_producer
 import ../../viewmodels/noir_test_run
 import ../../viewmodels/test_results_vm
+from ../../views/isonim_test_results_view import runButtonClass, runButtonTitle
 import ../../../../ct_test/contracts
 import ../../../../ct_test/frameworks/noir_test_syntax
+
+type PlainRunnerHolder = ref object
+  ## The shape `TestResultsVM` had before `runTests` became a `Signal`, kept
+  ## only so the mutation control below can write one and show the write
+  ## reaches no observer.
+  runner: proc()
 
 var countedAssertions = 0
 
@@ -55,7 +62,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 169
+const ExpectedAssertions = 179
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -512,7 +519,7 @@ fn passes_when_it_should_not() { assert(1 == 1); }
     # No host installed a runner.
     counted not vm.canRun()
     var started = 0
-    vm.runTests = proc() = inc started
+    vm.setRunTests(proc() = inc started)
     counted vm.canRun()
 
     # A deployment that stated a reason.
@@ -536,6 +543,56 @@ fn passes_when_it_should_not() { assert(1 == 1); }
     counted vm.canRun()
     vm.startRun()
     counted started == 1
+
+  test "a late install of the runner re-renders the button":
+    # THE HOST INSTALLS THE RUNNER AFTER THE PANE HAS MOUNTED. `ui_js` points
+    # `runTests` at `web_noir_build.startNoirTests` when the Noir surface comes
+    # up, by which time the button has already been painted against a nil
+    # runner. `runTests` was a plain `proc()` field — invisible to the reactive
+    # graph — so that install notified nothing and the pane went on painting a
+    # disabled control titled "No host in this build can run the tests" over a
+    # runner that was installed and working.
+    #
+    # This effect is what the view does. It must see a SECOND pair.
+    let vm = createTestResultsVM()
+    var painted: seq[(string, string)] = @[]
+    createEffect proc() =
+      painted.add((runButtonClass(vm), runButtonTitle(vm)))
+
+    counted painted.len == 1
+    counted painted[0][0] == "test-results-run-btn disabled"
+    counted painted[0][1] == "No host in this build can run the tests"
+
+    var started = 0
+    vm.setRunTests(proc() = inc started)
+
+    # The install alone — no other signal written — must have re-rendered.
+    counted painted.len == 2
+    counted painted[1][0] == "test-results-run-btn"
+    counted painted[1][1] == "Run the tests (nargo test)"
+
+    # And the control the effect just described is the one that runs: a class
+    # that says live over a click that does nothing is the same lie inverted.
+    vm.startRun()
+    counted started == 1
+
+    # THE MUTATION CONTROL, without which the three assertions above are just
+    # "an effect ran twice" and would score green against the defect too. A
+    # plain field is what `runTests` WAS; writing one notifies nothing, so an
+    # effect that read it never runs again. This is the mechanism the fix
+    # removes, demonstrated rather than asserted about.
+    var plainWrites = 0
+    let plainHolder = PlainRunnerHolder(runner: nil)
+    let trigger = createSignal(0)
+    createEffect proc() =
+      discard trigger.val          # something to make the effect re-runnable
+      discard plainHolder.runner.isNil
+      inc plainWrites
+    counted plainWrites == 1
+    plainHolder.runner = proc() = discard
+    counted plainWrites == 1       # the install was invisible: the defect
+    trigger.val = 1
+    counted plainWrites == 2       # the effect was alive the whole time
 
   test "beginRun clears the previous verdicts":
     let vm = createTestResultsVM()

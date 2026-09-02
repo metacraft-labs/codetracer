@@ -71,6 +71,10 @@ import test_run_summary_vm
 export test_run_summary_vm
 
 type
+  RunTestsProc* = proc()
+    ## The host's runner, named so a `Signal` of it can be created carrying
+    ## `nil` — an untyped `nil` gives `createSignal` nothing to infer from.
+
   TestResultsRowState* = enum
     ## What the pane knows about one test. `trsNotRun` is the state the join
     ## exists to produce and is not expressible in `TestRunOutcome`.
@@ -113,8 +117,22 @@ type
       ## while a run is very much happening. A button that re-enabled there
       ## would let a user queue a second suite over the first.
 
-    runTests*: proc()
+    runTests*: Signal[RunTestsProc]
       ## Start a run. Nil when no host installed one; see the header.
+      ##
+      ## A SIGNAL, and not the plain `proc()` field it was, because the host
+      ## installs it LATE. `ui_js` points it at `web_noir_build.startNoirTests`
+      ## when the Noir surface comes up, which is after the pane has mounted
+      ## and after `runButtonClass`/`runButtonTitle` have already been read
+      ## against a nil runner. A plain field is invisible to the reactive
+      ## graph, so that install re-rendered nothing and the pane kept painting
+      ## the disabled button and "No host in this build can run the tests"
+      ## over a runner that was by then installed and working — a dead
+      ## affordance whose deadness is a lie about the product.
+      ##
+      ## Every other input to `canRun` (`runAbsence`, `inFlight`) is already a
+      ## Signal; this was the one that was not, so it was also the one that
+      ## could not re-render.
 
     # -- Derived state --
     rows*: Memo[seq[TestResultsRow]]
@@ -202,10 +220,17 @@ proc setCatalog*(vm: TestResultsVM; catalog: TestCatalog) =
 proc setRunAbsence*(vm: TestResultsVM; reason: string) =
   vm.runAbsence.val = reason
 
+proc setRunTests*(vm: TestResultsVM; runner: RunTestsProc) =
+  ## Install the host's runner. A WRITE TO THE GRAPH, which is the point: the
+  ## install happens after the pane has mounted, and the button's class and
+  ## title must be recomputed against it rather than left at the verdict they
+  ## reached while it was nil.
+  vm.runTests.val = runner
+
 proc canRun*(vm: TestResultsVM): bool =
   ## Whether the ▶ does anything: a host installed a runner, this deployment
   ## stated no reason it cannot, and nothing is already in flight.
-  not vm.runTests.isNil and vm.runAbsence.val.len == 0 and not vm.inFlight.val
+  not vm.runTests.val.isNil and vm.runAbsence.val.len == 0 and not vm.inFlight.val
 
 proc beginRun*(vm: TestResultsVM) =
   ## Called by the host at the moment it dispatches, before any event arrives.
@@ -223,7 +248,10 @@ proc startRun*(vm: TestResultsVM) =
   ## and web renderers cannot disagree about when the button is live.
   if not vm.canRun():
     return
-  vm.runTests()
+  # Bound first: `vm.runTests.val()` parses as `val(vm.runTests)` and calls
+  # nothing.
+  let runner = vm.runTests.val
+  runner()
 
 proc clearRun*(vm: TestResultsVM) =
   vm.summary.val = TestRunSummary()
@@ -253,6 +281,13 @@ proc createTestResultsVM*(): TestResultsVM =
     let runAbsence = createSignal("")
     let projectName = createSignal("")
     let inFlight = createSignal(false)
+    # A TYPED VAR, and `createSignal(RunTestsProc(nil))` is specifically wrong.
+    # That conversion compiles on both backends and runs on one: `nim js`
+    # emits it as `null.bind(null)`, which throws at module scope and took
+    # every test that merely CONSTRUCTS this VM down with it — including six
+    # that never touch `runTests`. The native lane stayed green throughout.
+    var noRunner: RunTestsProc
+    let runTests = createSignal(noRunner)
 
     let rows = createMemo[seq[TestResultsRow]] proc(): seq[TestResultsRow] =
       joinRows(catalog.val, summary.val)
@@ -276,6 +311,7 @@ proc createTestResultsVM*(): TestResultsVM =
       runAbsence: runAbsence,
       projectName: projectName,
       inFlight: inFlight,
+      runTests: runTests,
       rows: rows,
       isEmpty: isEmpty,
       headline: headline,

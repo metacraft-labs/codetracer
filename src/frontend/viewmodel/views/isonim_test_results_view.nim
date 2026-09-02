@@ -102,7 +102,7 @@ proc runButtonTitle*(vm: TestResultsVM): string =
     "A test run is already in progress"
   elif vm.runAbsence.val.len > 0:
     vm.runAbsence.val
-  elif vm.runTests.isNil:
+  elif vm.runTests.val.isNil:
     "No host in this build can run the tests"
   else:
     "Run the tests (nargo test)"

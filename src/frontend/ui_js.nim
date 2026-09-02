@@ -5078,7 +5078,7 @@ when defined(ctWeb):
         test_results.initTestResultsVM()
         if not test_results.testResultsVMInstance.isNil:
           let testsVM = test_results.testResultsVMInstance
-          testsVM.runTests = proc() = web_noir_build.startNoirTests()
+          testsVM.setRunTests(proc() = web_noir_build.startNoirTests())
           web_noir_build.noirTestRunStarted = proc() = testsVM.beginRun()
           web_noir_build.noirTestRunSettled = proc() =
             testsVM.endRun()
