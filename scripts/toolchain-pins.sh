@@ -969,12 +969,36 @@ verify() {
 	# prints its own: the failure mode of a scoped guard is that its scope is
 	# forgotten and its green tick is read as a reproducibility claim.
 	printf '        SCOPE, and what is NOT covered:\n'
-	printf '        - %d tools (%s). C/C++, Go, the recorder toolchains and the Nim\n' \
-		"${#TOOLS[@]}" "$(
-			for entry in "${TOOLS[@]}"; do printf '%s ' "$(tool_field "$entry" 1)"; done
-		)"
-	printf '          package set are NOT checked. This is not a claim that the build is\n'
-	printf '          reproducible; it is a claim about the compilers named above.\n'
+	# The tools THIS RUN verified, not the declared list. A scoped run that
+	# printed the declared list here would name compilers it never looked at on
+	# the same line as the word PASSED, which is the overstatement this whole
+	# block exists to prevent — and it is not hypothetical: `--require nim rustc
+	# cargo` said "4 tools (nim rustc cargo nargo)" having checked three.
+	local verified_names="" skipped_names="" entry2 name2 want2 hit2
+	for entry2 in "${TOOLS[@]}"; do
+		name2="$(tool_field "$entry2" 1)"
+		hit2=1
+		if [ "${#wanted[@]}" -gt 0 ]; then
+			hit2=0
+			for want2 in "${wanted[@]}"; do
+				[ "$want2" = "$name2" ] && hit2=1
+			done
+		fi
+		if [ "$hit2" -eq 1 ]; then
+			verified_names="$verified_names $name2"
+		else
+			skipped_names="$skipped_names $name2"
+		fi
+	done
+	printf '        - %d tool(s) verified:%s. C/C++, Go, the recorder toolchains and\n' \
+		"$selected" "$verified_names"
+	printf '          the Nim package set are NOT checked. This is not a claim that the\n'
+	printf '          build is reproducible; it is a claim about the compilers just named.\n'
+	if [ -n "$skipped_names" ]; then
+		printf '        - DECLARED BUT NOT VERIFIED BY THIS RUN:%s. They were not held to\n' "$skipped_names"
+		printf '          anything here, and the stamp lists them under `not-verified:` for\n'
+		printf '          the same reason.\n'
+	fi
 	if [ "$strict" = strict ]; then
 		printf '        - store paths: %s.\n' "$STRICT_STORE_NOTE"
 	else

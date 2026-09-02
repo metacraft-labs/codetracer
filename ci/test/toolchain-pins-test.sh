@@ -250,9 +250,11 @@ expect_says "RESULT: PASSED" "and reports PASSED"
 #    to review.
 # -----------------------------------------------------------------------------
 expect_says "SCOPE, and what is NOT covered" "the passing line still declares its scope"
+expect_says "4 tool(s) verified: nim rustc cargo nargo" "and counts the tools THIS RUN verified"
+expect_silent_on "DECLARED BUT NOT VERIFIED" "with nothing left over on an unscoped run"
 expect_says "A VERSION STRING IS NOT AN IDENTITY" "and names the version-vs-identity gap"
 expect_says "NIM SELF-REPORTS NO REVISION" "and names the weaker evidence available for Nim"
-expect_says "not a claim that the build is" "and refuses to be read as a reproducibility claim"
+expect_says "not a claim that the" "and refuses to be read as a reproducibility claim"
 expect_says "THE STORE WAS REDEFINED for this run" "and discloses that its one seam was used"
 
 # -----------------------------------------------------------------------------
@@ -459,6 +461,11 @@ expect_says "not-verified: nim=" "naming nim among them"
 # respect the scope too: refusing a caller that never invokes nim, over nim,
 # would be the guard reporting on an input outside its own stated scope.
 expect_says "not applicable: nim is outside this run's scope" "and the nim-specific strict arm stands down rather than judging out of scope"
+# The scope line must count what THIS run verified. Printing the declared list
+# beside the word PASSED names compilers the run never looked at -- measured:
+# `--require nim rustc cargo` once said "4 tools (nim rustc cargo nargo)".
+expect_says "2 tool(s) verified: rustc cargo" "and the passing line counts only what this run verified"
+expect_says "DECLARED BUT NOT VERIFIED BY THIS RUN: nim nargo" "and names the declared tools it did not hold to anything"
 
 # -----------------------------------------------------------------------------
 # 15. THE VACUITY ARMS. A universal claim over an empty set is TRUE.
