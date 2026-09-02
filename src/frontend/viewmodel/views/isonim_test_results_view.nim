@@ -15,10 +15,27 @@
 ##         span.test-results-where     "src/main.nr:13"
 ##         span.test-results-duration  "2 ms"   (only once it has run)
 ##         div.test-results-message                (failures only)
+##     div.test-results-failure[.hidden]
+##       div.test-results-failure-line   one per run-level diagnostic
 ##     div.test-results-absence[.hidden]
 ##       text  why a run cannot be started here
 ##     div.test-results-empty[.hidden]
 ##       text "No tests found in this project."
+##
+## ## The failure block is what a faulted run looks like
+##
+## `.test-results-failure` renders `vm.runFailure` — the run-level diagnostics
+## of a settled run — and it exists because this pane used to answer a faulted
+## run with the sentence it had shown before the ▶ was pressed. The BUILD pane
+## received those same lines and rendered them; this one received them, folded
+## them into `TestRunSummary.diagnostics`, and painted nothing.
+##
+## It is DISTINCT FROM `.test-results-absence` and the two must not be merged.
+## An absence is a statement about a deployment that was true before anyone
+## clicked, and is not an error. A failure is the outcome of a run that was
+## actually attempted. They can also be true at once — a build with no
+## compiler module states an absence AND, if something dispatches anyway,
+## faults — and a single node would have to pick one to lose.
 ##
 ## ## Why the mark is a glyph and the state is also a class
 ##
@@ -139,9 +156,18 @@ proc renderRowMock(r: MockRenderer; row: TestResultsRow): MockNode =
     r.appendChild(node, detail)
   node
 
+proc renderFailureLineMock(r: MockRenderer; line: string): MockNode =
+  ## One run-level diagnostic, verbatim. Never truncated: the sentence a
+  ## faulted run leaves is the only thing the pane can offer a reader who
+  ## wants to know why, and it is the same text the BUILD pane shows in full.
+  ui(r):
+    tdiv(class = "test-results-failure-line"):
+      text line
+
 proc renderTestResultsPanel*(r: MockRenderer; vm: TestResultsVM): MockNode =
   var headlineNode: MockNode
   var bodyContainer: MockNode
+  var failureNode: MockNode
   var absenceNode: MockNode
   var emptyContainer: MockNode
 
@@ -158,6 +184,8 @@ proc renderTestResultsPanel*(r: MockRenderer; vm: TestResultsVM): MockNode =
           text "\u25b6"
       tdiv(ref = bodyContainer, class = "test-results-body"):
         discard
+      tdiv(ref = failureNode, class = "test-results-failure hidden"):
+        discard
       tdiv(ref = absenceNode, class = "test-results-absence hidden"):
         discard
       tdiv(ref = emptyContainer, class = "test-results-empty hidden"):
@@ -166,6 +194,7 @@ proc renderTestResultsPanel*(r: MockRenderer; vm: TestResultsVM): MockNode =
   createRenderEffect proc() =
     let rows = vm.rows.val
     let absence = vm.runAbsence.val
+    let failures = vm.runFailure.val
 
     r.clearChildren(headlineNode)
     r.appendChild(headlineNode, r.createTextNode(vm.headline.val))
@@ -176,6 +205,13 @@ proc renderTestResultsPanel*(r: MockRenderer; vm: TestResultsVM): MockNode =
     r.clearChildren(bodyContainer)
     for row in rows:
       r.appendChild(bodyContainer, renderRowMock(r, row))
+
+    r.clearChildren(failureNode)
+    for line in failures:
+      r.appendChild(failureNode, renderFailureLineMock(r, line))
+    r.setAttribute(failureNode, "class",
+      if failures.len > 0: "test-results-failure"
+      else: "test-results-failure hidden")
 
     r.clearChildren(absenceNode)
     if absence.len > 0:
@@ -243,6 +279,7 @@ when defined(js):
                                vm: TestResultsVM): isonim_dom.Element =
     var headlineNode: isonim_dom.Element
     var bodyContainer: isonim_dom.Element
+    var failureNode: isonim_dom.Element
     var absenceNode: isonim_dom.Element
     var emptyContainer: isonim_dom.Element
 
@@ -259,6 +296,8 @@ when defined(js):
             text "\u25b6"
         tdiv(ref = bodyContainer, class = "test-results-body"):
           discard
+        tdiv(ref = failureNode, class = "test-results-failure hidden"):
+          discard
         tdiv(ref = absenceNode, class = "test-results-absence hidden"):
           discard
         tdiv(ref = emptyContainer, class = "test-results-empty hidden"):
@@ -267,6 +306,7 @@ when defined(js):
     createRenderEffect proc() =
       let rows = vm.rows.val
       let absence = vm.runAbsence.val
+      let failures = vm.runFailure.val
 
       setWebText(headlineNode, vm.headline.val)
       isonim_dom.setAttribute(runButton, cstring"class",
@@ -278,6 +318,15 @@ when defined(js):
       for row in rows:
         isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
                                isonim_dom.Node(renderRowWeb(row)))
+
+      clearWeb(failureNode)
+      for line in failures:
+        isonim_dom.appendChild(isonim_dom.Node(failureNode),
+          isonim_dom.Node(webTextElement("div", line,
+                                         "test-results-failure-line")))
+      isonim_dom.setAttribute(failureNode, cstring"class",
+        cstring(if failures.len > 0: "test-results-failure"
+                else: "test-results-failure hidden"))
 
       setWebText(absenceNode, absence)
       isonim_dom.setAttribute(absenceNode, cstring"class",

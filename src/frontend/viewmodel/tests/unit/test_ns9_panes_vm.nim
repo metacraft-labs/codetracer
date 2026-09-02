@@ -170,6 +170,32 @@ suite "NS9 — Test Results":
     finished.passed = 1
     check headlineFor(items, finished, "") != "2 tests, not run yet"
 
+    # A RUN THAT FAULTED BEFORE ANY TEST REPORTED. It has no rows, so before
+    # this arm existed it fell through to "2 tests, not run yet" — the same
+    # sentence as never having pressed the button, over a run that was pressed
+    # and failed. The rendered end of this is asserted in
+    # `test_test_results_faulted_run_moves_the_pane.nim`.
+    var faulted = TestRunSummary()
+    faulted.diagnostics = @[TestRunDiagnostic(
+      severity: "error", message: "the Noir toolchain could not run the tests")]
+    check headlineFor(items, faulted, "") == RunFailedHeadline
+    check headlineFor(items, faulted, "") != "2 tests, not run yet"
+
+    # Rows WIN over a run-level diagnostic: a run that reached verdicts has a
+    # more specific true thing to say, and the diagnostic is still rendered
+    # beneath the counts rather than lost.
+    var partly = finished
+    partly.diagnostics = faulted.diagnostics
+    check headlineFor(items, partly, "") == summaryText(partly)
+    check headlineFor(items, partly, "") != RunFailedHeadline
+
+    # And an in-flight run is not a failed one, however many diagnostics have
+    # arrived so far.
+    var stillGoing = faulted
+    stillGoing.inProgress = true
+    check headlineFor(items, stillGoing, "") == "running…"
+    check runFailureLines(stillGoing).len == 0
+
   test "ns9_test_results_every_run_outcome_maps_to_a_distinct_row_state":
     # `TestRunOutcome` has no "not run" member on purpose — it is a projection
     # of a run, and a run cannot contain a test it never started. The pane's

@@ -52,6 +52,31 @@
 ## product is less capable than it is, which is the mirror image of a dead
 ## affordance.
 ##
+## ## A RUN THAT FAULTED IS A THIRD STATE, and it used to be invisible
+##
+## Three things can be true after the ▶ is pressed: the run is going, the run
+## reported verdicts, or the run FAULTED before it reported any. Only the first
+## two had a rendering, so the third fell through to the fourth arm of
+## `headlineFor` and painted "5 tests, not run yet" — byte-identical to the
+## pane before the click, which is what a user reads as a button that did
+## nothing. It is the same felt symptom as the spinner that never settled,
+## surviving in a quieter form after the control itself was proven live.
+##
+## The information was never missing; only its rendering was. A refused or
+## faulted run reaches this pane as `noir_test_run.noirTestRunEvents`'
+## `run-started` / `diagnostic` / `run-finished` stream, and `ingestTestEvent`
+## files a diagnostic carrying no `testId` under `TestRunSummary.diagnostics` —
+## the RUN-LEVEL diagnostics, as distinct from a row's. The BUILD pane was
+## already showing those same lines while this pane showed none of them.
+##
+## So `runFailureLines` reads them back out and `headlineFor` gains an arm
+## before the not-run one. The precedence matters and is not arbitrary: a run
+## that produced rows AND a run-level diagnostic keeps the counts as its
+## headline, because "2 passed, 1 failed" is the more specific true statement
+## and the diagnostic is still rendered beneath. The new arm fires only when
+## there are NO rows — precisely the case where the pane would otherwise claim
+## nothing ran when something did and failed.
+##
 ## ## `runTests` is the affordance the absence used to stand in for
 ##
 ## Installed by the host, exactly as `BuildVM.runBuild` is
@@ -138,6 +163,13 @@ type
     rows*: Memo[seq[TestResultsRow]]
     isEmpty*: Memo[bool]
     headline*: Memo[string]
+    runFailure*: Memo[seq[string]]
+      ## The run-level diagnostics of the last settled run, or empty.
+      ##
+      ## RENDERED WHETHER OR NOT THERE ARE ROWS, unlike the headline's failed
+      ## arm. A run that reported two verdicts and then faulted has both a
+      ## count worth showing and a fault worth showing, and the headline can
+      ## only carry one of them.
 
 proc stateFromOutcome*(outcome: TestRunOutcome): TestResultsRowState =
   case outcome
@@ -198,15 +230,53 @@ proc joinRows*(items: seq[TestItem]; summary: TestRunSummary):
       state: stateFromOutcome(row.outcome),
       durationMs: row.durationMs, message: row.output.strip())
 
+const RunFailedHeadline* = "run failed, no tests ran"
+  ## The headline for a run that faulted before any test reported.
+  ##
+  ## Spelled as a constant because two renderers and the checks both name it,
+  ## and because the WHOLE POINT is that this string is not either of the two
+  ## it used to be confused with: it is not "5 tests, not run yet" (which
+  ## asserts the tests never started) and it is not `summaryText`'s "N passed"
+  ## (which asserts they finished).
+
+proc runFailureLines*(summary: TestRunSummary): seq[string] =
+  ## What a settled run said when it could not run any tests.
+  ##
+  ## These are `TestRunSummary.diagnostics` — the diagnostics the runner
+  ## emitted with NO `testId`, which `ingestTestEvent` files at run level
+  ## precisely because they belong to the run rather than to any one test. A
+  ## wasm module that is absent, a crate that would not elaborate, a worker
+  ## that faulted: all three arrive here and none of them has a test to hang
+  ## off.
+  ##
+  ## EMPTY WHILE IN FLIGHT, deliberately. A run that has emitted its first
+  ## diagnostic and not yet finished is still a run in progress, and reporting
+  ## it as a failure would make the pane flip to a verdict it has not reached.
+  ## `inProgress` is the same gate `headlineFor`'s first arm uses, so the two
+  ## cannot disagree about whether the run is over.
+  if summary.inProgress:
+    return @[]
+  for diagnostic in summary.diagnostics:
+    if diagnostic.message.len > 0:
+      result.add diagnostic.message
+
 proc headlineFor*(items: seq[TestItem]; summary: TestRunSummary;
                   absence: string): string =
   ## The one line above the rows. It says what is true, in this order of
-  ## precedence: a run is happening; a run happened; tests exist but have not
-  ## run; there are no tests.
+  ## precedence: a run is happening; a run happened and reported tests; a run
+  ## happened and FAULTED; tests exist but have not run; there are no tests.
   if summary.inProgress:
     return "running…"
   if summary.rows.len > 0:
     return summaryText(summary)
+  if runFailureLines(summary).len > 0:
+    # A RUN HAPPENED AND FAILED, and this arm is the whole of the fix for a
+    # pane that answered a faulted run with the sentence it had shown before
+    # the click. It sits above the not-run arms because "these tests have not
+    # run yet" is FALSE here — an attempt was made and it failed — and below
+    # the rows arm because a run that got as far as verdicts has something
+    # more specific to say.
+    return RunFailedHeadline
   if items.len == 0:
     return "no tests found"
   let plural = if items.len == 1: " test" else: " tests"
@@ -305,6 +375,14 @@ proc createTestResultsVM*(): TestResultsVM =
       else:
         headlineFor(catalog.val, summary.val, runAbsence.val)
 
+    let runFailure = createMemo[seq[string]] proc(): seq[string] =
+      # NOT gated on `inFlight`. `runFailureLines` already refuses to answer
+      # while `summary.inProgress`, and adding the second gate here would
+      # blank the fault for the window between the last event and the host's
+      # `endRun` — a flicker back to silence at the exact moment the user
+      # looks for the reason.
+      runFailureLines(summary.val)
+
     TestResultsVM(
       catalog: catalog,
       summary: summary,
@@ -315,5 +393,6 @@ proc createTestResultsVM*(): TestResultsVM =
       rows: rows,
       isEmpty: isEmpty,
       headline: headline,
+      runFailure: runFailure,
       disposeProc: dispose,
     )

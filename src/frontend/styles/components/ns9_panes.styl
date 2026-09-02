@@ -131,6 +131,22 @@ ns9-row-padding = 2px 8px
   white-space: pre-wrap
   color: colors-ui-text-error-primary
 
+// A RUN THAT FAULTED, and it is styled as an error because it is one. This is
+// the one thing on this pane that is NOT ordinary content: the visitor pressed
+// Run, the run was attempted, and it failed. Sharing `.test-results-absence`'s
+// muted treatment would have put a real failure in the same register as "this
+// deployment cannot run tests", which is a statement that was already true
+// before anyone clicked.
+.test-results-failure
+  padding: 6px 8px
+  border-top: 1px solid colors-ui-border-secondary
+
+.test-results-failure-line
+  font-size: 0.85em
+  line-height: 1.35
+  white-space: pre-wrap
+  color: colors-ui-text-error-primary
+
 // The absence line and the empty state are ordinary content, not errors. The
 // absence is now a statement about a DEPLOYMENT that placed no Noir compiler
 // module rather than about the product — an ordinary web bundle runs its tests
