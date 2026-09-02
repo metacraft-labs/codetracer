@@ -560,6 +560,48 @@ suite "WelcomeScreenVM — launch_config":
       check host.launches[0].configIndex == 0
       dispose()
 
+  test "launchSelectedConfig reports the selected entry's index, not the first":
+    # The slug→index adapter, which is the ONE place this VM's model
+    # (keyed by slug) and the main process's IPC (keyed by an index into
+    # `getLaunchConfigsForWorkspace`) have to agree. A mutation pinning
+    # `configIndex` to 0 survived every other case in this file, because they
+    # all use a single-entry list where 0 is right by accident — the wrong
+    # config would have been recorded and nothing here would have said so.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
+      vm.setLaunchConfigs(@[
+        makeLaunchEntry("python-fibonacci", "Python: Fibonacci",
+                        "python", "examples/python/fib.py"),
+        makeLaunchEntry("ruby-fibonacci", "Ruby: Fibonacci",
+                        "ruby", "examples/ruby/fib.rb"),
+        makeLaunchEntry("c-app", "C app", "c", "examples/c/main.c"),
+      ])
+
+      vm.selectLaunchConfig("ruby-fibonacci")
+      check vm.launchSelectedConfig()
+      check host.launches.len == 1
+      check host.launches[0].slug == "ruby-fibonacci"
+      check host.launches[0].configIndex == 1
+
+      # A third entry too, so the assertion is about position rather than
+      # about "not zero".
+      vm.selectLaunchConfig("c-app")
+      check vm.launchSelectedConfig()
+      check host.launches.len == 2
+      check host.launches[1].slug == "c-app"
+      check host.launches[1].configIndex == 2
+
+      # ... and the first entry still reports 0, so the mapping is an index
+      # and not an off-by-one.
+      vm.selectLaunchConfig("python-fibonacci")
+      check vm.launchSelectedConfig()
+      check host.launches.len == 3
+      check host.launches[2].slug == "python-fibonacci"
+      check host.launches[2].configIndex == 0
+      dispose()
+
   test "native launch configs enter live MCR mode when native backend is installed":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
