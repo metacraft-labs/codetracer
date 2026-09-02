@@ -28,6 +28,14 @@ export const DEBUG_TOOLBAR_IDS = {
   reverseNext: "reverse-next-image",
   /** The one control the rename left alone. */
   jumpToLive: "jump-to-live-debug",
+  /**
+   * Stop — the session-ending control, and the spec's Debug -> Edit gesture.
+   *
+   * `Debugger-Controls.md` requires it to be reachable by toolbar button, menu
+   * entry and chord.  The chord (`SHIFT+F5`) and the behaviour landed first;
+   * the button did not exist until `noir-mode-roundtrip` went looking for it.
+   */
+  stop: "stop-image",
 } as const;
 
 export type DebugToolbarButton = keyof typeof DEBUG_TOOLBAR_IDS;

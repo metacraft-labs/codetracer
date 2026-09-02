@@ -449,17 +449,38 @@ proc rewireDebugControlsBridgeForActiveSession*(data: Data) =
     return
 
   let component = DebugComponent(data.ui.componentMapping[Content.Debug][0])
-  if component.isNil or component.api.isNil:
+  # THE TWO CALLBACKS DO NOT HAVE THE SAME PREREQUISITE, and treating them as
+  # if they did left the whole toolbar dead on the web.
+  #
+  # This guard used to read `if component.isNil or component.api.isNil: return`,
+  # so a nil mediator skipped BOTH callbacks. But `onAction` calls
+  # `component.action(id)` and never touches `api` — only `onDapStep`'s
+  # `dapStep(api, action)` does. A platform that has a `DebugComponent` and no
+  # mediator therefore lost the non-step half of the toolbar (run-to-entry,
+  # reset-operation, run-tests, and Stop) for a reason that applies only to the
+  # step half.
+  #
+  # The visible form: pressing Stop in a Noir Studio replay session did
+  # nothing. Measured in a browser against the assembled bundle — the button
+  # mounted, hit-tested, and took a real pointer click at its own centre, and
+  # the topbar stayed `debugger-controls` through a 20s wait on each of three
+  # trips (`ci/test/noir-mode-roundtrip.sh`).
+  if component.isNil:
     return
 
   initDebugControlsVM()
   debugComponentForBridge = component
   debugApiForBridge = component.api
   if not debugControlsVMInstance.isNil:
-    debugControlsVMInstance.onDapStep = proc(action: cstring) =
-      dapStep(component.api, action)
+    # Unconditional: this half needs nothing but the component.
     debugControlsVMInstance.onAction = proc(id: string) =
       component.action(id)
+    # Conditional: `dapStep` sends through the mediator, so without one there
+    # is nothing to send on, and a closure over a nil `api` would raise on the
+    # first step rather than decline.
+    if not component.api.isNil:
+      debugControlsVMInstance.onDapStep = proc(action: cstring) =
+        dapStep(component.api, action)
     wireDebugToolbarShortcuts()
 
 proc jumpBeforeList*(self: DebugComponent) =

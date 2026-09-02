@@ -3386,6 +3386,37 @@ test-noir-replay-in-browser:
   exec > >(tee test-logs/test-noir-replay-in-browser.log) 2>&1
   bash ci/test/noir-replay-in-browser.sh
 
+# EDIT -> RUN -> REPLAY -> STOP -> EDIT, three times, and the MODE is the
+# subject rather than the two modes.
+#
+# `test-noir-replay-in-browser` above drives the same journey and is not this:
+# its whole forward-direction evidence is that `#next-image` exists, and its
+# verdict string smuggles the mode claim into a parenthetical over that one
+# boolean. Nothing there records what the topbar was BEFORE the Run, so its
+# return-leg checks are graded against an unrecorded baseline — a product that
+# never entered Debug mode satisfies "no debugger pane is still mounted"
+# trivially. This gate reads the surface the product itself declares
+# (`data-topbar-surface`) at every leg, through one reader.
+#
+# It also presses the control a user can SEE. `renderer.stopAction` was
+# `discard` and no Stop button existed, so the return leg was reachable only by
+# `ctrl+f5` — which is what the sibling gate drives, and why the defect
+# survived it.
+#
+# Three round trips because `Mode-Transitions.md` §6 asks for at least three:
+# "the failure mode is a slot that is right once and empty afterwards".
+#
+# Needs the two Noir modules AND the replay engine: set CT_NOIR_WASM_COMPILER /
+# CT_NOIR_WASM_TRACER / CT_NOIR_WASM_REF / CT_REPLAY_ENGINE_DIR, or
+# CT_WEB_BUNDLE_DIR at a tree that already has them. It EXITS 2 rather than
+# passing when they are absent.
+test-noir-mode-roundtrip:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-mode-roundtrip.log) 2>&1
+  bash ci/test/noir-mode-roundtrip.sh
+
 # The studio keeps what you type, across a reload that destroys every JS value.
 #
 # The persistence half on its own: 16 counted assertions with three reddening

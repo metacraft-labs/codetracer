@@ -5524,6 +5524,34 @@ when defined(ctWeb) and not defined(ctInExtension):
           # The toolbar's own mount gave up during boot, against a document
           # that had not drawn the menu shell yet. Now that the surface exists
           # and has just been rebuilt, ask again — a no-op if it is already up.
+          # AND THE TOOLBAR'S BUTTONS HAVE TO REACH SOMETHING.
+          #
+          # `DebugControlsVM.onDapStep` and `.onAction` are the bridge every
+          # button in the debugger panel dispatches through — `stepClick` and
+          # `actionClick` in `isonim_debug_controls_view.nim` both begin
+          # `if not vm.onX.isNil`, so a nil bridge is a SILENT no-op behind a
+          # fully painted, hit-testable toolbar.
+          #
+          # `initDebugControlsVMWithStore` wires that bridge, but only inside
+          # `if not debugComponentForBridge.isNil and not
+          # debugApiForBridge.isNil`, and on the web that guard does not hold
+          # when it runs. Measured in a browser against the assembled bundle:
+          # the console carries `debug.nim | DebugControlsVM: parallel
+          # ViewModel instance created (shared store)` and does NOT carry the
+          # `re-wired onDapStep/onAction bridge after replacement` line that
+          # follows it eight lines later.
+          #
+          # `rewireDebugControlsBridgeForActiveSession` is the repair, and it
+          # already existed and was already exported — it reads the active
+          # session's `DebugComponent` out of `componentMapping` and installs
+          # the callbacks. It had ONE caller, `session_switch.switchSession`,
+          # and the web never switches sessions, so it never ran here.
+          #
+          # HERE is where it can: the loop above has just constructed the
+          # components the debug layout names, so `componentMapping[Content
+          # .Debug][0]` exists. Before `remountDebugControls`, so the panel
+          # mounts over a bridge that is already live.
+          debug.rewireDebugControlsBridgeForActiveSession(data)
           debug.remountDebugControls())
 
         # BUILD IS THE CONFIGURED ACTION, NOT A NEW CHORD.

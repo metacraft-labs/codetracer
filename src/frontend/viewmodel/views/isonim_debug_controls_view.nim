@@ -160,7 +160,11 @@ proc renderDebugControlsPanel*(r: MockRenderer;
 #   [history-back] [history-forward] | [reverse-next] [next] |
 #   [reverse-step-in] [step-in] | [reverse-step-out] [step-out] |
 #   [reverse-continue] [continue] | [run-to-entry] |
-#   [reset-operation] | [run-tests] |
+#   [reset-operation] | [run-tests] | [stop]
+#
+# `stop` is the one addition to that legacy row, and it is last behind its own
+# divider: it is the only control here that LEAVES the session rather than
+# moving within it.
 #
 # All button IDs use the `{action}-image` pattern that Playwright page
 # objects expect (e.g. `#next-image`, `#continue-image`), mapped in
@@ -298,6 +302,32 @@ when defined(js):
                onclick = actionClick(vm, "run-tests")):
           tdiv(class = "custom-tooltip"):
             text vm.toolbarTooltip("run-tests", "Record and replay tests in a new window")
+        tdiv(class = "separate-bar"):
+          discard
+        # -- STOP: the way out of the replay session, and back to editing.
+        #
+        # `GUI/Debugging-Features/Debugger-Controls.md` requires Stop to be
+        # reachable by all three of the routes CodeTracer offers a command —
+        # "a toolbar button, a menu entry and a chord". `renderer.stopAction`
+        # (now `ui/stop_command.stopReplaySession`) supplies the behaviour and
+        # `SHIFT+F5` supplies the chord; this is the BUTTON, which did not
+        # exist. The panel rendered thirteen controls and not one of them left
+        # the session, so the only way back to Edit mode was a chord with
+        # nothing on screen to suggest it.
+        #
+        # LAST IN THE BAR, behind its own divider, because it is the only
+        # control here that ENDS the session rather than moving within it.
+        # `Mode-Transitions.md` §3 rule 3 forbids re-ordering slots that are
+        # present in both modes and says nothing against giving a
+        # mode-leaving control its own group.
+        #
+        # `actionClick`, not `stepClick`: Stop is not a DAP step and must not
+        # go through `onDapStep`, which would send it to the engine as a move.
+        button(id = "stop-image",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               onclick = actionClick(vm, "stop")):
+          tdiv(class = "custom-tooltip"):
+            text vm.toolbarTooltip("stop", "Stop and return to editing")
         if vm.toolbarModeText.val.len > 0:
           span(id = "debug-toolbar-mode",
                class = "debug-toolbar-mode"):
