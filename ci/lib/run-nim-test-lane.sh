@@ -76,7 +76,38 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-cache_root="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+# THE CACHE ROOT IS PER-CHECKOUT, AND THAT IS THE WHOLE POINT.
+#
+# The default used to be a bare `/tmp/ct-nim-cache`, and the per-suite directory
+# beneath it is keyed `${lane}-${name}` with NO component naming the tree it was
+# compiled from. So two worktrees running the same lane at the same time compiled
+# into the same directory — caught on 2026-09-03, with `/Users/zahary/m/dev/ct-gutter`
+# and another worktree both writing `vm-unit-test_ns9_panes_vm`, and 295 shared
+# directories sitting under that root.
+#
+# THE FAILURE THIS PRODUCES IS SILENT AND POINTS THE WRONG WAY. Nim reuses a cached
+# artefact when it believes the inputs are unchanged, so the loser of the race can
+# link objects built from a DIFFERENT TREE and still report a clean pass. The loud
+# outcome is a confusing compile error; the quiet one is a green lane that measured
+# someone else's source, or a mutation arm reporting SURVIVED because the mutation
+# it planted was never in the bytes it graded. That reads as "this assertion does not
+# detect this defect" and sends someone to strengthen a test that was already fine.
+# This campaign has already lost time to exactly that, from two worktrees sharing one
+# compiler cache.
+#
+# Keyed on the absolute path of the checkout rather than its basename: worktrees are
+# siblings with distinct basenames today, but a name is not an identity, and two
+# clones of the same repo in different parents would collide again. `cksum` is POSIX,
+# unlike `shasum`/`sha1sum`, which differ across macOS and Linux — this script runs on
+# both. The basename is kept in the path only so a human can tell the directories
+# apart.
+if [ -n "${CT_NIM_CACHE_ROOT:-}" ]; then
+	cache_root="${CT_NIM_CACHE_ROOT}"
+else
+	_ct_checkout="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+	_ct_tag="$(printf '%s' "${_ct_checkout}" | cksum | awk '{print $1}')"
+	cache_root="/tmp/ct-nim-cache/$(basename "${_ct_checkout}")-${_ct_tag}"
+fi
 lane_timeout="${CT_LANE_TIMEOUT:-1800}"
 backend="$(test_lane_backend "${lane}")"
 read -r -a extra_flags <<<"$(test_lane_extra_flags "${lane}")"
