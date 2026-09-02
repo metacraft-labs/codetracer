@@ -320,13 +320,17 @@ const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir",
   ## ## And why the web needs it at all
   ##
   ## `nargo` is not in a browser, and the wasm compiler has no `info`
-  ## operation: `compile_vfs.rs` exports `nv_compile_vfs` and nothing else, the
-  ## worker dispatches exactly `compile` and `trace`, and the only compile a
-  ## tracer host asks for sets `force_brillig: true` — so even decoding its
-  ## artifact would answer about an all-unconstrained build rather than the
-  ## circuit. Producing this number in a tab needs a new wasm export and a new
-  ## worker branch; until then the answer travels with the sources it is an
-  ## answer about.
+  ## operation: `compile_vfs.rs` exports `nv_compile_vfs` and `nv_test_vfs` and
+  ## nothing else, the worker dispatches `compile`, `test` and `trace`, and the
+  ## only compile a tracer host asks for sets `force_brillig: true` — so even
+  ## decoding its artifact would answer about an all-unconstrained build rather
+  ## than the circuit. Producing this number in a tab needs a new wasm export
+  ## and a new worker branch; until then the answer travels with the sources it
+  ## is an answer about.
+  ##
+  ## THE SAME SENTENCE WAS TRUE OF `nargo test` AND IS NOT ANY MORE, which is
+  ## why the list above is spelled out rather than left as "exactly two". A
+  ## count goes stale silently; a list names what it is missing.
 
 const noirTemplateConstraintProvenance* =
   "nargo info --json, run against this template at build time"

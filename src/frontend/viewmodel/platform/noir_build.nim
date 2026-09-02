@@ -70,9 +70,13 @@ import std/[json, strutils]
 type
   NoirBuildMode* = enum
     ## `VfsRequest.mode`. `resolve` and `contract` exist in the Rust enum and
-    ## are deliberately absent here: the worker dispatches exactly two
-    ## subcommands, and a mode this product never asks for would be a value
-    ## with no caller and no test.
+    ## are deliberately absent here: a mode this product never asks for would
+    ## be a value with no caller and no test.
+    ##
+    ## `nargo test` takes NO mode at all — see `noirTestRequest`. It compiles
+    ## with `CompileOptions::default()` on the Rust side, and a request that
+    ## asked for `debug` would run an instrumented program that is not the one
+    ## the user tests locally.
     nbmProgram = "program"
       ## The circuit — what `nargo compile` means. Reports warnings.
     nbmDebug = "debug"

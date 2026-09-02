@@ -2159,27 +2159,143 @@ proc isPythonTestLine(lineContent: string): bool =
   let stripped = lineContent.strip()
   return stripped.startsWith("def test_") or stripped.startsWith("async def test_")
 
-proc loadAnimation(self: EditorViewComponent, el: Element, i: int) =
-  let frames = ["Running.  ", "Running.. ", "Running..."]
+# ---------------------------------------------------------------------------
+# The editor's Run-test control, and the three hooks a host fills in
+#
+# THIS CONTROL HUNG, and the hang was worse than the missing capability behind
+# it: a button that accepts a click and then does nothing teaches a user the
+# product is broken, where an absent one teaches nothing. Three separate faults
+# produced it and all three are closed here.
+#
+#   1. THE CLICK WENT NOWHERE ON THE WEB. `runTest` sends
+#      `CODETRACER::run-test`, which the Electron index answers and a browser
+#      tab does not — `newWebIpc.send` finds no responder, logs "no host for",
+#      and drops it. `editorTestRunHook` lets a host take the run instead, and
+#      `ui_js` points it at the Noir wasm runner, which is the same one the
+#      Test Results pane's ▶ uses.
+#   2. THE SPINNER NEVER STOPPED. `loadAnimation` re-armed a 300 ms
+#      `setTimeout` unconditionally and `activeTestId` was written in one place
+#      and cleared in none, so the animation outlived every outcome — including
+#      outcomes that arrived. It now stops when the button is no longer the
+#      active one, and `settleEditorTestRun` is what makes it no longer active.
+#   3. IT COULD SPIN FOREVER EVEN IF SOMETHING SETTLED IT WRONG. A cap is here
+#      as well as the settle, because a control whose only exit is a callback
+#      has one way to hang and a control with a deadline has none. Reaching the
+#      cap SAYS SO rather than quietly reverting: a run that was abandoned and
+#      a run that finished are different facts.
+#
+# The hooks are `var`s rather than a compile-time branch for the reason
+# `noir_build_producer.onProblem` is one: this module is the editor, the runner
+# lives behind the platform facade, and `ui_js` is the one place that can see
+# both.
+# ---------------------------------------------------------------------------
 
+var editorTestLinesHook*: proc(path: cstring): seq[int]
+  ## Which lines of `path` declare a test, from the project's real CATALOG.
+  ##
+  ## Nil falls back to the text scan in `addTestActions`, which is what the
+  ## desktop still uses. The two are not equivalent and the catalog is the
+  ## better one: the scan matches `lineStr.strip() == "#[test]"` exactly, so
+  ## `#[test(should_fail)]` and `#[test(should_fail_with = "…")]` get no button
+  ## at all — two of the bundled Noir template's five tests, which are
+  ## precisely the two whose behaviour is worth checking.
+
+var editorTestSelectorHook*: proc(path: cstring; attrLine: int): cstring
+  ## The RUNNER'S OWN NAME for the test declared at `attrLine` — the
+  ## fully-qualified `tests::test_main`, which is the string `nargo test
+  ## --exact` compares against. Empty when the catalog has no such test.
+  ##
+  ## Not the bare function name `getLineFunctionName` splits out of the source:
+  ## two modules may each declare `test_main`, and a runner given the bare name
+  ## would run both or neither.
+
+var editorTestRunHook*: proc(path: cstring; selector: cstring;
+                             line: int): cstring
+  ## Take the run. Returns "" when it was taken, or a sentence saying why it
+  ## could not be — which the caller shows instead of starting a spinner.
+  ##
+  ## Nil means no host installed one, and the desktop `CODETRACER::run-test`
+  ## path applies unchanged.
+
+const editorTestRunFrames = 400
+  ## 400 × 300 ms = two minutes. Long enough for a cold 16 MB wasm compiler to
+  ## be fetched, instantiated and run over a project; short enough that a
+  ## control which lost its answer stops claiming to be working before a user
+  ## has decided the product is broken.
+
+var spinningTestEditors: seq[EditorViewComponent] = @[]
+  ## Every editor with a Run-test button currently animating. A list rather
+  ## than one component because a session can have several editors open and a
+  ## settle has to reach all of them; `activeTestId` alone could only ever
+  ## describe the last one.
+
+proc restoreTestButton(self: EditorViewComponent; note: cstring) =
+  if self.activeTestId.len == 0:
+    return
+  let el = cast[Element](jq("#" & self.activeTestId))
+  self.activeTestId = cstring""
+  if el.isNil:
+    return
+  el.classList.remove(cstring"active-test-button")
+  el.innerHTML = if note.len > 0: note else: cstring"Run test"
+
+proc settleEditorTestRun*(note: cstring = cstring"") =
+  ## Stop every spinning Run-test button, however the run ended.
+  ##
+  ## Called on SETTLE and not on success: a refused run, a red suite and a
+  ## green one all end the animation, because all three are answers. The one
+  ## state this must never leave behind is "still running" over a run that is
+  ## not.
+  let editors = spinningTestEditors
+  spinningTestEditors = @[]
+  for editor in editors:
+    editor.restoreTestButton(note)
+
+proc loadAnimation(self: EditorViewComponent, el: Element, testId: cstring,
+                   i: int, frame: int) =
+  if self.activeTestId != testId:
+    # SETTLED, or another test was started from this editor. Either way this
+    # button is no longer the active one and the chain ends here — the missing
+    # condition that made the original loop unbounded.
+    return
+  if frame >= editorTestRunFrames:
+    self.restoreTestButton(cstring"Run test (timed out)")
+    let index = spinningTestEditors.find(self)
+    if index >= 0:
+      spinningTestEditors.delete(index)
+    self.api.errorMessage(
+      "The test run did not answer within two minutes. Nothing about the " &
+      "test has been established.")
+    return
+  let frames = ["Running.  ", "Running.. ", "Running..."]
   el.innerHTML = frames[i]
   let nextIndex = (i + 1) mod frames.len
-  discard setTimeout(proc() = loadAnimation(self, el, nextIndex), 300)
+  discard setTimeout(proc() = loadAnimation(self, el, testId, nextIndex,
+                                            frame + 1), 300)
 
 proc redrawActiveTestButton(self: EditorViewComponent) =
   let el = cast[Element](jq("#" & self.activeTestId))
-
-  el.classList.add("active-test-button")
-
-  discard setTimeout(proc() = loadAnimation(self, el, 0), 0)
+  if el.isNil:
+    return
+  el.classList.add(cstring"active-test-button")
+  let testId = self.activeTestId
+  discard setTimeout(proc() = loadAnimation(self, el, testId, 0, 0), 0)
 
 proc makeTestAction(self: EditorViewComponent, line: int, isPythonTest: bool = false): Node =
   # For Python tests, the function name is on the same line (line)
   # For Rust tests, the function is on the next line (line + 1, after #[test])
-  let testName = if isPythonTest:
+  let scannedName = if isPythonTest:
     self.getPythonTestFunctionName(line)
   else:
     self.getLineFunctionName(line + 1)
+  # THE CATALOG'S NAME WHEN THERE IS ONE. `selector` is what a runner is given;
+  # `scannedName` is what the source text looks like. They differ by the module
+  # path, and the difference decides whether `--exact` selects one test or none.
+  let selector =
+    if editorTestSelectorHook.isNil: scannedName
+    else:
+      let fromCatalog = editorTestSelectorHook(self.name, line)
+      if fromCatalog.len > 0: fromCatalog else: scannedName
   let testId = &"ct-test-action-{self.id}-{line}"
   if self.activeTestId == testId:
     discard setTimeout(proc() = redrawActiveTestButton(self), 0)
@@ -2187,16 +2303,36 @@ proc makeTestAction(self: EditorViewComponent, line: int, isPythonTest: bool = f
   result = document.createElement(cstring"div")
   result.setAttribute(cstring"id", cstring(testId))
   result.setAttribute(cstring"class", cstring"flow-parallel flow-parallel-value-single editor-test-action")
+  result.setAttribute(cstring"title",
+    cstring(if selector.len > 0: "Run " & $selector else: "Run this test"))
   result.appendChild(document.createTextNode(cstring"Run test"))
   result.addEventListener(cstring"click", proc(ev: Event) =
-    if testName.len() > 0:
+    if selector.len == 0:
+      self.api.errorMessage("Could not work out which test this is.")
+      return
+
+    if not editorTestRunHook.isNil:
+      # A HOST TOOK IT, or said why it could not. Either way the button never
+      # starts animating over a message that went nowhere.
+      let refusal = editorTestRunHook(self.name, selector, line)
+      if refusal.len > 0:
+        self.api.errorMessage($refusal)
+        return
       capture testId:
         self.activeTestId = testId
         self.redrawActiveTestButton()
-      self.runTest(testName, self.name, line, 1)
-      self.api.infoMessage(&"\"{testName}\" started")
-    else:
-      self.api.errorMessage("Coudln't extract test name."))
+      if spinningTestEditors.find(self) < 0:
+        spinningTestEditors.add(self)
+      self.api.infoMessage(&"\"{selector}\" started")
+      return
+
+    capture testId:
+      self.activeTestId = testId
+      self.redrawActiveTestButton()
+    if spinningTestEditors.find(self) < 0:
+      spinningTestEditors.add(self)
+    self.runTest(scannedName, self.name, line, 1)
+    self.api.infoMessage(&"\"{scannedName}\" started"))
 
 proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
   cdebug fmt"makeFlowLine position {position}"
@@ -2225,12 +2361,24 @@ proc addTestActions(self: EditorViewComponent) =
   let lang = fromPath(self.name)
   let isPythonFile = lang == LangPythonDb
 
+  # THE CATALOG FIRST, when a host has one. See `editorTestLinesHook`: the text
+  # scan below cannot see `#[test(should_fail)]`, so on the bundled Noir
+  # template it puts a Run button on three of the five tests and none on the
+  # two whose behaviour is the most interesting.
+  var catalogLines: seq[int] = @[]
+  var haveCatalog = false
+  if not editorTestLinesHook.isNil:
+    catalogLines = editorTestLinesHook(self.name)
+    haveCatalog = catalogLines.len > 0
+
   for i, line in self.tabInfo.sourceLines:
     let rLine = i + 1
     let lineStr = $line
 
     # Check for Rust tests (#[test] attribute)
-    let isRustTest = lineStr.strip() == "#[test]" and not isPythonFile
+    let isRustTest =
+      if haveCatalog: rLine in catalogLines
+      else: lineStr.strip() == "#[test]" and not isPythonFile
     # Check for Python tests (def test_* or async def test_*)
     let isPythonTest = isPythonFile and isPythonTestLine(lineStr)
 

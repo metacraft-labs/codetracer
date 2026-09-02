@@ -333,6 +333,35 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/noir-wasm-worker-e2e.sh
           '
 
+      - name: Prove the browser's test runner agrees with the real nargo
+        # THE OTHER HALF OF "IT WORKS", and the step above cannot cover it.
+        # `noir-wasm-worker-e2e.sh` compares the module against ITSELF across
+        # the worker boundary and against expectations written in this
+        # repository. Both sides can be wrong together. What that cannot catch
+        # is the browser's runner and the `nargo` a developer runs locally
+        # disagreeing about the same program — and since `nv_test_vfs` landed,
+        # a Test Results pane could report a suite backwards while every check
+        # above stayed green.
+        #
+        # `noir-template-toolchain.sh` is the only gate with a real `nargo` on
+        # PATH (from `ourPkgs.noir`). Its arm V runs the bundled template plus
+        # two deliberately-not-green tests through BOTH engines and diffs the
+        # verdict lists. It has never run in CI — no justfile recipe and no
+        # workflow invoked it, despite six production comments citing it as the
+        # gate that keeps the template honest. This is that invocation, and it
+        # is here rather than in a unit lane because arm V needs the module
+        # this job has just built.
+        #
+        # NOT `continue-on-error`. A deploy that published a runner disagreeing
+        # with nargo would ship a pane that contradicts the developer's own
+        # terminal, which is worse than shipping no pane.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_NOIR_WASM_COMPILER="$(pwd)/noir-wasm-out/noir_wasm.wasm"
+            direnv exec "$(pwd)" bash ci/test/noir-template-toolchain.sh
+          '
+
       - name: Seed isonim's tailwind-styles.json
         # `src/frontend/ui_js.nim` reaches `isonim/dsl/tailwind`, which
         # `staticRead`s this file at COMPILE time. Nim cannot catch a failing

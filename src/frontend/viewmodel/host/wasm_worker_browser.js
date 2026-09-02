@@ -60,8 +60,8 @@
 // contract, then executes a transaction against the world state that
 // registration produced, then seals a block containing it — and each of those
 // is a separate user action minutes apart, against state the previous one
-// left behind. A worker whose only verbs are `compile` and `trace`, each
-// posting `exit` in the same turn it was asked, cannot host it.
+// left behind. A worker whose only verbs are one-shot — `compile`, `test` and
+// `trace` all post `exit` in the same turn they were asked — cannot host it.
 //
 // The gap was never in the TYPES. `WasmHost.start` already hands back a
 // `ProcessHandle` and streams through `onOutput`/`onExit`, and

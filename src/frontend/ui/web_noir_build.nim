@@ -71,6 +71,8 @@ import
 # worker's `stdin` carries. The shapes themselves are
 # `platform/noir_build.nim`'s job.
 from std/json import JsonNode, `$`
+# `join`, for the one-test command label. `ui_imports` does not bring it.
+from std/strutils import join
 
 # `Signal.val` is a template on `isonim/core/signals`, and reading one from
 # here needs the module in scope even though the `BuildVM` type comes from
@@ -515,7 +517,7 @@ proc noirTestRunAbsence*(): string =
     return degradedBehaviour(platform.profile, capProcessSpawn)
   ""
 
-proc startNoirTests*(saved: seq[string] = @[]) =
+proc startNoirTests*(saved: seq[string] = @[]; only: seq[string] = @[]) =
   ## TEST — run the open project's `#[test]` functions and report each verdict.
   ##
   ## ONE DISPATCH, not a compile followed by anything: `nv_test_vfs` resolves
@@ -543,9 +545,16 @@ proc startNoirTests*(saved: seq[string] = @[]) =
   activeIntent = nriTest
   if not noirTestRunStarted.isNil:
     noirTestRunStarted()
+  # `only` is a list of the runner's own fully-qualified names, matched
+  # EXACTLY — `nargo test --exact`'s comparison, and the label says so, because
+  # a pane headline reading "1 passed" over a project with five tests is only
+  # honest if the command line beside it says one was asked for.
+  let label =
+    if only.len == 0: "nargo test"
+    else: "nargo test --exact " & only.join(" ")
   dispatch(producer, tmpl, nbpTest, noirTestArgs(),
-           $noirTestRequest(templateVfsEntries(tmpl), tmpl.name),
-           savedFilesLabel("nargo test", saved))
+           $noirTestRequest(templateVfsEntries(tmpl), tmpl.name, only),
+           savedFilesLabel(label, saved))
   if not activeInFlight:
     # `dispatch` refused before the worker saw anything — no `onExit` will
     # arrive, so the pane would sit `inFlight` forever behind a disabled ▶.
@@ -554,6 +563,20 @@ proc startNoirTests*(saved: seq[string] = @[]) =
       noirTestRunSink(producer.lastTests, tmpl.name)
     if not noirTestRunSettled.isNil:
       noirTestRunSettled()
+
+proc startNoirTest*(selector: string) =
+  ## Run ONE test — the editor's Run-test control, and the Test Results pane's
+  ## per-row action when it grows one.
+  ##
+  ## The whole suite is not run and then filtered: `nv_test_vfs` takes the
+  ## selection, so a project with a slow test does not pay for it to answer a
+  ## question about a fast one. `TestVfsRequest.tests` is `FunctionNameMatch::
+  ## Exact`, which is the same comparison `nargo test --exact` makes against
+  ## the same strings.
+  if selector.len == 0:
+    report("test-refused", "reason=no-selector")
+    return
+  startNoirTests(only = @[selector])
 
 proc stopNoirBuild*() =
   ## STOP — terminate the worker.

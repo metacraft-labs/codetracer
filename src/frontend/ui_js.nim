@@ -4983,7 +4983,15 @@ when defined(ctWeb):
           let testsVM = test_results.testResultsVMInstance
           testsVM.runTests = proc() = web_noir_build.startNoirTests()
           web_noir_build.noirTestRunStarted = proc() = testsVM.beginRun()
-          web_noir_build.noirTestRunSettled = proc() = testsVM.endRun()
+          web_noir_build.noirTestRunSettled = proc() =
+            testsVM.endRun()
+            # THE EDITOR'S RUN-TEST BUTTON STOPS HERE, and this line is the
+            # whole of the fix for the control that used to spin forever. It is
+            # on SETTLED and not on success, because a refused run and a red
+            # suite are answers too — the one state the button must never be
+            # left in is "running" over a run that is not.
+            editor.settleEditorTestRun()
+
           web_noir_build.noirTestRunSink =
             proc(response: NoirTestResponse; packageDir: string) =
               # The catalog is read AT FOLD TIME rather than captured, because
@@ -4999,6 +5007,53 @@ when defined(ctWeb):
                   commandLine = "nargo test",
                   packageDir = packageDir):
                 testsVM.ingestEvent(event)
+
+        # THE EDITOR'S RUN-TEST CONTROL, pointed at the runner that exists.
+        #
+        # It used to send `CODETRACER::run-test`, which the Electron index
+        # answers and a browser tab does not: `newWebIpc.send` found no
+        # responder, logged "no host for", and dropped it — after
+        # `renderer.runTests` had already called `resetBeforeRestart()` and
+        # blanked the panes for a restart that would never come. The button then
+        # animated forever, because nothing cleared `activeTestId`.
+        #
+        # All three hooks are installed together on purpose. Installing only
+        # the runner would leave the button on three of the template's five
+        # tests (the text scan cannot see `#[test(should_fail)]`) and would run
+        # them by a bare function name rather than by the runner's own selector.
+        editor.editorTestLinesHook = proc(path: cstring): seq[int] =
+          let relative = projectRelative(currentProject(), $path)
+          if relative.len == 0 or test_results.testResultsVMInstance.isNil:
+            return @[]
+          for item in test_results.testResultsVMInstance.catalog.val:
+            if item.file == relative:
+              # `startLine` is the ATTRIBUTE line — `noir_test_syntax.
+              # itemFromDeclRelative` sets `startLine: decl.attrLine` and
+              # `endLine: decl.line` — and the attribute line is where
+              # `addTestActions` places the widget. Using `endLine` would put
+              # every button one row below its test.
+              result.add item.range.startLine
+
+        editor.editorTestSelectorHook =
+          proc(path: cstring; attrLine: int): cstring =
+            let relative = projectRelative(currentProject(), $path)
+            if relative.len == 0 or test_results.testResultsVMInstance.isNil:
+              return cstring""
+            for item in test_results.testResultsVMInstance.catalog.val:
+              if item.file == relative and item.range.startLine == attrLine:
+                return cstring(item.selector)
+            cstring""
+
+        editor.editorTestRunHook =
+          proc(path: cstring; selector: cstring; line: int): cstring =
+            # REFUSE BEFORE ANIMATING. The caller starts no spinner when this
+            # returns a sentence, which is the difference between a control
+            # that says why and one that pretends to work.
+            let absence = web_noir_build.noirTestRunAbsence()
+            if absence.len > 0:
+              return cstring(absence)
+            web_noir_build.startNoirTest($selector)
+            cstring""
 
         # RUN IS A MODE TRANSITION — "full surface, returnable".
         #

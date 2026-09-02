@@ -10,6 +10,15 @@
 
 ns9-row-padding = 2px 8px
 
+// `colors-ui-surface-base-card` AND NOT `colors-ui-surface-hover-panel`, which
+// is what these rules said and which IS NOT A TOKEN. Nothing in
+// `styles/generated/{brand,alias,mapped}.styl` defines it, and Stylus emits an
+// unknown identifier verbatim rather than failing — so `background-color:
+// colors-ui-surface-hover-panel` reached the browser as an invalid value, was
+// dropped, and every row hover in these two panes silently did nothing. A
+// misspelling that compiles is the shape a token lint exists to catch; there is
+// no such lint over `src/frontend/styles`, so it is named here instead.
+
 .test-results,
 .constraints
   height: 100%
@@ -58,7 +67,7 @@ ns9-row-padding = 2px 8px
 
   &:hover
     opacity: 1
-    background-color: colors-ui-surface-hover-panel
+    background-color: colors-ui-surface-base-card
 
   &.disabled
     opacity: 0.3
@@ -88,7 +97,7 @@ ns9-row-padding = 2px 8px
   padding: ns9-row-padding
 
   &:hover
-    background-color: colors-ui-surface-hover-panel
+    background-color: colors-ui-surface-base-card
 
 .test-results-mark
   text-align: center
@@ -152,7 +161,7 @@ ns9-row-padding = 2px 8px
   padding: ns9-row-padding
 
   &:hover
-    background-color: colors-ui-surface-hover-panel
+    background-color: colors-ui-surface-base-card
 
 .constraints-name
   overflow: hidden
