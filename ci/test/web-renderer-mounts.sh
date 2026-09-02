@@ -177,7 +177,24 @@
 # Usage:  bash ci/test/web-renderer-mounts.sh
 # Env:    CT_WEB_BUNDLE_DIR   a bundle already assembled by
 #                             web-bundle-assets.sh. Assembled here if unset.
-#         CT_PROBE_SCREENSHOT_DIR  write one PNG per arm (debugging aid)
+#         CT_PROBE_SCREENSHOT_DIR  per arm, write what the browser SAW (one
+#                             PNG) and what it REPORTED (the probe's JSON, and
+#                             its stderr when it wrote any).
+#
+#                             BOTH, because a screenshot cannot distinguish a
+#                             live control from a dead one — the check that a
+#                             run button is disabled reads a class name and a
+#                             title, and a picture of a ▶ is identical either
+#                             way. An arm that failed on the DOM and shipped
+#                             only pixels is undiagnosable by construction:
+#                             the artefact preserves the one form of evidence
+#                             that is blind to the defect and drops the form
+#                             that is not.
+
+# The arm mutators below are dispatched BY NAME: each is handed to `run_arm`,
+# which invokes it. shellcheck cannot see through that indirection and reports
+# every one of them as dead code.
+# shellcheck disable=SC2329
 
 set -uo pipefail
 
@@ -186,6 +203,30 @@ cd "${repo_root}" || exit 2
 
 cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/web-renderer-mounts"
 mkdir -p "${cache}"
+
+# The ACIR opcode count the template ships, READ FROM THE TEMPLATE.
+#
+# DERIVED BECAUSE A TYPED COPY GOES STALE ON SOMEONE ELSE'S WATCH. Three arms
+# below assert on this number, and each was a separate literal `17` — a fourth,
+# fifth and sixth copy of a constant that had already gone stale once. They
+# were right only by luck of when they were written, which is the strongest
+# argument for the assertion and the weakest for the literal.
+#
+# TWO MEASURED LINKS, NOT ONE REMEMBERED NUMBER:
+# `ci/test/noir-template-toolchain.sh` checks this constant against the engine
+# that ships, and these arms check that the PANE shows this constant. Neither
+# link is a literal anyone has to remember.
+acir_expected="$(python3 -c '
+import re, sys
+m = re.search(r"\"opcodes\"\s*:\s*(\d+)", open(sys.argv[1]).read())
+if not m:
+    sys.stderr.write("no \"opcodes\" count found in noir_template.nim\n")
+    raise SystemExit(1)
+print(m.group(1))
+' src/frontend/viewmodel/platform/noir_template.nim)" || {
+	echo "could not read the shipped ACIR opcode count from noir_template.nim" >&2
+	exit 2
+}
 
 checks=0
 failures=0
@@ -405,6 +446,15 @@ probe_dir() {
 		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
 	local rc=$?
 	stop_server
+	# EXPORT BEFORE JUDGING, so an arm that failed exports the report that
+	# says why. Placed ahead of the `rc` check on purpose: the runs whose
+	# evidence is worth keeping are exactly the ones about to return non-zero.
+	if [ -n "${CT_PROBE_SCREENSHOT_DIR:-}" ]; then
+		[ -s "${cache}/${label}.json" ] &&
+			cp "${cache}/${label}.json" "${CT_PROBE_SCREENSHOT_DIR}/${label}.json"
+		[ -s "${cache}/${label}.err" ] &&
+			cp "${cache}/${label}.err" "${CT_PROBE_SCREENSHOT_DIR}/${label}.stderr.txt"
+	fi
 	if [ "${rc}" -ne 0 ] || [ ! -s "${cache}/${label}.json" ]; then
 		echo "  the probe did not produce a report for arm '${label}'" >&2
 		head -5 "${cache}/${label}.err" >&2
@@ -769,8 +819,8 @@ PY2
 # fails on drift.
 #
 # THIS arm is the other half of that: it perturbs the shipped constant and
-# requires the PANE to disagree. Without it, arm R's `main=17(acir)` check
-# could be satisfied by a pane that renders a hard-coded 17 — which is exactly
+# requires the PANE to disagree. Without it, arm R's opcode-count check
+# could be satisfied by a pane that renders the number literally — which is
 # the placeholder this campaign was told not to build. The number must come
 # from the constant, through `common/noir_constraints.parseNargoInfoJson`, to
 # the DOM.
@@ -936,6 +986,7 @@ PY2
 
 # ---------------------------------------------------------------------------
 echo "Arm I: THE INSTRUMENT — can this browser draw a letter at all?"
+# shellcheck disable=SC2016 # prose about `innerText`, not an expansion
 echo '    Before the product is measured, the measurement is. `innerText` is'
 echo "    defined over RENDERED text, so a browser with no font reports an"
 echo "    empty page for correct markup — and this gate would blame the"
@@ -1100,9 +1151,11 @@ fi
 # thing keeping the text assertion green.
 case "$(painted_shown control)" in
 *"codetracer-web-boot"* | *"codetracer-web-renderer"*)
-	ck fail "a status line is PAINTED on a page that mounted: '$(painted_shown control)' — the diagnostics must leave the document once the product is on it, or the text assertion above is measuring them" ;;
+	ck fail "a status line is PAINTED on a page that mounted: '$(painted_shown control)' — the diagnostics must leave the document once the product is on it, or the text assertion above is measuring them"
+	;;
 *)
-	ck ok "no status line is painted once the product mounted, so the text count above is the product's own" ;;
+	ck ok "no status line is painted once the product mounted, so the text count above is the product's own"
+	;;
 esac
 
 # NO UNCAUGHT ERRORS. The defect was an exception nothing was listening for.
@@ -1119,15 +1172,19 @@ fi
 # not see each other. That is why the third and fourth checks below can exist.
 case "${c_renderer}" in
 *"codetracer-web-renderer: ok"*)
-	ck ok "the renderer arm reported a mount: ${c_renderer#*: }" ;;
+	ck ok "the renderer arm reported a mount: ${c_renderer#*: }"
+	;;
 *)
-	ck fail "the renderer arm did not report a mount (line: '${c_renderer}')" ;;
+	ck fail "the renderer arm did not report a mount (line: '${c_renderer}')"
+	;;
 esac
 case "${c_boot}" in
 *"codetracer-web-boot: ok"*)
-	ck ok "the boot sequence completed in the renderer's own program" ;;
+	ck ok "the boot sequence completed in the renderer's own program"
+	;;
 *)
-	ck fail "the boot sequence did not complete (line: '${c_boot}')" ;;
+	ck fail "the boot sequence did not complete (line: '${c_boot}')"
+	;;
 esac
 
 # ---------------------------------------------------------------------------
@@ -1154,9 +1211,11 @@ esac
 # runtime value, and that is what is read here.
 case "${c_renderer}" in
 *"platform=pkWeb"*)
-	ck ok "the renderer's own ctPlatform() is the booted web platform" ;;
+	ck ok "the renderer's own ctPlatform() is the booted web platform"
+	;;
 *)
-	ck fail "the renderer's ctPlatform() is not the web platform (line: '${c_renderer}') — this is the NS9 defect: a mounted, painting product whose platform is uninstalledProfile" ;;
+	ck fail "the renderer's ctPlatform() is not the web platform (line: '${c_renderer}') — this is the NS9 defect: a mounted, painting product whose platform is uninstalledProfile"
+	;;
 esac
 
 # AND IT AGREES WITH THE BOOT LINE, which is the check that makes the one above
@@ -1300,12 +1359,16 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 	*"main.nr"*)
 		case "${r_labels}" in
 		*"Nargo.toml"*)
-			ck ok "arm R: the tree is the Noir template — ${r_entries} entries: ${r_labels}" ;;
+			ck ok "arm R: the tree is the Noir template — ${r_entries} entries: ${r_labels}"
+			;;
 		*)
-			ck fail "arm R: the tree has no Nargo.toml; a Noir project without one is not one (labels: ${r_labels})" ;;
-		esac ;;
+			ck fail "arm R: the tree has no Nargo.toml; a Noir project without one is not one (labels: ${r_labels})"
+			;;
+		esac
+		;;
 	*)
-		ck fail "arm R: the tree has no main.nr (labels: '${r_labels}') — a filesystem panel mounted, but not over the template" ;;
+		ck fail "arm R: the tree has no main.nr (labels: '${r_labels}') — a filesystem panel mounted, but not over the template"
+		;;
 	esac
 
 	# THE PRODUCT'S OWN ACCOUNT OF THE ROUTE. The DOM says what mounted; this
@@ -1321,9 +1384,11 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 	# went back to the parallel path.
 	case "${r_renderer}" in
 	*"surface=edit-mode"*"entry=efBare/evTemplate"*"language=noir"*)
-		ck ok "arm R: the renderer reported the route it took: ${r_renderer#*: }" ;;
+		ck ok "arm R: the renderer reported the route it took: ${r_renderer#*: }"
+		;;
 	*)
-		ck fail "arm R: the renderer line does not report edit mode on the noir route (line: '${r_renderer}')" ;;
+		ck fail "arm R: the renderer line does not report edit mode on the noir route (line: '${r_renderer}')"
+		;;
 	esac
 
 	# THE ASSERTION THE OTHERS COULD NOT MAKE. Every check above this one was
@@ -1395,11 +1460,14 @@ print(", ".join((d.get("dom", {}).get("statusBar") or {}).get("coveredBy") or []
 	r_shown="$(painted_shown route)"
 	case "${r_shown}" in
 	*"codetracer-web-boot"* | *"codetracer-web-renderer"*)
-		ck fail "arm R: a status line is painted on /noir ('${r_shown}') — the route's readable text is a diagnostic, not the project" ;;
+		ck fail "arm R: a status line is painted on /noir ('${r_shown}') — the route's readable text is a diagnostic, not the project"
+		;;
 	*"main.nr"*)
-		ck ok "arm R: the ${r_painted} characters a user can read on /noir are the project's own files: ${r_shown}" ;;
+		ck ok "arm R: the ${r_painted} characters a user can read on /noir are the project's own files: ${r_shown}"
+		;;
 	*)
-		ck fail "arm R: the painted text on /noir is '${r_shown}' (${r_painted} chars) — the project's file names are not what a user reads" ;;
+		ck fail "arm R: the painted text on /noir is '${r_shown}' (${r_painted} chars) — the project's file names are not what a user reads"
+		;;
 	esac
 
 	# -----------------------------------------------------------------------
@@ -1438,9 +1506,11 @@ print(", ".join((d.get("dom", {}).get("statusBar") or {}).get("coveredBy") or []
 	r_tabtext="$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["dom"].get("glTabTitles") or []))' "${cache}/route.json")"
 	case "${r_tabtext}" in
 	*"main.nr"*)
-		ck ok "arm R: the editor pane is open on the template's entry file — ${r_tabs} tabs: ${r_tabtext}" ;;
+		ck ok "arm R: the editor pane is open on the template's entry file — ${r_tabs} tabs: ${r_tabtext}"
+		;;
 	*)
-		ck fail "arm R: no editor tab names main.nr (tabs: '${r_tabtext}') — edit mode opened the layout but not the project's entry file" ;;
+		ck fail "arm R: no editor tab names main.nr (tabs: '${r_tabtext}') — edit mode opened the layout but not the project's entry file"
+		;;
 	esac
 
 	# ...AND THE SOURCE IS ON THE SCREEN. The pair with the check above is the
@@ -1454,9 +1524,11 @@ print(", ".join((d.get("dom", {}).get("statusBar") or {}).get("coveredBy") or []
 	r_linetext="$(python3 -c 'import json,sys; print(" ".join((json.load(open(sys.argv[1]))["dom"].get("editorLinesVisible") or [])))' "${cache}/route.json")"
 	case "${r_linetext}" in
 	*"fn main"*)
-		ck ok "arm R: Monaco painted ${r_lines} lines of the template's own source, including its fn main" ;;
+		ck ok "arm R: Monaco painted ${r_lines} lines of the template's own source, including its fn main"
+		;;
 	*)
-		ck fail "arm R: the editor shows ${r_lines} painted line(s) and none of them is the template's fn main — the pane mounted without its file (text: '${r_linetext:0:160}')" ;;
+		ck fail "arm R: the editor shows ${r_lines} painted line(s) and none of them is the template's fn main — the pane mounted without its file (text: '${r_linetext:0:160}')"
+		;;
 	esac
 
 	# THE TOPBAR. §1a.2: "The topbar is almost unchanged... it already carries
@@ -1497,12 +1569,16 @@ print(", ".join((d.get("dom", {}).get("statusBar") or {}).get("coveredBy") or []
 	*"TEST RESULTS"*)
 		case "${r_tabtext}" in
 		*"CONSTRAINTS"*)
-			ck ok "arm R: all four of §1a's panes are on the first screen — ${r_tabtext}" ;;
+			ck ok "arm R: all four of §1a's panes are on the first screen — ${r_tabtext}"
+			;;
 		*)
-			ck fail "arm R: no CONSTRAINTS pane in the layout (tabs: '${r_tabtext}')" ;;
-		esac ;;
+			ck fail "arm R: no CONSTRAINTS pane in the layout (tabs: '${r_tabtext}')"
+			;;
+		esac
+		;;
 	*)
-		ck fail "arm R: no TEST RESULTS pane in the layout (tabs: '${r_tabtext}')" ;;
+		ck fail "arm R: no TEST RESULTS pane in the layout (tabs: '${r_tabtext}')"
+		;;
 	esac
 
 	# THE TESTS ARE THE PROJECT'S OWN, named by the runner's selectors. The
@@ -1523,9 +1599,11 @@ print(" ".join(r["name"] for r in rows))
 	fi
 	case "${r_testnames}" in
 	*"test_main"*"test_in_range_accepts_small_values"*)
-		ck ok "arm R: the rows are the project's own tests, from src/main.nr through src/utils.nr" ;;
+		ck ok "arm R: the rows are the project's own tests, from src/main.nr through src/utils.nr"
+		;;
 	*)
-		ck fail "arm R: the rows do not name the template's tests ('${r_testnames}') — the pane mounted over something else" ;;
+		ck fail "arm R: the rows do not name the template's tests ('${r_testnames}') — the pane mounted over something else"
+		;;
 	esac
 
 	# ...AND THE PANE OFFERS TO RUN THEM.
@@ -1594,6 +1672,7 @@ bad = [b for b in boxes if b.get("overlapsMarker")]
 zero = [b for b in boxes if not b.get("width")]
 print(len(boxes), len(bad), len(zero))
 ' "${cache}/route.json")"
+	# shellcheck disable=SC2086 # deliberate word splitting of the overlap list
 	set -- ${r_overlap}
 	if [ "${1:-0}" -gt 0 ] && [ "${2:-1}" -eq 0 ] && [ "${3:-1}" -eq 0 ]; then
 		ck ok "arm R: each run control has a hit area of its own (${1} measured, none overlapping the breakpoint, none zero-width)"
@@ -1611,17 +1690,21 @@ rows = json.load(open(sys.argv[1]))["dom"].get("constraintRows") or []
 print(" ".join(r["name"] + "=" + r["count"] + "(" + r["kind"] + ")" for r in rows))
 ' "${cache}/route.json")"
 	case "${r_constraints}" in
-	*"main=17(acir)"*)
-		ck ok "arm R: Constraints shows the measured ACIR opcode count: ${r_constraints}" ;;
+	*"main=${acir_expected}(acir)"*)
+		ck ok "arm R: Constraints shows the measured ACIR opcode count: ${r_constraints}"
+		;;
 	*)
-		ck fail "arm R: Constraints does not show main=17(acir) — rows were '${r_constraints}'" ;;
+		ck fail "arm R: Constraints does not show main=${acir_expected}(acir) — rows were '${r_constraints}'"
+		;;
 	esac
 	r_prov="$(jsonraw route dom.constraintProvenance)"
 	case "${r_prov}" in
 	*"nargo info"*)
-		ck ok "arm R: the counts carry their provenance, so a reader can judge them: ${r_prov}" ;;
+		ck ok "arm R: the counts carry their provenance, so a reader can judge them: ${r_prov}"
+		;;
 	*)
-		ck fail "arm R: the constraint counts carry no provenance (${r_prov}) — a number a user cannot judge" ;;
+		ck fail "arm R: the constraint counts carry no provenance (${r_prov}) — a number a user cannot judge"
+		;;
 	esac
 
 	# §1a's PROPORTIONS. Not decoration: the same layout produced 29/33/37
@@ -1676,9 +1759,11 @@ else
 	# above's first half while being consistent with almost any bug.
 	case "${s_renderer}" in
 	*"codetracer-web-renderer: ok"*)
-		ck ok "arm S: the renderer still mounted a surface, so this arm isolates the routing and not the mount" ;;
+		ck ok "arm S: the renderer still mounted a surface, so this arm isolates the routing and not the mount"
+		;;
 	*)
-		ck fail "arm S: the renderer stopped mounting altogether (line: '${s_renderer}'); the arm does not isolate the route" ;;
+		ck fail "arm S: the renderer stopped mounting altogether (line: '${s_renderer}'); the arm does not isolate the route"
+		;;
 	esac
 fi
 echo
@@ -1702,7 +1787,7 @@ else
 	# The twin: the mutation must change VISIBILITY and nothing else, or the
 	# assertion it vouches for is not the one it reddened.
 	if [ "${v_panels}" = "1" ]; then
-		ck ok "arm V: the panel is still mounted, so this arm isolates painting from mounting" ;
+		ck ok "arm V: the panel is still mounted, so this arm isolates painting from mounting"
 	else
 		ck fail "arm V: the panel stopped mounting (${v_panels}); the arm does not isolate occlusion"
 	fi
@@ -1761,8 +1846,8 @@ else
 		ck fail "arm O: the page reports origin '${o_origin}', not http://${language_host} — the host mapping did not apply and the surface check below would be about the wrong host"
 	fi
 
-	if [ "${o_welcome}" = "0" ] && [ "${o_fs}" = "1" ] && \
-	   [ "${o_visible}" = "${o_entries}" ] && [ "${o_entries:-0}" -ge 5 ] 2>/dev/null; then
+	if [ "${o_welcome}" = "0" ] && [ "${o_fs}" = "1" ] &&
+		[ "${o_visible}" = "${o_entries}" ] && [ "${o_entries:-0}" -ge 5 ] 2>/dev/null; then
 		ck ok "arm O: / on the language host opened the template — ${o_visible} visible rows, no welcome screen"
 	else
 		ck fail "arm O: / on the language host gave ${o_welcome} welcome screen(s), ${o_fs} panel(s), ${o_visible}/${o_entries} visible rows"
@@ -1771,9 +1856,11 @@ else
 
 	case "${o_renderer}" in
 	*"surface=edit-mode"*"host=noir"*)
-		ck ok "arm O: the renderer named the host language it routed by: ${o_renderer#*: }" ;;
+		ck ok "arm O: the renderer named the host language it routed by: ${o_renderer#*: }"
+		;;
 	*)
-		ck fail "arm O: the renderer line does not report a noir host (line: '${o_renderer}')" ;;
+		ck fail "arm O: the renderer line does not report a noir host (line: '${o_renderer}')"
+		;;
 	esac
 
 	# THE TWIN, and the reason this arm is a claim about the ORIGIN. The same
@@ -1853,9 +1940,11 @@ else
 	fi
 	case "${a_boot}" in
 	*"codetracer-web-boot: ok"*)
-		ck ok "arm A: the loop arm still booted, so this arm is red for the renderer and not for everything" ;;
+		ck ok "arm A: the loop arm still booted, so this arm is red for the renderer and not for everything"
+		;;
 	*)
-		ck fail "arm A: the loop arm also stopped booting; the arm does not isolate the renderer" ;;
+		ck fail "arm A: the loop arm also stopped booting; the arm does not isolate the renderer"
+		;;
 	esac
 fi
 echo
@@ -1875,9 +1964,11 @@ else
 	fi
 	case "${b_renderer}" in
 	*"refused"*)
-		ck ok "arm B: the renderer reported a refusal rather than a silent blank page" ;;
+		ck ok "arm B: the renderer reported a refusal rather than a silent blank page"
+		;;
 	*)
-		ck fail "arm B: the renderer said '${b_renderer}' — a blank page with no explanation is the failure this gate exists for" ;;
+		ck fail "arm B: the renderer said '${b_renderer}' — a blank page with no explanation is the failure this gate exists for"
+		;;
 	esac
 fi
 echo
@@ -1901,9 +1992,11 @@ else
 	# leaking in — and the reach check would prove nothing.
 	case "${c2_renderer}" in
 	*"platform=pkWeb"*)
-		ck fail "arm C: the renderer still reports pkWeb with installPlatform neutered, so the control's reach check does not detect a platform that never reached the renderer" ;;
+		ck fail "arm C: the renderer still reports pkWeb with installPlatform neutered, so the control's reach check does not detect a platform that never reached the renderer"
+		;;
 	*)
-		ck ok "arm C: the renderer falls back to uninstalledProfile when nothing installs a platform, so the control's reach check is real (line: '${c2_renderer}')" ;;
+		ck ok "arm C: the renderer falls back to uninstalledProfile when nothing installs a platform, so the control's reach check is real (line: '${c2_renderer}')"
+		;;
 	esac
 	# The twin, and the reason this arm names a mechanism rather than reporting
 	# that something broke. The platform reach and the mount are independent:
@@ -1947,9 +2040,11 @@ else
 	e_topbar="$(json sync-reply dom.topbarPainted)"
 	case "${e_lines}" in
 	*"fn main"*)
-		ck fail "arm E: the editor still paints the template's source with the host replying synchronously — arm R's source assertion cannot detect the early-resolve defect, so it proves nothing" ;;
+		ck fail "arm E: the editor still paints the template's source with the host replying synchronously — arm R's source assertion cannot detect the early-resolve defect, so it proves nothing"
+		;;
 	*)
-		ck ok "arm E: the editor pane loses its source when the host replies synchronously, so arm R's source assertion can fail" ;;
+		ck ok "arm E: the editor pane loses its source when the host replies synchronously, so arm R's source assertion can fail"
+		;;
 	esac
 	# The twin. A mutation that took the whole page down would satisfy the
 	# check above while being consistent with almost any bug; what makes this
@@ -1983,9 +2078,11 @@ else
 			ck ok "arm T: the editor still shows the template's source and the tree still has ${t_entries} rows, so this arm isolates the chrome from the panes"
 		else
 			ck fail "arm T: removing #menu also emptied the file tree (${t_entries} rows) — it is not isolating the chrome"
-		fi ;;
+		fi
+		;;
 	*)
-		ck fail "arm T: removing #menu also took the editor's source off the screen — it is not isolating the chrome" ;;
+		ck fail "arm T: removing #menu also took the editor's source off the screen — it is not isolating the chrome"
+		;;
 	esac
 fi
 echo
@@ -2015,9 +2112,11 @@ else
 			ck ok "arm F: the page still mounts and paints (${f_entries} tree rows, the editor's source on screen) with no keyboard at all — which is why this defect needs a reported count and not a DOM check"
 		else
 			ck fail "arm F: the mutation also emptied the file tree (${f_entries} rows) — it is breaking more than the bindings parse"
-		fi ;;
+		fi
+		;;
 	*)
-		ck fail "arm F: the mutation also took the editor's source off the screen — it is breaking more than the bindings parse" ;;
+		ck fail "arm F: the mutation also took the editor's source off the screen — it is breaking more than the bindings parse"
+		;;
 	esac
 fi
 echo
@@ -2036,12 +2135,15 @@ print(" ".join(r["name"] + "=" + r["count"] for r in rows))
 ' "${cache}/bad-counts.json")"
 	n_tests="$(json bad-counts dom.testRows)"
 	case "${n_rows}" in
-	*"main=17"*)
-		ck fail "arm N: the pane still shows main=17 with the shipped constant perturbed — the number is not coming from the bundle, so arm R's check proves nothing" ;;
+	*"main=${acir_expected}"*)
+		ck fail "arm N: the pane still shows main=${acir_expected} with the shipped constant perturbed — the number is not coming from the bundle, so arm R's check proves nothing"
+		;;
 	*"main=99"*)
-		ck ok "arm N: the pane follows the shipped constant (${n_rows}), so arm R's count assertion reads real data and can fail" ;;
+		ck ok "arm N: the pane follows the shipped constant (${n_rows}), so arm R's count assertion reads real data and can fail"
+		;;
 	*)
-		ck fail "arm N: the constraints pane shows '${n_rows}' — the mutation broke more than the count" ;;
+		ck fail "arm N: the constraints pane shows '${n_rows}' — the mutation broke more than the count"
+		;;
 	esac
 	if [ "${n_tests:-0}" -eq 5 ] 2>/dev/null; then
 		ck ok "arm N: Test Results still lists 5 tests, so this arm isolates the constraint counts from the rest of the first screen"
@@ -2080,14 +2182,16 @@ rows = json.load(open(sys.argv[1]))["dom"].get("constraintRows") or []
 print(" ".join(r["name"] + "=" + r["count"] for r in rows))
 ' "${cache}/wide-layout.json")"
 	case "${w_counts}" in
-	*"main=17"*)
+	*"main=${acir_expected}"*)
 		if [ "${w_tests:-0}" -eq 5 ] 2>/dev/null; then
 			ck ok "arm W: all four panes still hold their own content (5 tests, ${w_counts}), so this arm isolates geometry from data"
 		else
 			ck fail "arm W: Test Results lost its rows (${w_tests:-0}) — the arm is not isolating geometry"
-		fi ;;
+		fi
+		;;
 	*)
-		ck fail "arm W: the constraint counts changed too (${w_counts}) — the arm is not isolating geometry" ;;
+		ck fail "arm W: the constraint counts changed too (${w_counts}) — the arm is not isolating geometry"
+		;;
 	esac
 fi
 echo
