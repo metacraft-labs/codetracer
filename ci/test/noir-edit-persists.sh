@@ -121,10 +121,28 @@ if [ -z "${bundle}" ]; then
 	fi
 	echo "  assembled at ${bundle}"
 fi
-if [ ! -s "${bundle}/ui.js" ]; then
-	echo "no ui.js in ${bundle}; nothing to drive" >&2
+# THE RENDERER'S PUBLISHED NAME, DERIVED FROM THE DOCUMENT rather than spelled.
+#
+# `ui.js` is its name today. The content-addressed-assets work makes a
+# published file's name carry its digest, so a gate that spelled `ui.js` would
+# either stop finding it or -- worse -- keep finding a stale copy beside the
+# hashed one. The entry document is the one place that must always name the
+# renderer correctly, because that is where the browser loads it from; reading
+# it asks the same question the product asks instead of guessing the answer.
+#
+# The renderer is the only script the document loads that is not under
+# `/public/` -- `web-bundle-assets.sh` places the third-party bundle and jstree
+# there, and the deploy guard asserts that arrangement.
+renderer_rel="$(grep -o '<script[^>]*src="[^"]*"' "${bundle}/index.html" |
+	sed -n 's/.*src="\([^"]*\)".*/\1/p' |
+	grep -v '^/public/' | head -1 | sed 's#^/##')"
+if [ -z "${renderer_rel}" ] || [ ! -s "${bundle}/${renderer_rel}" ]; then
+	echo "could not derive the renderer's path from ${bundle}/index.html" >&2
+	echo "  (derived: '${renderer_rel:-<none>}') -- nothing to drive" >&2
 	exit 1
 fi
+renderer="${bundle}/${renderer_rel}"
+echo "  renderer: ${renderer_rel} ($(wc -c <"${renderer}" | tr -d ' ') bytes)"
 echo
 
 probe() {
@@ -231,13 +249,13 @@ echo
 # the patch changed bytes, and requires the named assertion to go red.
 # ---------------------------------------------------------------------------
 mutate() {
-	# mutate ID PYTHON_EXPR — copies the bundle, rewrites ui.js, and FAILS if
-	# the rewrite changed nothing.
+	# mutate ID PYTHON_EXPR — copies the bundle, rewrites the renderer, and
+	# FAILS if the rewrite changed nothing.
 	local id="$1" expr="$2"
 	local dir="${cache}/mut-${id}"
 	rm -rf "${dir}"
 	cp -R "${bundle}" "${dir}"
-	python3 - "${dir}/ui.js" "${expr}" <<'PY'
+	python3 - "${dir}/${renderer_rel}" "${expr}" <<'PY'
 import re, sys
 path, expr = sys.argv[1], sys.argv[2]
 src = open(path, encoding="utf-8").read()
@@ -256,8 +274,8 @@ PY
 		ck fail "arm ${id}: the mutation did not apply — it would have measured an unmutated bundle"
 		return 1
 	fi
-	if cmp -s "${bundle}/ui.js" "${dir}/ui.js"; then
-		ck fail "arm ${id}: ui.js is byte-identical after the patch"
+	if cmp -s "${renderer}" "${dir}/${renderer_rel}"; then
+		ck fail "arm ${id}: the renderer is byte-identical after the patch"
 		return 1
 	fi
 	echo "${dir}"
