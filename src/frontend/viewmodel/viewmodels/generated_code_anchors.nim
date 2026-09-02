@@ -376,6 +376,20 @@ proc decideFor(anchors: seq[MappingAnchor]; index: int): SyncDecision =
       " but carries no source; synchronisation suspended")
   aligned(index)
 
+proc anchorIndexAtRow*(anchors: seq[MappingAnchor]; row: int): int =
+  ## The anchor covering a generated row, or `NoAnchor`.
+  ##
+  ## Separate from `syncFromGenerated` on purpose: that answers "what should
+  ## the other pane do", which depends on the toggle and on whether the rung
+  ## claims user source. This answers "which anchor is this row in", which is
+  ## what a per-row badge or count needs and which is true regardless of
+  ## whether synchronisation is on. Reusing the sync decision for rendering
+  ## would blank every row's fidelity the moment a user turned the toggle off.
+  for i, a in anchors:
+    if a.covers(row):
+      return i
+  NoAnchor
+
 proc syncFromGenerated*(anchors: seq[MappingAnchor]; row: int;
                         settings: SyncSettings = DefaultSyncSettings):
                         SyncDecision =

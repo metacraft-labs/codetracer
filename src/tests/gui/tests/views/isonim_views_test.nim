@@ -7628,7 +7628,17 @@ suite "IsoNim Low Level Code Panel — structure":
 
       dispose()
 
-  test "header overlay is empty when no address / error is set":
+  test "header carries no address / error overlay, but always the sync toggle":
+    ## THIS ASSERTION CHANGED, AND THE CHANGE IS THE POINT.
+    ##
+    ## It read `headerContainer.children.len == 0`. The header is no longer
+    ## ever empty: `Generated-Code-Listing.md` §3 requires synchronisation to be
+    ## "a toggle, defaulting to on, and unlocking a deliberate act with a
+    ## VISIBLE STATE", and §0a.2 recorded that nothing rendered it. A control
+    ## whose visible state appears only once it is wrong has no visible state.
+    ##
+    ## So the count is not merely relaxed — it is replaced by the two claims it
+    ## was standing for (no error div, no address div) plus the new one.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createLowLevelCodeVM(store)
@@ -7638,7 +7648,13 @@ suite "IsoNim Low Level Code Panel — structure":
 
       let headerContainer = findByClass(panel, "low-level-code-header")
       check headerContainer != nil
-      check headerContainer.children.len == 0
+      # The two overlays this case was written about are still absent.
+      check findByClassOrNil(headerContainer, "low-level-code-error") == nil
+      check findByClassOrNil(headerContainer, "low-level-code-address") == nil
+      # And the toggle is present, and reads its default-on state.
+      let toggle = findByClass(headerContainer, "low-level-code-sync")
+      check toggle != nil
+      check toggle.textContent == "sync on"
 
       dispose()
 

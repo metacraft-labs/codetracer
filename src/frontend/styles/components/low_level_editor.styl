@@ -236,7 +236,10 @@
 
 .low-level-code-instruction
   display: grid
-  grid-template-columns: 5em 6em 18em 14em 1fr
+  // Seven columns, not five: the fidelity badge and the executed count are
+  // per-row facts (Generated-Code-Listing.md §4, §2) and a listing whose rows
+  // all look alike cannot show that its middle is exact and its tail unmapped.
+  grid-template-columns: 5em 6em 18em 14em 7em auto 1fr
   min-height: 1.55em
   line-height: 1.55em
   padding: 0 0.5em
@@ -258,3 +261,73 @@
 
 .low-level-code-instruction-source
   opacity: 0.65
+
+// The fidelity ladder, coloured by CLAIM STRENGTH rather than by good/bad.
+// `unmapped` is not an error state — it is an honest "nothing is known here" —
+// so it is muted rather than red, which would tell a developer to go and fix
+// something that is not broken.
+.low-level-code-instruction-fidelity
+  font-size: 0.85em
+  opacity: 0.8
+  text-align: right
+  padding-right: 0.75em
+
+  &.fidelity-exact
+    color: colors-ui-text-primary-body
+    opacity: 0.55
+  &.fidelity-coarse
+    color: colors-ui-text-primary-body
+    opacity: 0.7
+  &.fidelity-merged
+    color: colors-ui-text-primary-body
+    opacity: 0.7
+  &.fidelity-compiler-generated
+    opacity: 0.45
+    font-style: italic
+  &.fidelity-unmapped
+    opacity: 0.4
+    font-style: italic
+
+// `×1024` vs `≈×1024`. The two must not be confusable at a glance, because the
+// pane's whole argument is that its numbers are facts about the run — so the
+// approximate form is not merely prefixed, it is dimmed and italic as well.
+.low-level-code-instruction-count
+  padding-right: 0.75em
+  text-align: right
+  font-variant-numeric: tabular-nums
+
+// §3's toggle, and §9.4's requirement that its state be visible BEFORE it is
+// surprising. It is drawn on both settings, not only when off.
+.low-level-code-sync
+  display: inline-block
+  cursor: pointer
+  user-select: none
+  font-size: 0.85em
+  padding: 0.1em 0.55em
+  margin-right: 0.6em
+  border: 1px solid colors-ui-border-secondary
+  border-radius: 3px
+
+  &.sync-on
+    opacity: 0.9
+  &.sync-off
+    opacity: 0.55
+    font-style: italic
+
+// Three causes, three appearances. §4: a suspension the user cannot see is
+// indistinguishable from drift — and "you turned it off", "the mapping ran
+// out" and "the producer's mapping was refused" are three different things.
+.low-level-code-notice
+  display: inline-block
+  font-size: 0.85em
+
+  &.hidden
+    display: none
+  &.notice-disabled
+    opacity: 0.55
+  &.notice-suspended
+    opacity: 0.75
+  &.notice-refused
+    color: colors-ui-text-primary-body
+    opacity: 0.9
+    font-weight: 600

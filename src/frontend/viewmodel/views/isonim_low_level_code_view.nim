@@ -88,6 +88,67 @@ proc sourceCrossRef*(instr: LowLevelInstruction): string =
   else:
     instr.highLevelPath & ":" & $instr.highLevelLine
 
+# ---------------------------------------------------------------------------
+# Anchoring, rendered.
+#
+# `Generated-Code-Listing.md` GCL-F1 recorded the defect these exist to fix: the
+# anchoring model was complete and correct, with 336 counted assertions behind
+# it, and NOTHING IN THIS FILE READ ANY OF IT. A grep for `anchors`,
+# `syncSettings`, `fidelityAtRow`, `countLabel` and eight siblings across `src/`
+# returned only the two unit suites. A capability that is present, correct and
+# unreachable is indistinguishable from one that was never built.
+# ---------------------------------------------------------------------------
+
+proc fidelityClass*(f: MappingFidelity): string =
+  ## Per-row badge class. §4's table is a claim about each row, so it is
+  ## rendered per row rather than summarised — a listing whose rows all look
+  ## alike cannot show that its middle is exact and its tail is unmapped.
+  "low-level-code-instruction-fidelity fidelity-" & label(f).replace(" ", "-")
+
+proc syncToggleLabel*(enabled: bool): string =
+  ## §3: "unlocking is a deliberate act with a visible state". This IS the
+  ## visible state.
+  if enabled: "sync on" else: "sync off"
+
+proc syncToggleClass*(enabled: bool): string =
+  "low-level-code-sync " & (if enabled: "sync-on" else: "sync-off")
+
+proc mappingNotice*(vm: LowLevelCodeVM): string =
+  ## The one line that says why synchronisation is not going to align, or "" if
+  ## nothing is wrong.
+  ##
+  ## THE THREE CASES ARE DELIBERATELY NOT COLLAPSED. `soDisabled` and
+  ## `soSuspended` are distinct outcomes in the model precisely because "you
+  ## turned it off" and "the mapping ran out here" are different things to show,
+  ## and a REFUSED mapping is a third: `anchorsRejected` is not `not hasAnchors`,
+  ## because an artefact with no debug info and a producer whose output was
+  ## rejected both leave the anchor list empty and must not look the same.
+  if not vm.syncSettings.val.enabled:
+    return "synchronisation is off"
+  if vm.anchorsRejected.val:
+    let defects = vm.anchorDefects.val
+    return "the mapping for this artefact was refused (" & $defects.len &
+      (if defects.len == 1: " defect); " else: " defects); ") &
+      "synchronisation suspended"
+  if not vm.hasAnchors.val and vm.instructions.val.len > 0:
+    return "no source mapping for this artefact; synchronisation suspended"
+  ""
+
+proc noticeClass*(vm: LowLevelCodeVM): string =
+  ## The class differs with the CAUSE, not merely with presence, so a
+  ## screenshot can tell the three apart and so can a test.
+  if not vm.syncSettings.val.enabled:
+    "low-level-code-notice notice-disabled"
+  elif vm.anchorsRejected.val:
+    "low-level-code-notice notice-refused"
+  elif not vm.hasAnchors.val and vm.instructions.val.len > 0:
+    "low-level-code-notice notice-suspended"
+  else:
+    "low-level-code-notice hidden"
+
+proc onSyncToggle(vm: LowLevelCodeVM): proc() =
+  result = proc() = vm.setSyncEnabled(not vm.syncSettings.val.enabled)
+
 proc onInstructionClick(vm: LowLevelCodeVM;
                          instr: LowLevelInstruction): proc() =
   ## Closure factory so each row captures its own
@@ -103,12 +164,15 @@ proc onInstructionClick(vm: LowLevelCodeVM;
 
 proc renderInstructionRowMock(r: MockRenderer; vm: LowLevelCodeVM;
                               instr: LowLevelInstruction;
-                              active: bool; noir: bool): MockNode =
+                              active: bool; noir: bool;
+                              fidelity: MappingFidelity;
+                              count: ExecutedCount): MockNode =
   ## One asm-listing row.  Carries the offset / name / args / other
   ## column spans plus an optional source-cross-reference span.
   ## Click handler maps to ``vm.jumpToInstruction``.
   let onClick = onInstructionClick(vm, instr)
   let crossRef = sourceCrossRef(instr)
+  let countText = countLabel(count)
   let row = ui(r):
     tdiv(class = rowClass(active), onclick = onClick):
       span(class = "low-level-code-instruction-offset"):
@@ -119,11 +183,21 @@ proc renderInstructionRowMock(r: MockRenderer; vm: LowLevelCodeVM;
         text instr.args
       span(class = "low-level-code-instruction-other"):
         text instr.other
+      span(class = fidelityClass(fidelity)):
+        text label(fidelity)
   if crossRef.len > 0:
     let crossSpan = ui(r):
       span(class = "low-level-code-instruction-source"):
         text crossRef
     r.appendChild(row, crossSpan)
+  # NO COUNT COLUMN FOR `cpNone`, and that is the rule rather than an
+  # optimisation: `countLabel` returns "" there, and a rendered `0` would read
+  # as "never ran" — a measurement the pane did not make. See GCL-D3.
+  if countText.len > 0:
+    let countSpan = ui(r):
+      span(class = "low-level-code-instruction-count"):
+        text countText
+    r.appendChild(row, countSpan)
   row
 
 proc renderLowLevelCodePanel*(r: MockRenderer;
@@ -148,12 +222,15 @@ proc renderLowLevelCodePanel*(r: MockRenderer;
       tdiv(ref = listContainer, class = "low-level-code-instructions"):
         discard
 
-  # Header overlays (error + address) — rebuilt whenever either
-  # signal changes.  Both signals are read inside the effect so the
-  # subscription edge is established for both.
+  # Header overlays (error + address + sync state + mapping notice) — rebuilt
+  # whenever any of them change.  Every signal is read inside the effect so the
+  # subscription edge is established for all of them.
   createRenderEffect proc() =
     let err = vm.errorMessage.val
     let addrVal = vm.address.val
+    let syncOn = vm.syncSettings.val.enabled
+    let notice = mappingNotice(vm)
+    let noticeCls = noticeClass(vm)
     r.clearChildren(headerContainer)
     if err.len > 0:
       let errDiv = ui(r):
@@ -165,6 +242,14 @@ proc renderLowLevelCodePanel*(r: MockRenderer;
         tdiv(class = "low-level-code-address"):
           text addressText(addrVal)
       r.appendChild(headerContainer, addrDiv)
+    let toggle = ui(r):
+      tdiv(class = syncToggleClass(syncOn), onclick = onSyncToggle(vm)):
+        text syncToggleLabel(syncOn)
+    r.appendChild(headerContainer, toggle)
+    let noticeDiv = ui(r):
+      tdiv(class = noticeCls):
+        text notice
+    r.appendChild(headerContainer, noticeDiv)
 
   # Instruction list — rebuilt whenever any of the row-affecting
   # signals change.
@@ -172,10 +257,21 @@ proc renderLowLevelCodePanel*(r: MockRenderer;
     let instructions = vm.instructions.val
     let activeOffset = vm.activeOffset.val
     let noir = vm.noirProject.val
+    let anchors = vm.anchors.val
     r.clearChildren(listContainer)
-    for instr in instructions:
+    for i, instr in instructions:
       let active = isActiveRow(instr, activeOffset)
-      let row = renderInstructionRowMock(r, vm, instr, active, noir)
+      # ROW INDEX, not offset. Anchors are ranges of generated-row indices, and
+      # `Generated-Code-Listing.md` GCL-D6 makes `row index == opcode index` an
+      # invariant of this pane — using the offset here would be off by whatever
+      # the artefact's first offset happens to be.
+      let fidelity = vm.fidelityAtRow(i)
+      var count = ExecutedCount(value: 0, provenance: cpNone)
+      let idx = anchorIndexAtRow(anchors, i)
+      if idx != NoAnchor:
+        count = anchors[idx].count
+      let row = renderInstructionRowMock(r, vm, instr, active, noir,
+                                         fidelity, count)
       r.appendChild(listContainer, row)
 
   panel
@@ -208,10 +304,16 @@ when defined(js):
 
   proc renderInstructionRowWeb(vm: LowLevelCodeVM;
                                instr: LowLevelInstruction;
-                               active: bool; noir: bool): isonim_dom.Element =
+                               active: bool; noir: bool;
+                               fidelity: MappingFidelity;
+                               count: ExecutedCount): isonim_dom.Element =
     ## Build an asm-listing row in the real DOM.  Same shape as the
     ## Mock variant; click handler is wired imperatively via
     ## ``addEventListener``.
+    ##
+    ## PARITY WITH THE MOCK ARM IS THE POINT. A mock-only assertion is green
+    ## over a surface nobody sees (`Verification-Harness-Traps.md` trap 3), so
+    ## every span the mock arm emits is emitted here too, with the same classes.
     let row = createWebElement("div", rowClass(active))
 
     let offsetSpan = createWebTextElement("span", formatOffset(instr, noir),
@@ -230,11 +332,21 @@ when defined(js):
                                           "low-level-code-instruction-other")
     isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(otherSpan))
 
+    let fidelitySpan = createWebTextElement("span", label(fidelity),
+                                            fidelityClass(fidelity))
+    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(fidelitySpan))
+
     let crossRef = sourceCrossRef(instr)
     if crossRef.len > 0:
       let crossSpan = createWebTextElement("span", crossRef,
                                             "low-level-code-instruction-source")
       isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(crossSpan))
+
+    let countText = countLabel(count)
+    if countText.len > 0:
+      let countSpan = createWebTextElement("span", countText,
+                                           "low-level-code-instruction-count")
+      isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(countSpan))
 
     let handler = onInstructionClick(vm, instr)
     isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
@@ -257,6 +369,9 @@ when defined(js):
     createRenderEffect proc() =
       let err = vm.errorMessage.val
       let addrVal = vm.address.val
+      let syncOn = vm.syncSettings.val.enabled
+      let notice = mappingNotice(vm)
+      let noticeCls = noticeClass(vm)
       clearWebChildren(headerContainer)
       if err.len > 0:
         let errDiv = createWebTextElement("div", err,
@@ -269,14 +384,33 @@ when defined(js):
         isonim_dom.appendChild(isonim_dom.Node(headerContainer),
                                isonim_dom.Node(addrDiv))
 
+      let toggle = createWebTextElement("div", syncToggleLabel(syncOn),
+                                        syncToggleClass(syncOn))
+      let toggleHandler = onSyncToggle(vm)
+      isonim_dom.addEventListener(isonim_dom.Node(toggle), cstring"click",
+                                  proc(ev: isonim_dom.Event) = toggleHandler())
+      isonim_dom.appendChild(isonim_dom.Node(headerContainer),
+                             isonim_dom.Node(toggle))
+
+      let noticeDiv = createWebTextElement("div", notice, noticeCls)
+      isonim_dom.appendChild(isonim_dom.Node(headerContainer),
+                             isonim_dom.Node(noticeDiv))
+
     createRenderEffect proc() =
       let instructions = vm.instructions.val
       let activeOffset = vm.activeOffset.val
       let noir = vm.noirProject.val
+      let anchors = vm.anchors.val
       clearWebChildren(listContainer)
-      for instr in instructions:
+      for i, instr in instructions:
         let active = isActiveRow(instr, activeOffset)
-        let row = renderInstructionRowWeb(vm, instr, active, noir)
+        let fidelity = vm.fidelityAtRow(i)
+        var count = ExecutedCount(value: 0, provenance: cpNone)
+        let idx = anchorIndexAtRow(anchors, i)
+        if idx != NoAnchor:
+          count = anchors[idx].count
+        let row = renderInstructionRowWeb(vm, instr, active, noir,
+                                          fidelity, count)
         isonim_dom.appendChild(isonim_dom.Node(listContainer),
                                isonim_dom.Node(row))
 
