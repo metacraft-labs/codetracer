@@ -53,6 +53,21 @@ proc shortcut*(shortcut: string): int =
 
     result = result or button
 
+proc isMacPlatform*(): bool =
+  ## Whether Monaco's `KeyMod.CtrlCmd` means COMMAND on this machine.
+  ##
+  ## Read from the browser rather than from a `when defined(...)` because the
+  ## renderer is one bundle served to every platform — a compile-time answer
+  ## would be the BUILDER's operating system, which is not the visitor's.
+  when defined(js):
+    var mac: bool = false
+    {.emit: [mac, """ = /Mac|iPhone|iPad|iPod/.test(
+      (typeof navigator !== 'undefined' &&
+       (navigator.platform || navigator.userAgent)) || '');"""].}
+    mac
+  else:
+    false
+
 proc delegateShortcut*(
   editor: EditorViewComponent,
   shortcutText: cstring,
@@ -68,6 +83,44 @@ proc delegateShortcut*(
     let test = if shortcutText == cstring"Enter": cstring"readOnly" else: cstring""
 
     monacoEditor.addCommand(shortcutCode, proc = command(monacoEditor, editor))
+
+    # THE LITERAL CONTROL KEY ON macOS, and the reason a `CTRL+…` chord
+    # otherwise does nothing in the editor on a Mac.
+    #
+    # `shortcut()` above maps `CTRL` to `KeyMod.CtrlCmd`, and Monaco defines
+    # that as COMMAND on macOS and Control everywhere else. So the command
+    # registered on the line above answers Cmd+B on a Mac and Ctrl+B on Linux
+    # and Windows — while `default_config.yaml`, the menus and the Mousetrap
+    # bind in `bindShortcut` all say CTRL, literally, on every platform.
+    #
+    # Measured on the assembled bundle, caret in `src/main.nr`, macOS: with
+    # `CTRL+B` whitelisted, `Control+b` produced NO delivery and `Meta+b`
+    # produced exactly one (`monaco handle CTRL+B build`, and the Noir build
+    # ran). So the chord worked and it was not the chord the product told the
+    # user to press — which is the same class of false claim as a binding that
+    # does not exist, and is how this arrived as a bug report.
+    #
+    # `KeyMod.WinCtrl` IS the literal Control key on macOS, so registering the
+    # same command under it gives the Mac both: Cmd+B, which is what a Mac user
+    # expects, and Ctrl+B, which is what the product says. Guarded to macOS
+    # because off it `WinCtrl` is the Windows/Meta key — a chord nothing here
+    # means and the OS often owns.
+    #
+    # It cannot double-deliver: Cmd+B and Ctrl+B are different key events, so
+    # one press raises one of them, and Mousetrap's `ctrl+b` never reaches the
+    # editor (the keydown does not survive to `document`'s bubble phase with
+    # the caret in Monaco). `ci/test/chord-and-pane-uniqueness.sh` measures
+    # exactly this over all 11 whitelisted chords in both focus contexts.
+    if isMacPlatform():
+      let KeyMod = monaco.KeyMod
+      let ctrlCmd = cast[int](KeyMod.CtrlCmd)
+      let winCtrl = cast[int](KeyMod.WinCtrl)
+      if ctrlCmd != 0 and winCtrl != 0 and (shortcutCode and ctrlCmd) != 0:
+        let literalCtrl = (shortcutCode and not ctrlCmd) or winCtrl
+        cdebug "shortcut: register mac literal-control variant " &
+          $shortcutText & " " & $literalCtrl
+        monacoEditor.addCommand(
+          literalCtrl, proc = command(monacoEditor, editor))
   else:
     cerror fmt"shortcut: can't generate a monaco editor shortcut for {shortcutText}"
 
