@@ -1007,6 +1007,94 @@ proc refreshLine(self: TraceComponent) =
   self.viewZone.heightInLines = self.viewZone.heightInLines
   layoutMonacoViewZone(self.monacoEditor, self.zoneId)
 
+# ---------------------------------------------------------------------------
+# The gutter's RUN-TEST lane
+#
+# WHY IT IS A HOVER OVERLAY AND NOT A LANE OF ITS OWN.
+#
+# `components/text_editor.styl`'s header lists the strip's lanes and each one's
+# owner, and every one of them is RESERVED on every line of every file — the
+# widths are subtracted from `.gutter-line` unconditionally, because a lane that
+# appeared only on some lines would make the line numbers jitter as a reader
+# scrolled. A run control declared that way would cost ~1.1em of gutter on every
+# file in the product, in every language, for a control that exists on the few
+# lines carrying a `#[test]`.
+#
+# So it takes no lane. It sits in the POINTER lane — the leftmost, whose only
+# occupant is the current-line arrow, which is on exactly one line — and it is
+# invisible until the pointer is over that row. Nothing moves, nothing is
+# reserved, and it is nowhere near the marker lane the breakpoint and tracepoint
+# share or the folding lane Monaco owns.
+#
+# THE CLICK IS ROUTED BEFORE THE BREAKPOINT SWEEP. `ui/editor.nim`'s gutter
+# `click` listener ends with `if ($element).contains("gutter")` -> toggle a
+# breakpoint, and `gutter-runtest` contains "gutter", so without an explicit
+# earlier arm clicking Run would set a breakpoint instead. That arm is the whole
+# reason the marker lanes were given disjoint hit areas first: a strip where two
+# controls answer one point cannot gain a third.
+#
+# `onmousedown='event.stopPropagation()'` for the reason `editorLineNumber`'s
+# own doc block measures: without it Monaco selects the line on press and the
+# click never reaches us.
+# ---------------------------------------------------------------------------
+
+var gutterTestLinesProvider*: proc(path: cstring): seq[int]
+  ## Which lines of `path` declare a test, from the project's CATALOG.
+  ##
+  ## A `var` in THIS module rather than in `ui/editor.nim` because
+  ## `editorLineNumber` is here and it is the thing that has to ask. `ui_js`
+  ## installs it; `editor.nim` reads it too, so there is one answer and not two.
+
+var gutterTestLines*: JsAssoc[cstring, seq[int]] =
+  JsAssoc[cstring, seq[int]]{}
+  ## A CACHE of what the provider said, keyed by the editor's own path.
+  ##
+  ## Filled lazily, on the first repaint after a provider exists, and never
+  ## while one does not — which is what makes the gutter self-healing rather
+  ## than order-dependent. THAT MATTERS BECAUSE THE ORDERING IS GENUINELY
+  ## UNSPECIFIED: a file can open before the test catalog arrives or after it,
+  ## the hooks can be installed before the catalog is delivered or after, and
+  ## the template path takes the unlucky branch of both. An eagerly-filled map
+  ## would be empty in those cases and nothing would refill it, because
+  ## `addTestActions` is not called again for a file already open.
+  ##
+  ## Caching only when a provider exists is the load-bearing half. Caching an
+  ## empty answer from a nil provider would freeze the unlucky ordering in
+  ## place, which is the defect this replaces rather than a smaller version of
+  ## it.
+
+var gutterRunningTest*: JsAssoc[cstring, int] = JsAssoc[cstring, int]{}
+  ## Which line, per path, has a run in flight.
+  ##
+  ## The gutter is re-rendered wholesale by Monaco whenever
+  ## `updateLineNumbersOnly` runs, so a spinner held in the DOM would be wiped
+  ## by the next repaint. The running state therefore lives HERE, where the
+  ## renderer can read it, and a repaint is how it becomes visible.
+
+proc invalidateGutterTestLines*(path: cstring) =
+  ## Forget what the provider said about `path`, so the next repaint asks again.
+  ## Called when the catalog changes.
+  if gutterTestLines.hasKey(path):
+    gutterTestLines.del(path)
+
+proc gutterTestLinesFor*(path: cstring): seq[int] =
+  ## The provider's answer, cached. Empty — and NOT cached — when no provider
+  ## is installed; see `gutterTestLines`.
+  ##
+  ## A `seq[int]` and not a set keyed by line, deliberately: under `nim js` a
+  ## `JsAssoc[int, _]`'s keys come back as JavaScript strings, so iterating one
+  ## to rebuild the list is a coercion this does not need to think about. A file
+  ## has a handful of tests, so the linear search below costs nothing.
+  if gutterTestLines.hasKey(path):
+    return gutterTestLines[path]
+  if gutterTestLinesProvider.isNil:
+    return @[]
+  result = gutterTestLinesProvider(path)
+  gutterTestLines[path] = result
+
+proc gutterHasTest(path: cstring; line: int): bool =
+  line in gutterTestLinesFor(path)
+
 proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDeleteChunk: bool = false, lineNumber: int = NO_LINE): cstring =
   ## The custom gutter, as HTML handed to Monaco's `lineNumbers` callback.
   ##
@@ -1075,12 +1163,29 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
     else:
       breakpointHtml = cstring"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
 
+  var runTestHtml = cstring""
+  if not isDeleteChunk and gutterHasTest(path, realLine):
+    let running =
+      gutterRunningTest.hasKey(path) and gutterRunningTest[path] == realLine
+    let runClass =
+      if running: cstring"gutter-runtest running" else: cstring"gutter-runtest"
+    let runTitle =
+      if running: cstring"Running this test" else: cstring"Run this test"
+    runTestHtml =
+      cstring"<div class='" & runClass & cstring"' data-runtest-line='" &
+      toCString(realLine) & cstring"' title='" & runTitle &
+      cstring"' onmousedown='event.stopPropagation()'></div>"
+
   let trueLineNumber = if not isDeleteChunk: toCString(realLine) else: toCString(line + lineNumber - 1)
   let lineHtml = cstring"<div class='gutter-line' onmousedown='event.stopPropagation()'>" & trueLineNumber & cstring"</div>"
   let diffHtml = cstring"<div class='diff-line' onmousedown='event.stopPropagation()'>" & cstring"</div>"
   let klass = if isDeleteChunk: cstring"diff-deleted-gutter" elif line in self.diffAddedLines: cstring"diff-added-gutter" else: cstring""
 
-  result = cstring"<div class='gutter " & klass & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & highlightHtml & lineHtml & diffHtml & tracepointHtml & breakpointHtml & cstring"</div>"
+  # The run slot goes in FIRST, before the highlight, so its `z-index` contest
+  # with the current-line arrow is decided by the stylesheet rather than by
+  # document order — and so a reader of this line sees the lane order the
+  # stylesheet's header describes, left to right.
+  result = cstring"<div class='gutter " & klass & "' data-line=" & trueLineNumber & cstring" onmousedown='event.stopPropagation()'>" & runTestHtml & highlightHtml & lineHtml & diffHtml & tracepointHtml & breakpointHtml & cstring"</div>"
 
 proc updateLineNumbersOnly*(self: EditorViewComponent) =
   let editorInstance = self.monacoEditor

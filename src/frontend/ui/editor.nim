@@ -2190,15 +2190,18 @@ proc isPythonTestLine(lineContent: string): bool =
 # both.
 # ---------------------------------------------------------------------------
 
-var editorTestLinesHook*: proc(path: cstring): seq[int]
-  ## Which lines of `path` declare a test, from the project's real CATALOG.
-  ##
-  ## Nil falls back to the text scan in `addTestActions`, which is what the
-  ## desktop still uses. The two are not equivalent and the catalog is the
-  ## better one: the scan matches `lineStr.strip() == "#[test]"` exactly, so
-  ## `#[test(should_fail)]` and `#[test(should_fail_with = "…")]` get no button
-  ## at all — two of the bundled Noir template's five tests, which are
-  ## precisely the two whose behaviour is worth checking.
+# WHICH LINES DECLARE A TEST is `trace.gutterTestLinesProvider`, and it lives
+# there rather than here because `trace.editorLineNumber` is the thing that has
+# to ask on every repaint. `addTestActions` reads the same one through
+# `trace.gutterTestLinesFor`, so the gutter and the fallback widget cannot
+# disagree about which lines have tests.
+#
+# Nil falls back to the text scan in `addTestActions`, which is what the desktop
+# still uses. The two are not equivalent and the catalog is the better one: the
+# scan matches `lineStr.strip() == "#[test]"` exactly, so `#[test(should_fail)]`
+# and `#[test(should_fail_with = "…")]` get no control at all — two of the
+# bundled Noir template's five tests, and precisely the two whose behaviour is
+# worth checking.
 
 var editorTestSelectorHook*: proc(path: cstring; attrLine: int): cstring
   ## The RUNNER'S OWN NAME for the test declared at `attrLine` — the
@@ -2230,6 +2233,19 @@ var spinningTestEditors: seq[EditorViewComponent] = @[]
   ## describe the last one.
 
 proc restoreTestButton(self: EditorViewComponent; note: cstring) =
+  ## Take this editor out of the running state, however the run ended.
+  ##
+  ## TWO SURFACES, because the control moved and the old one has not been torn
+  ## out from under the desktop's Python/Rust flows: the GUTTER slot, whose
+  ## running state lives in `trace.gutterRunningTest` and becomes visible
+  ## through a repaint, and the legacy inline widget, whose state is a class on
+  ## a node. Both are cleared here so a settle cannot leave either spinning.
+  if trace.gutterRunningTest.hasKey(self.name):
+    trace.gutterRunningTest.del(self.name)
+    # A REPAINT IS HOW IT BECOMES VISIBLE. Monaco re-renders the gutter
+    # wholesale, so the running class is not a DOM edit that survives — it is
+    # read out of the map above on the next render.
+    self.updateLineNumbersOnly()
   if self.activeTestId.len == 0:
     return
   let el = cast[Element](jq("#" & self.activeTestId))
@@ -2280,6 +2296,41 @@ proc redrawActiveTestButton(self: EditorViewComponent) =
   el.classList.add(cstring"active-test-button")
   let testId = self.activeTestId
   discard setTimeout(proc() = loadAnimation(self, el, testId, 0, 0), 0)
+
+proc runTestFromGutter(self: EditorViewComponent; attrLine: int) =
+  ## The gutter slot was clicked. One place, so the gutter and the legacy inline
+  ## widget cannot start a run two different ways.
+  let selector =
+    if editorTestSelectorHook.isNil: cstring""
+    else: editorTestSelectorHook(self.name, attrLine)
+  if selector.len == 0:
+    self.api.errorMessage("Could not work out which test this is.")
+    return
+  if editorTestRunHook.isNil:
+    self.api.errorMessage("No host in this build can run the tests.")
+    return
+  # REFUSE BEFORE SHOWING A RUNNING STATE. A slot that starts spinning over a
+  # request nothing took is the defect this control is being repaired for.
+  let refusal = editorTestRunHook(self.name, selector, attrLine)
+  if refusal.len > 0:
+    self.api.errorMessage($refusal)
+    return
+  trace.gutterRunningTest[self.name] = attrLine
+  if spinningTestEditors.find(self) < 0:
+    spinningTestEditors.add(self)
+  self.updateLineNumbersOnly()
+  # THE DEADLINE APPLIES HERE TOO. `loadAnimation` carries it for the inline
+  # widget; this slot has no animation to hang a frame counter on, so the cap is
+  # a timeout. Without it a host that never settled would leave the slot
+  # spinning for the life of the tab — the exact state this control had.
+  discard setTimeout(proc() =
+    if trace.gutterRunningTest.hasKey(self.name) and
+       trace.gutterRunningTest[self.name] == attrLine:
+      self.restoreTestButton(cstring"")
+      self.api.errorMessage(
+        "The test run did not answer within two minutes. Nothing about the " &
+        "test has been established."), editorTestRunFrames * 300)
+  self.api.infoMessage(&"\"{selector}\" started")
 
 proc makeTestAction(self: EditorViewComponent, line: int, isPythonTest: bool = false): Node =
   # For Python tests, the function name is on the same line (line)
@@ -2356,28 +2407,59 @@ proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
     loopStepCounts: JsAssoc[int, seq[int]]{}
   )
 
-proc addTestActions(self: EditorViewComponent) =
+proc addTestActions*(self: EditorViewComponent) =
   # Determine if this is a Python file
   let lang = fromPath(self.name)
   let isPythonFile = lang == LangPythonDb
 
-  # THE CATALOG FIRST, when a host has one. See `editorTestLinesHook`: the text
+  # THE CATALOG FIRST, when a host has one. See `trace.gutterTestLinesProvider`:
+  # the text
   # scan below cannot see `#[test(should_fail)]`, so on the bundled Noir
   # template it puts a Run button on three of the five tests and none on the
   # two whose behaviour is the most interesting.
-  var catalogLines: seq[int] = @[]
-  var haveCatalog = false
-  if not editorTestLinesHook.isNil:
-    catalogLines = editorTestLinesHook(self.name)
-    haveCatalog = catalogLines.len > 0
+  let catalogLines = trace.gutterTestLinesFor(self.name)
+  let haveCatalog = catalogLines.len > 0
+
+  # THE GUTTER GETS THE LINES, and this is what moves the control off the end
+  # of the source line and into the strip a reader already looks at for
+  # per-line actions. `trace.editorLineNumber` reads this map; a repaint is
+  # what makes the slots appear.
+  if haveCatalog:
+    # `gutterTestLinesFor` has already cached the answer the gutter renders
+    # from; nothing to publish here.
+    #
+    # AND ANY INLINE WIDGET FROM AN EARLIER PASS GOES. This proc can run twice
+    # for one file — once when it opened, and again when the catalog arrived
+    # (`refreshEditorTestControls`) — and the first pass may well have taken
+    # the fallback branch and painted inline widgets. Leaving them would put a
+    # control in the gutter AND one at the end of the source line for the same
+    # test, which is two affordances for one action and a reader having to
+    # decide which is real.
+    #
+    # Not `clearTest`, which is declared below this proc; the same three lines,
+    # here, rather than reordering a file this size.
+    for testLine in self.testLines:
+      if not testLine.contentWidget.isNil:
+        self.monacoEditor.removeContentWidget(testLine.contentWidget.toJs)
+        testLine.contentWidget = nil
+    self.testDom = JsAssoc[int, Node]{}
+
+    self.updateLineNumbersOnly()
 
   for i, line in self.tabInfo.sourceLines:
     let rLine = i + 1
     let lineStr = $line
 
     # Check for Rust tests (#[test] attribute)
+    #
+    # THE INLINE WIDGET IS THE FALLBACK NOW, not the control. When a host
+    # supplied a catalog the gutter carries the run control, and painting a
+    # second one at the end of the source line would be two affordances for one
+    # action — the reader has to decide which is real. Without a catalog (the
+    # desktop's Python and Rust flows, which have no `ct test` provider wired
+    # into this renderer) the inline widget is still the only one there is.
     let isRustTest =
-      if haveCatalog: rLine in catalogLines
+      if haveCatalog: false
       else: lineStr.strip() == "#[test]" and not isPythonFile
     # Check for Python tests (def test_* or async def test_*)
     let isPythonTest = isPythonFile and isPythonTestLine(lineStr)
@@ -2394,6 +2476,35 @@ proc addTestActions(self: EditorViewComponent) =
 
       testContainer.appendChild(testNode)
       parentContainer.appendChild(testContainer)
+
+proc refreshEditorTestControls*(data: Data) =
+  ## Re-derive every open editor's run-test controls from the CATALOG.
+  ##
+  ## WHY THIS HAS TO EXIST, and it is an ordering fact rather than a nicety.
+  ## `addTestActions` runs when a file is opened; the project's test catalog
+  ## arrives separately, on `CODETRACER::ns9-panes-catalog`. Nothing sequences
+  ## the two. An editor that opened first read an EMPTY catalog, took the
+  ## fallback branch, and painted the legacy inline widget — so the gutter had
+  ## no run controls at all, and nothing would ever have re-derived them
+  ## because `addTestActions` is not called again for a file already open.
+  ##
+  ## `onNs9PanesCatalog` calls this after `setCatalog`, which is the moment the
+  ## answer changes. Idempotent by construction: it rebuilds the line map from
+  ## the catalog rather than adding to it.
+  if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+    return
+  for editorId, editor in data.ui.editors:
+    if editor.isNil or editor.monacoEditor.isNil:
+      continue
+    try:
+      # FORGET FIRST. The cache holds what the provider said last time, and
+      # this proc is called precisely because that answer has changed.
+      trace.invalidateGutterTestLines(editor.name)
+      editor.addTestActions()
+    except CatchableError:
+      cerror "refreshEditorTestControls: " & getCurrentExceptionMsg()
+    except:
+      cerror "refreshEditorTestControls: a non-Nim value was raised"
 
 proc clearTest(self: EditorViewComponent) =
   for testLine in self.testLines:
@@ -2896,6 +3007,20 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
 
   document.querySelector(selector).addEventListener(cstring"click", proc(ev: Event) =
     ev.stopPropagation()
+    # THE RUN SLOT IS ROUTED FIRST, and the order is the whole of the guard.
+    # `gutter-runtest` contains "gutter", so the sweep at the bottom of this
+    # loop would toggle a breakpoint on it — one point answering two controls,
+    # which is exactly what the marker lanes were given disjoint hit areas to
+    # stop. Read from the attribute rather than from the class, because the line
+    # is what the handler needs and the class does not carry it.
+    let runAttr =
+      cast[Element](ev.target).getAttribute(cstring"data-runtest-line")
+    if not runAttr.isNil and runAttr.len > 0:
+      try:
+        self.runTestFromGutter(parseInt($runAttr))
+      except CatchableError:
+        self.api.errorMessage("This line's run control names no line.")
+      return
     for element in cast[seq[cstring]](ev.toJs.target.classList):
       if element == cstring"gutter-line" or element == cstring"gutter-breakpoint":
         self.lineActionClick(tabInfo, ev.target.toJs)

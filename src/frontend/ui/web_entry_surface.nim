@@ -666,10 +666,26 @@ proc installTemplatePaneHost*(tmpl: ProjectTemplate) =
   ## Registered BEFORE the `no-trace` delivery, because that delivery is what
   ## ends up sending the request — a responder installed afterwards would be
   ## installed after the question.
+  ##
+  ## IT DOES NOT CAPTURE `tmpl`, and that is the whole reason the message can be
+  ## asked twice. `installNoirBuildCommands` had exactly this defect and its
+  ## comment records the fix: a copy of a value type, frozen at install time,
+  ## read by every later call. A responder that closed over `tmpl` would answer
+  ## the BUNDLED sources for the rest of the session — so a user who wrote a
+  ## new `#[test]` and saved would get the original catalog back, and the pane
+  ## and the gutter would both quietly refuse to notice what they had just
+  ## written. `currentProject()` is what the editor last saved.
+  ##
+  ## The parameter stays because the constraint half genuinely is about the
+  ## bundled template: `noirTemplateNargoInfoJson` is a compile-time constant
+  ## measured against those sources, and re-deriving it for edited ones is not
+  ## something a browser can do (there is no `nargo info` in the wasm module).
+  ## So the two halves answer about different things ON PURPOSE, and the
+  ## constraint pane's provenance string says which.
   data.ipc.respond(cstring"CODETRACER::ns9-panes",
     proc(sender: js, payload: JsObject) =
       data.ipc.deliver(cstring"CODETRACER::ns9-panes-catalog", js{
-        catalog: cstring(pretty(templateTestCatalog(tmpl).toJson())),
+        catalog: cstring(pretty(templateTestCatalog(currentProject()).toJson())),
         # ASKED, NOT ASSERTED. "" on a deployment that placed the Noir
         # compiler module, and `degradedBehaviour`'s own sentence on one that
         # did not — see `noirTestRunAbsence`.

@@ -280,6 +280,37 @@ try {
       // enabled state are both read, because a ▶ that is painted but
       // permanently disabled is the dead affordance the absence line existed
       // to avoid — and the two are indistinguishable in a screenshot.
+      // THE EDITOR'S RUN-TEST CONTROL, IN THE GUTTER. Read as the LINES it
+      // sits on, not as a count: the bundled `src/main.nr` declares two tests,
+      // at lines 13 (`#[test]`) and 18 (`#[test(should_fail)]`), and the second
+      // is the one the text scan this replaced could not see — it matched
+      // `lineStr.strip() == "#[test]"` exactly. A count of 1 and a count of 2
+      // are the before and after of that defect, and only the LINES say which
+      // of the two is missing.
+      gutterRunSlots: Array.from(document.querySelectorAll('.gutter-runtest'))
+        .map((e) => e.getAttribute('data-runtest-line'))
+        .filter((v) => v !== null)
+        .sort((a, b) => Number(a) - Number(b)),
+      // A control painted over the breakpoint's hit area is worse than none:
+      // the click would set a breakpoint. Measured as the two boxes, so the
+      // assertion is about GEOMETRY rather than about class names that happen
+      // to differ.
+      gutterRunSlotBoxes: Array.from(
+        document.querySelectorAll('.gutter-runtest')).map((e) => {
+          const r = e.getBoundingClientRect();
+          const row = e.closest('.gutter');
+          const marker = row
+            ? row.querySelector('[class*="gutter-breakpoint"], [class*="gutter-no-breakpoint"]')
+            : null;
+          const m = marker ? marker.getBoundingClientRect() : null;
+          return {
+            line: e.getAttribute('data-runtest-line'),
+            left: Math.round(r.left), right: Math.round(r.right),
+            width: Math.round(r.width),
+            markerLeft: m ? Math.round(m.left) : null,
+            overlapsMarker: m ? !(r.right <= m.left || r.left >= m.right) : null,
+          };
+        }),
       testRunButton: (() => {
         const btn = document.querySelector('.test-results-run-btn');
         if (!btn) return null;
