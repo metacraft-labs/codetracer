@@ -1,4 +1,46 @@
 /**
+ * !!! UNEXECUTED AS WRITTEN — THIS FILE HAS NEVER BEEN RUN. !!!
+ *
+ * Every other assertion in this change was executed and has recorded mutation
+ * arms (see `src/frontend/tests/debug_toolbar_tooltips_test.nim` and the
+ * "tooltips read the binding" suite in `isonim_views_test.nim`). THIS ONE HAS
+ * NOT. An unexecuted spec is not evidence — it is the same category as a
+ * mutation arm that never mutated, and the presence of a plausible-looking
+ * file is exactly the kind of thing that reads as coverage when it is not.
+ * Treat every claim below as UNVERIFIED until someone runs it and deletes this
+ * banner.
+ *
+ * WHY IT COULD NOT BE RUN, precisely, so the next reader does not repeat the
+ * attempt blind. `just test-gui` requires `build-once`, which failed in this
+ * workspace for three reasons, none of them related to this change and all of
+ * them reproduced deterministically on a second run:
+ *
+ *   1. `db-replay-server-cargo` dies with
+ *      `dyld: Symbol not found: _SSL_set_quic_tls_cbs`, referenced from
+ *      `ngtcp2-1.17.0` and expected in `openssl-3.4.3` — an ABI mismatch
+ *      inside the dev shell. Upstream of it, `nix` refused the flake with a
+ *      `narHash` mismatch on the `ethereum.nix` input, so direnv fell back to
+ *      a CACHED shell; the stale closure is the likely cause of the mismatch.
+ *   2. `docs-book` / `docs-book-assets` fail with
+ *      `cannot open file: docs_scaffold` (the `isonim-docs` nimble dependency
+ *      is not installed, though the sibling repo is present).
+ *   3. `codetracer-visual-replay/ct_gfx_player` is not built.
+ *
+ * No `src/build-debug` output is produced, so there is no app to drive.
+ *
+ * ALSO NOTE, for anyone running this from an agent worktree: `just test-gui`
+ * resolves sibling repos against the worktree's PARENT directory. A worktree
+ * under `.agent-wt/` fails the `runquota` check outright, and `runquota` has
+ * an empty override column in `scripts/require-siblings.sh` by design, so no
+ * environment variable papers over it. Run from a checkout that sits beside
+ * the sibling repos.
+ *
+ * TO RUN IT:
+ *   just storybook-build   # only needed for the sibling storybook spec
+ *   just test-gui tests/debug-controls/toolbar-tooltip-chords.spec.ts
+ *
+ * ---------------------------------------------------------------------------
+ *
  * The debug toolbar's tooltips, judged in a real browser.
  *
  * Spec: `codetracer-specs/BlockTracer/Debugger-Integration.md` §10.5 — "Every
