@@ -60,16 +60,6 @@ proc makeStoreWithMock(autoRespond: bool = true):
   let store = createReplayDataStore(mock.toBackendService())
   (store, mock)
 
-proc commandCount(mock: MockBackendService; command: string): int =
-  ## Local helper — count how many times ``command`` appears in the
-  ## mock's received-command log.  ``MockBackendService`` exposes
-  ## ``findCommand`` (returns the first match) but no count API; the
-  ## tests below need to assert "exactly one dispatch" so we provide
-  ## the count locally rather than mutating the upstream module.
-  for rc in mock.receivedCommands:
-    if rc.command == command:
-      inc result
-
 proc makeTrace(id: string; program: string;
                args: seq[string] = @[];
                date: string = "2026/05/02 12:00:00";
@@ -110,6 +100,36 @@ proc makeLaunchEntry(slug, label, language, program: string;
     program: program,
     enabled: enabled,
   )
+
+type HostRecorder = ref object
+  ## What the VM handed the HOST — which is where the welcome screen's four
+  ## main-process flows go.
+  ##
+  ## These used to be asserted through ``MockBackendService``, because the VM
+  ## dispatched ``ct/load-recent-trace`` / ``ct/load-recent-folder`` /
+  ## ``ct/launch-config`` / ``ct/new-record`` as DAP commands. No engine in
+  ## this repo implements any of the four (``backend/dap_dialect.md`` §7), and
+  ## in production this VM's backend is a stub that resolves ``{}`` for
+  ## everything — so those assertions were green while the flows reached
+  ## nothing at all. Asserting on the seam asserts what actually arrives at
+  ## the main process.
+  recentTraces: seq[string]
+  recentFolders: seq[string]
+  launches: seq[LaunchConfigRequest]
+  newRecords: seq[NewRecordRequest]
+
+proc installRecorder(vm: WelcomeScreenVM): HostRecorder =
+  ## Stand in for ``ui/welcome_screen.nim``'s ``installWelcomeVMCallbacks``.
+  let rec = HostRecorder()
+  vm.onLoadRecentTrace = proc(recordingId: string) =
+    rec.recentTraces.add(recordingId)
+  vm.onLoadRecentFolder = proc(folderPath: string) =
+    rec.recentFolders.add(folderPath)
+  vm.onLaunchConfig = proc(request: LaunchConfigRequest) =
+    rec.launches.add(request)
+  vm.onSubmitNewRecord = proc(request: NewRecordRequest) =
+    rec.newRecords.add(request)
+  rec
 
 # ---------------------------------------------------------------------------
 # WelcomeScreenVM defaults
@@ -303,27 +323,29 @@ suite "WelcomeScreenVM — welcome_screen":
     # spec's ``.welcome-screen-loading`` modifier becomes visible
     # synchronously.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       vm.loadRecentTrace("01949fcc-7d92-7e9c-aaaa-00000000002a")
       drain()
       check vm.loading.val == true
       check vm.loadingRecordingId.val == "01949fcc-7d92-7e9c-aaaa-00000000002a"
-      check mock.commandCount("ct/load-recent-trace") == 1
+      check host.recentTraces == @["01949fcc-7d92-7e9c-aaaa-00000000002a"]
       dispose()
 
   test "test_recent_trace_loading":
     # Verifies recent traces launch properly from welcome screen
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       let recId = "01949fcc-7d92-7e9c-aaaa-000000000088"
       vm.setRecentTraces(@[makeTrace(recId, "/usr/bin/python3", @["test.py"])])
       vm.loadRecentTrace(recId)
       drain()
       check vm.loading.val == true
       check vm.loadingRecordingId.val == recId
-      check mock.commandCount("ct/load-recent-trace") == 1
+      check host.recentTraces == @[recId]
       check store.session.val.debugSessionMode == completedReplay
       dispose()
 
@@ -387,14 +409,15 @@ suite "WelcomeScreenVM — edit_mode":
     # so the GUI does not race the IPC roundtrip.  The legacy bridge
     # transitioned in the main process; the VM mirrors it locally.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       vm.loadRecentFolder("/home/u/fib")
       drain()
       check vm.mode.val == wsmEdit
       check vm.editMode.val == true
       check vm.launchConfig.val.editFolderPath == "/home/u/fib"
-      check mock.commandCount("ct/load-recent-folder") == 1
+      check host.recentFolders == @["/home/u/fib"]
       dispose()
 
   test "setMode keeps editMode consistent for non-edit modes":
@@ -517,11 +540,12 @@ suite "WelcomeScreenVM — launch_config":
 
   test "launchSelectedConfig dispatches when a slug is selected":
     # Spec: "Recording Ruby: Fibonacci produces a trace" — clicking
-    # the entry triggers the launch flow.  The VM dispatches one
-    # ``ct/launch-config`` command on the backend.
+    # the entry triggers the launch flow.  The VM hands the host one
+    # resolved ``LaunchConfigRequest``.
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       vm.setLaunchConfigs(@[
         makeLaunchEntry("ruby-fibonacci", "Ruby: Fibonacci",
                         "ruby", "examples/ruby/fib.rb"),
@@ -530,13 +554,17 @@ suite "WelcomeScreenVM — launch_config":
       let dispatched = vm.launchSelectedConfig()
       drain()
       check dispatched == true
-      check mock.commandCount("ct/launch-config") == 1
+      check host.launches.len == 1
+      check host.launches[0].slug == "ruby-fibonacci"
+      # The slug→index translation the host IPC needs: sole entry, index 0.
+      check host.launches[0].configIndex == 0
       dispose()
 
   test "native launch configs enter live MCR mode when native backend is installed":
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       vm.setRecordBackendAvailability(RecordBackendAvailability(
         nativeBackendInstalled: true,
         hostPlatform: rhpLinux,
@@ -547,29 +575,30 @@ suite "WelcomeScreenVM — launch_config":
       vm.selectLaunchConfig("c-app")
       check vm.launchSelectedConfig()
       drain()
-      let cmd = mock.findCommand("ct/launch-config")
-      check cmd.isSome
-      if cmd.isSome:
-        check cmd.get.args["recordBackend"].getStr == "mcr"
-        check cmd.get.args["startsLive"].getBool == true
+      check host.launches.len == 1
+      check host.launches[0].recordBackend == "mcr"
+      check host.launches[0].startsLive == true
+      check host.launches[0].debugSessionMode == liveMcr
       check store.session.val.debugSessionMode == liveMcr
       dispose()
 
   test "loading a recent trace is replay mode only":
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       store.setSessionMode(liveMcr)
       vm.loadRecentTrace("018f25ea-3d65-7000-8000-000000000001")
       drain()
-      check mock.commandCount("ct/load-recent-trace") == 1
+      check host.recentTraces == @["018f25ea-3d65-7000-8000-000000000001"]
       check store.session.val.debugSessionMode == completedReplay
       dispose()
 
   test "launchSelectedConfig returns false with no selection":
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       vm.setLaunchConfigs(@[
         makeLaunchEntry("ruby-fibonacci", "Ruby: Fibonacci",
                         "ruby", "examples/ruby/fib.rb"),
@@ -577,7 +606,7 @@ suite "WelcomeScreenVM — launch_config":
       let dispatched = vm.launchSelectedConfig()
       drain()
       check dispatched == false
-      check mock.commandCount("ct/launch-config") == 0
+      check host.launches.len == 0
       dispose()
 
   test "launchSelectedConfig refuses disabled entries":
@@ -585,8 +614,9 @@ suite "WelcomeScreenVM — launch_config":
     # class is asserted on the parent.  A disabled entry must not
     # dispatch (the legacy view rendered it grayed out).
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       vm.setLaunchConfigs(@[
         makeLaunchEntry("python-fibonacci", "Python: Fibonacci",
                         "python", "examples/python/fib.py",
@@ -596,7 +626,7 @@ suite "WelcomeScreenVM — launch_config":
       let dispatched = vm.launchSelectedConfig()
       drain()
       check dispatched == false
-      check mock.commandCount("ct/launch-config") == 0
+      check host.launches.len == 0
       dispose()
 
   test "setEditFolderPath updates the launch-config without changing mode":
@@ -682,24 +712,28 @@ suite "WelcomeScreenVM — new_record_form":
 
   test "submitNewRecord refuses an invalid form":
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       let dispatched = vm.submitNewRecord()
       drain()
       check dispatched == false
-      check mock.commandCount("ct/new-record") == 0
+      check host.newRecords.len == 0
       dispose()
 
   test "submitNewRecord dispatches when valid":
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       vm.setRecordExecutable("/usr/bin/python3")
       vm.setRecordArgs(@["fib.py"])
       let dispatched = vm.submitNewRecord()
       drain()
       check dispatched == true
-      check mock.commandCount("ct/new-record") == 1
+      check host.newRecords.len == 1
+      check host.newRecords[0].executable == "/usr/bin/python3"
+      check host.newRecords[0].args == @["fib.py"]
       dispose()
 
   test "native backend choices are shown only when native backend is installed":
@@ -728,8 +762,9 @@ suite "WelcomeScreenVM — new_record_form":
 
   test "RR and TTD native choices record replay-only sessions":
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
       vm.setRecordExecutable("/tmp/main.rs")
       vm.setRecordBackendAvailability(RecordBackendAvailability(
         nativeBackendInstalled: true,
@@ -743,11 +778,9 @@ suite "WelcomeScreenVM — new_record_form":
       check vm.newRecordSessionMode.val == completedReplay
       check vm.submitNewRecord()
       drain()
-      let cmd = mock.findCommand("ct/new-record")
-      check cmd.isSome
-      if cmd.isSome:
-        check cmd.get.args["recordBackend"].getStr == "ttd"
-        check cmd.get.args["startsLive"].getBool == false
+      check host.newRecords.len == 1
+      check host.newRecords[0].recordBackend == "ttd"
+      check host.newRecords[0].startsLive == false
       check store.session.val.debugSessionMode == completedReplay
       dispose()
 
@@ -767,30 +800,28 @@ suite "WelcomeScreenVM — new_record_form":
 
   test "materialized recorders start live except blockchain-style recorders":
     createRoot proc(dispose: proc()) =
-      let (store, mock) = makeStoreWithMock()
+      let (store, _) = makeStoreWithMock()
       let vm = createWelcomeScreenVM(store)
+      let host = vm.installRecorder()
 
       vm.setRecordExecutable("/tmp/fib.py")
       check vm.recordBackendOptions.val.len == 0
       check vm.newRecordSessionMode.val == liveMaterialized
       check vm.submitNewRecord()
       drain()
-      var cmd = mock.findCommand("ct/new-record")
-      check cmd.isSome
-      if cmd.isSome:
-        check cmd.get.args["recordBackend"].getStr == "db"
-        check cmd.get.args["startsLive"].getBool == true
+      check host.newRecords.len == 1
+      check host.newRecords[0].recordBackend == "db"
+      check host.newRecords[0].startsLive == true
       check store.session.val.debugSessionMode == liveMaterialized
 
-      mock.clearReceivedCommands()
       vm.setRecordExecutable("/tmp/contract.sol")
       check vm.newRecordSessionMode.val == completedReplay
       check vm.submitNewRecord()
       drain()
-      cmd = mock.findCommand("ct/new-record")
-      check cmd.isSome
-      if cmd.isSome:
-        check cmd.get.args["recordBackend"].getStr == "db"
-        check cmd.get.args["startsLive"].getBool == false
+      # The second submit appends rather than replacing, so indexing [1] is
+      # also an assertion that the first one was not re-delivered.
+      check host.newRecords.len == 2
+      check host.newRecords[1].recordBackend == "db"
+      check host.newRecords[1].startsLive == false
       check store.session.val.debugSessionMode == completedReplay
       dispose()

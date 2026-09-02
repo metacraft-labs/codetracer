@@ -133,6 +133,40 @@ type
     targetKind*: RecordTargetKind
     backendChoice*: RecordBackendChoice
 
+  LaunchConfigRequest* = object
+    ## What `launchSelectedConfig` resolved, handed to the host to perform.
+    ##
+    ## `configIndex` is the entry's position in `launchConfig.configs`, which
+    ## is the ONE field the VM cannot check for itself. The main process keys
+    ## `CODETRACER::record-with-launch-config` by index into
+    ## `getLaunchConfigsForWorkspace` (`index/traces.nim:1034`), while
+    ## everything on this side is keyed by `slug`. The two agree only because
+    ## the host installs `setLaunchConfigs` from that same list, in order — so
+    ## a host that reorders or filters the list before installing it MUST
+    ## translate the slug itself rather than trusting this index.
+    configIndex*: int
+    slug*: string
+    language*: string
+    program*: string
+    recordBackend*: string
+    startsLive*: bool
+    debugSessionMode*: DebugSessionMode
+
+  NewRecordRequest* = object
+    ## What `submitNewRecord` resolved, handed to the host to perform.
+    ## Mirrors the fields the legacy `CODETRACER::new-record` payload carries
+    ## plus the session-mode decision the VM owns.
+    executable*: string
+    args*: seq[string]
+    workDir*: string
+    outputFolder*: string
+    defaultOutputFolder*: bool
+    languageHint*: string
+    targetKind*: RecordTargetKind
+    recordBackend*: string
+    startsLive*: bool
+    debugSessionMode*: DebugSessionMode
+
   WelcomeScreenVM* = ref object of ViewModel
     ## Reactive state for the Welcome Screen surface.
     store*: ReplayDataStore
@@ -162,6 +196,33 @@ type
     showRecordBackendChoice*: Memo[bool]
     newRecordStartsLive*: Memo[bool]
     newRecordSessionMode*: Memo[DebugSessionMode]
+
+    # -- Host seam: callbacks wired by the host (ui/welcome_screen.nim) --
+    #
+    # These four flows are Electron main-process concerns — opening a
+    # recording, opening a folder, starting a recorder, launching a debug
+    # configuration. They are NOT replay-engine commands, and the four
+    # `ct/...` strings they used to send through `store.backend` were
+    # implemented by no engine in this repo (`backend/dap_dialect.md` §7
+    # listed them among nine such). In production this VM's backend is a stub
+    # that resolves `%*{}` for every command (`ui/welcome_screen.nim`'s
+    # `ensureWelcomeScreenVm`), so those sends reached nothing at all while
+    # the mock-backend tests stayed green — the same shape as
+    # `ErrorsVM.jumpToProblem`'s `ct/jump-location`, and fixed the same way.
+    #
+    # The host owns the IPC; the VM owns the decision. A host that installs
+    # these callbacks performs the flow, a host that does not gets an
+    # explicit no-op rather than a command nothing answers.
+    onLoadRecentTrace*: proc(recordingId: string)
+      ## Open a recording by id. `ui/welcome_screen.nim` sends
+      ## `CODETRACER::load-recent-trace`.
+    onLoadRecentFolder*: proc(folderPath: string)
+      ## Open a project folder. `CODETRACER::load-recent-folder`.
+    onLaunchConfig*: proc(request: LaunchConfigRequest)
+      ## Launch a debug configuration.
+      ## `CODETRACER::record-with-launch-config`, keyed by `configIndex`.
+    onSubmitNewRecord*: proc(request: NewRecordRequest)
+      ## Start a new recording. `CODETRACER::new-record`.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -607,36 +668,41 @@ proc isNewRecordValid*(vm: WelcomeScreenVM): bool =
 # ---------------------------------------------------------------------------
 
 proc loadRecentTrace*(vm: WelcomeScreenVM; recordingId: string) =
-  ## Dispatch the legacy ``CODETRACER::load-recent-trace`` flow.
-  ## The Karax view sent the same payload via ``self.data.ipc.send``
-  ## so the main-process side picks the right handler regardless of
-  ## which view triggered it.  Unknown recording-ids are accepted
-  ## (the bridge logs a warning); we pre-flip the loading overlay
-  ## so the spec sees the spinner immediately.  The IPC field name
-  ## ``traceId`` is preserved as wire format (M-REC-5 territory).
+  ## Open a recent recording through the host.
+  ##
+  ## Unknown recording-ids are accepted (the bridge logs a warning); we
+  ## pre-flip the loading overlay so the spec sees the spinner immediately,
+  ## which is also why the state changes happen before the host call rather
+  ## than in a completion handler.
   vm.store.setSessionMode(completedReplay)
   vm.beginLoadingTrace(recordingId)
-  let args = %*{"traceId": recordingId}
-  discard vm.store.backend.send("ct/load-recent-trace", args)
+  if vm.onLoadRecentTrace != nil:
+    vm.onLoadRecentTrace(recordingId)
 
 proc loadRecentFolder*(vm: WelcomeScreenVM; folderPath: string) =
-  ## Dispatch the legacy ``CODETRACER::load-recent-folder`` flow.
-  ## Folder loads transition the welcome surface into edit mode on
-  ## the main-process side, so we mirror that locally so the GUI
-  ## test does not race the IPC roundtrip.
+  ## Open a recent project folder through the host.
+  ##
+  ## Folder loads transition the welcome surface into edit mode on the
+  ## main-process side, so we mirror that locally rather than let the GUI
+  ## race the IPC roundtrip.
   vm.enterEditMode(folderPath)
-  let args = %*{"folderPath": folderPath}
-  discard vm.store.backend.send("ct/load-recent-folder", args)
+  if vm.onLoadRecentFolder != nil:
+    vm.onLoadRecentFolder(folderPath)
 
 proc launchSelectedConfig*(vm: WelcomeScreenVM): bool =
-  ## Dispatch ``ct/launch-config`` for the currently-selected
-  ## launch-config entry.  Returns ``true`` when a dispatch was
-  ## issued, ``false`` when no entry is selected or the selected
-  ## slug is no longer in the configs list.
+  ## Launch the currently-selected launch-config entry through the host.
+  ## Returns ``true`` when a launch was issued, ``false`` when no entry is
+  ## selected, the selected slug is no longer in the configs list, or the
+  ## entry is disabled.
+  ##
+  ## The return value reports the VM's DECISION, not the host's success: it
+  ## is ``true`` for a resolved, enabled entry even when no host callback is
+  ## installed, because "should this launch?" is what the caller asks and
+  ## what every test here asserts.
   let lc = vm.launchConfig.val
   if lc.selectedSlug.len == 0:
     return false
-  for entry in lc.configs:
+  for index, entry in lc.configs:
     if entry.slug == lc.selectedSlug:
       if not entry.enabled:
         return false
@@ -650,22 +716,27 @@ proc launchSelectedConfig*(vm: WelcomeScreenVM): bool =
         vm.recordBackendAvailability.val,
       )
       vm.store.setSessionMode(mode)
-      let args = %*{
-        "slug": entry.slug,
-        "language": entry.language,
-        "program": entry.program,
-        "recordBackend": backend.recordBackendWireName,
-        "startsLive": mode in {liveMcr, liveMaterialized},
-        "debugSessionMode": $mode,
-      }
-      discard vm.store.backend.send("ct/launch-config", args)
+      if vm.onLaunchConfig != nil:
+        vm.onLaunchConfig(LaunchConfigRequest(
+          configIndex: index,
+          slug: entry.slug,
+          language: entry.language,
+          program: entry.program,
+          recordBackend: backend.recordBackendWireName,
+          startsLive: mode in {liveMcr, liveMaterialized},
+          debugSessionMode: mode,
+        ))
       return true
   return false
 
 proc submitNewRecord*(vm: WelcomeScreenVM): bool =
-  ## Dispatch the legacy ``CODETRACER::new-record`` flow if the
-  ## current ``NewRecordFormState`` is valid.  Returns ``true`` on
-  ## dispatch, ``false`` when validation fails.
+  ## Start a new recording through the host if the current
+  ## ``NewRecordFormState`` is valid.  Returns ``true`` when the form
+  ## passed validation, ``false`` when it did not.
+  ##
+  ## As with ``launchSelectedConfig``, the bool reports validation, not host
+  ## success — an uninstalled callback is a host that does not record, not
+  ## an invalid form.
   if not vm.isNewRecordValid:
     return false
   let form = vm.newRecord.val
@@ -674,19 +745,19 @@ proc submitNewRecord*(vm: WelcomeScreenVM): bool =
   let backend = form.effectiveRecordBackend(availability)
   let mode = sessionModeForRecording(target, backend, availability)
   vm.store.setSessionMode(mode)
-  let args = %*{
-    "executable": form.executable,
-    "args": form.args,
-    "workDir": form.workDir,
-    "outputFolder": form.outputFolder,
-    "defaultOutputFolder": form.defaultOutputFolder,
-    "languageHint": form.languageHint,
-    "targetKind": $target,
-    "recordBackend": backend.recordBackendWireName,
-    "startsLive": mode in {liveMcr, liveMaterialized},
-    "debugSessionMode": $mode,
-  }
-  discard vm.store.backend.send("ct/new-record", args)
+  if vm.onSubmitNewRecord != nil:
+    vm.onSubmitNewRecord(NewRecordRequest(
+      executable: form.executable,
+      args: form.args,
+      workDir: form.workDir,
+      outputFolder: form.outputFolder,
+      defaultOutputFolder: form.defaultOutputFolder,
+      languageHint: form.languageHint,
+      targetKind: target,
+      recordBackend: backend.recordBackendWireName,
+      startsLive: mode in {liveMcr, liveMaterialized},
+      debugSessionMode: mode,
+    ))
   return true
 
 # ---------------------------------------------------------------------------
