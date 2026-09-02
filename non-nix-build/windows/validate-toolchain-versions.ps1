@@ -13,6 +13,7 @@ $requiredKeys = @(
   "JUST_VERSION",
   "JUST_WIN_X64_SHA256",
   "CARGO_NEXTEST_VERSION",
+  "CARGO_NEXTEST_WIN_X64_SHA256",
   "NODE_VERSION",
   "UV_VERSION",
   "DOTNET_SDK_VERSION",
@@ -39,6 +40,7 @@ $requiredKeys = @(
   "TUP_MSYS2_BASE_X64_SHA256",
   "TUP_MSYS2_PACKAGES",
   "LDC_WIN_X64_SHA256",
+  "ZSTD_WIN_X64_SHA256",
   # TTD/WinDbg msixbundle. Absent from this list until 2026-08-23, which is
   # exactly how TTD_BUNDLE_SHA256 shipped EMPTY: Ensure-Ttd downloaded ~767 MB
   # and executed it with only a warning, and nothing here objected. A pin that
@@ -54,6 +56,7 @@ $valuePatterns = @{
   "JUST_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "JUST_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "CARGO_NEXTEST_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
+  "CARGO_NEXTEST_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "NODE_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "UV_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
   "DOTNET_SDK_VERSION" = '^[0-9]+(?:\.[0-9]+)*(?:[-+][0-9A-Za-z.-]+)?$'
@@ -80,6 +83,7 @@ $valuePatterns = @{
   "TUP_MSYS2_BASE_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "TUP_MSYS2_PACKAGES" = '^[A-Za-z0-9+_.-]+(?: [A-Za-z0-9+_.-]+)*$'
   "LDC_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
+  "ZSTD_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "WINDBG_BUNDLE_VERSION" = '^[0-9]+(?:\.[0-9]+)*$'
   "TTD_BUNDLE_URL" = '^https://\S+$'
   "TTD_BUNDLE_SHA256" = '^[A-Fa-f0-9]{64}$'

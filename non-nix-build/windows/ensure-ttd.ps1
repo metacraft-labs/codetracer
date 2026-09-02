@@ -10,26 +10,93 @@ $ErrorActionPreference = "Stop"
 # variants) so the probe degrades to "package unavailable" instead of
 # crashing the sync.
 function Invoke-AppxPackageQuery {
-  param([Parameter(Mandatory = $true)][string]$Name)
-  try {
-    return Get-AppxPackage -Name $Name -ErrorAction Stop
-  } catch {
-    $msg = ""
-    if ($null -ne $_.Exception) { $msg = [string]$_.Exception.Message }
-    $isPlatformUnsupported =
-      ($msg -match "0x80131539") -or
-      ($msg -match "not supported on this platform") -or
-      ($msg -match "Appx") -or
-      ($msg -match "PackageManager") -or
-      # Windows Server 2022 / nested Windows guests: the AppX
-      # repository SQLite database is sometimes malformed on first
-      # boot (never got the initial schema populated), so
-      # Get-AppxPackage throws "The database disk image is malformed"
-      # (SQLite error 11). Treat that the same as 0x80131539.
-      ($msg -match "database disk image is malformed")
-    if ($isPlatformUnsupported) { return $null }
-    throw
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [int]$MaxAttempts = 5,
+    [int]$RetryDelaySeconds = 3
+  )
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    try {
+      return Get-AppxPackage -Name $Name -ErrorAction Stop
+    } catch {
+      $msg = ""
+      if ($null -ne $_.Exception) { $msg = [string]$_.Exception.Message }
+
+      # Transient AppX/RPC faults: the AppX deployment service
+      # (AppXSvc) and StateRepository expose their query surface over
+      # RPC.  On hosted Windows Server 2022 runners those services are
+      # frequently still spinning up (or briefly recycle under load)
+      # when this bootstrap runs as the FIRST Ensure-* step, so
+      # Get-AppxPackage throws "The remote procedure call failed."
+      # (0x800706BE) or a sibling.  These are terminating errors that
+      # -ErrorAction cannot suppress; retry a few times with a short
+      # backoff before giving up.
+      $isTransientRpc =
+        ($msg -match "remote procedure call failed") -or
+        ($msg -match "RPC server is unavailable") -or
+        ($msg -match "0x800706BE") -or
+        ($msg -match "0x800706BA") -or
+        ($msg -match "server process could not be started") -or
+        ($msg -match "service .* could not be started") -or
+        ($msg -match "class not registered") -or
+        # "Server execution failed" (0x80080005 CO_E_SERVER_EXEC_FAILURE): the
+        # AppX COM server (AppXSvc / StateRepository) failed to LAUNCH rather
+        # than failing mid-call. On loaded self-hosted runners this appears
+        # interchangeably with "remote procedure call failed" and is just as
+        # transient -- observed aborting env.ps1 on attempt 3 after two RPC
+        # retries. Include the two classic "COM server busy / rejecting calls"
+        # DCOM faults, which likewise mean "retry shortly".
+        ($msg -match "Server execution failed") -or
+        ($msg -match "0x80080005") -or
+        ($msg -match "call was rejected by callee") -or
+        ($msg -match "0x80010001") -or
+        ($msg -match "server is busy") -or
+        ($msg -match "0x8001010A")
+      if ($isTransientRpc -and $attempt -lt $MaxAttempts) {
+        Write-Warning ("Get-AppxPackage -Name '$Name' hit a transient AppX/RPC fault " +
+          "(attempt $attempt/$MaxAttempts): $msg. Retrying in ${RetryDelaySeconds}s...")
+        Start-Sleep -Seconds $RetryDelaySeconds
+        continue
+      }
+
+      $isPlatformUnsupported =
+        ($msg -match "0x80131539") -or
+        ($msg -match "not supported on this platform") -or
+        ($msg -match "Appx") -or
+        ($msg -match "PackageManager") -or
+        # Windows Server 2022 / nested Windows guests: the AppX
+        # repository SQLite database is sometimes malformed on first
+        # boot (never got the initial schema populated), so
+        # Get-AppxPackage throws "The database disk image is malformed"
+        # (SQLite error 11). Treat that the same as 0x80131539.
+        ($msg -match "database disk image is malformed")
+      if ($isPlatformUnsupported) { return $null }
+
+      # Transient RPC fault that survived every retry: the AppX service
+      # is simply not answering on this box.  Degrade to "package
+      # unavailable" (callers fall back to the DIY cache) rather than
+      # aborting the whole sync.
+      if ($isTransientRpc) {
+        Write-Warning ("Get-AppxPackage -Name '$Name' still failing after $MaxAttempts attempts " +
+          "with a transient AppX/RPC fault: $msg. Treating the package as unavailable via AppX.")
+        return $null
+      }
+
+      # Any OTHER Get-AppxPackage failure: the AppX probe is best-effort. TTD/
+      # WinDbg detection is optional -- when it yields nothing, Ensure-Ttd falls
+      # back to the pinned msixbundle download (Step 3), so a failed probe must
+      # never abort env.ps1 sourcing. Enumerating every transient AppX/DCOM
+      # HRESULT is whack-a-mole (this exact throw is what let the un-enumerated
+      # "Server execution failed" kill the Windows installer build), so degrade
+      # to "unavailable via AppX" for anything that reaches here. The transient
+      # set above still governs whether we spent retries before giving up.
+      Write-Warning ("Get-AppxPackage -Name '$Name' failed with a non-transient AppX error: " +
+        "$msg. Treating the package as unavailable via AppX and falling back to the DIY " +
+        "toolchain cache.")
+      return $null
+    }
   }
+  return $null
 }
 
 function Get-WindowsArchForTtd {

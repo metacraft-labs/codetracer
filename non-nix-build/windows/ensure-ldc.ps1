@@ -54,7 +54,7 @@ function Ensure-Ldc {
   try {
     Assert-FileSha256 -Path $tempArchive -Expected $expectedSha
     Ensure-CleanDirectory -Path $ldcVersionRoot
-    $sevenZipExe = Get-SevenZipExe
+    $sevenZipExe = Get-SevenZipExe -Root $Root -Toolchain $Toolchain
     & $sevenZipExe x $tempArchive "-o$ldcVersionRoot" -y | Out-Host
     if ($LASTEXITCODE -ne 0) {
       throw "Failed to extract LDC archive '$tempArchive'."
