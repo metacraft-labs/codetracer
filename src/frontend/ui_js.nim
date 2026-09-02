@@ -3260,6 +3260,14 @@ proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
     discard jsDelete(data.ui.editors[untitledName])
     data.ui.editors[newPath].path = newPath
 
+var refreshEditToolbarHook: proc()
+  ## Recompose the edit-mode topbar. A hook rather than a direct call because
+  ## `ui/web_noir_build` is imported in a `when defined(js)` block far below
+  ## this handler, and hoisting that import to reach one proc would pull the
+  ## whole wasm-toolchain module into the desktop renderer's graph. Installed
+  ## beside `installEditModeToolbar`, which is the only place that has the
+  ## `invoke` it needs anyway.
+
 proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
   if data.services.editor.open.hasKey(response.name):
     data.services.editor.open[response.name].changed = false
@@ -3313,6 +3321,15 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
   if data.startOptions.edit:
     data.ipc.send "CODETRACER::ns9-panes",
       js{ folder: data.startOptions.folder }
+    # AND THE EDIT-MODE TOOLBAR, for the same reason and from the same event.
+    # Its inputs are the project LISTING — a save can add the `Nargo.toml`
+    # that `projectKinds` recognises — and the mode and the wasm registry.
+    # `EditToolbarModel` is a value, so none of those reach a toolbar already
+    # mounted; `installEditModeToolbar`'s own comment claimed it was "called on
+    # every install and after every save" and it had one call site, in a
+    # one-shot startup block.
+    if not refreshEditToolbarHook.isNil:
+      refreshEditToolbarHook()
 
   data.redraw()
 
@@ -5077,11 +5094,30 @@ when defined(ctWeb):
         # creates the instance.
         test_results.initTestResultsVM()
         if not test_results.testResultsVMInstance.isNil:
-          let testsVM = test_results.testResultsVMInstance
-          testsVM.runTests = proc() = web_noir_build.startNoirTests()
-          web_noir_build.noirTestRunStarted = proc() = testsVM.beginRun()
+          # THE INSTANCE IS READ AT FIRE TIME, NOT CAPTURED.
+          #
+          # `initTestResultsVMWithStore` REPLACES `testResultsVMInstance` when
+          # the shared store arrives, exactly as `initBuildVMWithStore` replaces
+          # `buildVMInstance` — the hazard `web_noir_build.producerFor` guards
+          # against with a comment that names it ("a producer captured earlier
+          # would be writing into a VM no view is bound to — a build that ran,
+          # succeeded, and painted nothing"). These three callbacks held the
+          # ref from THIS moment, with no equivalent guard, so a replacement
+          # after this line would have left them folding verdicts into a
+          # view-model nothing renders: a run that worked and a pane that
+          # never moved.
+          #
+          # A `ref` capture is not automatically safe. It follows MUTATION of
+          # the object it points at; it does not follow REBINDING of the
+          # variable that named it. The accessor does.
+          test_results.testResultsVMInstance.runTests =
+            proc() = web_noir_build.startNoirTests()
+          web_noir_build.noirTestRunStarted = proc() =
+            if not test_results.testResultsVMInstance.isNil:
+              test_results.testResultsVMInstance.beginRun()
           web_noir_build.noirTestRunSettled = proc() =
-            testsVM.endRun()
+            if not test_results.testResultsVMInstance.isNil:
+              test_results.testResultsVMInstance.endRun()
             # THE EDITOR'S RUN-TEST BUTTON STOPS HERE, and this line is the
             # whole of the fix for the control that used to spin forever. It is
             # on SETTLED and not on success, because a refused run and a red
@@ -5091,6 +5127,9 @@ when defined(ctWeb):
 
           web_noir_build.noirTestRunSink =
             proc(response: NoirTestResponse; packageDir: string) =
+              if test_results.testResultsVMInstance.isNil:
+                return
+              let testsVM = test_results.testResultsVMInstance
               # The catalog is read AT FOLD TIME rather than captured, because
               # it arrives on its own message and may not have when this
               # closure was made. Its only use is resolving a selector to the
@@ -5202,6 +5241,14 @@ when defined(ctWeb):
           # that gives the two buttons genuinely different answers.
           of "record-tests-image": saveThenCompile(runAfter = true)
           else: discard)
+        # AND THE WAY BACK. `installEditModeToolbar` holds the `invoke` above
+        # so it can recompose without it; this hook is how `onSavedFile` — far
+        # above this block, and without `web_noir_build` in scope — reaches
+        # that recomposition. Set here because this is the only site that has
+        # both, and set AFTER the install so the hook can never run before
+        # there is a toolbar to refresh.
+        refreshEditToolbarHook = proc() =
+          web_noir_build.refreshEditModeToolbar()
         # RUN IS A MODE TRANSITION — "full surface, returnable".
         #
         # Installed here, beside the Build wiring, and for the same reason its
