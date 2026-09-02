@@ -1,3 +1,13 @@
+## NOT-A-TEST-LANE-FILE: this is the Test Results PANE (`Content.TestResults`)
+## — production frontend code named after the test results it displays, which
+## is why its basename matches the guard's `test_*` name arm. It imports no
+## `unittest` and declares no `suite`/`test` block. It is not dark: it is
+## imported by `src/frontend/ui_js.nim`, so the `renderer-web` and
+## `renderer-electron` lanes compile-check it on both targets, and the VM it
+## owns is asserted by
+## `src/frontend/viewmodel/tests/unit/test_ns9_panes_vm.nim` (the `vm-unit` /
+## `vm-unit-js` lanes).
+
 ## Test Results panel (`Content.TestResults`) — the legacy-side bridge.
 ##
 ## There is no legacy Karax half to bridge FROM: this pane is new, and it was

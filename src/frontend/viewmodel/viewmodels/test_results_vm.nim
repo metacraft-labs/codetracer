@@ -1,3 +1,11 @@
+## NOT-A-TEST-LANE-FILE: this is the Test Results pane's VIEWMODEL —
+## production frontend code named after the test results it models, which is
+## why its basename matches the guard's `test_*` name arm. It imports no
+## `unittest` and declares no `suite`/`test` block. Its behaviour IS asserted,
+## by the five `ns9_test_results_*` cases in
+## `src/frontend/viewmodel/tests/unit/test_ns9_panes_vm.nim`, which the
+## `vm-unit` and `vm-unit-js` lanes run.
+
 ## TestResultsVM — reactive state for the Test Results pane (`Content.TestResults`).
 ##
 ## ## It invents no model
