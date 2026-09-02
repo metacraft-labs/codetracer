@@ -132,6 +132,12 @@ proc traceRelativePath(reported: string): string =
   ## already the accepted form.  Only a caller that round-trips a
   ## *reported* location (which this test does, to stay
   ## self-calibrating) has to strip the prefix.
+  ##
+  ## RETIRE THIS once an engine carrying the `Handler::load_path_id` →
+  ## `fuzzy_path_id_for` change ships: that makes the jump arms accept the
+  ## reported spelling too, and this helper becomes a no-op that hides
+  ## whether the engine under test actually has the fix. It is kept for now
+  ## because it must keep passing against the engine that is deployed today.
   if reported.startsWith("./"): reported[2 .. ^1] else: reported
 
 proc checkMoveWasEmitted(s: HeadlessDebugSession; what: string) =

@@ -3780,8 +3780,37 @@ impl Handler {
         crate::origin_query::placeholder_summary(token)
     }
 
+    /// Resolve a caller-supplied source path against the trace's path table.
+    ///
+    /// FUZZY, not exact, and that difference is a defect fix rather than a
+    /// loosening. This engine REPORTS one spelling of a path and used to
+    /// ACCEPT only another. `ct/complete-move` builds its location as
+    /// `workdir.join(stored_path)` (`trace_reader.rs`), and for a trace whose
+    /// `workdir` is `"."` — the in-repo fixture, among others — that yields
+    /// `./test_code/x.rs` while the path table stores `test_code/x.rs`.
+    /// Handing a reported location straight back to `ct/source-line-jump` was
+    /// therefore answered `unknown location: ./test_code/x.rs:18`, and the
+    /// session did not move.
+    ///
+    /// That round-trip is not hypothetical: `ui/editor.nim` keys its tabs off
+    /// the reported path and passes that key to `sourceLineJump` /
+    /// `sourceCallJump`.
+    ///
+    /// `Handler::load_path_id` was the only holdout. `MaterializedReplaySession
+    /// ::load_path_id` (`db.rs`) — an identically-named method one layer down —
+    /// already calls `fuzzy_path_id_for`, which is why `setBreakpoints`,
+    /// `ct/load-flow` and `ct/install-source-view` accept the reported form and
+    /// only the two jump arms did not. Two methods with one name and opposite
+    /// tolerance is what kept re-teaching this bug; they now agree.
+    ///
+    /// `fuzzy_path_id_for` tries exact match first, so every path that
+    /// resolved before still resolves to the same id. What is new is that
+    /// paths which previously returned `None` may now resolve — including its
+    /// filename-only strategy, which is gated on the filename matching exactly
+    /// one entry (`matches.len() == 1`), so an ambiguous name still fails
+    /// rather than guessing.
     fn load_path_id(&self, path: &str) -> Option<PathId> {
-        self.reader.path_id_for(path)
+        self.reader.fuzzy_path_id_for(path)
     }
 
     fn find_next_step(&self, path_id: PathId, line: usize) -> Option<StepId> {

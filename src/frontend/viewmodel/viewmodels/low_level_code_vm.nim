@@ -258,6 +258,13 @@ proc jumpToInstruction*(vm: LowLevelCodeVM; instr: LowLevelInstruction) =
   ## prefix; normalising this path towards the reported form would break
   ## the lookup (``unknown location: ./foo.rs:18``).
   ##
+  ## That last sentence has an expiry date.  ``Handler::load_path_id``
+  ## (``dap_handler.rs``) now resolves through ``fuzzy_path_id_for``, which
+  ## accepts both spellings — so once an engine carrying that change ships,
+  ## the reported form works too and this caveat can go.  Forwarding
+  ## verbatim stays correct either way, which is why it is still the rule
+  ## here.
+  ##
   ## A row can legitimately lack a back-pointer (asm generated from a
   ## function with no debug info).  That case reports through
   ## ``errorMessage`` rather than returning silently, so a click that
