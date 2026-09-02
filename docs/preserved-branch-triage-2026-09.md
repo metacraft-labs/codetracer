@@ -96,6 +96,44 @@ instead of by *commit*:
   regression that consumed three agents and two confidently wrong diagnoses
   before the engine was suspected.
 
+## First drift verdict, 2026-09-02: the PINS drifted, not the checkouts
+
+The moment the guard was landed it went red on this workstation, for all
+three siblings. "Stale pin" and "drifted checkout" are **opposite fixes**, so
+this was established from ancestry rather than assumed:
+
+| Sibling | Pin | Relation to the pin | Verdict |
+|---|---|---|---|
+| `codetracer-native-recorder` | `7e0400b3` (2026-07-06) | pin is an **ancestor** of local HEAD; pin is **1151 commits** behind the sibling's `origin/dev`; both are on `dev` | **pin stale** |
+| `codetracer-trace-format` | `392c5559` | pin is **not on `origin/dev` at all** — reachable only from `origin/ci/ref-rot-gate` and `origin/fix/ci-action-refs`, two unmerged feature branches | **pin off-branch** |
+| `codetracer-trace-format-nim` | `d7eca441` | pin on `origin/dev`, 7 commits behind | **pin stale** |
+
+`flake.nix` declares all three as `.../dev`. For `codetracer-trace-format`
+the lock therefore **contradicts its own declared branch** — that one is a
+correctness defect, not staleness.
+
+**Aligning the checkouts to the pins would have been the inverted fix.** It
+would have moved the recorder back 1151 commits to July code and parked
+`trace-format` on an unmerged feature branch — the exact "pin a workspace to
+superseded code" error.
+
+**CI was not red on this.** The deploy lane clones the siblings *at* the pins
+and then verifies *at* the pins, so it is self-consistent and passes. The red
+is a statement about this workstation's checkouts — i.e. that local builds do
+not match CI — which is the reproducibility gap, not an outage.
+
+The bump is prepared on branch **`fix/sibling-pins-bump-2026-09-02`** and is
+deliberately **not** on a mainline: it moves the recorder by 1,459 files and
++364,380/−22,976 lines, and nothing was built, because this workspace cannot
+build codetracer. The flake re-locks and evaluates and the contract suite is
+20/0, but evaluation is not a build. It needs a build window and someone who
+can run one. The `trace-format` correction has an independent argument and
+does not have to wait for the recorder bump.
+
+Also observed and **not** touched: the local `codetracer-trace-format` checkout
+is parked on `feat/managed-upload-derivation` with 3 uncommitted files. That is
+someone's live work; a shared checkout is not a thing to reset underneath them.
+
 ## Known gap: the toolchain is not pinned
 
 `scripts/sibling-pins.sh` pins three **repositories**. It does not pin the
