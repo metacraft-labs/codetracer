@@ -168,16 +168,20 @@ fn reads_nim_bulk_built_cow_image() {
 
 /// M4 — emit a CoW namespace image written by the **Rust** writer
 /// ([`CowNamespaceWriter`]) plus its `(key, descriptor-hex)` manifest, into the
-/// shared fixtures dir. The Nim test `test_cow_btree.nim::"rust-written CoW
-/// image reads back through loadCowBTree"` reads it back, proving the Rust
-/// writer's on-disk page format is byte-compatible with the Nim reader — the
-/// reverse direction of `rust_reader_round_trips_nim_cow_image`, closing the
-/// bidirectional wire-format loop the M5/M6 Rust replay-time write path depends
-/// on.
+/// shared fixtures dir, for a Nim-side cross-read to consume.
 ///
-/// This is a generator, not an assertion test: it writes the fixture, then
-/// re-reads it through the Rust reader as a self-check. The Nim consumer test
-/// skips cleanly when the fixture is absent.
+/// This is a generator, not a cross-language assertion. The only thing asserted
+/// below is that the **Rust** reader round-trips the **Rust** writer's image.
+///
+/// NOT CLOSED: no Nim consumer of this fixture exists in the tree — no `*.nim`
+/// file reads a `.cowbt` at all (`git grep -l cowbt -- '*.nim'` is empty).
+/// Until one does, the reverse direction of `rust_reader_round_trips_nim_cow_image`
+/// is unproven: the Rust writer's on-disk page format has never been read back
+/// by Nim's `loadCowBTree`, so the bidirectional wire-format compatibility the
+/// M5/M6 Rust replay-time write path wants is not established here or anywhere
+/// else. The missing consumer would load `cow_btree_rust_typea.cowbt` with
+/// `cltTypeA` and check every `(key, descriptor-hex)` line of the `.manifest`
+/// written beside it.
 #[test]
 fn gen_rust_written_cow_fixture_for_nim() {
     let dir = fixture_dir();
@@ -214,7 +218,8 @@ fn gen_rust_written_cow_fixture_for_nim() {
     assert_eq!(r.lookup(21).expect("lookup 21"), &0xDEAD_BEEFu64.to_le_bytes());
 
     eprintln!(
-        "OK: wrote Rust-written CoW fixture ({} keys) to {} for the Nim cross-read",
+        "OK: wrote Rust-written CoW fixture ({} keys) to {} \
+         (Rust-reader self-check only — no Nim consumer reads it yet)",
         N,
         image_path.display()
     );
