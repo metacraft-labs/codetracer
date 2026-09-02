@@ -71,6 +71,8 @@ import
 # worker's `stdin` carries. The shapes themselves are
 # `platform/noir_build.nim`'s job.
 from std/json import JsonNode, `$`
+# `join`, for the one-test command label. `ui_imports` does not bring it.
+from std/strutils import join
 
 # `Signal.val` is a template on `isonim/core/signals`, and reading one from
 # here needs the module in scope even though the `BuildVM` type comes from
@@ -95,6 +97,13 @@ import ./build as build_pane
 from ./errors import
   syncErrorsAppendProblem, syncErrorsClear, highlightFirstBuildError
 from ../viewmodel/store/types import BuildProblemLine
+# THE EDIT-MODE TOPBAR. `editModeToolbar` composes the model, `debug` mounts
+# it, and `currentWasmRegistry` is what lets the browser tier resolve
+# `nargo compile` at subcommand granularity instead of refusing every command.
+from ../viewmodel/viewmodels/edit_mode_toolbar import
+  editModeToolbar, EditToolbarModel, ToolbarMode
+from ../viewmodel/platform/web_platform import currentWasmRegistry
+import ./debug
 
 export noir_build_producer
 
@@ -105,6 +114,33 @@ type
     ## Run continues into the tracer with the artifact the compile produced.
     nriBuild
     nriRun
+    nriTest
+      ## `nargo test`. One phase, not two: the module compiles each test
+      ## function and executes it inside one `nv_test_vfs` call, so there is
+      ## nothing for this module to chain.
+
+var
+  noirTestRunSink*: proc(response: NoirTestResponse; packageDir: string)
+    ## Where a finished test run's verdicts go, besides the build pane.
+    ##
+    ## A CALLBACK and not a direct call into `ui/test_results`, for
+    ## `noir_build_producer.onProblem`'s reason one layer up: this module talks
+    ## to the wasm toolchain, and the Test Results pane is a second surface
+    ## over the same run. `ui_js` installs it, which is the one place that can
+    ## see the pane, the catalog and this module at once.
+    ##
+    ## Nil is a real state and not a defect: a build with no Test Results pane
+    ## mounted still runs the tests and still paints them into the build pane.
+
+  noirTestRunStarted*: proc()
+    ## Told at DISPATCH, before the worker has answered. The pane needs it to
+    ## clear the previous run and disable its ▶; see
+    ## `test_results_vm.inFlight` for why the event stream cannot supply this.
+
+  noirTestRunSettled*: proc()
+    ## Told when the run settles, however it settled — including a refusal that
+    ## never reached the worker. Paired with `noirTestRunStarted`, because a
+    ## pane left `inFlight` would disable its own button permanently.
 
 var
   activeProducer: NoirBuildProducer
@@ -288,6 +324,22 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
     startTrace(producer, tmpl)
     return
 
+  if phase == nbpTest:
+    # THE VERDICTS, HANDED ON WHILE THEY EXIST — the same rule the trace arm
+    # states in `noir_build_producer.onExit`. `beginPhase` clears `lastTests`,
+    # so a pane that asked for them after the next run would read an empty
+    # response and paint a suite of nothing.
+    if not noirTestRunSink.isNil:
+      noirTestRunSink(producer.lastTests, tmpl.name)
+    if not noirTestRunSettled.isNil:
+      noirTestRunSettled()
+    report("test-results",
+           "ok=" & $producer.lastTests.ok &
+           " passed=" & $producer.lastTests.passed &
+           " failed=" & $producer.lastTests.failed &
+           " skipped=" & $producer.lastTests.skipped &
+           " tests=" & $producer.lastTests.tests.len)
+
   # REVEALED AGAIN WHEN THE RESULT LANDS, and this is not belt-and-braces.
   #
   # A first compile takes seconds — the compiler is 16 MB and has to be fetched
@@ -444,6 +496,95 @@ proc startNoirRun*(saved: seq[string] = @[]) =
            $noirVfsRequest(templateVfsEntries(tmpl), tmpl.name, nbmDebug),
            savedFilesLabel("nargo compile --debug", saved))
 
+proc noirTestRunAbsence*(): string =
+  ## Why this deployment cannot run the tests, or "" when it can.
+  ##
+  ## THE FIELD THIS FILLS USED TO CARRY A PARAGRAPH SAYING NO DEPLOYMENT COULD.
+  ## Every clause of it has since become false — `nv_test_vfs` is an export of
+  ## `noir_wasm.wasm`, `wasm_worker_browser.js` routes `test` to it, and
+  ## `nargo::ops::run_test` reaches the verdicts — so what is left is a
+  ## question about THIS bundle, which is a question with a real answer either
+  ## way.
+  ##
+  ## Asked of the platform rather than answered from a constant, because the
+  ## answer genuinely varies: `webRuntimeAssets()` marks both Noir modules
+  ## `required: false`, so a deployment that placed neither has no
+  ## `capProcessSpawn` at all and `degradedBehaviour` already carries the
+  ## sentence explaining it. A bundle missing only the TRACER can still run
+  ## tests, which is why this asks about the capability and not about the
+  ## tracer.
+  ##
+  ## A delivery that placed only the tracer is not detected here and does not
+  ## need to be: the dispatch is refused by `wasm_registry` with
+  ## `wrSubcommandNotBuilt`'s sentence, which names `nargo test` and lists what
+  ## the module does provide — a better message than anything this proc could
+  ## compose in advance, and one the pane shows through the ordinary run path.
+  let platform = ctPlatform()
+  if not platform.can(capProcessSpawn):
+    return degradedBehaviour(platform.profile, capProcessSpawn)
+  ""
+
+proc startNoirTests*(saved: seq[string] = @[]; only: seq[string] = @[]) =
+  ## TEST — run the open project's `#[test]` functions and report each verdict.
+  ##
+  ## ONE DISPATCH, not a compile followed by anything: `nv_test_vfs` resolves
+  ## the tree, elaborates the crate, discovers the tests with
+  ## `get_all_test_functions_in_crate_matching` and runs each through
+  ## `nargo::ops::run_test`, which is the same function `nargo test` calls. So
+  ## `#[test(should_fail)]`'s inversion — an assertion failure is a pass — is
+  ## decided by nargo and not by anything in this repository.
+  ##
+  ## No `mode` is sent. `nargo test` compiles with `CompileOptions::default()`,
+  ## and asking for `debug` would run an INSTRUMENTED program, which is not the
+  ## one the user tests locally; two runners disagreeing about the same suite
+  ## is the single outcome this whole path exists to avoid.
+  if activeInFlight:
+    report("test-ignored", "reason=already-running")
+    return
+  let tmpl = currentProject()
+  if not tmpl.hasFiles:
+    report("test-refused", "reason=no-project")
+    return
+  let producer = producerFor(tmpl)
+  if producer.isNil:
+    report("test-refused", "reason=no-build-vm")
+    return
+  activeIntent = nriTest
+  if not noirTestRunStarted.isNil:
+    noirTestRunStarted()
+  # `only` is a list of the runner's own fully-qualified names, matched
+  # EXACTLY — `nargo test --exact`'s comparison, and the label says so, because
+  # a pane headline reading "1 passed" over a project with five tests is only
+  # honest if the command line beside it says one was asked for.
+  let label =
+    if only.len == 0: "nargo test"
+    else: "nargo test --exact " & only.join(" ")
+  dispatch(producer, tmpl, nbpTest, noirTestArgs(),
+           $noirTestRequest(templateVfsEntries(tmpl), tmpl.name, only),
+           savedFilesLabel(label, saved))
+  if not activeInFlight:
+    # `dispatch` refused before the worker saw anything — no `onExit` will
+    # arrive, so the pane would sit `inFlight` forever behind a disabled ▶.
+    # The refusal itself is already painted in the build pane by `onRefusal`.
+    if not noirTestRunSink.isNil:
+      noirTestRunSink(producer.lastTests, tmpl.name)
+    if not noirTestRunSettled.isNil:
+      noirTestRunSettled()
+
+proc startNoirTest*(selector: string) =
+  ## Run ONE test — the editor's Run-test control, and the Test Results pane's
+  ## per-row action when it grows one.
+  ##
+  ## The whole suite is not run and then filtered: `nv_test_vfs` takes the
+  ## selection, so a project with a slow test does not pay for it to answer a
+  ## question about a fast one. `TestVfsRequest.tests` is `FunctionNameMatch::
+  ## Exact`, which is the same comparison `nargo test --exact` makes against
+  ## the same strings.
+  if selector.len == 0:
+    report("test-refused", "reason=no-selector")
+    return
+  startNoirTests(only = @[selector])
+
 proc stopNoirBuild*() =
   ## STOP — terminate the worker.
   ##
@@ -468,6 +609,53 @@ proc stopNoirBuild*() =
 # ---------------------------------------------------------------------------
 # Installation
 # ---------------------------------------------------------------------------
+
+proc installEditModeToolbar*(invoke: proc(id: string)) =
+  ## Compose the edit-mode topbar from what this tab actually is, and hand it
+  ## to the mount.
+  ##
+  ## `invoke` is the caller's, because the thing a Build button must do —
+  ## SAVE, then compile — lives in `ui_js.nim` as `saveThenCompile`, which is
+  ## also what `data.actions[ClientAction.build]` and Ctrl+B dispatch through.
+  ## Reaching it from here would be an import cycle; reproducing it would be a
+  ## second path to the same feature, and the two would drift on the first fix
+  ## applied to one of them.
+  ##
+  ## THIS PROC IS THE WHOLE OF WHY THE FEATURE WAS INVISIBLE.
+  ## `viewmodels/edit_mode_toolbar.nim` is 1043 lines, tested on both backends,
+  ## and until now was imported by nothing outside its own two suites — a
+  ## correct capability that nothing reached, which is this campaign's most
+  ## common defect and was the user's bug report in its visible form.
+  ##
+  ## Composed HERE rather than in `ui/debug.nim` because a model needs three
+  ## things only a platform knows, and `debug.nim` is shared with the desktop:
+  ##
+  ##   * the PROFILE — `capProcessArbitraryPrograms` vs the browser's
+  ##     `capProcessSpawn`, which is what makes Build enabled or refused;
+  ##   * the REGISTRY — resolved at subcommand granularity, so `nargo compile`
+  ##     is allowed and a subcommand this build lacks is refused by name;
+  ##   * the LISTING — `Nargo.toml` is what `projectKinds` recognises, and it
+  ##     is read from `currentProject()` for the same reason the build
+  ##     callbacks are: a frozen copy compiles a project the user has since
+  ##     edited away from.
+  ##
+  ## Called on every install and after every save, so a file that adds a
+  ## `Nargo.toml` changes the toolbar rather than waiting for a reload.
+  let platform = ctPlatform()
+  let project = currentProject()
+  var listing: seq[string] = @[]
+  for file in project.files:
+    listing.add file.path
+
+  let model = editModeToolbar(
+    platform.profile,
+    ToolbarMode(data.ui.mode.ord),
+    listing = listing,
+    wasm = currentWasmRegistry())
+
+  debug.setEditModeToolbar(model, invoke)
+  report("edit-toolbar", "buttons=" & $model.buttons.len &
+    " kinds=" & $model.kinds.len & " group=" & $model.commandGroupVisible)
 
 proc installNoirBuildCommands*(tmpl: ProjectTemplate) =
   ## Point the BUILD pane's ▶ and ■ at the wasm toolchain.

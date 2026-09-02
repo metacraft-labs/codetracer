@@ -1528,17 +1528,40 @@ print(" ".join(r["name"] for r in rows))
 		ck fail "arm R: the rows do not name the template's tests ('${r_testnames}') — the pane mounted over something else" ;;
 	esac
 
-	# ...AND THE PANE SAYS WHY THEY HAVE NOT RUN. On the web that is permanent
-	# and correct: there is no `nargo` in a tab and the wasm worker dispatches
-	# only `compile` and `trace`. A pane that listed five tests and said
-	# nothing about running them would be the placeholder this campaign was
-	# told not to build.
+	# ...AND THE PANE OFFERS TO RUN THEM.
+	#
+	# THIS CHECK WAS THE OTHER WAY ROUND and its inversion is the point. It
+	# used to require the absence line to be LONGER THAN 80 CHARACTERS, because
+	# on the web "these cannot be run here" was the permanent and correct
+	# answer: no `nargo` in a tab, and a wasm worker dispatching only `compile`
+	# and `trace`. Both clauses are now false — `noir_wasm.wasm` exports
+	# `nv_test_vfs` and the worker routes `test` to it — so a pane still
+	# carrying that paragraph would be asserting an absence that has been
+	# filled, which teaches a visitor the product is less capable than it is.
+	#
+	# So the absence must be EMPTY, and the ▶ must be present AND enabled. Both
+	# halves are needed: a painted-but-disabled button and a working one look
+	# identical in a screenshot, and the disabled one is the dead affordance the
+	# paragraph existed to avoid.
 	r_absence="$(json route dom.testAbsenceLength)"
 	r_testhead="$(jsonraw route dom.testHeadline)"
-	if [ "${r_absence:-0}" -gt 80 ] 2>/dev/null; then
-		ck ok "arm R: Test Results states why a run cannot start here (${r_absence} characters), headline ${r_testhead}"
+	r_runbtn="$(jsonraw route dom.testRunButton.text)"
+	r_rundisabled="$(json route dom.testRunButton.disabled)"
+	if [ "${r_absence:-1}" = "0" ]; then
+		ck ok "arm R: Test Results states no reason a run cannot start, because there is none; headline ${r_testhead}"
 	else
-		ck fail "arm R: Test Results offers no reason the tests have not run (${r_absence:-0} characters) — five rows and no explanation"
+		ck fail "arm R: Test Results still carries a ${r_absence}-character absence line — prose asserting an absence that has been filled"
+		jsonraw route dom.testAbsence 2>/dev/null | head -3 | sed 's/^/      /'
+	fi
+	if [ "${r_runbtn}" != "null" ] && [ -n "${r_runbtn}" ]; then
+		ck ok "arm R: Test Results paints a run control (${r_runbtn})"
+	else
+		ck fail "arm R: Test Results paints no run control — five rows and no way to run them"
+	fi
+	if [ "${r_rundisabled}" = "false" ]; then
+		ck ok "arm R: and it is live rather than a painted-but-dead affordance"
+	else
+		ck fail "arm R: the run control is disabled ($(jsonraw route dom.testRunButton.title)) — indistinguishable from a working one in a screenshot, and useless"
 	fi
 
 	# CONSTRAINTS SHOWS A MEASURED NUMBER. 17 is `nargo info --json`'s answer
@@ -2042,7 +2065,10 @@ echo
 # Raised in the same commit that adds them, so the additions are RECORDED. A
 # count that tracked the tally automatically would let an assertion be deleted
 # without anything noticing, which is the whole reason this line exists.
-expect_count 64
+# 66, and the two new ones are the ▶'s presence and its enabled state. The
+# absence check that used to be here was inverted rather than added to — it
+# still costs one assertion, it now requires the opposite thing.
+expect_count 66
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

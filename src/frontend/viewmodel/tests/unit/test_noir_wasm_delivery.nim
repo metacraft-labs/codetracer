@@ -40,7 +40,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 113
+const ExpectedAssertions = 114
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -100,29 +100,33 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     counted noirWasmRegistry(bothModules()).resolve(
       noirToolchainCommand, @["compile"]).kind == wrResolved
 
-  test "a full delivery declares exactly the two subcommands the worker routes":
-    # `wasm_worker_browser.js` routes `compile` -> `compileVfs` and `trace` ->
-    # `traceArtifact`, and nothing else. Declaring a third would produce a run
-    # that reaches the worker and dies there.
+  test "a full delivery declares exactly the three subcommands the worker routes":
+    # `wasm_worker_browser.js` routes `compile` -> `compileVfs`,
+    # `test` -> `testVfs` and `trace` -> `traceArtifact`, and nothing else.
+    # Declaring a fourth would produce a run that reaches the worker and dies
+    # there.
     let registry = noirWasmRegistry(bothModules())
     counted registry.modules.len == 1
 
     let module = registry.modules[0]
     counted module.command == noirToolchainCommand
-    counted module.subcommands == @[compileSubcommand, traceSubcommand]
-    counted module.subcommands.len == 2
-    counted "test" notin module.subcommands
+    counted module.subcommands ==
+      @[compileSubcommand, testSubcommand, traceSubcommand]
+    counted module.subcommands.len == 3
     counted "fmt" notin module.subcommands
 
     # Manifest order, so the refusal sentence's "It provides:" list is stable
-    # rather than dependent on the order a probe reported.
+    # rather than dependent on the order a probe reported. Within one asset the
+    # order is `subcommandsForAsset`'s.
     counted deliveredSubcommands(bothModules()) ==
-      @[compileSubcommand, traceSubcommand]
+      @[compileSubcommand, testSubcommand, traceSubcommand]
     counted deliveredSubcommands(tracerOnly() & compilerOnly()) ==
-      @[compileSubcommand, traceSubcommand]
+      @[compileSubcommand, testSubcommand, traceSubcommand]
 
-    # Both resolve; an unbuilt one does not.
+    # All three resolve; an unbuilt one does not.
     counted registry.resolve(noirToolchainCommand, @["compile"]).kind ==
+      wrResolved
+    counted registry.resolve(noirToolchainCommand, @["test"]).kind ==
       wrResolved
     counted registry.resolve(noirToolchainCommand, @["trace"]).kind ==
       wrResolved
@@ -137,14 +141,19 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     # already fits, and it is the only one that can list what IS available.
     let registry = noirWasmRegistry(compilerOnly())
     counted registry.modules.len == 1
-    counted registry.modules[0].subcommands == @[compileSubcommand]
+    # BOTH of the compiler module's subcommands, because `nv_compile_vfs` and
+    # `nv_test_vfs` are exports of the same file: a delivery that placed
+    # `noir_wasm.wasm` can build AND test, whatever happened to the tracer.
+    counted registry.modules[0].subcommands ==
+      @[compileSubcommand, testSubcommand]
+    counted registry.resolve(noirToolchainCommand, @["test"]).kind == wrResolved
 
     counted registry.resolve(noirToolchainCommand, @["compile"]).kind ==
       wrResolved
 
     let refused = registry.resolve(noirToolchainCommand, @["trace"])
     counted refused.kind == wrSubcommandNotBuilt
-    counted refused.available == @[compileSubcommand]
+    counted refused.available == @[compileSubcommand, testSubcommand]
     let error = refused.refusal()
     counted error.kind == pkNotSupported
     # "reported as unavailable BY NAME, with the command shown" — the promise
@@ -205,11 +214,11 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     counted CompilerProvenance in full.modules[0].builtFrom
     counted TracerProvenance in full.modules[0].builtFrom
 
-    # CONTROL ARM: the same two ids WITH provenance produce no defects and two
-    # subcommands.
+    # CONTROL ARM: the same two ids WITH provenance produce no defects and all
+    # three subcommands.
     counted deliveryDefects(bothModules()).len == 0
     counted modulesWithoutProvenance(bothModules()).len == 0
-    counted noirWasmRegistry(bothModules()).modules[0].subcommands.len == 2
+    counted noirWasmRegistry(bothModules()).modules[0].subcommands.len == 3
 
   test "a delivered id the manifest does not declare is named, not ignored":
     # A typo would otherwise present as "no modules were delivered", which is
@@ -256,8 +265,8 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     # AND NOT EVERY FETCHED ASSET. This used to be `ids == fetchedIds` and it
     # was true only while `damFetched` had exactly two members, both Noir
     # modules. The replay engine is fetched for the same delivery reasons and
-    # is not a Noir module: it has no `nv_*` / `ct_*` ABI, `subcommandForAsset`
-    # answers the empty string for it, and a registry that counted it would
+    # is not a Noir module: it has no `nv_*` / `ct_*` ABI, `subcommandsForAsset`
+    # answers an empty list for it, and a registry that counted it would
     # make the page claim `nargo` over a wasm-bindgen debugger.
     var fetchedIds: seq[string]
     for asset in fetchedRuntimeAssets(): fetchedIds.add asset.id
@@ -267,13 +276,14 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     counted replayEngineGlueId notin ids
 
     # The mapping is total over the manifest and empty off it.
-    counted subcommandForAsset(noirCompilerModuleId) == compileSubcommand
-    counted subcommandForAsset(noirTracerModuleId) == traceSubcommand
-    counted subcommandForAsset(avmTranspilerModuleId) == transpileSubcommand
-    counted subcommandForAsset("renderer") == ""
-    counted subcommandForAsset("wasm-worker") == ""
+    counted subcommandsForAsset(noirCompilerModuleId) ==
+      @[compileSubcommand, testSubcommand]
+    counted subcommandsForAsset(noirTracerModuleId) == @[traceSubcommand]
+    counted subcommandsForAsset(avmTranspilerModuleId) == @[transpileSubcommand]
+    counted subcommandsForAsset("renderer").len == 0
+    counted subcommandsForAsset("wasm-worker").len == 0
     for id in ids:
-      counted subcommandForAsset(id).len > 0
+      counted subcommandsForAsset(id).len > 0
 
     # And so is the COMMAND mapping, which is the half that keeps a subcommand
     # attributed to the tool that actually runs it.
@@ -344,8 +354,10 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     counted full.resolve(transpilerCommand, @[transpileSubcommand]).kind ==
       wrResolved
     counted full.resolve(noirToolchainCommand, @["compile"]).kind == wrResolved
+    # Three for `nargo`, because the compiler module enables `compile` AND
+    # `test` — `nv_compile_vfs` and `nv_test_vfs` are exports of one file.
     counted deliveredSubcommands(full3(), noirToolchainCommand) ==
-      @[compileSubcommand, traceSubcommand]
+      @[compileSubcommand, testSubcommand, traceSubcommand]
     counted deliveredSubcommands(full3(), transpilerCommand) ==
       @[transpileSubcommand]
 

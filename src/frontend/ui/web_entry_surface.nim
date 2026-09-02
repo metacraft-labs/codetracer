@@ -108,6 +108,11 @@ import ./web_replay_host
 # unaffected by the move.
 import ./web_project_store
 export templateProjectRoot, templateFilePath, templateFileFor, projectRelative
+# The Noir toolchain driver, for ONE proc: whether this deployment can run the
+# tests. `web_project_store` was split out of this module so `web_noir_build`
+# could import the project without importing the surface, so the dependency
+# runs this way and only this way.
+from ./web_noir_build import noirTestRunAbsence
 from ../index/layout_config_repair import sanitizeLayoutConfig
 from ../edit_mode import chooseInitialEditPath
 from ../../ct_test/contracts import TestCatalog
@@ -599,19 +604,27 @@ proc installProjectSaveHost*() =
             name: name, error: cstring(error)
           })))
 
-const webTestRunAbsence* =
-  "This build cannot run the tests. A browser has no `nargo` and no " &
-  "subprocess, and the Noir wasm worker implements exactly two operations — " &
-  "`compile` and `trace`. Running these needs a test operation in the wasm " &
-  "module and a branch for it in the worker; neither exists yet. The tests " &
-  "listed above are the ones `nargo test` would run: the selectors are " &
-  "produced by the same parser the `ct test` provider uses, and " &
-  "`ci/test/noir-template-toolchain.sh` compares them against nargo's own " &
-  "names on every run."
-  ## Why the Run column is not offered here, said once, where the pane can
-  ## show it. A pane that lists five tests beside a button that does nothing
-  ## is worse than one that says why — and "not wired up yet" would be untrue:
-  ## the operation does not exist to wire.
+# THE PARAGRAPH THAT USED TO BE HERE IS GONE, and its removal is the point
+# rather than a tidy-up.
+#
+# `webTestRunAbsence` was a const saying, in nine lines, that this build could
+# not run the tests: a browser has no `nargo` and no subprocess, and the Noir
+# wasm worker implements exactly two operations, `compile` and `trace`. It was
+# true when it was written and it named its own conditions precisely enough to
+# be checkable. All three have since changed:
+#
+#   * `noir_wasm.wasm` exports `nv_test_vfs` beside `nv_compile_vfs`
+#     (`compiler/wasm/src/test_vfs.rs` in the pinned `noir` fork);
+#   * `wasm_worker_browser.js` routes the `test` subcommand to it;
+#   * the verdicts come from `nargo::ops::run_test` itself, so
+#     `#[test(should_fail)]` inverts the way `nargo test` inverts it.
+#
+# What replaces it is not a shorter paragraph. It is `web_noir_build.
+# noirTestRunAbsence()`, which asks THIS deployment whether it can run tests
+# and answers "" when it can — and the ▶ the Test Results pane now renders.
+# Leaving the prose behind would have taught a visitor the product is less
+# capable than it is, which is the mirror image of an affordance that does
+# nothing.
 
 proc templateTestCatalog*(tmpl: ProjectTemplate): TestCatalog =
   ## Which tests the bundled project has, parsed from its own sources by the
@@ -657,7 +670,10 @@ proc installTemplatePaneHost*(tmpl: ProjectTemplate) =
     proc(sender: js, payload: JsObject) =
       data.ipc.deliver(cstring"CODETRACER::ns9-panes-catalog", js{
         catalog: cstring(pretty(templateTestCatalog(tmpl).toJson())),
-        absence: cstring(webTestRunAbsence)
+        # ASKED, NOT ASSERTED. "" on a deployment that placed the Noir
+        # compiler module, and `degradedBehaviour`'s own sentence on one that
+        # did not — see `noirTestRunAbsence`.
+        absence: cstring(noirTestRunAbsence())
       })
       let report = templateConstraintReport(tmpl)
       data.ipc.deliver(cstring"CODETRACER::ns9-panes-constraints", js{

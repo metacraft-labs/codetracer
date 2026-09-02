@@ -945,6 +945,36 @@ proc editModeToolbar*(profile: PlatformProfile;
     result.actions.incl tbaActionOverflow
 
 # ---------------------------------------------------------------------------
+# §7.3 — WHICH SURFACE THE TOPBAR HOST CARRIES
+# ---------------------------------------------------------------------------
+
+type
+  TopbarSurface* = enum
+    ## What `#isonim-debug-controls` holds. The host is ONE element and the two
+    ## surfaces are mutually exclusive in it, which is what makes reusing the
+    ## debug panel's ids safe: no document ever contains both.
+    tsDebuggerControls
+    tsEditCommands
+
+proc topbarSurface*(mode: ToolbarMode;
+                    editToolbarAvailable: bool): TopbarSurface {.noSideEffect.} =
+  ## The mount's decision, as a value rather than as an `if` inside a proc that
+  ## also touches the DOM — so both answers are reachable from one headless
+  ## test process, which is the same argument `editModeToolbar` makes for
+  ## taking `mode` as a parameter (EMT-A5).
+  ##
+  ## `editToolbarAvailable` is the second term and it is not redundant. The
+  ## model is composed by the platform layer from things only a host knows —
+  ## the profile, the wasm registry, the project's file listing — so a build
+  ## that has not installed one has nothing to render. Falling back to the
+  ## debugger controls there is deliberate: it is what shipped before this
+  ## feature, so a platform that never installs a model is unchanged rather
+  ## than blank. An empty topbar would be the worse failure, and it is the one
+  ## a bare `if mode.isEditing` would produce.
+  if mode.isEditing and editToolbarAvailable: tsEditCommands
+  else: tsDebuggerControls
+
+# ---------------------------------------------------------------------------
 # §9 — Run means record-then-replay, and the verdict is the artefact
 # ---------------------------------------------------------------------------
 

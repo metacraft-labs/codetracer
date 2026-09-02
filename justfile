@@ -3130,6 +3130,25 @@ test-noir-wasm-worker:
   exec > >(tee test-logs/test-noir-wasm-worker.log) 2>&1
   bash ci/test/noir-wasm-worker-e2e.sh
 
+# The bundled Noir template, against the REAL toolchain -- and, when the wasm
+# compiler is available, the browser's test runner against the real `nargo`.
+#
+# HAD NO RECIPE AND NO WORKFLOW until now, despite six production comments
+# citing it as the gate that keeps the template honest -- a citation of a check
+# nobody runs reads, in review, exactly like a check.
+#
+# Needs `nargo` and `nim` on PATH (the dev shell has both). Arm V additionally
+# needs CT_NOIR_WASM_COMPILER and skips loudly without it, moving the expected
+# assertion count with it so a skip cannot be mistaken for a pass:
+#
+#   CT_NOIR_WASM_COMPILER=/tmp/noir-wasm-out/noir_wasm.wasm just test-noir-template
+test-noir-template:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-template.log) 2>&1
+  bash ci/test/noir-template-toolchain.sh
+
 # A wasm-worker SESSION, alive in a real tab over the assembled publish tree.
 #
 # The e2e above drives the node twin and the twin is one-shot: it proves the

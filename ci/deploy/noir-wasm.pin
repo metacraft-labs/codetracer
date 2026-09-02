@@ -20,8 +20,35 @@
 # and check the two sizes in the log against the ones recorded here.
 
 NOIR_REPO=https://github.com/metacraft-labs/noir
-NOIR_REF=ns10/entry-call-order
-# WHAT THIS BUMP BUYS: a browser-produced trace opens on `main` instead of on
+NOIR_REF=ns11/nargo-test-in-wasm
+# WHAT THIS BUMP BUYS: `nargo test` in the browser.
+#
+# `compiler/wasm` could compile a virtual filesystem and could not test one, so
+# the Test Results pane listed the tests `nargo test` would run beside a
+# paragraph saying no browser could run them. `compiler/wasm/src/test_vfs.rs`
+# adds `nv_test_vfs`, which discovers a package's `#[test]` functions with the
+# frontend's own `get_all_test_functions_in_crate_matching` and runs each
+# through `nargo::ops::run_test` — so `#[test(should_fail)]`'s inversion (an
+# assertion failure is a PASS) and `should_fail_with`'s substring match are
+# nargo's verdicts rather than a second implementation of them.
+#
+# THIS REVISION CONTAINS THE ONE IT REPLACES. It is a direct child of
+# df2d2f2e, the entry-call-order bump this line carried, so it is a
+# fast-forward of the same line rather than a second pin racing it.
+#
+# PUSHED, AND CHECKED THE WAY THE BUILDER RESOLVES IT. `build-noir-wasm.sh`
+# runs `git fetch --depth 1 origin <rev>` into a directory it created, so the
+# check is the same operation, and it was run into an empty clone that had
+# never seen this machine:
+#
+#   git init && git remote add origin https://github.com/metacraft-labs/noir
+#   git fetch --depth=1 origin 9c2dfc249c4e0a240642dd6230be0cfd88783df7
+#   git cat-file -p FETCH_HEAD:compiler/wasm/src/test_vfs.rs
+#
+# resolves, and the third command prints the module.
+#
+# The previous bump's note, kept because its claim still holds:
+# a browser-produced trace opens on `main` instead of on
 # a frame the engine invented.
 #
 # `MemorySink::start` pushed the entry `Step` and then the `<toplevel>` `Call`.
@@ -49,7 +76,7 @@ NOIR_REF=ns10/entry-call-order
 # resolves in an empty clone that had never seen this machine, and
 # `tooling/tracer_wasm/src/memory_sink.rs` at the fetched commit pushes the
 # `Call` before the `Step`.
-NOIR_REV=df2d2f2e48b12ad4628ac75f8be7f252d80fd5c2
+NOIR_REV=9c2dfc249c4e0a240642dd6230be0cfd88783df7
 
 # The noir workspace resolves `codetracer_trace_types` and
 # `codetracer_trace_writer_nim` through PATH dependencies on a sibling checkout
@@ -85,5 +112,18 @@ TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 # against the file in the publish directory, and both come from the same
 # assembly run — so it catches a stale document over fresh bytes, which is the
 # failure that reached production in the sibling campaign.
-EXPECT_COMPILER_BYTES=15858329
-EXPECT_TRACER_BYTES=4623865
+# MEASURED at the revision above (2026-09-02, aarch64-darwin), both of them
+# this time: the compiler grew by the test runner and its blackbox solver, and
+# the tracer was rebuilt from the same tree to check it had not.
+#
+#   noir_wasm.wasm         16438462  (+580133 against the figure it replaces)
+#   noir_tracer_wasm.wasm   4613157  (-10708, and this crate is UNCHANGED —
+#                                     see the reproducibility note above; a
+#                                     different build DIRECTORY moves it)
+#
+# The compiler's growth is 3.7%, which is what `bn254_blackbox_solver` plus
+# `nargo::ops::run_test` and its foreign-call layers cost. It is not free and
+# it is not hidden: the module is fetched at run time and cached `immutable`,
+# so it is paid once per pin by the sessions that compile anything.
+EXPECT_COMPILER_BYTES=16438462
+EXPECT_TRACER_BYTES=4613157

@@ -26,10 +26,15 @@
 ## subcommand**:
 ##
 ##   `wasm_worker_browser.js`   `compile` -> `compileVfs`  -> loads `noir-compiler`
+##                              `test`    -> `testVfs`     -> loads `noir-compiler`
 ##                              `trace`   -> `traceArtifact` -> loads `noir-tracer`
 ##
 ## A deployment carrying only the compiler can therefore run `nargo compile`
-## and cannot run `nargo trace`. Declaring both would produce a run that dies
+## and `nargo test` and cannot run `nargo trace`. That an ASSET can enable more
+## than one subcommand is why the mapping below is `subcommandsForAsset` and
+## not `subcommandForAsset`: `nargo test` compiles each test function and
+## executes it, and both halves are in `noir_wasm.wasm` — the tracer is not
+## involved, because a test run produces a verdict rather than a recording. Declaring both would produce a run that dies
 ## inside the worker with "no url declared for wasm module"; declaring neither
 ## would refuse a `compile` that works. Both are the confident-answer-that-is-
 ## sometimes-wrong shape, one in each direction.
@@ -98,6 +103,7 @@ const
 
   compileSubcommand* = "compile"
   traceSubcommand* = "trace"
+  testSubcommand* = "test"
 
   transpilerCommand* = "avm-transpiler"
     ## The bare program name `aztec-nargo` invokes after `nargo compile`, and
@@ -115,22 +121,29 @@ const
 
   transpileSubcommand* = "transpile"
 
-proc subcommandForAsset*(assetId: string): string =
-  ## Which subcommand each fetched module makes possible, and the empty string
+proc subcommandsForAsset*(assetId: string): seq[string] =
+  ## Which subcommands each fetched module makes possible, and an empty list
   ## for an asset that enables none.
   ##
   ## This is the whole delivery-to-capability mapping, in one place, so the
   ## worker's routing and the registry's claim have a single point of
   ## agreement. `test_noir_wasm_delivery` pins both directions.
-  if assetId == noirCompilerModuleId: compileSubcommand
-  elif assetId == noirTracerModuleId: traceSubcommand
-  elif assetId == avmTranspilerModuleId: transpileSubcommand
-  else: ""
+  ##
+  ## PLURAL, because the Noir compiler module enables two: `nv_compile_vfs` and
+  ## `nv_test_vfs` are exports of the same `noir_wasm.wasm`, and
+  ## `wasm_worker_browser.js` routes `compile` and `test` to the same file. The
+  ## singular spelling this replaced could not say that, and a `test`
+  ## subcommand added under it would have had to invent a third asset that does
+  ## not exist.
+  if assetId == noirCompilerModuleId: @[compileSubcommand, testSubcommand]
+  elif assetId == noirTracerModuleId: @[traceSubcommand]
+  elif assetId == avmTranspilerModuleId: @[transpileSubcommand]
+  else: @[]
 
 proc commandForAsset*(assetId: string): string =
   ## Which COMMAND the subcommand above belongs to.
   ##
-  ## Split from `subcommandForAsset` rather than folded into it because a
+  ## Split from `subcommandsForAsset` rather than folded into it because a
   ## subcommand alone cannot say which tool runs it, and the registry's whole
   ## job is to answer `which <command>`. While every module belonged to `nargo`
   ## this was invisible; the moment a second tool arrived, a delivery that
@@ -161,7 +174,7 @@ proc deliverableModuleIds*(): seq[string] =
   ## `nargo` claim; the replay engine is fetched for the same delivery reasons
   ## and is a wasm-bindgen module driven from its own worker, so a list keyed
   ## on "fetched" would have made the page declare `nargo` over it and
-  ## `subcommandForAsset` answer the empty string for a module the registry
+  ## `subcommandsForAsset` answer an empty list for a module the registry
   ## had already counted.
   for asset in noirWasmModuleAssets():
     result.add asset.id
@@ -206,9 +219,9 @@ proc deliveredSubcommands*(delivered: seq[DeliveredWasmModule],
     if commandForAsset(asset.id) != command: continue
     for module in registrable:
       if module.id == asset.id:
-        let sub = subcommandForAsset(asset.id)
-        if sub.len > 0 and sub notin result:
-          result.add sub
+        for sub in subcommandsForAsset(asset.id):
+          if sub.len > 0 and sub notin result:
+            result.add sub
 
 proc deliveredProvenance*(delivered: seq[DeliveredWasmModule],
                           command: string = noirToolchainCommand): string =

@@ -32,6 +32,42 @@ const files = {
 const compileRequest = { files, package_dir: 'proj', mode: 'debug' };
 const inputs = 'x = "3"\n';
 
+// THE TEST SUITE, FOUR WAYS. The verdicts a `should_fail` runner can get wrong
+// are not two but four, and a TALLY distinguishes none of them: 2 passed /
+// 2 failed is also what a runner that inverted BOTH attributes reports, and
+// what one that inverted NEITHER reports over a different program. So each
+// expectation below is per test, by name.
+//
+// This is the one check in this file that would catch an inverted suite before
+// it reached a user, and it runs against the module the deploy is about to
+// publish rather than against a fixture.
+const testFiles = {
+  'suite/Nargo.toml': '[package]\nname = "suite"\ntype = "bin"\n',
+  'suite/src/main.nr':
+    'fn main() {}\n' +
+    '\n#[test]\nfn passes() { assert(1 == 1); }\n' +
+    '\n#[test]\nfn fails() { assert(1 == 2, "one is not two"); }\n' +
+    '\n#[test(should_fail)]\nfn fails_as_asked() { assert(1 == 2); }\n' +
+    '\n#[test(should_fail)]\nfn passes_when_it_should_not() { assert(1 == 1); }\n' +
+    '\n#[test(should_fail_with = "not two")]\n' +
+    'fn right_message() { assert(1 == 2, "one is not two"); }\n' +
+    '\n#[test(should_fail_with = "some other reason")]\n' +
+    'fn wrong_message() { assert(1 == 2, "one is not two"); }\n',
+};
+const testRequest = { files: testFiles, package_dir: 'suite' };
+const expectedVerdicts = {
+  passes: 'pass',
+  fails: 'fail',
+  // An assertion that FIRED under `should_fail` is a PASS.
+  fails_as_asked: 'pass',
+  // A test that ran CLEAN under `should_fail` is a FAILURE.
+  passes_when_it_should_not: 'fail',
+  // `should_fail_with` is a substring match on the failure message, so the
+  // wrong message is a failure even though the test did fail.
+  right_message: 'pass',
+  wrong_message: 'fail',
+};
+
 const digest = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
 
 // --- the direct path, in this process --------------------------------------
@@ -54,6 +90,14 @@ function put(exports, alloc, str) {
   new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
   return [ptr, bytes.length];
 }
+async function directTests() {
+  const c = await load(compiler);
+  const [rp, rl] = put(c, 'nv_alloc', JSON.stringify(testRequest));
+  const ptr = c.nv_test_vfs(rp, rl);
+  return JSON.parse(new TextDecoder().decode(
+    new Uint8Array(c.memory.buffer, ptr, c.nv_result_len()).slice()));
+}
+
 async function directPath() {
   const c = await load(compiler);
   const [rp, rl] = put(c, 'nv_alloc', JSON.stringify(compileRequest));
@@ -121,6 +165,41 @@ async function workerPath() {
   }
 }
 
+async function workerTests() {
+  // A RED SUITE EXITS 1, which is `nargo test`'s own exit code and which
+  // `workerRun` rejects on — so the text has to be collected from the rejection
+  // rather than from a resolve. Treating exit 1 as "the run failed" here would
+  // make this check unable to observe any failing test at all, which is the
+  // half of the four-way fixture that matters most.
+  const worker = new Worker(join(here, 'worker.mjs'), {
+    workerData: { compiler, tracer },
+  });
+  try {
+    return await new Promise((resolve, reject) => {
+      let out = '';
+      const onMessage = (raw) => {
+        const message = JSON.parse(String(raw));
+        if (message.seq !== 3) return;
+        if (message.kind === 'output') out += message.text;
+        else if (message.kind === 'exit') {
+          worker.off('message', onMessage);
+          resolve({ text: out, exitCode: message.exitCode });
+        } else if (message.kind === 'failed') {
+          worker.off('message', onMessage);
+          reject(new Error(message.message));
+        }
+      };
+      worker.on('message', onMessage);
+      worker.postMessage(JSON.stringify({
+        seq: 3, kind: 'start', module: 'noir', command: 'nargo',
+        args: ['test'], workingDir: '', stdin: JSON.stringify(testRequest),
+      }));
+    });
+  } finally {
+    await worker.terminate();
+  }
+}
+
 // --- compare ---------------------------------------------------------------
 let failures = 0;
 const ok = (m) => console.log(`  [OK]     ${m}`);
@@ -153,7 +232,53 @@ if (dTrace.paths.length > 0 && dTrace.paths[0] === 'proj/src/main.nr') {
   bad(`paths were ${JSON.stringify(dTrace.paths)}`);
 }
 
+// --- and the tests, both ways ----------------------------------------------
+const directRun = await directTests();
+const workerRunResult = await workerTests();
+const workerRunBody = JSON.parse(workerRunResult.text);
+
+console.log(`  tests: ok=${directRun.ok} passed=${directRun.passed} ` +
+            `failed=${directRun.failed} skipped=${directRun.skipped}`);
+
+if (directRun.ok) {
+  ok('the suite RAN (`ok` means it ran, not that it was green)');
+} else {
+  bad(`the suite did not run: ${directRun.message}`);
+}
+
+const byName = Object.fromEntries(
+  (directRun.tests || []).map((t) => [t.name, t.status]));
+let verdictFailures = 0;
+for (const [name, expected] of Object.entries(expectedVerdicts)) {
+  if (byName[name] !== expected) {
+    bad(`${name}: expected ${expected}, module said ${byName[name] ?? '<absent>'}`);
+    verdictFailures++;
+  }
+}
+if (verdictFailures === 0) {
+  ok(`all ${Object.keys(expectedVerdicts).length} verdicts are the ones ` +
+     '`nargo test` reaches, including both directions of `should_fail`');
+}
+
+// The digest again, over the whole run, so the two paths cannot differ in a
+// field this file forgot to name.
+if (digest(JSON.stringify(directRun)) === digest(JSON.stringify(workerRunBody))) {
+  ok('the worker path produced a byte-identical test run to the direct path');
+} else {
+  bad('the worker path produced a DIFFERENT test run to the direct path');
+}
+
+// A RED SUITE EXITS NON-ZERO. `nargo test` does, and a CI script that shelled
+// out to this worker and read the exit code would otherwise believe a suite
+// with two failures had passed.
+if (workerRunResult.exitCode === 1) {
+  ok('a red suite exits 1 through the worker, as `nargo test` does');
+} else {
+  bad(`a red suite exited ${workerRunResult.exitCode} through the worker`);
+}
+
 console.log(failures === 0
-  ? '\nRESULT: OK — the worker path and the direct path agree, over a real trace'
+  ? '\nRESULT: OK — the worker path and the direct path agree, over a real ' +
+    'trace and a real test run'
   : `\nRESULT: FAILED — ${failures} check(s)`);
 process.exit(failures === 0 ? 0 : 1);

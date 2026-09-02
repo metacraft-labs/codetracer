@@ -25,6 +25,12 @@
 @import "components/calltrace"
 @import "components/async_flow"
 @import "components/flow"
+
+// AFTER `text_editor` and after `flow`: the Run-test control's markup borrows
+// four classes from those two sheets and this is what stops them deciding what
+// it looks like. Import order is the whole mechanism — moving this line above
+// them puts the button back to looking like a flow loop chip.
+@import "components/editor_test_action"
 @import "components/timeline"
 @import "components/frame_viewer"
 @import "components/pixel_history"

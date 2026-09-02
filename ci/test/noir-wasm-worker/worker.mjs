@@ -49,6 +49,19 @@ async function compileVfs(request) {
     new Uint8Array(exports.memory.buffer, resPtr, resLen).slice()));
 }
 
+async function testVfs(request) {
+  // THE SAME MODULE AS `compileVfs`: `nv_test_vfs` is an export of
+  // `noir_wasm.wasm` beside `nv_compile_vfs`, and shares its allocator and its
+  // `nv_result_len`. The tracer is not involved — a test run produces a
+  // verdict, not a recording.
+  const exports = await load('noir-compiler', workerData.compiler);
+  const [ptr, len] = put(exports, 'nv_alloc', JSON.stringify(request));
+  const resPtr = exports.nv_test_vfs(ptr, len);
+  const resLen = exports.nv_result_len();
+  return JSON.parse(new TextDecoder().decode(
+    new Uint8Array(exports.memory.buffer, resPtr, resLen).slice()));
+}
+
 async function traceArtifact(artifact, inputs) {
   const exports = await load('noir-tracer', workerData.tracer);
   const [aPtr, aLen] = put(exports, 'ct_alloc', JSON.stringify(artifact));
@@ -118,6 +131,15 @@ parentPort.on('message', async (raw) => {
       const response = await compileVfs(JSON.parse(request.stdin));
       post({ seq, kind: 'output', stream: 'stdout', text: JSON.stringify(response) });
       post({ seq, kind: 'exit', exitCode: response.ok ? 0 : 1, signalled: false });
+    } else if (sub === 'test') {
+      const response = await testVfs(JSON.parse(request.stdin));
+      post({ seq, kind: 'output', stream: 'stdout', text: JSON.stringify(response) });
+      // `ok` means the suite RAN; the exit code has to also account for a test
+      // that failed, or a red suite would resolve as a successful run. Same
+      // rule, same spelling, as the browser worker — this file's whole value is
+      // that the two do not disagree by accident.
+      const failed = !response.ok || (response.failed || 0) > 0;
+      post({ seq, kind: 'exit', exitCode: failed ? 1 : 0, signalled: false });
     } else if (sub === 'trace') {
       const payload = JSON.parse(request.stdin);
       const text = await traceArtifact(payload.artifact, payload.inputs);

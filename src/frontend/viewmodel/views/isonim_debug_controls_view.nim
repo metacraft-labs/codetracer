@@ -198,6 +198,13 @@ when defined(js):
 
     let panel = ui(r):
       tdiv(class = "ct-header isonim-debug-controls",
+           # WHICH SURFACE THIS IS. `#isonim-debug-controls` now holds one of
+           # two panels — this one or the edit-mode toolbar — and they share
+           # `run-tests-image`. Declaring the surface on both roots is what
+           # lets a selector say which one it means, and it lets a check
+           # distinguish "the debugger controls are mounted" from "no panel is
+           # mounted at all", which reading the buttons alone cannot.
+           `data-topbar-surface` = "debugger-controls",
            `data-session-mode` = $vm.store.session.val.debugSessionMode,
            `data-recording-head` = $vm.store.session.val.recordingHeadRRTicks):
         tdiv(class = "separate-bar"):

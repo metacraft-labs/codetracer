@@ -103,7 +103,12 @@ let registry = WasmRegistry(modules: @[WasmModule(
   command: "nargo",
   moduleId: WasmModuleId("noir-toolchain@1"),
   displayName: "the Noir toolchain",
-  subcommands: @["trace", "compile"],
+  # Three, since `nv_test_vfs` landed: `wasm_worker_browser.js` routes
+  # `compile` and `test` to the compiler module and `trace` to the tracer.
+  # This fixture is what the suites below drive, so it has to name the same
+  # vocabulary the worker answers — a registry declaring less than the worker
+  # implements makes `resolve` refuse a subcommand that works.
+  subcommands: @["trace", "compile", "test"],
   builtFrom: "noir@codetracer tooling/tracer_wasm")])
 
 let noirModule = WasmModuleId("noir-toolchain@1")

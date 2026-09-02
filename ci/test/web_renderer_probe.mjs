@@ -269,11 +269,27 @@ try {
         })),
       testHeadline:
         ((document.querySelector('.test-results-headline') || {}).textContent || '').trim(),
-      // The stated reason a run cannot start here. On the web this is the
-      // permanent and correct answer, so it is CONTENT — a pane that listed
-      // five tests beside a dead Run button would be worse.
+      // The stated reason a run cannot start here. EMPTY on an ordinary web
+      // deployment, because there is now a runner: `noir_wasm.wasm` exports
+      // `nv_test_vfs` and the worker routes `test` to it. It stays non-empty
+      // for a bundle that placed no compiler module, which is a statement
+      // about that deployment rather than about the product.
       testAbsenceLength:
         ((document.querySelector('.test-results-absence') || {}).textContent || '').trim().length,
+      // THE AFFORDANCE THAT REPLACED THE PARAGRAPH. Its presence AND its
+      // enabled state are both read, because a ▶ that is painted but
+      // permanently disabled is the dead affordance the absence line existed
+      // to avoid — and the two are indistinguishable in a screenshot.
+      testRunButton: (() => {
+        const btn = document.querySelector('.test-results-run-btn');
+        if (!btn) return null;
+        const cls = typeof btn.className === 'string' ? btn.className : '';
+        return {
+          text: (btn.textContent || '').trim(),
+          disabled: cls.includes('disabled'),
+          title: btn.getAttribute('title') || '',
+        };
+      })(),
       constraintRows: Array.from(document.querySelectorAll('.constraints-row'))
         .map((e) => ({
           name: (e.querySelector('.constraints-name') || {}).textContent || '',

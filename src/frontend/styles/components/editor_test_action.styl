@@ -1,0 +1,108 @@
+// The editor's Run-test control.
+//
+// ## Why this file exists at all
+//
+// The control has been in the product since `makeTestAction`
+// (`ui/editor.nim`) was written and **it had no stylesheet**. Its markup asks
+// for `flow-parallel flow-parallel-value-single editor-test-action` inside
+// `flow-loop-step-container` inside `flow-content-widget`, and only the first
+// three of those have rules — all of them belonging to the FLOW pane, which
+// paints loop iteration chips. So the button inherited a loop chip's
+// background, a loop chip's border radius and a loop chip's font, and looked
+// like one: an artefact of the flow renderer that happened to say "Run test".
+//
+// `.editor-test-action` and `.active-test-button` are declared here, after the
+// borrowed classes, so the flow rules stop deciding what this control looks
+// like without any of them having to change.
+//
+// ## Tokens, not values
+//
+// Every colour is a `colors-ui-*` mapped token from `styles/generated`. Not
+// hygiene: the editor has a light theme and a dark one and the token layer is
+// what follows a theme change, so a hex here would be correct in one of them
+// and wrong in the other. The sizes are in `em` against the editor's own font
+// size, which `makeTestContainer` sets inline per widget — a `px` here would
+// stop tracking the editor's zoom.
+//
+// ## What it must NOT look like
+//
+// A primary action. There is one of these on every test in the file, and a row
+// of filled brand-coloured buttons down the right-hand side of the source would
+// compete with the code for attention every time a developer reads the file
+// rather than runs it. So it is quiet by default — a hairline outline and a
+// label — and only fills in on hover, which is the moment the pointer has
+// already declared intent.
+
+.editor-test-action
+  display: inline-flex
+  align-items: center
+  gap: 0.35em
+
+  padding: 0 0.6em
+  border: 1px solid colors-ui-border-secondary
+  border-radius: 999px
+
+  background-color: transparent
+  color: colors-ui-text-primary-label-subtle
+
+  font-family: "SpaceGrotesk"
+  font-size: 0.85em
+  font-weight: 500
+  line-height: 1.6
+  white-space: nowrap
+  letter-spacing: 0.01em
+
+  cursor: pointer
+  user-select: none
+  opacity: 0.55
+  transition: opacity 120ms ease, background-color 120ms ease, border-color 120ms ease, color 120ms ease
+
+  // THE GLYPH IS A PSEUDO-ELEMENT and not a character in the label, because
+  // the label is replaced wholesale by `loadAnimation` while a run is in
+  // flight (`el.innerHTML = frames[i]`). A ▶ written into the text node would
+  // be erased on the first frame and never come back.
+  &:before
+    content: "\25b6"
+    font-size: 0.75em
+    line-height: 1
+    opacity: 0.9
+
+  &:hover
+    opacity: 1
+    background-color: colors-ui-surface-base-card
+    border-color: colors-ui-border-primary-hover
+    color: colors-ui-text-primary-label
+
+  &:active
+    background-color: colors-ui-surface-primary-default-hover
+
+  &:focus-visible
+    outline: 2px solid colors-ui-border-focus
+    outline-offset: 1px
+
+// RUNNING. Fully opaque and brand-bordered, because at this point the control
+// is no longer an affordance offering itself — it is a status, and a status a
+// reader has to hover to see is not one.
+//
+// The animation this class accompanies now STOPS: `loadAnimation` returns when
+// the button is no longer the editor's active one, and `settleEditorTestRun`
+// is what makes it no longer active. Before that it re-armed a 300 ms timer
+// unconditionally and nothing ever cleared `activeTestId`, so a control whose
+// message went nowhere on the web build animated for the life of the tab.
+.editor-test-action.active-test-button
+  opacity: 1
+  border-color: colors-ui-border-action
+  color: colors-ui-text-primary-body
+  background-color: colors-ui-surface-base-card
+  cursor: default
+
+  // No pointer affordance while it runs, and no ▶ either: the label is
+  // "Running..." and a play triangle beside it would be offering an action
+  // that is already happening.
+  &:before
+    content: ""
+    display: none
+
+  &:hover
+    background-color: colors-ui-surface-base-card
+    border-color: colors-ui-border-action

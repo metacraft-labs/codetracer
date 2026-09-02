@@ -61,14 +61,16 @@ export noir_build
 
 type
   NoirBuildPhase* = enum
-    ## Which of the two subcommands is in flight. The pane needs to know
+    ## Which of the three subcommands is in flight. The pane needs to know
     ## because their stdout is not the same thing: `compile` answers a
-    ## `VfsResponse` a few kilobytes long that is worth decoding, and `trace`
-    ## answers a whole `MemoryTrace` — 3.7 KB for the bundled template and
-    ## unbounded in general. Painting the second verbatim would put a trace in
-    ## a log pane.
+    ## `VfsResponse` a few kilobytes long that is worth decoding, `test`
+    ## answers a `TestVfsResponse` whose per-test rows are worth painting, and
+    ## `trace` answers a whole `MemoryTrace` — 3.7 KB for the bundled template
+    ## and unbounded in general. Painting the last verbatim would put a trace
+    ## in a log pane.
     nbpCompile
     nbpTrace
+    nbpTest
 
   NoirPhaseVerdict* = enum
     ## What `onExit` concluded. Returned rather than stored so the caller can
@@ -110,6 +112,18 @@ type
       ## build.
     lastVerdict*: NoirPhaseVerdict
     lastSummary*: NoirTraceSummary
+    lastTests*: NoirTestResponse
+      ## What the last `nbpTest` phase decoded, whole.
+      ##
+      ## Kept on the producer for the same reason `artifact` is: the Test
+      ## Results pane is a SECOND surface over this run, and it needs the
+      ## per-test outcomes rather than the lines this module painted into the
+      ## build pane. A caller reads it after `onExit` returns.
+      ##
+      ## Not an `Option` and not cleared to a sentinel: `decoded` already
+      ## distinguishes "no run has happened" (`false`, no raw) from a run,
+      ## which is the distinction an `Option` would be adding a second
+      ## spelling for.
     settled: bool
       ## `onExit` runs once per phase. `wasm_worker.finish` already forgets a
       ## run before settling it, but a transport that delivered twice would
@@ -252,21 +266,40 @@ proc problemOf*(producer: NoirBuildProducer;
     col: diagnostic.column,
     message: problemMessage(diagnostic))
 
-proc manifestProblem*(producer: NoirBuildProducer;
-                      response: NoirCompileResponse): BuildProblemLine =
-  ## A RESOLVE refusal as a Problems row.
+proc manifestRefusalProblem*(producer: NoirBuildProducer;
+                             manifest, message: string;
+                             line, column: int): BuildProblemLine =
+  ## A RESOLVE refusal as a Problems row, from its four fields.
   ##
   ## `noir_build.nim`'s header fact 3: a refusal before compilation carries
   ## ZERO diagnostics and one positioned message, so a pane that rendered only
   ## `diagnostics` would paint nothing for the two most likely first-run
   ## mistakes — a `Nargo.toml` that names a git dependency, and a missing
   ## manifest. Both are errors and both point at a file the user can open.
+  ##
+  ## Takes the fields rather than a response because BOTH responses carry
+  ## them: `resolve_vfs` is the same function behind `nv_compile_vfs` and
+  ## `nv_test_vfs`, so a manifest that is refused for a Build is refused
+  ## identically for a test run. Two copies of this would be two chances for
+  ## one of them to stop pointing at the manifest.
   BuildProblemLine(
     severity: blsError,
-    path: producer.rendererPath(response.manifest),
-    line: response.line,
-    col: response.column,
-    message: response.message)
+    path: producer.rendererPath(manifest),
+    line: line,
+    col: column,
+    message: message)
+
+proc manifestProblem*(producer: NoirBuildProducer;
+                      response: NoirCompileResponse): BuildProblemLine =
+  ## A compile response's resolve refusal. See `manifestRefusalProblem`.
+  producer.manifestRefusalProblem(
+    response.manifest, response.message, response.line, response.column)
+
+proc manifestProblem*(producer: NoirBuildProducer;
+                      response: NoirTestResponse): BuildProblemLine =
+  ## A test response's resolve refusal. Same four fields, same row.
+  producer.manifestRefusalProblem(
+    response.manifest, response.message, response.line, response.column)
 
 # ---------------------------------------------------------------------------
 # Painting
@@ -362,12 +395,19 @@ proc beginPhase*(producer: NoirBuildProducer; phase: NoirBuildPhase;
   if phase == nbpCompile:
     producer.artifact = nil
     producer.lastSummary = NoirTraceSummary()
+  if phase == nbpTest:
+    # The previous run's verdicts, gone before the new one starts. A pane that
+    # kept them would show a green row for a test the current sources no longer
+    # contain, which is the stalest thing a test pane can say.
+    producer.lastTests = NoirTestResponse()
   producer.vm.setCommand(command)
   producer.vm.setBuildStartTime(nowMs)
   producer.vm.setRunning(true)
-  if phase == nbpCompile:
-    # Only the first phase of a Run clears. A trace that wiped the pane would
-    # delete the compile's own warnings before the user had read them.
+  if phase != nbpTrace:
+    # Only the SECOND phase of a Run leaves the pane alone. A trace that wiped
+    # it would delete the compile's own warnings before the user had read them.
+    # A test run is a run of its own and starts from an empty pane, exactly as
+    # a compile does.
     producer.vm.clearOutput()
     if not producer.onProblemsCleared.isNil:
       producer.onProblemsCleared()
@@ -456,6 +496,138 @@ proc paintCompileResult(producer: NoirBuildProducer;
       producer.emit(response.message, isStdout = false, severity = blsError)
   return npvRefused
 
+proc testMark(outcome: NoirTestOutcome): string =
+  ## The glyph the build pane's row starts with.
+  ##
+  ## The SAME four glyphs `views/isonim_test_results_view.stateMark` uses, so a
+  ## reader who has both panes open sees one vocabulary rather than two. They
+  ## are spelled here rather than imported because this module is a ViewModel
+  ## and that one is a View; importing a view from a producer would invert the
+  ## layering the host-free gate enforces.
+  case outcome.status
+  of ntsPass: "\u2713"          ## ✓
+  of ntsFail: "\u2717"          ## ✗
+  of ntsCompileError: "!"
+  of ntsSkipped: "\u2013"       ## –
+  of ntsUnknown: "?"
+
+proc paintTestResult(producer: NoirBuildProducer;
+                     response: NoirTestResponse): NoirPhaseVerdict =
+  ## Everything a decoded `TestVfsResponse` says, painted into the build pane.
+  ##
+  ## THE BUILD PANE AND NOT A NEW ONE, because the plumbing a failing test
+  ## needs is the plumbing a failing build already has: a positioned message,
+  ## a click that opens the file at the line, and a mirrored row in PROBLEMS.
+  ## A test failure IS a diagnostic with a location, and giving it a second,
+  ## poorer surface would be building a worse copy of a pane that works.
+  if not response.decoded:
+    producer.note(
+      "the Noir toolchain answered with something this build could not " &
+      "decode as a test result. That is a protocol fault, not a fault in " &
+      "your tests: nothing about them has been established.")
+    if response.raw.len > 0:
+      producer.emit(response.raw[0 .. min(response.raw.high, 400)],
+                    isStdout = false, severity = blsError)
+    return npvFaulted
+
+  if not response.ok:
+    # The suite did not RUN. Distinct from a red suite in every way that
+    # matters: no test reached a verdict, so there is nothing to report per
+    # test, and the thing to fix is the project rather than an assertion.
+    if response.manifest.len > 0:
+      # A resolve refusal points at a manifest and carries no diagnostics —
+      # `noir_build.nim`'s header fact 3. Painting only `diagnostics` here
+      # would leave a missing `Nargo.toml` reported as an empty pane.
+      let problem = producer.manifestProblem(response)
+      let located =
+        if problem.line > 0: problem.path & ":" & $problem.line &
+          (if problem.col > 0: ":" & $problem.col else: "")
+        else: problem.path
+      producer.emit(located & ": error: " & problem.message,
+                    isStdout = false, severity = blsError,
+                    path = problem.path, line = problem.line)
+      producer.vm.appendProblem(problem)
+      if not producer.onProblem.isNil:
+        producer.onProblem(problem)
+      producer.vm.appendError(BuildErrorLine(
+        locationPath: problem.path, locationLine: problem.line,
+        rawLocation: located, other: problem.message))
+    for diagnostic in response.diagnostics:
+      producer.paintDiagnostic(diagnostic)
+    if response.diagnostics.len == 0 and response.manifest.len == 0:
+      producer.note(
+        "the Noir toolchain could not run the tests" &
+        (if response.stage.len > 0: " (refused at the " & response.stage &
+                                    " stage)" else: "") &
+        (if response.kind.len > 0: " [" & response.kind & "]" else: "") & ".")
+      if response.message.len > 0:
+        producer.emit(response.message, isStdout = false, severity = blsError)
+    elif response.diagnostics.len > 0:
+      producer.note(
+        "the tests were not run: the project did not compile. " &
+        $response.diagnostics.len & " diagnostic(s) above.")
+    else:
+      producer.note("the tests were not run; the refusal is above.")
+    return npvRefused
+
+  for warning in response.warnings:
+    producer.paintDiagnostic(warning)
+
+  if response.tests.len == 0:
+    # A REAL AND DIFFERENT OUTCOME from a green run, and one a tally of zeroes
+    # renders identically. `nargo test` over a package with no `#[test]`
+    # functions succeeds and runs nothing, and a pane reporting "0 passed" as
+    # success would be telling a user their tests pass when they have none.
+    producer.note(
+      "the project compiled and declares no tests. `nargo test` runs the " &
+      "functions marked `#[test]`; this package has none.")
+    return npvSucceeded
+
+  for outcome in response.tests:
+    let expectation = noirTestExpectationNote(outcome)
+    let suffix = if expectation.len > 0: "  (" & expectation & ")" else: ""
+    let path = producer.rendererPath(outcome.file)
+    case outcome.status
+    of ntsPass:
+      producer.emit(testMark(outcome) & " " & outcome.name & suffix,
+                    isStdout = true, severity = blsNone,
+                    path = path, line = outcome.line)
+    of ntsSkipped:
+      producer.emit(testMark(outcome) & " " & outcome.name & suffix,
+                    isStdout = true, severity = blsInfo,
+                    path = path, line = outcome.line)
+      if outcome.output.strip().len > 0:
+        producer.emit("    " & outcome.output.strip(), isStdout = true,
+                      severity = blsInfo, path = path, line = outcome.line)
+    of ntsFail, ntsCompileError, ntsUnknown:
+      producer.emit(testMark(outcome) & " " & outcome.name & suffix,
+                    isStdout = false, severity = blsError,
+                    path = path, line = outcome.line)
+      # THE DIAGNOSTIC, when there is one, through the ordinary path — so a
+      # failing assertion lands in PROBLEMS and jumps to the `assert` line
+      # rather than to the `fn` line. That is the whole reason this pane was
+      # chosen: the affordance already exists and already works.
+      if outcome.hasDiagnostic:
+        producer.paintDiagnostic(outcome.diagnostic)
+      else:
+        let text = noirTestFailureText(outcome)
+        if text.len > 0:
+          producer.emit("    " & text, isStdout = false, severity = blsError,
+                        path = path, line = outcome.line)
+    if outcome.status != ntsSkipped and outcome.output.strip().len > 0:
+      # What the test PRINTED. Indented under its row and marked as ordinary
+      # output, because it is the program talking rather than the runner.
+      for printed in outcome.output.strip().split('\n'):
+        producer.emit("    " & printed, isStdout = true, severity = blsNone,
+                      path = path, line = outcome.line)
+
+  producer.note(
+    $response.passed & " passed, " & $response.failed & " failed" &
+    (if response.skipped > 0: ", " & $response.skipped & " skipped" else: "") &
+    " of " & $response.tests.len & " test(s)")
+
+  if response.failed > 0: npvRefused else: npvSucceeded
+
 proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
   ## The worker's `exit` message — and its `failed` message, which
   ## `wasm_worker.deliver` also delivers here, with exit code 1.
@@ -479,6 +651,10 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
   of nbpCompile:
     producer.lastVerdict = producer.paintCompileResult(
       parseNoirCompileResponse(producer.stdoutText))
+  of nbpTest:
+    let response = parseNoirTestResponse(producer.stdoutText)
+    producer.lastTests = response
+    producer.lastVerdict = producer.paintTestResult(response)
   of nbpTrace:
     let summary = summariseNoirTrace(producer.stdoutText)
     producer.lastSummary = summary

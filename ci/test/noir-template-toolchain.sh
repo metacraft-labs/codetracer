@@ -29,6 +29,17 @@
 #      parser's selectors against `nargo test --format json`'s `name` fields,
 #      as SETS, and requires them equal.
 #
+#   5. AND THE VERDICTS AGREE, NOT ONLY THE NAMES. Claim 4 guards DISCOVERY:
+#      the two agree about which tests exist. It says nothing about what they
+#      say happened, and the browser now RUNS the tests — `noir_wasm.wasm`
+#      exports `nv_test_vfs`, which drives `nargo::ops::run_test`. A pane that
+#      listed the right five tests and reported them backwards would satisfy
+#      claim 4 completely. So arm V below runs one program through BOTH engines
+#      and diffs the `<name> <status>` lists, over a program deliberately
+#      containing a failing test and a `should_fail` test that passes — because
+#      a suite in which everything is green is one that a runner with the
+#      inversion backwards also reports as green.
+#
 # THE SHAPE, from Verification-Harness-Traps.md 4a/4c
 # ---------------------------------------------------
 #   * COUNTED assertions, with the count asserted at the bottom.
@@ -48,12 +59,22 @@
 #   * arm B (break the Noir syntax in `main.nr`): reddens the compile check
 #     first, and the gate says so rather than reporting five confusing
 #     downstream failures.
+#   * arm V (invert one expected verdict before the diff): reddens the
+#     verdict-equality check alone. Its own control is the un-inverted diff in
+#     the same arm, so "the two engines agree" and "the check can see a
+#     disagreement" are established over the same two runs.
+#
+# ARM V IS SKIPPED LOUDLY, not silently, when `CT_NOIR_WASM_COMPILER` is unset
+# or `node` is missing — and the expected assertion count moves with it, so a
+# skipped arm cannot be mistaken for a passed one. The deploy workflow sets that
+# variable from `ci/deploy/build-noir-wasm.sh`'s output directory.
 #
 # NETWORK: none. `nargo` is a local binary from `ourPkgs.noir`
 # (`nix/shells/ci-base.nix`); nothing is fetched.
 #
 # Usage:  bash ci/test/noir-template-toolchain.sh
-# Env:    CT_NIM_CACHE_ROOT   nim cache root (default /tmp/ct-nim-cache)
+# Env:    CT_NIM_CACHE_ROOT       nim cache root (default /tmp/ct-nim-cache)
+#         CT_NOIR_WASM_COMPILER   noir_wasm.wasm, for arm V (optional)
 
 set -uo pipefail
 
@@ -149,6 +170,32 @@ for line in open(sys.argv[1]):
         names.append(row.get("name", ""))
 for n in sorted(set(n for n in names if n)):
     print(n)
+' "$1"
+}
+
+nargo_verdicts() {
+	# `<name> <status>` for every test nargo REACHED A VERDICT ON, sorted.
+	#
+	# Read from the terminal events and not from `started`, which is what
+	# `nargo_selectors` reads: this is the half claim 4 does not cover. The
+	# statuses are nargo's own spellings (`ok` / `failed` / `ignored`), and
+	# `noir-template-verdicts.mjs` normalises the wasm module's four tags into
+	# them so the two sides are comparable without either being rewritten here.
+	python3 -c '
+import json, sys
+rows = []
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        row = json.loads(line)
+    except Exception:
+        continue
+    if row.get("type") == "test" and row.get("event") in ("ok", "failed", "ignored"):
+        rows.append("%s %s" % (row.get("name", ""), row.get("event")))
+for r in sorted(set(rows)):
+    print(r)
 ' "$1"
 }
 
@@ -336,12 +383,100 @@ else
 fi
 echo
 
-expect_count 14
+# ---------------------------------------------------------------------------
+echo "Arm V: THE VERDICTS — nargo and the wasm module over one program"
+echo "    Expect the two engines to agree line for line, and the check to be"
+echo "    able to see a disagreement."
+# ---------------------------------------------------------------------------
+arm_v_checks=0
+if [ -z "${CT_NOIR_WASM_COMPILER:-}" ] || [ ! -f "${CT_NOIR_WASM_COMPILER:-}" ]; then
+	note "SKIPPED: CT_NOIR_WASM_COMPILER is unset or does not name a file."
+	note "  This arm compares the browser's test runner against nargo's. Build"
+	note "  the module and point at it:"
+	note "    bash ci/deploy/build-noir-wasm.sh /tmp/noir-wasm-out"
+	note "    CT_NOIR_WASM_COMPILER=/tmp/noir-wasm-out/noir_wasm.wasm \\"
+	note "      bash ci/test/noir-template-toolchain.sh"
+elif ! command -v node >/dev/null 2>&1; then
+	note "SKIPPED: node is not on PATH, and the wasm module is driven from node."
+else
+	arm_v_checks=4
+	arm_dir="${cache}/arm-verdicts"
+	materialise "${arm_dir}" >"${cache}/v-report.txt" 2>&1
+
+	# TWO TESTS THAT MUST NOT BE GREEN, appended to a template whose own five
+	# all pass. Without them this arm would compare two lists of `ok`, which is
+	# what a runner with the `should_fail` inversion backwards also produces.
+	cat >>"${arm_dir}/src/main.nr" <<'ARM_V'
+
+#[test]
+fn ci_deliberate_failure() {
+    assert(1 == 2, "ci: this test is meant to fail");
+}
+
+#[test(should_fail)]
+fn ci_should_fail_but_does_not() {
+    assert(1 == 1);
+}
+ARM_V
+
+	(cd "${arm_dir}" && nargo test --format json >"${cache}/v-nargo.json" 2>&1)
+	nargo_verdicts "${cache}/v-nargo.json" >"${cache}/v-nargo.txt"
+	node ci/test/noir-template-verdicts.mjs "${arm_dir}" hello_noir 		>"${cache}/v-wasm.txt" 2>"${cache}/v-wasm.err"
+	wasm_status=$?
+	sed 's/^/    /' "${cache}/v-wasm.err"
+
+	nargo_v="$(wc -l <"${cache}/v-nargo.txt" | tr -d ' ')"
+	wasm_v="$(wc -l <"${cache}/v-wasm.txt" | tr -d ' ')"
+
+	if [ "${wasm_status}" -eq 0 ] && [ "${nargo_v}" -eq 7 ] && [ "${wasm_v}" -eq 7 ]; then
+		ck ok "both engines reached a verdict on all 7 tests, so the diff below is not between two empty lists"
+	else
+		ck fail "nargo reported ${nargo_v} verdict(s) and the wasm module ${wasm_v} (exit ${wasm_status}) — two equal empty lists would compare as a pass, so this is checked first"
+	fi
+
+	# THE PROGRAM IS NOT ALL-GREEN, asserted rather than assumed. If the two
+	# appended tests stopped failing — a template rename, a `nargo` change —
+	# this arm would silently become the weak all-`ok` comparison it exists to
+	# avoid, and would still pass.
+	failing_n="$(grep -c ' failed$' "${cache}/v-nargo.txt")"
+	if [ "${failing_n}" -eq 2 ]; then
+		ck ok "the program under comparison has 2 failing tests and 5 passing, so an inverted runner cannot agree by accident"
+	else
+		ck fail "nargo reported ${failing_n} failing test(s); this arm needs exactly 2, or it compares two all-green lists"
+	fi
+
+	if diff -u "${cache}/v-nargo.txt" "${cache}/v-wasm.txt" \
+		>"${cache}/v-verdict.diff" 2>&1; then
+		ck ok "the wasm module's verdicts are nargo's own, line for line ($(tr '\n' '; ' <"${cache}/v-wasm.txt"))"
+	else
+		ck fail "the browser's runner and nargo disagree about what happened — a Test Results pane fed by this would contradict the developer's own terminal:"
+		sed 's/^/      /' "${cache}/v-verdict.diff" | head -14
+	fi
+
+	# THE ARM'S OWN CONTROL: invert one line and the diff must go red. Without
+	# this, "the two agree" is satisfied by a comparison that cannot disagree —
+	# a `diff` against a file that failed to be written, for instance.
+	sed 's/ci_deliberate_failure failed/ci_deliberate_failure ok/' \
+		"${cache}/v-wasm.txt" >"${cache}/v-wasm-inverted.txt"
+	if diff -q "${cache}/v-nargo.txt" "${cache}/v-wasm-inverted.txt" >/dev/null 2>&1; then
+		ck fail "arm V: inverting one verdict still compared equal — the diff is not reading the statuses"
+	else
+		ck ok "arm V: inverting one verdict makes the comparison red, so it can see a disagreement"
+	fi
+fi
+echo
+
+expect_count $((14 + arm_v_checks))
 
 if [ "${failures}" -eq 0 ]; then
 	printf 'RESULT: OK — %d check(s); the bundled template compiles, its five tests pass,\n' "${checks}"
 	printf '            the browser'"'"'s parser names the runner'"'"'s tests, and the shipped\n'
 	printf '            constraint counts are the ones nargo info reports.\n'
+	if [ "${arm_v_checks}" -eq 0 ]; then
+		printf '            Arm V (the browser runner'"'"'s verdicts against nargo'"'"'s) was SKIPPED.\n'
+	else
+		printf '            The browser runner'"'"'s verdicts are nargo'"'"'s own.\n'
+	fi
 	exit 0
 fi
 printf 'RESULT: FAILED — %d of %d check(s)\n' "${failures}" "${checks}"
