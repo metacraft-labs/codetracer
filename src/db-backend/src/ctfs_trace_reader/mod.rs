@@ -4756,40 +4756,41 @@ mod tests {
 
         let src = "/test/prog.rs";
         let int_type = TypeId(1);
-        let mut events: Vec<TraceLowLevelEvent> = Vec::new();
-        events.push(TraceLowLevelEvent::Path(std::path::PathBuf::from(src)));
-        events.push(TraceLowLevelEvent::Type(TypeRecord {
-            kind: TypeKind::None,
-            lang_type: "None".to_string(),
-            specific_info: TypeSpecificInfo::None,
-        }));
-        events.push(TraceLowLevelEvent::Type(TypeRecord {
-            kind: TypeKind::Int,
-            lang_type: "Int".to_string(),
-            specific_info: TypeSpecificInfo::None,
-        }));
-        events.push(TraceLowLevelEvent::Function(FunctionRecord {
-            path_id: PathId(0),
-            line: Line(1),
-            name: "<toplevel>".to_string(),
-        }));
-        events.push(TraceLowLevelEvent::Call(CallRecord {
-            function_id: FunctionId(0),
-            args: vec![],
-        }));
-        events.push(TraceLowLevelEvent::Function(FunctionRecord {
-            path_id: PathId(0),
-            line: Line(1),
-            name: "main".to_string(),
-        }));
-        events.push(TraceLowLevelEvent::Step(StepRecord {
-            path_id: PathId(0),
-            line: Line(1),
-        }));
-        events.push(TraceLowLevelEvent::Call(CallRecord {
-            function_id: FunctionId(1),
-            args: vec![],
-        }));
+        let mut events: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(std::path::PathBuf::from(src)),
+            TraceLowLevelEvent::Type(TypeRecord {
+                kind: TypeKind::None,
+                lang_type: "None".to_string(),
+                specific_info: TypeSpecificInfo::None,
+            }),
+            TraceLowLevelEvent::Type(TypeRecord {
+                kind: TypeKind::Int,
+                lang_type: "Int".to_string(),
+                specific_info: TypeSpecificInfo::None,
+            }),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<toplevel>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "main".to_string(),
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(1),
+                args: vec![],
+            }),
+        ];
         for i in 0..4usize {
             events.push(TraceLowLevelEvent::Step(StepRecord {
                 path_id: PathId(0),

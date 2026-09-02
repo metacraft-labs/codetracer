@@ -743,8 +743,8 @@ mod load_args_tests {
         // the ONE case that may fall back to the default.
         let req = request_with(Value::Null);
         assert_eq!(
-            req.load_args_or_default::<OptionalArgs>().unwrap(),
-            OptionalArgs::default()
+            req.load_args_or_default::<OptionalArgs>().map_err(|e| e.to_string()),
+            Ok(OptionalArgs::default())
         );
     }
 
@@ -752,11 +752,11 @@ mod load_args_tests {
     fn well_formed_arguments_are_parsed() {
         let req = request_with(serde_json::json!({ "limit": 5, "method": "GET" }));
         assert_eq!(
-            req.load_args_or_default::<OptionalArgs>().unwrap(),
-            OptionalArgs {
+            req.load_args_or_default::<OptionalArgs>().map_err(|e| e.to_string()),
+            Ok(OptionalArgs {
                 limit: Some(5),
                 method: Some("GET".to_string()),
-            }
+            })
         );
     }
 

@@ -892,6 +892,18 @@ fn truncating_a_finalized_container_refuses_rather_than_guessing() {
     // valid committed prefix, asserted row-for-row above. This is the corrected
     // property; the retired `partial == 0` clause was an artifact of the meta-bit
     // gate the amendment removed.
+    //
+    // Retiring that clause left `partial` counted but never read. Asserting it is
+    // reached is what keeps the paragraph above honest: without this, a regression
+    // that made every torn-`spans.dat` cut refuse would still pass this test while
+    // the comment went on claiming the prefix path was exercised. It is reached 17
+    // times for `stage_image(4)` over the deterministic `(16..len).step_by(101)`
+    // cuts, so this pins a property the test already relies on rather than a count.
+    assert!(
+        partial > 0,
+        "no cut produced a partial list, so the committed-prefix path above never ran and its \
+         row-for-row assertions proved nothing"
+    );
 }
 
 // ── A server that stops mid-request ─────────────────────────────────────
