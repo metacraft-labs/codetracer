@@ -152,15 +152,29 @@ mkShell {
 
   # Compose: build-critical exports from ci-base, then dev-only tail.
   shellHook = base.shellHook + ''
+    # Anchor every path below to the repo root. A dev shell can be entered from
+    # any subdirectory, and a relative path then resolves against THAT directory
+    # rather than the checkout. For `.pre-commit-config.yaml` the failure is
+    # indirect and hard to read: a nested copy makes prek run the Rust hooks with
+    # the nested directory as cwd, so `--manifest-path src/db-backend/Cargo.toml`
+    # resolves to `src/db-backend/src/db-backend/Cargo.toml` and surfaces as
+    # "No such file or directory" on a path that reads as correct. The hooks in
+    # nix/pre-commit.nix each `cd` to the toplevel to survive that; this is the
+    # cause those workarounds were compensating for.
+    #
+    # `|| pwd` keeps the old behaviour if the shell is somehow entered outside a
+    # git repo, where `--show-toplevel` fails: previously that left the symlink
+    # in the cwd, and an unguarded empty ROOT_PATH would aim it at `/` instead.
+    ROOT_PATH=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
     # Install pre-commit hooks automatically.
     ${preCommit.installationScript}
-    ln -sf ${preCommit.settings.configFile} .pre-commit-config.yaml
+    ln -sf ${preCommit.settings.configFile} "$ROOT_PATH/.pre-commit-config.yaml"
 
     export RUST_LOG=info
 
     # Tree-sitter-nim parser regen (local checkout — CI clones with
     # submodules: false and skips this).
-    ROOT_PATH=$(git rev-parse --show-toplevel)
     if [ -d "$ROOT_PATH/libs/tree-sitter-nim" ]; then
       (cd "$ROOT_PATH/libs/tree-sitter-nim" && just generate)
     fi
