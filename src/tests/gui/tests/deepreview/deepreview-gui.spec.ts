@@ -46,11 +46,15 @@ const emptyReviewPath = path.join(fixturesDir, "empty-review.json");
 const noCalltracePath = path.join(fixturesDir, "no-calltrace-review.json");
 // RV-4 — real output of the MATERIALIZED collector (`replay-server
 // review-collect`) over a real Noir recording, produced by
-// `fixtures/regenerate-materialized-review.sh`.  Every other fixture in this
-// directory is hand-written and shaped like the NATIVE collector's export;
-// this one is the second collector's actual bytes, which is what makes the
-// suite below an end-to-end review over a materialized recording rather than
-// another test of the same document.
+// `fixtures/regenerate-materialized-review.sh`.  The review DOCUMENTS in this
+// directory are otherwise hand-written and shaped like the NATIVE collector's
+// export; this one is the second collector's actual bytes, which is what makes
+// the suite below an end-to-end review over a materialized recording rather
+// than another test of the same document.
+//
+// (`edit-layout-without-agent-activity.json` is generated too, by
+// `fixtures/regenerate-edit-layout-fixture.sh`, but it is a LAYOUT rather than
+// a review document and no test in this file reads it.)
 const materializedReviewPath = path.join(fixturesDir, "materialized-review.json");
 
 // ---------------------------------------------------------------------------

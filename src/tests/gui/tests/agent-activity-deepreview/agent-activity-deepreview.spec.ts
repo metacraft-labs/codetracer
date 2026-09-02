@@ -178,6 +178,12 @@ test.describe("DeepReview - the third pillar survives a persisted edit layout", 
   // session ends — asserted to be exactly that, and kept from drifting, by
   // `test_the_e2e_fixture_is_what_edit_mode_actually_writes` in
   // src/tests/gui/tests/layout/review_layout_test.nim.
+  //
+  // It is GENERATED, not hand-written.  When that test goes red, regenerate:
+  //   bash src/tests/gui/tests/deepreview/fixtures/regenerate-edit-layout-fixture.sh
+  // Editing the JSON to make the test pass records today's answer instead of
+  // re-deriving it, and the next pane added to `src/config/default_layout.json`
+  // desynchronises it again — which is exactly how it went stale once.
   test.use({
     launchMode: "deepreview",
     deepreviewJsonPath: sampleReviewPath,

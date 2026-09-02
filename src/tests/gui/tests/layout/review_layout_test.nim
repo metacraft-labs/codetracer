@@ -347,10 +347,33 @@ when defined(js):
       ## Pinned here rather than in the spec because this is the only place
       ## that can run the real `sanitizeLayoutConfig` over the real bundled
       ## layout.
+      ##
+      ## THE FIXTURE IS THE SIDE THAT MOVES.  `savedEditLayoutFile()` is
+      ## DERIVED from production — the real save-side sanitiser over the real
+      ## bundled `default_layout.json` — so it cannot be wrong about what edit
+      ## mode writes; it *is* what edit mode writes.  When these two disagree
+      ## the fixture is stale, and the answer is to regenerate it, never to
+      ## adjust this assertion or to hand-edit the JSON until it matches.  A
+      ## hand-edited golden agrees with production by coincidence for exactly
+      ## as long as nobody looks.
+      ##
+      ## This drifted for a day unnoticed because no regeneration procedure was
+      ## written down: `Content.TestResults` (48) and `Content.Constraints`
+      ## (49) became panes of the bundled layout — declared there and
+      ## deliberately absent from `editModeHiddenContentIds`, so an editing
+      ## session shows them — and the fixture kept the two-pane layout that
+      ## predated them.  There is a procedure now, and the failure names it.
       const e2eEditLayoutFixture = staticRead(
         "../deepreview/fixtures/edit-layout-without-agent-activity.json")
-      check jsonStringify(jsonParse(cstring(e2eEditLayoutFixture))) ==
-        savedEditLayoutFile()
+      let fixture = jsonStringify(jsonParse(cstring(e2eEditLayoutFixture)))
+      let written = savedEditLayoutFile()
+      if fixture != written:
+        checkpoint(
+          "the e2e fixture has drifted from what edit mode writes — " &
+          "regenerate it, do not edit it:\n" &
+          "    bash src/tests/gui/tests/deepreview/fixtures/" &
+          "regenerate-edit-layout-fixture.sh")
+      check fixture == written
 
     test "test_the_saved_edit_layout_really_has_no_agent_activity_panel":
       ## The premise, asserted rather than assumed, so the tests below cannot
