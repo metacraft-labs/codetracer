@@ -254,7 +254,9 @@ impl ContinuationPatternSet {
                 links.push(ContinuationLink {
                     id: links.len() as u64,
                     registration: ExecutionPoint { step_id: reg_step },
-                    continuation: ExecutionPoint { step_id: marker.step_id },
+                    continuation: ExecutionPoint {
+                        step_id: marker.step_id,
+                    },
                     context_id: marker.context_id,
                     link_type,
                     async_thread_id,

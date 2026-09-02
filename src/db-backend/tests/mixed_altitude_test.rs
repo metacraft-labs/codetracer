@@ -28,7 +28,7 @@ use std::path::PathBuf;
 use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;
 use db_backend::ctfs_trace_reader::span_stream::{SpanRecord, SpanStreamReader};
 use db_backend::mixed_altitude::{
-    active_altitude, descend, innermost_crossing_span, is_vm_crossing_span, recompute_release, Altitude, AltitudeState,
+    Altitude, AltitudeState, active_altitude, descend, innermost_crossing_span, is_vm_crossing_span, recompute_release,
 };
 
 // ── Fixture plumbing ──────────────────────────────────────────────────────
@@ -113,13 +113,17 @@ fn test_innermost_covering_span_is_chosen() {
     let spans = crossing_spans();
     // At step 5 both frames cover; the innermost is `scale` (span id 2).
     assert_eq!(
-        innermost_crossing_span(&spans, 5).expect("a covering span at step 5").span_id,
+        innermost_crossing_span(&spans, 5)
+            .expect("a covering span at step 5")
+            .span_id,
         2,
         "innermost-wins: the deepest (scale) frame is chosen at step 5"
     );
     // At step 6 only `compute` (span id 1) covers.
     assert_eq!(
-        innermost_crossing_span(&spans, 6).expect("a covering span at step 6").span_id,
+        innermost_crossing_span(&spans, 6)
+            .expect("a covering span at step 6")
+            .span_id,
         1,
         "at step 6 only the enclosing compute frame covers"
     );
@@ -146,7 +150,10 @@ fn test_deliberate_descent_is_span_scoped_and_releases() {
     // override. recompute_release clears the override; P1 reasserts and the
     // altitude rises back to VM for the enclosing compute frame.
     recompute_release(&mut state, &spans, 6);
-    assert_eq!(state.override_span, None, "P3: override released on leaving the pinned span");
+    assert_eq!(
+        state.override_span, None,
+        "P3: override released on leaving the pinned span"
+    );
     assert_eq!(
         active_altitude(&state, &spans, 6),
         Altitude::Vm,

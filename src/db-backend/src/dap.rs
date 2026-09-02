@@ -596,11 +596,7 @@ fn post_decode_failure(scope: &web_sys::DedicatedWorkerGlobalScope, raw: &Value,
     use wasm_bindgen::JsValue;
 
     let request_seq = raw.get("seq").and_then(|v| v.as_i64()).unwrap_or(0);
-    let command = raw
-        .get("command")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let command = raw.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let response = DapMessage::Response(Response {
         base: ProtocolMessage {
             seq: 0,

@@ -238,12 +238,7 @@ pub extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_i
     }
     for offset in 0..n {
         // SAFETY: the caller's contract, above; we stop at the first NUL.
-        let (a, b) = unsafe {
-            (
-                *s1.add(offset) as u8,
-                *s2.add(offset) as u8,
-            )
-        };
+        let (a, b) = unsafe { (*s1.add(offset) as u8, *s2.add(offset) as u8) };
         if a != b {
             return a as c_int - b as c_int;
         }

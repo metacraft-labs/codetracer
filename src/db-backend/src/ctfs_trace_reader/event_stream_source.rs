@@ -110,8 +110,8 @@ impl EventsReader {
                 self.dat.len()
             ));
         }
-        let raw_records =
-            decode_chunk_records(&self.dat[start..end]).map_err(|e| format!("events.dat: chunk {chunk_number}: {e}"))?;
+        let raw_records = decode_chunk_records(&self.dat[start..end])
+            .map_err(|e| format!("events.dat: chunk {chunk_number}: {e}"))?;
         let mut records = Vec::with_capacity(raw_records.len());
         for (within, raw) in raw_records.iter().enumerate() {
             records.push(

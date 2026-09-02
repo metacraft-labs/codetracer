@@ -103,8 +103,7 @@ fn the_probe_picks_the_spelling_the_vfs_can_serve() {
     let bare = PathBuf::from(RECORDED_RELATIVE);
     assert_nothing_is_on_disk(&[&wd, &joined, &bare]);
     assert_ne!(
-        joined,
-        bare,
+        joined, bare,
         "the two spellings must be different keys, or this test cannot distinguish them"
     );
 
@@ -181,7 +180,10 @@ fn both_spellings_a_host_may_have_written_resolve() {
     // (case name, the key the host wrote into the VFS)
     let cases: [(&str, PathBuf); 2] = [
         ("host wrote the workdir-joined spelling", wd.join(RECORDED_RELATIVE)),
-        ("host wrote the bare recorded spelling", PathBuf::from(RECORDED_RELATIVE)),
+        (
+            "host wrote the bare recorded spelling",
+            PathBuf::from(RECORDED_RELATIVE),
+        ),
     ];
     assert_eq!(cases.len(), 2, "both spellings must be covered");
 

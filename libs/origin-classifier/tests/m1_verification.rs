@@ -293,7 +293,12 @@ fn test_classifier_c_per_language_overrides() {
     );
     assert_eq!(c.kind, OriginKind::TrivialCopy);
     assert_eq!(c.source_variable.as_deref(), Some("g_shared"));
-    let c = classify_full("local = atomic_load(&g_shared);", "local", Lang::C, &patterns);
+    let c = classify_full(
+        "local = atomic_load(&g_shared);",
+        "local",
+        Lang::C,
+        &patterns,
+    );
     assert_eq!(c.kind, OriginKind::TrivialCopy);
     assert_eq!(c.source_variable.as_deref(), Some("g_shared"));
 

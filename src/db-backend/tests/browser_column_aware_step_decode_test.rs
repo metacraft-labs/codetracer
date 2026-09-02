@@ -80,15 +80,7 @@ const SOURCE_LINE_LENGTHS: [u32; 6] = [12, 30, 25, 18, 27, 20];
 
 /// `(line, column)` in write order. Columns are 1-based, and each is well
 /// inside its line's length so the decoder's answer is unambiguous.
-const WRITTEN_POSITIONS: [(i64, i64); 7] = [
-    (1, 1),
-    (2, 5),
-    (3, 11),
-    (4, 2),
-    (5, 17),
-    (3, 24),
-    (6, 9),
-];
+const WRITTEN_POSITIONS: [(i64, i64); 7] = [(1, 1), (2, 5), (3, 11), (4, 2), (5, 17), (3, 24), (6, 9)];
 
 /// `writer.start(path, Line(1))` emits a step of its own before any of
 /// [`WRITTEN_POSITIONS`] is registered, so the container holds one more step on
@@ -234,7 +226,8 @@ fn column_aware_container_decodes_written_lines_and_columns() {
     );
 
     assert_eq!(
-        subject, expected,
+        subject,
+        expected,
         "the browser reader decoded a column-aware container's steps to the wrong positions.\n\
          Every entry whose line is far outside 1..={} is a `global_position_index` byte offset \
          being read as a line number by `unpack_global_line_index` — the defect that made the \

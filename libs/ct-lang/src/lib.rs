@@ -300,14 +300,19 @@ pub mod lang_wire {
         use super::super::Lang;
         use serde::{Deserialize, Deserializer, Serializer};
 
-        pub fn serialize<S: Serializer>(lang: &Option<Lang>, serializer: S) -> Result<S::Ok, S::Error> {
+        pub fn serialize<S: Serializer>(
+            lang: &Option<Lang>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
             match lang {
                 Some(lang) => serializer.serialize_some(lang.wire_name()),
                 None => serializer.serialize_none(),
             }
         }
 
-        pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Lang>, D::Error> {
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<Lang>, D::Error> {
             let name = Option::<String>::deserialize(deserializer)?;
             match name {
                 None => Ok(None),
@@ -361,6 +366,9 @@ mod tests {
                 "Lang::ALL[{index}] is not the variant with ordinal {index}"
             );
         }
-        assert_eq!(<Lang as FromPrimitive>::from_u8(Lang::ALL.len() as u8), None);
+        assert_eq!(
+            <Lang as FromPrimitive>::from_u8(Lang::ALL.len() as u8),
+            None
+        );
     }
 }

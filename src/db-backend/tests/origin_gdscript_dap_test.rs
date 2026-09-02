@@ -112,8 +112,12 @@ fn open_reader() -> Arc<dyn TraceReader> {
 /// `gf_values` does not carry — GF10 is not implemented).
 fn build_handler(reader: Arc<dyn TraceReader>) -> Handler {
     let ct = fixture_ct();
-    let mut handler =
-        Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), Arc::clone(&reader), false);
+    let mut handler = Handler::construct_with_reader(
+        TraceKind::Materialized,
+        RecreatorArgs::default(),
+        Arc::clone(&reader),
+        false,
+    );
     handler.set_trace_folder(&ct);
     handler.load_source_views(&ct);
     // §5.2 — extract the sources the GDScript `.ct` bundled so the value-origin
@@ -169,7 +173,10 @@ fn take_body(rx: &mpsc::Receiver<DapMessage>, command: &str) -> JsonValue {
 /// `locals` array from the wire response.
 fn load_locals_at(handler: &mut Handler, step: StepId) -> Vec<JsonValue> {
     handler.step_id = step;
-    handler.replay.jump_to(step).expect("jump_to must succeed on a materialized trace");
+    handler
+        .replay
+        .jump_to(step)
+        .expect("jump_to must succeed on a materialized trace");
     let (tx, rx) = mpsc::channel::<DapMessage>();
     let args = CtLoadLocalsArguments {
         rr_ticks: step.0,
@@ -219,7 +226,9 @@ fn origin_chain(handler: &mut Handler, variable: &str, step: StepId) -> OriginCh
         classify_source: true,
     };
     let req = make_request("ct/originChain", serde_json::to_value(&args).unwrap());
-    handler.origin_chain(req, args, tx).expect("origin_chain must not surface a DAP error");
+    handler
+        .origin_chain(req, args, tx)
+        .expect("origin_chain must not surface a DAP error");
     let body = take_body(&rx, "ct/originChain");
     serde_json::from_value(body).expect("decode OriginChain")
 }
@@ -300,7 +309,11 @@ fn test_gdscript_dap_locals_visible_with_correct_values() {
 
     // Inside callee `scale` (line 31) → factor == 30 (cross-frame local).
     let locals_31 = load_locals_at(&mut handler, step_at_line(&reader, 31));
-    assert_eq!(local_int(&locals_31, "factor"), 30, "factor at line 31 (ct/load-locals)");
+    assert_eq!(
+        local_int(&locals_31, "factor"),
+        30,
+        "factor at line 31 (ct/load-locals)"
+    );
 
     // Cross-check against the raw reader so a load-locals regression that
     // silently drops the value can't pass by returning an empty frame.

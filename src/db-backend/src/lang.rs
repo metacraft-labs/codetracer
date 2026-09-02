@@ -16,7 +16,7 @@ use std::path::Path;
 
 use crate::task::TraceKind;
 
-pub use ct_lang::{lang_wire, Lang};
+pub use ct_lang::{Lang, lang_wire};
 
 /// Map a source path to the language whose value loader must decode its locals.
 ///
@@ -189,8 +189,14 @@ mod tests {
 
     #[test]
     fn materialized_rust_is_still_rust_wasm() {
-        assert_eq!(lang_from_context(Path::new("/src/a.rs"), TraceKind::Materialized), Lang::RustWasm);
-        assert_eq!(lang_from_context(Path::new("/src/a.rs"), TraceKind::Recreator), Lang::Rust);
+        assert_eq!(
+            lang_from_context(Path::new("/src/a.rs"), TraceKind::Materialized),
+            Lang::RustWasm
+        );
+        assert_eq!(
+            lang_from_context(Path::new("/src/a.rs"), TraceKind::Recreator),
+            Lang::Rust
+        );
     }
 
     // -----------------------------------------------------------------

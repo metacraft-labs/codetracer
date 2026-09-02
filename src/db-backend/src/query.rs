@@ -376,10 +376,9 @@ mod tests {
     /// `Cpp` is exactly the contract this change removes.
     #[test]
     fn an_ordinal_on_the_wire_is_rejected() {
-        let err = serde_json::from_str::<ReplayQuery>(
-            r#"{"kind":"LoadValue","expression":"x","lang":1,"depth_limit":null}"#,
-        )
-        .expect_err("an ordinal must not deserialize as a language");
+        let err =
+            serde_json::from_str::<ReplayQuery>(r#"{"kind":"LoadValue","expression":"x","lang":1,"depth_limit":null}"#)
+                .expect_err("an ordinal must not deserialize as a language");
         let message = err.to_string();
         assert!(message.contains("string"), "unhelpful error: {message}");
     }

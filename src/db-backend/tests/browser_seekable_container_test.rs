@@ -299,10 +299,7 @@ fn browser_navigation_does_not_materialize_the_step_table() {
         "200 local steps filled {populated} of {count} slots — local navigation must fill only \
          the chunks it touched, not the whole trace"
     );
-    let chunks = f
-        .browser
-        .lazy_steps_chunk_decompressions()
-        .expect("on the lazy path");
+    let chunks = f.browser.lazy_steps_chunk_decompressions().expect("on the lazy path");
     assert!(
         chunks <= 2,
         "200 contiguous steps inflated {chunks} steps.dat chunks; a local walk spans at most two"
@@ -528,7 +525,11 @@ fn browser_event_count_does_not_decode_events() {
         .seekable_event_page(0, 4)
         .expect("a reader with a stream must serve a page");
     assert!(page.len() <= 4, "a page must not exceed its requested length");
-    assert_eq!(page.len(), std::cmp::min(4, seekable), "a page must be filled from the head");
+    assert_eq!(
+        page.len(),
+        std::cmp::min(4, seekable),
+        "a page must be filled from the head"
+    );
 
     // Past-the-end is an empty page, not a panic and not a wrap-around.
     assert!(

@@ -81,8 +81,12 @@ fn open_reader(ct: &Path) -> Arc<dyn TraceReader> {
 /// launch, plus the IS-M2 crossing-span cache (`load_crossing_spans`) that the
 /// production setup path installs after `load_bundled_sources`.
 fn build_handler(ct: &Path, reader: Arc<dyn TraceReader>) -> Handler {
-    let mut handler =
-        Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), Arc::clone(&reader), false);
+    let mut handler = Handler::construct_with_reader(
+        TraceKind::Materialized,
+        RecreatorArgs::default(),
+        Arc::clone(&reader),
+        false,
+    );
     handler.set_trace_folder(ct);
     handler.load_source_views(ct);
     handler.load_bundled_sources(ct);
@@ -115,7 +119,9 @@ fn move_to_step(handler: &mut Handler, step: u64) -> JsonValue {
         ticks: step as i64,
     };
     let req = make_request("ct/goto-ticks", serde_json::to_value(&args).unwrap());
-    handler.goto_ticks(req, args, tx).expect("goto_ticks must succeed on a materialized trace");
+    handler
+        .goto_ticks(req, args, tx)
+        .expect("goto_ticks must succeed on a materialized trace");
     // The move path emits a `ct/complete-move` event carrying the MoveState.
     while let Ok(msg) = rx.try_recv() {
         if let DapMessage::Event(event) = msg
@@ -231,17 +237,21 @@ fn test_move_altitude_tracks_full_fixture_layout() {
         (0, "native", None),
         (1, "native", None),
         (2, "native", None),
-        (3, "vm", Some(1)),  // compute frame only
-        (4, "vm", Some(2)),  // scale nested inside compute
-        (5, "vm", Some(2)),  // scale nested inside compute
-        (6, "vm", Some(1)),  // back in compute only
+        (3, "vm", Some(1)), // compute frame only
+        (4, "vm", Some(2)), // scale nested inside compute
+        (5, "vm", Some(2)), // scale nested inside compute
+        (6, "vm", Some(1)), // back in compute only
         (7, "native", None),
         (8, "native", None),
     ];
     for &(step, altitude, span) in expectations {
         let body = move_to_step(&mut handler, step);
         assert_eq!(altitude_of(&body), altitude, "altitude at step {step}; body={body:?}");
-        assert_eq!(crossing_span_of(&body), span, "innermost span at step {step}; body={body:?}");
+        assert_eq!(
+            crossing_span_of(&body),
+            span,
+            "innermost span at step {step}; body={body:?}"
+        );
     }
 }
 
