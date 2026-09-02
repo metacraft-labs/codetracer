@@ -51,6 +51,7 @@ import std/[strutils, unittest, jsffi]
 import ../config
 import ../types
 import ../lib/jslib
+from ../ui/shortcut_labels import MONACO_SHORTCUTS_WHITELIST
 
 var countedAssertions = 0
 
@@ -58,7 +59,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 31
+const ExpectedAssertions = 56
+  ## 31 before the two Stop cases below; +5 for the binding pin and +20 for the
+  ## Monaco-delegation family (9 non-vacuity checks, 10 membership checks and
+  ## the total).
 
 proc chordsFor(config: Config; action: ClientAction): seq[Shortcut] =
   for shortcut in config.shortcutMap.actionShortcuts[action]:
@@ -178,6 +182,72 @@ suite "shipped shortcut bindings":
     # over nothing cannot pass.
     counted checkedPairs == config.shortcutBindingCount()
     counted checkedPairs > 40
+
+  test "Stop is bound, and to the chord both specs and the YAML agree on":
+    # `stop` was the one debugger command whose whole chain ended in
+    # `renderer.nim`'s `proc stopAction* = discard`. The binding was never the
+    # broken link, so this half is a regression guard: it pins the chord the
+    # fix is reachable through, in both spellings, since the Monaco assertion
+    # below reads the `editor` one and Mousetrap reads the `renderer` one.
+    let stop = chordsFor(config, ClientAction.stop)
+    counted stop.len == 1
+    counted $stop[0].renderer == "shift+f5"
+    counted $stop[0].editor == "SHIFT+F5"
+    counted config.shortcutMap.shortcutActions[cstring"SHIFT+F5"] ==
+      ClientAction.stop
+    # And it is not somebody else's dropped loser — `initShortcutMap` is
+    # first-writer-wins, and `Debugger-Controls.md` gives `Shift+F5` to
+    # Reverse Continue as well as to Stop in the same table, which is exactly
+    # the collision that would silence one of them.
+    var losers: seq[ClientAction] = @[]
+    for pair in config.shortcutMap.conflictList:
+      for action in pair[1]:
+        losers.add(action)
+    counted ClientAction.stop notin losers
+
+  test "every debugger command reaches Monaco, Stop included":
+    # THE LINK THIS TEST EXISTS FOR.
+    #
+    # `ui/editor.nim` delegates a config chord into Monaco only if it appears
+    # in `MONACO_SHORTCUTS_WHITELIST` (`editor.nim`, the `notin` guard in
+    # `configureShortcuts`). Monaco stops keydown propagation before the
+    # bubble phase Mousetrap listens on, so a chord left off that list is
+    # DEAD while the caret is in the editor — which for a source debugger is
+    # where the caret usually is.
+    #
+    # `SHIFT+F5` was missing from the list. Every other member of the family
+    # was present, so Stop was the single debugger command a user could not
+    # invoke from the editor, which is a large part of why it read as "bound
+    # and does nothing" even before you reach `stopAction`'s empty body.
+    #
+    # Asserted over the family rather than for Stop alone, so the next command
+    # added to the YAML and forgotten here reddens too. The `editor` spelling
+    # is the one used, because that is the string `editor.nim` looks up.
+    const debuggerCommands = [
+      ClientAction.forwardContinue,
+      ClientAction.reverseContinue,
+      ClientAction.forwardNext,
+      ClientAction.reverseNext,
+      ClientAction.forwardStep,
+      ClientAction.reverseStep,
+      ClientAction.forwardStepOut,
+      ClientAction.reverseStepOut,
+      ClientAction.stop,
+    ]
+    var checkedChords = 0
+    for action in debuggerCommands:
+      let chords = chordsFor(config, action)
+      # Non-vacuity per action: an unbound action has no chords, and a loop
+      # over an empty seq asserts nothing while looking like it did.
+      counted chords.len >= 1
+      for chord in chords:
+        checkpoint($action & " -> " & $chord.editor)
+        counted chord.editor in MONACO_SHORTCUTS_WHITELIST
+        inc checkedChords
+    # `forwardContinue` is bound to two chords ("F8 F2"), so nine commands
+    # contribute ten chords. Pinning the total is what stops this passing on a
+    # table that parsed only half of itself.
+    counted checkedChords == 10
 
   test "shortcut_bindings_assertion_count_is_measured":
     checkpoint("counted assertions: " & $countedAssertions)

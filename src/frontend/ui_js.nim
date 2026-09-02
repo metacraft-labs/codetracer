@@ -901,7 +901,28 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           element "Reverse Step Over", reverseNext
           element "Reverse Step In", reverseStep
           element "Reverse Step Out", reverseStepOut
-          # element "Stop Debugging", stop
+          # STOP — the menu route the spec asks for.
+          #
+          # `codetracer-specs` `latest`
+          # `GUI/Debugging-Features/Debugger-Controls.md` § "Ending a session
+          # from inside it": "*Stop* must be discoverable by all three of the
+          # routes CodeTracer offers a command — a toolbar button, a menu entry
+          # and a chord". Commented out, it was reachable only by `SHIFT+F5`,
+          # and this node is also what feeds the command palette
+          # (`ui/menu.nim`'s `generateNameMap(self.data.ui.menuNode)`) and the
+          # native macOS menu (`index/menu.nim`), so one comment removed all
+          # three at once.
+          #
+          # The toolbar button is the one route still missing, and it is
+          # missing in the SPEC too, not just here: the same document says
+          # "neither the toolbar order nor the wireframe above yet places it.
+          # It needs a mark, which Control Marks does not have". Adding a
+          # button would mean choosing that mark, which is not this change's
+          # to make.
+          #
+          # Named "Stop" rather than "Stop Debugging" to match the name the
+          # spec, the config key and the tooltip all use.
+          element "Stop", stop
           # TODO dynamic name
           # element "Pause (currently using stop shortcut?)", stop, false
           --sub

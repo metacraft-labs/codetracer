@@ -1259,8 +1259,10 @@ test-frontend-js:
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
   shortcut_bindings_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-bindings-test.XXXXXX.js")"
   debug_toolbar_tooltips_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-debug-toolbar-tooltips-test.XXXXXX.js")"
+  component_registry_binding_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-component-registry-binding-test.XXXXXX.js")"
+  stop_command_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-stop-command-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$debug_toolbar_tooltips_test" "$html_sinks_probe"' EXIT
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$html_sinks_probe"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1311,6 +1313,30 @@ test-frontend-js:
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$debug_toolbar_tooltips_test" js src/frontend/tests/debug_toolbar_tooltips_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$debug_toolbar_tooltips_test"
+  echo ""
+  # Every component `registerComponent` is handed must come out bound to its
+  # `Data`, including one whose (content, id) slot is already taken -- the
+  # singleton factories all build id 0 and publish into `data.ui.<panel>`
+  # BEFORE registering, so a rejected duplicate is still what the app renders.
+  # Unbound, its first `self.data.<field>` is `null.sessions` in the generated
+  # JS: the "statusBaseModel dereferences null: reading 'sessions'" crash.
+  # Same `window` alias as the scratchpad suite, same `types.nim` reason.
+  echo "Running component registry binding tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$component_registry_binding_test" js src/frontend/tests/component_registry_binding_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$component_registry_binding_test"
+  echo ""
+  # *Stop* leaves Debug mode for Edit mode. `renderer.nim`'s `stopAction` was
+  # `discard` from the initial open-source commit while `SHIFT+F5` dispatched
+  # to it, and nothing could see that: no runnable lane can import
+  # `renderer.nim` (`nim js` on it pulls the Karax/Monaco tree), so the two
+  # renderer lanes compile-check it and an empty body compiles fine. The
+  # behaviour therefore lives in the leaf `ui/stop_command.nim`, which this
+  # runs.
+  echo "Running Stop command tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$stop_command_test" js src/frontend/tests/stop_command_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$stop_command_test"
   echo ""
   echo "Running IPC registry rebind tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \

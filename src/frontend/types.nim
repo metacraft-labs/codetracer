@@ -2581,16 +2581,63 @@ when defined(ctRenderer):
     result.parent = middlewareToViewsApi
 
   proc registerComponent*(data: Data, component: Component, content: Content) =
-    if data.ui.componentMapping[content].hasKey(component.id):
-      echo fmt"WARNING: already having a component for {content} with id {component.id}"
-    else:
-      component.data = data
-      component.content = content
-      if not data.viewsApi.isNil and component.api.isNil:
-        let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
-        component.register(componentToMiddlewareApi)
-      echo "register component ", content, " ", component.id
-      data.ui.componentMapping[content][component.id] = component
+    ## Bind a component to its ``Data`` and put it in the per-session
+    ## component registry.
+    ##
+    ## ``component.data`` IS THE ONLY WAY A PANEL REACHES ITS SESSION.  Every
+    ## `self.data.<field>` in `ui/` goes through a Data forwarding template
+    ## (`services`, `ui`, `trace`, `startOptions`, ... above), each of which
+    ## expands to `data.sessions[data.activeSessionIndex].<field>` — so a
+    ## component whose `data` is nil does not fail with "data is nil", it
+    ## fails on the *next* hop, as `TypeError: Cannot read properties of null
+    ## (reading 'sessions')`.
+    ##
+    ## Both assignments used to live in the `else` branch below, i.e. a
+    ## component was only bound if the registry ACCEPTED it.  That is not
+    ## sound, because the `make*Component` helpers in `utils.nim` publish the
+    ## component before registering it — `makeStatusComponent`
+    ## (`utils.nim`) does `data.ui.status = result` and only then calls this
+    ## proc.  So a rejected duplicate is still the component the app renders,
+    ## with `data == nil`.
+    ##
+    ## The duplicate is reachable, not hypothetical.  `makeStatusComponent`
+    ## and `makeSearchResultsComponent` are the two singleton helpers that
+    ## pass no `id` at all — the rest call `generateId`, which hands out the
+    ## lowest FREE id and so quietly makes a second component instead of a
+    ## duplicate — so those two build id 0 every time.  And they are built
+    ## twice for one session: `ui/session_switch.nim`'s `createNewSession`
+    ## builds the chrome for a new tab, then `switchSession` calls
+    ## `renderer.createUIComponents` for the same session on its first
+    ## activation.  The second `makeStatusComponent` won `data.ui.status`,
+    ## unbound, and the first status render after the tab switch died in
+    ## `ui/status.nim`'s `statusBaseModel` on `self.data.services`.
+    ##
+    ## So: bind first, unconditionally.  And when the id is taken by a
+    ## DIFFERENT object, hand the slot to the newcomer rather than dropping
+    ## it — the old one is unregistered first, because leaving both
+    ## subscribed is the #612 handler leak (see `Component.unregister` and
+    ## `src/frontend/tests/scratchpad_add_dispatch_test.nim`).
+    component.data = data
+    component.content = content
+
+    let existing =
+      if data.ui.componentMapping[content].hasKey(component.id):
+        data.ui.componentMapping[content][component.id]
+      else:
+        nil
+
+    if not existing.isNil and not (existing == component):
+      echo fmt"WARNING: replacing the component for {content} with id {component.id}"
+      try:
+        existing.unregister()
+      except CatchableError:
+        echo fmt"WARNING: unregister of the replaced {content} #{component.id} failed"
+
+    if not data.viewsApi.isNil and component.api.isNil:
+      let componentToMiddlewareApi = setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
+      component.register(componentToMiddlewareApi)
+    echo "register component ", content, " ", component.id
+    data.ui.componentMapping[content][component.id] = component
 
   proc projectPath*(project: cstring, path: string): cstring =
     return data.startOptions.app & cstring("/") & project & cstring(path)

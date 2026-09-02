@@ -10,6 +10,10 @@ import
   # internal
   types, utils, lang,
   file_conflicts,
+  # `ui/stop_command` is a LEAF (`../types` + `../lib/logging`), so this does
+  # not drag the `ui/` tree in — `ui/` modules import THIS one, not the other
+  # way round, and that direction is preserved.
+  ui / stop_command,
   communication, dap,
   event_helpers,
   .. / common / ct_event,
@@ -822,7 +826,18 @@ template reverseStepOut*(fromShortcut: bool) =
 #     continueTo(data.breakpoints)
 
 proc stopAction* {.locks: 0.}=
-  discard
+  ## *Stop* — leave Debug mode and return the workspace to Edit mode.
+  ##
+  ## This body was `discard` from commit `3fc21a75` (the initial open-source
+  ## release) until now, while `src/config/default_config.yaml:75` bound
+  ## `SHIFT+F5` to it and `ui_js.nim`'s action table dispatched to it: a
+  ## command that was bound, reachable and inert.
+  ##
+  ## The behaviour, the spec citations that settle it and the one thing the
+  ## spec leaves open are all in `ui/stop_command.nim`, which is a leaf a node
+  ## suite can import — `renderer.nim` is not, which is how an empty body
+  ## survived here for the life of the repository.
+  discard stopReplaySession(data)
 
 
 proc loadTheme*(name: cstring) =

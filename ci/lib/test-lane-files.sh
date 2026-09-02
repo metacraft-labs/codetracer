@@ -542,12 +542,20 @@ test_lane_files() {
 		# restate it as a literal, so it asserts the shipped table drives all 13
 		# controls and that rebinding one changes the answer. JS-only for the
 		# same `JsAssoc` reason.
+		# `component_registry_binding_test.nim` is JS-only for the reason its
+		# subject is: `Component.data` matters because every `self.data.<x>` in
+		# `ui/` expands to `data.sessions[data.activeSessionIndex].<x>`, and
+		# that forwarding only exists on the JS side (`std/jsffi`'s `JsAssoc`,
+		# and the `{.emit.}`ed getters in `types.nim`). It is also the only
+		# lane that RUNS `registerComponent` rather than compile-checking it.
 		printf '%s\n' \
+			src/frontend/tests/component_registry_binding_test.nim \
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
 			src/frontend/tests/scratchpad_add_dispatch_test.nim \
 			src/frontend/tests/shortcut_bindings_test.nim \
+			src/frontend/tests/stop_command_test.nim \
 			src/frontend/tests/target_axes_js_test.nim
 		;;
 

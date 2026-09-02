@@ -132,3 +132,121 @@ proc toolbarChord*(config: Config; actionId: string): string =
   if action.isNone:
     return ""
   renderChord(action.get, config)
+# ---------------------------------------------------------------------------
+# The Monaco delegation whitelist.
+#
+# MOVED HERE FROM `ui/editor.nim`, unchanged apart from being exported.
+# `ui/editor.nim` still owns the delegation itself (`delegateShortcut`); what
+# lives here is the LIST, because the list is a claim about the shipped
+# binding table and `ui/editor.nim` cannot be imported by a suite — `nim js`
+# on it pulls the whole Karax/Monaco tree. This module already compiles into
+# `src/frontend/tests/debug_toolbar_tooltips_test.nim`, so the list can now be
+# asserted against `defaultRendererConfig()` in
+# `src/frontend/tests/shortcut_bindings_test.nim`.
+#
+# The absence that made that worth doing: `SHIFT+F5` (Stop) was bound in
+# `default_config.yaml` and missing from this list, so the command that leaves
+# Debug mode did not fire while the caret was in the editor — and nothing
+# could say so.
+#
+# for now applied to user config, but not to commands:
+# the commands shortcuts are hardcoded in this file
+# so review them if needed!
+const MONACO_SHORTCUTS_WHITELIST*: seq[cstring] =
+  @[
+      "F2",
+      "F8",
+      "F10",
+      "F11",
+      "F12",
+      "SHIFT+F2",
+      # STOP — `SHIFT+F5`, spelled as `default_config.yaml:75` spells it.
+      #
+      # Required by name: `codetracer-specs` `latest`
+      # `GUI/Debugging-Features/Debugger-Controls.md` § "Ending a session from
+      # inside it" — "because it must work while the editor holds focus it
+      # belongs in `MONACO_SHORTCUTS_WHITELIST` as well as in the YAML".
+      #
+      # The reason that requirement is not decoration is the one measured for
+      # `CTRL+B` below: Monaco stops keydown propagation before the bubble
+      # phase Mousetrap listens on, so a global bind cannot fire while the
+      # caret is in the editor. Every OTHER debugger control is on this list
+      # already; Stop was the one omission, so the command that LEAVES Debug
+      # mode was the one command unavailable from the surface a user is
+      # looking at when they want to leave it.
+      "SHIFT+F5",
+      "SHIFT+F8",
+      "SHIFT+F10",
+      "SHIFT+F11",
+      "SHIFT+F12",
+      "CTRL+KeyS",
+      # BUILD — `CTRL+B`, spelled as `default_config.yaml` spells it.
+      #
+      # `initShortcutMap` copies the YAML string into `Shortcut.editor`
+      # VERBATIM (`common/config.nim`: `editor: normalShortcut`, and
+      # `normalize` is the identity), so the entry that matches `build`'s
+      # binding is `CTRL+B` and not `CTRL+KeyB`. `ui/shortcuts.nim:18` is what
+      # makes the two spellings equivalent to Monaco — a one-character final
+      # token becomes `Key<X>` there — so `CTRL+KeyS` above and `CTRL+B` here
+      # both resolve, and matching the YAML is what makes the lookup on line
+      # 295 hit at all.
+      #
+      # WHY IT IS NEEDED, measured on the deployed site rather than reasoned
+      # from the comment below. `noirstudio.dev`, caret placed in
+      # `src/main.nr` by clicking a `.view-line`, then `Ctrl+B`: ZERO
+      # `nargo compile` worker starts, zero `.wasm` fetches, and no
+      # `shortcuts: global handle ctrl+b build` line. The same page with focus
+      # on `<body>`: the build ran, `nbpCompile-exit verdict=npvSucceeded`.
+      # Two in-editor trials, one after typing into the buffer — the user's
+      # actual gesture — both dead. This is the bug report.
+      #
+      # WHERE THE EVENT DIES, and it is NOT `stopCallback`. A keydown listener
+      # installed before any page script saw `ctrl+b` arrive at `document` in
+      # the CAPTURE phase, `defaultPrevented == false`, target
+      # `div.native-edit-context` — and then never reach `document` in the
+      # BUBBLE phase, which is where Mousetrap listens. Something between the
+      # two stops propagation while the caret is in Monaco. So a global bind
+      # cannot fire from inside the editor no matter what `stopCallback`
+      # answers, because `stopCallback` is only consulted for events that
+      # arrive.
+      #
+      # NOT A DOUBLE-DELIVERY, and this is the question the ALT+F8 note below
+      # says to ask. Monaco binds nothing to `ctrl+b`: the standalone editor's
+      # own keybinding resolver, queried on the live page, returns an EMPTY
+      # list for Ctrl+B/Cmd+B — unlike ALT+F8, which is Monaco's marker
+      # navigation and which is why that chord fired twice. The two paths stay
+      # exclusive for the reason `ui/shortcuts.nim` records: with the caret in
+      # Monaco the event never reaches Mousetrap (measured above), and with
+      # the caret outside, the delegated Monaco command does not run.
+      "CTRL+B",
+  ]
+  # BUILD-ERROR NAVIGATION IS DELIBERATELY *NOT* IN THE LIST ABOVE, and the
+  # reason is worth recording because the obvious change is the wrong one.
+  #
+  # Mousetrap's DEFAULT `stopCallback` ignores a chord raised inside a
+  # textarea, and Monaco's input surface is one — so a global binding would
+  # normally never fire while the user was editing, which is the only place
+  # anybody presses "go to next error" from. That is what this whitelist is
+  # for, and `ALT+F8` was added to it on exactly that reasoning.
+  #
+  # But `ui/shortcuts.nim:318` overrides `stopCallback` to `return false` for
+  # the whole application. The global binding therefore ALREADY fires with the
+  # caret in the editor, and adding the chord here made it fire TWICE — once
+  # through Mousetrap and once through the delegated Monaco command. Measured
+  # in a browser tab: one press of ALT+F8 on a one-error build advanced to the
+  # error and then wrapped, reporting "wrapped to first error" for a list the
+  # user had not finished walking once.
+  #
+  # THE SENTENCE ABOVE IS TRUE OF ALT+F8 AND FALSE IN GENERAL — see the
+  # `CTRL+B` entry in the list. "The global binding ALREADY fires with the
+  # caret in the editor" holds only for chords whose keydown still REACHES
+  # `document`'s bubble phase. ALT+F8 does; `ctrl+b` does not, so for it the
+  # whitelist is the only path and there is nothing to double up with. The
+  # distinguishing question is not `stopCallback`, it is whether Monaco
+  # consumes the chord — which `default_config.yaml`'s own note records from
+  # the other side: "with the chord removed from the whitelist it fired NOT AT
+  # ALL, because Monaco consumed the key before it reached the document."
+  #
+  # The entries above predate that override and are left alone: F2/F8/F10-F12
+  # are chords Monaco itself would otherwise consume, and changing them is a
+  # separate question from this one.
