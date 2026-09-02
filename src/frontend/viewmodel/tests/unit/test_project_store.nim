@@ -211,6 +211,68 @@ suite "durability is three tiers, not a boolean — §4.1, §4.2":
     check opened.value.durability.exportUrgency == euEscalated
     check "did not say" in opened.value.announcement
 
+  test "the degraded sentences lead with what is true, not with the refusal":
+    ## THE DEFECT IN THE WORDING, as an assertion.
+    ##
+    ## The notice opened on "This browser refused to mark your work as
+    ## persistent" — a browser refusal, reported at the moment a first-time
+    ## visitor has invested nothing, about work that is in fact in OPFS, on
+    ## disk, and surviving reloads and crashes. Under the Storage Standard a
+    ## denied first visit is the NORMAL case; the origin is best-effort, not
+    ## unsaved.
+    ##
+    ## Both halves are asserted deliberately. Dropping the eviction risk would
+    ## be dishonest — best-effort data really can be cleared without a prompt,
+    ## and export really is the mitigation — so the risk and the export
+    ## instruction must both still be present. What must not be present is the
+    ## refusal as the opening clause.
+    for condition in [scPersistenceUnknown, scPersistenceDenied]:
+      let sentence = durabilityReport(condition).announcement
+      check sentence.startsWith("Your work is saved in this browser")
+      check "survives reloads" in sentence
+      check "export the project" in sentence
+      check "refused" notin sentence
+      # The risk is still stated rather than softened away.
+      check "storage" in sentence
+
+    # …and `scVolatile` does NOT get the reassuring opening, because nothing is
+    # saved in that row and the sentence would be false. This is the arm that
+    # stops "lead with what is true" from being applied where it is not true.
+    let volatileSentence = durabilityReport(scVolatile).announcement
+    check not volatileSentence.startsWith("Your work is saved")
+    check "lost when it closes" in volatileSentence
+
+  test "a first refusal is not treated as permanent":
+    ## `mayBeGrantedLater` is what `web_project_persistence.recheckPersistence`
+    ## consults before asking the browser a second time.
+    check mayBeGrantedLater(scPersistenceDenied)
+    check mayBeGrantedLater(scPersistenceUnknown)
+    # Nothing left to ask for…
+    check not mayBeGrantedLater(scPersistenceGranted)
+    # …and nothing a grant could rescue: there is no OPFS to make persistent.
+    check not mayBeGrantedLater(scVolatile)
+
+  test "a later grant improves the report and keeps the acknowledgement":
+    let volume = newMemoryVolume()
+    var durable = volume.asVolume
+    durable.durable = true
+    let opened = awaitOutcome(openStore(durable, "tab-a", false, true, t0))
+    check opened.ok
+    let session = opened.value
+    check session.durability.condition == scPersistenceDenied
+    check session.announcement.len > 0
+    check session.durability.exportUrgency == euEscalated
+    session.acknowledgeDurability()
+
+    session.refreshDurability(scPersistenceGranted)
+    check session.durability.condition == scPersistenceGranted
+    check session.announcement == ""
+    check session.durability.exportUrgency == euRoutine
+    # THE ACKNOWLEDGEMENT MUST SURVIVE. `web_platform.writeText` refuses every
+    # write while `readyForEditing` is false, so resetting it here would make
+    # the product start rejecting saves at the exact moment the news improved.
+    check session.readyForEditing
+
   test "the three tiers are named, and the middle one says why it is absent":
     let report = durabilityReport(scPersistenceGranted)
     check report.tiers[dtWorkingTree].available

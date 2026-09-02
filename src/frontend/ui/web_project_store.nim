@@ -212,6 +212,24 @@ proc applyEditToMemory*(relativePath, content: string): bool =
 # What the user is TOLD about where their work lives — §4.2
 # ---------------------------------------------------------------------------
 
+type
+  DurabilityNoticeLevel* = enum
+    ## How urgently the notice must read — and therefore which
+    ## `NotificationKind` the renderer raises it as.
+    ##
+    ## Carried as a value rather than inferred from the sentence. A severity
+    ## recovered by grepping the text is a severity that silently changes the
+    ## day someone rewords the text, which is precisely what this change does
+    ## to the text.
+    dnlReassurance
+      ## The working tree is durable and the browser has undertaken to keep it.
+      ## Nothing is at risk and there is nothing for the user to do.
+    dnlEvictable
+      ## On disk, surviving reload and crash, and reclaimable without a prompt
+      ## if the device runs low. Export is the mitigation.
+    dnlUnstored
+      ## Not stored at all. It goes when the tab does.
+
 var durabilityNotice: string
   ## The sentence shown in the product, or `""` when there is nothing to say.
   ##
@@ -223,14 +241,21 @@ var durabilityNotice: string
 
 var durabilityIsDurable: bool
   ## Whether the working tree actually survives a reload, as a value a test can
-  ## assert and a banner can style. Not derived from the notice text.
+  ## assert and a view can style. Not derived from the notice text.
 
-proc setDurabilityNotice*(text: string; durable: bool) =
+var durabilityLevel: DurabilityNoticeLevel
+
+proc setDurabilityNotice*(text: string; durable: bool;
+                          level: DurabilityNoticeLevel) =
   durabilityNotice = text
   durabilityIsDurable = durable
+  durabilityLevel = level
 
 proc durabilityNoticeText*(): string =
   durabilityNotice
+
+proc durabilityNoticeLevel*(): DurabilityNoticeLevel =
+  durabilityLevel
 
 proc worksSurviveReload*(): bool =
   durabilityIsDurable

@@ -28,6 +28,20 @@
 # store landed — had zero callers, so "export to keep them" named an action the
 # product did not offer. This gate is the assertion that both are now true.
 #
+# THE SECOND DEFECT, AND WHY THE BANNER ASSERTIONS BECAME NOTICE ASSERTIONS
+# -------------------------------------------------------------------------
+# Once the sentence was true it was shown in a bespoke `<div>` appended to
+# `document.body` at `position:fixed; bottom:0; z-index:2147483646` — which is
+# the status bar's own strip, so the product covered its own footer on every
+# first visit. `NotificationKind`, `newNotification` and the toast stack in
+# `ui/status.nim` already existed and already stack ABOVE the bar
+# (`#active-notifications` is `bottom:38px`), so the sentence moved there.
+#
+# The acceptance is therefore not "a notification appears" but "the status bar
+# is not covered", hit-tested at three points across the bar WHILE the notice
+# is on screen — with arm D putting an equivalent overlay back to prove that
+# check is not vacuous.
+#
 # THE FALSE PASS THIS GATE REFUSES TO BE
 # --------------------------------------
 # **A test that edits a file and asserts a successful build proves nothing**,
@@ -227,20 +241,121 @@ fi
 	ck ok "the fresh context really loaded a project ($(jstrlen "${cache}/control.json" bundledContent) chars)" ||
 	ck fail "the fresh context loaded nothing, so the comparison above is against an empty string"
 
-# §4.2's sentence, PAINTED — hit-tested at its own centre, not `innerText`.
-[ "$(jbool "${cache}/control.json" bannerPainted)" = "1" ] &&
-	ck ok "the durability sentence is painted and is the element at its own centre" ||
-	ck fail "the durability sentence is not painted where a user would read it"
+# ---------------------------------------------------------------------------
+# §4.2's sentence, DELIVERED THROUGH THE NOTIFICATION SYSTEM — and the status
+# bar left alone.
+#
+# It used to be a bespoke `<div id="codetracer-durability">` appended to
+# `document.body` at `position:fixed; bottom:0; z-index:2147483646`. That is
+# exactly where the status bar is, so on every load in the two degraded storage
+# rows — which is every first visit, because browsers deny persistence to an
+# origin a visitor has just arrived at — the product covered its own footer
+# with a strip of text. The sentence was right; the surface was a second
+# notification system with a worse z-index.
+# ---------------------------------------------------------------------------
 
-[ "$(jget "${cache}/control.json" bannerPaintedChars)" -ge 80 ] &&
-	ck ok "the durability sentence is $(jget "${cache}/control.json" bannerPaintedChars) painted characters" ||
-	ck fail "the durability sentence is too short to be the announcement"
+# THE SURFACE IS GONE. Asserted directly, because "a notification appears"
+# would still be true of a build that raised the notification AND kept the
+# banner, which would leave the bar just as covered.
+[ "$(jbool "${cache}/control.json" legacyBannerPresent)" = "0" ] &&
+	ck ok "the bespoke bottom banner is gone from the document" ||
+	ck fail "'#codetracer-durability' is still in the page — the covering surface was not removed"
+
+[ "$(jbool "${cache}/control.json" noticeFound)" = "1" ] &&
+	ck ok "the durability sentence is raised as a Notification in the status bar's stack" ||
+	ck fail "no durability notification in '#active-notifications' — the sentence reaches no one"
+
+[ "$(jbool "${cache}/control.json" noticePainted)" = "1" ] &&
+	ck ok "the notification is painted and is the element at its own centre" ||
+	ck fail "the notification is laid out but is not what the browser finds at its own centre"
+
+[ "$(jget "${cache}/control.json" noticeChars)" -ge 80 ] &&
+	ck ok "the sentence is $(jget "${cache}/control.json" noticeChars) painted characters" ||
+	ck fail "the sentence is too short to be the announcement"
+
+# THE ACCEPTANCE. Hit-tested at three points across the bar, WHILE the notice
+# is on screen.
+[ "$(jbool "${cache}/control.json" statusBarFound)" = "1" ] &&
+	ck ok "the status bar is in the document, so the check below is about something" ||
+	ck fail "'#status-base' is absent; the obscuring check would pass vacuously"
+
+[ "$(jget "${cache}/control.json" statusBarProbePoints)" -eq 3 ] &&
+	ck ok "all three probe points across the bar are inside the viewport" ||
+	ck fail "only $(jget "${cache}/control.json" statusBarProbePoints) of 3 probe points were testable"
+
+[ "$(jbool "${cache}/control.json" statusBarUnobscured)" = "1" ] &&
+	ck ok "the status bar is unobscured while the notice is showing" ||
+	ck fail "the status bar is covered by $(jget "${cache}/control.json" statusBarCoveredBy)"
+
+# DISMISSIBLE, AND DISMISSED.
+[ "$(jbool "${cache}/control.json" noticeHasDismiss)" = "1" ] &&
+	ck ok "the notification carries a dismiss control" ||
+	ck fail "the notification cannot be dismissed — that is a banner by another name"
+
+[ "$(jbool "${cache}/control.json" noticeDismissed)" = "1" ] &&
+	ck ok "clicking dismiss actually removes it" ||
+	ck fail "the dismiss control is present and does not dismiss"
+
+# THE ACTION, beside the chord.
+[ "$(jbool "${cache}/control.json" noticeHasExport)" = "1" ] &&
+	ck ok "the notification offers Export as an action, not only as a chord" ||
+	ck fail "the notification tells the user to export and offers no button"
 
 python3 - "${cache}/control.json" <<'PY' && ck ok "the sentence names the export gesture it tells the user to perform" || ck fail "the sentence tells the user to export and does not say how"
 import json,sys
 d=json.load(open(sys.argv[1]))
-sys.exit(0 if "Ctrl+Shift+E" in (d.get("bannerText") or "") else 1)
+sys.exit(0 if "Ctrl+Shift+E" in (d.get("noticeText") or "") else 1)
 PY
+
+[ "$(jget "${cache}/control.json" noticeClass)" != "null" ] &&
+	python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));sys.exit(0 if "warning" in (d.get("noticeClass") or "") else 1)' "${cache}/control.json" &&
+	ck ok "it is raised at NotificationWarning — the level the product already has for this" ||
+	ck fail "the notification is not a warning; class was $(jget "${cache}/control.json" noticeClass)"
+
+# ---------------------------------------------------------------------------
+# THE WORDING. Accurate, and no longer opening on a refusal.
+#
+# What the message means: `navigator.storage.persist()` was denied, so the
+# origin is best-effort rather than persistent. Best-effort data is REAL — it
+# is in OPFS, on disk, and survives reloads, crashes and restarts — but the
+# browser may clear it without prompting when the device runs low. A first
+# visit is normally denied; persistence is granted on engagement. So the old
+# opening clause ("This browser refused to mark your work as persistent")
+# reported a normal, usually temporary condition as though it were the state of
+# the user's work, to a visitor who had invested nothing.
+#
+# The risk is NOT softened away: both halves are asserted.
+# ---------------------------------------------------------------------------
+python3 - "${cache}/control.json" <<'PY' && ck ok "the sentence leads with what is true — the work IS saved" || ck fail "the sentence does not open by saying the work is saved"
+import json,sys
+d=json.load(open(sys.argv[1]))
+sys.exit(0 if (d.get("noticeText") or "").startswith("Your work is saved in this browser") else 1)
+PY
+
+python3 - "${cache}/control.json" <<'PY' && ck ok "it does not open on a browser refusal" || ck fail "the sentence still reports a refusal as the headline"
+import json,sys
+d=json.load(open(sys.argv[1]))
+sys.exit(0 if "refused" not in (d.get("noticeText") or "") else 1)
+PY
+
+python3 - "${cache}/control.json" <<'PY' && ck ok "the eviction risk and the export mitigation are both still stated" || ck fail "the wording was softened into dishonesty — the real risk is no longer named"
+import json,sys
+d=json.load(open(sys.argv[1]))
+t=(d.get("noticeText") or "")
+sys.exit(0 if ("storage" in t and "export the project" in t) else 1)
+PY
+
+# ---------------------------------------------------------------------------
+# ONCE PER BROWSER SESSION — and the twin that stops "once" from meaning
+# "never again".
+# ---------------------------------------------------------------------------
+[ "$(jbool "${cache}/control.json" noticeAfterReload)" = "0" ] &&
+	ck ok "a reload in the same tab is not re-nagged" ||
+	ck fail "the notice returns on every load; the reader already read it a moment ago"
+
+[ "$(jbool "${cache}/control.json" noticeInFreshContext)" = "1" ] &&
+	ck ok "a new browser session IS told — the message is suppressed, not lost" ||
+	ck fail "a fresh context sees no notice at all; the message has been suppressed into silence"
 
 echo
 
@@ -283,8 +398,13 @@ PY
 }
 
 arm() {
-	# arm ID DESCRIPTION PATTERN REPLACEMENT FIELD_A FIELD_B EXPECT_EQUAL
-	local id="$1" desc="$2" pat="$3" repl="$4"
+	# arm ID DESCRIPTION PATTERN REPLACEMENT TARGET PY_IS_RED
+	#
+	# EACH ARM NAMES THE ASSERTION IT MUST REDDEN, and is judged on THAT
+	# assertion rather than on a shared one. An arm scored against a check it
+	# was not written for is an arm that can pass while the check it was meant
+	# to defend stays vacuous.
+	local id="$1" desc="$2" pat="$3" repl="$4" target="$5" pyred="$6"
 	echo "Arm ${id}: MUTATION — ${desc}"
 	local dir
 	dir="$(mutate "${id}" "${pat}"$'\x1f'"${repl}")" || return 0
@@ -292,22 +412,27 @@ arm() {
 		ck fail "arm ${id}: produced no measurement"
 		return 0
 	fi
-	# The arm's own assertion: the restore must now be indistinguishable from
-	# the bundle, i.e. the edit was lost.
-	if [ "$(jeq "${cache}/${id}.json" restoredContent bundledContent)" = "1" ] ||
-	   [ "$(jbool "${cache}/${id}.json" markerAfterReload)" = "0" ]; then
-		ck ok "arm ${id} reddens 'the edit survives a reload' — the check works"
+	{
+		printf '%s\n' 'import json,sys'
+		printf '%s\n' 'd=json.load(open(sys.argv[1]))'
+		printf 'sys.exit(0 if (%s) else 1)\n' "${pyred}"
+	} >"${cache}/${id}.py"
+	if python3 "${cache}/${id}.py" "${cache}/${id}.json"; then
+		ck ok "arm ${id} reddens '${target}' — the check works"
 	else
-		ck fail "arm ${id} did NOT redden the persistence assertion; that check may be vacuous"
+		ck fail "arm ${id} did NOT redden '${target}'; that check may be vacuous"
 	fi
 	echo
 }
+
+edit_is_lost='(d.get("restoredContent") or "")==(d.get("bundledContent") or "") or not d.get("markerAfterReload")'
 
 # A — the shipped Ctrl+S defect: the save host is not registered at all, so the
 #     message falls through to `newWebIpc`'s "no host" warning.
 arm A "the save host is never registered" \
 	'\.ipc\.respond\(\("CODETRACER::save-file"\)' \
-	'.ipc.respond(("CODETRACER::save-file-NO-HOST")'
+	'.ipc.respond(("CODETRACER::save-file-NO-HOST")' \
+	"the edit survives a reload" "${edit_is_lost}"
 
 # B — the restore never reads the store, so every load re-seeds from the
 #     bundle. The save still happens and the bytes are still on disk; the tab
@@ -315,7 +440,8 @@ arm A "the save host is never registered" \
 #     write-only test would miss entirely.
 arm B "the restore never reads what the store already holds" \
 	'if \(stored_[0-9]+\.ok\) \{' \
-	'if (false) {'
+	'if (false) {' \
+	"the edit survives a reload" "${edit_is_lost}"
 
 # C — the write-through never happens: the edit reaches memory, so the tab
 #     looks correct for the whole session and is empty-handed after a reload.
@@ -323,10 +449,42 @@ arm B "the restore never reads what the store already holds" \
 #     an in-page round trip.
 arm C "the edit is kept in memory and never persisted" \
 	'if \(\(writeThrough_[0-9]+\[0\] == null\)\) \{' \
-	'if (true) {'
+	'if (true) {' \
+	"the edit survives a reload" "${edit_is_lost}"
+
+# D — THE DEFECT THE USER REPORTED, PUT BACK. A fixed strip pinned to the
+#     bottom of the viewport above everything, exactly as the removed banner
+#     was. It uses a different id on purpose: the arm must redden the HIT TEST,
+#     not the id check beside it, or "the status bar is unobscured" would be
+#     resting on "the old element is absent" and would not be an independent
+#     assertion at all.
+#
+#     An interval rather than a one-shot append, so the overlay is present
+#     whenever the probe looks, independently of mount timing.
+arm D "a fixed bottom-0 overlay is painted over the footer again" \
+	'^' \
+	"(function(){var f=function(){var d=document.getElementById('ct-mut-banner');if(!d){d=document.createElement('div');d.id='ct-mut-banner';d.textContent='mutation overlay';d.setAttribute('style','position:fixed;left:0;right:0;bottom:0;height:31px;z-index:2147483646;background:rgb(74,45,18);color:rgb(255,217,160)');document.body.appendChild(d);}};setInterval(function(){try{if(document.body){f();}}catch(e){}},200);})();" \
+	"the status bar is unobscured" 'not d.get("statusBarUnobscured")'
+
+# E — the sentence is composed, and never handed to the notification system.
+#     The shape of the original defect one step on: a correct value, computed
+#     on every boot, that no view reads.
+arm E "the notice is never raised into the status bar" \
+	'awaitStatusBarThenRaise__[A-Za-z0-9_]+\(40\);' \
+	'void 0;' \
+	"the sentence is raised as a Notification" 'not d.get("noticeFound")'
+
+# F — the wording reverts to opening on the browser's refusal. Everything else
+#     about the delivery stays correct, which is what makes this an assertion
+#     about the WORDING rather than about the plumbing.
+arm F "the sentence opens on the refusal again" \
+	'Your work is saved in this browser and survives reloads, crashes and restarts\. This browser has not marked it as protected yet, so it can be cleared' \
+	'This browser refused to mark your work as persistent, so it can be cleared' \
+	"the sentence leads with what is true" \
+	'not (d.get("noticeText") or "").startswith("Your work is saved in this browser")'
 
 # ---------------------------------------------------------------------------
-expect_count 16
+expect_count 33
 if [ "${failures}" -ne 0 ]; then
 	printf '\nRESULT: FAILED — %d check(s), %d failure(s).\n' "${checks}" "${failures}"
 	exit 1

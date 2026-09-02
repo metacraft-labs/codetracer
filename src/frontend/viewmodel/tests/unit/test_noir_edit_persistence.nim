@@ -59,7 +59,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 83
+const ExpectedAssertions = 89
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -306,13 +306,15 @@ suite "paths cross the renderer/store boundary exactly once":
 suite "the product says where the work lives":
 
   test "a durable session and a volatile one are different sentences":
-    setDurabilityNotice("Your work is saved in this browser.", true)
+    setDurabilityNotice("Your work is saved in this browser.", true,
+                        dnlReassurance)
     counted worksSurviveReload()
     counted durabilityNoticeText().len > 0
     counted durabilityNoticeText().contains("saved in this browser")
 
     setDurabilityNotice(
-      "everything you write here is held in this tab and will be lost", false)
+      "everything you write here is held in this tab and will be lost", false,
+      dnlUnstored)
     counted not worksSurviveReload()
     counted durabilityNoticeText().contains("lost")
 
@@ -322,12 +324,34 @@ suite "the product says where the work lives":
     ## The sentence itself is `store_durability.announcementFor`'s and is
     ## asserted there; what this checks is that a volatile session cannot be
     ## left with nothing to show.
-    setDurabilityNotice("", false)
+    setDurabilityNotice("", false, dnlUnstored)
     counted durabilityNoticeText().len == 0
     counted not worksSurviveReload()
     # …and that the accessor reports the tier honestly once set.
-    setDurabilityNotice("held in this tab", false)
+    setDurabilityNotice("held in this tab", false, dnlUnstored)
     counted durabilityNoticeText().len > 0
+    counted not worksSurviveReload()
+
+  test "the severity travels as a value, not as a word in the sentence":
+    ## What `ui_js.durabilityNotificationKind` switches on. The three levels
+    ## must be independently settable and independently readable, because the
+    ## renderer picks `NotificationSuccess`, `NotificationWarning` and
+    ## `NotificationError` from them — and the whole point of carrying a level
+    ## is that rewording the sentence (which this change does) cannot silently
+    ## change how loudly it is raised.
+    setDurabilityNotice("saved and protected", true, dnlReassurance)
+    counted durabilityNoticeLevel() == dnlReassurance
+    counted worksSurviveReload()
+
+    setDurabilityNotice("saved, but reclaimable", true, dnlEvictable)
+    counted durabilityNoticeLevel() == dnlEvictable
+    # THE PAIR THAT MATTERS: evictable work is still DURABLE across a reload.
+    # A level that implied "not saved" here would be the pessimism this change
+    # exists to remove, re-entered through the severity instead of the words.
+    counted worksSurviveReload()
+
+    setDurabilityNotice("not stored at all", false, dnlUnstored)
+    counted durabilityNoticeLevel() == dnlUnstored
     counted not worksSurviveReload()
 
 suite "EMT-D17: Run saves, and the header names what it saved":

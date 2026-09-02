@@ -124,15 +124,34 @@ proc exportState(): TierState =
     unavailableBecause: "")
 
 proc announcementFor(condition: StorageCondition): string =
+  ## LEAD WITH WHAT IS TRUE, then name the risk — and the order is the finding.
+  ##
+  ## The first two degraded rows describe a working tree that IS on disk in
+  ## OPFS and DOES survive reload, tab close and crash. Under the Storage
+  ## Standard the only thing missing is the *persistent* box: a best-effort
+  ## origin may be cleared without prompting when the device runs low. Opening
+  ## on "this browser refused" reported the missing box as though it were the
+  ## state of the user's work, at the moment a first-time visitor has invested
+  ## nothing — and browsers deny a first visit as a matter of course, granting
+  ## persistence later on engagement heuristics (repeat visits, a bookmark, an
+  ## install). So the refusal is normal, usually temporary, and not the
+  ## headline; the eviction risk is real and stays, because export is the only
+  ## thing that removes it.
+  ##
+  ## `scVolatile` is the row that does NOT get this treatment. There is no
+  ## reassuring true half to lead with: nothing is stored, and a sentence that
+  ## opened "your work is saved" would be false.
   case condition
   of scPersistenceGranted: ""
   of scPersistenceUnknown:
-    "This browser did not say whether it will keep your work across " &
-    "evictions. Treat this session as unsaved: export the project to keep it."
+    "Your work is saved in this browser and survives reloads, crashes and " &
+    "restarts. This browser did not say whether it will keep it when storage " &
+    "runs low, so export the project to keep a copy that cannot be reclaimed."
   of scPersistenceDenied:
-    "This browser refused to mark your work as persistent, so it can be " &
-    "cleared when storage runs low. Your files survive reloads and crashes; " &
-    "they may not survive the browser reclaiming space. Export to keep them."
+    "Your work is saved in this browser and survives reloads, crashes and " &
+    "restarts. This browser has not marked it as protected yet, so it can be " &
+    "cleared if the device runs low on storage — export the project to keep a " &
+    "copy that cannot be reclaimed."
   of scVolatile:
     "This browser has no storage available for projects, so everything you " &
     "write here is held in this tab and will be lost when it closes. You can " &
@@ -143,6 +162,20 @@ proc urgencyFor(condition: StorageCondition): ExportUrgency =
   of scPersistenceGranted: euRoutine
   of scPersistenceUnknown, scPersistenceDenied: euEscalated
   of scVolatile: euCritical
+
+proc mayBeGrantedLater*(condition: StorageCondition): bool =
+  ## Whether asking the browser again could change the answer.
+  ##
+  ## The Storage Standard grants persistence on engagement heuristics — repeat
+  ## visits, a bookmark, an install — so a first visit is normally denied and
+  ## the SAME origin is normally granted later. A product that asks once, at
+  ## the moment the visitor has invested nothing, and never asks again has made
+  ## that first refusal permanent for no reason.
+  ##
+  ## `scVolatile` is excluded because there is no OPFS to make persistent: a
+  ## grant would be a promise over a volume that does not survive the tab.
+  ## `scPersistenceGranted` is excluded because there is nothing left to ask.
+  condition in {scPersistenceUnknown, scPersistenceDenied}
 
 proc durabilityReport*(condition: StorageCondition): DurabilityReport =
   result.condition = condition
