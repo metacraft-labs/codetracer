@@ -1967,6 +1967,15 @@ export const test = base.extend<
 
         await use(result.page);
       } finally {
+        // A PASSING test can still have written corrupt reactive state: a
+        // top-level `string` signal written `undefined` stores it silently and
+        // never reaches the console. So an investigation needs the grouped
+        // report even on green -- `CT_REPORT_JS_ERRORS=1` asks for it.
+        if (process.env.CT_REPORT_JS_ERRORS === "1") {
+          for (const line of formatErrorGroups(result.consoleErrors)) {
+            console.log(line);
+          }
+        }
         // Capture diagnostics on test failure (DOM snapshot, summary, error details)
         if (testInfo.status !== testInfo.expectedStatus) {
           try {

@@ -775,12 +775,33 @@ package codeTracer:
       output = buildDebugPath("tests/reload_bootstrap_host.js"))
     target("reload-bootstrap-host-js", reloadBootstrapHost)
 
+    # `hotCodeReloadingOn` is OFF for the renderer on purpose.
+    #
+    # Under `--hotCodeReloading`, jsgen names a routine with
+    # `idOrSig` (compiler/sighashes.nim) instead of `mangleProcNameExt`.
+    # `idOrSig` is a hash of the routine's OWN signature plus a
+    # MODULE-LOCAL collision counter, and it appends the module name only
+    # for `ccInline` procs.  An anonymous `proc()` closure inside a
+    # generic — `createMemo`'s `initialFn`/`wrappedFn` in
+    # `isonim/core/computation.nim` — therefore hashes identically in
+    # every module that instantiates `createMemo[T]` (the closure's type
+    # is `proc()`, independent of `T`), gets the same `_2` counter in
+    # each, and is emitted as several top-level functions sharing one JS
+    # name.  JS keeps the LAST declaration, so `createMemo[CapabilityRung]`
+    # in one module ran another module's `createMemo[T']` body and copied
+    # the value with the WRONG type descriptor: `nimCopy` walked an enum
+    # as a 7-field tuple, read an absent `path` field as `undefined`, and
+    # threw `undefined.slice(0)` out of `nimCopy`'s `tyString` branch —
+    # inside `createUIComponents`, so the editor never mounted.
+    #
+    # Without HCR, `mangleProcNameExt` names every routine
+    # `__<module>_u<itemId>`, which is unique across modules.
     let frontendUiJs = ctNimJs(
       definesValue = CommonNimDefines & HmrRendererDefines,
       outputPath = buildDebugPath("ui.js"),
       sourcePath = "src/frontend/ui_js.nim",
       debugInfoOnValue = true,
-      hotCodeReloadingOnValue = true)
+      hotCodeReloadingOnValue = false)
     target("frontend-ui-js", frontendUiJs)
 
     let frontendPublicUiJs = fs.copyFile(
@@ -816,7 +837,15 @@ package codeTracer:
       sourcePath = "src/frontend/subwindow.nim",
       debugInfoOnValue = true,
       sourcemapOnValue = true,
-      hotCodeReloadingOnValue = true)
+      # Off for the same reason as `frontend-ui-js` above: under
+      # `--hotCodeReloading` jsgen names non-inline routines with a
+      # module-local counter, so one generic's anonymous closures collide
+      # across modules in a single bundle.  This bundle has not grown
+      # enough isonim-instantiating modules to collide yet — but it is the
+      # same trap armed, and it does not even build with `-d:ctHmr`
+      # (`RendererDefines`, not `HmrRendererDefines`), so the flag bought
+      # it nothing.
+      hotCodeReloadingOnValue = false)
     target("frontend-subwindow-js", frontendSubwindowJs)
 
     let frontendSrcSubwindowJs = fs.copyFile(
