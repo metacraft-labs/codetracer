@@ -606,7 +606,26 @@ mutate_no_platform_install() {
 import re, sys
 p = sys.argv[1]
 s = open(p).read()
-m = re.search(r'function (installPlatform__viewmodelZplatformZplatform_[A-Za-z0-9]+)\(([^)]*)\)\s*\{', s)
+# THE MODULE PATH IS NOT SPELLED, and that is a repair rather than a
+# loosening. Nim's JS backend mangles a symbol's module path, and WHETHER it
+# rot13s that path varies between compilers: the pinned toolchain emits
+# `installPlatform__viewmodelZplatformZplatform_u99`, a `nim 2.2.4` from a
+# user profile emits `installPlatform__ivrjzbqryZcyngsbezZcyngsbez_u99` for
+# the identical source. This arm spelled the first, so on the second compiler
+# it found nothing, exited 1, and reported "arm C could not be measured" —
+# an INSTRUMENT failure reported in the same words a product failure would
+# get. Verified against a renderer built at 5334f7aa, before the change this
+# was noticed during: zero occurrences of the old needle, one of the new.
+#
+# Matching the leading `installPlatform__` and no more is safe rather than
+# vague: there is exactly ONE such symbol in the bundle (the platform module
+# has one `installPlatform`), so the superset has one member, and the
+# `sys.exit(1)` below still refuses to let the arm pass over a bundle it
+# could not cut.
+# `[A-Za-z0-9_]+`, with the underscore. The mangled tail carries one
+# (`..._u99`); the old pattern got away with `[A-Za-z0-9]+` only because the
+# literal module path it spelled ended at the underscore before it.
+m = re.search(r'function (installPlatform__[A-Za-z0-9_]+)\(([^)]*)\)\s*\{', s)
 if not m:
     sys.exit(1)                      # the needle is gone; the arm must not
                                      # silently pass over a bundle it cannot cut
@@ -1242,6 +1261,8 @@ if ! run_arm route "" "/noir"; then
 	ck fail "arm R could not be measured (fourth half)"
 	ck fail "arm R could not be measured (fifth half)"
 	ck fail "arm R could not be measured (sixth half)"
+	ck fail "arm R could not be measured (status bar present)"
+	ck fail "arm R could not be measured (status bar unobscured)"
 else
 	r_present="$(json route dom.domRootPresent)"
 	r_welcome="$(json route dom.welcomeScreenRoots)"
@@ -1315,6 +1336,53 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 		ck ok "arm R: all ${r_visible} tree rows hit-test to themselves, so a user can see the project and not just the DOM"
 	else
 		ck fail "arm R: ${r_visible} of ${r_entries} tree rows are visible — the surface is mounted and something is painted over it, which is the state a DOM-only check calls a pass"
+		dump_arm route
+	fi
+
+	# -----------------------------------------------------------------------
+	# NOTHING COVERS THE STATUS BAR — a STANDING guard, and the only check in
+	# this suite that watches the bottom of the screen.
+	#
+	# It is here because a surface took that space and nobody noticed until a
+	# user did: the storage-durability notice was painted into a bespoke
+	# `<div id="codetracer-durability">` at `position:fixed; bottom:0;
+	# z-index:2147483646`, sitting on `#status` on every first visit. That
+	# instance is fixed — the sentence goes through `ui/status.nim`'s
+	# notification stack, which is anchored at `bottom:38px` and stacks ABOVE
+	# the bar — but nothing in the suite would have caught it, and nothing
+	# would catch the next one.
+	#
+	# `status-bar/footer-visibility-css-guard.spec.ts` says so itself, in its
+	# "WHERE IT STOPS" section: asking for a box catches every regression that
+	# changes LAYOUT and none that changes only PAINTING, an occluded footer
+	# keeps a full-size box, `readyOnEntryTest` passes over it, and "that
+	# family is currently unguarded by anything in the suite". This is the
+	# guard for that family, on the web arm, where a browser is already open.
+	#
+	# ARM V VOUCHES FOR IT. The overlay that arm already installs is
+	# full-viewport, so it covers this too; if this check could not go red
+	# there it would be measuring nothing.
+	# -----------------------------------------------------------------------
+	r_bar_found="$(json route dom.statusBar.found)"
+	r_bar_clear="$(json route dom.statusBar.unobscured)"
+	r_bar_points="$(json route dom.statusBar.points)"
+	r_bar_by="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(", ".join((d.get("dom", {}).get("statusBar") or {}).get("coveredBy") or []) or "(nothing)")
+' "${cache}/route.json" 2>/dev/null)"
+	# NON-VACUITY FIRST. `unobscured` over a page with no status bar would be
+	# an absence reported as a pass, which is this gate's founding defect.
+	if [ "${r_bar_found}" = "True" ] && [ "${r_bar_points}" = "3" ]; then
+		ck ok "arm R: the status bar is in the document and all three probe points across it are testable"
+	else
+		ck fail "arm R: no testable status bar (found=${r_bar_found}, points=${r_bar_points}) — the occlusion check below would be vacuous"
+		dump_arm route
+	fi
+	if [ "${r_bar_clear}" = "True" ]; then
+		ck ok "arm R: nothing is painted over the status bar"
+	else
+		ck fail "arm R: the status bar is covered by ${r_bar_by} — a surface has taken the bottom of the screen, which is the defect the durability banner shipped"
 		dump_arm route
 	fi
 
@@ -1561,6 +1629,7 @@ echo "    assertion RED and the mount assertion GREEN."
 if ! run_arm covered mutate_covered_surface "/noir"; then
 	ck fail "arm V could not be measured"
 	ck fail "arm V could not be measured (second half)"
+	ck fail "arm V could not be measured (status bar half)"
 else
 	v_entries="$(json covered dom.filesystemEntries)"
 	v_visible="$(json covered dom.entryLabelsVisible)"
@@ -1576,6 +1645,21 @@ else
 		ck ok "arm V: the panel is still mounted, so this arm isolates painting from mounting" ;
 	else
 		ck fail "arm V: the panel stopped mounting (${v_panels}); the arm does not isolate occlusion"
+	fi
+
+	# ...AND IT VOUCHES FOR THE STATUS-BAR GUARD TOO. The overlay is
+	# full-viewport, so it covers `#status` exactly as the durability banner
+	# did. If arm R's occlusion check could not go red here it would be a
+	# check that cannot distinguish a clear footer from a covered one.
+	#
+	# `found` must stay true: an arm that made the bar VANISH would redden the
+	# same assertion for the wrong reason, and would vouch for nothing.
+	v_bar_found="$(json covered dom.statusBar.found)"
+	v_bar_clear="$(json covered dom.statusBar.unobscured)"
+	if [ "${v_bar_found}" = "True" ] && [ "${v_bar_clear}" = "False" ]; then
+		ck ok "arm V: the status bar is still in the document and reads as COVERED, so arm R's occlusion guard can fail"
+	else
+		ck fail "arm V: status bar found=${v_bar_found} unobscured=${v_bar_clear} under a full-viewport overlay — arm R's occlusion guard cannot detect occlusion and proves nothing"
 	fi
 fi
 echo
@@ -1958,7 +2042,7 @@ echo
 # Raised in the same commit that adds them, so the additions are RECORDED. A
 # count that tracked the tally automatically would let an assertion be deleted
 # without anything noticing, which is the whole reason this line exists.
-expect_count 61
+expect_count 64
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"
