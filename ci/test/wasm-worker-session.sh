@@ -35,7 +35,8 @@
 #
 # So every part under test here is a shipping part:
 #
-#   * `/assets/wasm-worker.js`, byte for byte as `web-bundle-assets.sh` placed
+#   * the published wasm worker — `assets/wasm-worker.<digest>.js`, resolved
+#     by stem — byte for byte as `web-bundle-assets.sh` placed
 #     it. The gate asserts the copy it serves is unmodified against the
 #     original, so "the tree was quietly patched" is not available to it.
 #   * `host/web_browser.newBrowserWasmWorker`, the one place a browser
@@ -130,6 +131,29 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}" || exit 2
 
+# shellcheck source=ci/lib/published-asset.sh
+# shellcheck disable=SC1091 # resolved at runtime from $repo_root
+source "${repo_root}/ci/lib/published-asset.sh"
+
+# `digest_of <file>` — sha256, or the empty string, and callers must check.
+# Resolved once rather than branching on `command -v` at each call site, which
+# is how the control arm ended up with two `shasum` invocations where only one
+# path was checked for existence.
+if command -v shasum >/dev/null 2>&1; then
+	digest_of() { [ -f "$1" ] || return 0; shasum -a 256 "$1" | cut -d' ' -f1; }
+elif command -v sha256sum >/dev/null 2>&1; then
+	digest_of() { [ -f "$1" ] || return 0; sha256sum "$1" | cut -d' ' -f1; }
+else
+	echo "neither shasum nor sha256sum is on PATH" >&2
+	exit 2
+fi
+
+# `worker_in <tree>` — the tree's own copy of the worker script, by stem.
+# Every mutation arm patches this file; a `mutate` against a path that is not
+# there fails loudly (its needle check cannot even open the file), which is
+# right, but the message blames a drifted needle rather than a moved name.
+worker_in() { published_asset "$1" assets/wasm-worker.js; }
+
 cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/wasm-worker-session"
 mkdir -p "${cache}"
 
@@ -208,13 +232,25 @@ if [ -z "${bundle}" ]; then
 		exit 1
 	fi
 fi
-worker_asset="${bundle}/assets/wasm-worker.js"
+# THE WORKER IS RESOLVED BY STEM, NOT NAMED. It is published as
+# `assets/wasm-worker.<16 hex>.js`, so the literal path this used to hold was in
+# no bundle: the gate aborted here, before a single assertion, with a message
+# that reads like a bundling regression. `published_asset_rel` refuses loudly on
+# zero matches and on two — a previous assembly's copy left in the tree — so the
+# name can move again without this becoming an empty string that `shasum`,
+# `rm -f` and `ckeq` would each accept in their own quiet way.
+if ! worker_rel="$(published_asset_rel "${bundle}" assets/wasm-worker.js)"; then
+	echo "no wasm worker in ${bundle}, under that name or a content-addressed one; there is nothing to session" >&2
+	exit 1
+fi
+worker_asset="${bundle}/${worker_rel}"
+worker_url="/${worker_rel}"
 if [ ! -s "${worker_asset}" ]; then
-	echo "no assets/wasm-worker.js in ${bundle}; there is nothing to session" >&2
+	echo "${worker_asset} is empty; there is nothing to session" >&2
 	exit 1
 fi
 echo "  publish tree: ${bundle}"
-echo "  worker asset: $(wc -c <"${worker_asset}" | tr -d ' ') bytes"
+echo "  worker asset: ${worker_rel}, $(wc -c <"${worker_asset}" | tr -d ' ') bytes"
 echo
 
 # ---------------------------------------------------------------------------
@@ -331,7 +367,30 @@ probe() {
 		echo "  the static server did not start" >&2
 		return 2
 	fi
-	local url="http://127.0.0.1:${port}/__harness/harness.html${query}"
+	# THE WORKER URL IS PASSED TO EVERY ARM. The harness used to fall back to a
+	# compiled-in `/assets/wasm-worker.js`, and once the published name carried
+	# a digest that fallback 404'd — so arms C, T, V, A, E and O would all have
+	# become copies of arm I (the deliberate missing-worker arm): no ready
+	# event, every delivery refused, and arm I the only one still green. The
+	# tree's own copy is resolved here so the mutation arms serve the file they
+	# patched, and an arm that deliberately supplies its own `worker=` keeps it.
+	local worker_query="${query}"
+	case "${query}" in
+	*worker=*) ;;
+	*)
+		local arm_worker_rel
+		if arm_worker_rel="$(published_asset_rel "${dir}" assets/wasm-worker.js)"; then
+			if [ -z "${query}" ]; then
+				worker_query="?worker=/${arm_worker_rel}"
+			else
+				worker_query="${query}&worker=/${arm_worker_rel}"
+			fi
+		fi
+		# NOT an else-branch that invents a URL. A tree with no worker is what
+		# some arms are FOR; the harness reports the absence by name.
+		;;
+	esac
+	local url="http://127.0.0.1:${port}/__harness/harness.html${worker_query}"
 	node ci/test/wasm_session_probe.mjs "${url}" 15000 \
 		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
 	local rc=$?
@@ -377,15 +436,27 @@ stage "${arm_dir}"
 # The tree is served UNMODIFIED, and that is asserted rather than assumed:
 # every arm below patches a copy, and a gate that could not tell a patched
 # tree from a clean one would be measuring its own edits.
-if command -v shasum >/dev/null 2>&1; then
-	orig_digest="$(shasum -a 256 "${worker_asset}" | cut -d' ' -f1)"
-	copy_digest="$(shasum -a 256 "${arm_dir}/assets/wasm-worker.js" | cut -d' ' -f1)"
-else
-	orig_digest="$(sha256sum "${worker_asset}" | cut -d' ' -f1)"
-	copy_digest="$(sha256sum "${arm_dir}/assets/wasm-worker.js" | cut -d' ' -f1)"
+#
+# BOTH SIDES ARE RESOLVED, AND NEITHER MAY BE EMPTY. This compared
+# `${arm_dir}/assets/wasm-worker.js` — a path that stopped existing when the
+# published name gained a digest. `shasum` on a missing file prints nothing to
+# stdout, so `copy_digest` became "", `orig_digest` became "" with it, and
+# `ckeq "" ""` PASSED: a green assertion that the served worker is byte
+# identical to the published one, having compared nothing to nothing. That is
+# the worst outcome available here and it is why the emptiness is checked
+# before the equality.
+if ! copy_rel="$(published_asset_rel "${arm_dir}" assets/wasm-worker.js)"; then
+	ck no "the staged copy has no wasm worker, so the control cannot be compared"
+	copy_rel=""
 fi
-ckeq "${orig_digest}" "${copy_digest}" "the worker served is byte-identical to the one the tree published"
-note "sha256 ${orig_digest:0:16}"
+orig_digest="$(digest_of "${worker_asset}")"
+copy_digest="$(digest_of "${arm_dir}/${copy_rel}")"
+if [ -z "${orig_digest}" ] || [ -z "${copy_digest}" ]; then
+	ck no "a worker digest came out empty (published='${orig_digest}' staged='${copy_digest}') — comparing them would compare nothing to nothing"
+else
+	ckeq "${orig_digest}" "${copy_digest}" "the worker served is byte-identical to the one the tree published"
+	note "sha256 ${orig_digest:0:16}"
+fi
 
 probe c "${arm_dir}"
 present="$(j c reportPresent)"
@@ -416,11 +487,16 @@ fi
 
 worker_200="$(node -e '
 const doc = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+// THE PUBLISHED URL IS PASSED IN rather than spelled here. `endsWith` on the
+// undigested name matched nothing once the file was content-addressed, and it
+// failed by answering "false" about a tab that had fetched the worker
+// perfectly — a predicate that goes quiet rather than loud.
+const want = process.argv[2];
 const hit = (doc.workerRequests || []).find(
-  (r) => r.url.endsWith("/assets/wasm-worker.js") && r.status === 200);
+  (r) => new URL(r.url).pathname === want && r.status === 200);
 process.stdout.write(hit ? "true" : "false");
-' "${cache}/c.json")"
-ckeq "${worker_200}" "true" "the tab fetched /assets/wasm-worker.js from the publish tree"
+' "${cache}/c.json" "${worker_url}")"
+ckeq "${worker_200}" "true" "the tab fetched ${worker_url} from the publish tree"
 
 # --- the session exists, and says so itself -------------------------------
 ckeq "$(j c report.readyEvent)" "true" "the session announced itself — a handle is not evidence, this is"
@@ -529,7 +605,7 @@ echo
 echo "Arm V — a full inbox refuses without killing the session"
 arm_v="${cache}/arm-v"
 stage "${arm_v}"
-if ! mutate "${arm_v}/assets/wasm-worker.js" \
+if ! mutate "$(worker_in "${arm_v}")" \
 	'const SESSION_QUEUE_LIMIT = 64;' \
 	'const SESSION_QUEUE_LIMIT = 0;'; then
 	ck fail "arm V could set the queue limit to 0"
@@ -603,7 +679,7 @@ echo "Arm A — a registration that is not kept"
 note "target: sendAcceptedAfterRegister goes RED, registerAccepted stays GREEN"
 arm_a="${cache}/arm-a"
 stage "${arm_a}"
-if ! mutate "${arm_a}/assets/wasm-worker.js" \
+if ! mutate "$(worker_in "${arm_a}")" \
 	'state.contracts.push(name);' \
 	'/* MUTATED: the registration is not kept */'; then
 	ck fail "arm A's mutation applied (a pattern that matched nothing is vacuous)"
@@ -622,7 +698,7 @@ echo "Arm E — the session exits in the turn it opened (the state this replaces
 note "target: every acknowledgement goes RED, readyEvent stays GREEN"
 arm_e="${cache}/arm-e"
 stage "${arm_e}"
-if ! mutate "${arm_e}/assets/wasm-worker.js" \
+if ! mutate "$(worker_in "${arm_e}")" \
 	'      openSession(seq, sub, request);
       return;' \
 	'      openSession(seq, sub, request);
@@ -645,7 +721,7 @@ echo "Arm O — the per-session drain guard removed"
 note "target: burstHandledInOrder goes RED, serialCount stays 8"
 arm_o="${cache}/arm-o"
 stage "${arm_o}"
-if ! mutate "${arm_o}/assets/wasm-worker.js" \
+if ! mutate "$(worker_in "${arm_o}")" \
 	'  if (session.draining) return;' \
 	'  if (false) return; /* MUTATED: no per-session serialisation */'; then
 	ck fail "arm O's mutation applied (a pattern that matched nothing is vacuous)"

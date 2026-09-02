@@ -21,9 +21,14 @@ name: Deploy ide.codetracer.com
 # WHAT IS PUBLISHED — TWO PRODUCTS, ONE FILE TREE
 #
 #   1. NOIR STUDIO, the hosted product, at `/`. `ci/test/web-bundle-assets.sh`
-#      assembles { index.html, ui.js, assets/wasm-worker.js,
-#      assets/noir_wasm.wasm, assets/noir_tracer_wasm.wasm, _headers,
-#      _redirects }. Until 2026-08-31 NOTHING PUBLISHED THIS AT ALL: CI proved
+#      assembles { index.html, ui.js, _headers, _redirects } plus everything
+#      under `assets/`, each of which is published as
+#      `<name>.<16 hex of its sha256>.<ext>` — the wasm worker, the two Noir
+#      modules, the replay worker and the engine's two files. The digest is
+#      what makes `/assets/*`'s year-long `immutable` a true statement, and
+#      the entry document's descriptor is where the URLs are, because a name
+#      derived from the bytes cannot be a constant anything compiles in.
+#      Until 2026-08-31 NOTHING PUBLISHED THIS AT ALL: CI proved
 #      the bundle compiled and booted and no workflow shipped it, so the
 #      product existed only as a green check.
 #
@@ -828,14 +833,36 @@ jobs:
           # carry digests; this checks that what the CDN actually returns
           # agrees, because the header table is merged with the engine's at
           # staging time and a merge is another place for it to go wrong.
-          echo "== no stable-named asset is served immutable =="
+          # THE CHECK IS TWO-SIDED, AND EVERY COUNT IS ASSERTED.
+          #
+          # It used to `continue` past any name carrying a digest and grade only
+          # the stable ones. Correct while nothing was hashed; an assertion
+          # about nothing now that the assembly step hashes all six. It had no
+          # count assertion either, so the transition would have shown up as a
+          # step that printed a heading, listed nothing, and passed — the
+          # `ok: 0/0` shape this workflow already carries a paragraph about.
+          #
+          # A digest is now the PREMISE, not a reason to skip, and each side has
+          # its own conclusion: a hashed name must be `immutable` (or the rename
+          # bought nothing), a stable one must not be (or a deploy cannot
+          # dislodge it).
+          echo "== the immutable header follows the digest, in both directions =="
+          header_verdicts=0
+          hashed_seen=0
+          asset_paths=0
+          stable_names=""
           while IFS= read -r rel; do
             case "$rel" in assets/*) ;; *) continue ;; esac
+            asset_paths=$((asset_paths + 1))
             # A digest in the name is the only thing that makes `immutable`
             # true. Mirrors `assetIsContentAddressed` in web_deployment.nim.
             base_name="${rel##*/}"
             if printf '%s' "$base_name" | grep -qE '\.[0-9a-fA-F]{6,}\.'; then
-              continue
+              hashed=1
+              hashed_seen=$((hashed_seen + 1))
+            else
+              hashed=0
+              stable_names="${stable_names} ${rel}"
             fi
             # THE SAME DERIVED LIST as the sweep, and not a second literal one.
             # Each custom domain is a separate zone cache with its own age, so
@@ -843,17 +870,114 @@ jobs:
             # on 2026-09-01 `ide.codetracer.com` and `noirstudio.dev` held
             # independently poisoned copies, ~138537s and ~47520s old.
             for base in "${hosts[@]}"; do
-              cc="$(curl -fsSI --retry 3 --retry-delay 2 --retry-all-errors \
-                      "$base/$rel" | tr -d '\r' \
-                    | grep -i '^cache-control:' | cut -d' ' -f2- || true)"
-              if printf '%s' "$cc" | grep -qi 'immutable'; then
-                echo "  $base/$rel is served '$cc' but its name carries no digest — a deploy cannot dislodge it" >&2
+              hdrs="$(curl -fsSI --retry 3 --retry-delay 2 --retry-all-errors \
+                        "$base/$rel" | tr -d '\r' || true)"
+              cc="$(printf '%s' "$hdrs" | grep -i '^cache-control:' | cut -d' ' -f2- || true)"
+              ctype="$(printf '%s' "$hdrs" | grep -i '^content-type:' | cut -d' ' -f2- || true)"
+              header_verdicts=$((header_verdicts + 1))
+              # Pages answers an address it has no file for with the SPA entry
+              # document at 200 `text/html`, so a correct-looking header can
+              # belong to a page that is not the asset. Nothing under
+              # `/assets/` is HTML.
+              case "$ctype" in
+                *text/html*)
+                  echo "  $base/$rel answered '$ctype' — that is the entry document, not the asset" >&2
+                  fail=1
+                  continue
+                  ;;
+              esac
+              # ONE `max-age`, not merely the word `immutable`. Pages applies
+              # every matching rule and CONCATENATES the values — measured on
+              # this deployment as `max-age=60, must-revalidate,
+              # max-age=31536000, immutable` on a 16 MB module, the short TTL
+              # first. That is why the `/*` row is dropped at staging time; this
+              # is the assertion that the drop actually worked, on what the CDN
+              # returns rather than on the file that was uploaded.
+              age_count="$(printf '%s' "$cc" | grep -o 'max-age=' | wc -l | tr -d ' ')"
+              if [ "${age_count:-0}" -gt 1 ]; then
+                echo "  $base/$rel is served '$cc' — two rules were concatenated, and the first max-age is the one a cache obeys" >&2
                 fail=1
+                continue
+              fi
+              if printf '%s' "$cc" | grep -qi 'immutable'; then
+                if [ "$hashed" -eq 1 ]; then
+                  echo "  ok: $base/$rel -> ${cc:-<none>}"
+                else
+                  echo "  $base/$rel is served '$cc' but its name carries no digest — a deploy cannot dislodge it" >&2
+                  fail=1
+                fi
               else
-                echo "  ok: $base/$rel -> ${cc:-<none>}"
+                if [ "$hashed" -eq 1 ]; then
+                  echo "  $base/$rel carries a digest and is served '${cc:-<none>}' — the rename bought nothing and every load re-revalidates it" >&2
+                  fail=1
+                else
+                  echo "  ok: $base/$rel -> ${cc:-<none>}"
+                fi
               fi
             done
           done < <(cut -f1 "$manifest")
+          # THE TWO COUNTS, BOTH ASSERTED, BECAUSE THE PER-PATH LOOP ABOVE
+          # CANNOT SEE THE DIRECTORY.
+          #
+          # This block is the third instance tonight of one shape: a predicate
+          # keyed on "its name carries no digest", written to catch a
+          # stable-named asset served `immutable`, which has nothing left to
+          # examine once every published name carries a digest. The per-path
+          # arms above are correct and are still not enough — a stable-named
+          # file served `max-age=0` passes every one of them, path by path,
+          # while costing the WHOLE directory its `immutable`, because
+          # `staticAssetGlobClass` derives one glob for the weakest member.
+          # The symptom of that regression is a green deploy that is ~38 MB
+          # slower per load, which is to say no symptom at all.
+          #
+          # So the directory-level facts are asserted as COUNTS: zero stable
+          # names, a non-zero number of digested ones, and that number equal to
+          # what the served document declares. None of the three can be
+          # satisfied by an empty list.
+          stable_seen=$((asset_paths - hashed_seen))
+          if [ "$header_verdicts" -lt 1 ]; then
+            echo "  no asset headers were checked — the manifest carried no assets/ path, so this said nothing" >&2
+            fail=1
+          elif [ "$hashed_seen" -lt 1 ]; then
+            echo "  none of the $asset_paths assets/ path(s) carries a digest — this deploy publishes stable names and /assets/* cannot be immutable" >&2
+            fail=1
+          else
+            echo "  $hashed_seen of $asset_paths assets/ path(s) are content-addressed, over $header_verdicts host-path verdict(s)"
+          fi
+          if [ "$stable_seen" -ne 0 ]; then
+            echo "  $stable_seen of $asset_paths published assets/ path(s) carry NO digest, so /assets/* drops to max-age=0 for the whole directory and every asset beside them pays for it:" >&2
+            for stale_name in $stable_names; do echo "    $stale_name" >&2; done
+            fail=1
+          fi
+
+          # AND THE UPLOAD AGREES WITH THE DOCUMENT, on the live deployment.
+          #
+          # `deployGuardDefects` asks this of `site/` before the upload; this
+          # asks it of what the CDN is actually serving, which is the only
+          # version of the question a stale or partial publish can fail. A
+          # document declaring five assets over six uploaded ones is a file
+          # nothing can reach; six over five is a promise that 404s.
+          declared_assets="$(curl -fsSL --retry 5 --retry-delay 4 --retry-all-errors \
+                               https://web-codetracer.pages.dev/ 2>/dev/null \
+                             | python3 -c '
+          import json, re, sys
+          html = sys.stdin.read()
+          m = re.search(r"id=\"codetracer-deployment\"[^>]*>(.*?)</script>", html, re.S)
+          if not m:
+              print(-1); raise SystemExit
+          d = json.loads(m.group(1))
+          urls = [r.get("url","") for r in list(d.get("modules",[])) + list(d.get("assets",[]))]
+          print(len([u for u in urls if u.startswith("/assets/")]))
+          ' 2>/dev/null || echo -1)"
+          if [ "${declared_assets:--1}" -lt 0 ]; then
+            echo "  could not read the served descriptor, so the upload could not be compared with the declaration" >&2
+            fail=1
+          elif [ "$declared_assets" -ne "$hashed_seen" ]; then
+            echo "  the served document declares $declared_assets /assets/ file(s) and $hashed_seen were uploaded and swept — one side is publishing what the other cannot name" >&2
+            fail=1
+          else
+            echo "  ok: the served document declares all $declared_assets published /assets/ file(s)"
+          fi
 
           echo "== the served page declares what was served =="
           # Not "it returned 200". The descriptor is what makes the toolchain

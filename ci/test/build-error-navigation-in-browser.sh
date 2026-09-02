@@ -58,6 +58,10 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && cd .. && pwd)"
 cd "${repo_root}" || exit 2
 
+# shellcheck source=ci/lib/published-asset.sh
+# shellcheck disable=SC1091 # resolved at runtime from $repo_root
+source "${repo_root}/ci/lib/published-asset.sh"
+
 cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/build-error-nav"
 mkdir -p "${cache}"
 
@@ -112,9 +116,10 @@ fi
 # tree the page refuses by name, the pane paints the refusal, there are no
 # diagnostics, and every navigation assertion below would be a statement about
 # an empty list — which is exactly the vacuous pass this gate exists to avoid.
-compiler="${bundle}/assets/noir_wasm.wasm"
-if [ ! -f "${compiler}" ]; then
+# RESOLVED BY STEM; see `noir-build-in-browser.sh` for the same correction.
+if ! compiler="$(published_asset "${bundle}" assets/noir_wasm.wasm)"; then
 	echo "  the assembled tree at ${bundle} ships no assets/noir_wasm.wasm," >&2
+	echo "  under that name or a content-addressed one," >&2
 	echo "  so no build can fail with real diagnostics and this gate would" >&2
 	echo "  measure nothing. Set CT_NOIR_WASM_COMPILER / CT_NOIR_WASM_TRACER /" >&2
 	echo "  CT_NOIR_WASM_REF and re-assemble." >&2

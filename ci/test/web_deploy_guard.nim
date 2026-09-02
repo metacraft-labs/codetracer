@@ -134,19 +134,37 @@ when isMainModule:
   # property actually at stake and is checked below in full: it must carry a
   # descriptor and it must reference its bundles. Size tells us nothing here
   # that those two do not tell us better.
+  #
+  # AND IT IS LOOKED UP BY STEM, NOT BY EQUALITY. Everything under `/assets/`
+  # is published as `<name>.<digest>.<ext>`, so `publishDir / asset.path` names
+  # a file no deployment contains: this loop would have reported the worker
+  # script — a REQUIRED asset — missing from every correct bundle. The published
+  # set is searched for a file whose `contentAddressedStem` is the manifest
+  # path, which is the same question asked in the direction the rename goes.
+  proc publishedFor(manifestPath: string): string =
+    ## The served path this manifest row was published at, or "".
+    let stem = "/" & manifestPath
+    for candidate in served:
+      if candidate == stem or contentAddressedStem(candidate) == stem:
+        return candidate
+    ""
+
   for asset in webRuntimeAssets():
     if not asset.required: continue
     inc checks
-    let path = publishDir / asset.path
+    let publishedAt = publishedFor(asset.path)
+    let path = publishDir / publishedAt.strip(chars = {'/'}, trailing = false)
     let floor = if asset.mode == damEntryDocument: 0 else: 1024
-    if not fileExists(path):
+    if publishedAt.len == 0 or not fileExists(path):
       defects.add "required asset `" & asset.id & "` is missing from the " &
-        "publish directory at " & asset.path
+        "publish directory at " & asset.path &
+        " (searched for it under a content-addressed name too)"
     elif getFileSize(path) <= floor:
       defects.add "required asset `" & asset.id & "` is only " &
-        $getFileSize(path) & " bytes at " & asset.path & " — truncated or empty"
+        $getFileSize(path) & " bytes at " & publishedAt & " — truncated or empty"
     else:
-      echo "  ok: " & asset.id & " (" & $getFileSize(path) & " bytes)"
+      echo "  ok: " & asset.id & " -> " & publishedAt & " (" &
+        $getFileSize(path) & " bytes)"
 
   # 2. The declaration and the directory agree, both ways.
   let descriptorText = descriptorTextFrom(document)
@@ -169,6 +187,10 @@ when isMainModule:
     # THE SIZE IS COMPARED, not trusted. A declaration that says 16 MB over a
     # file of 400 bytes is the "green build that served a cached store path"
     # failure, and it is caught here rather than in a visitor's console.
+    for asset in descriptor.assets:
+      inc checks
+      echo "    " & asset.id & " -> " & asset.url & " (" & $asset.bytes &
+        " bytes declared)"
     for module in descriptor.modules:
       let path = publishDir / module.url.strip(chars = {'/'}, trailing = false)
       if not fileExists(path): continue
@@ -178,6 +200,34 @@ when isMainModule:
         defects.add "the entry document declares `" & module.id & "` at " &
           $module.bytes & " bytes and the publish directory holds " &
           $actual & " — the document and the bytes are from different builds"
+    for asset in descriptor.assets:
+      let path = publishDir / asset.url.strip(chars = {'/'}, trailing = false)
+      if not fileExists(path): continue
+      inc checks
+      let actual = getFileSize(path).int
+      if actual != asset.bytes:
+        defects.add "the entry document declares `" & asset.id & "` at " &
+          $asset.bytes & " bytes and the publish directory holds " &
+          $actual & " — the document and the bytes are from different builds"
+
+    # THE CACHE CLASS THE PUBLISHED SET EARNED, stated where the bytes are.
+    #
+    # Counted and named, not merely derived: `staticAssetGlobClass` answers
+    # `ccMutableAsset` for a set with one stable name in it AND for a set with
+    # no names in it at all, and those are two very different deployments. The
+    # count is what tells them apart, and `deployGuardDefects` is what names the
+    # offending file in the first case.
+    let publishedAssets = publishedStaticAssets(descriptor)
+    inc checks
+    if publishedAssets.len == 0:
+      defects.add "the entry document declares no /assets/ file at all — the " &
+        "cache table would be derived from an empty set, and a universal " &
+        "claim about nothing is not evidence for `immutable`"
+    else:
+      echo "  ok: " & $publishedAssets.len & " published /assets/ file(s), " &
+        "of which " & $unhashedStaticAssets(descriptor).len &
+        " carry no digest; /assets/* -> " &
+        headerFor(staticAssetGlobClass(descriptor))
 
   # 3. Every same-origin script the document asks for was published.
   let references = scriptReferences(document)

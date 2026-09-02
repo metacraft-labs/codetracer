@@ -48,6 +48,52 @@ proc awaitOutcome[T](future: PlatformFuture[PlatformOutcome[T]]
 
 const t0: int64 = 1_700_000_000_000
 
+# ---------------------------------------------------------------------------
+# A deployment assembled the way the assembly step assembles one.
+#
+# WHY THIS FIXTURE EXISTS AT ALL, and it is the whole of a defect review found
+# on 2026-09-01. The `/assets/` cache class used to be selected in this file
+# with `/assets/app.9f2b1c.js` — a filename no assembly step had ever produced.
+# The class was therefore validated on a fictional address while all three real
+# published paths, every one of them stable-named, went unchecked and were
+# served a year of `immutable`.
+#
+# So the names below are not written out. They are formed by
+# `contentAddressedPath`, which is the same function `ci/test/web_asset_name.nim`
+# calls for `ci/test/web-bundle-assets.sh` — one producer, so the example in a
+# test and the output of an assembly cannot be different things. A change to
+# the naming rule reddens these cases; it cannot quietly leave them describing
+# a convention the deployment stopped using.
+# ---------------------------------------------------------------------------
+
+const
+  digestOfBuildOne = "9f2b1c4d8e7a6b5c"
+  digestOfBuildTwo = "0a1b2c3d4e5f6071"
+    ## Two digests, because the property `immutable` rests on is that DIFFERENT
+    ## BYTES GET A DIFFERENT ADDRESS. `assetDigestLength` characters each, which
+    ## is what a real SHA-256 is truncated to.
+
+proc publishedDeployment(digest: string): DeploymentDescriptor =
+  ## What a bundle assembled by `web-bundle-assets.sh` declares: every
+  ## `/assets/` row in the manifest, published under its content-addressed name.
+  ##
+  ## The split between `modules` and `assets` is the manifest's `DeliveryMode`,
+  ## exactly as the assembly step splits it — a `damFetched` row is something a
+  ## worker resolves by id, anything else under `/assets/` is a script loaded by
+  ## URL.
+  result.origin = "https://ide.example.test"
+  result.revision = "abc1234"
+  let prefix = staticAssetPrefix[1 .. ^1]
+  for asset in webRuntimeAssets():
+    if not asset.path.startsWith(prefix): continue
+    let url = "/" & contentAddressedPath(asset.path, digest)
+    if asset.mode == damFetched:
+      result.modules.add DeployedModule(
+        id: asset.id, url: url, bytes: 4096,
+        builtFrom: "codetracer abc1234 test fixture")
+    else:
+      result.assets.add PublishedAsset(id: asset.id, url: url, bytes: 4096)
+
 type
   BridgeLog = ref object
     ## What the fake tab was asked to do. Assertions read this rather than
@@ -491,7 +537,8 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     check not covered
 
   test "the generated rewrite config serves 200, never a redirect":
-    let contract = deploymentContract("https://ide.example.test")
+    let contract = deploymentContract("https://ide.example.test",
+                                      publishedDeployment(digestOfBuildOne))
     let rendered = renderRewriteConfig(contract)
     check "  200" in rendered
     check "301" notin rendered
@@ -500,7 +547,8 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
       check (prefix & "/*") in rendered
 
   test "the three cache classes are keyed on prefix, with distinct headers":
-    let contract = deploymentContract("https://ide.example.test")
+    let contract = deploymentContract("https://ide.example.test",
+                                      publishedDeployment(digestOfBuildOne))
     check headerFor(ccImmutable) == "public, max-age=31536000, immutable"
     check "stale-while-revalidate" in headerFor(ccPointer)
     check "must-revalidate" in headerFor(ccEntryDocument)
@@ -520,19 +568,33 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     check cacheClassFor(pointerPath("hello-world", "3f9a2c")) == ccPointer
     check cacheClassFor("/p/hello-world-3f9a2c") == ccEntryDocument
     check cacheClassFor("/s/9f2b1c") == ccImmutable
-    check cacheClassFor("/assets/app.9f2b1c.js") == ccStaticAsset
-    # A REAL published asset, beside the hashed example. `/assets/app.9f2b1c.js`
-    # is a filename no assembly step has ever produced, and while it was the
-    # only `/assets/` address in this list the class was being validated on
-    # fiction: all three files actually published under `/assets/` have stable
-    # names, and all three were served `immutable` for a year as a result.
-    check cacheClassFor("/" & wasmWorkerScriptPath) == ccMutableAsset
     check cacheClassFor("/noir") == ccEntryDocument
+
+    # THE TWO `/assets/` ADDRESSES ARE BOTH REAL, and neither is illustrative.
+    #
+    # `hashedWorker` is what the assembly step publishes — formed here by the
+    # same `contentAddressedPath` that forms it there, so this line cannot go on
+    # describing a convention the bundle has stopped using. It replaced
+    # `/assets/app.9f2b1c.js`, a filename nothing has ever produced, whose
+    # presence here was how `ccStaticAsset` came to be the only class anyone
+    # checked while three stable-named files quietly carried its header.
+    #
+    # `wasmWorkerScriptPath` is the pre-rename manifest name, and it stays as
+    # the `ccMutableAsset` example for a reason that is not symmetry: it is
+    # exactly what a file added to `/assets/` WITHOUT going through the rename
+    # would look like, and the class that answers for it is what stops the whole
+    # directory promising more than it can keep.
+    let hashedWorker = "/" & contentAddressedPath(wasmWorkerScriptPath,
+                                                  digestOfBuildOne)
+    check cacheClassFor(hashedWorker) == ccStaticAsset
+    check cacheClassFor("/" & wasmWorkerScriptPath) == ccMutableAsset
+    check hashedWorker != "/" & wasmWorkerScriptPath
+
     var seen: set[CacheClass] = {}
     for address in ["/", "/noir", "/noir/new", "/s/9f2b1c",
                     "/p/hello-world-3f9a2c",
                     "/p/hello-world-3f9a2c/current.json",
-                    "/assets/app.9f2b1c.js", "/" & wasmWorkerScriptPath,
+                    hashedWorker, "/" & wasmWorkerScriptPath,
                     "/projects"]:
       seen.incl cacheClassFor(address)
     for class in CacheClass:
@@ -551,22 +613,32 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     ## Checked in both directions so neither half can rot:
     ##   * every unhashed published asset resolves to a revalidating class, and
     ##   * the `/assets/*` rule the CDN actually receives carries that class.
-    for path in unhashedStaticAssets():
+    ## THE ARM THAT KEEPS THE RULE HONEST, over a deployment that publishes one
+    ## stable name beside five hashed ones — which is what an asset added to
+    ## `/assets/` without going through the rename produces.
+    var mixed = publishedDeployment(digestOfBuildOne)
+    mixed.assets.add PublishedAsset(
+      id: "hand-added", url: "/assets/hand-added.js", bytes: 10)
+    check unhashedStaticAssets(mixed) == @["/assets/hand-added.js"]
+    for path in unhashedStaticAssets(mixed):
       check cacheClassFor(path) == ccMutableAsset
       check "immutable" notin headerFor(cacheClassFor(path))
 
-    let contract = deploymentContract("https://ide.example.test")
-    for rule in contract.caches:
+    let mixedContract = deploymentContract("https://ide.example.test", mixed)
+    for rule in mixedContract.caches:
       if "immutable" in rule.headerValue:
         # Whatever the glob covers must be content-addressed. `/s/*` is, by
-        # construction — a snapshot id IS the digest. `/assets/*` is not, today.
+        # construction — a snapshot id IS the digest. `/assets/*` is not, on a
+        # deployment with one stable name in it, however many hashed files sit
+        # beside it: a `_headers` glob has to be right for its weakest member.
         check rule.pattern == snapshotPrefix & "*"
 
   test "the `/assets/*` glob follows the digests, not the directory":
-    ## The self-upgrading half. Nobody has to remember to flip a header the day
-    ## content-hashed filenames land: the rule is derived from the published
-    ## set, so it tightens and loosens on its own.
-    check assetIsContentAddressed("/assets/app.9f2b1c.js")
+    ## The self-upgrading half, and it has now upgraded. Nobody had to remember
+    ## to flip a header the day content-hashed filenames landed: the rule is
+    ## derived from the published set, so it tightened on its own — this case
+    ## was written when it answered `ccMutableAsset` and asserts `ccStaticAsset`
+    ## today, over the same two lines of `staticAssetGlobClass`.
     check assetIsContentAddressed("/assets/ui.deadbeefcafe.js")
     check not assetIsContentAddressed("/assets/wasm-worker.js")
     check not assetIsContentAddressed("/assets/noir_wasm.wasm")
@@ -577,12 +649,113 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     check not assetIsContentAddressed("/assets/app.v2.js")
     check not assetIsContentAddressed("/assets/app.1234.js")
 
-    # Today every published `/assets/` file is stable-named, so the glob must
-    # revalidate. This is the assertion that goes red if someone reinstates the
-    # year-long header without hashing the names.
-    check unhashedStaticAssets().len == publishedStaticAssets().len
-    check publishedStaticAssets().len > 0
-    check staticAssetGlobClass() == ccMutableAsset
+    # THE PUBLISHED SET, COUNTED, AND THE COUNT ASSERTED. "Every published asset
+    # carries a digest" is true of a deployment that published none, so the size
+    # of the set is part of the claim rather than a preamble to it.
+    let published = publishedDeployment(digestOfBuildOne)
+    check publishedStaticAssets(published).len == declaredStaticAssetStems().len
+    check publishedStaticAssets(published).len == 6
+    for path in publishedStaticAssets(published):
+      check assetIsContentAddressed(path)
+    check unhashedStaticAssets(published).len == 0
+    check staticAssetGlobClass(published) == ccStaticAsset
+    check headerFor(staticAssetGlobClass(published)) == immutableHeader
+
+    # AND BY NAME, because six of six is a number some other six files could
+    # make. These are the files the 2026-09-01 staleness was found on, and the
+    # two the engine needs; a rename that dropped one would keep the count.
+    var byStem: seq[string]
+    for path in publishedStaticAssets(published):
+      byStem.add contentAddressedStem(path)
+    for expected in ["/" & wasmWorkerScriptPath,
+                     "/" & noirCompilerWasmPath,
+                     "/" & noirTracerWasmPath,
+                     "/" & replayWorkerScriptPath,
+                     "/" & replayEngineGluePath,
+                     "/" & replayEngineWasmPath]:
+      check expected in byStem
+
+    # THE EMPTY DEPLOYMENT DOES NOT EARN IT. Without this the derivation would
+    # be satisfied by a descriptor whose `assets` array failed to parse — a
+    # universal claim over nothing, answering `immutable`, which is the shape of
+    # the check that reported `ok: 0/0 published files match` and exited 0.
+    let nothingPublished = DeploymentDescriptor(origin: "https://ide.example.test")
+    check publishedStaticAssets(nothingPublished).len == 0
+    check unhashedStaticAssets(nothingPublished).len == 0
+    check staticAssetGlobClass(nothingPublished) == ccMutableAsset
+
+  test "a deploy changes the URL, which is what makes `immutable` true":
+    ## THE PROPERTY THE WHOLE RENAME EXISTS FOR. `immutable` tells a cache the
+    ## bytes at a URL never change; that is only safe if new bytes go to a new
+    ## URL, and nothing else in this file would notice a naming scheme that
+    ## returned a constant, hashed the FILENAME, or used the build revision —
+    ## all of which satisfy `assetIsContentAddressed` while re-publishing over
+    ## an address a CDN has been promised will never change.
+    let one = publishedDeployment(digestOfBuildOne)
+    let two = publishedDeployment(digestOfBuildTwo)
+    check publishedStaticAssets(one).len == publishedStaticAssets(two).len
+    check publishedStaticAssets(one).len > 0
+    var moved = 0
+    for i in 0 ..< publishedStaticAssets(one).len:
+      let before = publishedStaticAssets(one)[i]
+      let after = publishedStaticAssets(two)[i]
+      check before != after
+      # And it is the same FILE at a new address, not a different file: the
+      # stems must agree, or this would pass over a scheme that renamed things
+      # at random.
+      check contentAddressedStem(before) == contentAddressedStem(after)
+      check assetIsContentAddressed(after)
+      inc moved
+    check moved == publishedStaticAssets(one).len
+    check moved == 6
+
+    # Both deployments still earn `immutable` — the address moved, the promise
+    # did not weaken.
+    check staticAssetGlobClass(one) == ccStaticAsset
+    check staticAssetGlobClass(two) == ccStaticAsset
+
+  test "the published name and the manifest name convert both ways":
+    ## `contentAddressedStem` is what every path-deriving check uses to find a
+    ## file it knows by its manifest name, and a digest in the name is precisely
+    ## where such a check stops matching — by finding nothing, which reads as
+    ## nothing wrong. `deployGuardDefects`' published-but-undeclared arm is the
+    ## one that would have gone silently vacuous.
+    var round = 0
+    for stem in declaredStaticAssetStems():
+      let published = "/" & contentAddressedPath(stem[1 .. ^1], digestOfBuildOne)
+      check contentAddressedStem(published) == stem
+      inc round
+    check round == declaredStaticAssetStems().len
+    check round == 6
+    # A path with no digest is its own stem, so a check that maps every served
+    # path through this does not lose the ones that were never renamed.
+    check contentAddressedStem("/index.html") == "/index.html"
+    check contentAddressedStem("/" & wasmWorkerScriptPath) ==
+      "/" & wasmWorkerScriptPath
+
+  test "a name the producer forms is a name the predicate accepts":
+    ## The two halves of the convention, compared on real inputs rather than on
+    ## an illustrative one. `ci/test/web_asset_name.nim` makes the same
+    ## assertion at assembly time and refuses to publish a name that fails it,
+    ## so a change to either function fails a build rather than making a site
+    ## quietly slower.
+    var formed = 0
+    for stem in declaredStaticAssetStems():
+      let named = contentAddressedPath(stem[1 .. ^1], digestOfBuildOne)
+      check named.len > 0
+      check named != stem[1 .. ^1]
+      check assetIsContentAddressed("/" & named)
+      # The extension is preserved, because a static host reads it to choose a
+      # `Content-Type` and `WebAssembly.instantiateStreaming` refuses anything
+      # that is not `application/wasm` by name.
+      check named.endsWith("." & stem.rsplit('.', 1)[1])
+      inc formed
+    check formed == 6
+    # A digest that could not make the name content-addressed produces nothing,
+    # rather than a plausible path that quietly fails to earn `immutable`.
+    check contentAddressedPath("assets/wasm-worker.js", "abc") == ""
+    check contentAddressedPath("assets/wasm-worker.js", "zzzzzzzzzzzzzzzz") == ""
+    check contentAddressedPath("assets/noextension", digestOfBuildOne) == ""
 
   test "the generated cache config agrees with cacheClassFor, address by address":
     ## The failure this prevents is the one review found: the classifier said
@@ -599,7 +772,8 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
       path.len >= head.len + tail.len and
         path.startsWith(head) and path.endsWith(tail)
 
-    let contract = deploymentContract("https://ide.example.test")
+    let contract = deploymentContract("https://ide.example.test",
+                                      publishedDeployment(digestOfBuildOne))
     # THE ADDRESSES THIS DEPLOYMENT CAN ACTUALLY SERVE, and the `/assets/` ones
     # are the published set rather than an illustrative hashed name.
     #
@@ -615,8 +789,11 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
                       "/p/hello-world-3f9a2c",
                       "/p/hello-world-3f9a2c/current.json",
                       "/projects"]
-    addresses.add publishedStaticAssets()
-    check publishedStaticAssets().len > 0   # the loop must not be vacuous
+    addresses.add publishedStaticAssets(publishedDeployment(digestOfBuildOne))
+    check publishedStaticAssets(publishedDeployment(digestOfBuildOne)).len == 6
+      # The loop must not be vacuous, and the count is asserted rather than
+      # merely non-zero: `> 0` is satisfied by one asset, and the whole point of
+      # the glob is that it has to be right for all six at once.
     for address in addresses:
       var applied = ""
       for rule in contract.caches:
@@ -634,7 +811,8 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
       let tail = pattern[star + 1 .. ^1]
       path.len >= head.len + tail.len and
         path.startsWith(head) and path.endsWith(tail)
-    var contract = deploymentContract("https://ide.example.test")
+    var contract = deploymentContract("https://ide.example.test",
+                                      publishedDeployment(digestOfBuildOne))
     contract.caches = @[CacheRule(pattern: "/p/*", class: ccPointer,
                                   headerValue: pointerHeader)]
     let address = "/p/hello-world-3f9a2c"
@@ -646,7 +824,8 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     check applied != headerFor(cacheClassFor(address))
 
   test "there is no identifier allocation endpoint, and two write surfaces":
-    let contract = deploymentContract("https://ide.example.test")
+    let contract = deploymentContract("https://ide.example.test",
+                                      publishedDeployment(digestOfBuildOne))
     check contract.identifierAllocationEndpoints.len == 0
     check contract.writeSurfaces.len == 2
     for surface in contract.writeSurfaces:
@@ -658,8 +837,12 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     ## Two different origins produce two different contracts and neither is
     ## baked in. A default here is what the last two domain moves each had to
     ## hunt for.
-    check deploymentContract("https://a.example").origin == "https://a.example"
-    check deploymentContract("https://b.example").origin == "https://b.example"
+    check deploymentContract("https://a.example",
+                             publishedDeployment(digestOfBuildOne)).origin ==
+      "https://a.example"
+    check deploymentContract("https://b.example",
+                             publishedDeployment(digestOfBuildOne)).origin ==
+      "https://b.example"
     check absoluteUrl("https://ide.example.test", "/s/abc", "f=main.nr:4") ==
       "https://ide.example.test/s/abc#f=main.nr:4"
 
@@ -1049,18 +1232,28 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     #
     # So the assertion is now the property actually wanted — a class of its
     # own, distinct from the document's — plus the invariant that `immutable`
-    # is reserved for names that earn it. When the assembly step emits digests
-    # these become `ccStaticAsset` again, and this test keeps passing across
-    # that change rather than having to be edited through it.
+    # is reserved for names that earn it. The assembly step emits digests now,
+    # and this test did keep passing across that change: what moved is that the
+    # class is read at the PUBLISHED address rather than at the manifest one,
+    # because those are no longer the same string and the manifest one is served
+    # by nobody.
+    let deployed = publishedDeployment(digestOfBuildOne)
+    var graded = 0
     for asset in webRuntimeAssets():
       if asset.mode notin {damBundled, damEntryDocument}:
         check asset.path.startsWith(staticAssetPrefix[1 .. ^1])
-        let class = cacheClassFor("/" & asset.path)
-        check class == staticAssetGlobClass()
+        let url = publishedUrl(deployed, asset.id)
+        check url.len > 0
+        let class = cacheClassFor(url)
+        check class == staticAssetGlobClass(deployed)
         check class notin {ccEntryDocument, ccPointer}
         check headerFor(class) != entryDocumentHeader
+        inc graded
         if "immutable" in headerFor(class):
-          check assetIsContentAddressed("/" & asset.path)
+          check assetIsContentAddressed(url)
+    # Every non-bundled row was graded, and how many there are is part of the
+    # claim: a `continue` that stopped matching would leave this loop silent.
+    check graded == 6
 
   test "and the entry document is the one thing that must NOT be immutable":
     # The mirror of the case above, and the reason `damEntryDocument` is its
@@ -1102,12 +1295,16 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     # It is rendered into HTML and read back out of HTML, so the round trip is
     # the assertion — not `render` and `parse` agreeing in isolation, which
     # they would even if the document swallowed the element.
+    let workerUrl = "/" & contentAddressedPath(wasmWorkerScriptPath,
+                                               digestOfBuildOne)
     let descriptor = DeploymentDescriptor(
       origin: "https://ide.codetracer.com", revision: "abc1234",
       modules: @[
         DeployedModule(id: noirCompilerModuleId,
                        url: "/" & noirCompilerWasmPath, bytes: 15862494,
-                       builtFrom: "noir@codetracer 6c590c7789 compiler/wasm")])
+                       builtFrom: "noir@codetracer 6c590c7789 compiler/wasm")],
+      assets: @[
+        PublishedAsset(id: wasmWorkerAssetId, url: workerUrl, bytes: 35525)])
     let document = renderEntryDocument(descriptor)
     check document.contains("id=\"" & deploymentDescriptorElementId & "\"")
     # The page must reference the renderer, or it is a document that can never
@@ -1145,6 +1342,30 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     check parsed.modules[0].id == noirCompilerModuleId
     check parsed.modules[0].bytes == 15862494
     check parsed.modules[0].builtFrom.len > 0
+
+    # AND THE WORKER SCRIPT'S URL, THROUGH THE ACCESSOR THE PRODUCT CALLS.
+    #
+    # This is the half of the round trip that would fail SILENTLY and that no
+    # deploy gate looks at. `host/web_browser.nim` asks
+    # `assetUrl(deployment, wasmWorkerAssetId)` and answers `noWasmModules()`
+    # for an empty string — correct behaviour for a deployment that shipped no
+    # worker, and indistinguishable from one whose `assets` array did not
+    # survive the document. The deployed-page probe asserts a SURFACE (the
+    # welcome screen, the template) and a page with no toolchain mounts exactly
+    # the same surface, so the first report would be a user finding that Build
+    # does nothing.
+    #
+    # Asserted through `assetUrl` rather than by reading `parsed.assets[0]`
+    # because the accessor is what the product depends on; a field that
+    # round-trips into a list nothing can look up is not delivery.
+    check parsed.assets.len == 1
+    check assetUrl(parsed, wasmWorkerAssetId) == workerUrl
+    check assetIsContentAddressed(assetUrl(parsed, wasmWorkerAssetId))
+    check parsed.assets[0].bytes == 35525
+    # An id this deployment did not publish is "", which is the answer the
+    # caller branches on. Checked here so the accessor cannot start inventing
+    # a stem for a missing row.
+    check assetUrl(parsed, "no-such-asset") == ""
 
   test "a document that could truncate itself does not":
     # `</script>` inside the JSON would end the element early and take the rest
@@ -1190,8 +1411,18 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     # The two failures a sibling campaign met in one day. A guard catching only
     # one of them would have been green on the other, and which one it met was
     # decided by which edit somebody made.
-    let compilerUrl = "/" & noirCompilerWasmPath
-    let tracerUrl = "/" & noirTracerWasmPath
+    #
+    # THE URLS ARE THE PUBLISHED ONES, not the manifest ones. They used to be
+    # `"/" & noirCompilerWasmPath` — the stems — and that stopped being a
+    # description of any deployment when the assembly step began renaming what
+    # it places. The guard's published-but-undeclared arm is matched through
+    # `contentAddressedStem` for exactly this reason: it asked whether the STEM
+    # was served, and once nothing serves a stem it would have found nothing
+    # every time and reported no defects at all.
+    let compilerUrl = "/" & contentAddressedPath(noirCompilerWasmPath,
+                                                 digestOfBuildOne)
+    let tracerUrl = "/" & contentAddressedPath(noirTracerWasmPath,
+                                               digestOfBuildOne)
     let both = DeploymentDescriptor(modules: @[
       DeployedModule(id: noirCompilerModuleId, url: compilerUrl, bytes: 10,
                      builtFrom: "noir@codetracer deadbeef compiler/wasm"),
@@ -1207,13 +1438,110 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     check missing[0].contains(tracerUrl)
 
     # Published and not declared: bytes nothing can reach — the still frame.
+    # The served paths carry digests here, so this arm also proves the stem
+    # match works: an equality test against the manifest path would find neither
+    # file and report a clean deployment.
     let orphan = deployGuardDefects(DeploymentDescriptor(),
                                     @[compilerUrl, tracerUrl])
     check orphan.len == 2
 
+    # PUBLISHED UNDER A STABLE NAME. Its own arm, reddening its own assertion:
+    # the deployment is otherwise perfectly consistent — declared, served, sizes
+    # agreeing — and the only thing wrong is that `immutable` cannot be promised
+    # over it, which would otherwise show up as nothing but a slower site.
+    let stableNamed = DeploymentDescriptor(modules: @[
+      DeployedModule(id: noirCompilerModuleId, url: "/" & noirCompilerWasmPath,
+                     bytes: 10,
+                     builtFrom: "noir@codetracer deadbeef compiler/wasm")])
+    let stableDefects = deployGuardDefects(stableNamed,
+                                           @["/" & noirCompilerWasmPath])
+    check stableDefects.len == 1
+    check stableDefects[0].contains(noirCompilerWasmPath)
+    check stableDefects[0].contains("stable name")
+
+    # A WORKER SCRIPT DECLARED AND NOT PUBLISHED, which the guard could not see
+    # at all before the descriptor carried `assets[]`: its URL was a constant,
+    # so there was nothing for a deployment to be wrong about.
+    let workerUrl = "/" & contentAddressedPath(wasmWorkerScriptPath,
+                                               digestOfBuildOne)
+    let workerMissing = deployGuardDefects(
+      DeploymentDescriptor(assets: @[
+        PublishedAsset(id: wasmWorkerAssetId, url: workerUrl, bytes: 7)]), @[])
+    check workerMissing.len == 1
+    check workerMissing[0].contains(workerUrl)
+
     # A deployment that ships nothing and declares nothing is CORRECT, and the
     # guard must not invent a defect for the supported configuration.
     check deployGuardDefects(DeploymentDescriptor(), @[]).len == 0
+
+    # And the assembly step's own output is accepted, which is the arm that
+    # would catch a rename the guard cannot follow.
+    let real = publishedDeployment(digestOfBuildOne)
+    var servedByReal: seq[string]
+    for path in publishedStaticAssets(real): servedByReal.add path
+    check servedByReal.len == 6
+    check deployGuardDefects(real, servedByReal).len == 0
+
+  test "modules with no worker to run them in are not a delivered toolchain":
+    ## THE IMPLICATION CONTENT-ADDRESSED FILENAMES BROKE, restored as a value.
+    ##
+    ## `wasmWorkerScriptPath` was a compile-time constant, so "the descriptor
+    ## names modules" entailed "there is a worker to run them in" — the second
+    ## fact could not fail by itself. The worker is now published under a
+    ## digest and declared like anything else, so a document can name two Noir
+    ## modules and no worker; ungated, that tab reports
+    ## `toolchain=nargo:compile+trace` on its boot line while every run
+    ## refuses, which is the one thing `host/web_browser.nim`'s header forbids.
+    ##
+    ## Asserted here because `web_browser.nim` is compiled by a compile-ONLY
+    ## lane and can host no assertion of its own.
+    let workerUrl = "/" & contentAddressedPath(wasmWorkerScriptPath,
+                                               digestOfBuildOne)
+    let modules = @[
+      DeployedModule(id: noirCompilerModuleId,
+                     url: "/" & contentAddressedPath(noirCompilerWasmPath,
+                                                     digestOfBuildOne),
+                     bytes: 10, builtFrom: "noir@codetracer deadbeef c"),
+      DeployedModule(id: noirTracerModuleId,
+                     url: "/" & contentAddressedPath(noirTracerWasmPath,
+                                                     digestOfBuildOne),
+                     bytes: 20, builtFrom: "noir@codetracer deadbeef t")]
+
+    # With a worker: everything the document declares is runnable.
+    let withWorker = DeploymentDescriptor(
+      modules: modules,
+      assets: @[PublishedAsset(id: wasmWorkerAssetId, url: workerUrl, bytes: 7)])
+    check declaresNoirWasmWorker(withWorker)
+    check noirRunnableModules(withWorker).len == 2
+
+    # WITHOUT ONE: none of them is, and the count is asserted on BOTH sides so
+    # neither arm can be satisfied by an empty modules list.
+    let withoutWorker = DeploymentDescriptor(modules: modules)
+    check not declaresNoirWasmWorker(withoutWorker)
+    check withoutWorker.modules.len == 2
+    check noirRunnableModules(withoutWorker).len == 0
+
+    # AND THE URLS STILL REACH A WORKER THAT DOES EXIST. `declaredModuleUrls`
+    # is deliberately NOT gated: it is what a `configure` message carries, and
+    # a worker that exists must be told about everything published. Gating it
+    # would produce a worker running with no modules — a different defect
+    # wearing the same fix.
+    check declaredModuleUrls(withoutWorker).len == 2
+
+    # The replay engine is a different consumer with its own script, so an
+    # absent NOIR worker must not hide it; `ui/web_replay_host.nim` refuses by
+    # name on its own row.
+    let engineOnly = DeploymentDescriptor(
+      modules: @[DeployedModule(id: replayEngineModuleId,
+                                url: "/" & contentAddressedPath(
+                                  replayEngineWasmPath, digestOfBuildOne),
+                                bytes: 30, builtFrom: "codetracer abc1234")],
+      assets: @[PublishedAsset(id: replayWorkerModuleId,
+                               url: "/" & contentAddressedPath(
+                                 replayWorkerScriptPath, digestOfBuildOne),
+                               bytes: 9)])
+    check assetUrl(engineOnly, replayWorkerModuleId).len > 0
+    check declaredModuleUrls(engineOnly).len == 1
 
   test "the worker is configured with the urls the descriptor declares":
     # `declaredModuleUrls` is what reaches the worker's `configure` message.
@@ -1375,7 +1703,8 @@ suite "the rewrite target a static host is actually given":
     ## text, because the rendered text now contains the string `/index.html`
     ## in a comment explaining this, and a grep would fail for the wrong
     ## reason.
-    let contract = deploymentContract("https://ide.example.test")
+    let contract = deploymentContract("https://ide.example.test",
+                                      publishedDeployment(digestOfBuildOne))
     check normalisedRewriteTargets(contract).len == 0
     # NON-VACUITY: an empty target list would also satisfy the check above.
     check rewriteTargets(contract).len == rewritePrefixes().len * 2
@@ -1389,7 +1718,8 @@ suite "the rewrite target a static host is actually given":
     ## points. `test_every_entry_form_reaches_the_application` above asserts
     ## the prefixes; this asserts they survived into the rendered file with a
     ## status of 200 and the canonical target.
-    let rendered = renderRewriteConfig(deploymentContract("https://a.test"))
+    let rendered = renderRewriteConfig(
+      deploymentContract("https://a.test", publishedDeployment(digestOfBuildOne)))
     for prefix in rewritePrefixes():
       check (prefix & "  " & entryDocumentAddress & "  200") in rendered
       check (prefix & "/*  " & entryDocumentAddress & "  200") in rendered
@@ -1550,7 +1880,8 @@ suite "which hosts are language entry points is deployment configuration":
     ## file for one tree serving every host, so the prefix must be in it or
     ## `noirstudio.dev/new` reaches the CDN and not the application.
     check "/new" in rewritePrefixes()
-    let rendered = renderRewriteConfig(deploymentContract("https://a.test"))
+    let rendered = renderRewriteConfig(
+      deploymentContract("https://a.test", publishedDeployment(digestOfBuildOne)))
     check "/new  " & entryDocumentAddress & "  200" in rendered
 
   test "a language origin that can never match is refused at build time":

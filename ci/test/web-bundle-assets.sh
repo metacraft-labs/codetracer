@@ -127,9 +127,32 @@ echo
 # Only the paths the manifest declares are removed. The output directory is
 # shared with `web-bundle-smoke.sh`, so a blanket `rm -rf` here would delete
 # another gate's artefacts.
+#
+# AND EVERY DIGESTED SPELLING OF THEM, which is what content-addressed names
+# cost this loop. `rm -f "${out_dir}/assets/noir_wasm.wasm"` deletes a name no
+# assembly has published since the rename landed: it succeeds, against nothing,
+# and the loop reads as if it had run.
+#
+# The gap it leaves is precisely the bug this loop's header records, reached by
+# a different route. An OPTIONAL module supplied on one run and not the next —
+# `CT_NOIR_WASM_COMPILER` unset, which is the ordinary local case and the
+# workflow's cache-miss path — is never placed, so the per-asset sweep inside
+# Step 3a is skipped for it by `[ -f "${src}" ] || continue`, and the previous
+# run's `assets/noir_wasm.<olddigest>.wasm` survives. `published_asset_rel`
+# then finds EXACTLY ONE match and resolves it without complaint, so the
+# browser gates grade bytes this assembly never placed. That is "required and
+# present over a module it had never produced" again, wearing a digest.
+#
+# Removed here, before anything is placed, rather than beside the rename: this
+# is the only point that sees every declared asset whether or not this run has
+# one. Step 3a therefore no longer needs its own sweep.
 while IFS=$'\t' read -r _id _path _mode _req _behaviour; do
 	[ -n "${_path}" ] || continue
 	rm -f "${out_dir}/${_path}"
+	_dir="$(dirname "${out_dir}/${_path}")"
+	_base="$(basename "${_path}")"
+	[ -d "${_dir}" ] || continue
+	find "${_dir}" -maxdepth 1 -name "${_base%.*}.*.${_base##*.}" -delete 2>/dev/null
 done < <(printf '%s\n' "${manifest}")
 
 # AND ONE PATH THE MANIFEST NO LONGER DECLARES. `web.js` was a required asset
@@ -388,7 +411,8 @@ echo
 echo "Step 3: place the worker script and, if supplied, the wasm modules"
 # ---------------------------------------------------------------------------
 worker_src="src/frontend/viewmodel/host/wasm_worker_browser.js"
-worker_dst="${out_dir}/$(printf '%s\n' "${manifest}" | awk -F'\t' '$1=="wasm-worker"{print $2}')"
+worker_stem="$(printf '%s\n' "${manifest}" | awk -F'\t' '$1=="wasm-worker"{print $2}')"
+worker_dst="${out_dir}/${worker_stem}"
 mkdir -p "$(dirname "${worker_dst}")"
 if cp "${worker_src}" "${worker_dst}" 2>/dev/null; then
 	ok "worker script placed at ${worker_dst#"${out_dir}"/}"
@@ -458,6 +482,127 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
+echo "Step 3a: every /assets/ file is renamed to carry its own digest"
+echo "    This is what makes 'immutable' TRUE rather than merely asserted."
+echo "    A year-long immutable on a stable filename is a promise a deploy"
+echo "    breaks every time, and Cloudflare believed it for 36 hours across"
+echo "    two zones. The header is derived from these names, so the rename"
+echo "    is what earns it -- nothing downstream had to be told."
+# ---------------------------------------------------------------------------
+if ! nim c --hints:off --warnings:off --nimcache:"${cache}/assetname" \
+	-o:"${cache}/asset-name-bin" ci/test/web_asset_name.nim \
+	>"${cache}/assetname.log" 2>&1; then
+	bad "ci/test/web_asset_name.nim does not compile, so no name can be formed"
+	grep -E 'Error:' "${cache}/assetname.log" | head -3 | sed 's/^/      /'
+fi
+
+# The digest tool, resolved once and checked, for the reason
+# `verify-deployed-bytes.sh` records at length: a tool that goes missing inside
+# `$(...)` manufactures empty output, and an empty digest here would produce
+# `assets/wasm-worker..js` — a name that is neither the old one nor
+# content-addressed, published under `immutable`.
+SHA="$(command -v shasum || true)"
+SHA_ARGS=(-a 256)
+if [ -z "${SHA}" ]; then
+	SHA="$(command -v sha256sum || true)"
+	SHA_ARGS=()
+fi
+[ -n "${SHA}" ] || {
+	echo "neither shasum nor sha256sum is on PATH; a content-addressed name cannot be formed" >&2
+	exit 2
+}
+
+published_tsv="${cache}/published-assets.tsv"
+: >"${published_tsv}"
+asset_prefix="assets/"
+hashed_count=0
+asset_rows=0
+
+# The rename is driven by the MANIFEST, so a `/assets/` row added to
+# `webRuntimeAssets()` is digested without editing this step — the same
+# property `staticAssetGlobClass` has on the reading side. `mode` decides which
+# stream the descriptor gets the row on; `fetched` is a module a consumer
+# resolves by id, anything else under `/assets/` is a script loaded by URL.
+while IFS=$'\t' read -r id path mode req behaviour consumer; do
+	[ -n "${id}" ] || continue
+	case "${path}" in "${asset_prefix}"*) ;; *) continue ;; esac
+	asset_rows=$((asset_rows + 1))
+	src="${out_dir}/${path}"
+	# NOT AN ERROR. An optional module that was not supplied was never placed,
+	# and Step 4 is what grades presence. Silently skipping a file that IS there
+	# would be the error, and that is why the count is asserted below.
+	[ -f "${src}" ] || continue
+
+	digest="$("${SHA}" "${SHA_ARGS[@]}" "${src}" | cut -d' ' -f1)"
+	if [ -z "${digest}" ]; then
+		bad "${id}: could not digest ${path}; refusing to publish it under any name"
+		continue
+	fi
+	named="$("${cache}/asset-name-bin" "${path}" "${digest}")"
+	if [ $? -ne 0 ] || [ -z "${named}" ]; then
+		bad "${id}: web_asset_name refused to name ${path} — see its message above"
+		continue
+	fi
+	# NO STALE SWEEP HERE. It used to live at this line and was wrong at it:
+	# guarded by the `continue` above, it only ran for assets this run placed,
+	# so the one case that produces a stale copy — an optional asset supplied
+	# last run and not this one — was the case it could not reach. The removal
+	# is in the pre-place loop near the top of this file, which sees every
+	# declared asset whether or not this run has one.
+	mv "${src}" "${out_dir}/${named}"
+	bytes="$(wc -c <"${out_dir}/${named}" | tr -d ' ')"
+	case "${mode}" in
+	fetched) kind="module" ;;
+	*) kind="asset" ;;
+	esac
+	printf '%s\t%s\t/%s\t%s\n' "${kind}" "${id}" "${named}" "${bytes}" >>"${published_tsv}"
+	hashed_count=$((hashed_count + 1))
+	ok "${id}: published as ${named} (${bytes} bytes)"
+done < <(printf '%s\n' "${manifest}")
+
+# NON-VACUITY, AND BY NAME. `ok: 0/0` is the shape this repository keeps
+# finding: a loop whose subject list came out empty agrees with itself
+# perfectly and exits 0. Two assertions, because they fail differently — the
+# first catches a manifest that stopped naming `/assets/` rows at all, the
+# second catches an assembly that placed the required worker and did not
+# rename it. A count alone would pass if some other file made up the number.
+if [ "${asset_rows}" -ge 3 ]; then
+	ok "the manifest declares ${asset_rows} /assets/ row(s), so the rename loop had subjects"
+else
+	bad "the manifest declares only ${asset_rows} /assets/ row(s) — the rename loop is vacuous"
+fi
+worker_published="$(awk -F'\t' '$2=="wasm-worker"{print $3}' "${published_tsv}")"
+if printf '%s' "${worker_published}" | grep -qE '/assets/wasm-worker\.[0-9a-fA-F]{6,}\.js$'; then
+	ok "wasm-worker, by name, is published content-addressed at ${worker_published}"
+else
+	bad "wasm-worker is published at '${worker_published}', which carries no digest — /assets/* cannot be immutable"
+fi
+note "${hashed_count} of ${asset_rows} declared /assets/ file(s) were present and digested"
+# Steps 5 and 6 grade the placed worker, and it has moved. Not re-derived at
+# each use: one variable, reassigned once, where the rename happened.
+[ -n "${worker_published}" ] && worker_dst="${out_dir}${worker_published}"
+
+# THE PROPERTY THE WHOLE CHANGE EXISTS FOR, asserted on the assembly's own
+# output rather than on an illustrative string: different bytes get a different
+# address. Without it, `immutable` is still a promise nobody checked — a
+# renaming step that hashed the FILENAME, or a constant, would satisfy every
+# other assertion in this step and re-publish the same URL over new bytes.
+probe_a="${cache}/deploy-probe-a"
+probe_b="${cache}/deploy-probe-b"
+printf 'build one\n' >"${probe_a}"
+printf 'build two\n' >"${probe_b}"
+name_a="$("${cache}/asset-name-bin" "${worker_stem}" \
+	"$("${SHA}" "${SHA_ARGS[@]}" "${probe_a}" | cut -d' ' -f1)")"
+name_b="$("${cache}/asset-name-bin" "${worker_stem}" \
+	"$("${SHA}" "${SHA_ARGS[@]}" "${probe_b}" | cut -d' ' -f1)")"
+if [ -n "${name_a}" ] && [ -n "${name_b}" ] && [ "${name_a}" != "${name_b}" ]; then
+	ok "a change of content changes the published URL (${name_a##*/} vs ${name_b##*/})"
+else
+	bad "two different files were published at the same address ('${name_a}' vs '${name_b}') — a deploy would not dislodge the cached copy"
+fi
+echo
+
+# ---------------------------------------------------------------------------
 echo "Step 3b: render the entry document and the host configuration"
 echo "    The asset nothing produced. renderRewriteConfig() emitted a target"
 echo "    for every prefix and no step ever wrote the file it named -- so a"
@@ -493,26 +638,32 @@ revision="${CT_WEB_REVISION:-$(git -C "${repo_root}" rev-parse --short HEAD 2>/d
 # an unset value here disables the module rather than shipping it anonymously.
 noir_ref="${CT_NOIR_WASM_REF:-}"
 
-modules_tsv="${cache}/declared-modules.tsv"
-: >"${modules_tsv}"
+descriptor_tsv="${cache}/descriptor-rows.tsv"
+: >"${descriptor_tsv}"
 declare_module() {
 	local id="$1" crate="$2" origin_label="${3:-noir@codetracer ${noir_ref} }"
-	local path
-	path="$(printf '%s\n' "${manifest}" | awk -F'\t' -v i="${id}" '$1==i{print $2}')"
-	local file="${out_dir}/${path}"
-	# MEASURED FROM THE FILE, never from the variable that was supposed to
-	# produce it. This is the "verify the artifact, not the workflow" rule at
-	# its smallest: the document declares a size a guard can compare against
-	# the bytes about to be uploaded, so a truncated copy is a failed deploy
-	# rather than a broken page.
-	[ -f "${file}" ] || return 0
+	# THE URL AND THE SIZE BOTH COME FROM WHAT STEP 3a ACTUALLY PUBLISHED, not
+	# from the manifest path. The manifest names `assets/noir_wasm.wasm` and no
+	# deployment serves that address any more; declaring it would produce a
+	# document promising a module the publish directory does not contain, which
+	# is the exact state `deployGuardDefects` blocks a deploy for — reached by
+	# the step that writes the declaration.
+	#
+	# The size is still MEASURED rather than assumed, for the reason this
+	# comment has always given: the document declares a number a guard can
+	# compare against the bytes about to be uploaded, so a truncated copy is a
+	# failed deploy rather than a broken page.
+	local row
+	row="$(awk -F'\t' -v i="${id}" '$1=="module" && $2==i {print}' "${published_tsv}")"
+	[ -n "${row}" ] || return 0
 	if [ -z "${origin_label}" ]; then
 		bad "${id}: placed, but its provenance is unset, so it has no builtFrom and the page would drop it"
 		return 0
 	fi
-	printf '%s\t/%s\t%s\t%s\n' "${id}" "${path}" \
-		"$(wc -c <"${file}" | tr -d ' ')" \
-		"${origin_label}${crate}" >>"${modules_tsv}"
+	printf 'module\t%s\t%s\t%s\t%s\n' "${id}" \
+		"$(printf '%s' "${row}" | cut -f3)" \
+		"$(printf '%s' "${row}" | cut -f4)" \
+		"${origin_label}${crate}" >>"${descriptor_tsv}"
 }
 noir_provenance=""
 [ -n "${noir_ref}" ] && noir_provenance="noir@codetracer ${noir_ref} "
@@ -538,6 +689,30 @@ engine_provenance=""
 declare_module replay-engine-glue "src/db-backend (wasm-bindgen glue)" "${engine_provenance}"
 declare_module replay-engine "src/db-backend" "${engine_provenance}"
 
+# THE WORKER SCRIPTS, WHICH USED TO NEED NO DECLARATION AT ALL.
+#
+# `newBrowserWasmHost(registry, "/" & wasmWorkerScriptPath, ...)` was a Nim
+# constant, and a constant is a perfectly good answer for a file whose name
+# never changes. A name derived from the bytes is not a constant, so the
+# deployment now says where it put them and the product reads it out of the
+# document — the same indirection `modules[]` already had, which is why the two
+# Noir modules cost nothing to hash and these two did.
+#
+# No provenance clause: these are this repository's own files, `registrableModules`
+# never sees them, and inventing a `builtFrom` for them would put a worker
+# script in a list `wasm_worker.configure` hands to a worker as a module.
+declared_assets=0
+while IFS=$'\t' read -r kind id url bytes; do
+	[ "${kind}" = "asset" ] || continue
+	printf 'asset\t%s\t%s\t%s\n' "${id}" "${url}" "${bytes}" >>"${descriptor_tsv}"
+	declared_assets=$((declared_assets + 1))
+done <"${published_tsv}"
+if [ "${declared_assets}" -ge 1 ]; then
+	ok "the document declares ${declared_assets} published worker script(s) by URL"
+else
+	bad "no worker script was declared; the page would have no URL to start a Worker from and would report this deployment as shipping none"
+fi
+
 if ! nim c --hints:off --warnings:off --nimcache:"${cache}/render" \
 	-o:"${cache}/render-bin" ci/test/web_deployment_render.nim \
 	>"${cache}/render.log" 2>&1; then
@@ -546,7 +721,7 @@ if ! nim c --hints:off --warnings:off --nimcache:"${cache}/render" \
 else
 	if "${cache}/render-bin" "${origin}" "${revision}" "${out_dir}" \
 		"${language_origins}" \
-		<"${modules_tsv}" >"${cache}/render-out.log" 2>&1; then
+		<"${descriptor_tsv}" >"${cache}/render-out.log" 2>&1; then
 		ok "rendered index.html, _headers and _redirects for ${origin} @ ${revision}"
 		sed 's/^/      /' "${cache}/render-out.log"
 	else
@@ -563,7 +738,17 @@ echo "    'the bundle carries the renderer' and carries nothing."
 # ---------------------------------------------------------------------------
 while IFS=$'\t' read -r id path mode req behaviour; do
 	[ -n "${id}" ] || continue
-	target="${out_dir}/${path}"
+	# THE PUBLISHED NAME, NOT THE MANIFEST NAME, for anything Step 3a renamed.
+	# Left as `${out_dir}/${path}`, this loop would report every `/assets/`
+	# asset as missing — and, worse, would have reported them PRESENT if a
+	# previous run's undigested copies were still in the tree, which is the
+	# stale-artefact false pass this script's own Step 1 header records.
+	published="$(awk -F'\t' -v i="${id}" '$2==i{print $3}' "${published_tsv}")"
+	if [ -n "${published}" ]; then
+		target="${out_dir}${published}"
+	else
+		target="${out_dir}/${path}"
+	fi
 	if [ "${req}" = "required" ]; then
 		if [ ! -f "${target}" ]; then
 			bad "${id}: REQUIRED and absent from the bundle (${path})"
@@ -686,6 +871,73 @@ if [ -f "${worker_dst}" ]; then
 	fi
 else
 	bad "no worker script was placed, so the protocol checks cannot run"
+fi
+echo
+
+# ---------------------------------------------------------------------------
+echo "Step 5b: the engine's glue is told where its wasm is, and does not guess"
+echo "    THE ONE WAY CONTENT-ADDRESSING COULD BREAK THE ENGINE. The glue and"
+echo "    the wasm are two files and the glue names the other one; hashing one"
+echo "    without the other would 404 -- and on Pages a 404 under /assets/ is"
+echo "    the entry document at 200 text/html, which fails inside"
+echo "    WebAssembly.compileStreaming naming neither file."
+# ---------------------------------------------------------------------------
+#
+# WHY IT IS SAFE HERE, MEASURED RATHER THAN ASSUMED. `wasm-pack --target web`
+# emits `__wbg_init(module_or_path)`, whose DEFAULT is
+# `new URL('db_backend_bg.wasm', import.meta.url)` — the glue's own directory
+# and the undigested name. `browser-replay/app/worker.js` relies on exactly
+# that, which is why BlockTracer's `/worker.js` and `/pkg/*` copies are NOT
+# renamed and must not be.
+#
+# The Studio's `replay-worker.js` does not rely on it: it takes both URLs from
+# the entry document's descriptor and passes the wasm one in —
+# `await module.default(wasmUrl)`. That argument is what makes hashing the two
+# files independently safe, and it is one edit away from not being there. So it
+# is asserted, on the file that was actually placed, rather than believed.
+replay_worker_published="$(awk -F'\t' '$2=="replay-worker"{print $3}' "${published_tsv}")"
+if [ -n "${replay_worker_published}" ]; then
+	replay_code="${cache}/replay-worker-code.js"
+	grep -vE '^[[:space:]]*//' "${out_dir}${replay_worker_published}" >"${replay_code}"
+
+	if node --check "${out_dir}${replay_worker_published}" 2>"${cache}/replay-parse.log"; then
+		ok "the replay worker parses as JavaScript"
+	else
+		bad "the replay worker does NOT parse; a browser would fail on its first line"
+		head -5 "${cache}/replay-parse.log" | sed 's/^/      /'
+	fi
+
+	# Positive control on the stripped file, so the greps below cannot pass over
+	# an empty one by finding nothing in it.
+	if grep -q "self.onmessage" "${replay_code}"; then
+		ok "positive control: the placed replay worker installs a message handler"
+	else
+		bad "positive control FAILED: the placed file is not a worker; every check below is vacuous"
+	fi
+
+	# THE ARGUMENT, WHICH IS THE WHOLE OF IT.
+	if grep -qE 'module\.default\([^)]+\)' "${replay_code}"; then
+		ok "the replay worker passes the wasm URL to the glue rather than letting it guess"
+	else
+		bad "the replay worker calls the glue's init with NO url, so the glue would resolve db_backend_bg.wasm relative to itself — a name no deployment publishes"
+	fi
+	# And the URL it passes is the DECLARED one, by id, not a path it built.
+	for needed in "replay-engine-glue" "replay-engine"; do
+		if grep -qF "\"${needed}\"" "${replay_code}"; then
+			ok "the replay worker resolves '${needed}' from the descriptor's moduleUrls"
+		else
+			bad "the replay worker never names '${needed}'; it cannot be getting its URL from the entry document"
+		fi
+	done
+	# It must not reconstruct a path. A `new URL('...db_backend...')` here would
+	# be the guessing this step exists to forbid, however it was spelled.
+	if grep -qE "new URL\([^)]*db_backend" "${replay_code}"; then
+		bad "the replay worker builds a db_backend URL of its own; the published name carries a digest and cannot be spelled in source"
+	else
+		ok "the replay worker constructs no db_backend URL of its own"
+	fi
+else
+	note "no replay worker was placed (the engine was not supplied), so its glue contract was not checked"
 fi
 echo
 

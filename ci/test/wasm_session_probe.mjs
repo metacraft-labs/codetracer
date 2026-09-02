@@ -48,6 +48,21 @@ page.on('console', (m) => {
 });
 // Which worker script the tab actually fetched. A gate that assumed the URL
 // would go green over a page that silently fell back to something else.
+//
+// `includes('wasm-worker')` AND NOT `endsWith('wasm-worker.js')`, and this is
+// worth a line because the stricter form looks tidier and would be a silent
+// defect. The worker is published as `assets/wasm-worker.<16 hex>.js` — the
+// digest is what makes `/assets/*`'s year-long `immutable` a true promise — so
+// an `endsWith` on the undigested name matches nothing and this collector
+// stays EMPTY. Downstream that reads as "the tab never fetched the worker",
+// which is a page-is-broken verdict over a working page, and it is the same
+// shape as the fetch predicate in `noir_replay_probe.mjs` that had to be
+// widened to a stem regex for exactly this reason.
+//
+// The substring is deliberately loose in the other direction too: it matches
+// whatever name the assembly publishes, so the digest can change every build
+// without this line knowing. `wasm-worker` is the stem, and the stem is the
+// only part of the name that is ours to spell.
 page.on('response', (r) => {
   const u = r.url();
   if (u.includes('wasm-worker') || u.includes('/__harness/')) {

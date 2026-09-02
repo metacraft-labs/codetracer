@@ -18,7 +18,8 @@
 ## * `host/web_browser.newBrowserWasmWorker` — the one place a browser
 ##   `Worker` is constructed, the same call `newBrowserWasmHost` makes;
 ## * `platform/wasm_worker` — the protocol driver, unmodified;
-## * `/assets/wasm-worker.js` — served from the assembled publish tree, byte
+## * the published wasm worker, whose URL arrives as `?worker=` because the
+##   name carries a content digest — served from the assembled publish tree, byte
 ##   for byte as `web-bundle-assets.sh` placed it.
 ##
 ## A harness that re-implemented the transport would have proven that a
@@ -365,7 +366,35 @@ proc finish(h: Harness) =
   drainSync()
 
 proc main() =
-  let scriptUrl = $jsQueryFlag("worker".cstring, "/assets/wasm-worker.js".cstring)
+  # THE WORKER URL IS SUPPLIED, NOT DEFAULTED, and the default that used to be
+  # here was `/assets/wasm-worker.js`.
+  #
+  # That was a fine default while the published name was the manifest name. Once
+  # `web-bundle-assets.sh` began renaming every `/assets/` file to carry its
+  # content digest, the default became an address nothing serves — and the
+  # failure was silent in the specific way that matters: only arm I passes
+  # `?worker=`, so every other arm would have fallen through to a 404, produced
+  # no ready event and refused every delivery, and arm I — the arm whose whole
+  # premise is a missing worker — would have been the one still green. Six arms
+  # turning into a copy of the seventh, with the seventh vouching for them.
+  #
+  # An absent flag is now reported by name rather than guessed at, so a shell
+  # that forgets to resolve the published URL fails loudly here instead of
+  # producing seven arms' worth of plausible wrong numbers.
+  let scriptUrl = $jsQueryFlag("worker".cstring, "".cstring)
+  if scriptUrl.len == 0:
+    # Reported into the same element the probe reads, so the shell sees a
+    # sentence rather than a timeout. `reportPresent` stays TRUE on purpose:
+    # this is a harness that ran and refused, not one that failed to load, and
+    # the two must not produce the same evidence.
+    var refusal = newJObject()
+    refusal["reportPresent"] = %true
+    refusal["workerUrlMissing"] = %true
+    refusal["done"] = %true
+    refusal["steps"] = %(@["no ?worker= was supplied; this harness does not " &
+                           "guess a published asset's name"])
+    jsSetText(reportElementId.cstring, ($refusal).cstring)
+    return
   # DEFAULT ZERO, deliberately. A running clock makes the height at any moment
   # a function of how fast the machine is, so the control arm's numbers would
   # be approximate and every assertion on them would have to be an inequality.

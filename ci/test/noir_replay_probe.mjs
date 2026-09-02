@@ -305,7 +305,24 @@ for (const line of report.replayLines) {
 }
 report.distinctLines = Array.from(seen);
 report.wasmRequests = wasmRequests;
-report.engineFetched = wasmRequests.some((r) => r.url.includes('db_backend_bg.wasm'));
+// THE ENGINE, MATCHED BY STEM AND ANSWERED WITH A STATUS.
+//
+// `includes('db_backend_bg.wasm')` was two defects in one predicate.
+//
+// It required `_bg` to be followed immediately by `.wasm`, and the published
+// name is `db_backend_bg.<16 hex>.wasm` — so it would have answered `false`
+// forever on a working deployment, reddening the control AND turning mutation
+// arm A ("the engine was not fetched") green for the wrong reason. A predicate
+// that stops matching is worse than one that breaks, because one of the two
+// verdicts it feeds looks like success.
+//
+// And it asked only whether the URL was REQUESTED, which is true whether the
+// answer was 18 MB or a 404 — and Cloudflare Pages was measured answering an
+// absent `.wasm` with the entry document at 200 `text/html`. "The engine was
+// fetched" has to mean the bytes arrived, so the status is part of the claim.
+report.engineFetched = wasmRequests.some(
+  (r) => /\/db_backend_bg(\.[0-9a-f]{6,})?\.wasm$/.test(new URL(r.url).pathname) &&
+    r.status === 200);
 report.pageErrors = pageErrors;
 report.consoleLines = consoleLines.filter((l) =>
   l.includes('codetracer-') || l.includes('Error') || l.includes('error:'));

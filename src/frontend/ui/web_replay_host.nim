@@ -143,9 +143,30 @@ proc openSession(request: ReplaySessionRequest) =
     activeReplayTerminate = nil
 
   let requested = request
+  # THE WORKER'S URL COMES FROM THE DEPLOYMENT, not from a constant. It was
+  # `"/" & replayWorkerScriptPath` until the assembly step began renaming every
+  # `/assets/` file to carry its content digest — which is what makes the
+  # year-long `immutable` on those URLs a true promise, and which a compiled-in
+  # path cannot follow.
+  #
+  # An undeclared worker is REFUSED BY NAME rather than requested anyway.
+  # Cloudflare Pages answers an unknown path with the SPA entry document at 200
+  # `text/html`, so `new Worker("/assets/replay-worker.js")` on a deployment
+  # that published no such file would load the application shell into a worker
+  # and fail inside it — the manifest's own sentence for this absence says the
+  # session reports that this deployment ships no engine, which is both true and
+  # findable.
+  let descriptor = deploymentDescriptor()
+  let replayWorkerUrl = assetUrl(descriptor, replayWorkerModuleId)
+  if replayWorkerUrl.len == 0:
+    lastReplayFailure =
+      "this deployment declares no `" & replayWorkerModuleId &
+      "`, so there is no worker to instantiate the replay engine in"
+    report("refused: " & lastReplayFailure)
+    return
   newBrowserReplaySession(
-    scriptUrl = "/" & replayWorkerScriptPath,
-    moduleUrls = declaredModuleUrls(deploymentDescriptor()),
+    scriptUrl = replayWorkerUrl,
+    moduleUrls = declaredModuleUrls(descriptor),
     payload = payload,
     onFrame = proc(frame: JsObject) =
       deliverFrame(requested, frame),

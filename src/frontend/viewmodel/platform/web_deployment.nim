@@ -85,6 +85,18 @@ type
       ## digests in the filenames, those paths become genuinely content-
       ## addressed and `assetIsContentAddressed` moves them to `ccStaticAsset`
       ## with no further edit here.
+      ##
+      ## ## 2026-09-02: the assembly step now emits digests, and nothing here
+      ## ## was edited to say so
+      ##
+      ## `web-bundle-assets.sh` renames every file it places under `/assets/`
+      ## to `contentAddressedPath(path, sha256(bytes))` and the entry document
+      ## carries the resulting URLs. `cacheClassFor` therefore answers
+      ## `ccStaticAsset` for all six, and `staticAssetGlobClass` answers
+      ## `ccStaticAsset` for the glob — by the same two lines that answered
+      ## `ccMutableAsset` the day before. THAT is what this row is for: it is
+      ## still reachable, still tested, and still what a stable-named file gets
+      ## the moment somebody adds one to the directory.
 
   RewriteRule* = object
     ## A 200-rewrite, never a redirect. §1b.4: "served **200 rather than 302**".
@@ -206,6 +218,79 @@ proc assetIsContentAddressed*(path: string): bool =
         break
     if allHex: return true
   false
+
+const assetDigestLength* = 16
+  ## How many hex characters of the content digest go into a filename.
+  ##
+  ## Sixteen, not sixty-four. The property that has to hold is that two
+  ## different byte sequences do not collide on one URL, and 64 bits of SHA-256
+  ## gives that with room to spare over a set of six files; the rest is path
+  ## length in every log, header and manifest that carries it. It is well above
+  ## `assetIsContentAddressed`'s six-character floor, which is deliberate: the
+  ## predicate and the producer must not be the same number, or a change to one
+  ## silently becomes a change to the other.
+
+proc contentAddressedPath*(path, digest: string): string =
+  ## `assets/wasm-worker.js` + a digest -> `assets/wasm-worker.<digest>.js`.
+  ##
+  ## THE ONE PLACE THE NAME IS FORMED, and it is here rather than in the shell
+  ## for the reason this module's header gives about every other list it owns.
+  ## `assetIsContentAddressed` decides what earns `immutable`; if the assembly
+  ## step spelled the name itself, the producer and the predicate would be two
+  ## descriptions of one convention with nothing comparing them — which is
+  ## exactly how `/assets/app.9f2b1c.js` came to be the only address the cache
+  ## class was ever tested on, a filename no assembly step has ever produced.
+  ## `ci/test/web_asset_name.nim` calls this and refuses to print a name the
+  ## predicate would reject, so the example and the output cannot diverge.
+  ##
+  ## The digest goes BETWEEN the stem and the final extension rather than at the
+  ## end, because the extension is what a static host reads to choose a
+  ## `Content-Type` — `db_backend_bg.wasm.<digest>` would be served
+  ## `application/octet-stream` and `WebAssembly.instantiateStreaming` refuses
+  ## it by name.
+  ##
+  ## Returns "" for a digest that could not make the name content-addressed, so
+  ## a caller that forgot to check gets an obviously broken path rather than a
+  ## plausible one that quietly re-earns `immutable` on a stable name.
+  if digest.len < assetDigestLength: return ""
+  let short = digest[0 ..< assetDigestLength]
+  for c in short:
+    if c notin HexDigits: return ""
+  let dot = path.rfind('.')
+  let slash = path.rfind('/')
+  # No extension, or a dot that belongs to a directory rather than to the
+  # filename: there is no "between the stem and the extension" to insert into.
+  if dot <= slash + 1: return ""
+  result = path[0 ..< dot] & "." & short & path[dot .. ^1]
+
+proc contentAddressedStem*(path: string): string =
+  ## The path a content-addressed name was derived from — the inverse of
+  ## `contentAddressedPath`, and `path` unchanged when it carries no digest.
+  ##
+  ## Needed because every check that knows a file by its MANIFEST name has to
+  ## be able to find it under its published one. That is the trap the deploy
+  ## checks were warned about: a digest in the name is precisely where a
+  ## path-deriving check stops matching, and it stops matching by finding
+  ## nothing, which reads as "nothing wrong".
+  let slash = path.rfind('/')
+  let dir = if slash >= 0: path[0 .. slash] else: ""
+  let name = if slash >= 0: path[slash + 1 .. ^1] else: path
+  let parts = name.split('.')
+  if parts.len < 3: return path
+  for i in 1 ..< parts.len - 1:
+    let segment = parts[i]
+    if segment.len < 6: continue
+    var allHex = true
+    for c in segment:
+      if c notin HexDigits:
+        allHex = false
+        break
+    if allHex:
+      var kept: seq[string]
+      for j in 0 ..< parts.len:
+        if j != i: kept.add parts[j]
+      return dir & kept.join(".")
+  path
 
 proc cacheClassFor*(path: string): CacheClass =
   ## The class a CDN must apply, from the path alone.
@@ -500,7 +585,15 @@ const
   rendererThemeStylesPath* = "frontend/styles/default_dark_theme_electron.css"
   rendererLoaderStylesPath* = "frontend/styles/loader.css"
   thirdPartyBundlePath* = "public/dist/frontend_bundle.js"
+  wasmWorkerAssetId* = "wasm-worker"
+    ## Exported because three places must agree on it: `webRuntimeAssets`,
+    ## the assembly step's descriptor row, and `host/web_browser.nim`'s
+    ## `assetUrl` lookup. A literal spelled at the lookup site is how an id
+    ## drifts into a URL that is silently "" — which reads, downstream, as a
+    ## deployment that ships no toolchain.
   wasmWorkerScriptPath* = staticAssetPrefix[1 .. ^1] & "wasm-worker.js"
+    ## The name the assembly step places the worker under BEFORE digesting it.
+    ## No deployment serves this address; see `PublishedAsset`.
   noirCompilerModuleId* = "noir-compiler"
   noirTracerModuleId* = "noir-tracer"
   noirCompilerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_wasm.wasm"
@@ -549,7 +642,7 @@ proc webRuntimeAssets*(): seq[RuntimeAsset] =
       id: "renderer-loader-styles", path: rendererLoaderStylesPath,
       mode: damBundled, required: true, absenceBehaviour: ""),
     RuntimeAsset(
-      id: "wasm-worker", path: wasmWorkerScriptPath, mode: damAsset,
+      id: wasmWorkerAssetId, path: wasmWorkerScriptPath, mode: damAsset,
       required: true,
       absenceBehaviour: ""),
     RuntimeAsset(
@@ -646,36 +739,21 @@ proc undeclaredAbsences*(): seq[string] =
     if not asset.required and asset.absenceBehaviour.len == 0:
       result.add asset.id
 
-proc publishedStaticAssets*(): seq[string] =
-  ## Every asset this bundle places under `/assets/`, as the path a browser
-  ## requests. `RuntimeAsset.path` is relative to the bundle root, so the served
-  ## address is that with a leading slash.
+proc declaredStaticAssetStems*(): seq[string] =
+  ## Every `/assets/` path the MANIFEST declares, as the address a browser would
+  ## request if the file were published under its manifest name.
+  ##
+  ## These are stems, not addresses: the assembly step renames each of them to
+  ## `contentAddressedPath(path, sha256(bytes))` before publishing, so no
+  ## deployment serves any of these strings. It is the INTENT half — which files
+  ## a bundle must carry — and it is deliberately not called
+  ## `publishedStaticAssets` any more, because that name is now the FACT half
+  ## and reads a descriptor. Confusing the two is what let the cache class be
+  ## derived from a list of names nothing served.
   let prefix = staticAssetPrefix[1 .. ^1]
   for asset in webRuntimeAssets():
     if asset.path.len >= prefix.len and asset.path[0 ..< prefix.len] == prefix:
       result.add "/" & asset.path
-
-proc unhashedStaticAssets*(): seq[string] =
-  ## The published `/assets/` paths that carry no digest, and therefore may not
-  ## be served `immutable`.
-  ##
-  ## A value rather than a boolean so a failing assertion can NAME the files.
-  ## All three members today are the ones the 2026-09-01 staleness was found on.
-  for path in publishedStaticAssets():
-    if not assetIsContentAddressed(path): result.add path
-
-proc staticAssetGlobClass*(): CacheClass =
-  ## The class the single `/assets/*` rule may carry, DERIVED from the assets
-  ## this bundle actually publishes.
-  ##
-  ## Cloudflare's `_headers` matches by glob and cannot ask whether a filename
-  ## has a digest, so one rule must cover the whole directory — and a rule that
-  ## covers a mixed directory has to be correct for its weakest member. Deriving
-  ## it here means the day the assembly step starts emitting digests, the glob
-  ## becomes `immutable` on its own, and the day someone adds a stable-named
-  ## file to a hashed directory it stops being `immutable` on its own. Neither
-  ## is a decision anybody has to remember to make.
-  if unhashedStaticAssets().len > 0: ccMutableAsset else: ccStaticAsset
 
 proc headerFor*(class: CacheClass): string =
   case class
@@ -685,8 +763,13 @@ proc headerFor*(class: CacheClass): string =
   of ccStaticAsset: staticAssetHeader
   of ccMutableAsset: mutableAssetHeader
 
-proc deploymentContract*(origin: string): DeploymentContract =
-  ## The whole contract, for a named origin. No default — see the header.
+proc deploymentContractWithAssetClass(origin: string;
+                                      assetClass: CacheClass
+                                     ): DeploymentContract =
+  ## The contract, given the class the `/assets/*` glob has been DERIVED to
+  ## carry. `deploymentContract` below is the only caller and supplies that
+  ## class from the deployment's own published set; the split exists only
+  ## because `DeploymentDescriptor` is declared further down this file.
   result.origin = origin
   for prefix in rewritePrefixes():
     result.rewrites.add RewriteRule(prefix: prefix, servesEntryDocument: true)
@@ -701,8 +784,8 @@ proc deploymentContract*(origin: string): DeploymentContract =
     CacheRule(pattern: snapshotPrefix & "*", class: ccImmutable,
               headerValue: immutableHeader),
     CacheRule(pattern: staticAssetPrefix & "*",
-              class: staticAssetGlobClass(),
-              headerValue: headerFor(staticAssetGlobClass())),
+              class: assetClass,
+              headerValue: headerFor(assetClass)),
     CacheRule(pattern: "/*", class: ccEntryDocument,
               headerValue: entryDocumentHeader)]
   result.writeSurfaces = @[
@@ -872,11 +955,41 @@ type
       ## it came from is DROPPED by `registrableModules`, so this is not
       ## decoration: an empty string here silently disables the module.
 
+  PublishedAsset* = object
+    ## One NON-FETCHED file a particular deployment placed under `/assets/`,
+    ## at the name it was actually published under.
+    ##
+    ## ## Why the worker scripts needed a descriptor row and the modules did not
+    ##
+    ## A `damFetched` module was already indirected: `modules[].url` is data the
+    ## page reads, so giving the file a digest changed a string in a JSON blob
+    ## and nothing else. The two `damAsset` worker scripts were not. Their URLs
+    ## were Nim constants — `"/" & wasmWorkerScriptPath` in
+    ## `host/web_browser.nim` and `"/" & replayWorkerScriptPath` in
+    ## `ui/web_replay_host.nim` — and a constant cannot name a file whose name
+    ## depends on its bytes. So they get the same treatment the modules already
+    ## had: the deployment says where it put them, and the product asks.
+    ##
+    ## They are a separate field from `modules` rather than more rows in it,
+    ## because `modules` has a meaning that several readers depend on:
+    ## `declaredModuleUrls` is what reaches a worker's `configure` message, and
+    ## `deployGuardDefects` grades it against `fetchedRuntimeAssets()`. A worker
+    ## script in that list would be handed to itself as a module to instantiate.
+    id*: string
+      ## A `webRuntimeAssets()` asset id.
+    url*: string
+      ## Root-relative, with the digest in the name.
+    bytes*: int
+      ## Measured from the file, like `DeployedModule.bytes` and for the same
+      ## reason.
+
   DeploymentDescriptor* = object
     origin*: string
     revision*: string
       ## The codetracer commit the bundle was built from.
     modules*: seq[DeployedModule]
+    assets*: seq[PublishedAsset]
+      ## The published, non-fetched `/assets/` files. See `PublishedAsset`.
     languageOrigins*: seq[OriginLanguage]
       ## WHICH HOSTS ARE LANGUAGE ENTRY POINTS, declared by the deployment.
       ##
@@ -934,6 +1047,12 @@ proc renderDeploymentDescriptor*(descriptor: DeploymentDescriptor): string =
       "url": module.url,
       "bytes": module.bytes,
       "builtFrom": module.builtFrom}
+  var assets = newJArray()
+  for asset in descriptor.assets:
+    assets.add %*{
+      "id": asset.id,
+      "url": asset.url,
+      "bytes": asset.bytes}
   var languageOrigins = newJArray()
   for entry in descriptor.languageOrigins:
     languageOrigins.add %*{
@@ -943,6 +1062,7 @@ proc renderDeploymentDescriptor*(descriptor: DeploymentDescriptor): string =
     "origin": descriptor.origin,
     "revision": descriptor.revision,
     "modules": modules,
+    "assets": assets,
     "languageOrigins": languageOrigins})
 
 proc parseDeploymentDescriptor*(text: string): DeploymentDescriptor =
@@ -974,18 +1094,41 @@ proc parseDeploymentDescriptor*(text: string): DeploymentDescriptor =
   if parsed.kind != JObject: return DeploymentDescriptor()
   result.origin = parsed{"origin"}.getStr
   result.revision = parsed{"revision"}.getStr
+  # EACH SECTION IS PARSED INDEPENDENTLY, and that is a fix rather than a
+  # rearrangement. This used to `return` when `modules` was absent or not an
+  # array, which silently took `languageOrigins` — and now `assets` — with it. A
+  # deployment that ships no toolchain is supported and documented; one that
+  # also loses its host map and its worker URLs because of that is not, and the
+  # symptom would have been a working product at the generic entry point with
+  # no worker, which is three defects wearing one face.
   let modules = parsed{"modules"}
-  if modules.isNil or modules.kind != JArray: return
-  for entry in modules:
-    if entry.kind != JObject: continue
-    let module = DeployedModule(
-      id: entry{"id"}.getStr,
-      url: entry{"url"}.getStr,
-      bytes: entry{"bytes"}.getInt,
-      builtFrom: entry{"builtFrom"}.getStr)
-    if module.id.len == 0 or module.url.len == 0 or module.builtFrom.len == 0:
-      continue
-    result.modules.add module
+  if not modules.isNil and modules.kind == JArray:
+    for entry in modules:
+      if entry.kind != JObject: continue
+      let module = DeployedModule(
+        id: entry{"id"}.getStr,
+        url: entry{"url"}.getStr,
+        bytes: entry{"bytes"}.getInt,
+        builtFrom: entry{"builtFrom"}.getStr)
+      if module.id.len == 0 or module.url.len == 0 or module.builtFrom.len == 0:
+        continue
+      result.modules.add module
+
+  let assets = parsed{"assets"}
+  if not assets.isNil and assets.kind == JArray:
+    for entry in assets:
+      if entry.kind != JObject: continue
+      let asset = PublishedAsset(
+        id: entry{"id"}.getStr,
+        url: entry{"url"}.getStr,
+        bytes: entry{"bytes"}.getInt)
+      # No provenance clause here, unlike a module: a worker script is this
+      # repository's own file and `registrableModules` never sees it. An id and
+      # a URL are exactly what makes it usable, and a row missing either is
+      # dropped for the same reason a half-declared module is — a URL the page
+      # would `new Worker("")` on is worse than a stated absence.
+      if asset.id.len == 0 or asset.url.len == 0: continue
+      result.assets.add asset
 
   let languageOrigins = parsed{"languageOrigins"}
   if languageOrigins.isNil or languageOrigins.kind != JArray: return
@@ -1072,6 +1215,148 @@ proc declaredModuleUrls*(descriptor: DeploymentDescriptor):
   for module in descriptor.modules:
     result.add (id: module.id, url: module.url)
 
+proc assetUrl*(descriptor: DeploymentDescriptor; id: string): string =
+  ## Where THIS deployment put a non-fetched asset, or "" if it declared none.
+  ##
+  ## The empty string is a real answer and callers must treat it as one. It
+  ## means the deployment did not publish that file, and the honest response is
+  ## the asset's `absenceBehaviour` — not `new Worker("")`, which throws a
+  ## `SyntaxError` naming nothing, and not a fall back to the manifest stem,
+  ## which would request a URL no deploy has served since digests landed and
+  ## get the SPA entry document at 200 `text/html` from Cloudflare Pages for
+  ## its trouble.
+  for asset in descriptor.assets:
+    if asset.id == id: return asset.url
+  ""
+
+proc declaresNoirWasmWorker*(descriptor: DeploymentDescriptor): bool =
+  ## Does this deployment publish the worker the Noir modules are instantiated
+  ## in? A module is bytes; this is the thing that runs them.
+  assetUrl(descriptor, wasmWorkerAssetId).len > 0
+
+proc noirRunnableModules*(descriptor: DeploymentDescriptor): seq[DeployedModule] =
+  ## The declared modules a tab can actually RUN, which is not the same list as
+  ## the ones it was told about.
+  ##
+  ## ## The implication content-addressed filenames broke
+  ##
+  ## `wasmWorkerScriptPath` was a compile-time constant, so "the descriptor
+  ## names modules" ENTAILED "there is a worker to run them in": the second
+  ## fact had no way to be false on its own. The worker is now published under
+  ## a content digest and its URL is a descriptor row like any other, so a
+  ## document can name two Noir modules and no worker at all.
+  ##
+  ## Ungated, that deployment reports `toolchain=nargo:compile+trace` on its
+  ## boot line — `describeToolchain` reads the registry, and the registry is
+  ## built from the modules — while `browserWasmHost` answers `noWasmModules()`
+  ## and every run refuses. `host/web_browser.nim`'s header forbids exactly
+  ## that: "declaring `nargo` over modules that were never placed would put
+  ## `capProcessSpawn` back on a profile whose every run fails". This is that
+  ## defect reached from the other side — the modules ARE placed, and the thing
+  ## that runs them is not.
+  ##
+  ## ## Why the rule is here and not at the call site
+  ##
+  ## Because `host/web_browser.nim` is compiled by no test. It is a browser
+  ## module — `host-instantiations` builds it and cannot run it — so a rule
+  ## written there is a rule nothing checks, which is this repository's
+  ## signature defect and the reason that file once sat unparseable on `dev`
+  ## for days. Here it is compiled and asserted on both backends by
+  ## `test_platform_web.nim`, and `deliveredModulesFrom` is a one-line map over
+  ## it.
+  ##
+  ## Scoped to the NOIR worker deliberately. The replay engine is fetched by a
+  ## different consumer with its own script (`replay-worker`), and
+  ## `ui/web_replay_host.nim` refuses by name when that one is undeclared. The
+  ## engine's availability is not this worker's business, and
+  ## `declaredModuleUrls` — which carries the URLs into a `configure` message —
+  ## is deliberately NOT gated, because a worker that exists must still be told
+  ## about everything the deployment published.
+  if not declaresNoirWasmWorker(descriptor): return @[]
+  descriptor.modules
+
+proc publishedUrl*(descriptor: DeploymentDescriptor; id: string): string =
+  ## Where this deployment put an asset, whichever half of the descriptor it
+  ## travels in, or "" if it declared none.
+  ##
+  ## `assetUrl` and `declaredModuleUrls` are the two halves and both have
+  ## callers that must NOT be given the other's rows — a worker script handed to
+  ## `configure` would be instantiated as a module. This is for the readers that
+  ## genuinely do not care which kind a file is, which is every check that asks
+  ## "where was this published".
+  for asset in descriptor.assets:
+    if asset.id == id: return asset.url
+  for module in descriptor.modules:
+    if module.id == id: return module.url
+  ""
+
+proc publishedStaticAssets*(descriptor: DeploymentDescriptor): seq[string] =
+  ## Every `/assets/` address THIS deployment actually published, from both
+  ## halves of the descriptor: the fetched modules and the worker scripts.
+  ##
+  ## This is the FACT list. It replaces a same-named function that read
+  ## `webRuntimeAssets()` — the manifest — and the difference is the whole
+  ## repair. A digest cannot be a compile-time constant, so a cache class
+  ## derived from compile-time paths could only ever describe a deployment
+  ## whose filenames were stable. It described one for a year.
+  let prefix = staticAssetPrefix
+  proc underAssets(url: string): bool =
+    url.len >= prefix.len and url[0 ..< prefix.len] == prefix
+  for module in descriptor.modules:
+    if underAssets(module.url): result.add module.url
+  for asset in descriptor.assets:
+    if underAssets(asset.url): result.add asset.url
+
+proc unhashedStaticAssets*(descriptor: DeploymentDescriptor): seq[string] =
+  ## The published `/assets/` addresses that carry no digest, and therefore may
+  ## not be served `immutable`.
+  ##
+  ## A value rather than a boolean so a failing assertion can NAME the files.
+  ## Its six members on 2026-09-01 were the files the staleness was found on;
+  ## it is empty for a deployment the current assembly step produced, and the
+  ## test that says so asserts the count of what it looked at, because an empty
+  ## answer from an empty input is the failure this whole area keeps finding.
+  for path in publishedStaticAssets(descriptor):
+    if not assetIsContentAddressed(path): result.add path
+
+proc staticAssetGlobClass*(descriptor: DeploymentDescriptor): CacheClass =
+  ## The class the single `/assets/*` rule may carry, DERIVED from the assets
+  ## this deployment actually published.
+  ##
+  ## Cloudflare's `_headers` matches by glob and cannot ask whether a filename
+  ## has a digest, so one rule must cover the whole directory — and a rule that
+  ## covers a mixed directory has to be correct for its weakest member. Deriving
+  ## it means the day the assembly step started emitting digests the glob became
+  ## `immutable` on its own, and the day someone adds a stable-named file to a
+  ## hashed directory it stops being `immutable` on its own. Neither is a
+  ## decision anybody has to remember to make, and neither has been made by hand
+  ## here: the body below is the two lines it has always been.
+  ##
+  ## ## The empty deployment does not earn `immutable`, and that is not pedantry
+  ##
+  ## "Every published asset carries a digest" is a universal quantification, and
+  ## it is TRUE of a deployment that published nothing. Without the first
+  ## clause, a descriptor that lost its `assets` array — a rename, a parse
+  ## failure, an assembly step that placed no worker — would flip `/assets/*` to
+  ## a year of `immutable` on the strength of having no evidence, which is the
+  ## precise shape of the check that reported `ok: 0/0 published files match`
+  ## and exited 0. `immutable` is a promise about bytes; it has to be paid for
+  ## by bytes that exist.
+  if publishedStaticAssets(descriptor).len == 0: return ccMutableAsset
+  if unhashedStaticAssets(descriptor).len > 0: ccMutableAsset else: ccStaticAsset
+
+proc deploymentContract*(origin: string;
+                         descriptor: DeploymentDescriptor
+                        ): DeploymentContract =
+  ## The whole contract, for a named origin and a particular published set.
+  ##
+  ## No default for either — see the header for the origin, and
+  ## `staticAssetGlobClass` for the descriptor. A default descriptor would be
+  ## the empty one, and the empty one is exactly the input whose answer must not
+  ## be trusted; making it a parameter forces every caller, including every
+  ## test, to say which deployment's cache table it is talking about.
+  deploymentContractWithAssetClass(origin, staticAssetGlobClass(descriptor))
+
 proc deployGuardDefects*(descriptor: DeploymentDescriptor;
                          servedPaths: seq[string]): seq[string] =
   ## Everything wrong between what a document DECLARES and what a publish
@@ -1101,19 +1386,58 @@ proc deployGuardDefects*(descriptor: DeploymentDescriptor;
       result.add "the entry document declares `" & module.id &
         "` with no provenance, so the page would drop it and report no " &
         "toolchain while serving one"
-  # The other direction. A module that is published and not declared is not a
-  # broken page — it is 16 MB of upload nothing can reach, which is precisely
-  # the "built, deployed, served and never referenced" state that made every
-  # BlockTracer session a still frame.
-  for asset in declarable:
-    let served = "/" & asset.path
-    if served notin servedPaths: continue
-    var declared = false
-    for module in descriptor.modules:
-      if module.url == served: declared = true
-    if not declared:
-      result.add "the publish directory contains " & served &
-        ", which the entry document does not declare, so nothing can load it"
+  # THE SAME TWO QUESTIONS FOR THE WORKER SCRIPTS. They are `damAsset`, so they
+  # are not in `modules[]` and were not graded here at all — which was safe only
+  # for as long as their URLs were constants the guard could not disagree with.
+  # Now that a deployment says where it put them, it can say something false.
+  for asset in descriptor.assets:
+    var known = false
+    for declarableAsset in webRuntimeAssets():
+      if declarableAsset.mode == damAsset and declarableAsset.id == asset.id:
+        known = true
+    if not known:
+      result.add "the entry document declares asset `" & asset.id &
+        "`, which the runtime asset manifest does not name"
+    if asset.url notin servedPaths:
+      result.add "the entry document declares `" & asset.id & "` at " &
+        asset.url & ", which the publish directory does not contain"
+
+  # EVERY DECLARED `/assets/` URL CARRIES A DIGEST, checked by name rather than
+  # left to be absorbed by the header table.
+  #
+  # `staticAssetGlobClass` already answers `ccMutableAsset` for a set with one
+  # stable name in it, so the deployment would be CORRECT — and 34 MB slower on
+  # every page load, silently, with nothing saying which file cost it. A guard
+  # sentence naming the file is the difference between a downgrade somebody
+  # fixes and a downgrade nobody notices.
+  for path in unhashedStaticAssets(descriptor):
+    result.add "the entry document publishes " & path &
+      " under a stable name, so `/assets/*` must drop to `" &
+      mutableAssetHeader & "` for the whole directory — every asset beside it " &
+      "pays for this one"
+
+  # The other direction, for both kinds. A file that is published and not
+  # declared is not a broken page — it is 16 MB of upload nothing can reach,
+  # which is precisely the "built, deployed, served and never referenced" state
+  # that made every BlockTracer session a still frame.
+  #
+  # MATCHED THROUGH `contentAddressedStem` AND NOT BY EQUALITY, which is the
+  # correction digests forced. This loop used to ask whether `"/" & asset.path`
+  # was served; once the assembly step renames every file it places, that string
+  # is served by no deployment, so the `continue` fired for every asset and the
+  # check quietly stopped running while still passing. A digest in the name is
+  # exactly where a path-deriving check stops matching.
+  var declaredUrls: seq[string]
+  for module in descriptor.modules: declaredUrls.add module.url
+  for asset in descriptor.assets: declaredUrls.add asset.url
+  for asset in webRuntimeAssets():
+    if asset.mode notin {damFetched, damAsset}: continue
+    let stem = "/" & asset.path
+    for served in servedPaths:
+      if contentAddressedStem(served) != stem: continue
+      if served notin declaredUrls:
+        result.add "the publish directory contains " & served &
+          ", which the entry document does not declare, so nothing can load it"
 
 proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
   ## The page. `renderRewriteConfig` points every prefix at this file, and

@@ -53,6 +53,10 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && cd .. && pwd)"
 cd "${repo_root}" || exit 2
 
+# shellcheck source=ci/lib/published-asset.sh
+# shellcheck disable=SC1091 # resolved at runtime from $repo_root
+source "${repo_root}/ci/lib/published-asset.sh"
+
 cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/noir-build-in-browser"
 rm -rf "${cache}"
 mkdir -p "${cache}"
@@ -110,9 +114,12 @@ fi
 # arm vacuously green in the most misleading way available: the page would
 # refuse by name, the pane would paint the refusal, and a careless assertion on
 # "the pane has rows" would pass.
-compiler="${bundle}/assets/noir_wasm.wasm"
-if [ ! -f "${compiler}" ]; then
+# RESOLVED BY STEM. The compiler is published as `noir_wasm.<digest>.wasm`, so
+# the literal path this held is in no bundle and the abort below would have
+# fired on a perfectly assembled tree, blaming an unset environment variable.
+if ! compiler="$(published_asset "${bundle}" assets/noir_wasm.wasm)"; then
 	echo "  the assembled tree at ${bundle} ships no assets/noir_wasm.wasm," >&2
+	echo "  under that name or a content-addressed one," >&2
 	echo "  so there is no compiler for a Build to reach and this gate would" >&2
 	echo "  measure nothing. Set CT_NOIR_WASM_COMPILER / CT_NOIR_WASM_TRACER /" >&2
 	echo "  CT_NOIR_WASM_REF and re-assemble." >&2
@@ -563,7 +570,17 @@ echo
 echo "Arm 4: a tree that ships no compiler refuses BY NAME and fetches nothing"
 nomodules="${cache}/nomodules"
 copy_tree "${bundle}" "${nomodules}"
-rm -f "${nomodules}/assets/noir_wasm.wasm" "${nomodules}/assets/noir_tracer_wasm.wasm"
+# REMOVED, AND THE REMOVAL IS CHECKED. `rm -f` on a name that no longer
+# matches succeeds in silence, so once the published names carried digests this
+# arm would have copied the tree, deleted nothing, and asserted that a
+# deployment with a full toolchain refuses by name.
+for stem in assets/noir_wasm.wasm assets/noir_tracer_wasm.wasm; do
+	if ! gone="$(published_asset_rel "${nomodules}" "${stem}")"; then
+		ck fail "arm 4 could not remove ${stem}: its premise does not hold and the arm would measure an unmutated tree"
+		continue
+	fi
+	rm -f "${nomodules}/${gone}"
+done
 # The DESCRIPTOR is what the registry is derived from, so removing the files
 # alone would leave the page believing it has a toolchain and failing inside
 # the worker with `not-served`. That is a different and equally real state, and
@@ -627,8 +644,13 @@ echo
 echo "Arm 5: modules declared and not served reach the user as a sentence"
 notserved="${cache}/notserved"
 copy_tree "${bundle}" "${notserved}"
-rm -f "${notserved}/assets/noir_wasm.wasm"
-if [ -f "${notserved}/assets/noir_wasm.wasm" ]; then
+# The premise is checked BEFORE the removal as well as after. The old `[ -f ]`
+# guard below could only catch a file that survived deletion; it read as
+# satisfied when there was no file to delete in the first place, which is what
+# a digest in the name produces.
+notserved_compiler="$(published_asset_rel "${notserved}" assets/noir_wasm.wasm || true)"
+rm -f "${notserved}/${notserved_compiler:-assets/__no-such-file__}"
+if [ -z "${notserved_compiler}" ] || [ -f "${notserved}/${notserved_compiler}" ]; then
 	ck fail "arm 5 could not remove the compiler, so its premise does not hold"
 elif ! probe notserved "${notserved}" /noir shortcut; then
 	ck fail "arm 5 could not be measured"
@@ -675,7 +697,7 @@ echo
 # a tracer can walk) followed by a trace of the artifact it produced.
 # ---------------------------------------------------------------------------
 echo "Arm 6: Ctrl+Enter compiles for debugging and then traces"
-if [ ! -f "${bundle}/assets/noir_tracer_wasm.wasm" ]; then
+if ! published_asset_rel "${bundle}" assets/noir_tracer_wasm.wasm >/dev/null; then
 	ck fail "this tree ships no assets/noir_tracer_wasm.wasm, so Run cannot be measured — and a skip is not a pass"
 	ck fail "  (build it: cd <noir>/tooling/tracer_wasm && cargo build --release --no-default-features --target wasm32-unknown-unknown)"
 	ck fail "  (then re-assemble with CT_NOIR_WASM_TRACER pointing at it)"

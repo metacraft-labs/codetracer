@@ -271,7 +271,8 @@ proc toJsBytes(content: seq[byte]): JsObject =
 # ---------------------------------------------------------------------------
 
 proc browserWasmHost(delivered: seq[DeliveredWasmModule];
-                     moduleUrls: seq[tuple[id: string, url: string]] = @[]
+                     moduleUrls: seq[tuple[id: string, url: string]] = @[];
+                     workerScriptUrl: string = ""
                     ): WasmHost
   ## Forward-declared because the bridge is built above the Worker transport
   ## it may need. Defined with `newBrowserWasmHost`, whose reasons it shares.
@@ -279,7 +280,8 @@ proc browserWasmHost(delivered: seq[DeliveredWasmModule];
 proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
                        persistenceAnswered: bool;
                        deliveredWasmModules: seq[DeliveredWasmModule] = @[];
-                       wasmModuleUrls: seq[tuple[id: string, url: string]] = @[]
+                       wasmModuleUrls: seq[tuple[id: string, url: string]] = @[];
+                       wasmWorkerScriptUrl: string = ""
                       ): BrowserBridge =
   BrowserBridge(
     volume: volume,
@@ -376,7 +378,8 @@ proc newBrowserBridge*(volume: StoreVolume; persistenceGranted,
     # from?" does not exist, so every current call passes the default and this
     # tab still ships no toolchain. That is a true statement about this
     # deployment rather than a placeholder.
-    wasm: browserWasmHost(deliveredWasmModules, wasmModuleUrls))
+    wasm: browserWasmHost(deliveredWasmModules, wasmModuleUrls,
+                          wasmWorkerScriptUrl))
 
 # ---------------------------------------------------------------------------
 # The wasm worker's transport
@@ -475,7 +478,8 @@ proc newBrowserWasmHost*(registry: WasmRegistry; scriptUrl: string;
   newBrowserWasmWorker(registry, scriptUrl, moduleUrls).asWasmHost()
 
 proc browserWasmHost(delivered: seq[DeliveredWasmModule];
-                     moduleUrls: seq[tuple[id: string, url: string]] = @[]
+                     moduleUrls: seq[tuple[id: string, url: string]] = @[];
+                     workerScriptUrl: string = ""
                     ): WasmHost =
   ## The registry a delivery implies, behind a real Worker when there is
   ## anything to run.
@@ -485,10 +489,29 @@ proc browserWasmHost(delivered: seq[DeliveredWasmModule];
   ## `wrNoModulesLoaded` for every command either way — and spawning a worker
   ## thread to host nothing is cost with no capability behind it. The choice is
   ## therefore an optimisation over an equivalence, not a second behaviour.
+  ##
+  ## ## The worker's URL is READ FROM THE DEPLOYMENT, and it used to be a
+  ## ## constant
+  ##
+  ## This line was `"/" & wasmWorkerScriptPath`. That was correct for exactly as
+  ## long as the published filename was the manifest filename, which stopped
+  ## being true when the assembly step started renaming every `/assets/` file to
+  ## carry its content digest — the rename is what makes `immutable` a true
+  ## promise, and a digest cannot be compiled in.
+  ##
+  ## AN ABSENT URL IS `noWasmModules()`, not a request for the old constant.
+  ## Falling back to `/assets/wasm-worker.js` would be worse than failing:
+  ## Cloudflare Pages answers a path it has no file for with the SPA entry
+  ## document at **200 `text/html`**, so `new Worker` would receive an HTML page,
+  ## fail on its first token, and report a broken worker rather than a
+  ## deployment that shipped none. The stated absence is the honest answer and
+  ## it is the one the manifest already writes down.
   let registry = noirWasmRegistry(delivered)
   if registry.modules.len == 0:
     return noWasmModules()
-  newBrowserWasmHost(registry, "/" & wasmWorkerScriptPath, moduleUrls)
+  if workerScriptUrl.len == 0:
+    return noWasmModules()
+  newBrowserWasmHost(registry, workerScriptUrl, moduleUrls)
 
 # ---------------------------------------------------------------------------
 # What THIS deployment delivered
@@ -562,7 +585,15 @@ proc deliveredModulesFrom*(descriptor: DeploymentDescriptor):
   ## A pure function of the descriptor, separate from the DOM read above, so
   ## `test_platform_web.nim` can drive every delivery shape — both modules, one
   ## module, none, an unknown id — on both backends without a browser.
-  for module in descriptor.modules:
+  ##
+  ## A MODULE WITH NO WORKER TO RUN IT IN IS NOT DELIVERED, and that rule lives
+  ## in `web_deployment.noirRunnableModules` rather than here — see its comment
+  ## for the implication content-addressed filenames broke. It is there because
+  ## nothing compiles THIS file except a compile-only lane, so a rule written
+  ## here would be a rule no test can reach; there it is asserted on both
+  ## backends. What is left in this proc is the map into the registry's type,
+  ## which is all it ever should have been.
+  for module in noirRunnableModules(descriptor):
     result.add DeliveredWasmModule(id: module.id, builtFrom: module.builtFrom)
 
 # ---------------------------------------------------------------------------
@@ -692,7 +723,8 @@ proc boot*(): Future[WebBoot] {.async.} =
   # `WebBoot.entry`.
   let entry = currentEntryResolution(deployment)
   let bridge = newBrowserBridge(volume, granted, answered, delivered,
-                                declaredModuleUrls(deployment))
+                                declaredModuleUrls(deployment),
+                                assetUrl(deployment, wasmWorkerAssetId))
   let opened = await openWebStore(bridge)
   if not opened.ok:
     return WebBoot(

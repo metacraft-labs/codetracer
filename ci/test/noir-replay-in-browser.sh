@@ -48,6 +48,31 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && cd .. && pwd)"
 cd "${repo_root}" || exit 2
 
+# shellcheck source=ci/lib/published-asset.sh
+# shellcheck disable=SC1091 # resolved at runtime from $repo_root
+source "${repo_root}/ci/lib/published-asset.sh"
+
+remove_published() {
+	## Delete a bundle's copy of an asset, and REFUSE if there was none.
+	##
+	## The whole value of a deletion-based mutation arm is that the file was
+	## there and now is not. `rm -f` cannot tell those apart, so an arm built on
+	## it goes on "passing" — silently mutating nothing — the moment the name it
+	## deletes stops matching. That is precisely what content-addressed
+	## filenames did to arms A and B.
+	local tree="$1" stem="$2" rel
+	if ! rel="$(published_asset_rel "${tree}" "${stem}")"; then
+		echo "  cannot mutate: ${tree} has no ${stem} to remove, so this arm would measure an unmutated tree" >&2
+		return 1
+	fi
+	rm -f "${tree}/${rel}"
+	if [ -e "${tree}/${rel}" ]; then
+		echo "  cannot mutate: ${tree}/${rel} survived its own removal" >&2
+		return 1
+	fi
+	note "mutated ${tree##*/}: removed ${rel}"
+}
+
 cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/noir-replay-in-browser"
 rm -rf "${cache}"
 mkdir -p "${cache}"
@@ -101,23 +126,49 @@ fi
 # every arm below vacuously green in the most misleading way available: the
 # page refuses by name, the pane paints the refusal, and a careless assertion
 # on "the session reported something" passes.
+#
+# RESOLVED BY STEM, NOT BY LITERAL PATH. Every file below is published as
+# `<name>.<digest>.<ext>`, so the literal names this loop used to hold are in
+# no bundle: it would have aborted on the first one with a message blaming an
+# unset environment variable, on a tree that was perfectly assembled.
+# `published_asset_rel` refuses loudly when it finds zero — or two, which is a
+# previous assembly's copy still in the tree — so a name that stops resolving
+# stays an abort rather than becoming an empty string.
+# A plain variable for the one path read later, not an associative array: this
+# needs bash 4 and `verify-deployed-bytes.sh` next door is explicitly the
+# harness a human runs by hand after a cache purge, where `/bin/bash` on macOS
+# is still 3.2. One lookup does not need a map.
+engine_wasm_rel=""
+resolved_assets=0
 for required in assets/noir_wasm.wasm assets/noir_tracer_wasm.wasm \
 	assets/db_backend_bg.wasm assets/db_backend.js assets/replay-worker.js; do
-	if [ ! -f "${bundle}/${required}" ]; then
+	if ! rel="$(published_asset_rel "${bundle}" "${required}")"; then
 		echo "  the assembled tree at ${bundle} ships no ${required}," >&2
+		echo "  under that name or a content-addressed one," >&2
 		echo "  so this gate would measure a deployment that cannot replay." >&2
 		echo "  Set CT_NOIR_WASM_COMPILER / CT_NOIR_WASM_TRACER /" >&2
 		echo "  CT_REPLAY_ENGINE_DIR / CT_NOIR_WASM_REF and re-assemble." >&2
 		exit 2
 	fi
+	if [ "${required}" = "assets/db_backend_bg.wasm" ]; then
+		engine_wasm_rel="${rel}"
+	fi
+	resolved_assets=$((resolved_assets + 1))
+	note "resolved ${required} -> ${rel}"
 done
+# The count, asserted, because the loop above is what makes every arm below
+# non-vacuous and an empty `for` list would have skipped it in silence.
+if [ "${resolved_assets}" -ne 5 ]; then
+	echo "  resolved ${resolved_assets} of 5 required assets — the precondition loop did not run over its subjects" >&2
+	exit 2
+fi
 if ! grep -q 'replay-engine' "${bundle}/index.html"; then
 	echo "  the entry document declares no replay-engine module, so the worker" >&2
 	echo "  would be configured with no URL for it and the session would refuse" >&2
 	echo "  before constructing anything." >&2
 	exit 2
 fi
-engine_bytes="$(wc -c <"${bundle}/assets/db_backend_bg.wasm" | tr -d ' ')"
+engine_bytes="$(wc -c <"${bundle}/${engine_wasm_rel}" | tr -d ' ')"
 note "bundle: ${bundle}"
 note "engine: ${engine_bytes} bytes, declared in the entry document"
 echo
@@ -309,7 +360,13 @@ arm_a="${cache}/arm-a"
 rm -rf "${arm_a}"
 cp -RL "${bundle}" "${arm_a}" 2>/dev/null
 chmod -R u+w "${arm_a}"
-rm -f "${arm_a}/assets/db_backend_bg.wasm"
+# THE FILE I DELETE MUST HAVE EXISTED. `rm -f` on a path that is not there
+# succeeds silently, so once the published name carried a digest this arm
+# copied the bundle, deleted nothing, and ran the probe against a PRISTINE
+# tree — reddening "the engine was not fetched" against a working product,
+# and, had the assertion ever been loosened, going green while mutating
+# nothing. `mutate` in wasm-worker-session.sh has this guard; this arm did not.
+remove_published "${arm_a}" assets/db_backend_bg.wasm || exit 2
 arm_a_out="${cache}/arm-a.json"
 if run_probe "${arm_a}" "${arm_a_out}"; then
 	a_engine="$(field "${arm_a_out}" '.engineFetched')"
@@ -334,7 +391,7 @@ arm_b="${cache}/arm-b"
 rm -rf "${arm_b}"
 cp -RL "${bundle}" "${arm_b}" 2>/dev/null
 chmod -R u+w "${arm_b}"
-rm -f "${arm_b}/assets/replay-worker.js"
+remove_published "${arm_b}" assets/replay-worker.js || exit 2
 arm_b_out="${cache}/arm-b.json"
 if run_probe "${arm_b}" "${arm_b_out}"; then
 	b_resolved="$(field "${arm_b_out}" '.resolvedCount')"
