@@ -38,7 +38,20 @@ function Invoke-AppxPackageQuery {
         ($msg -match "0x800706BA") -or
         ($msg -match "server process could not be started") -or
         ($msg -match "service .* could not be started") -or
-        ($msg -match "class not registered")
+        ($msg -match "class not registered") -or
+        # "Server execution failed" (0x80080005 CO_E_SERVER_EXEC_FAILURE): the
+        # AppX COM server (AppXSvc / StateRepository) failed to LAUNCH rather
+        # than failing mid-call. On loaded self-hosted runners this appears
+        # interchangeably with "remote procedure call failed" and is just as
+        # transient -- observed aborting env.ps1 on attempt 3 after two RPC
+        # retries. Include the two classic "COM server busy / rejecting calls"
+        # DCOM faults, which likewise mean "retry shortly".
+        ($msg -match "Server execution failed") -or
+        ($msg -match "0x80080005") -or
+        ($msg -match "call was rejected by callee") -or
+        ($msg -match "0x80010001") -or
+        ($msg -match "server is busy") -or
+        ($msg -match "0x8001010A")
       if ($isTransientRpc -and $attempt -lt $MaxAttempts) {
         Write-Warning ("Get-AppxPackage -Name '$Name' hit a transient AppX/RPC fault " +
           "(attempt $attempt/$MaxAttempts): $msg. Retrying in ${RetryDelaySeconds}s...")
@@ -69,7 +82,18 @@ function Invoke-AppxPackageQuery {
         return $null
       }
 
-      throw
+      # Any OTHER Get-AppxPackage failure: the AppX probe is best-effort. TTD/
+      # WinDbg detection is optional -- when it yields nothing, Ensure-Ttd falls
+      # back to the pinned msixbundle download (Step 3), so a failed probe must
+      # never abort env.ps1 sourcing. Enumerating every transient AppX/DCOM
+      # HRESULT is whack-a-mole (this exact throw is what let the un-enumerated
+      # "Server execution failed" kill the Windows installer build), so degrade
+      # to "unavailable via AppX" for anything that reaches here. The transient
+      # set above still governs whether we spent retries before giving up.
+      Write-Warning ("Get-AppxPackage -Name '$Name' failed with a non-transient AppX error: " +
+        "$msg. Treating the package as unavailable via AppX and falling back to the DIY " +
+        "toolchain cache.")
+      return $null
     }
   }
   return $null
