@@ -81,6 +81,11 @@ import isonim/core/signals
 
 import ../platform_host
 import ../viewmodel/platform/noir_template
+# THE ONE MUTABLE PROJECT. `currentProject()` is what a save mutates, and
+# reading it here rather than a module-local copy is the whole of this file's
+# half of the edits-are-discarded defect. `templateProjectRoot` comes with it
+# so the project's root has one spelling in the tree instead of four.
+import ./web_project_store
 import ../viewmodel/platform/noir_build
 import ../viewmodel/viewmodels/noir_build_producer
 from ../viewmodel/viewmodels/build_vm import BuildVM
@@ -106,7 +111,6 @@ var
   activeHandle: ProcessHandle
   activeIntent: NoirRunIntent
   activeInFlight = false
-  buildTemplate: ProjectTemplate
   lastStartCount = 0
     ## How many `start` messages this module has caused the worker to be sent.
     ##
@@ -164,6 +168,21 @@ proc report(phase, detail: string) =
 
 proc templateVfsEntries*(tmpl: ProjectTemplate): seq[NoirSourceEntry] =
   ## The open project as the compiler's virtual filesystem.
+  ##
+  ## ## THE DEFECT THIS PROC WAS THE FAR END OF
+  ##
+  ## It still reads `tmpl.files`, and that is correct — what changed is WHICH
+  ## value its callers hand it. `startNoirBuild` and `startNoirRun` used to
+  ## pass `buildTemplate`, a module-level copy taken once at
+  ## `installNoirBuildCommands` time from the compile-time bundled template.
+  ## Nothing mutated it, and nothing could: `ProjectTemplate` is an `object`,
+  ## so the assignment was a copy.
+  ##
+  ## The result was that Build and Run compiled the BUNDLED template no matter
+  ## what the visitor had typed. Editing `main.nr` into something that cannot
+  ## compile and pressing Ctrl+B produced a clean, green, successful build — of
+  ## code the user had not written. They now pass
+  ## `web_project_store.currentProject()`, which the save host mutates.
   ##
   ## THE CONVERTER THAT DID NOT EXIST. `nv_compile_vfs` wants
   ## `{files:{path:content}, package_dir, mode}`; the web project store holds
@@ -242,7 +261,7 @@ proc producerFor(tmpl: ProjectTemplate): NoirBuildProducer =
   if activeProducer.isNil or activeProducer.vm != build_pane.buildVMInstance:
     activeProducer = newNoirBuildProducer(
       build_pane.buildVMInstance,
-      projectRoot = "/" & tmpl.name,
+      projectRoot = templateProjectRoot(tmpl),
       packageDir = tmpl.name)
     # FEED THE PROBLEMS PANE TOO. Without these two the browser arm painted
     # diagnostics in the BUILD pane and left PROBLEMS empty, so error
@@ -342,7 +361,7 @@ proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
     ProcessSpec(
       command: "nargo",
       args: args,
-      workingDir: "/" & tmpl.name,
+      workingDir: templateProjectRoot(tmpl),
       stdinText: stdin),
     onOutput, onExit))
 
@@ -371,12 +390,18 @@ proc startTrace(producer: NoirBuildProducer; tmpl: ProjectTemplate) =
   dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
            $noirTraceRequest(producer.artifact, inputs), "nargo trace")
 
-proc startNoirBuild*() =
+proc startNoirBuild*(saved: seq[string] = @[]) =
   ## BUILD — compile the open project, report warnings and errors.
+  ##
+  ## `saved` names the editors the caller wrote out before calling, for the
+  ## header. The SAVING is the caller's job rather than this module's: it needs
+  ## `data.saveFiles`, which lives in `renderer.nim`, and reaching it from here
+  ## would put a renderer dependency into the module that talks to the wasm
+  ## toolchain. `ui_js`'s web arm owns both and does it there.
   if activeInFlight:
     report("build-ignored", "reason=already-running")
     return
-  let tmpl = buildTemplate
+  let tmpl = currentProject()
   if not tmpl.hasFiles:
     report("build-refused", "reason=no-project")
     return
@@ -387,9 +412,9 @@ proc startNoirBuild*() =
   activeIntent = nriBuild
   dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
            $noirVfsRequest(templateVfsEntries(tmpl), tmpl.name, nbmProgram),
-           "nargo compile")
+           savedFilesLabel("nargo compile", saved))
 
-proc startNoirRun*() =
+proc startNoirRun*(saved: seq[string] = @[]) =
   ## RUN — compile for debugging, then trace.
   ##
   ## WHAT A USER SEES AT THE END OF THIS, stated plainly because it is easy to
@@ -406,7 +431,7 @@ proc startNoirRun*() =
   if activeInFlight:
     report("run-ignored", "reason=already-running")
     return
-  let tmpl = buildTemplate
+  let tmpl = currentProject()
   if not tmpl.hasFiles:
     report("run-refused", "reason=no-project")
     return
@@ -417,7 +442,7 @@ proc startNoirRun*() =
   activeIntent = nriRun
   dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
            $noirVfsRequest(templateVfsEntries(tmpl), tmpl.name, nbmDebug),
-           "nargo compile --debug")
+           savedFilesLabel("nargo compile --debug", saved))
 
 proc stopNoirBuild*() =
   ## STOP — terminate the worker.
@@ -458,7 +483,11 @@ proc installNoirBuildCommands*(tmpl: ProjectTemplate) =
   ## `ct/build-cancel` on the backend when no host claims the running build —
   ## the desktop's channel — and a browser's stub backend would resolve `{}`
   ## and make a Stop that did nothing look like one that worked.
-  buildTemplate = tmpl
+  # NO LONGER CACHES THE TEMPLATE. It used to do `buildTemplate = tmpl`, and
+  # that assignment WAS the defect: a copy of a value type, frozen here, read
+  # by every later Build. The pane's callbacks below take no template at all —
+  # they read `currentProject()` when they fire, so a Build always compiles
+  # what the editor last saved.
   if build_pane.buildVMInstance.isNil:
     report("install-skipped", "reason=no-build-vm")
     return
