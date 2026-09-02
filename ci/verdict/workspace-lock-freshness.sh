@@ -110,10 +110,50 @@
 # look — and it says so instead of blaming publication. It stays red either
 # way; an alarm must not go quiet because its own network broke.
 #
+# # Why it also reads the publisher's trigger list
+#
+# "No workspace lock for codetracer (candidates: b4738be9)" names the missing
+# thing and not one word about the cause, and the difference is not cosmetic:
+# the two causes have disjoint remedies and one of them cannot be acted on from
+# a workspace at all.
+#
+#   PUBLICATION STALLED — the branch IS a publishing branch, and the record for
+#   this commit was not produced or not pushed. Remedy is in the workspace (see
+#   the post-commit log this report already points at).
+#
+#   BRANCH NOT COVERED — no publisher is configured to run for this branch, so
+#   no record was ever going to exist for ANY of its commits. Nothing a
+#   developer does to their checkout changes that; the remedy is one line in
+#   `.github/workflows/publish-workspace-lock.yml`.
+#
+# The second cause is why this alarm is being taught to distinguish them.
+# Measured on 2026-09-03: 24 of the last 60 commits on `dev` carried a lock and
+# 0 of the last 60 on `cloud` did — because `cloud` was absent from that
+# workflow's `branches:` lists. Every pull request into `cloud` therefore died
+# at `Setup isonim siblings`, and this alarm — the one job whose entire purpose
+# is to explain a missing lock — was reporting the workspace-side cause, which
+# was the wrong one. It had all the evidence needed to say so: the publisher's
+# trigger list is a file in this very checkout.
+#
+# So the branch coverage is DERIVED, from that workflow, at report time. It is
+# not a constant here, because a constant would drift out of agreement with the
+# workflow silently and this check would go back to guessing.
+#
 # Usage:
 #   ci/verdict/workspace-lock-freshness.sh --manifest-dir DIR --sha SHA [--sha PARENT_SHA]
+#                                          [--branch NAME] [--publisher-workflow FILE]
 #                                          [--grace-seconds N] [--poll-seconds N]
 #
+#   --branch NAME      the branch the commit under test is on. When given, the
+#                      report says whether a publisher is configured for it.
+#                      Omitted (or empty) => that question is not answered
+#                      rather than answered wrongly.
+#   --publisher-workflow FILE
+#                      the workflow whose `branches:` lists define which
+#                      branches get a lock published. Default:
+#                      `.github/workflows/publish-workspace-lock.yml` in this
+#                      checkout. Overridable so the contract suite can drive
+#                      both verdicts from fixtures.
 #   --grace-seconds N  how long a missing lock may still arrive (default 300).
 #   --poll-seconds N   pause between re-fetches when the ref did not move
 #                      (default 15). Both exist so the contract suite can
@@ -141,9 +181,12 @@ MANIFEST_DIR=""
 SHAS=()
 GRACE_SECONDS=300
 POLL_SECONDS=15
+BRANCH=""
+PUBLISHER_WORKFLOW="$REPO_ROOT/.github/workflows/publish-workspace-lock.yml"
 
 usage() {
 	echo "usage: workspace-lock-freshness.sh --manifest-dir DIR --sha SHA [--sha SHA]" \
+		"[--branch NAME] [--publisher-workflow FILE]" \
 		"[--grace-seconds N] [--poll-seconds N]" >&2
 	exit 2
 }
@@ -165,6 +208,14 @@ while [ "$#" -gt 0 ]; do
 		;;
 	--sha)
 		[ -n "${2:-}" ] && SHAS+=("$2")
+		shift 2
+		;;
+	--branch)
+		BRANCH="${2:-}"
+		shift 2
+		;;
+	--publisher-workflow)
+		PUBLISHER_WORKFLOW="${2:-}"
 		shift 2
 		;;
 	--grace-seconds)
@@ -197,6 +248,74 @@ readonly ZERO_SHA="0000000000000000000000000000000000000000"
 
 locked_sha=""
 untrusted=""
+
+# publisher_branches — print, one per line, every branch named in a `branches:`
+# list in the publisher workflow.
+#
+# Both YAML spellings are accepted, because either is valid and a check that
+# understood only one would report "not covered" for a branch that IS covered —
+# the most expensive way this could be wrong:
+#
+#     branches: [dev, cloud]          flow sequence
+#     branches:                       block sequence
+#       - dev
+#       - cloud
+#
+# Comments are stripped first, so a branch named only inside a comment (this
+# file's own prose does exactly that) is never mistaken for configuration.
+#
+# It does NOT try to distinguish the `push:` list from the `pull_request_target:`
+# one. Either trigger publishes a lock for the branch, so for the question
+# actually being asked — "is anything configured to publish for this branch?" —
+# the union is the honest answer, and a union needs no YAML nesting model to
+# compute. Prints nothing if the file is unreadable; the caller treats "no
+# branches found" as unknown rather than as "not covered", because an empty
+# parse is far more likely to be this parser failing than a publisher genuinely
+# configured for zero branches.
+publisher_branches() {
+	[ -n "$PUBLISHER_WORKFLOW" ] && [ -r "$PUBLISHER_WORKFLOW" ] || return 0
+	awk '
+		{ sub(/#.*/, "", $0) }
+		# A `branches:` key. Anything on the same line is a flow sequence.
+		/^[[:space:]]*branches:/ {
+			rest = $0
+			sub(/^[[:space:]]*branches:[[:space:]]*/, "", rest)
+			gsub(/[][,"'"'"']/, " ", rest)
+			n = split(rest, parts, /[[:space:]]+/)
+			for (i = 1; i <= n; i++)
+				if (parts[i] != "") print parts[i]
+			# An empty remainder means the items follow as a block sequence.
+			in_block = (rest ~ /^[[:space:]]*$/)
+			next
+		}
+		in_block && /^[[:space:]]*-[[:space:]]*[^[:space:]]/ {
+			item = $0
+			sub(/^[[:space:]]*-[[:space:]]*/, "", item)
+			gsub(/["'"'"']/, "", item)
+			sub(/[[:space:]]+$/, "", item)
+			if (item != "") print item
+			next
+		}
+		# Any other non-blank line ends a block sequence.
+		/[^[:space:]]/ { in_block = 0 }
+	' "$PUBLISHER_WORKFLOW"
+}
+
+# publisher_covers BRANCH — 0 if a publisher is configured for it, 1 if not,
+# 2 if the question could not be answered (no branch given, or nothing parsed).
+publisher_covers() {
+	local want="$1" b found=1 any=0
+	[ -n "$want" ] || return 2
+	while IFS= read -r b; do
+		[ -n "$b" ] || continue
+		any=1
+		[ "$b" = "$want" ] && found=0
+	done <<EOF
+$(publisher_branches)
+EOF
+	[ "$any" -eq 0 ] && return 2
+	return "$found"
+}
 
 # One pass over the candidate SHAs against whatever is on disk right now.
 probe_candidates() {
@@ -351,24 +470,91 @@ not have been seen. In CI this directory is a fresh clone and IS
 re-fetched; this wording means the check was pointed at a fixture."
 fi
 
+# WHICH CAUSE, derived rather than assumed. See the header's "Why it also
+# reads the publisher's trigger list".
+coverage_rc=0
+publisher_covers "$BRANCH" || coverage_rc=$?
+publisher_list="$(publisher_branches | sort -u | tr '\n' ' ')"
+
+case "$coverage_rc" in
+0)
+	headline="WORKSPACE LOCK PUBLICATION HAS STALLED"
+	cause_note="CAUSE: not the branch. '${BRANCH}' IS a publishing branch —
+'${PUBLISHER_WORKFLOW#"$REPO_ROOT"/}' triggers on: ${publisher_list}—
+so a record for this commit was expected and did not arrive. The
+workspace-side shapes below are the ones to check."
+	;;
+1)
+	headline="NO PUBLISHER IS CONFIGURED FOR BRANCH '${BRANCH}'"
+	cause_note="CAUSE: the branch, not the workspace. '${BRANCH}' is NOT in the
+trigger lists of '${PUBLISHER_WORKFLOW#"$REPO_ROOT"/}', which
+publishes for: ${publisher_list}— so no lock was ever going to exist
+for this commit, or for any other commit on this branch.
+
+Nothing done in a developer's workspace can change that, and the
+workspace-side shapes listed below are NOT what happened here. Read
+this line before spending time in the post-commit log.
+
+REMEDY: add '${BRANCH}' to that workflow's \`push:\` (and, if it is a
+pull-request base, \`pull_request_target:\`) \`branches:\` list. Then
+SEED ONE COMMIT: the forward carry only sustains itself once its head
+is locked, so run that workflow's \`workflow_dispatch\` with
+source-sha = a locked commit whose sibling set is current,
+target-sha = a commit on '${BRANCH}', base-ref = '${BRANCH}'."
+	;;
+*)
+	headline="WORKSPACE LOCK IS MISSING"
+	if [ -z "$BRANCH" ]; then
+		cause_note="CAUSE: NOT DETERMINED — no --branch was given, so this check could not
+say whether a publisher is even configured for this branch. That is the
+difference between 'the record was not produced' and 'no record was ever
+going to exist', and it is worth passing --branch to learn."
+	else
+		cause_note="CAUSE: NOT DETERMINED — no \`branches:\` list could be read from
+'${PUBLISHER_WORKFLOW}', so whether a publisher covers '${BRANCH}'
+is unknown. Treat the workspace-side shapes below as candidates, not
+as the diagnosis, and fix that file's readability first."
+	fi
+	;;
+esac
+
 cat <<EOF
 
 ==============================================================
-  WORKSPACE LOCK PUBLICATION HAS STALLED
+  ${headline}
 ==============================================================
 
 No workspace lock exists in the shared manifests repo for any of:
 
 $(printf '  - %s\n' "${SHAS[@]}")
 
+Branch under test: ${BRANCH:-<not given>}
 Newest commit touching locks/ in that repo: ${newest_lock_date}.
+
+${cause_note}
 
 ${window_note}
 
-This is NOT a CI failure and it does not affect the test jobs — they
-stopped depending on the lock deliberately. It is a statement about
-the WORKSPACE: for every commit in this window there is no published,
-reproducible snapshot of which sibling revisions it was built against.
+This job is an alarm, not a gate: nothing declares \`needs:\` on it and
+it is absent from ci/verdict/required-jobs.txt, so it cannot skip a
+test job.
+
+But do NOT read that as "a missing lock is harmless". It stopped being
+harmless when sibling entries went back to BARE names: a bare entry in
+\`clone-siblings\` resolves its revision FROM THIS LOCK, so an unlocked
+commit dies at \`Setup isonim siblings\` before it builds anything.
+Measured on a \`cloud\` run: 11 of 21 failing jobs, all with
+\`No workspace lock for codetracer (candidates: <base sha>)\`. The
+sentence that used to sit here — that the test jobs no longer depend
+on the lock — was true when the entries carried explicit refs and is
+not true now.
+
+It is also, still, a statement about the WORKSPACE: for every commit in
+this window there is no published, reproducible snapshot of which
+sibling revisions it was built against.
+
+IF THE CAUSE ABOVE IS A STALL, these are the shapes to look for. If it
+is branch coverage, they are not — skip them and do the remedy above.
 
 The likely shape, because it is the one already observed: 'repro's
 post-commit hook still writes the lock into a workspace-local checkout

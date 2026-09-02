@@ -5157,8 +5157,20 @@ jobs:
           # credential plumbing is needed) until the lock appears or its grace
           # window expires. It returns the moment a fetch finds the lock, so the
           # healthy case is no slower than before.
+          #
+          # --branch lets the check answer WHY there is no lock instead of
+          # assuming. A branch absent from publish-workspace-lock.yml's
+          # trigger lists has no publisher at all, so no commit on it was ever
+          # going to be locked — a different fact from "the record was not
+          # pushed", with a different remedy, and the one that took out 11 of
+          # 21 jobs on `cloud`. `github.head_ref` is the source branch on a
+          # pull request (empty otherwise); `github.ref_name` is the branch on
+          # a push. The BASE is what matters for a PR, because the base is the
+          # mainline whose commits `clone-siblings` probes.
+          BRANCH="${GITHUB_BASE_REF:-${GITHUB_REF_NAME:-}}"
           PARENT="$(git rev-parse --verify --quiet HEAD^ || true)"
           bash ci/verdict/workspace-lock-freshness.sh \
             --manifest-dir "${RUNNER_TEMP}/metacraft-manifests" \
+            --branch "${BRANCH}" \
             --sha "${GITHUB_SHA}" \
             --sha "${PARENT}"

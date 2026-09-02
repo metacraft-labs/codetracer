@@ -78,8 +78,36 @@ on:
   #
   # This runs with the repository's own `GITHUB_TOKEN`-equivalent write context,
   # then mints the CI App token below exactly as the PR path does.
+  #
+  # WHY `cloud` IS HERE, measured on 2026-09-03. This list is the whole of what
+  # makes a branch a LOCKED mainline, and `cloud` was missing from it while
+  # being a mainline in every other respect — it takes direct pushes, it is a
+  # pull-request base, and `Codetracer CI` runs on it. The consequence was
+  # total and silent:
+  #
+  #   of the last 60 first-parent commits on `dev`,   24 carry a lock;
+  #   of the last 60 first-parent commits on `cloud`,  0 carry a lock.
+  #
+  # Not "few". Zero, for the whole reachable history. `clone-siblings` probes
+  # `pull_request` -> `base.sha` with `--no-walk`, and every base.sha of a PR
+  # targeting `cloud` is one of those unlocked commits, so EVERY such PR failed
+  # at `Setup isonim siblings` with
+  #
+  #   No workspace lock for codetracer (candidates: <base sha>)
+  #
+  # — 11 of 21 failing jobs on one such run, and the same 11 on every other.
+  # The lane could not be fixed from the workspace side either: local
+  # publication is irrelevant here, because what keeps `dev` locked is THIS
+  # workflow's server-side forward carry, not a developer's hook.
+  #
+  # BOOTSTRAP. The carry chain is self-sustaining only once its head is locked
+  # (`github.event.before` must already have a record). `cloud` has none, so
+  # adding it here is necessary but NOT sufficient: one commit must be seeded
+  # by the `workflow_dispatch` path below (source-sha = any locked commit whose
+  # sibling set is current, target-sha = the `cloud` commit, base-ref = cloud).
+  # After that seed, every later push carries itself forward.
   push:
-    branches: [dev]
+    branches: [dev, cloud]
 
   # `pull_request_target`, not `pull_request`: this repo is public, so a fork's
   # pull request would otherwise run without the credential this job needs, and
@@ -94,9 +122,13 @@ on:
   # pull request that bumped a sibling, where the PR HEAD's lock is the correct
   # source and the branch's previous tip is not. For a fork PR it is also the
   # only path that runs with a credential at all.
+  #
+  # `cloud` is listed for the same reason it is listed under `push` above, and
+  # this path additionally covers the case the forward carry gets wrong: a PR
+  # into `cloud` that BUMPS a sibling, whose own HEAD lock carries the bump.
   pull_request_target:
     types: [closed]
-    branches: [dev, stable]
+    branches: [dev, cloud, stable]
 
   # Backfill. Every mainline commit that landed before this workflow existed is
   # still unlocked, and so is any commit whose publish failed transiently. This
