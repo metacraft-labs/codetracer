@@ -206,13 +206,13 @@ sibling_remote_org="${CODETRACER_SIBLING_REMOTE_ORG:-https://github.com/metacraf
 # for a lane that means to assert a complete workspace.
 # -----------------------------------------------------------------------------
 required_siblings=(
-	'isonim|src/isonim.nim|ISONIM_SRC|the reactive UI framework the whole renderer is written against (223 `import isonim/...` sites); also the source `build-tailwind.sh` extracts utility classes from'
+	'isonim|src/isonim.nim|ISONIM_SRC|the reactive UI framework the whole renderer is written against — hundreds of `import isonim/...` sites across the frontend; count them with: grep -rl "import isonim/" --include=*.nim src | wc -l . Also the source `build-tailwind.sh` extracts utility classes from'
 	'nim-agents|src/nim_agents.nim||`import nim_agents` in src/frontend/viewmodel/agent_service.nim and the agentic-session UI'
 	"nim-agent-harbor|src/nim_agent_harbor.nim||the session/worktree backend nim_agents is written against; passed unconditionally by src/Tuprules.tup:79"
 	"nim-acp|src||the Agent Client Protocol bindings src/Tuprules.tup:78 puts on the Nim search path"
 	"nim-everywhere|src||the patched Nim 2.x distribution src/Tuprules.tup:77 puts on the Nim search path"
 	'codetracer-trace-format-nim|src/codetracer_ct_print_lib.nim|CODETRACER_TRACE_FORMAT_NIM_SRC|`ct print` (src/ct/cli/print_trace.nim) imports codetracer_trace_writer/* and codetracer_ct_print_lib'
-	'codetracer-trace-format|codetracer_trace_types/Cargo.toml||five `path = "../../../codetracer-trace-format/..."` dependencies in src/db-backend/Cargo.toml; cargo cannot even parse the manifest without them'
+	'codetracer-trace-format|codetracer_trace_types/Cargo.toml||every `path = "../../../codetracer-trace-format/..."` dependency in src/db-backend/Cargo.toml resolves through it (grep -c that path in the manifest for how many); cargo cannot even parse the manifest without them'
 	'codetracer-native-recorder|ct_emulator/src/ct_emulator/emulator_wasm_api.nim|CT_CODETRACER_NATIVE_RECORDER_SIBLING|src/db-backend/build.rs compiles the Nim MCR emulator from ct_emulator/ and links it as lib${CT_MCR_EMULATOR_LINK_NAME}.so; without it the db-backend link fails with 81 undefined `mcr*` symbols'
 	# Override column deliberately empty -- see the RUNQUOTA_SRC discussion in
 	# the tier notes above. Accepting the env var here would green this check on

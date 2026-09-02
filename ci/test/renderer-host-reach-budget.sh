@@ -104,12 +104,15 @@ count_in() {
 #               is absent on web). A facade arm for these would promise what a
 #               tab cannot do.
 #
-# THE THREE KINDS ARE REPORTED SEPARATELY, ON PURPOSE. Sixteen of the nineteen
-# reaches below are in `webexcluded` modules. That is NOT the same fact as
-# sixteen having been migrated, and a single shrinking total would let the two
-# read alike — the exclusion removed them from one CONFIGURATION, it did not
-# remove a single call. Step 3 checks the guards actually exist, so the
-# classification is enforced rather than asserted.
+# THE THREE KINDS ARE REPORTED SEPARATELY, ON PURPOSE. Most of the reaches
+# budgeted below sit in `webexcluded` modules; run this gate and read its
+# RESULT line for the split, which is computed from `budget_for` rather than
+# restated here — a hardcoded total is exactly what goes stale the next time a
+# budget moves, and the one that used to stand here did. "In a module a web
+# build cannot compile" is NOT the same fact as "migrated", and a single
+# shrinking total would let the two read alike: the exclusion removed them from
+# one CONFIGURATION, it did not remove a single call. Step 3 checks the guards
+# actually exist, so the classification is enforced rather than asserted.
 # ---------------------------------------------------------------------------
 budget_for() {
 	case "$1" in
