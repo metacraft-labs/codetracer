@@ -406,3 +406,46 @@ suite "the template can be run":
     # cases above are `for` loops.
     checkpoint("counted assertions: " & $countedAssertions)
     check countedAssertions == ExpectedAssertions
+
+suite "the ACIR listing crosses the worker boundary":
+
+  test "a compile response carries acir_listing when the module emits one":
+    # `VfsResponse.acir_listing` is the compiler's own `--print-acir` text, and
+    # it is the ONLY way a browser can say what an opcode IS: `bytecode` is
+    # base64 of gzip of a tagged binary encoding, so a host that decodes
+    # `debug_symbols` knows where every opcode came FROM and nothing about what
+    # it is. See `Generated-Code-Listing.md` §8.3.
+    let text = """{"ok":true,"artifact":{"bytecode":"H4sI"},"acir_listing":"func 0\nprivate parameters: [w0]\npublic parameters: []\nreturn values: []\nASSERT w1 = 2*w0\n"}"""
+    let response = parseNoirCompileResponse(text)
+    check response.decoded
+    check response.ok
+    check response.acirListing.contains("func 0")
+    check response.acirListing.contains("ASSERT w1 = 2*w0")
+
+  test "an older module answers without the field and that is not a failure":
+    # The field post-dates `ci/deploy/noir-wasm.pin`'s revision. A bundle built
+    # before the bump answers without it, and the pane must then say it has no
+    # listing rather than report the compile as broken — the difference between
+    # "this toolchain cannot show you this yet" and "your program did not
+    # compile".
+    let text = """{"ok":true,"artifact":{"bytecode":"H4sI"}}"""
+    let response = parseNoirCompileResponse(text)
+    check response.decoded
+    check response.ok
+    check response.acirListing == ""
+    check not response.artifact.isNil
+
+  test "a contract compile carries an artifact and no listing":
+    # A contract has one listing per function and no single `Program`, so the
+    # module sends none. Absent beats an arbitrary pick of one function's.
+    let text = """{"ok":true,"artifact":{"name":"Counter","functions":[]}}"""
+    let response = parseNoirCompileResponse(text)
+    check response.ok
+    check response.acirListing == ""
+
+  test "a refused compile has no listing to carry":
+    let text = """{"ok":false,"stage":"compile","kind":"compile-error","message":"nope"}"""
+    let response = parseNoirCompileResponse(text)
+    check response.decoded
+    check not response.ok
+    check response.acirListing == ""

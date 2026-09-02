@@ -140,6 +140,22 @@ type
     diagnostics*: seq[NoirDiagnostic]
     warnings*: seq[NoirDiagnostic]
     artifact*: JsonNode  ## `nil` unless the compile succeeded.
+    acirListing*: string
+      ## `nargo compile --print-acir`'s text, as the COMPILER prints it —
+      ## `VfsResponse.acir_listing`.
+      ##
+      ## WHY IT COMES FROM THE MODULE AND IS NOT DERIVED HERE. `artifact` lets a
+      ## host say where every opcode CAME FROM: `debug_symbols` is base64 of raw
+      ## deflate of JSON, and `noir_anchor_producer` resolves each opcode to its
+      ## source call stack from it. It does not let a host say what any opcode
+      ## IS: `bytecode` is base64 of GZIP of a tagged binary encoding, not text.
+      ## So the listing has to cross the boundary, and reimplementing an opcode
+      ## formatter here would drift from the toolchain a user can run beside us.
+      ##
+      ## EMPTY IS THE NORMAL CASE ON AN OLDER MODULE, not a fault. The field
+      ## post-dates `ci/deploy/noir-wasm.pin`'s revision, so a bundle built
+      ## before that bump answers without it, and the pane must then say it has
+      ## no listing rather than treat the compile as failed.
     decoded*: bool
       ## False when the text was not a `VfsResponse` at all. A worker that
       ## answered with something else must be reported as such rather than as
@@ -322,6 +338,13 @@ proc parseNoirCompileResponse*(raw: string): NoirCompileResponse =
   if parsed.hasKey("artifact") and parsed["artifact"].kind != JNull:
     artifact = parsed["artifact"]
 
+  # Absent on an older module, and absent for a contract compile — a contract
+  # has one listing per function and no single program. Both are ordinary, so
+  # neither is an error here.
+  var acirListing = ""
+  if parsed.hasKey("acir_listing") and parsed["acir_listing"].kind == JString:
+    acirListing = parsed["acir_listing"].getStr
+
   NoirCompileResponse(
     ok: parsed["ok"].kind == JBool and parsed["ok"].getBool,
     stage: getStrOr(parsed, "stage"),
@@ -333,6 +356,7 @@ proc parseNoirCompileResponse*(raw: string): NoirCompileResponse =
     diagnostics: parseDiagnosticList(parsed, "diagnostics"),
     warnings: parseDiagnosticList(parsed, "warnings"),
     artifact: artifact,
+    acirListing: acirListing,
     decoded: true,
     raw: "")
 
