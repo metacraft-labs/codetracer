@@ -349,11 +349,44 @@ if [ -n "$ct_reprobuild_host" ]; then
 			while IFS= read -r root; do
 				if [ -d "$root/lib" ]; then
 					export LIBRARY_PATH="$root/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
-					if [ "$ct_reprobuild_host" = "darwin" ]; then
-						export DYLD_LIBRARY_PATH="$root/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-					else
-						export LD_LIBRARY_PATH="$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-					fi
+					# ONLY clingo goes on the run-time loader path.
+					#
+					# LIBRARY_PATH above is what the `-lssl/-lcrypto/-lsqlite3/
+					# -lpcre/-lzip` LINK step needs, and it is consulted only by
+					# the compiler driver. DYLD_LIBRARY_PATH / LD_LIBRARY_PATH are
+					# different: they OVERRIDE, by leaf name, the library every
+					# already-linked binary recorded for itself -- for this process
+					# and every child.
+					#
+					# These roots come from `nixpkgs#...`, i.e. the USER'S FLAKE
+					# REGISTRY, which is a different pin from the one the dev shell
+					# and reprobuild's provisioned tools were built against. Putting
+					# that openssl ahead of everything made `cargo` (whose
+					# curl -> ngtcp2 chain is linked against a NEWER openssl) abort
+					# before `main`:
+					#
+					#   dyld: Symbol not found: _SSL_set_quic_tls_cbs
+					#     Referenced from: .../ngtcp2-1.17.0/lib/libngtcp2_crypto_ossl.dylib
+					#     Expected in:     .../openssl-3.4.3/lib/libssl.3.dylib
+					#
+					# which failed `backend-session-manager-cargo` and
+					# `db-replay-server-cargo` with exit -1 and left NO
+					# `src/build-debug` output at all. Removing just that one entry
+					# turns the same `cargo --version` back into a clean exit 0.
+					#
+					# clingo is the one library that genuinely needs run-time
+					# discovery: `repro_solver` dlopen()s `libclingo.{dylib,so}` by
+					# LEAF NAME (nothing links it), so it cannot be found any other
+					# way. Everything else here is a link-time dependency only.
+					case "$root" in
+					*clingo*)
+						if [ "$ct_reprobuild_host" = "darwin" ]; then
+							export DYLD_LIBRARY_PATH="$root/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+						else
+							export LD_LIBRARY_PATH="$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+						fi
+						;;
+					esac
 				fi
 				if [ -d "$root/include" ]; then
 					export C_INCLUDE_PATH="$root/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"

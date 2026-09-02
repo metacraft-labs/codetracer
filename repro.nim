@@ -1496,11 +1496,20 @@ package codeTracer:
       if ws.len == 0:
         break docsBookIsonim
 
-      # The eight paths ci/deploy/docs.sh writes, in its order.  A missing
+      # The nine paths ci/deploy/docs.sh writes, in its order.  A missing
       # sibling aborts the whole block: half a path set produces a confusing
       # "cannot open file" deep inside the SSG rather than an honest skip.
+      #
+      # `codetracer-design-system/nim` supplies `metacraft_docs_theme`, which
+      # `src/theme_tokens.nim` imports.  It was missing from this list while
+      # `ci/deploy/docs.sh:284` had it, so the deploy lane built the book and
+      # the `docs-book` action did not: it failed with
+      # `cannot open file: metacraft_docs_theme`.  The two path sets are the
+      # same set by contract -- keep them in the same order so a diff of this
+      # list against docs.sh's heredoc stays a one-to-one read.
       const BookSiblingPaths = [
-        ("isonim-docs", "src"), ("isonim", "src"),
+        ("isonim-docs", "src"), ("codetracer-design-system", "nim"),
+        ("isonim", "src"),
         ("nim-everywhere", "src"), ("nim-faststreams", ""),
         ("nim-stew", ""), ("isonim", "vendor/chronicles"),
         ("isonim", "vendor/serialization"),
