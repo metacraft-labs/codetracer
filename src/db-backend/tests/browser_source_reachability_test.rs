@@ -22,7 +22,7 @@
 //!
 //! * `db::source_probe_path` reverted to `workdir_path.exists()`
 //!   → reds `the_probe_picks_the_spelling_the_vfs_can_serve` and
-//!     `both_spellings_a_host_may_have_written_resolve`, ONLY.
+//!   `both_spellings_a_host_may_have_written_resolve`, ONLY.
 //! * `expr_loader::get_source_line_v2`'s bundled branch reverted to
 //!   `candidate.exists() && fs::read_to_string(..)`
 //!   → reds `a_bundled_source_in_the_vfs_reads_back_with_bundled_origin`, ONLY.

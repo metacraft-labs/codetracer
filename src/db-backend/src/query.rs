@@ -281,7 +281,15 @@ pub struct MaterializeIntervalResponse {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic, clippy::unwrap_used)]
+// `expect_used` joins the two allows this module already carried. The crate denies
+// all three (`main.rs`), which is right for the binary: a panic there takes down a
+// live debug session. In a test the panic IS the assertion. `expect_err` is how the
+// two rejection tests below state "this input must not deserialize", and it is
+// strictly better than the `unwrap` this module already permits, because it carries
+// the reason into the failure message. Denying it here while allowing `unwrap` and
+// bare `panic!` would push these tests toward the less informative idiom, so the
+// omission of `expect_used` from this list was an oversight rather than a policy.
+#[allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

@@ -4187,6 +4187,7 @@ fn default_type_record() -> codetracer_trace_types::TypeRecord {
 ///   bare → resolves. A host that deliberately writes at the recorded
 ///   relative path stays correct rather than becoming wrong.
 /// * Native → `exists()` answers first and the behaviour is byte-identical.
+///
 /// Public so the browser acceptance test can assert the CHOICE directly. The
 /// four call sites feed their result straight into `get_source_line_v2`, whose
 /// failure mode is an empty string and `SourceOrigin::Unavailable` — the same
