@@ -318,17 +318,32 @@ proc ensureBuildPaneVisible() =
   build_pane.tryMountIsoNimBuildPanel()
 
 proc producerFor(tmpl: ProjectTemplate): NoirBuildProducer =
-  ## One producer per pane, rebuilt if the VM was replaced underneath it.
+  ## One producer per pane, rebuilt if the VM was replaced underneath it OR if
+  ## it is holding a different project's paths.
   ##
   ## `initBuildVMWithStore` replaces `buildVMInstance` when the shared store
   ## arrives, so a producer captured earlier would be writing into a VM no
   ## view is bound to — a build that ran, succeeded, and painted nothing.
+  ##
+  ## THE SECOND CLAUSE IS THE SAME FROZEN-VALUE SHAPE, one layer down, and it
+  ## is closed here rather than left latent. `projectRoot` and `packageDir` are
+  ## COPIES of a `ProjectTemplate`'s fields taken at construction; a producer
+  ## built for one project and reused for another would map every diagnostic's
+  ## VFS path against the wrong root, so a click on an error would open nothing
+  ## and the pane would look broken rather than wrong. Reachable only through a
+  ## second `setCurrentProject` in one session — which today means a reload, so
+  ## this is a latent member of the class rather than a live defect. It is
+  ## still a member, and the test for it is one comparison.
   if build_pane.buildVMInstance.isNil:
     return nil
-  if activeProducer.isNil or activeProducer.vm != build_pane.buildVMInstance:
+  let root = templateProjectRoot(tmpl)
+  if activeProducer.isNil or
+     activeProducer.vm != build_pane.buildVMInstance or
+     activeProducer.projectRoot != root or
+     activeProducer.packageDir != tmpl.name:
     activeProducer = newNoirBuildProducer(
       build_pane.buildVMInstance,
-      projectRoot = templateProjectRoot(tmpl),
+      projectRoot = root,
       packageDir = tmpl.name)
     # FEED THE PROBLEMS PANE TOO. Without these two the browser arm painted
     # diagnostics in the BUILD pane and left PROBLEMS empty, so error

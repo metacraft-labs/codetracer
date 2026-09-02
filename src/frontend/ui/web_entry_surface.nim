@@ -676,12 +676,19 @@ proc installTemplatePaneHost*(tmpl: ProjectTemplate) =
   ## and the gutter would both quietly refuse to notice what they had just
   ## written. `currentProject()` is what the editor last saved.
   ##
-  ## The parameter stays because the constraint half genuinely is about the
-  ## bundled template: `noirTemplateNargoInfoJson` is a compile-time constant
-  ## measured against those sources, and re-deriving it for edited ones is not
-  ## something a browser can do (there is no `nargo info` in the wasm module).
-  ## So the two halves answer about different things ON PURPOSE, and the
-  ## constraint pane's provenance string says which.
+  ## The parameter is DISCARDED, exactly as `installTemplateHost` discards its
+  ## own — see that proc's header, which was written about this same defect and
+  ## which this proc, 140 lines below it in the same file, did not follow.
+  ##
+  ## The constraint half still answers about the BUNDLED template's numbers,
+  ## and that is deliberate rather than a leftover capture:
+  ## `noirTemplateNargoInfoJson` is a compile-time constant measured by a real
+  ## `nargo info` against those sources, and there is no `nargo info` in the
+  ## wasm module to re-derive it from edited ones. It reads `currentProject()`
+  ## only to decide whether a project is open at all. The constraint pane's
+  ## provenance string is what tells a reader which sources the counts are
+  ## about, and it says so on the pane rather than only here.
+  discard tmpl
   data.ipc.respond(cstring"CODETRACER::ns9-panes",
     proc(sender: js, payload: JsObject) =
       data.ipc.deliver(cstring"CODETRACER::ns9-panes-catalog", js{
@@ -691,7 +698,7 @@ proc installTemplatePaneHost*(tmpl: ProjectTemplate) =
         # did not — see `noirTestRunAbsence`.
         absence: cstring(noirTestRunAbsence())
       })
-      let report = templateConstraintReport(tmpl)
+      let report = templateConstraintReport(currentProject())
       data.ipc.deliver(cstring"CODETRACER::ns9-panes-constraints", js{
         info: cstring(noirTemplateNargoInfoJson),
         provenance: cstring(noirTemplateConstraintProvenance),
