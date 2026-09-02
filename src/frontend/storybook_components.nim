@@ -245,8 +245,20 @@ proc storyCalltraceArgs(): Table[string, seq[CallArg]] =
                  negativeMasses[iteration], 1000, negativeStatus[iteration],
                  negativePct[iteration])
 
+var lastStoryMock: MockBackendService
+  ## The backend behind the most recently mounted story.
+  ##
+  ## Held so a browser-driven check can read back WHAT A REAL CLICK ASKED
+  ## THE BACKEND FOR. The headless suites drive `renderInstructionRowMock`
+  ## / the MockRenderer arm; the shipped web bundle renders through
+  ## `renderInstructionRowWeb` and binds with `addEventListener`. Those are
+  ## two different procs, so a suite that only exercises the mock arm can
+  ## be green against a binding no user ever reaches. This var is what lets
+  ## a real Chromium click on the real DOM arm be asserted on.
+
 proc makeStore(): ReplayDataStore =
   let mock = newMockBackendService(autoRespond = true)
+  lastStoryMock = mock
   result = createReplayDataStore(mock.toBackendService)
   result.session.val = SessionState(connectionStatus: csConnected)
   result.timeline.val = TimelineState(
@@ -1213,6 +1225,17 @@ proc mountLowLevelCode(container: isonim_dom.Element; fixture: string): DisposeP
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createLowLevelCodeVM(store)
     if fixture == "error": vm.setErrorMessage("Unable to load assembly")
+    elif fixture == "no-source-ref":
+      # Asm generated from a function with no debug info: the row renders,
+      # but carries no back-pointer to jump to. Clicking it must report
+      # rather than silently do nothing — and that report is DOM-visible,
+      # so a real browser click can be asserted on without reaching into
+      # the backend.
+      vm.setAddress(0x401000)
+      vm.setInstructions(@[
+        LowLevelInstruction(name: "nop", args: "", other: "no debug info",
+                            offset: 0, highLevelPath: "", highLevelLine: 0),
+      ])
     else: vm.applyLowLevelCode()
     mountIsoNimLowLevelCode(container, vm)
     return proc() = vm.dispose())
@@ -1582,6 +1605,19 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
     return proc() =
       for dispose in disposers:
         dispose())
+
+proc storyBackendCommands*(): cstring {.exportc.} =
+  ## The commands the mounted story's backend received, as a JSON array of
+  ## ``{"command": ..., "args": ...}``.
+  ##
+  ## Exists so a browser check can assert what a REAL click asked for, on
+  ## the real-DOM render arm. Returns ``[]`` before any story is mounted.
+  if lastStoryMock.isNil:
+    return cstring"[]"
+  var arr = newJArray()
+  for rc in lastStoryMock.receivedCommands:
+    arr.add(%*{"command": rc.command, "args": rc.args})
+  cstring($arr)
 
 proc mountCodeTracerStory*(container: isonim_dom.Element;
                            kind: cstring;
