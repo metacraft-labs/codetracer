@@ -104,13 +104,24 @@ suite "Embed SDK facade — ReplayDataStore and types (spec §3.1 rows 1, 8)":
 suite "Embed SDK facade — BackendService seam (spec §3.1 row 3)":
 
   test "MockBackendService satisfies BackendService":
+    ## The subject is the seam — that a `MockBackendService` can stand where a
+    ## `BackendService` is required and records what it was handed — not any
+    ## particular command. It used `ct/ping`, which is not a DAP command at
+    ## all; `MockBackendService.send` now validates against
+    ## `VALID_DAP_COMMANDS`, because a mock that accepted any string is why the
+    ## nine commands in `backend/dap_dialect.md` §7 each had passing tests over
+    ## an engine implementing none of them.
+    ##
+    ## A seam test that does not care which command it sends can send a real
+    ## one, so it does, rather than spending `validateCommands = false` to keep
+    ## a placeholder.
     let mock = mockBackend()
     let backend: BackendService = mock.toBackendService()
-    mock.expect("ct/ping", %*{"success": true, "pong": true})
-    discard backend.send("ct/ping", %*{})
+    mock.expect("initialize", %*{"success": true})
+    discard backend.send("initialize", %*{})
     check mock.receivedCommands.len == 1
-    check mock.receivedCommands[0].command == "ct/ping"
-    check mock.findCommand("ct/ping").isSome
+    check mock.receivedCommands[0].command == "initialize"
+    check mock.findCommand("initialize").isSome
 
   test "disconnect reaches the implementation":
     let mock = mockBackend()
