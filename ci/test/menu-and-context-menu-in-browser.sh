@@ -83,13 +83,14 @@ for tool in ${required_tools}; do
 		exit 2
 	}
 done
-node -e "require('playwright')" >/dev/null 2>&1 || {
-	echo "menu-and-context-menu-in-browser.sh: playwright is not installed." >&2
-	echo "  remedy: (cd src/tests/gui && npm install) and re-run with" >&2
-	# shellcheck disable=SC2016 # a literal remedy line, not an expansion
-	echo '  NODE_PATH=${PWD}/src/tests/gui/node_modules' >&2
+if [ ! -d node_modules/playwright ] && ! node -e "require('playwright')" >/dev/null 2>&1; then
+	# Same precondition, and the same remedy, as `ci/test/web-renderer-mounts.sh`:
+	# the dev shell provides `node_modules/playwright` at the repo root, which is
+	# what `ci/test/menu_and_context_menu_probe.mjs` resolves against.
+	echo "menu-and-context-menu-in-browser.sh: node_modules/playwright is missing;" >&2
+	echo "  run inside the dev shell (direnv exec ${repo_root} ...)" >&2
 	exit 2
-}
+fi
 
 echo "=== one menu on right-click, and a submenu you can click ==="
 echo
@@ -343,6 +344,35 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# THE MIXIN'S PRECONDITION, asked of every dropdown surface on screen rather
+# than of the one that was reported.  `dropdown-surface()` clips every
+# descendant, so any caller that acquires an absolutely-positioned child laid
+# out beside it has this defect — and would pass every markup assertion while
+# the child rendered perfectly and invisibly.
+#
+# NOT ANSWERABLE FROM THE STYLESHEET: a static pass over the compiled CSS
+# reports zero escaping children even for `#menu-main`, because
+# `.menu-nested-elements` is a sibling RULE and a child only in the DOM.
+# ---------------------------------------------------------------------------
+with_abs="$(q menu clipCheck withAbsoluteChildren)"
+if [ "${with_abs:-0}" -ge 1 ]; then
+	ck ok "[clip/instrument] $(q menu clipCheck containersExamined) dropdown surface(s)" \
+		"examined, ${with_abs} of them actually holding an absolutely-positioned" \
+		"child — so 'nothing escaped' is not a statement about an empty set"
+else
+	ck fail "[clip/instrument] no dropdown surface on screen held an" \
+		"absolutely-positioned child, so the escape check below measures nothing"
+fi
+
+escapes="$(q menu clipCheck escapes)"
+if [ "$(python3 -c "import json;print(len(json.loads('''${escapes}''')))")" = "0" ]; then
+	ck ok "[clip] no dropdown surface clips an absolutely-positioned child"
+else
+	ck fail "[clip] a dropdown surface clips a child that paints outside it:" \
+		"${escapes}"
+fi
+
+# ---------------------------------------------------------------------------
 # THE FLICKER — measured between the frames, not in a screenshot.
 # ---------------------------------------------------------------------------
 samples="$(q menu sweep opacitySamples)"
@@ -460,7 +490,7 @@ fi
 # THE COUNT ITSELF, so a check skipped by an early `return` cannot read as a
 # pass.  Raise this deliberately when adding one.
 # ---------------------------------------------------------------------------
-EXPECTED_CHECKS=16
+EXPECTED_CHECKS=18
 echo
 if [ "${checks}" -ne "${EXPECTED_CHECKS}" ]; then
 	echo "RESULT: FAILED — ${checks} check(s) ran, ${EXPECTED_CHECKS} expected."
