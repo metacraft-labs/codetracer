@@ -32,6 +32,42 @@ ns9-row-padding = 2px 8px
   overflow: hidden
   text-overflow: ellipsis
 
+// The headline and the ▶ share a row: the headline takes the slack and
+// truncates, so a long "3 passed, 2 failed" never pushes the control off the
+// pane. Same arrangement as the BUILD pane's header, which is where a reader
+// has already learned to look for a run control.
+.test-results-header
+  display: flex
+  align-items: baseline
+  justify-content: space-between
+  gap: 6px
+
+  .test-results-headline
+    flex: 1 1 auto
+    min-width: 0
+
+// DISABLED IS DIMMED, NOT ABSENT — see the view's header. A control that
+// disappears cannot be told apart from a feature that is not there, and the
+// three reasons it can be disabled are all temporary or deployment-specific.
+.test-results-run-btn
+  flex: 0 0 auto
+  padding: 4px 8px
+  cursor: pointer
+  opacity: 0.75
+  user-select: none
+
+  &:hover
+    opacity: 1
+    background-color: colors-ui-surface-hover-panel
+
+  &.disabled
+    opacity: 0.3
+    cursor: default
+
+    &:hover
+      opacity: 0.3
+      background-color: transparent
+
 .test-results-body,
 .constraints-body
   display: flex
@@ -86,8 +122,10 @@ ns9-row-padding = 2px 8px
   white-space: pre-wrap
   color: colors-ui-text-error-primary
 
-// The absence line and the empty state are ordinary content, not errors: on
-// the web "these cannot be run here" is the correct and permanent answer.
+// The absence line and the empty state are ordinary content, not errors. The
+// absence is now a statement about a DEPLOYMENT that placed no Noir compiler
+// module rather than about the product — an ordinary web bundle runs its tests
+// and leaves this line empty.
 .test-results-absence,
 .test-results-empty,
 .constraints-absence,

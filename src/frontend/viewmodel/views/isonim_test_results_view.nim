@@ -5,7 +5,9 @@
 ## Structure, both renderers::
 ##
 ##   div.component-container.test-results
-##     div.test-results-headline      text "5 tests, not run yet"
+##     div.test-results-header
+##       div.test-results-headline    text "5 tests, not run yet"
+##       div.test-results-run-btn[.disabled]   click -> vm.startRun()
 ##     div.test-results-body
 ##       div.test-results-row[.not-run|.passed|.failed|…]   (one per test)
 ##         span.test-results-mark      "✓" / "✗" / "·" / …
@@ -29,10 +31,25 @@
 ##
 ## ## The absence line is not an error state
 ##
-## `runAbsence` is shown as ordinary content, below the rows, because on the
-## web it is the permanent and correct answer — there is no `nargo` in a tab
-## and the wasm worker dispatches only `compile` and `trace`. Rendering it as
+## `runAbsence` is shown as ordinary content, below the rows, because when it
+## is set it is a statement about a DEPLOYMENT rather than a fault: a bundle
+## that placed no Noir compiler module cannot run tests, and rendering that as
 ## an error would tell a visitor something is broken when nothing is.
+##
+## It is empty on an ordinary web deployment. It used to be a permanent
+## paragraph saying a browser cannot run `nargo test` at all; the wasm module
+## now exports `nv_test_vfs` and the worker routes `test` to it, so that
+## paragraph was prose asserting an absence that had been filled. The ▶ beside
+## the headline is what replaced it.
+##
+## ## Why the ▶ is disabled rather than hidden
+##
+## A control that vanishes cannot be told apart from a feature that does not
+## exist. `vm.canRun` is false in three different situations — no host
+## installed a runner, the deployment stated a reason, a run is already in
+## flight — and in all three the button stays in place with a `disabled` class
+## and a `title` that says which. That is `stopButtonClass`'s rule in the build
+## view, applied to the same shape of question.
 
 import std/strutils
 
@@ -70,6 +87,25 @@ proc rowWhere*(row: TestResultsRow): string =
   if row.file.len == 0: ""
   elif row.line > 0: row.file & ":" & $row.line
   else: row.file
+
+proc runButtonClass*(vm: TestResultsVM): string =
+  ## `disabled` follows `canRun`, so the class a gate reads and the guard the
+  ## click takes are one decision rather than two that can drift.
+  if vm.canRun(): "test-results-run-btn"
+  else: "test-results-run-btn disabled"
+
+proc runButtonTitle*(vm: TestResultsVM): string =
+  ## WHY it is disabled, in the tooltip — the three cases are different
+  ## problems with different remedies and a single greyed control that said
+  ## nothing would make all three look like the same dead affordance.
+  if vm.inFlight.val:
+    "A test run is already in progress"
+  elif vm.runAbsence.val.len > 0:
+    vm.runAbsence.val
+  elif vm.runTests.isNil:
+    "No host in this build can run the tests"
+  else:
+    "Run the tests (nargo test)"
 
 proc rowDuration*(row: TestResultsRow): string =
   ## Empty until the test has actually run. "0 ms" against a test nobody
@@ -109,10 +145,17 @@ proc renderTestResultsPanel*(r: MockRenderer; vm: TestResultsVM): MockNode =
   var absenceNode: MockNode
   var emptyContainer: MockNode
 
+  var runButton: MockNode
+
   let panel = ui(r):
     tdiv(class = TestResultsContainerClass, tabIndex = "2"):
-      tdiv(ref = headlineNode, class = "test-results-headline"):
-        discard
+      tdiv(class = "test-results-header"):
+        tdiv(ref = headlineNode, class = "test-results-headline"):
+          discard
+        tdiv(ref = runButton, class = "test-results-run-btn",
+             title = "Run the tests (nargo test)",
+             onclick = proc() = vm.startRun()):
+          text "\u25b6"
       tdiv(ref = bodyContainer, class = "test-results-body"):
         discard
       tdiv(ref = absenceNode, class = "test-results-absence hidden"):
@@ -126,6 +169,9 @@ proc renderTestResultsPanel*(r: MockRenderer; vm: TestResultsVM): MockNode =
 
     r.clearChildren(headlineNode)
     r.appendChild(headlineNode, r.createTextNode(vm.headline.val))
+
+    r.setAttribute(runButton, "class", runButtonClass(vm))
+    r.setAttribute(runButton, "title", runButtonTitle(vm))
 
     r.clearChildren(bodyContainer)
     for row in rows:
@@ -200,10 +246,17 @@ when defined(js):
     var absenceNode: isonim_dom.Element
     var emptyContainer: isonim_dom.Element
 
+    var runButton: isonim_dom.Element
+
     let panel = ui(r):
       tdiv(class = TestResultsContainerClass, tabIndex = "2"):
-        tdiv(ref = headlineNode, class = "test-results-headline"):
-          discard
+        tdiv(class = "test-results-header"):
+          tdiv(ref = headlineNode, class = "test-results-headline"):
+            discard
+          tdiv(ref = runButton, class = "test-results-run-btn",
+               title = "Run the tests (nargo test)",
+               onclick = proc() = vm.startRun()):
+            text "\u25b6"
         tdiv(ref = bodyContainer, class = "test-results-body"):
           discard
         tdiv(ref = absenceNode, class = "test-results-absence hidden"):
@@ -216,6 +269,10 @@ when defined(js):
       let absence = vm.runAbsence.val
 
       setWebText(headlineNode, vm.headline.val)
+      isonim_dom.setAttribute(runButton, cstring"class",
+                              cstring(runButtonClass(vm)))
+      isonim_dom.setAttribute(runButton, cstring"title",
+                              cstring(runButtonTitle(vm)))
 
       clearWeb(bodyContainer)
       for row in rows:

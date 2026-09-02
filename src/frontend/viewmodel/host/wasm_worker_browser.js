@@ -397,6 +397,22 @@ async function compileVfs(request) {
     new Uint8Array(exports.memory.buffer, resPtr, resLen).slice()));
 }
 
+async function testVfs(request) {
+  // THE SAME MODULE AS `compileVfs`, and the same three ABI calls. `nargo test`
+  // compiles each test function and executes it, and both halves are exports of
+  // `noir_wasm.wasm` — `nv_test_vfs` sits beside `nv_compile_vfs` and shares
+  // `nv_alloc` / `nv_free` / `nv_result_len` with it, deliberately, so a host
+  // cannot pair a pointer from one length cell with bytes from another.
+  //
+  // The tracer is NOT involved. A test run produces a verdict, not a recording.
+  const exports = await load('noir-compiler');
+  const [ptr, len] = put(exports, 'nv_alloc', JSON.stringify(request));
+  const resPtr = exports.nv_test_vfs(ptr, len);
+  const resLen = exports.nv_result_len();
+  return JSON.parse(new TextDecoder().decode(
+    new Uint8Array(exports.memory.buffer, resPtr, resLen).slice()));
+}
+
 async function traceArtifact(artifact, inputs) {
   const exports = await load('noir-tracer');
   const [aPtr, aLen] = put(exports, 'ct_alloc', JSON.stringify(artifact));
@@ -822,6 +838,17 @@ self.onmessage = async (event) => {
       // its run as a success is the "chain of agreements" shape this
       // protocol's header names.
       post({ seq, kind: 'exit', exitCode: response.ok ? 0 : 1, signalled: false });
+    } else if (sub === 'test') {
+      const response = await testVfs(JSON.parse(request.stdin));
+      post({ seq, kind: 'output', stream: 'stdout', text: JSON.stringify(response) });
+      // `response.ok` MEANS THE SUITE RAN, not that it was green — see
+      // `test_vfs.rs`'s header and `noir_build.NoirTestResponse`. So the exit
+      // code is 1 when the run was refused OR when a test failed, which is
+      // what `nargo test` itself exits with; a runner that exited 0 over a red
+      // suite would be the same class of false agreement the `compile` arm
+      // above guards against, and it is the one a CI script would believe.
+      const failed = !response.ok || (response.failed || 0) > 0;
+      post({ seq, kind: 'exit', exitCode: failed ? 1 : 0, signalled: false });
     } else if (sub === 'trace') {
       const payload = JSON.parse(request.stdin);
       const text = await traceArtifact(payload.artifact, payload.inputs);

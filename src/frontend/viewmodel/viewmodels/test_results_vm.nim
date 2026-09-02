@@ -35,12 +35,30 @@
 ## ## Why `runAbsence` is a first-class field
 ##
 ## A pane that lists five tests and a Run button that does nothing is worse
-## than one that says why. On the web there is no `nargo`, no subprocess and
-## no test operation in the wasm worker — it dispatches exactly `compile` and
-## `trace` — so running is not "not wired yet", it is unavailable for a reason
-## that can be stated. `runAbsence` carries that sentence and the view shows
-## it. §1b.3 step 6's rule, applied to a pane: "a plain statement of what was
-## asked for and could not be found."
+## than one that says why. So `runAbsence` carries the sentence and the view
+## shows it. §1b.3 step 6's rule, applied to a pane: "a plain statement of what
+## was asked for and could not be found."
+##
+## WHAT IT NO LONGER SAYS. Until the `test` operation landed in the Noir wasm
+## module this field carried a permanent paragraph — a browser has no `nargo`,
+## the worker dispatches exactly `compile` and `trace`, running is unavailable.
+## Every clause of that is now false: `nv_test_vfs` is an export of
+## `noir_wasm.wasm`, the worker routes `test` to it, and `nargo::ops::run_test`
+## reaches the verdicts. The field stays because a deployment that delivered no
+## compiler module still cannot run tests and still owes a sentence saying so —
+## but it is now a statement about a PARTICULAR deployment, computed by
+## `ui/web_noir_build.noirTestRunAbsence`, rather than a claim about the
+## product. Prose asserting an absence that has been filled teaches a user the
+## product is less capable than it is, which is the mirror image of a dead
+## affordance.
+##
+## ## `runTests` is the affordance the absence used to stand in for
+##
+## Installed by the host, exactly as `BuildVM.runBuild` is
+## (`ui_js` points it at `web_noir_build.startNoirTests` on the web arm and the
+## Electron arm may point it elsewhere). Nil means no host installed one, and
+## the view renders the button disabled rather than absent — a Run control that
+## vanishes is indistinguishable from a pane that has no such feature.
 
 import std/[options, strutils, tables]
 
@@ -84,6 +102,19 @@ type
     runAbsence*: Signal[string]
       ## Why a run cannot be started here, or "" when it can.
     projectName*: Signal[string]
+    inFlight*: Signal[bool]
+      ## A run this pane started is still going.
+      ##
+      ## SEPARATE FROM `summary.inProgress`, which is derived from the event
+      ## stream's open scopes. The two answer different questions and the gap
+      ## between them is the whole first second of a run: a click dispatches a
+      ## `start` to a worker that has 16 MB to fetch and instantiate before it
+      ## emits `run-started`, and in that window `summary.inProgress` is false
+      ## while a run is very much happening. A button that re-enabled there
+      ## would let a user queue a second suite over the first.
+
+    runTests*: proc()
+      ## Start a run. Nil when no host installed one; see the header.
 
     # -- Derived state --
     rows*: Memo[seq[TestResultsRow]]
@@ -171,6 +202,29 @@ proc setCatalog*(vm: TestResultsVM; catalog: TestCatalog) =
 proc setRunAbsence*(vm: TestResultsVM; reason: string) =
   vm.runAbsence.val = reason
 
+proc canRun*(vm: TestResultsVM): bool =
+  ## Whether the ▶ does anything: a host installed a runner, this deployment
+  ## stated no reason it cannot, and nothing is already in flight.
+  not vm.runTests.isNil and vm.runAbsence.val.len == 0 and not vm.inFlight.val
+
+proc beginRun*(vm: TestResultsVM) =
+  ## Called by the host at the moment it dispatches, before any event arrives.
+  ## Clears the previous run — a pane that kept the last verdicts under a
+  ## button that had visibly been pressed is one a user reads as "it passed".
+  vm.summary.val = TestRunSummary()
+  vm.inFlight.val = true
+
+proc endRun*(vm: TestResultsVM) =
+  ## Called by the host when the run settles, however it settled.
+  vm.inFlight.val = false
+
+proc startRun*(vm: TestResultsVM) =
+  ## The view's click handler. Guarded here rather than in the view so the mock
+  ## and web renderers cannot disagree about when the button is live.
+  if not vm.canRun():
+    return
+  vm.runTests()
+
 proc clearRun*(vm: TestResultsVM) =
   vm.summary.val = TestRunSummary()
 
@@ -198,6 +252,7 @@ proc createTestResultsVM*(): TestResultsVM =
     let summary = createSignal(TestRunSummary())
     let runAbsence = createSignal("")
     let projectName = createSignal("")
+    let inFlight = createSignal(false)
 
     let rows = createMemo[seq[TestResultsRow]] proc(): seq[TestResultsRow] =
       joinRows(catalog.val, summary.val)
@@ -206,13 +261,21 @@ proc createTestResultsVM*(): TestResultsVM =
       catalog.val.len == 0 and summary.val.rows.len == 0
 
     let headline = createMemo[string] proc(): string =
-      headlineFor(catalog.val, summary.val, runAbsence.val)
+      if inFlight.val and not summary.val.inProgress and
+         summary.val.rows.len == 0:
+        # The dispatched-but-silent window. See `inFlight`: the worker has the
+        # request and has not answered, and "5 tests, not run yet" over a run
+        # the user just started reads as a button that did nothing.
+        "running…"
+      else:
+        headlineFor(catalog.val, summary.val, runAbsence.val)
 
     TestResultsVM(
       catalog: catalog,
       summary: summary,
       runAbsence: runAbsence,
       projectName: projectName,
+      inFlight: inFlight,
       rows: rows,
       isEmpty: isEmpty,
       headline: headline,

@@ -148,6 +148,99 @@ type
     raw*: string
       ## What could not be decoded, for the message. Empty when `decoded`.
 
+  NoirTestStatus* = enum
+    ## `test_vfs.rs::TestOutcome.status`, which is one tag per
+    ## `nargo::ops::TestStatus` variant.
+    ##
+    ## `ntsUnknown` is here for `noirSeverityOf`'s reason and NOT folded into
+    ## `ntsFail`: a decoder that called every unrecognised tag a failure would
+    ## report a red suite over a protocol change, and a red suite is exactly
+    ## the answer a user acts on.
+    ntsPass = "pass"
+    ntsFail = "fail"
+    ntsSkipped = "skipped"
+    ntsCompileError = "compile-error"
+    ntsUnknown = "unknown"
+
+  NoirTestOutcome* = object
+    ## `test_vfs.rs::TestOutcome`, field for field.
+    name*: string
+      ## The runner's fully-qualified name (`tests::test_main`) — the same
+      ## string `noir_test_syntax.selectorFor` derives and `nargo test
+      ## --exact` takes, which is what lets a run be JOINED to a catalog
+      ## without either side guessing.
+    status*: NoirTestStatus
+    statusText*: string
+      ## Verbatim, so `ntsUnknown` names the tag it did not recognise.
+    message*: string
+      ## `TestStatus::Fail.message` — for an unsatisfied constraint this is
+      ## the bare `"Failed assertion"`. THE USER'S OWN ASSERTION TEXT IS NOT
+      ## HERE; it is in `diagnostic`. That asymmetry is nargo's rather than
+      ## this product's (`test_status_program_compile_pass` puts
+      ## `circuit_execution_err.to_string()` in `message` and resolves the
+      ## user string through `try_to_diagnose_runtime_error` into the
+      ## diagnostic), and it is measured by `test_vfs.rs`'s own
+      ## `the_four_verdicts_are_not_symmetric`. A pane that rendered only
+      ## `message` would show every failing test as "Failed assertion", which
+      ## is a row nobody can act on — see `noirTestFailureText`.
+    output*: string
+      ## Whatever the test `print`ed.
+    shouldFail*: bool
+      ## `#[test(should_fail)]` / `#[test(should_fail_with = "…")]`.
+      ## Reported rather than applied here: the inversion is decided inside
+      ## `nargo::ops`, and this field exists so a pane can SAY "passed
+      ## (expected to fail)" instead of silently showing a green row whose
+      ## meaning is the opposite of the obvious one.
+    expectedFailure*: string
+      ## The substring `should_fail_with` requires. Empty for bare
+      ## `should_fail`, which accepts any failure.
+    hasArguments*: bool
+      ## A test with arguments is a fuzzing harness to `nargo test`. The
+      ## module skips those and says why; see `test_vfs.rs`.
+    file*: string      ## VFS path, as registered. `noir_build_producer`
+                       ## maps it to the renderer's spelling.
+    line*: int         ## 1-based, the `fn` line.
+    column*: int
+    diagnostic*: NoirDiagnostic
+    hasDiagnostic*: bool
+      ## Whether `diagnostic` was present. A zeroed `NoirDiagnostic` and an
+      ## absent one are indistinguishable otherwise, and the difference is
+      ## whether there is a place to jump to.
+
+  NoirTestResponse* = object
+    ## `test_vfs.rs::TestVfsResponse`.
+    ##
+    ## ## `ok` DOES NOT MEAN THE TESTS PASSED
+    ##
+    ## It means the suite RAN — the tree resolved, the crate elaborated, and
+    ## every discovered test reached a verdict. A suite in which every test
+    ## failed answers `ok: true` and a non-zero `failed`. The Rust side spends
+    ## a header paragraph on this and it is restated here because the two
+    ## responses in this module now spell `ok` differently:
+    ## `NoirCompileResponse.ok` is "the compile succeeded".
+    ##
+    ## Reading it the other way would make "the project does not compile" and
+    ## "one assertion fired" the same value, which are the two outcomes a Test
+    ## Results pane most needs to tell apart.
+    ok*: bool
+    stage*: string     ## `request`, `resolve` or `check`. Absent when it ran.
+    kind*: string      ## `bad-request`, `missing-manifest`, `check-error`, …
+    message*: string
+    manifest*: string
+    line*: int
+    column*: int
+    diagnostics*: seq[NoirDiagnostic]
+      ## Elaboration errors — the ones that stop a run before any test exists.
+    warnings*: seq[NoirDiagnostic]
+    tests*: seq[NoirTestOutcome]
+    passed*: int
+    failed*: int
+    skipped*: int
+    decoded*: bool
+      ## False when the text was not a `TestVfsResponse` at all. Same third
+      ## outcome, and same reason, as `NoirCompileResponse.decoded`.
+    raw*: string
+
   NoirTraceSummary* = object
     ## What a trace IS, counted — the shape `ci/test/noir-wasm-worker/
     ## compare.mjs` asserts on, because "it returned" is not a result.
@@ -166,9 +259,11 @@ type
 const
   noirCompileSubcommand* = "compile"
   noirTraceSubcommand* = "trace"
-    ## The two the worker implements. Spelled here as well as in
+  noirTestSubcommand* = "test"
+    ## The three the worker implements. Spelled here as well as in
     ## `noir_wasm_modules.nim` would be two statements of one fact, so they
-    ## are NOT: see `noirCompileArgs` / `noirTraceArgs`, which take them.
+    ## are NOT: see `noirCompileArgs` / `noirTraceArgs` / `noirTestArgs`,
+    ## which take them.
 
 # ---------------------------------------------------------------------------
 # The request
@@ -231,6 +326,35 @@ proc noirCompileArgs*(): seq[string] = @[noirCompileSubcommand]
 
 proc noirTraceArgs*(): seq[string] = @[noirTraceSubcommand]
 
+proc noirTestArgs*(): seq[string] = @[noirTestSubcommand]
+
+proc noirTestRequest*(files: seq[NoirSourceEntry]; packageDir: string;
+                      tests: seq[string] = @[]): JsonNode =
+  ## `TestVfsRequest`, as the JSON the worker's `stdin` carries.
+  ##
+  ## The `files` / `package_dir` half is `noirVfsRequest`'s, field for field —
+  ## the Rust side says so in `test_vfs.rs`'s own doc comment — so a caller
+  ## that can compose a Build can compose a test run by changing the args and
+  ## nothing else. There is NO `mode`: `nargo test` compiles with plain
+  ## `CompileOptions::default()`, and a request that carried `debug` would ask
+  ## the module to run an instrumented program that is not the one the user
+  ## tests locally.
+  ##
+  ## `tests` is a list of fully-qualified names, matched exactly — the strings
+  ## `nargo test --exact` takes, which are the same strings
+  ## `noir_test_syntax.selectorFor` produces. Empty runs every test.
+  var tree = newJObject()
+  for entry in files:
+    tree[entry.path] = %entry.content
+  var wanted = newJArray()
+  for name in tests:
+    wanted.add %name
+  %*{
+    "files": tree,
+    "package_dir": packageDir,
+    "tests": wanted
+  }
+
 # ---------------------------------------------------------------------------
 # The response
 # ---------------------------------------------------------------------------
@@ -257,6 +381,11 @@ proc getIntOr(node: JsonNode; key: string; fallback = 0): int =
   if node.isNil or node.kind != JObject or not node.hasKey(key): return fallback
   if node[key].kind != JInt: return fallback
   node[key].getInt
+
+proc getBoolOr(node: JsonNode; key: string; fallback = false): bool =
+  if node.isNil or node.kind != JObject or not node.hasKey(key): return fallback
+  if node[key].kind != JBool: return fallback
+  node[key].getBool
 
 proc getStrSeq(node: JsonNode; key: string): seq[string] =
   if node.isNil or node.kind != JObject or not node.hasKey(key): return @[]
@@ -361,6 +490,144 @@ proc countBySeverity*(diagnostics: seq[NoirDiagnostic];
   ## mutation that changes ONE row's severity visible.
   for diagnostic in diagnostics:
     if diagnostic.severity == severity: inc result
+
+# ---------------------------------------------------------------------------
+# The test run
+# ---------------------------------------------------------------------------
+
+proc noirTestStatusOf*(text: string): NoirTestStatus =
+  ## The four tags `test_vfs.rs::status_tag` produces, and `ntsUnknown` for
+  ## anything else. Case-insensitive for `noirSeverityOf`'s reason.
+  case text.toLowerAscii
+  of "pass": ntsPass
+  of "fail": ntsFail
+  of "skipped": ntsSkipped
+  of "compile-error": ntsCompileError
+  else: ntsUnknown
+
+proc noirTestFailed*(status: NoirTestStatus): bool =
+  ## Whether a tag counts against the suite.
+  ##
+  ## `ntsUnknown` is NOT a failure. A tag this build does not recognise is a
+  ## protocol fault, and reporting it red would tell a user their program is
+  ## broken because our decoder is out of date. The pane shows it as errored
+  ## with the raw tag in the message, which is a statement about the tooling.
+  status in {ntsFail, ntsCompileError}
+
+proc parseNoirTestOutcome*(node: JsonNode): NoirTestOutcome =
+  ## One `TestOutcome`. Every field probed rather than indexed, for header
+  ## fact 1's reason: the Rust side omits `message`, `output`,
+  ## `expected_failure`, `file`, `line`, `column` and `diagnostic` when they
+  ## are absent, so a passing test carries almost none of them.
+  let statusText = getStrOr(node, "status")
+  var diagnostic: NoirDiagnostic
+  var hasDiagnostic = false
+  if not node.isNil and node.kind == JObject and node.hasKey("diagnostic") and
+     node["diagnostic"].kind == JObject:
+    diagnostic = parseNoirDiagnostic(node["diagnostic"])
+    hasDiagnostic = true
+  NoirTestOutcome(
+    name: getStrOr(node, "name"),
+    status: noirTestStatusOf(statusText),
+    statusText: statusText,
+    message: getStrOr(node, "message"),
+    output: getStrOr(node, "output"),
+    shouldFail: getBoolOr(node, "should_fail"),
+    expectedFailure: getStrOr(node, "expected_failure"),
+    hasArguments: getBoolOr(node, "has_arguments"),
+    file: getStrOr(node, "file"),
+    line: getIntOr(node, "line"),
+    column: getIntOr(node, "column"),
+    diagnostic: diagnostic,
+    hasDiagnostic: hasDiagnostic)
+
+proc undecodedTestResponse(raw: string): NoirTestResponse =
+  NoirTestResponse(ok: false, decoded: false, raw: raw,
+                   diagnostics: @[], warnings: @[], tests: @[])
+
+proc parseNoirTestResponse*(raw: string): NoirTestResponse =
+  ## Decode a `TestVfsResponse` out of the worker's stdout.
+  ##
+  ## Keyed on `tests` as well as `ok`, because `ok` alone does not tell the two
+  ## responses this module decodes apart: a `VfsResponse` from a `compile` that
+  ## somehow reached this decoder would parse as a test run with zero tests —
+  ## a green "no tests" over a compile result. `passed`/`failed`/`skipped` are
+  ## unique to this shape, so one of them is required.
+  if raw.len == 0:
+    return undecodedTestResponse("")
+  var parsed: JsonNode
+  try:
+    parsed = parseJson(raw)
+  except:
+    # Bare `except` for `parseNoirCompileResponse`'s reason: on JS `parseJson`
+    # defers to `JSON.parse`, whose `SyntaxError` is not a `CatchableError`.
+    return undecodedTestResponse(raw)
+  if parsed.isNil or parsed.kind != JObject or not parsed.hasKey("ok"):
+    return undecodedTestResponse(raw)
+  if not (parsed.hasKey("passed") and parsed.hasKey("failed")):
+    return undecodedTestResponse(raw)
+
+  var tests: seq[NoirTestOutcome] = @[]
+  if parsed.hasKey("tests") and parsed["tests"].kind == JArray:
+    for item in parsed["tests"]:
+      if item.kind == JObject: tests.add parseNoirTestOutcome(item)
+
+  NoirTestResponse(
+    ok: parsed["ok"].kind == JBool and parsed["ok"].getBool,
+    stage: getStrOr(parsed, "stage"),
+    kind: getStrOr(parsed, "kind"),
+    message: getStrOr(parsed, "message"),
+    manifest: getStrOr(parsed, "manifest"),
+    line: getIntOr(parsed, "line"),
+    column: getIntOr(parsed, "column"),
+    diagnostics: parseDiagnosticList(parsed, "diagnostics"),
+    warnings: parseDiagnosticList(parsed, "warnings"),
+    tests: tests,
+    passed: getIntOr(parsed, "passed"),
+    failed: getIntOr(parsed, "failed"),
+    skipped: getIntOr(parsed, "skipped"),
+    decoded: true,
+    raw: "")
+
+proc noirTestFailureText*(outcome: NoirTestOutcome): string =
+  ## The sentence a pane shows for one failure, and the one place that decides
+  ## how the two halves of a nargo failure are joined.
+  ##
+  ## `message` is the runner's verdict (`"Failed assertion"`, or `"error: Test
+  ## passed when it should have failed"`); `diagnostic.message` is the string
+  ## the user actually wrote (`"Assertion failed: one is not two"`). Rendering
+  ## either alone loses something a reader needs — the first is generic, the
+  ## second does not exist for an unexpected pass — so both are shown when
+  ## both exist and neither contains the other.
+  var parts: seq[string] = @[]
+  let verdict = outcome.message.strip()
+  if verdict.len > 0:
+    parts.add verdict
+  if outcome.hasDiagnostic:
+    let detail = outcome.diagnostic.message.strip()
+    if detail.len > 0 and detail notin parts and
+       not (verdict.len > 0 and verdict.contains(detail)):
+      parts.add detail
+  if parts.len == 0 and outcome.status == ntsUnknown:
+    parts.add "the runner answered an outcome this build does not know: `" &
+      outcome.statusText & "`"
+  parts.join(" — ")
+
+proc noirTestExpectationNote*(outcome: NoirTestOutcome): string =
+  ## What the test's ATTRIBUTE asked for, as a sentence, or "" for a plain
+  ## `#[test]`.
+  ##
+  ## Shown beside a `should_fail` row rather than left implicit. A green row
+  ## against a test that is expected to fail means the opposite of what a green
+  ## row usually means, and a pane that did not say so would be inviting the
+  ## reader to misread it — the same failure as reporting the suite backwards,
+  ## only quieter.
+  if not outcome.shouldFail:
+    return ""
+  if outcome.expectedFailure.len > 0:
+    "expected to fail with `" & outcome.expectedFailure & "`"
+  else:
+    "expected to fail"
 
 # ---------------------------------------------------------------------------
 # The trace

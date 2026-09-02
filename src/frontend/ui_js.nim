@@ -3382,6 +3382,14 @@ proc onReviewDatasetRead*(sender: js,
 # (`Planned-Features/Noir-Studio.md` §3).
 # ---------------------------------------------------------------------------
 
+var noirTestRunCounter = 0
+  ## Which wasm test run this is, for `TestEvent.runId`.
+  ##
+  ## A counter and not a timestamp: `runId` is only ever compared for equality
+  ## within one stream, and `test_run_summary_vm.ingestTestEvent` fills it from
+  ## the first event it sees. A clock would make two runs in the same
+  ## millisecond indistinguishable, which is exactly what a double-click does.
+
 proc onNs9PanesCatalog(
     sender: js,
     response: jsobject(catalog=cstring, absence=cstring)) =
@@ -4604,6 +4612,10 @@ when defined(ctWeb):
   # `ctPlatform().process` expecting the wasm host a browser tab has and an
   # Electron renderer does not.
   import ui/web_noir_build
+  # `NoirTestResponse` -> `TestEvent`s, so the Test Results pane is fed by the
+  # fold every other run producer is fed by. Web-only for `web_noir_build`'s
+  # reason: nothing else in this file has a `NoirTestResponse` to convert.
+  from viewmodel/viewmodels/noir_test_run import noirTestRunEvents
   import ui/web_replay_host
   # Where the user's edits live. `web_project_store` is the one mutable
   # project — backend-neutral, so `web_entry_surface` can keep compiling on the
@@ -4952,6 +4964,41 @@ when defined(ctWeb):
       # a Build button pointed at nothing is worse than one that is absent.
       if wantsTemplate and mounted:
         web_noir_build.installNoirBuildCommands(tmpl)
+
+        # THE TEST RESULTS PANE'S ▶, AND WHERE ITS ROWS COME FROM.
+        #
+        # Here for `installNoirBuildCommands`' reason, one pane over: this is
+        # the only place that can see the pane's view-model, the project and
+        # the toolchain driver at the same moment, and `web_noir_build` must
+        # not import `ui/test_results` — it is the module that talks to the
+        # wasm worker, and a Test Results pane is one of two surfaces over what
+        # it produces (the BUILD pane is the other, and gets the same run
+        # through `noir_build_producer`).
+        #
+        # `initTestResultsVM` first because the pane may not have been mounted
+        # yet: `onNs9PanesCatalog` also calls it, and whichever runs first
+        # creates the instance.
+        test_results.initTestResultsVM()
+        if not test_results.testResultsVMInstance.isNil:
+          let testsVM = test_results.testResultsVMInstance
+          testsVM.runTests = proc() = web_noir_build.startNoirTests()
+          web_noir_build.noirTestRunStarted = proc() = testsVM.beginRun()
+          web_noir_build.noirTestRunSettled = proc() = testsVM.endRun()
+          web_noir_build.noirTestRunSink =
+            proc(response: NoirTestResponse; packageDir: string) =
+              # The catalog is read AT FOLD TIME rather than captured, because
+              # it arrives on its own message and may not have when this
+              # closure was made. Its only use is resolving a selector to the
+              # id the pane joins on; `noirTestRunEvents` derives one when the
+              # catalog has no such test, so an empty catalog degrades to rows
+              # that still carry every verdict.
+              inc noirTestRunCounter
+              for event in noirTestRunEvents(
+                  response, testsVM.catalog.val,
+                  runId = "wasm-test-" & $noirTestRunCounter,
+                  commandLine = "nargo test",
+                  packageDir = packageDir):
+                testsVM.ingestEvent(event)
 
         # RUN IS A MODE TRANSITION — "full surface, returnable".
         #
