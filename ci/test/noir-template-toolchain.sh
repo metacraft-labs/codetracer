@@ -110,14 +110,39 @@ expect_count() {
 echo "=== the bundled Noir template, against the real toolchain ==="
 echo
 
-command -v nargo >/dev/null 2>&1 || {
-	echo "nargo is not on PATH; run inside the dev shell (ourPkgs.noir)" >&2
-	exit 2
+# A MISSING TOOLCHAIN IS A FAILURE, NOT A THIRD OUTCOME.
+#
+# These guards exited 2, above `expect_count` and above the `checks` counter,
+# so the script could report that NOTHING WAS VERIFIED without printing a
+# RESULT line and without the one sentence `expect_count` exists to print. A
+# reader scanning the output for "FAILED" found nothing, because nothing was
+# written.
+#
+# Exit 2 also offers a caller a third state to interpret as "skipped". Nothing
+# in this repo keys on it -- the justfile recipe and the deploy workflow both
+# just run the script, the latter under `set -e` -- so the distinct code buys
+# no caller anything and costs the reader the RESULT line.
+#
+# The rule this file states at `expect_count` applies to this file first: an
+# assertion that did not run is not an assertion that passed. Its own
+# absent-toolchain exit was exactly that case, one level above the counter that
+# enforces the rule. So say it, in the same words, and fail with the same code
+# as any other failure.
+#
+# No count is named here on purpose. The number of assertions written depends
+# on whether arm V is in play, and a numeral in this message would be the same
+# mistake arm I made: a constant in a second place, wrong the day the first one
+# moves.
+require_tool() {
+	command -v "$1" >/dev/null 2>&1 && return 0
+	printf '\nRESULT: FAILED — 0 assertion(s) ran; the suite never started.\n'
+	printf 'An assertion that did not run is not an assertion that passed.\n'
+	printf '%s is not on PATH; %s\n' "$1" "$2" >&2
+	exit 1
 }
-command -v nim >/dev/null 2>&1 || {
-	echo "nim is not on PATH; run inside the dev shell" >&2
-	exit 2
-}
+
+require_tool nargo 'run inside the dev shell (ourPkgs.noir).'
+require_tool nim 'run inside the dev shell.'
 
 # ---------------------------------------------------------------------------
 # The fixture writer — the product's own constants, not this script's.

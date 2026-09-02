@@ -310,12 +310,20 @@ const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir",
   ## function of a constant is a constant, so carrying the answer is the same
   ## kind of claim as carrying the files.
   ##
-  ## What would make it dishonest is drift, and that is what
-  ## `test_noir_template_constraints.nim` exists to prevent: it writes this
-  ## template to a temporary directory, runs `nargo info --json` against it,
-  ## and fails if the bytes differ. So editing `main.nr` without re-measuring
-  ## fails a suite instead of shipping a number that is quietly wrong — the
-  ## same gate that checks the crate compiles and its five tests pass.
+  ## What would make it dishonest is drift, and what prevents it is
+  ## `ci/test/noir-template-toolchain.sh`: it writes this template to a
+  ## temporary directory, runs `nargo info --json` against it, and fails if the
+  ## bytes differ. So editing `main.nr` without re-measuring fails a gate
+  ## instead of shipping a number that is quietly wrong — the same gate that
+  ## checks the crate compiles and its five tests pass.
+  ##
+  ## THIS NAMED `test_noir_template_constraints.nim` UNTIL 09-02, AND NO SUCH
+  ## FILE HAS EVER EXISTED. The description was accurate and the filename was
+  ## invented, so a reader who wanted to see the drift check ran out of places
+  ## to look, and a reader who merely saw a test named went away reassured. The
+  ## check it describes is real — it is the shell gate above — but it had never
+  ## run in CI, so the constant it guards was wrong (17 against a measured 15)
+  ## for a day before anything said so.
   ##
   ## ## And why the web needs it at all
   ##
