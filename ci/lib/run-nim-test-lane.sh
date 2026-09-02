@@ -161,6 +161,50 @@ while read -r f; do
 	verdict="$(classify_test_run "${rc}" "${oks}" "${fails}")"
 	test_run_headline "${verdict}" "${rc}" "${oks}" "${fails}" "${skips}"
 
+	# THE KNOWN-FAILURE LEDGER (ci/lib/known-test-failures.tsv).
+	#
+	# Consulted for `ok` AND `partial`, and for NOTHING ELSE. Both directions
+	# matter and the second is the one that makes this a mechanism rather than
+	# a mute button:
+	#
+	#   partial — the reds may be exactly the registered ones, in which case
+	#             the file is settled and the lane stays green;
+	#   ok      — a registered test that has started PASSING must redden the
+	#             lane by name, so the entry gets deleted instead of quietly
+	#             outliving its defect.
+	#
+	# `crashed`, `no-results` and `silent-failure` are deliberately NOT offered
+	# to it. A registration excuses a named case that ran and failed for a named
+	# reason; it must never excuse a suite that died, reported nothing, or
+	# exited non-zero with no failure to point at. That is the shape of the trap
+	# a sibling repo hit — a ledger entry that went on swallowing an exit code
+	# after the run had started throwing on its first line — and the guard is
+	# here, at the only place that can see the process's exit status.
+	kf_out=""
+	kf_rc=0
+	case "${verdict}" in
+	ok | partial)
+		kf_out="$(printf '%s\n' "${output}" |
+			python3 "${repo_root}/ci/lib/known_failures.py" \
+				reconcile "${lane}" "${f}" 2>&1)" || kf_rc=$?
+		;;
+	esac
+	if [ -n "${kf_out}" ]; then
+		printf '%s\n' "${kf_out}" | sed 's/^/      /'
+	fi
+	if [ "${kf_rc}" -eq 1 ]; then
+		failed=$((failed + 1))
+		continue
+	fi
+	if [ "${kf_rc}" -eq 3 ]; then
+		# Settled: every red is registered and failed for its registered
+		# reason. Counted as passed so the lane's verdict reflects "nothing
+		# here is unaccounted for" — the count of registrations is printed
+		# above, so this is never silent.
+		passed=$((passed + 1))
+		continue
+	fi
+
 	case "${verdict}" in
 	ok)
 		passed=$((passed + 1))
@@ -239,6 +283,19 @@ fi
 if [ "${compile_only}" -eq 0 ] && [ "${total_oks}" -eq 0 ]; then
 	echo "ERROR: lane '${lane}' ran ${files} file(s) but reported no test cases." >&2
 	exit 1
+fi
+
+# A registration against a file this lane does not run is unreachable: nothing
+# will ever observe it going green, so it can never be retired, and it sits
+# there implying somebody is watching a red that nobody runs. The per-file
+# reconciliation above cannot see this — it only ever looks at files that ran —
+# so the whole-lane view is checked once, here.
+if [ "${compile_only}" -eq 0 ]; then
+	if ! kf_audit="$(test_lane_files "${lane}" |
+		xargs python3 "${repo_root}/ci/lib/known_failures.py" audit "${lane}" 2>&1)"; then
+		printf '%s\n' "${kf_audit}" >&2
+		exit 1
+	fi
 fi
 
 [ "${failed}" -eq 0 ]

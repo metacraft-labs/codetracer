@@ -2904,6 +2904,28 @@ test-web-bundle-assets:
 #
 # Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
 # otherwise.
+# THE KNOWN-FAILURE LEDGER FAILS IN BOTH DIRECTIONS.
+#
+# `ci/lib/known-test-failures.tsv` lets a lane stay green over a red that has
+# been triaged and registered. A mechanism that can only ever suppress is
+# indistinguishable from one that suppresses everything, so this drives
+# `ci/lib/known_failures.py` over fixtures and asserts the exit code in each
+# direction: a registered red is excused, a registered test that has started
+# PASSING reddens the lane by name, and a registered test failing for an
+# UNREGISTERED reason is not absorbed.
+#
+# That last arm is the trap this closes: an entry keyed on a test's identity
+# alone swallows any failure of that test, which is how a sibling repo's ledger
+# went on green-lighting a journey that had started throwing on its first line.
+#
+# Pure shell and python, no build: seconds, not minutes.
+test-known-failures:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-known-failures.log) 2>&1
+  bash ci/test/known-failures-gate.sh
+
 test-web-renderer-mounts:
   #!/usr/bin/env bash
   set -euo pipefail

@@ -1,0 +1,81 @@
+# Known test failures — the executable ledger.
+#
+# lane <TAB> file <TAB> test name <TAB> signature
+#
+# READ ci/lib/known_failures.py BEFORE ADDING A ROW. The short version:
+#
+#   * A registered test still asserts the CORRECT behaviour and still fails.
+#     Never edit a test to match today's wrong answer — that teaches the next
+#     maintainer that the wrong answer is the contract, which is the whole
+#     reason this file exists rather than a `skip`.
+#   * A registered test that starts PASSING fails the lane by name. That is the
+#     signal. Delete its row; do not "resolve" it in place.
+#   * `signature` is a substring that must appear in THAT case's own failure
+#     output. It is what stops an entry from silently absorbing a different
+#     failure of the same test — a ledger keyed on identity alone has already
+#     green-lit a failure nobody reviewed, in a sibling repo, when a schema bump
+#     made a journey throw on its first line.
+#   * The failing set must equal the registered set exactly, so a new red is
+#     never absorbed by its neighbours, and a suite that never ran (compile
+#     error, crash before the first case) can never be excused by its rows.
+#
+# Registering is the LAST resort. If the product can be fixed cheaply, fix it:
+# `new_trace_caption_chrome_test.nim`'s red was going to be registered here and
+# turned out to be a grep that had not followed its subject to another module,
+# so it was fixed instead and has no row.
+#
+# ---------------------------------------------------------------------------
+# THE STRICT MOCK, 2026-09-02.
+#
+# `MockBackendService.send` now validates against `VALID_DAP_COMMANDS` and
+# raises. That turned eleven silently-wrong dispatches into honest reds. The
+# full triage is `src/frontend/viewmodel/backend/dap_dialect.md` §7b; the short
+# form is that all eleven send a command NO ENGINE IMPLEMENTS, so the tests are
+# right and the product is wrong.
+#
+# These are NOT "adding the string to VALID_DAP_COMMANDS" jobs. That list
+# describes what the engine implements; editing it implements nothing.
+#
+#   ct/load-recent-trace, ct/load-recent-folder, ct/new-record, ct/launch-config
+#     Wrong transport, not a wrong name. `welcome_screen_vm.nim`'s own comment
+#     calls this "the legacy CODETRACER::load-recent-trace flow" — an Electron
+#     IPC channel (ui/welcome_screen.nim:281, ui_js.nim:3314), a main-process
+#     concern the replay engine should never implement. The ViewModel routes the
+#     payload through the DAP backend instead, where nothing handles it.
+#     Retired by: a host-callback seam on WelcomeScreenVM (it has none at all)
+#     plus host wiring — four seams. `re_record_queue_vm_test.nim` already
+#     models the right shape: the VM returns effects by value, the adapter
+#     performs the IPC.
+#
+#   ct/load-step-lines
+#     Genuinely dead. No engine arm loads step lines for a location and there is
+#     no analogue to redirect to, so there is nothing to rename it to either.
+#     Retired by: an engine command for it.
+#
+# Both files run in vm-native (C) and vm-js (node), so each case is registered
+# for both lanes: the defect is in the ViewModel, which is backend-neutral.
+# ---------------------------------------------------------------------------
+
+vm-native	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	click on recent trace dispatches load and flips loading	MockBackendService: 'ct/load-recent-trace' is not a valid DAP command.
+vm-native	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	test_recent_trace_loading	MockBackendService: 'ct/load-recent-trace' is not a valid DAP command.
+vm-native	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	loading a recent trace is replay mode only	MockBackendService: 'ct/load-recent-trace' is not a valid DAP command.
+vm-native	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	loadRecentFolder pre-flips edit mode and dispatches	MockBackendService: 'ct/load-recent-folder' is not a valid DAP command.
+vm-native	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	launchSelectedConfig dispatches when a slug is selected	MockBackendService: 'ct/launch-config' is not a valid DAP command.
+vm-native	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	native launch configs enter live MCR mode when native backend is installed	MockBackendService: 'ct/launch-config' is not a valid DAP command.
+vm-native	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	submitNewRecord dispatches when valid	MockBackendService: 'ct/new-record' is not a valid DAP command.
+vm-native	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	RR and TTD native choices record replay-only sessions	MockBackendService: 'ct/new-record' is not a valid DAP command.
+vm-native	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	materialized recorders start live except blockchain-style recorders	MockBackendService: 'ct/new-record' is not a valid DAP command.
+vm-native	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor emits ct/load-step-lines with location + count	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.
+vm-native	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor falls back to default panel height when unset	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.
+
+vm-js	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	click on recent trace dispatches load and flips loading	MockBackendService: 'ct/load-recent-trace' is not a valid DAP command.
+vm-js	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	test_recent_trace_loading	MockBackendService: 'ct/load-recent-trace' is not a valid DAP command.
+vm-js	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	loading a recent trace is replay mode only	MockBackendService: 'ct/load-recent-trace' is not a valid DAP command.
+vm-js	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	loadRecentFolder pre-flips edit mode and dispatches	MockBackendService: 'ct/load-recent-folder' is not a valid DAP command.
+vm-js	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	launchSelectedConfig dispatches when a slug is selected	MockBackendService: 'ct/launch-config' is not a valid DAP command.
+vm-js	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	native launch configs enter live MCR mode when native backend is installed	MockBackendService: 'ct/launch-config' is not a valid DAP command.
+vm-js	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	submitNewRecord dispatches when valid	MockBackendService: 'ct/new-record' is not a valid DAP command.
+vm-js	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	RR and TTD native choices record replay-only sessions	MockBackendService: 'ct/new-record' is not a valid DAP command.
+vm-js	src/tests/gui/tests/welcome-screen/welcome_screen_vm_test.nim	materialized recorders start live except blockchain-style recorders	MockBackendService: 'ct/new-record' is not a valid DAP command.
+vm-js	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor emits ct/load-step-lines with location + count	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.
+vm-js	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor falls back to default panel height when unset	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.

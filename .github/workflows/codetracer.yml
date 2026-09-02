@@ -1805,6 +1805,28 @@ jobs:
         # attributable to different steps.
         run: nix develop .#devShells.x86_64-linux.default --command just test-web-renderer-mounts
 
+      - name: A registered known failure signals when it goes green
+        # The ledger `just test-vm` now consults, gated in both directions.
+        #
+        # Making `MockBackendService` strict turned eleven silently-wrong
+        # dispatches into honest reds, and there was nowhere to put them: this
+        # repo had no known-failure mechanism at all — no registry, no
+        # annotation, no allow-list — so "registered as a known failure" meant a
+        # row in a Markdown table and `just test-vm` exited 1 on every push. A
+        # permanently red suite is one nobody reads, which is the condition
+        # underneath this campaign's worst findings.
+        #
+        # A suppression mechanism observed only suppressing is
+        # indistinguishable from one that suppresses everything, so this asserts
+        # the other direction too: a registered test that starts PASSING reddens
+        # the lane by name, and one failing for an UNREGISTERED reason is not
+        # absorbed. Eight arms, counted, with the count asserted.
+        #
+        # Before `just test-vm` deliberately, so a broken ledger is reported as
+        # a broken ledger rather than as whatever the lane does when it reads
+        # one.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-known-failures
+
       - name: One press, one action; one pane id, one node
         # Two latent defects that were doing no harm by luck. The pane half is
         # a fixed duplicate-id fall-through in `ui/layout.nim`, with an arm
