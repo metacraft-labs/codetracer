@@ -479,10 +479,14 @@ proc installNoirBuildCommands*(tmpl: ProjectTemplate) =
   ## this tab does not have). Overwriting it here rather than branching inside
   ## `ui_js.nim` keeps the desktop's wiring exactly as it was.
   ##
-  ## `cancelBuildProc` likewise. `build_vm.cancelBuild` dispatches
-  ## `ct/build-cancel` on the backend when no host claims the running build —
-  ## the desktop's channel — and a browser's stub backend would resolve `{}`
-  ## and make a Stop that did nothing look like one that worked.
+  ## `cancelBuildProc` likewise, and it is now the *only* way a build stops.
+  ## `build_vm.cancelBuild` used to fall back to dispatching `ct/build-cancel`
+  ## on the backend, described there as "the desktop's channel"; it was no
+  ## such thing — `backend/dap_dialect.md` §7 records it as having no engine
+  ## implementation, and no view sends any build-cancel channel either. A
+  ## browser's stub backend resolved it `{}`, making a Stop that did nothing
+  ## look like one that worked. The fallback is gone, so `cancelBuildProc` —
+  ## registered just above — is what makes ■ Stop terminate the Worker.
   # NO LONGER CACHES THE TEMPLATE. It used to do `buildTemplate = tmpl`, and
   # that assignment WAS the defect: a copy of a value type, frozen here, read
   # by every later Build. The pane's callbacks below take no template at all —
