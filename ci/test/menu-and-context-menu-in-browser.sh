@@ -487,10 +487,78 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# THE GUTTER — one lane, one owner, and the ABSENCE of the second effect.
+#
+# Reported as "clicking the gutter to place a breakpoint also collapses the
+# function".  It does not reproduce on either the deployed build or `cloud`:
+# `.gutter` subtracts `--ct-gutter-folding-lane` from its own width, so Monaco's
+# chevron is never underneath us.  A test that checked each control WORKS would
+# have passed on the defect exactly as reported, so both directions here are
+# assertions about what must NOT also happen.
+#
+# The lanes are asserted too, because a third control is being added to this
+# strip: each lane must own the hit test at its own centre, and no two may
+# overlap.  They did — the breakpoint and tracepoint markers had independently
+# tuned right offsets that put the tracepoint over the breakpoint's centre.
+# ---------------------------------------------------------------------------
+if [ "$(q gutter geom line)" != "null" ]; then
+	ck ok "[gutter] a foldable line is on screen (line $(q gutter geom line)), so the" \
+		"two gestures below have a subject"
+else
+	ck fail "[gutter] no foldable line found; the gutter checks measure nothing"
+fi
+
+unowned="$(python3 -c "
+import json
+z = json.loads('''$(q gutter geom zones)''') or {}
+print(','.join(n for n, v in z.items() if not v['ownedBySelf']) or 'none')
+print(len(z))
+")"
+unowned_names="$(printf '%s\n' "${unowned}" | head -1)"
+zone_count="$(printf '%s\n' "${unowned}" | tail -1)"
+if [ "${zone_count:-0}" -ge 3 ] && [ "${unowned_names}" = "none" ]; then
+	ck ok "[gutter/lanes] all ${zone_count} lanes own the hit test at their own centre"
+else
+	ck fail "[gutter/lanes] ${zone_count} lane(s) found; these do not own their own" \
+		"centre: ${unowned_names} — $(q gutter geom zones)"
+fi
+
+overlaps="$(q gutter geom overlaps)"
+if [ "$(python3 -c "import json;print(len(json.loads('''${overlaps}''')))")" = "0" ]; then
+	ck ok "[gutter/lanes] no two lanes overlap horizontally"
+else
+	ck fail "[gutter/lanes] lanes overlap: ${overlaps}"
+fi
+
+if [ "$(q gutter geom lineNumberClipped)" = "false" ]; then
+	ck ok "[gutter/lanes] and the line number still fits its lane after the marker" \
+		"lane was widened to separate the markers"
+else
+	ck fail "[gutter/lanes] the line number is clipped by its lane"
+fi
+
+if [ "$(q gutter clickGutter breakpointChanged)" = "true" ] &&
+	[ "$(q gutter clickGutter folded)" = "false" ]; then
+	ck ok "[gutter/click] a gutter click toggles the breakpoint and does NOT fold"
+else
+	ck fail "[gutter/click] breakpointChanged=$(q gutter clickGutter breakpointChanged)" \
+		"folded=$(q gutter clickGutter folded) — expected a breakpoint and no fold"
+fi
+
+if [ "$(q gutter clickChevron folded)" = "true" ] &&
+	[ "$(q gutter clickChevron breakpointChanged)" = "false" ]; then
+	ck ok "[gutter/fold] the dedicated folding control folds and does NOT touch" \
+		"breakpoints"
+else
+	ck fail "[gutter/fold] folded=$(q gutter clickChevron folded)" \
+		"breakpointChanged=$(q gutter clickChevron breakpointChanged)"
+fi
+
+# ---------------------------------------------------------------------------
 # THE COUNT ITSELF, so a check skipped by an early `return` cannot read as a
 # pass.  Raise this deliberately when adding one.
 # ---------------------------------------------------------------------------
-EXPECTED_CHECKS=18
+EXPECTED_CHECKS=24
 echo
 if [ "${checks}" -ne "${EXPECTED_CHECKS}" ]; then
 	echo "RESULT: FAILED — ${checks} check(s) ran, ${EXPECTED_CHECKS} expected."
