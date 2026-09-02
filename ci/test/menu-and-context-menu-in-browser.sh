@@ -72,7 +72,11 @@ ck() {
 }
 note() { echo "      $*"; }
 
-for tool in node python3; do
+required_tools="node python3"
+# `nim` only when this gate is going to build the renderer itself; an arm that
+# supplies its own tree does not need a compiler on PATH.
+[ -z "${CT_MENU_GATE_TREE:-}" ] && required_tools="${required_tools} nim"
+for tool in ${required_tools}; do
 	command -v "${tool}" >/dev/null 2>&1 || {
 		echo "menu-and-context-menu-in-browser.sh: no '${tool}' on PATH." >&2
 		echo "  remedy: run inside the dev shell (direnv exec ${repo_root} ...)" >&2
@@ -109,11 +113,46 @@ if [ -z "${tree}" ]; then
 	tree="${bundle}"
 fi
 
-# THE STYLESHEET IS PART OF THE SUBJECT, and that is not incidental here: the
-# menu half of this gate is entirely a stylesheet defect.  A bundle assembled
-# before a `.styl` edit carries the OLD compiled CSS, so an arm that mutates a
-# stylesheet would score a false pass while the browser rendered the old rules.
+# BOTH HALVES OF THE SUBJECT ARE REBUILT FROM SOURCE, because a pre-assembled
+# `CT_WEB_BUNDLE_DIR` carries whatever `ui.js` and `.css` it was built with, and
+# a gate that measured those would be reporting on a tree nobody edited.  That is
+# the "verify the instrument" trap, and it bites hardest here: the menu half is
+# entirely a stylesheet defect and the context-menu half is entirely a renderer
+# one, so a stale copy of either half silently passes over its own defect.
+#
+# `CT_MENU_GATE_TREE` opts out on purpose — it names a tree the caller has
+# already prepared, which is how the mutation arms serve a mutated build.
 if [ -z "${CT_MENU_GATE_TREE:-}" ]; then
+	# Into a COPY, so a caller's `CT_WEB_BUNDLE_DIR` is never written through.
+	served="${cache}/tree"
+	if [ -e "${served}" ]; then
+		chmod -R u+w "${served}" 2>/dev/null
+		rm -rf "${served}"
+	fi
+	cp -R "${tree}" "${served}"
+	chmod -R u+w "${served}"
+	tree="${served}"
+
+	echo "Rebuilding the renderer into the tree..."
+	rm -f "${cache}/ui.js"
+	if ! nim js --hints:off --warnings:off -d:chronicles_enabled=off \
+		-d:ctRenderer -d:ctWeb --nimcache:"${cache}/nimcache" \
+		-o:"${cache}/ui.js" src/frontend/ui_js.nim \
+		>"${cache}/build.log" 2>&1 || [ ! -f "${cache}/ui.js" ]; then
+		# `nim js` has exited 0 while writing no artifact in this repo, so the
+		# file itself is checked rather than the status.
+		echo "  the renderer did not build; see ${cache}/build.log" >&2
+		grep -E 'Error:' "${cache}/build.log" | head -3 | sed 's/^/      /' >&2
+		exit 2
+	fi
+	# The assembled tree wraps `ui.js` in an IIFE.  Reproduce it, or the renderer
+	# redefines globals and the page dies before mounting.
+	{
+		printf '(function () {\n'
+		cat "${cache}/ui.js"
+		printf '\n})();\n'
+	} >"${tree}/ui.js"
+
 	if [ -x node_modules/.bin/stylus ]; then
 		if node node_modules/.bin/stylus -p \
 			src/frontend/styles/default_dark_theme_electron.styl \
