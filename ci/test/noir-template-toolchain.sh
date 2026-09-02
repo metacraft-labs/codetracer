@@ -40,6 +40,28 @@
 #      a suite in which everything is green is one that a runner with the
 #      inversion backwards also reports as green.
 #
+#   6. AND THEY AGREE ABOUT WHAT IS VALID NOIR AT ALL, not only about what
+#      happened to the tests inside a file both engines accepted. Claim 5
+#      compares two VERDICT LISTS, so it can only speak about a program that
+#      compiled twice. A file one engine REFUSES and the other accepts does not
+#      surface there as a disagreement — it surfaces as "0 versus 7", which arm
+#      V's own guard then attributes to "nargo never ran". That is the wrong
+#      component: nargo ran perfectly and returned a considered rejection.
+#
+#      THIS IS NOT HYPOTHETICAL. The template shipped as the hello-world
+#      carried two `§` characters and an em dash in `src/tests.nr`'s comments.
+#      The browser reported five passing tests for about a day while the
+#      `nargo` from the flake pin refused the same file outright:
+#
+#        Invalid comment character: only ASCII is currently supported.
+#        Error: Aborting due to 3 previous errors
+#
+#      Nothing in this gate could see it, because nothing in this gate ever
+#      asked the two engines whether they agreed that a file was Noir. Arm U
+#      below asks exactly that, and it is the direction that matters: code
+#      that works in the studio and fails on the user's machine is the one
+#      failure a user cannot detect from inside the studio.
+#
 # THE SHAPE, from Verification-Harness-Traps.md 4a/4c
 # ---------------------------------------------------
 #   * COUNTED assertions, with the count asserted at the bottom.
@@ -63,18 +85,47 @@
 #     verdict-equality check alone. Its own control is the un-inverted diff in
 #     the same arm, so "the two engines agree" and "the check can see a
 #     disagreement" are established over the same two runs.
+#   * arm U (feed both engines a comment containing `§` and an em dash):
+#     reddens the VALIDITY-agreement check ALONE, and this was verified by
+#     making the divergence happen rather than by reasoning about it. A `nargo`
+#     shim was put ahead of the real one on PATH, refusing any crate whose
+#     sources contain a non-ASCII byte with the beta.2 lexer's own words
+#     ("Invalid comment character: only ASCII is currently supported") and
+#     delegating every other subcommand unchanged. Under that shim the gate
+#     goes RED on one check — "THE ENGINES DISAGREE ABOUT WHAT IS VALID NOIR
+#     — nargo rejected, the wasm module accepted" — while arm U's two controls
+#     and all of arms P, I, B and V stay green. Removing the shim returns the
+#     suite to 21 green.
 #
-# ARM V IS SKIPPED LOUDLY, not silently, when `CT_NOIR_WASM_COMPILER` is unset
-# or `node` is missing — and the expected assertion count moves with it, so a
-# skipped arm cannot be mistaken for a passed one. The deploy workflow sets that
-# variable from `ci/deploy/build-noir-wasm.sh`'s output directory.
+#     Its controls are in the same arm: the same crate with those characters
+#     transliterated to ASCII must be accepted by both, and a crate with a real
+#     syntax error must be REFUSED by both — so "they agree" cannot be
+#     satisfied by two oracles that only ever say "accepted", and each engine
+#     is observed producing BOTH answers in the same run.
 #
-# NETWORK: none. `nargo` is a local binary from `ourPkgs.noir`
-# (`nix/shells/ci-base.nix`); nothing is fetched.
+# ARMS U AND V ARE SKIPPED LOUDLY, not silently, when `CT_NOIR_WASM_COMPILER`
+# is unset or `node` is missing — and the expected assertion count moves with
+# them, so a skipped arm cannot be mistaken for a passed one. The deploy
+# workflow sets that variable from `ci/deploy/build-noir-wasm.sh`'s output
+# directory.
+#
+# NETWORK: none. `nargo` is a local binary; nothing is fetched.
+#
+# WHICH `nargo` ANSWERED IS PRINTED, AND IT IS NOT A FORMALITY. This file used
+# to say `nargo` came from `ourPkgs.noir` (`nix/shells/ci-base.nix`). On a
+# workstation it frequently does not: the workspace `.envrc` puts a SIBLING
+# CHECKOUT's release build ahead of it on PATH, and the two are different
+# compilers with different answers. The flake pin (`5e98f904`, beta.2) still
+# carries the lexer's `NonAsciiComment` check; the sibling build measured on
+# 2026-09-02 (`906af2f4`, beta.26) does not, because upstream deliberately
+# removed it in `93bb72f8` "feat!: allow UTF-8 in comments (#12699)". So the
+# SAME script, run in two shells, is two different oracles — and a green run
+# that does not name the binary is a result nobody can reproduce. "Measured
+# locally" is not a provenance.
 #
 # Usage:  bash ci/test/noir-template-toolchain.sh
 # Env:    CT_NIM_CACHE_ROOT       nim cache root (default /tmp/ct-nim-cache)
-#         CT_NOIR_WASM_COMPILER   noir_wasm.wasm, for arm V (optional)
+#         CT_NOIR_WASM_COMPILER   noir_wasm.wasm, for arms U and V (optional)
 
 set -uo pipefail
 
@@ -141,8 +192,23 @@ require_tool() {
 	exit 1
 }
 
-require_tool nargo 'run inside the dev shell (ourPkgs.noir).'
+require_tool nargo 'run inside the dev shell.'
 require_tool nim 'run inside the dev shell.'
+
+# THE ORACLE NAMES ITSELF, beside every verdict it is about to produce.
+#
+# `command -v nargo` is not decoration here. Which binary answers decides what
+# this gate MEANS, and on a developer workstation it is routinely not the one
+# the shell config nominates — see the header. Printing the resolved path and
+# the compiler revision costs two lines and makes a disagreement between two
+# runs of this script diagnosable instead of mysterious.
+nargo_path="$(command -v nargo)"
+note "nargo:  ${nargo_path}"
+nargo --version 2>/dev/null | sed 's/^/    /'
+if [ -n "${CT_NOIR_WASM_COMPILER:-}" ] && [ -f "${CT_NOIR_WASM_COMPILER}" ]; then
+	note "module: ${CT_NOIR_WASM_COMPILER} ($(wc -c <"${CT_NOIR_WASM_COMPILER}" | tr -d ' ') bytes, sha256 $(shasum -a 256 "${CT_NOIR_WASM_COMPILER}" | cut -c1-16))"
+fi
+echo
 
 # ---------------------------------------------------------------------------
 # The fixture writer — the product's own constants, not this script's.
@@ -637,7 +703,150 @@ ARM_V
 fi
 echo
 
-expect_count $((11 + engine_checks + arm_v_checks))
+# ---------------------------------------------------------------------------
+echo "Arm U: VALIDITY — the two engines agree about what is Noir AT ALL"
+echo "    Expect both to accept a non-ASCII comment or both to refuse it, and"
+echo "    the check to be able to see a one-sided refusal."
+# ---------------------------------------------------------------------------
+# WHY A SEPARATE ARM AND NOT ANOTHER LINE IN ARM V.
+#
+# Arm V diffs two verdict LISTS. Both sides of that diff only exist for a
+# program both engines compiled, so the comparison is conditioned on the very
+# agreement this arm establishes. When an engine refuses the file, arm V sees an
+# empty list and its guard says "nargo emitted NO events — it never ran", which
+# names the wrong component: nargo ran, and returned a reasoned rejection. A
+# check whose failure message sends the reader to the healthy component is worse
+# than no check, so the question is asked here, first, and in its own terms.
+#
+# ACCEPTED-vs-REFUSED is the whole comparison. Not the diagnostic text, which
+# the two engines spell differently and are entitled to; only whether each one
+# considers the file a Noir program.
+
+# "accepted" or "rejected" — does `nargo` consider the crate in <dir> valid?
+nargo_validity() {
+	if (cd "$1" && nargo compile >"$2" 2>&1); then
+		echo accepted
+	else
+		echo rejected
+	fi
+}
+
+# The same question, asked of the module a browser downloads.
+#
+# `noir-template-verdicts.mjs` exits 0 having listed verdicts when the module
+# compiled the crate, and exits 1 reporting `could not run the suite` when
+# `nv_test_vfs` answered with a compile failure. That is `nargo compile`'s
+# question put to the other engine, which is why this arm can compare the two
+# without a second wasm driver.
+wasm_validity() {
+	if node ci/test/noir-template-verdicts.mjs "$1" hello_noir \
+		>/dev/null 2>"$2"; then
+		echo accepted
+	else
+		echo rejected
+	fi
+}
+
+arm_u_checks=0
+if [ -z "${CT_NOIR_WASM_COMPILER:-}" ] || [ ! -f "${CT_NOIR_WASM_COMPILER:-}" ]; then
+	note "SKIPPED: CT_NOIR_WASM_COMPILER is unset or does not name a file."
+	note "  This arm is the one that would have caught the non-ASCII template:"
+	note "  it asks both engines whether a file is valid Noir at all. Build the"
+	note "  module and point at it:"
+	note "    bash ci/deploy/build-noir-wasm.sh /tmp/noir-wasm-out"
+	# shellcheck disable=SC1003
+	note '    CT_NOIR_WASM_COMPILER=/tmp/noir-wasm-out/noir_wasm.wasm \'
+	note "      bash ci/test/noir-template-toolchain.sh"
+elif ! command -v node >/dev/null 2>&1; then
+	note "SKIPPED: node is not on PATH, and the wasm module is driven from node."
+else
+	arm_u_checks=3
+
+	# CONTROL 1: the same shape of edit, in ASCII, must be accepted by BOTH.
+	# Without it a disagreement below could be about appending a comment at all,
+	# or about the fixture, rather than about the characters in it.
+	arm_dir="${cache}/arm-validity-ascii"
+	materialise "${arm_dir}" >"${cache}/u-ascii-report.txt" 2>&1
+	printf '\n// arm U: section S and S plus an em dash - in a comment\n' \
+		>>"${arm_dir}/src/main.nr"
+	u_ascii_nargo="$(nargo_validity "${arm_dir}" "${cache}/u-ascii-nargo.log")"
+	u_ascii_wasm="$(wasm_validity "${arm_dir}" "${cache}/u-ascii-wasm.err")"
+	if [ "${u_ascii_nargo}" = "accepted" ] && [ "${u_ascii_wasm}" = "accepted" ]; then
+		ck ok "arm U: both engines accept the crate with an ASCII comment, so a disagreement below is about the CHARACTERS and not about the edit"
+	else
+		ck fail "arm U: the ASCII control was not accepted by both (nargo ${u_ascii_nargo}, wasm ${u_ascii_wasm}) — this arm cannot isolate anything:"
+		tail -5 "${cache}/u-ascii-nargo.log" | sed 's/^/      /'
+		tail -5 "${cache}/u-ascii-wasm.err" | sed 's/^/      /'
+	fi
+
+	# CONTROL 2: a crate neither engine can accept. This is what stops the
+	# equality below from being satisfied by two oracles that only ever answer
+	# "accepted" — the failure mode that makes an agreement check vacuous.
+	arm_dir="${cache}/arm-validity-broken"
+	materialise "${arm_dir}" >"${cache}/u-broken-report.txt" 2>&1
+	printf '\nfn broken( {\n' >>"${arm_dir}/src/main.nr"
+	u_broken_nargo="$(nargo_validity "${arm_dir}" "${cache}/u-broken-nargo.log")"
+	u_broken_wasm="$(wasm_validity "${arm_dir}" "${cache}/u-broken-wasm.err")"
+	if [ "${u_broken_nargo}" = "rejected" ] && [ "${u_broken_wasm}" = "rejected" ]; then
+		ck ok "arm U: both engines refuse a crate with a syntax error, so each oracle can say 'rejected' and the agreement check is not vacuous"
+	else
+		ck fail "arm U: a syntax error was not refused by both (nargo ${u_broken_nargo}, wasm ${u_broken_wasm}) — an 'always accepted' oracle would agree with anything"
+	fi
+
+	# THE CHECK ITSELF. `§` twice and an em dash, in a comment — the exact shape
+	# that shipped in the template's `src/tests.nr` and compiled in the browser
+	# while the flake pin's `nargo` refused it. Written as byte escapes rather
+	# than literals so that what is being appended is unambiguous in review and
+	# survives an editor that helpfully normalises the file.
+	arm_dir="${cache}/arm-validity-utf8"
+	materialise "${arm_dir}" >"${cache}/u-report.txt" 2>&1
+	printf '\n// arm U: section \xc2\xa7 and \xc2\xa7 plus an em dash \xe2\x80\x94 in a comment\n' \
+		>>"${arm_dir}/src/main.nr"
+	u_nargo="$(nargo_validity "${arm_dir}" "${cache}/u-nargo.log")"
+	u_wasm="$(wasm_validity "${arm_dir}" "${cache}/u-wasm.err")"
+	if [ "${u_nargo}" = "${u_wasm}" ]; then
+		ck ok "arm U: nargo and the wasm module agree that a non-ASCII comment is ${u_nargo}, so the studio will not green-light a file the user's toolchain refuses"
+	else
+		ck fail "arm U: THE ENGINES DISAGREE ABOUT WHAT IS VALID NOIR — nargo ${u_nargo}, the wasm module ${u_wasm}."
+		note "This is the divergence a user cannot detect from inside the studio:"
+		note "code that compiles in the browser and fails on their machine."
+		note "nargo (${nargo_path}) said:"
+		tail -6 "${cache}/u-nargo.log" | sed 's/^/      /'
+		note "the wasm module said:"
+		tail -6 "${cache}/u-wasm.err" | sed 's/^/      /'
+		note "If this is a version gap, the two Noir revisions are the thing to"
+		note "reconcile: the flake pin in flake.nix and NOIR_REV in"
+		note "ci/deploy/noir-wasm.pin. Upstream 93bb72f8 'feat!: allow UTF-8 in"
+		note "comments (#12699)' is the commit that moves this behaviour."
+	fi
+
+	# WHY THERE IS NO INVERSION CONTROL HERE, unlike arm V.
+	#
+	# The first version of this arm had one, and it was wrong in a way worth
+	# recording. Arm V's inversion works because a verdict LIST has many possible
+	# values, so flipping one entry is a perturbation with an expected direction.
+	# This arm's answer is BINARY. Inverting one side flips the equality
+	# unconditionally, so "inverted compares unequal" holds no matter what was
+	# measured — a check that cannot fail. Worse, on the run this arm exists to
+	# catch, where the two genuinely disagree, inverting makes them EQUAL and the
+	# control fires backwards: it would have reported the harness broken at
+	# exactly the moment the harness was working.
+	#
+	# Controls 1 and 2 above are the non-vacuity proof, and they are the right
+	# shape for a two-valued oracle: between them each engine has been observed
+	# saying BOTH "accepted" (the ASCII crate) and "rejected" (the broken crate)
+	# in this same run. An oracle that can produce both values, compared by an
+	# equality that is then given two real measurements, is not vacuous — and
+	# that is established by measurement here rather than by an inversion that
+	# only restates how `=` works.
+	#
+	# That arm U reddens on a real divergence is VERIFIED, out of band, by
+	# putting a `nargo` shim on PATH that refuses non-ASCII comments the way the
+	# flake pin's beta.2 lexer does — see the note in the header.
+fi
+echo
+
+expect_count $((11 + engine_checks + arm_v_checks + arm_u_checks))
 
 if [ "${failures}" -eq 0 ]; then
 	printf 'RESULT: OK — %d check(s); the bundled template compiles, its five tests pass,\n' "${checks}"
@@ -658,6 +867,15 @@ if [ "${failures}" -eq 0 ]; then
 	else
 		printf '            The browser runner'"'"'s verdicts are nargo'"'"'s own.\n'
 	fi
+	# NAME THE ORACLE IN THE SUMMARY TOO, not only at the top. A reader who
+	# scrolls to RESULT to decide whether to trust a green run should not have to
+	# scroll back up to learn which of two different compilers produced it.
+	if [ "${arm_u_checks}" -eq 0 ]; then
+		printf '            Arm U (do the two engines agree what is valid Noir?) was SKIPPED.\n'
+	else
+		printf '            The two engines agree a non-ASCII comment is %s.\n' "${u_nargo}"
+	fi
+	printf '            The nargo that answered: %s\n' "${nargo_path}"
 	exit 0
 fi
 printf 'RESULT: FAILED — %d of %d check(s)\n' "${failures}" "${checks}"

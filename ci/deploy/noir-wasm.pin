@@ -10,6 +10,41 @@
 # deploy in both directions, which is worse than two pins that each say what
 # they are for.
 #
+# AND THE TWO PINS DO NOT AGREE ABOUT WHAT NOIR IS. Measured 2026-09-02: they
+# are not on the same line at all. `5e98f904` is NOT an ancestor of the revision
+# below, and their merge base is `49a095de` from 2025-02-18 — so the native pin
+# is a year-old branch point, not an older point on this branch.
+#
+# THE FIRST USER-VISIBLE CONSEQUENCE, and the reason this paragraph exists. The
+# lexer's non-ASCII comment check lives at
+# `compiler/noirc_frontend/src/lexer/lexer.rs` in `5e98f904` and is ABSENT from
+# the revision below, because upstream removed it deliberately in `93bb72f8`
+# "feat!: allow UTF-8 in comments (#12699)" on 2026-05-18 — after the native
+# pin's branch point and before this one. The effect is that a `§` or an em dash
+# in a comment compiles in the browser and is refused by the flake's `nargo`:
+#
+#   Invalid comment character: only ASCII is currently supported.
+#
+# That shipped. The hello-world template carried two `§` and an em dash in
+# `src/tests.nr` and did not build under the native pin for about a day while
+# the Test Results pane reported five passing tests. The template was fixed; the
+# PIN GAP was not, and it is the thing that can produce the next one.
+#
+# THE DIRECTION MATTERS AND IT IS NOT THE OBVIOUS ONE. The wasm module is not
+# missing a check — it is NEWER, and it matches what upstream Noir decided. The
+# engine that refuses is the stale one. So the repair is to move the native pin
+# forward, not to reintroduce a restriction upstream removed on purpose.
+#
+# UNTIL THAT HAPPENS, THE DISAGREEMENT IS AT LEAST VISIBLE. Arm U of
+# `ci/test/noir-template-toolchain.sh` feeds both engines a comment containing
+# those exact characters and asserts they agree on VALIDITY — accepted by both,
+# or refused by both. Verdict lists could not express this: a file one engine
+# refuses shows up there as "0 versus 7". Note that arm U's `nargo` is whichever
+# one is on PATH, which on a workstation is frequently a sibling checkout's
+# release build (`906af2f4`, beta.26 — no check, so it AGREES) rather than the
+# flake pin (beta.2 — check present, so it DISAGREES). The gate prints the
+# resolved path and revision for that reason.
+#
 # WHY PINNED AT ALL, rather than tracking the branch head. A deploy that
 # rebuilds from a moving ref cannot be reproduced, and the provenance string
 # the entry document carries — `noir@codetracer <rev> compiler/wasm` — would
