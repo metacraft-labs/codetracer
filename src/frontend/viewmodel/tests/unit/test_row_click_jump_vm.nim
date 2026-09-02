@@ -266,8 +266,9 @@ suite "row-click jumps move the debugger (real replay-server)":
     let vm = createStepListVM(session.session.store)
     defer: vm.dispose()
 
-    # A Step List row describing the position we started at.  `rrTicks`
-    # is the field `dap_handler.rs::local_step_jump` actually replays to.
+    # A Step List row describing the position we started at.  The row's
+    # `rrTicks` is what `jumpToStepLine` puts in `ticks`, and what
+    # `dap_handler.rs::goto_ticks` replays to via `jump_to(StepId(..))`.
     vm.jumpToStepLine(StepLine(
       kind: slkLine,
       delta: -1,
