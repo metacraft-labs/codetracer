@@ -5060,7 +5060,7 @@ when defined(ctWeb):
       # Only on the template arm: the welcome screen has no open project, and
       # a Build button pointed at nothing is worse than one that is absent.
       if wantsTemplate and mounted:
-        web_noir_build.installNoirBuildCommands(tmpl)
+        web_noir_build.installNoirBuildCommands()
 
         # THE TEST RESULTS PANE'S ▶, AND WHERE ITS ROWS COME FROM.
         #

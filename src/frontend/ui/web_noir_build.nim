@@ -814,7 +814,19 @@ proc installEditModeToolbar*(invoke: proc(id: string)) =
   report("edit-toolbar", "buttons=" & $model.buttons.len &
     " kinds=" & $model.kinds.len & " group=" & $model.commandGroupVisible)
 
-proc installNoirBuildCommands*(tmpl: ProjectTemplate) =
+proc installNoirBuildCommands*() =
+  ## TAKES NO PROJECT, and that is the point rather than a tidy-up.
+  ##
+  ## It used to take one and cache it (`buildTemplate = tmpl`), which was the
+  ## frozen-value defect its own comment below records. The cure was applied by
+  ## reading `currentProject()` in the callbacks instead — a HABIT, which is
+  ## why the same defect then recurred in `installTemplatePaneHost`, 140 lines
+  ## below an `installTemplateHost` whose header is entirely about it.
+  ##
+  ## A habit is not checkable. A SIGNATURE is: with no parameter there is
+  ## nothing to capture, so the defect is unrepresentable here rather than
+  ## merely absent, and a reader confirms it from one line instead of three
+  ## headers.
   ## Point the BUILD pane's ▶ and ■ at the wasm toolchain.
   ##
   ## Called after `enterTemplateEditMode`, which is when `buildVMInstance`
@@ -842,4 +854,6 @@ proc installNoirBuildCommands*(tmpl: ProjectTemplate) =
     return
   build_pane.buildVMInstance.runBuild = proc() = startNoirBuild()
   build_pane.buildVMInstance.cancelBuildProc = proc() = stopNoirBuild()
-  report("installed", "files=" & $tmpl.files.len & " package=" & tmpl.name)
+  let project = currentProject()
+  report("installed",
+         "files=" & $project.files.len & " package=" & project.name)
