@@ -572,15 +572,39 @@ wrong behaviour misleads the next reader more than a red one does:
   `ct/line-step-jump` ×2, `ct/asm-instruction-jump` ×2
 - `welcome-screen/welcome_screen_vm_test.nim` — 9: the four IPC commands above
 
-**A second drift, in the opposite direction.** The engine implements nine
-commands that `VALID_DAP_COMMANDS` does not list, so `isValidDapCommand` would
-reject traffic that works: `scopes`, `threads`, `stackTrace`, `variables`,
-`restart`, `ct/originMode`, `ct/load-request-spans`, `ct/set-active-source-view`,
-`ct/install-source-view`. Nothing sends them through `BackendService` today
-(`worker_backend.nim` reaches the engine directly), so nothing is broken by it —
-but the module header promises these lists stay in sync, and in both directions
-they do not. Adding them is a real change to what the mock accepts and belongs
-in its own commit, with the `EVENT_KIND_TO_DAP_MAPPING` half checked too.
+**A second drift, in the opposite direction. FIXED — and it was TEN, not nine.**
+The engine implemented commands that `VALID_DAP_COMMANDS` did not list, so
+`isValidDapCommand` would reject traffic that works. This paragraph used to list
+nine: `scopes`, `threads`, `stackTrace`, `variables`, `restart`,
+`ct/originMode`, `ct/load-request-spans`, `ct/set-active-source-view`,
+`ct/install-source-view`. It missed `disconnect`, which the engine answers in
+its message loop (`dap_server.rs:2643`, `:2893`) rather than in
+`handle_request`'s `match` — so a reader scanning the one obvious dispatch table
+does not see it.
+
+That miscount is the argument for the guard that now exists.
+`ci/test/dap-command-sync.py` derives the engine's dispatch from all four of its
+constructs — the `handle_request` match, its `_` fallthrough's `next` /
+`stepBack` / `stepIn` / `stepOut` special cases, the `dap_command_to_step_action`
+match, and the message-loop `DapMessage::Request` guards — and fails if any of
+them names a command the allow-list omits. It checks the
+`EVENT_KIND_TO_DAP_MAPPING` half too, which had drifted the same way:
+`ct/set-active-source-view` and `ct/install-source-view` were already event
+kinds and still absent from the allow-list.
+
+All ten are now listed. Note what that does **not** buy: eight of them have no
+`CtEventKind`, so `dapCommandToEventKind` still raises on them and
+`RealBackendService` cannot translate one. Nothing sends them through
+`BackendService` today (`worker_backend.nim` reaches the engine directly), and
+inventing event kinds for traffic no ViewModel produces would be a bigger lie
+than the gap — so that residue is *pinned* as `EXPECTED_RESIDUE` in the guard
+rather than left to be rediscovered. It cannot grow without reddening.
+
+Deriving the allow-list outright was tried first and does not work: it is the
+union of three facts, not a mirror of one — engine requests, engine-EMITTED
+events (`sender.send` call sites, not any table), and the frontend-only
+`internal/last-complete-move`. Generating it from the dispatch table would
+delete every event string in it.
 
 **One thing the strict mock nearly hid.** `store/backend_test.nim`'s "strict mode
 rejects unexpected commands" sent `ct/unknown` and expected an `AssertionDefect`.

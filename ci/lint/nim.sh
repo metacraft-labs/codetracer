@@ -50,6 +50,23 @@ lint_step "SDK facade boundary: contract suite" \
 lint_step "SDK facade boundary: no reach past the facade, no chain concept inside it" \
 	bash ci/test/sdk-facade-boundary.sh
 
+# `VALID_DAP_COMMANDS` against the tables it mirrors, in BOTH directions. The
+# allow-list is hand-written but no longer hand-CHECKED: the guard derives the
+# engine's dispatch from `src/db-backend/src/dap_server.rs` and the event
+# mapping from `src/frontend/dap.nim`. It had drifted in the direction nothing
+# looked at — ten engine-implemented commands missing, two of them already in
+# `EVENT_KIND_TO_DAP_MAPPING`.
+#
+# Contract suite first, same order and same reason as the two guards above. It
+# matters more here than usual: every check the guard makes is a SUBSET test,
+# and a subset test against an empty set passes, so a broken extraction regex
+# would turn this guard green rather than red.
+lint_step "DAP command sync: contract suite" \
+	bash ci/test/dap-command-sync-test.sh
+
+lint_step "DAP command sync: the allow-list names everything the engine dispatches" \
+	python3 ci/test/dap-command-sync.py
+
 # Canary for the chronicles/distinct-type breakage that takes every editor in
 # the project down. Currently QUARANTINED against an upstream nimsuggest crash;
 # ci/test/nimsuggest-check.sh carries the diagnosis, tells a toolchain defect
