@@ -57,7 +57,7 @@
 # one case where this script keeps talking even when the hatch is set.
 #
 # See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
-#      AGENTS.md, "Where a checkout -- or a worktree -- has to live"
+#      AGENTS.md -- its opening section, on where a checkout or worktree has to live
 # =============================================================================
 set -euo pipefail
 
@@ -388,7 +388,7 @@ NOTE -- BOTH THINGS ARE TRUE HERE, and neither alone is the whole fix.
 
 ${#mw_present[@]} of the ${#missing_names[@]} missing repo(s) ARE present under the workspace root, so this
 checkout is a worktree outside the workspace and moving it is part of the fix
-(see AGENTS.md, "Where a checkout -- or a worktree -- has to live"). But
+(see AGENTS.md -- its opening section, on where a checkout or worktree has to live). But
 ${#mw_absent[@]} of them cannot be found there either, so that workspace is genuinely
 incomplete and the remedies above are needed as well -- run them against
 $main_workspace_root, NOT against $workspace_root.
@@ -440,7 +440,7 @@ and fails minutes later naming a MODULE (\`cannot open file: runquota_process\`)
 rather than the location. The second builds a second workspace inside a scratch
 directory, duplicating repos that are already on disk and free to drift from them.
 
-See AGENTS.md, "Where a checkout -- or a worktree -- has to live".
+See AGENTS.md -- its opening section, on where a checkout or worktree has to live.
 EOF
 }
 
