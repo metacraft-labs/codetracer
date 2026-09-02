@@ -1,0 +1,119 @@
+# The compilers this commit expects to be answered by.
+#
+# ## Why this file exists when `flake.lock` already pins them
+#
+# It is NOT a second pin, and it must not be read as one. `flake.lock` is the
+# pin: the Nim compiler in the dev shell is `codetracer-toolchains`'
+# `packages.nim-2_2` (`nix/packages/default.nix`'s `nim-codetracer`), and
+# `rustc`/`cargo` are `fenix`'s stable toolchain combined in
+# `nix/shells/ci-base.nix`. Both are root inputs of `flake.nix` with 40-hex
+# locked revs, so the commit ALREADY determines them.
+#
+# What the commit did not have was any way to state, cheaply and without
+# evaluating the flake, WHICH COMPILER IT EXPECTS — so nothing could tell a
+# build that answered with a different one. That gap is not hypothetical:
+#
+#   * `nim` outside the dev shell on this workstation is 2.2.4 from
+#     `~/.nix-profile/bin/nim`; inside it is 2.2.8. Both are `/nix/store`
+#     paths after symlink resolution, so "is it from the store" does not
+#     separate them.
+#   * A nine-hour investigation into a renderer "build break" ended at one
+#     machine's compiler, not at the source.
+#   * Two builds that both had all three sibling repositories at their pins
+#     differed by 60,920 bytes (`scripts/sibling-pins.sh`'s header records it).
+#
+# So this file is a REDUNDANT RESTATEMENT of what `flake.lock` implies, kept
+# for exactly one property: drift becomes a DIFF. A toolchain bump now has to
+# edit a tracked file, and a reviewer sees "the compiler changed" in the same
+# patch as whatever number moved because of it.
+#
+# ## How the redundancy is kept from rotting
+#
+# Every `LOCK_*` line below records the `flake.lock` revision the `EXPECT_*`
+# lines were MEASURED under. `scripts/toolchain-pins.sh --verify` compares them
+# against `flake.lock` and FAILS when they disagree, with "re-measure" as the
+# remedy. A restatement that could silently lag the thing it restates would be
+# worse than no restatement at all — it would assert a compiler nobody ships,
+# which is the entire defect class this file belongs to.
+#
+# ## TO BUMP
+#
+#   1. Update `flake.lock` (`nix flake update codetracer-toolchains` / `fenix`).
+#   2. Enter the dev shell and run `bash scripts/toolchain-pins.sh --stamp`.
+#   3. Copy the measured versions and the new revs here, in one commit with
+#      whatever the bump moved.
+
+# The host the versions below were measured on. Version strings are not
+# expected to differ by platform (both toolchains are pinned by revision, not
+# by channel), so this is provenance for the reader rather than a key — but if
+# a version ever DOES differ by platform, this line is where the reader learns
+# which one was written down.
+TOOLCHAIN_HOST_MEASURED=aarch64-darwin
+TOOLCHAIN_MEASURED_ON=2026-09-02
+
+# --- Nim --------------------------------------------------------------------
+#
+# From `codetracer-toolchains`' `nim-2_2`, wrapped as `nim-codetracer` in
+# `nix/packages/default.nix`. Provides both `nim` and `nim2`.
+EXPECT_NIM_VERSION=2.2.8
+
+# UPSTREAM, and this was MEASURED rather than assumed, because the opposite was
+# the standing hypothesis and it was wrong. `flake.lock` does carry a
+# `nim-fork-src` node — `git+https://github.com/metacraft-labs/nim`, ref
+# `codetracer`, rev 0b5b5ec507d2d9c731d222184c625851377a02c8 — and the obvious
+# reading is that the dev shell's Nim is that fork. It is not. `nim-fork-src`
+# is an input of `reprobuild` and of nothing else, so it builds `repro`, not
+# CodeTracer. The dev shell's compiler resolves to a derivation whose `src` is
+#
+#     https://nim-lang.org/download/nim-2.2.8.tar.xz
+#     sha256-EUGRr6CDxQWdy+XOiNvk9CVCz/BOLDAXZo7kOLwLjPw=
+#
+# reached by `nix-store -q --deriver $(command -v nim)` and then
+# `nix derivation show` on the `.drv` and on its `src` input. A guess would
+# have been recorded here as a gap; this is a measurement, so it is recorded as
+# a value, and `--verify` re-checks the REACHABILITY half of it (that
+# `nim-fork-src` has not become reachable from `codetracer-toolchains`) on
+# every run.
+EXPECT_NIM_SOURCE=upstream
+
+# --- Rust -------------------------------------------------------------------
+#
+# `fenixPkgs.stable` combined with the wasm32/x86_64 rust-std targets in
+# `nix/shells/ci-base.nix`; the combined derivation is named `rust-mixed`.
+# The parenthesised hash in `rustc --version` is rustc's OWN upstream commit
+# and is checked as part of the version string, because it is the one identity
+# rustc self-reports.
+EXPECT_RUSTC_VERSION=1.96.0
+EXPECT_RUSTC_COMMIT=ac68faa20
+
+# --- nargo: DELIBERATELY ABSENT ---------------------------------------------
+#
+# There is no EXPECT_NARGO_VERSION, and its absence is a decision rather than
+# an omission. In a workspace dev shell `nargo` is NOT the flake's nargo:
+# `scripts/detect-siblings.sh` prepends `../noir/target/release` to PATH when
+# that binary exists, so what answers is a release build of the `noir` SIBLING
+# WORKING COPY. Recording an expected version would therefore encode one
+# developer's checkout as the project's expectation and would fail for
+# everyone else.
+#
+# `nargo` is instead verified STRUCTURALLY, against its own checkout, by
+# `scripts/toolchain-pins.sh`: the binary self-reports its build revision
+# (`git version hash: <sha>, is dirty: <bool>`), so the guard can require that
+# revision to be the checkout's HEAD and the checkout to be clean. That is the
+# check that catches the real failure — a binary built weeks ago from a commit
+# the working copy has since moved past, which is what was on this machine when
+# this file was written (binary at 906af2f4, checkout HEAD five commits later).
+#
+# The `noir` flake pin is recorded below all the same, because the divergence
+# between it and the sibling is worth REPORTING even where it is not worth
+# failing on. See the guard's header for why that split is drawn where it is.
+
+# --- The flake.lock revisions the above were measured under -----------------
+#
+# `scripts/toolchain-pins.sh --verify` fails when any of these disagrees with
+# `flake.lock`. Do not "fix" a mismatch by editing these lines alone: they are
+# a claim that the EXPECT_* values above were observed at these revisions, and
+# editing them without re-measuring makes that claim false.
+LOCK_CODETRACER_TOOLCHAINS=942c995a36469853351af605da90025314ffc58e
+LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
+LOCK_NOIR=5e98f904cde508d574ba559da692a312476ff032
