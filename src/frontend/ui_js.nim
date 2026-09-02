@@ -1551,6 +1551,78 @@ proc refreshCommandPaletteFileIndex*(data: Data) =
     for path in fsPaths:
       addPath(path)
 
+proc refreshSearchServiceIndex*(data: Data) =
+  ## Rebuild the OTHER fuzzy index — `services.search`, the one the `open` and
+  ## `view` verbs read — from the current project.
+  ##
+  ## ## There are two indexes with the same field names, and only one was
+  ## ## being maintained
+  ##
+  ## `CommandInterpreter` (`types.nim:413-420`) and `SearchService`
+  ## (`types.nim:423-433`) both carry a `commandsPrepared`. The first is
+  ## rebuilt correctly: the three procs above and `onSymbolsLoaded` each clear
+  ## with `= @[]` and then re-add. The second was only ever APPENDED TO. Its
+  ## four seqs — `pathsPrepared`, `commandsPrepared`, `functionsPrepared`,
+  ## `functionsInSourcemapPrepared` — had no clear, no reset and no
+  ## invalidator anywhere in the tree, and `data` itself is one module-level
+  ## global that is never recreated. So they only ever grew, for the lifetime
+  ## of the window.
+  ##
+  ## Three ways that went stale, all reachable without reloading:
+  ##
+  ## 1. **Opening another project.** `CODETRACER::no-trace` is the one door
+  ##    used both for first launch and for opening a recent folder while
+  ##    already running (`ui/web_entry_surface.nim:270-272` says so), and
+  ##    `onNoTrace` ran these loops. Project B's files were APPENDED to project
+  ##    A's, so `open <name>` kept offering files from a project the user had
+  ##    left — and opening one of them opens a path that is no longer in the
+  ##    workspace.
+  ##
+  ## 2. **A rescan within one project.** `onFilenamesLoaded` REPLACES
+  ##    `services.debugger.paths` and refreshes the command-palette index, and
+  ##    never touched this one. So after files were added or deleted on disk,
+  ##    one of the two indexes was current and the other — the one `open`
+  ##    actually reads (`renderer.nim:1220`) — still held the old list. Deleted
+  ##    files stayed offerable; new files never appeared.
+  ##
+  ## 3. **Session switch.** `session_switch.nim` never referenced
+  ##    `services.search` at all, and `SearchService` is not per-session, so a
+  ##    switch simply inherited whatever the last project left behind.
+  ##
+  ## Clearing first is the whole fix, and it is deliberately one proc called
+  ## from every producer rather than a clear added at each of them: the reason
+  ## this drifted is that the rebuild lived inline in `onNoTrace` where the
+  ## second and third producers could not see it.
+  ##
+  ## `functionsPrepared` is rebuilt with the rest even though nothing reads it
+  ## today (`renderer.nim` reads `commandsPrepared`, `pathsPrepared` and
+  ## `functionsInSourcemapPrepared`; `renderer.nim:1059` carries a
+  ## `# TODO functionsPrepared ?`). Leaving one member of a set to go stale
+  ## while its three siblings are refreshed is how the next reader concludes
+  ## that staleness here is acceptable.
+  if data.isNil or data.services.isNil or data.services.search.isNil:
+    return
+
+  data.services.search.pathsPrepared = @[]
+  data.services.search.commandsPrepared = @[]
+  data.services.search.functionsPrepared = @[]
+  data.services.search.functionsInSourcemapPrepared = @[]
+
+  if not data.services.debugger.isNil:
+    for path in data.services.debugger.paths:
+      data.services.search.pathsPrepared.add(fuzzysort.prepare(path))
+
+  for name, source in data.services.search.pluginCommands:
+    data.services.search.commandsPrepared.add(fuzzysort.prepare(name))
+
+  if not data.services.debugger.isNil:
+    for function in data.services.debugger.functions:
+      var prepared = fuzzysort.prepare(function.signature)
+      prepared.obj = function
+      data.services.search.functionsPrepared.add(prepared)
+      if function.inSourcemap:
+        data.services.search.functionsInSourcemapPrepared.add(prepared)
+
 proc followMouse(event: dom.Event) =
   # dont support ancient IE
   var ev = event
@@ -2759,6 +2831,12 @@ proc onFilenamesLoaded(
   data.services.debugger.paths = response.filenames
 
   data.refreshCommandPaletteFileIndex()
+  # THE SECOND INDEX, which this handler never refreshed. `paths` has just been
+  # REPLACED, so anything derived from it is stale by definition — and it is
+  # `services.search.pathsPrepared`, not the command-palette one, that
+  # `renderer.onCommandSearch` reads for the `open` verb. Refreshing one of the
+  # two left deleted files offerable and new files invisible.
+  data.refreshSearchServiceIndex()
 
   data.redraw()
 
@@ -2944,21 +3022,40 @@ proc onNoTrace(
   data.services.debugger.functions = response.functions
   data.ui.menuNode = data.webTechMenu(baseName(response.path))
 
+  # A NEW PROJECT ASKS FOR LSP AGAIN.
+  #
+  # `lspStarted` had exactly one writer — `editor.ensureEditorLspStarted`,
+  # which sends `CODETRACER::start-lsp` and sets the flag to `true` on the very
+  # next line, without waiting to learn whether anything started — and exactly
+  # one reader, the guard in that same proc. Nothing anywhere set it back to
+  # `false`, and `data` is one module-level global that outlives every project
+  # open, so the flag meant "we asked once, ever" while being read as "LSP is
+  # available".
+  #
+  # Two consequences, and the first is the worse one. If the first attempt
+  # failed — `lsp_bridge.startLspBridge` has a `CatchableError` arm, a language
+  # server can be missing, a port can be taken — no editor in any project could
+  # ever retry for the lifetime of the window, and the only recovery was the
+  # full `location.reload()` behind "Reconnect". Hover, go-to-definition and
+  # completion simply stopped working, silently, with nothing on screen saying
+  # why. Second, a project opened after that inherited the same false
+  # assurance.
+  #
+  # Cleared HERE because `CODETRACER::no-trace` is the project-open door for
+  # both first launch and opening a recent folder in a running window, so this
+  # is the moment a fresh editor is about to mount and can ask again. It is not
+  # a claim that the bridges were torn down: `onStartLsp` starts them through
+  # `startLspBridge`, which carries its own per-kind idempotency guard, so
+  # asking a second time when they are already up is a no-op rather than a
+  # duplicate.
+  data.lspStarted = false
+
   hideWelcomeScreenSurface()
 
-  for path in data.services.debugger.paths:
-    data.services.search.pathsPrepared.add(fuzzysort.prepare(path))
-
-  for name, source in data.services.search.pluginCommands:
-    data.services.search.commandsPrepared.add(
-      fuzzysort.prepare(name))
-
-  for function in data.services.debugger.functions:
-    var prepared = fuzzysort.prepare(function.signature)
-    prepared.obj = function
-    data.services.search.functionsPrepared.add(prepared)
-    if function.inSourcemap:
-      data.services.search.functionsInSourcemapPrepared.add(prepared)
+  # REBUILT, NOT APPENDED TO. These four loops used to live here inline and
+  # only ever added; opening a second project left the first project's files
+  # and functions in the palette. See `refreshSearchServiceIndex`.
+  data.refreshSearchServiceIndex()
 
   data.services.editor.filesystem = response.filesystem
   # READ BEFORE THE ASSIGNMENT, and that ordering is the whole of it.
