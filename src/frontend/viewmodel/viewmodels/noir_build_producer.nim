@@ -71,6 +71,10 @@ type
     nbpCompile
     nbpTrace
     nbpTest
+    nbpTestRecord
+      ## `test` with `record` set: compile ONE test as a traceable entry point
+      ## and answer the artifact, running nothing. The middle step of
+      ## "run this test in the debugger" — verdict, artifact, trace.
 
   NoirPhaseVerdict* = enum
     ## What `onExit` concluded. Returned rather than stored so the caller can
@@ -112,6 +116,15 @@ type
       ## build.
     lastVerdict*: NoirPhaseVerdict
     lastSummary*: NoirTraceSummary
+    replayLabel*: string
+      ## What a session opened from this producer is OF — a test's selector, or
+      ## "" for a Run of `main`. Set by the caller before the trace phase; only
+      ## the caller knows which gesture is in flight.
+    replayInNewSessionTab*: bool
+      ## Whether that session should open beside the current one rather than
+      ## replacing it. See `ReplaySessionRequest.newSessionTab`: it is a
+      ## REQUEST, and a host that cannot hold two live sessions refuses it
+      ## rather than opening one tab over a dead engine.
     lastTests*: NoirTestResponse
       ## What the last `nbpTest` phase decoded, whole.
       ##
@@ -395,6 +408,12 @@ proc beginPhase*(producer: NoirBuildProducer; phase: NoirBuildPhase;
   if phase == nbpCompile:
     producer.artifact = nil
     producer.lastSummary = NoirTraceSummary()
+  if phase == nbpTestRecord:
+    # A recording replaces whatever artifact was carried. Not left alone like a
+    # trace's: the artifact a Build produced compiles `main`, and tracing it
+    # here would step the program instead of the test that was clicked.
+    producer.artifact = nil
+    producer.lastSummary = NoirTraceSummary()
   if phase == nbpTest:
     # The previous run's verdicts, gone before the new one starts. A pane that
     # kept them would show a green row for a test the current sources no longer
@@ -403,7 +422,7 @@ proc beginPhase*(producer: NoirBuildProducer; phase: NoirBuildPhase;
   producer.vm.setCommand(command)
   producer.vm.setBuildStartTime(nowMs)
   producer.vm.setRunning(true)
-  if phase != nbpTrace:
+  if phase notin {nbpTrace, nbpTestRecord}:
     # Only the SECOND phase of a Run leaves the pane alone. A trace that wiped
     # it would delete the compile's own warnings before the user had read them.
     # A test run is a run of its own and starts from an empty pane, exactly as
@@ -655,6 +674,41 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
     let response = parseNoirTestResponse(producer.stdoutText)
     producer.lastTests = response
     producer.lastVerdict = producer.paintTestResult(response)
+  of nbpTestRecord:
+    let response = parseNoirTestResponse(producer.stdoutText)
+    if not response.decoded:
+      producer.note(
+        "the Noir toolchain answered with something this build could not " &
+        "decode when asked to record the test. Nothing was recorded.")
+      producer.lastVerdict = npvFaulted
+    elif not response.ok:
+      # A REFUSAL WITH A NAME. `no-such-test` and `test-takes-arguments` are
+      # the two a user can act on, and both are about the test rather than
+      # about the project — so they are painted as the toolchain's sentence
+      # rather than as a compile failure.
+      for diagnostic in response.diagnostics:
+        producer.paintDiagnostic(diagnostic)
+      producer.note(
+        "the test could not be recorded" &
+        (if response.kind.len > 0: " (" & response.kind & ")" else: "") & ".")
+      if response.message.len > 0:
+        producer.emit(response.message, isStdout = false, severity = blsError)
+      producer.lastVerdict = npvRefused
+    elif response.artifact.isNil:
+      # `ok` WITH NO ARTIFACT is a protocol fault and not a refusal: the module
+      # said the compile succeeded and then answered nothing to trace. Reported
+      # as such, because a caller that went on to trace `null` would fail one
+      # layer down with a message naming the tracer.
+      producer.note(
+        "the toolchain reported the test compiled and produced no artifact " &
+        "to record. That is a protocol fault, not a fault in your test.")
+      producer.lastVerdict = npvFaulted
+    else:
+      producer.artifact = response.artifact
+      for warning in response.warnings:
+        producer.paintDiagnostic(warning)
+      producer.note("compiled the test for recording")
+      producer.lastVerdict = npvSucceeded
   of nbpTrace:
     let summary = summariseNoirTrace(producer.stdoutText)
     producer.lastSummary = summary
@@ -707,13 +761,15 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
       # steps looking like it was still running. Measured exactly that way:
       # the rows painted, the two `note` calls below never ran, and the tab
       # reported one uncaught page error with no message a user could read.
-      var opened = false
+      var outcome = rsoNoHost
       var refusal = ""
       try:
-        opened = requestReplaySession(ReplaySessionRequest(
+        outcome = openReplaySession(ReplaySessionRequest(
           rawMemoryTrace: producer.stdoutText,
           packageDir: producer.packageDir,
-          projectRoot: producer.projectRoot))
+          projectRoot: producer.projectRoot,
+          label: producer.replayLabel,
+          newSessionTab: producer.replayInNewSessionTab))
       except CatchableError as e:
         refusal = e.msg
       except:
@@ -721,8 +777,20 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
         # neither `CatchableError`, and the whole point of this block is that
         # nothing gets past it.
         refusal = "the replay host raised a value that is not an exception"
-      if opened:
-        producer.note("opening a replay session over this trace")
+      if outcome == rsoOpened:
+        producer.note(
+          "opening a replay session over this trace" &
+          (if producer.replayLabel.len > 0: " (" & producer.replayLabel & ")"
+           else: ""))
+      elif outcome == rsoNoSecondSession:
+        # REFUSED BY NAME, and nothing was opened. Falling back to the current
+        # tab would destroy the session the user asked to keep beside this one,
+        # which is the entire reason they asked for a new tab.
+        producer.note(
+          "a NEW session tab was asked for and this build holds one live " &
+          "session at a time, so nothing was opened. Ask again without the " &
+          "new-tab option to replace the current session; the rows above are " &
+          "what the trace contains.")
       elif refusal.len > 0:
         producer.note("a replay session could not be started: " & refusal)
       else:

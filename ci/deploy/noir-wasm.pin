@@ -32,6 +32,14 @@ NOIR_REF=ns11/nargo-test-in-wasm
 # assertion failure is a PASS) and `should_fail_with`'s substring match are
 # nargo's verdicts rather than a second implementation of them.
 #
+# AND IT RECORDS. `TestVfsRequest.record` names one test and answers a
+# `ProgramArtifact` with that test as its `main`, compiled through the
+# instrumented `force_brillig` path — the only shape `ct_trace` can step. That
+# is what makes "run this test" mean "land in a time-travel session on it"
+# rather than "see a verdict". MEASURED through the worker protocol: a recorded
+# test traces to 8 events, 2 steps and 2 calls, against the one event and zero
+# steps an uninstrumented compile produces while every module reports ok.
+#
 # THIS REVISION CONTAINS THE ONE IT REPLACES. It is a direct child of
 # df2d2f2e, the entry-call-order bump this line carried, so it is a
 # fast-forward of the same line rather than a second pin racing it.
@@ -42,7 +50,7 @@ NOIR_REF=ns11/nargo-test-in-wasm
 # never seen this machine:
 #
 #   git init && git remote add origin https://github.com/metacraft-labs/noir
-#   git fetch --depth=1 origin 9c2dfc249c4e0a240642dd6230be0cfd88783df7
+#   git fetch --depth=1 origin fd96a7d4a09fc91337c1df9c1ff8ba3b42ec9654
 #   git cat-file -p FETCH_HEAD:compiler/wasm/src/test_vfs.rs
 #
 # resolves, and the third command prints the module.
@@ -76,7 +84,7 @@ NOIR_REF=ns11/nargo-test-in-wasm
 # resolves in an empty clone that had never seen this machine, and
 # `tooling/tracer_wasm/src/memory_sink.rs` at the fetched commit pushes the
 # `Call` before the `Step`.
-NOIR_REV=9c2dfc249c4e0a240642dd6230be0cfd88783df7
+NOIR_REV=fd96a7d4a09fc91337c1df9c1ff8ba3b42ec9654
 
 # The noir workspace resolves `codetracer_trace_types` and
 # `codetracer_trace_writer_nim` through PATH dependencies on a sibling checkout
@@ -116,7 +124,7 @@ TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 # this time: the compiler grew by the test runner and its blackbox solver, and
 # the tracer was rebuilt from the same tree to check it had not.
 #
-#   noir_wasm.wasm         16438462  (+580133 against the figure it replaces)
+#   noir_wasm.wasm         16454689  (+596360 against the figure it replaces)
 #   noir_tracer_wasm.wasm   4613157  (-10708, and this crate is UNCHANGED —
 #                                     see the reproducibility note above; a
 #                                     different build DIRECTORY moves it)
@@ -125,5 +133,5 @@ TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 # `nargo::ops::run_test` and its foreign-call layers cost. It is not free and
 # it is not hidden: the module is fetched at run time and cached `immutable`,
 # so it is paid once per pin by the sessions that compile anything.
-EXPECT_COMPILER_BYTES=16438462
+EXPECT_COMPILER_BYTES=16454689
 EXPECT_TRACER_BYTES=4613157

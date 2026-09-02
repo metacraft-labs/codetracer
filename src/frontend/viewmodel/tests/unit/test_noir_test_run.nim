@@ -55,7 +55,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 145
+const ExpectedAssertions = 169
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -122,6 +122,30 @@ const FuzzHarness = """
 
 const NoTests = """{"ok":true,"passed":0,"failed":0,"skipped":0}"""
 
+const Recorded = """
+{"ok":true,"passed":0,"failed":0,"skipped":0,
+ "artifact":{"noir_version":"1.0.0","hash":123,"abi":{"parameters":[]},
+             "bytecode":"H4sI","debug_symbols":"eJw","file_map":{}}}
+"""
+  ## `nv_test_vfs` with `record` set. NO `tests` KEY AT ALL — a recording runs
+  ## nothing — and an `artifact` where a run has none. The two shapes have to be
+  ## told apart by which field is present, not by `ok`, which is `true` for both.
+
+const RecordRefused = """
+{"ok":false,"stage":"request","kind":"no-such-test",
+ "message":"`no_such_test` is not a test in this package",
+ "passed":0,"failed":0,"skipped":0}
+"""
+
+const RecordedWithoutArtifact = """
+{"ok":true,"passed":0,"failed":0,"skipped":0}
+"""
+  ## THE PROTOCOL FAULT: the module says the compile succeeded and answers
+  ## nothing to trace. Indistinguishable from `NoTests` in every field, which is
+  ## why the producer has to know which PHASE it is in — and why a caller that
+  ## went on to trace `null` would fail one layer down with a message naming the
+  ## tracer instead of this.
+
 proc stubStore(): ReplayDataStore =
   let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
     when defined(js):
@@ -138,6 +162,13 @@ proc stubStore(): ReplayDataStore =
 proc fixture(): NoirBuildProducer =
   newNoirBuildProducer(createBuildVM(stubStore()),
                        projectRoot = "/app", packageDir = "app")
+
+proc runPhase(producer: NoirBuildProducer; phase: NoirBuildPhase;
+              stdout: string; exitCode: int): NoirPhaseVerdict =
+  producer.beginPhase(phase, "nargo test", 1000.0)
+  if stdout.len > 0:
+    producer.onOutput(ProcessOutputChunk(stream: psStdout, text: stdout))
+  producer.onExit(ProcessExit(exitCode: exitCode, signalled: false))
 
 proc runTestPhase(producer: NoirBuildProducer; stdout: string;
                   exitCode: int): NoirPhaseVerdict =
@@ -515,6 +546,80 @@ fn passes_when_it_should_not() { assert(1 == 1); }
     vm.beginRun()
     counted vm.summary.val.rows.len == 0
     counted vm.rows.val.len == 0
+
+suite "recording a test, which is what running one means":
+
+  test "a recorded test yields an artifact and runs nothing":
+    let producer = fixture()
+    let verdict = runPhase(producer, nbpTestRecord, Recorded, exitCode = 0)
+    counted verdict == npvSucceeded
+    counted not producer.artifact.isNil
+    # The artifact goes to the tracer through the SAME request a Run's trace
+    # uses, which is what makes this reuse the Run path's second half rather
+    # than needing a second tracer route.
+    let request = noirTraceRequest(producer.artifact, noirTestRecordInputs)
+    counted request["artifact"]["noir_version"].getStr == "1.0.0"
+    # EMPTY INPUTS, and that is the correct value rather than a missing one: a
+    # `#[test]` takes no arguments, so its ABI has nothing to encode. Sending
+    # the project's `Prover.toml` would encode `main`'s arguments against a
+    # test's ABI.
+    counted request["inputs"].getStr == ""
+    counted noirTestRecordInputs == ""
+
+  test "a record request is not a run request":
+    let files = @[NoirSourceEntry(path: "app/src/main.nr", content: "fn main() {}")]
+    let record = noirTestRecordRequest(files, "app", "tests::test_main")
+    counted record["record"].getStr == "tests::test_main"
+    counted not record.hasKey("tests")
+    counted not record.hasKey("mode")
+
+    let run = noirTestRequest(files, "app", @["tests::test_main"])
+    counted not run.hasKey("record")
+    counted run["tests"][0].getStr == "tests::test_main"
+
+  test "ok with no artifact is a protocol fault, not a green recording":
+    # The two responses differ in ONE field and `ok` is not it. A producer that
+    # branched on `ok` alone would hand `null` to the tracer and fail a layer
+    # down with a message naming the tracer.
+    let producer = fixture()
+    let verdict = runPhase(producer, nbpTestRecord, RecordedWithoutArtifact,
+                           exitCode = 0)
+    counted verdict == npvFaulted
+    counted producer.artifact.isNil
+    counted "protocol fault" in paneText(producer)
+    counted "not a fault in your test" in paneText(producer)
+
+  test "a refused recording names the test rather than the project":
+    let producer = fixture()
+    let verdict = runPhase(producer, nbpTestRecord, RecordRefused, exitCode = 1)
+    counted verdict == npvRefused
+    counted producer.artifact.isNil
+    counted "no-such-test" in paneText(producer)
+    counted "no_such_test" in paneText(producer)
+
+  test "a recording replaces a Build's artifact rather than inheriting it":
+    # A Build compiles `main`. Tracing THAT after clicking Run on a test would
+    # step the program instead of the test that was clicked — a session that
+    # opens, works, and shows the wrong execution.
+    let producer = fixture()
+    discard runPhase(producer, nbpCompile,
+      """{"ok":true,"artifact":{"noir_version":"main-not-test"}}""", 0)
+    counted not producer.artifact.isNil
+    counted producer.artifact["noir_version"].getStr == "main-not-test"
+    discard runPhase(producer, nbpTestRecord, RecordRefused, exitCode = 1)
+    counted producer.artifact.isNil
+
+  test "a recording does not wipe the verdict the pane just painted":
+    # The gesture is three phases and the user sees the verdict first. A record
+    # phase that cleared the pane would delete the pass or the failure before
+    # the seconds an instrumented compile takes had elapsed.
+    let producer = fixture()
+    discard runTestPhase(producer, FourWays, exitCode = 1)
+    let afterVerdict = paneText(producer)
+    counted "passes_when_it_should_not" in afterVerdict
+    discard runPhase(producer, nbpTestRecord, Recorded, exitCode = 0)
+    counted "passes_when_it_should_not" in paneText(producer)
+    counted "compiled the test for recording" in paneText(producer)
 
 suite "the paths the two spellings meet on":
 

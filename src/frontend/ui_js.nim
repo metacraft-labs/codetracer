@@ -5119,7 +5119,11 @@ when defined(ctWeb):
             let absence = web_noir_build.noirTestRunAbsence()
             if absence.len > 0:
               return cstring(absence)
-            web_noir_build.startNoirTest($selector)
+            # RECORDING, not merely running. "Run test" in this product means
+            # the test executes, its execution is captured, and the user lands
+            # in a time-travel session on it — the verdict arrives first and
+            # fills the Test Results pane, the session is what was asked for.
+            web_noir_build.startNoirTestRecording($selector)
             cstring""
 
         # THE EDIT-MODE TOPBAR, and the reason it is installed HERE.
