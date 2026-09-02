@@ -19,6 +19,7 @@ import isonim/core/[signals, computation, owner]
 import isonim/testing/mock_dom
 import backend/backend_service
 import backend/mock_backend
+import backend/dap_commands
 import store/types
 import store/replay_data_store
 import viewmodels/state_vm
@@ -6784,7 +6785,23 @@ suite "IsoNim Step List Panel — backend requests":
 
 suite "IsoNim Step List Panel — interactions":
 
-  test "clicking a Line row dispatches ct/line-step-jump with delta + location":
+  # These two tests deliberately do NOT assert "command X was dispatched".
+  # That is the assertion this pane's previous tests made, and it is why
+  # they stayed green for as long as `ct/line-step-jump` existed in no
+  # mapping table and no dispatch table: `MockBackendService.send` records
+  # whatever string it is handed and validates none of it.
+  #
+  # What they assert instead is the contract whose absence let that
+  # happen — the emitted command must be one the system can RESOLVE
+  # (`isValidDapCommand`; in production `dapCommandToEventKind` raises
+  # `ValueError` when it cannot) — plus the row's own data reaching the
+  # payload, and the request count.
+  #
+  # That the click actually MOVES the session is asserted where it can be
+  # honestly measured, against a real replay-server:
+  # `src/frontend/viewmodel/tests/unit/test_row_click_jump_vm.nim`.
+
+  test "clicking a Line row asks the backend to move to that row's tick":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createStepListVM(store)
@@ -6811,16 +6828,19 @@ suite "IsoNim Step List Panel — interactions":
       check row != nil
       row.fireEvent("click")
 
-      let req = mock.findCommand("ct/line-step-jump")
-      check req.isSome
-      check req.get.args{"delta"}.getInt == 3
-      check req.get.args{"path"}.getStr == "src/main.nim"
-      check req.get.args{"line"}.getInt == 17
-      check req.get.args{"rrTicks"}.getInt == 142
+      # Counted, with the count itself asserted: one click, one request.
+      check mock.receivedCommands.len == 1
+      let sent = mock.receivedCommands[0]
+
+      # Resolvable — the check that was missing everywhere.
+      check isValidDapCommand(sent.command)
+
+      # The clicked row's tick is what got asked for.
+      check sent.args{"ticks"}.getInt == 142
 
       dispose()
 
-  test "jumpToStepLine sends the same payload when invoked directly":
+  test "a step-line request carries every field the engine requires":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createStepListVM(store)
@@ -6835,12 +6855,17 @@ suite "IsoNim Step List Panel — interactions":
         values: @[],
       ))
 
-      let req = mock.findCommand("ct/line-step-jump")
-      check req.isSome
-      check req.get.args{"delta"}.getInt == -1
-      check req.get.args{"path"}.getStr == "x.nim"
-      check req.get.args{"line"}.getInt == 4
-      check req.get.args{"rrTicks"}.getInt == 7
+      check mock.receivedCommands.len == 1
+      let sent = mock.receivedCommands[0]
+      check isValidDapCommand(sent.command)
+
+      # `GoToTicksArguments` declares no `#[serde(default)]`, so a missing
+      # `threadId` fails the whole request with `missing field threadId`
+      # and the session does not move. Asserted here because it is cheap,
+      # and because `event_log_vm.jumpToCounterpart` ships exactly that
+      # bug today — it sends {rrTicks, ticks} and no threadId.
+      check sent.args.hasKey("threadId")
+      check sent.args{"ticks"}.getInt == 7
 
       dispose()
 
@@ -7828,7 +7853,7 @@ suite "IsoNim Low Level Code Panel — interactions":
 
       dispose()
 
-  test "clicking a row dispatches ct/asm-instruction-jump with the offset / cross-ref":
+  test "clicking a row asks the backend for that row's source line":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createLowLevelCodeVM(store)
@@ -7846,29 +7871,38 @@ suite "IsoNim Low Level Code Panel — interactions":
       let listContainer = findByClass(panel, "low-level-code-instructions")
       listContainer.children[1].fireEvent("click")
 
-      let req = mock.findCommand("ct/asm-instruction-jump")
-      check req.isSome
-      check req.get.args["offset"].getInt == 1
-      check req.get.args["highLevelPath"].getStr == "src/a.nim"
-      check req.get.args["highLevelLine"].getInt == 4
+      check mock.receivedCommands.len == 1
+      let sent = mock.receivedCommands[0]
+      check isValidDapCommand(sent.command)
+
+      # The SECOND row was clicked, so the second row's back-pointer is
+      # what must be on the wire — not the first row's, and not the
+      # offset, which the source-line lookup does not take.
+      check sent.args{"path"}.getStr == "src/a.nim"
+      check sent.args{"line"}.getInt == 4
+
+      # A click that produced a request must not also be showing an error.
+      check vm.errorMessage.val == ""
 
       dispose()
 
-  test "jumpToInstruction direct call sends the same payload shape":
+  test "a row with no source back-pointer reports instead of sending":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createLowLevelCodeVM(store)
 
       mock.clearReceivedCommands()
-      vm.jumpToInstruction(makeInstr("call", offset = 9,
-                                      highLevelPath = "src/x.nim",
-                                      highLevelLine = 21))
+      # Asm generated from a function with no debug info: no path, no line.
+      vm.jumpToInstruction(makeInstr("nop", offset = 9,
+                                      highLevelPath = "",
+                                      highLevelLine = 0))
 
-      let req = mock.findCommand("ct/asm-instruction-jump")
-      check req.isSome
-      check req.get.args["offset"].getInt == 9
-      check req.get.args["highLevelPath"].getStr == "src/x.nim"
-      check req.get.args["highLevelLine"].getInt == 21
+      # THE EFFECT: nothing was asked of the backend...
+      check mock.receivedCommands.len == 0
+      # ...and the pane says why, rather than swallowing the click. A
+      # silent return here would be indistinguishable from a click that
+      # never registered — the most expensive shape this codebase has.
+      check vm.errorMessage.val.len > 0
 
       dispose()
 
