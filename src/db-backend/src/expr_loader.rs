@@ -598,11 +598,32 @@ fn vfs_source_text(path: &Path) -> Option<String> {
 /// including the ones whose text the engine is holding in memory. A
 /// `missing_path` computed from it alone reports a source-less session over a
 /// trace that shipped its own source.
-fn source_is_reachable(path: &Path) -> bool {
+///
+/// Public because `missing_path` was not the only probe built on bare
+/// `exists()`. The origin chain in `db.rs` spells the same question four times
+/// (`crate::db::source_probe_path`), choosing between `workdir.join(recorded)`
+/// and the bare recorded path; on wasm32 that ternary could only ever take the
+/// else. Both probes must ask the same question or the two spellings of a path
+/// disagree about whether the engine can read it.
+pub fn source_is_reachable(path: &Path) -> bool {
     if path.exists() {
         return true;
     }
     vfs_source_text(path).is_some()
+}
+
+/// Read a source file from the filesystem, falling back to the VFS.
+///
+/// Filesystem first, so a native session reads the working tree exactly as it
+/// did before; in a browser `fs::read_to_string` is `Unsupported` for every
+/// path and the VFS is the only branch that can succeed. Same ordering as
+/// [`ExprLoader::file_source_code`] — this is the standalone form, for probes
+/// that are not going through the `processed_files` cache.
+pub fn source_text(path: &Path) -> Option<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Some(text),
+        Err(_) => vfs_source_text(path),
+    }
 }
 
 #[allow(clippy::unwrap_used)]
@@ -767,9 +788,15 @@ impl ExprLoader {
         // line text used for the classifier.
         if let Some(root) = meta_dat_sources_root {
             let candidate = bundled_source_path(root, path);
-            if candidate.exists()
-                && let Ok(text) = fs::read_to_string(&candidate)
-            {
+            // `candidate.exists() && fs::read_to_string(..)` — the shape this
+            // used to have — is two filesystem calls, and on
+            // `wasm32-unknown-unknown` the first is hardwired `false` and the
+            // second is `Unsupported`. That made the bundled-source branch
+            // unreachable in a browser for any container, which is the read
+            // half of why `srcviews.dat` never surfaced there. `source_text`
+            // keeps the filesystem first and adds the VFS behind it, so the
+            // native answer is unchanged.
+            if let Some(text) = source_text(&candidate) {
                 // Match `get_source_line`'s 1-indexed convention: the
                 // bundled-source branch is invoked with the same `row`
                 // value the cached-file branch consumes (where
@@ -2383,7 +2410,11 @@ pub enum SourceOrigin {
     Unavailable,
 }
 
-pub(crate) fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
+/// Public so the browser acceptance test can assert the WRITE and the READ
+/// land on the same key. The native extraction and the VFS extraction both
+/// derive their destination from this function; a test that spelled the
+/// destination itself would keep passing if the two sides drifted.
+pub fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
     // Godot records GDScript source under its virtual-filesystem scheme
     // (`res://script.gd`, `user://...`). That is neither a real
     // filesystem path nor portable (a `res:` path component is invalid

@@ -99,16 +99,57 @@ const
   compileSubcommand* = "compile"
   traceSubcommand* = "trace"
 
+  transpilerCommand* = "avm-transpiler"
+    ## The bare program name `aztec-nargo` invokes after `nargo compile`, and
+    ## the name of upstream's own binary. NOT a `nargo` subcommand: there is no
+    ## `nargo transpile` on any desktop, and inventing one here would make the
+    ## tab disagree with every script a user already has — the exact drift
+    ## `noirToolchainCommand`'s comment exists to prevent, one tool over.
+
+  transpilerModuleId* = "avm-transpiler-toolchain"
+    ## Opaque at this layer, and deliberately not the asset id, for the reason
+    ## `noirToolchainModuleId` gives: this identifies the TOOL, which is what
+    ## `which avm-transpiler` is asking about, while the asset id names a file.
+
+  transpilerDisplayName* = "the Aztec AVM transpiler"
+
+  transpileSubcommand* = "transpile"
+
 proc subcommandForAsset*(assetId: string): string =
-  ## Which `nargo` subcommand each fetched module makes possible, and the
-  ## empty string for an asset that enables none.
+  ## Which subcommand each fetched module makes possible, and the empty string
+  ## for an asset that enables none.
   ##
   ## This is the whole delivery-to-capability mapping, in one place, so the
   ## worker's routing and the registry's claim have a single point of
   ## agreement. `test_noir_wasm_delivery` pins both directions.
   if assetId == noirCompilerModuleId: compileSubcommand
   elif assetId == noirTracerModuleId: traceSubcommand
+  elif assetId == avmTranspilerModuleId: transpileSubcommand
   else: ""
+
+proc commandForAsset*(assetId: string): string =
+  ## Which COMMAND the subcommand above belongs to.
+  ##
+  ## Split from `subcommandForAsset` rather than folded into it because a
+  ## subcommand alone cannot say which tool runs it, and the registry's whole
+  ## job is to answer `which <command>`. While every module belonged to `nargo`
+  ## this was invisible; the moment a second tool arrived, a delivery that
+  ## enabled `transpile` would otherwise have declared `nargo transpile` — a
+  ## command that exists nowhere else, presented to the user as if it did.
+  if assetId == noirCompilerModuleId or assetId == noirTracerModuleId:
+    noirToolchainCommand
+  elif assetId == avmTranspilerModuleId:
+    transpilerCommand
+  else: ""
+
+proc registeredCommands*(): seq[string] =
+  ## Every command a delivery could declare, in manifest order and without
+  ## repeats. Derived from the manifest for the same reason
+  ## `deliverableModuleIds` is: a second list is a thing that can disagree.
+  for asset in fetchedRuntimeAssets():
+    let command = commandForAsset(asset.id)
+    if command.len > 0 and command notin result:
+      result.add command
 
 proc deliverableModuleIds*(): seq[string] =
   ## The asset ids a deployment MAY deliver, read from the manifest rather
@@ -150,25 +191,34 @@ proc registrableModules*(delivered: seq[DeliveredWasmModule]):
     if module.id in known and module.builtFrom.len > 0:
       result.add module
 
-proc deliveredSubcommands*(delivered: seq[DeliveredWasmModule]): seq[string] =
-  ## The subcommands this delivery can actually run, in manifest order so the
-  ## refusal sentence's "It provides: ..." list is stable rather than dependent
-  ## on the order a probe happened to report.
+proc deliveredSubcommands*(delivered: seq[DeliveredWasmModule],
+                           command: string = noirToolchainCommand): seq[string] =
+  ## The subcommands this delivery can actually run FOR ONE COMMAND, in
+  ## manifest order so the refusal sentence's "It provides: ..." list is stable
+  ## rather than dependent on the order a probe happened to report.
+  ##
+  ## `command` defaults to the Noir toolchain because that is what every
+  ## existing caller means; it became a parameter when a second tool arrived,
+  ## rather than the union it used to return, because a union would tell
+  ## `avm-transpiler` it provides `compile`.
   let registrable = registrableModules(delivered)
   for asset in noirWasmModuleAssets():
+    if commandForAsset(asset.id) != command: continue
     for module in registrable:
       if module.id == asset.id:
         let sub = subcommandForAsset(asset.id)
         if sub.len > 0 and sub notin result:
           result.add sub
 
-proc deliveredProvenance*(delivered: seq[DeliveredWasmModule]): string =
-  ## Every registrable module's provenance, in manifest order. One `nargo`
-  ## entry stands for up to two artefacts, so it has to name both — a
+proc deliveredProvenance*(delivered: seq[DeliveredWasmModule],
+                          command: string = noirToolchainCommand): string =
+  ## One command's registrable modules' provenance, in manifest order. One
+  ## `nargo` entry stands for up to two artefacts, so it has to name both — a
   ## `builtFrom` that mentioned only the compiler would make the tracer's
   ## origin unanswerable while looking answered.
   let registrable = registrableModules(delivered)
   for asset in noirWasmModuleAssets():
+    if commandForAsset(asset.id) != command: continue
     for module in registrable:
       if module.id == asset.id:
         if result.len > 0: result.add "; "
@@ -183,16 +233,25 @@ proc noirWasmRegistry*(delivered: seq[DeliveredWasmModule]): WasmRegistry =
   ## `capProcessSpawn` is correctly absent. That is the same answer the old
   ## `noWasmModules()` constant gave, reached by asking instead of by
   ## asserting.
-  let subcommands = deliveredSubcommands(delivered)
-  if subcommands.len == 0:
-    return WasmRegistry(modules: @[])
-  WasmRegistry(modules: @[
-    WasmModule(
-      command: noirToolchainCommand,
-      moduleId: WasmModuleId(noirToolchainModuleId),
-      displayName: noirToolchainDisplayName,
+  ## ONE ENTRY PER COMMAND, and only for commands this delivery can actually
+  ## run. A deployment that placed the two Noir modules and no transpiler
+  ## declares `nargo` and does not declare `avm-transpiler` — so `which
+  ## avm-transpiler` answers case (0)'s "no module" rather than case (3)'s
+  ## "registered, but not built with that subcommand", and those are different
+  ## sentences about different deployments.
+  for command in registeredCommands():
+    let subcommands = deliveredSubcommands(delivered, command)
+    if subcommands.len == 0: continue
+    result.modules.add WasmModule(
+      command: command,
+      moduleId: WasmModuleId(
+        if command == transpilerCommand: transpilerModuleId
+        else: noirToolchainModuleId),
+      displayName:
+        if command == transpilerCommand: transpilerDisplayName
+        else: noirToolchainDisplayName,
       subcommands: subcommands,
-      builtFrom: deliveredProvenance(delivered))])
+      builtFrom: deliveredProvenance(delivered, command))
 
 proc deliveryDefects*(delivered: seq[DeliveredWasmModule]): seq[string] =
   ## Everything wrong with a delivery, as sentences. Empty is the assertion a

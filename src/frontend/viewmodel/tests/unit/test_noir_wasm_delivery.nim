@@ -40,7 +40,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 87
+const ExpectedAssertions = 113
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -61,6 +61,20 @@ proc tracerOnly(): seq[DeliveredWasmModule] =
 
 proc bothModules(): seq[DeliveredWasmModule] =
   compilerOnly() & tracerOnly()
+
+const TranspilerProvenance =
+  "aztec-avm-runtime@browser/vendor-aztec-nr f3e00ce avm-transpiler-wasm"
+  ## Which repository, which published ref, which crate — the same three facts
+  ## the two Noir strings above carry. The transpiler shim wraps upstream's
+  ## `avm_transpile_bytecode` from `aztec-packages@233d8e0993`, and the ref
+  ## named here is the one that carries the shim.
+
+proc transpilerOnly(): seq[DeliveredWasmModule] =
+  @[DeliveredWasmModule(
+    id: avmTranspilerModuleId, builtFrom: TranspilerProvenance)]
+
+proc full3(): seq[DeliveredWasmModule] =
+  bothModules() & transpilerOnly()
 
 suite "the Noir wasm registry follows the delivery (NS3)":
 
@@ -226,9 +240,10 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     # and the assembly step makes it again: a hand-written copy cannot be made
     # to agree with the product.
     let ids = deliverableModuleIds()
-    counted ids.len == 2
+    counted ids.len == 3
     counted noirCompilerModuleId in ids
     counted noirTracerModuleId in ids
+    counted avmTranspilerModuleId in ids
 
     # Derived, not restated: the deliverable list IS the manifest's
     # `fcNoirWasmWorker` rows, and no bundled or asset-mode one.
@@ -254,10 +269,21 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     # The mapping is total over the manifest and empty off it.
     counted subcommandForAsset(noirCompilerModuleId) == compileSubcommand
     counted subcommandForAsset(noirTracerModuleId) == traceSubcommand
+    counted subcommandForAsset(avmTranspilerModuleId) == transpileSubcommand
     counted subcommandForAsset("renderer") == ""
     counted subcommandForAsset("wasm-worker") == ""
     for id in ids:
       counted subcommandForAsset(id).len > 0
+
+    # And so is the COMMAND mapping, which is the half that keeps a subcommand
+    # attributed to the tool that actually runs it.
+    counted commandForAsset(noirCompilerModuleId) == noirToolchainCommand
+    counted commandForAsset(noirTracerModuleId) == noirToolchainCommand
+    counted commandForAsset(avmTranspilerModuleId) == transpilerCommand
+    counted commandForAsset("renderer") == ""
+    for id in ids:
+      counted commandForAsset(id).len > 0
+    counted registeredCommands() == @[noirToolchainCommand, transpilerCommand]
 
   test "a project's own nargo is never served the studio's module":
     # Case (1), and it must hold whatever was delivered: a project holding
@@ -293,6 +319,50 @@ suite "the Noir wasm registry follows the delivery (NS3)":
     counted noirToolchainModuleId notin deliverableModuleIds()
     counted noirToolchainModuleId != noirCompilerModuleId
     counted noirToolchainModuleId != noirTracerModuleId
+
+  test "the transpiler is its OWN command, and a Noir-only delivery declares none":
+    # The join this case exists for: a contract compiled in the tab is handed
+    # to the transpiler in the tab. That needs a THIRD module, and it is not a
+    # `nargo` subcommand — there is no `nargo transpile` on any desktop, and
+    # declaring one would make the tab disagree with every script a user has.
+
+    # A delivery with only the Noir modules declares `nargo` and NOT the
+    # transpiler. This is the arm that fails if `registeredCommands` ever
+    # declares a command whose module was not delivered.
+    let noirOnly = noirWasmRegistry(bothModules())
+    counted noirOnly.modules.len == 1
+    counted noirOnly.resolve(transpilerCommand, @[transpileSubcommand]).kind ==
+      wrNoModuleForCommand
+    counted transpileSubcommand notin noirOnly.modules[0].subcommands
+
+    # With the transpiler delivered there are TWO modules, each naming its own
+    # command, and `nargo` has not grown a subcommand.
+    let full = noirWasmRegistry(full3())
+    counted full.modules.len == 2
+    counted full.describes(noirToolchainCommand) == noirToolchainModuleId
+    counted full.describes(transpilerCommand) == transpilerModuleId
+    counted full.resolve(transpilerCommand, @[transpileSubcommand]).kind ==
+      wrResolved
+    counted full.resolve(noirToolchainCommand, @["compile"]).kind == wrResolved
+    counted deliveredSubcommands(full3(), noirToolchainCommand) ==
+      @[compileSubcommand, traceSubcommand]
+    counted deliveredSubcommands(full3(), transpilerCommand) ==
+      @[transpileSubcommand]
+
+    # Provenance is per command, so the transpiler cannot borrow the compiler's.
+    counted deliveredProvenance(full3(), transpilerCommand) ==
+      avmTranspilerModuleId & ": " & TranspilerProvenance
+    counted CompilerProvenance notin
+      deliveredProvenance(full3(), transpilerCommand)
+
+    # The transpiler ALONE: `avm-transpiler` resolves, `nargo` does not. The
+    # mirror of the first arm, and it is what shows the two commands are
+    # independent rather than one being a side effect of the other.
+    let transpilerAlone = noirWasmRegistry(transpilerOnly())
+    counted transpilerAlone.modules.len == 1
+    counted transpilerAlone.modules[0].command == transpilerCommand
+    counted transpilerAlone.resolve(noirToolchainCommand, @["compile"]).kind ==
+      wrNoModuleForCommand
 
   test "noir_wasm_delivery_assertion_count_is_measured":
     # The count is asserted so that deleting or short-circuiting a check above
