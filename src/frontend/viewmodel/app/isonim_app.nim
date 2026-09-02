@@ -21,8 +21,7 @@
 ##     code is identical — it does not know whether it reads from the
 ##     primary or mirror signals.
 ##
-## Usage:
-##   # In ui_js.nim configureMiddleware, after creating activeSessionVM:
+## Usage (illustrative — nothing in the tree calls this today):
 ##   import viewmodel/app/isonim_app
 ##   mountIsoNimApp(activeSessionVM)
 
@@ -115,15 +114,21 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   )
 
 # ---------------------------------------------------------------------------
-# Top-level mount proc — called from ui_js.nim
+# Top-level mount proc — currently uncalled
 # ---------------------------------------------------------------------------
 
 proc mountIsoNimApp*(session: SessionViewModel): IsoNimApp =
   ## Mount the IsoNim application into the `#isonim-app` container.
   ##
-  ## This is the main entry point called from ui_js.nim. It creates the
+  ## This is the entry point for the standalone shell. It creates the
   ## full IsoNim app with all panels, or returns nil if the container div
   ## is not present in the HTML.
+  ##
+  ## It has no call site in the tree. `ui_js.nim` imports this module but
+  ## deliberately does not mount the shell — mounting it there would build
+  ## a second DOM tree in `#isonim-app` on top of the per-panel mounts
+  ## (`calltrace.nim`, `state.nim`, `event_log.nim`, …) that GoldenLayout
+  ## already drives. See the comment next to that decision in `ui_js.nim`.
   ##
   ## The standalone shell is mounted only by callers that opt into this entry
   ## point. The regular application mounts IsoNim views directly into
