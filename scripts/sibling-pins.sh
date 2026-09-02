@@ -83,6 +83,32 @@
 # the three named repositories are at the commits `flake.lock` specifies.
 # Pinning the toolchain is separate work and is NOT done here.
 #
+# ## This is one link in a chain — do NOT unify it with blocktracer's
+#
+# There is a second pinning mechanism in a different repository, and the next
+# person to notice both will be tempted to merge them. They are not duplicates.
+# They pin DISJOINT sets from DIFFERENT sources of truth:
+#
+#   blocktracer  client/hydrate/build.sh   pins CODETRACER_REF, ISONIM_REF and
+#                                          NIM_EVERYWHERE_REF, read from
+#                                          `ci/embed-sdk-pin.env`
+#
+#   codetracer   scripts/sibling-pins.sh   pins codetracer-native-recorder,
+#                (this file)               codetracer-trace-format and
+#                                          codetracer-trace-format-nim, read
+#                                          from `flake.lock`
+#
+# blocktracer pins CODETRACER at a commit; this file then makes that commit
+# determine codetracer's own three build siblings. That is a chain: each link
+# fixes the inputs of the next. Removing either one reopens exactly one hop and
+# reintroduces "the same commit built twice takes different inputs" at that
+# hop only — which is the failure that is hardest to attribute, because
+# everything on either side of the missing link still reports pinned.
+#
+# So: keep both. Neither makes the other redundant, and neither can be
+# extended to cover the other's set, because they read different files that
+# are correct for different repositories.
+#
 # ## Modes
 #
 #   sibling-pins.sh                      -> `name=rev` lines, one per sibling
