@@ -537,7 +537,13 @@ test_lane_files() {
 		# drops a second claim on a chord. It is JS-only because
 		# `frontend/config.nim` is built on `std/jsffi`'s `JsAssoc`, and it
 		# needs the same `globalThis.window` shim the scratchpad suite does.
+		# `debug_toolbar_tooltips_test.nim` is the same shape one level up: the
+		# debug toolbar's tooltips must NAME the chord that is bound rather than
+		# restate it as a literal, so it asserts the shipped table drives all 13
+		# controls and that rebinding one changes the answer. JS-only for the
+		# same `JsAssoc` reason.
 		printf '%s\n' \
+			src/frontend/tests/debug_toolbar_tooltips_test.nim \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
 			src/frontend/tests/scratchpad_add_dispatch_test.nim \

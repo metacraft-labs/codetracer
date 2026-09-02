@@ -13,9 +13,17 @@
 ## - `MockRenderer` — a minimal toolbar with text-glyph buttons used by
 ##   headless unit tests.
 ## - `WebRenderer` — the Karax-compatible toolbar with SVG icons,
-##   tooltips and `.separate-bar` dividers, IDs `{action}-debug` for
-##   Playwright targeting, and click handlers that delegate to the
+##   tooltips and `.separate-bar` dividers, IDs `{action}-image` for
+##   Playwright targeting (see `page-objects/debug-toolbar-ids.ts`; the
+##   ids were renamed from `{action}-debug` and this line said so for
+##   longer than it was true — `jump-to-live-debug` is the one control
+##   the rename left alone), and click handlers that delegate to the
 ##   VM's legacy bridge callbacks (`onDapStep`, `onAction`).
+##
+## Every button carries a `.custom-tooltip` child whose text is built by
+## `DebugControlsVM.toolbarTooltip`, which READS the chord currently bound
+## to that control instead of restating it. Both panels use it, so the
+## headless lane can assert the same text the browser paints.
 ##
 ## Each panel is expressed as a single `ui()` block; per-button
 ## reactivity (the `disabled` attribute) is wired afterwards via the
@@ -92,21 +100,33 @@ proc renderDebugControlsPanel*(r: MockRenderer;
       button(ref = stepBack, class = "step-backward",
              onclick = proc() = vm.stepBackward()):
         text "◀"
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("reverse-next", "Reverse next")
       button(ref = stepFwd, class = "step-forward",
              onclick = proc() = vm.stepForward()):
         text "▶"
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("next", "Next")
       button(ref = stepIn, class = "step-in",
              onclick = proc() = vm.stepIn()):
         text "↓"
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("step-in", "Step in")
       button(ref = stepOut, class = "step-out",
              onclick = proc() = vm.stepOut()):
         text "↑"
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("step-out", "Step out")
       button(ref = contBtn, class = "continue-btn",
              onclick = proc() = vm.continueExecution()):
         text "⏩"
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("continue", "Continue")
       button(ref = revContBtn, class = "reverse-continue",
              onclick = proc() = vm.reverseContinue()):
         text "⏪"
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("reverse-continue", "Reverse continue")
       if vm.toolbarModeText.val.len > 0:
         span(class = "debug-toolbar-mode"):
           text vm.toolbarModeText.val
@@ -140,8 +160,9 @@ proc renderDebugControlsPanel*(r: MockRenderer;
 #   [reverse-continue] [continue] | [run-to-entry] |
 #   [reset-operation] | [run-tests] |
 #
-# All button IDs use the `{action}-debug` pattern that Playwright page
-# objects expect (e.g. `#next-debug`, `#continue-debug`).
+# All button IDs use the `{action}-image` pattern that Playwright page
+# objects expect (e.g. `#next-image`, `#continue-image`), mapped in
+# `src/tests/gui/page-objects/debug-toolbar-ids.ts`.
 
 when defined(js):
 
@@ -186,12 +207,12 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "history-back")):
           tdiv(class = "custom-tooltip"):
-            text "History back"
+            text vm.toolbarTooltip("history-back", "History back")
         button(id = "history-forward-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "history-forward")):
           tdiv(class = "custom-tooltip"):
-            text "History forward"
+            text vm.toolbarTooltip("history-forward", "History forward")
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse next / Next --
@@ -199,12 +220,12 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-next")):
           tdiv(class = "custom-tooltip"):
-            text "Reverse next (Shift-F10)"
+            text vm.toolbarTooltip("reverse-next", "Reverse next")
         button(ref = nextBtn, id = "next-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "next")):
           tdiv(class = "custom-tooltip"):
-            text "Next (F10)"
+            text vm.toolbarTooltip("next", "Next")
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse step-in / Step-in --
@@ -212,12 +233,12 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-step-in")):
           tdiv(class = "custom-tooltip"):
-            text "Reverse step in (Shift-F11)"
+            text vm.toolbarTooltip("reverse-step-in", "Reverse step in")
         button(ref = stepInBtn, id = "step-in-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "step-in")):
           tdiv(class = "custom-tooltip"):
-            text "Step in (F11)"
+            text vm.toolbarTooltip("step-in", "Step in")
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse step-out / Step-out --
@@ -225,12 +246,12 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-step-out")):
           tdiv(class = "custom-tooltip"):
-            text "Reverse step out (Shift-F12)"
+            text vm.toolbarTooltip("reverse-step-out", "Reverse step out")
         button(ref = stepOutBtn, id = "step-out-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "step-out")):
           tdiv(class = "custom-tooltip"):
-            text "Step out (F12)"
+            text vm.toolbarTooltip("step-out", "Step out")
         tdiv(class = "separate-bar"):
           discard
         # -- Reverse continue / Continue --
@@ -238,12 +259,12 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "reverse-continue")):
           tdiv(class = "custom-tooltip"):
-            text "Reverse continue (Shift-F8)"
+            text vm.toolbarTooltip("reverse-continue", "Reverse continue")
         button(ref = contBtn, id = "continue-image",
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = stepClick(vm, "continue")):
           tdiv(class = "custom-tooltip"):
-            text "Continue (F8)"
+            text vm.toolbarTooltip("continue", "Continue")
         tdiv(class = "separate-bar"):
           discard
         # -- Run to entry --
@@ -251,7 +272,7 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "run-to-entry")):
           tdiv(class = "custom-tooltip"):
-            text "Run to entry"
+            text vm.toolbarTooltip("run-to-entry", "Run to entry")
         tdiv(class = "separate-bar"):
           discard
         # -- Reset operation --
@@ -259,7 +280,7 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "reset-operation")):
           tdiv(class = "custom-tooltip"):
-            text "Reset operation"
+            text vm.toolbarTooltip("reset-operation", "Reset operation")
         tdiv(class = "separate-bar"):
           discard
         # -- Run tests --
@@ -267,7 +288,7 @@ when defined(js):
                class = "ct-button-image-md-secondary ct-button-no-border",
                onclick = actionClick(vm, "run-tests")):
           tdiv(class = "custom-tooltip"):
-            text "Record and replay tests in a new window"
+            text vm.toolbarTooltip("run-tests", "Record and replay tests in a new window")
         if vm.toolbarModeText.val.len > 0:
           span(id = "debug-toolbar-mode",
                class = "debug-toolbar-mode"):
