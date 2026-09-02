@@ -150,12 +150,24 @@ proc checkMoveWasEmitted(s: HeadlessDebugSession; what: string) =
   ## Checking the buffer first converts that into a named failure, which
   ## matters for the mutation arms: each of them must redden *its own*
   ## assertion with a readable reason, not time out.
+  ##
+  ## This RAISES rather than calling ``fail()``.  ``fail()`` sets the test
+  ## status but does not unwind out of a proc, so the body would carry on
+  ## into ``consumeNextCompleteMove`` and block anyway — a mutation arm
+  ## that hangs instead of naming its failure. (Measured: the
+  ## missing-``threadId`` arm did exactly that before this was a raise.)
+  ##
+  ## One case this still cannot rescue: a command the engine answers with
+  ## NOTHING AT ALL — an unmapped string, or `ct/local-step-jump`, whose
+  ## handler omits `respond_dap`. There the blocking send never returns
+  ## and no assertion here is ever reached. That deadlock is not a gap in
+  ## the test; it IS the defect that keeps this code off those commands.
   for ev in s.backend.eventQueue:
     if ev.getOrDefault("event").getStr("") == "ct/complete-move":
       return
-  checkpoint("no ct/complete-move was emitted for: " & what &
-             " — the engine did not move the session")
-  fail()
+  raise newException(ValueError,
+    "no ct/complete-move was emitted for: " & what &
+    " — the engine did not move the session")
 
 proc findDistinctLaterPosition(s: HeadlessDebugSession;
                                start: Position;
