@@ -267,6 +267,91 @@ for row in "${required_siblings[@]}"; do
 	describe_missing "$name" "$probe" "$overrides" "$reason"
 done
 
+# -----------------------------------------------------------------------------
+# Was the dev shell ever entered HERE?
+#
+# This file's whole subject is "the workspace is incomplete, and the compiler
+# will misattribute that later". A fresh `git worktree` is incomplete in a
+# SECOND way that produces the same class of misattribution, and it is not about
+# siblings at all:
+#
+#   * `.envrc` is what runs `git submodule update --init --recursive`, and it is
+#     blocked per-directory until `direnv allow` is run there. A worktree it has
+#     never run in has NO initialised submodules, so `libs/*` are empty
+#     directories and the build dies on `cannot open file: <module>` -- the
+#     exact symptom, and the exact misattribution, that the sibling tables above
+#     exist to pre-empt.
+#   * `.pre-commit-config.yaml` is a devshell-GENERATED SYMLINK into /nix/store
+#     rather than a tracked file, so it is absent too, and `git commit` behaves
+#     differently here than in the main checkout.
+#
+# Both were MEASURED in a fresh worktree of this repository: before
+# `direnv allow`, `git submodule status` prefixed every entry with `-` and
+# `.pre-commit-config.yaml` did not exist; after it, both were in place.
+#
+# The check itself lives in `scripts/toolchain-pins.sh --devshell-init`, because
+# the question it answers -- "did the environment that answers `nim` actually
+# initialise in this directory?" -- is that guard's subject, and one
+# implementation is better than two that can drift. This is the call site,
+# because this is the script every build driver already runs first.
+#
+# SEVERITY IS SPLIT, deliberately, and along the line this file already draws:
+# a build that fails BECAUSE of the preflight is worse than no preflight, so
+# only the condition that genuinely stops a build is hard. Uninitialised
+# submodules stop it. A missing pre-commit symlink does not, so it warns.
+devshell_guard="$repo_root/scripts/toolchain-pins.sh"
+if [ -f "$devshell_guard" ]; then
+	devshell_report=""
+	devshell_rc=0
+	devshell_report="$(bash "$devshell_guard" --devshell-init 2>&1)" || devshell_rc=$?
+	if [ "$devshell_rc" -ne 0 ]; then
+		# Ask the one question that decides severity here rather than trusting
+		# the delegate's single exit code to mean the same thing forever.
+		uninit_submodules=0
+		if command -v git >/dev/null 2>&1; then
+			uninit_submodules="$(git -C "$repo_root" submodule status 2>/dev/null | grep -c '^-' | tr -d ' ')"
+		fi
+		if [ "${uninit_submodules:-0}" -gt 0 ]; then
+			{
+				echo "Cannot start the CodeTracer build: the dev shell has never initialised this checkout."
+				echo
+				printf '%s\n' "$devshell_report"
+				echo
+				echo "  this repo: $repo_root"
+				echo
+				echo "$uninit_submodules submodule(s) are uninitialised, and the Nim build resolves"
+				echo "libs/* through them. It would run for minutes and then fail with"
+				echo '`cannot open file: <module>`, naming a module rather than this cause --'
+				echo "which is the same misattribution the sibling check above exists to prevent."
+				echo
+				echo "    cd $repo_root && direnv allow"
+				echo
+				echo "or, without direnv:"
+				echo
+				echo "    git -C $repo_root submodule update --init --recursive"
+				echo
+				echo "CODETRACER_SKIP_SIBLING_CHECK=1 bypasses this along with everything else"
+				echo "above, and the build will still not succeed."
+			} >&2
+			exit 1
+		fi
+		{
+			echo "scripts/require-siblings.sh: the dev shell has not fully initialised this checkout."
+			printf '%s\n' "$devshell_report"
+			echo "  The BUILD continues -- nothing above stops a compile. Commits made from"
+			echo "  here will not run the same hooks as the main checkout."
+			echo "  remedy: cd $repo_root && direnv allow"
+		} >&2
+	fi
+else
+	# Say so rather than pass silently. A delegated check whose delegate is
+	# missing is an unrun check, and an unrun check that reports nothing is
+	# indistinguishable from one that found nothing.
+	echo "scripts/require-siblings.sh: NOTE -- $devshell_guard is absent, so the" >&2
+	echo "  dev-shell-initialisation check did NOT run. Uninitialised submodules in a" >&2
+	echo '  fresh worktree will surface later as `cannot open file: <module>`.' >&2
+fi
+
 # Advisory tier: name what will fail to resolve, and let the build proceed.
 # Anything here is something a build has been observed to survive without.
 advisory_missing=()

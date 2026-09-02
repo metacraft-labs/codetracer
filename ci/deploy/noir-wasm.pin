@@ -135,3 +135,22 @@ TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 # so it is paid once per pin by the sessions that compile anything.
 EXPECT_COMPILER_BYTES=16454689
 EXPECT_TRACER_BYTES=4613157
+
+# WHICH COMPILER PRODUCED THE TWO FIGURES ABOVE: NOT RECORDED, and that is
+# written down rather than guessed.
+#
+# The note above says "a rustc bump moves them further", so the toolchain is
+# already known to reach these numbers — but no run that produced them ever
+# printed which rustc it was, so the honest value here is unknown. Filling it in
+# from the rustc that happens to be in a dev shell today would be inventing a
+# provenance for a measurement taken by a different run, which is the same shape
+# of error as the constant this whole guard was written after.
+MEASURED_TOOLCHAIN=unknown-predates-the-stamp
+#
+# THE NEXT BUMP MUST FILL IT IN, and does not have to remember to:
+# `ci/deploy/build-noir-wasm.sh` now runs
+# `scripts/toolchain-pins.sh --require rustc cargo` before it builds anything,
+# refuses if the toolchain cannot be attributed to this commit, and prints the
+# resulting `TOOLCHAIN: …` line beside each byte count and again at the end of
+# its log. Copy that line here alongside the new figures — it is the sentence
+# that makes "the number moved" answerable.

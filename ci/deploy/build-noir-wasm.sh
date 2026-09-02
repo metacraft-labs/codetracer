@@ -66,10 +66,45 @@ command -v cargo >/dev/null 2>&1 || {
 	exit 2
 }
 
+# WHICH COMPILER ANSWERED. This script's two byte counts land in a TRACKED
+# FILE — `EXPECT_COMPILER_BYTES` and `EXPECT_TRACER_BYTES` in
+# `ci/deploy/noir-wasm.pin` — and that file already records why the toolchain
+# reaches them: "A rustc bump moves them further." Until now nothing said WHICH
+# rustc produced the recorded figures, so a number in the pin file and a number
+# from a later run could differ for a reason nobody could name.
+#
+# `--require rustc cargo` is the rule from `scripts/toolchain-pins.sh`: it
+# verifies strictly and only then prints the stamp, so there is no way to reach
+# the number without having passed the refusal. It is SCOPED to the two tools
+# this script actually uses — `nim` and `nargo` play no part in a
+# `wasm32-unknown-unknown` cargo build, and a stamp that named them would be
+# vouching for compilers this run never invoked. The stamp itself lists them
+# separately under `not-verified:` for exactly that reason.
+#
+# A refusal here exits 2 (the environment is wrong), not 1 (the build failed),
+# matching the cargo check above.
+TOOLCHAIN_STAMP=""
+toolchain_guard="${repo_root}/scripts/toolchain-pins.sh"
+if [ -f "${toolchain_guard}" ]; then
+	if ! TOOLCHAIN_STAMP="$(bash "${toolchain_guard}" --require rustc cargo)"; then
+		echo "refusing to produce a byte count from an unattributable toolchain." >&2
+		echo "  The two numbers this script prints are copied into" >&2
+		echo "  ci/deploy/noir-wasm.pin, so they have to name a compiler." >&2
+		echo "  The diagnostics above say which check failed and how to fix it." >&2
+		exit 2
+	fi
+else
+	# Say so rather than print a number with no provenance at all. A missing
+	# guard is an unrun check, and an unrun check reads exactly like a passing
+	# one on the line that follows.
+	TOOLCHAIN_STAMP="TOOLCHAIN: UNKNOWN — ${toolchain_guard} is absent, so nothing verified the compiler that produced the figures below."
+fi
+
 echo "=== the two Noir wasm modules ==="
 echo "  noir:         ${NOIR_REPO} @ ${NOIR_REV}"
 echo "  trace-format: ${TRACE_FORMAT_REPO} @ ${TRACE_FORMAT_REV}"
 echo "  work dir:     ${work_dir}"
+echo "  ${TOOLCHAIN_STAMP}"
 echo
 
 # The sibling FIRST. Without it `cargo` fails while loading the workspace
@@ -149,7 +184,13 @@ build_module() {
 		# declares — which is the check that actually protects a visitor.
 		echo "  NOTE: ${artifact} is ${bytes} bytes; the pin records ${expected}"
 	fi
+	# THE NUMBER AND THE COMPILER, ON THE SAME LINE. This figure is what gets
+	# copied into ci/deploy/noir-wasm.pin, and the previous bumps' notes show
+	# what its absence cost: entries carried forward "unmeasured", divergences
+	# attributed to a build DIRECTORY, and no way to tell a rustc bump from a
+	# product change. Whoever copies the number now copies the compiler with it.
 	echo "  ok: ${artifact} (${bytes} bytes)"
+	echo "      ${TOOLCHAIN_STAMP}"
 	return 0
 }
 
@@ -166,3 +207,4 @@ if [ "${failures}" -ne 0 ]; then
 fi
 echo "RESULT: OK — both modules are in ${out_dir}"
 echo "NOIR_REV=${NOIR_REV}"
+echo "${TOOLCHAIN_STAMP}"

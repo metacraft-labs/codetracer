@@ -104,6 +104,13 @@ lint_step "shellcheck: flake pin alignment guard" \
 lint_step "shellcheck: sibling commit-pin resolver" \
 	shellcheck scripts/sibling-pins.sh
 
+# The toolchain half of the same question, and not covered by the glob for the
+# same reason. `sibling-pins.sh` pins three REPOSITORIES and says on its own
+# passing line that it does not cover the compilers that read them; this is the
+# guard that does.
+lint_step "shellcheck: toolchain resolver" \
+	shellcheck scripts/toolchain-pins.sh
+
 # Its contract suite runs here for the same reason the others do -- pure bash
 # and git, no nix, no network, under a second -- and because the thing it
 # actually asserts is that the guard's FAILURE PATHS accuse the right thing.
@@ -213,5 +220,16 @@ lint_step "contract suite: sibling flake inputs track the branch CI clones" \
 # catch. Pure bash + git + python3 over mktemp fixtures; no nix, no network.
 lint_step "contract suite: build siblings are pinned to commits, not branches" \
 	bash ci/test/sibling-pins-test.sh
+
+# The suite above covers three REPOSITORIES; this one covers the COMPILERS that
+# read them, which the suite above explicitly does not and says so. Registered
+# here rather than left to be discovered for the same reason: an unrun check is
+# the defect it exists to catch. Its own arms are mostly failure paths, because
+# every way a toolchain guard can be wrong looks like it working -- an ambient
+# `nim` that resolves into the store, a `--require` naming a tool that is not
+# declared, an emptied tool list. Pure bash + git + python3 over mktemp
+# fixtures; no nix, no dev shell, no network.
+lint_step "contract suite: the toolchain that answered is the one this commit declares" \
+	bash ci/test/toolchain-pins-test.sh
 
 lint_summary
