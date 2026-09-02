@@ -1892,6 +1892,32 @@ jobs:
         # real duplicate so "exactly one" cannot pass vacuously.
         run: nix develop .#devShells.x86_64-linux.default --command just test-chord-and-pane-uniqueness
 
+      - name: A submenu you can click, a bar that does not flicker, one menu on right-click
+        # Three defects one user reported against the deployed site on
+        # 2026-09-02, and the reason none of them was caught here: every
+        # existing check asserts markup or a model, and all three defects are
+        # invisible to both.
+        #
+        # The submenus were in the DOM with the right rows at the right
+        # coordinates, clipped out of existence by an `overflow: hidden` the
+        # `dropdown-surface()` mixin carried onto `#menu-main` at 09bc09b7; the
+        # same mixin's reveal animation replayed from `opacity: 0` on every
+        # rebuild of the shell, which is the flicker. So this gate hit-tests the
+        # submenu row at its own painted centre and samples the menu's opacity
+        # every animation frame — a screenshot before and after the sweep shows
+        # a good menu both times.
+        #
+        # The context-menu half reads `defaultPrevented` from a document-level
+        # bubble listener, because the native menu is browser chrome and is
+        # suppressed under automation in every engine, so "two menus" cannot be
+        # counted directly and the gate declines to pretend otherwise.
+        #
+        # Placed beside the other two browser gates so all three read the same
+        # assembled bundle, and carrying the same shape: counted assertions with
+        # the count asserted, and five mutation arms each verified to redden
+        # exactly its own check.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-menu-and-context-menu
+
       - name: Renderer host-reach budget (NS1 residual 1)
         # The migration that stands between the web bundle and a rendered pane,
         # as a ratchet rather than a plan. Fails when a module gains a host

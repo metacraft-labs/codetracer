@@ -1008,6 +1008,36 @@ proc refreshLine(self: TraceComponent) =
   layoutMonacoViewZone(self.monacoEditor, self.zoneId)
 
 proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDeleteChunk: bool = false, lineNumber: int = NO_LINE): cstring =
+  ## The custom gutter, as HTML handed to Monaco's `lineNumbers` callback.
+  ##
+  ## TWO THINGS ABOUT THIS MARKUP THAT WERE ASKED ABOUT AND ARE NOW MEASURED,
+  ## because both look like defects and only one is.
+  ##
+  ## 1. `onmousedown='event.stopPropagation()'` ON EVERY NODE IS LOAD-BEARING.
+  ##    It reads like a guard on the wrong event — the breakpoint handler is a
+  ##    `click` listener (`ui/editor.nim`), so a guard on `mousedown` cannot
+  ##    stop anything that acts on `click` or `mouseup`, which is how Monaco's
+  ##    folding works.  Measured in a real tab by stripping all 132 of them from
+  ##    a live page and repeating the same click:
+  ##
+  ##        with the guards     breakpoint toggled, no selection, no fold
+  ##        without them        Monaco SELECTS THE LINE, and the breakpoint is
+  ##                            not toggled at all
+  ##
+  ##    So they stop Monaco's line-selection on press, which is their job, and
+  ##    they are also what keeps the click path working.  They do not stop
+  ##    folding — but nothing needs to, because `.gutter` subtracts
+  ##    `--ct-gutter-folding-lane` from its own width and the chevron is never
+  ##    underneath us (components/text_editor.styl).
+  ##
+  ## 2. `diffHtml` IS A DEAD SLOT.  It is an empty div, and NO rule in the
+  ##    compiled theme targets `.diff-line` — the VCS signal a user actually
+  ##    sees comes from the CONTAINER classes below (`.diff-added-gutter`
+  ##    colours the number and `.line-numbers:has(.diff-added-gutter)` draws the
+  ##    edge).  Measured: `.diff-line` renders at 73x0 px.  It is left in place
+  ##    rather than deleted because a VCS-gutter feature may want the slot, but
+  ##    it is a slot, not an indicator, and anything placing a control in this
+  ##    strip should not count it as an occupied lane.
   let realLine =
     if isDeleteChunk:
       -1

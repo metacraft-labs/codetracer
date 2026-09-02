@@ -2737,6 +2737,163 @@ suite "IsoNim Debug Controls Panel — status text":
       dispose()
 
 # ===========================================================================
+# Debug Controls tooltips — the chord is READ, not restated
+# ===========================================================================
+#
+# The toolbar used to carry `text "Next (F10)"`: a STRING LITERAL, which
+# `isonim/dsl/transform.nim`'s `isDynamic` classifies as static, so it was
+# painted once at mount and could never change. It agreed with
+# `default_config.yaml` by coincidence and would have gone on promising "F10"
+# for as long as the file existed, whatever anyone rebound.
+#
+# THE FALSE PASS THESE TESTS ARE SHAPED AGAINST is asserting that a tooltip
+# EXISTS, or that it CONTAINS AN EXPECTED LITERAL. A hardcoded label passes
+# both, which is precisely why neither caught the defect. The discriminating
+# assertion is that CHANGING THE BINDING CHANGES THE PAINTED TEXT — so every
+# test below that matters has a mutation arm, and each arm reddens its own
+# assertion.
+#
+# `shortcutFor` is the injected lookup `ui/debug.nim` fills from
+# `data.config.shortcutMap`; the tests stand in for that host with a table
+# they control, which is what makes "rebind" expressible here at all.
+
+proc tooltipTextOf(panel: MockNode; buttonClass: string): string =
+  ## The text a user would read in one button's tooltip.
+  ##
+  ## Reads the `.custom-tooltip` child rather than the button, because the
+  ## button's own `textContent` also contains its glyph.
+  let button = findByClass(panel, buttonClass)
+  findByClass(button, "custom-tooltip").textContent
+
+const mockToolbarButtons: array[6, tuple[cls: string; id: string; label: string]] = [
+  (cls: "step-backward",     id: "reverse-next",     label: "Reverse next"),
+  (cls: "step-forward",      id: "next",             label: "Next"),
+  (cls: "step-in",           id: "step-in",          label: "Step in"),
+  (cls: "step-out",          id: "step-out",         label: "Step out"),
+  (cls: "continue-btn",      id: "continue",         label: "Continue"),
+  (cls: "reverse-continue",  id: "reverse-continue", label: "Reverse continue"),
+]
+
+suite "IsoNim Debug Controls — tooltips read the binding":
+
+  test "every control paints a tooltip, and the count is what it should be":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+      vm.shortcutFor = proc(actionId: string): string = "CTRL+ALT+9"
+      let r = MockRenderer()
+
+      let panel = renderDebugControlsPanel(r, vm)
+
+      # NON-VACUITY. "every control has a chord" is satisfied by a toolbar
+      # with no controls, so the population is sized before it is judged.
+      let tooltips = findAllByClass(panel, "custom-tooltip")
+      check tooltips.len == 6
+      check tooltips.len > 0
+      check mockToolbarButtons.len == 6
+
+      var withChord = 0
+      for entry in mockToolbarButtons:
+        if "(CTRL+ALT+9)" in tooltipTextOf(panel, entry.cls):
+          inc withChord
+      check withChord == mockToolbarButtons.len
+
+      dispose()
+
+  test "the tooltip names the control AND the chord bound to it":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+      # A DISTINCT chord per action, so a lookup that ignored its argument and
+      # returned one constant — which every "contains F10" assertion would
+      # have accepted — is caught here.
+      vm.shortcutFor = proc(actionId: string): string = "CHORD-FOR-" & actionId
+      let r = MockRenderer()
+
+      let panel = renderDebugControlsPanel(r, vm)
+
+      var checkedControls = 0
+      for entry in mockToolbarButtons:
+        check tooltipTextOf(panel, entry.cls) ==
+          entry.label & " (CHORD-FOR-" & entry.id & ")"
+        inc checkedControls
+      check checkedControls == 6
+
+      dispose()
+
+  test "REBINDING CHANGES THE PAINTED TOOLTIP — the whole point":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+
+      # A rebindable table, standing in for `data.config.shortcutMap`.
+      var bindings = {"next": "F10", "step-in": "F11"}.toTable
+      vm.shortcutFor = proc(actionId: string): string =
+        if bindings.hasKey(actionId): bindings[actionId] else: ""
+      let r = MockRenderer()
+
+      let panel = renderDebugControlsPanel(r, vm)
+
+      # BEFORE. Asserted so the mutation below has a measured starting point
+      # and cannot pass by having been true all along.
+      check tooltipTextOf(panel, "step-forward") == "Next (F10)"
+      check tooltipTextOf(panel, "step-in") == "Step in (F11)"
+
+      # THE MUTATION ARM: rebind, exactly as a user editing the config would.
+      bindings["next"] = "CTRL+ALT+7"
+      vm.shortcutsRevision.val = vm.shortcutsRevision.val + 1
+      drain()
+
+      # AFTER, on the SAME panel — no re-render, no remount. A hardcoded
+      # label cannot do this, and neither can a lookup read only at mount.
+      check tooltipTextOf(panel, "step-forward") == "Next (CTRL+ALT+7)"
+      # And the control that was NOT rebound did not move — this is the arm's
+      # own control, catching a repaint that simply rewrote everything.
+      check tooltipTextOf(panel, "step-in") == "Step in (F11)"
+
+      dispose()
+
+  test "an unbound control shows its label and no empty parentheses":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+      vm.shortcutFor = proc(actionId: string): string = ""
+      let r = MockRenderer()
+
+      let panel = renderDebugControlsPanel(r, vm)
+
+      # `initShortcutMap` is first-writer-wins, so an action whose chord was
+      # already claimed silently gets NO chord. Rendering that as "Next ()"
+      # would advertise a shortcut that does not exist — the defect family
+      # this work exists to remove, reintroduced at the last step.
+      var checkedControls = 0
+      for entry in mockToolbarButtons:
+        let text = tooltipTextOf(panel, entry.cls)
+        check text == entry.label
+        check "(" notin text
+        inc checkedControls
+      check checkedControls == 6
+
+      dispose()
+
+  test "a nil lookup degrades to labels rather than crashing":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createDebugControlsVM(store)
+      # `shortcutFor` is nil until `ui/debug.nim` wires it, and the toolbar
+      # can mount before that happens.
+      check vm.shortcutFor.isNil
+      let r = MockRenderer()
+
+      let panel = renderDebugControlsPanel(r, vm)
+
+      check tooltipTextOf(panel, "step-forward") == "Next"
+      check findAllByClass(panel, "custom-tooltip").len == 6
+
+      dispose()
+
+
+# ===========================================================================
 # Event Log panel tests
 # ===========================================================================
 

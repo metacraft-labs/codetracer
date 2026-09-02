@@ -337,6 +337,28 @@ while IFS=$'\t' read -r path _ _; do
 			continue
 		fi
 
+		# AND THE `max-age` IS ACTUALLY LONG, not merely accompanied by the word
+		# `immutable`.
+		#
+		# Measured on 2026-09-02, and it is why this is not pedantry: the custom
+		# domains do not serve what `_headers` says. The pages.dev ORIGIN gives
+		# `.js` and `.wasm` under `/assets/` the same header; every custom domain
+		# edge-caches the `.js` (`cf-cache-status: REVALIDATED`) and REWRITES its
+		# browser TTL to 14400, while the `.wasm` is not edge-cached
+		# (`DYNAMIC`) and passes through untouched. That asymmetry is also the
+		# explanation for the incident's: the `.js` worker was edge-cached and
+		# poisoned, the wasm modules never were.
+		#
+		# So a zone can hand back `max-age=14400, immutable`, where the digest
+		# bought four hours instead of a year, and a check that greps for the
+		# word would call that a success.
+		max_age="$(printf '%s' "$cc" | sed -n 's/.*max-age=\([0-9][0-9]*\).*/\1/p')"
+		if [ "$hashed" -eq 1 ] && [ -n "$max_age" ] && [ "$max_age" -lt 86400 ]; then
+			echo "  $host$path carries a digest and is served '$cc' — max-age=$max_age is under a day, so the content-addressed name is buying revalidation, not caching" >&2
+			fail=1
+			continue
+		fi
+
 		if printf '%s' "$cc" | grep -qi 'immutable'; then
 			if [ "$hashed" -eq 1 ]; then
 				printf '  ok: %-52s %s\n' "$host$path" "${cc:-<none>}"

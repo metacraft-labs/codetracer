@@ -654,7 +654,7 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     # of the set is part of the claim rather than a preamble to it.
     let published = publishedDeployment(digestOfBuildOne)
     check publishedStaticAssets(published).len == declaredStaticAssetStems().len
-    check publishedStaticAssets(published).len == 6
+    check publishedStaticAssets(published).len == 7
     for path in publishedStaticAssets(published):
       check assetIsContentAddressed(path)
     check unhashedStaticAssets(published).len == 0
@@ -707,7 +707,7 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
       check assetIsContentAddressed(after)
       inc moved
     check moved == publishedStaticAssets(one).len
-    check moved == 6
+    check moved == 7
 
     # Both deployments still earn `immutable` — the address moved, the promise
     # did not weaken.
@@ -726,7 +726,7 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
       check contentAddressedStem(published) == stem
       inc round
     check round == declaredStaticAssetStems().len
-    check round == 6
+    check round == 7
     # A path with no digest is its own stem, so a check that maps every served
     # path through this does not lose the ones that were never renamed.
     check contentAddressedStem("/index.html") == "/index.html"
@@ -750,7 +750,7 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
       # that is not `application/wasm` by name.
       check named.endsWith("." & stem.rsplit('.', 1)[1])
       inc formed
-    check formed == 6
+    check formed == 7
     # A digest that could not make the name content-addressed produces nothing,
     # rather than a plausible path that quietly fails to earn `immutable`.
     check contentAddressedPath("assets/wasm-worker.js", "abc") == ""
@@ -790,7 +790,7 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
                       "/p/hello-world-3f9a2c/current.json",
                       "/projects"]
     addresses.add publishedStaticAssets(publishedDeployment(digestOfBuildOne))
-    check publishedStaticAssets(publishedDeployment(digestOfBuildOne)).len == 6
+    check publishedStaticAssets(publishedDeployment(digestOfBuildOne)).len == 7
       # The loop must not be vacuous, and the count is asserted rather than
       # merely non-zero: `> 0` is satisfied by one asset, and the whole point of
       # the glob is that it has to be right for all six at once.
@@ -1138,10 +1138,10 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     check (id: "renderer", mode: damBundled) in byId
     check (id: "wasm-worker", mode: damAsset) in byId
 
-  test "the two Noir modules and the replay engine are FETCHED, never bundled":
-    # ~16 MB, ~4.6 MB and ~18 MB. Bundling any of them inflates it by a third
-    # as base64 and puts the result in front of first paint, for a capability
-    # most sessions never invoke.
+  test "the toolchain modules and the replay engine are FETCHED, never bundled":
+    # ~16 MB, ~4.6 MB, ~5.2 MB and ~18 MB. Bundling any of them inflates it by a
+    # third as base64 and puts the result in front of first paint, for a
+    # capability most sessions never invoke.
     #
     # THE ENGINE IS A DECLARED ADDITION TO THIS LIST, not an accident of the
     # count. It was published at `/pkg/db_backend_bg.wasm` and `/worker.js`
@@ -1154,6 +1154,7 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     var ids: seq[string]
     for asset in fetched: ids.add asset.id
     check ids.sorted == @[noirCompilerModuleId, noirTracerModuleId,
+                          avmTranspilerModuleId,
                           replayEngineGlueId, replayEngineModuleId].sorted
     for asset in fetched:
       check asset.mode == damFetched
@@ -1169,7 +1170,8 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     var noirIds, engineIds: seq[string]
     for asset in noirWasmModuleAssets(): noirIds.add asset.id
     for asset in replayEngineAssets(): engineIds.add asset.id
-    check noirIds.sorted == @[noirCompilerModuleId, noirTracerModuleId].sorted
+    check noirIds.sorted == @[noirCompilerModuleId, noirTracerModuleId,
+                          avmTranspilerModuleId].sorted
     check engineIds.sorted == @[replayEngineGlueId, replayEngineModuleId].sorted
     # Counted, and disjoint: the two lists partition the fetched set, so an
     # asset joining one of them silently cannot also be leaving the other.
@@ -1201,6 +1203,7 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     # at run time and nowhere earlier.
     check noirCompilerModuleId == "noir-compiler"
     check noirTracerModuleId == "noir-tracer"
+    check avmTranspilerModuleId == "avm-transpiler"
 
   test "every OPTIONAL asset says what its absence costs":
     # The same rule `capabilities.undeclaredDegradations` enforces one layer
@@ -1253,7 +1256,7 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
           check assetIsContentAddressed(url)
     # Every non-bundled row was graded, and how many there are is part of the
     # claim: a `continue` that stopped matching would leave this loop silent.
-    check graded == 6
+    check graded == 7
 
   test "and the entry document is the one thing that must NOT be immutable":
     # The mirror of the case above, and the reason `damEntryDocument` is its
@@ -1479,7 +1482,7 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
     let real = publishedDeployment(digestOfBuildOne)
     var servedByReal: seq[string]
     for path in publishedStaticAssets(real): servedByReal.add path
-    check servedByReal.len == 6
+    check servedByReal.len == 7
     check deployGuardDefects(real, servedByReal).len == 0
 
   test "modules with no worker to run them in are not a delivered toolchain":

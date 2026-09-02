@@ -216,7 +216,27 @@ type
     # the two notes above give: the `actions` array in `ui_js.nim` is indexed
     # positionally by this enum, so inserting anywhere but the end silently
     # re-points every handler after the insertion.
-    aVerification                 # Open the Verification panel
+    aVerification,                # Open the Verification panel
+    # The five debug-toolbar controls that had no `ClientAction`, and so had no
+    # chord that `ui/menu.nim`'s `loadShortcut` — or a tooltip — could read.
+    #
+    # The other eight toolbar buttons were already covered: `forwardNext` /
+    # `reverseNext` / `forwardStep` / `reverseStep` / `forwardStepOut` /
+    # `reverseStepOut` / `forwardContinue` / `reverseContinue` are in
+    # `default_config.yaml` with exactly the conventional F10/F11/F12/F8 family
+    # the toolbar's hardcoded tooltip strings had been *restating*. Nothing was
+    # displaced to add these five; they occupy chords nothing claimed.
+    #
+    # Appended at the end for the reason the three notes above give: `actions`
+    # in `ui_js.nim` is `array[ClientAction, ClientActionHandler]` written as a
+    # positional literal, so inserting anywhere but the end silently re-points
+    # every handler after the insertion. `test_verification_panel_registration`
+    # pins `ord(aVerification) == 183`, which an append leaves true.
+    aHistoryBack,                 # CTRL+ALT+B — toolbar `history-back`
+    aHistoryForward,              # CTRL+ALT+F — toolbar `history-forward`
+    aRunToEntry,                  # CTRL+ALT+E — toolbar `run-to-entry`
+    aResetOperation,              # CTRL+ALT+R — toolbar `reset-operation`
+    aRunTests                     # ALT+L      — toolbar `run-tests`
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

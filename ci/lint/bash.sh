@@ -98,6 +98,12 @@ lint_step "contract suite: DeepReview design-review harness" \
 lint_step "shellcheck: flake pin alignment guard" \
 	shellcheck scripts/test-flake-pin-alignment.sh
 
+# Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
+# every push to `cloud`, where a shell defect would surface as a deploy failure
+# rather than as a lint one.
+lint_step "shellcheck: sibling commit-pin resolver" \
+	shellcheck scripts/sibling-pins.sh
+
 # Its contract suite runs here for the same reason the others do -- pure bash
 # and git, no nix, no network, under a second -- and because the thing it
 # actually asserts is that the guard's FAILURE PATHS accuse the right thing.
@@ -195,5 +201,17 @@ lint_step "contract suite: crates.io download URL (crate sources are fetchable)"
 # greps, no nix.
 lint_step "contract suite: sibling flake inputs track the branch CI clones" \
 	bash ci/test/sibling-input-branch-test.sh
+
+# The suite above holds the two lanes to the same BRANCH. That is agreement,
+# not determinism: a branch tip moves, so the same codetracer commit built on
+# two days took two different sibling revisions and nothing could say which
+# artifact a commit was supposed to produce. `flake.lock` already records the
+# exact revision each of the three build siblings resolves to, so the fix was
+# to feed those revisions to the clone lane and then ASSERT the cloned trees
+# are at them. This suite covers that guard, and it is registered here rather
+# than left to be discovered because an unrun check is the defect it exists to
+# catch. Pure bash + git + python3 over mktemp fixtures; no nix, no network.
+lint_step "contract suite: build siblings are pinned to commits, not branches" \
+	bash ci/test/sibling-pins-test.sh
 
 lint_summary

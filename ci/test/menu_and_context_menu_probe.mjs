@@ -150,6 +150,73 @@ try {
         return out;
       });
 
+      // ---- THE MIXIN'S PRECONDITION, as a standing check ------------------
+      // `dropdown-surface()` carries `overflow: hidden`, which clips EVERY
+      // descendant and not just the rows.  That is what deleted the submenus.
+      // This asks the general question of every dropdown surface currently on
+      // screen — does any of them clip an absolutely-positioned child? — so a
+      // future caller that acquires such a child is caught by this gate rather
+      // than by a user.
+      //
+      // It cannot be asked of the stylesheet: a static pass over the compiled
+      // CSS reports ZERO escaping children even for `#menu-main`, because
+      // `.menu-nested-elements` is a sibling RULE and a child only in the DOM.
+      report.menu.clipCheck = await page.evaluate((SURFACES) => {
+        const containers = [];
+        const escapes = [];
+        for (const sel of SURFACES) {
+          for (const c of document.querySelectorAll(sel)) {
+            const cs = getComputedStyle(c);
+            const cr = c.getBoundingClientRect();
+            if (cr.width === 0 || cr.height === 0) continue;
+            const abs = [...c.querySelectorAll("*")].filter((d) => {
+              const p = getComputedStyle(d).position;
+              return p === "absolute" || p === "fixed";
+            });
+            containers.push({
+              sel,
+              overflow: `${cs.overflowX}/${cs.overflowY}`,
+              absDescendants: abs.length,
+            });
+            const clipX = cs.overflowX !== "visible";
+            const clipY = cs.overflowY !== "visible";
+            for (const d of abs) {
+              const dr = d.getBoundingClientRect();
+              if (dr.width === 0 || dr.height === 0) continue;
+              const outX = clipX && (dr.right <= cr.left + 1 || dr.left >= cr.right - 1);
+              const outY = clipY && (dr.bottom <= cr.top + 1 || dr.top >= cr.bottom - 1);
+              if (outX || outY) {
+                escapes.push({
+                  container: sel,
+                  child: `${d.tagName}#${d.id}.${typeof d.className === "string" ? d.className.slice(0, 40) : ""}`,
+                  axis: outX ? "x" : "y",
+                  childRect: { x: Math.round(dr.x), y: Math.round(dr.y), w: Math.round(dr.width), h: Math.round(dr.height) },
+                  containerRect: { x: Math.round(cr.x), y: Math.round(cr.y), w: Math.round(cr.width), h: Math.round(cr.height) },
+                });
+              }
+            }
+          }
+        }
+        return {
+          containersExamined: containers.length,
+          // NON-VACUITY: at least one of them must actually HOLD an
+          // absolutely-positioned child, or "nothing escaped" is a statement
+          // about an empty set.
+          withAbsoluteChildren: containers.filter((c) => c.absDescendants > 0).length,
+          containers,
+          escapes,
+        };
+      }, [
+        "#menu-main",
+        ".menu-nested-elements",
+        "#context-menu-container",
+        ".command-results",
+        ".layout-dropdown",
+        ".ct-picker-dropdown",
+        ".session-tab-overflow-menu",
+        ".vcs-branch-dropdown",
+      ]);
+
       // ---- the flicker: sample the menu's opacity across a pointer sweep --
       const others = items.filter((i) => i.label !== folder.label);
       await page.evaluate(() => {
@@ -373,6 +440,109 @@ try {
       ...(await readMenu()),
       events: await page.evaluate(() => window.__ctx.events),
     };
+  }
+  // =======================================================================
+  // PART C — the gutter: one lane, one owner, and no second effect
+  // =======================================================================
+  // The reported symptom was "clicking the gutter to place a breakpoint also
+  // collapses the function".  It does not reproduce — but a test that checked
+  // each control WORKS would have passed on the defect as reported, so what is
+  // measured here is the ABSENCE of the other effect in each direction.
+  await page.evaluate(() => {
+    const c = document.getElementById("context-menu-container");
+    if (c) c.style.display = "none";
+    window.__gut = () => ({
+      lines: [...document.querySelectorAll(".margin-view-overlays .gutter-line")].length,
+      breakpoints: [...document.querySelectorAll(".margin-view-overlays .gutter")]
+        .filter((g) => g.querySelector('[class*="gutter-breakpoint-"]'))
+        .map((g) => g.getAttribute("data-line")),
+      collapsed: document.querySelectorAll(".codicon-folding-collapsed").length,
+    });
+  });
+
+  const gutterGeom = await page.evaluate(() => {
+    const chev = document.querySelector(".codicon-folding-expanded");
+    if (!chev) return null;
+    const cr = chev.getBoundingClientRect();
+    const rows = [...document.querySelectorAll(".margin-view-overlays > div")];
+    const row = rows.find((r) => {
+      const rr = r.getBoundingClientRect();
+      return cr.top >= rr.top - 1 && cr.bottom <= rr.bottom + 1;
+    });
+    const gut = row && row.querySelector(".gutter");
+    if (!gut) return null;
+    const zoneSel = {
+      lineNumber: ".gutter-line",
+      breakpoint: '[class*="gutter-no-breakpoint"], [class*="gutter-breakpoint-"]',
+      tracepoint: '[class*="gutter-no-trace"], [class*="gutter-trace"], [class*="gutter-disabled-trace"]',
+    };
+    const zones = {};
+    for (const [name, sel] of Object.entries(zoneSel)) {
+      const el = gut.querySelector(sel);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const cx = Math.round(r.x + r.width / 2);
+      const cy = Math.round(r.y + r.height / 2);
+      const hit = document.elementFromPoint(cx, cy);
+      zones[name] = {
+        rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+        centre: { x: cx, y: cy },
+        // The lane's owner is the element the hit test finds at the lane's own
+        // centre. Anything else means two lanes share a hit area.
+        ownedBySelf: hit === el || el.contains(hit),
+        hitElement: hit ? `${hit.tagName}.${typeof hit.className === "string" ? hit.className.slice(0, 40) : ""}` : null,
+      };
+    }
+    // Pairwise horizontal overlap between the lanes.
+    const names = Object.keys(zones);
+    const overlaps = [];
+    for (let i = 0; i < names.length; i++) {
+      for (let j = i + 1; j < names.length; j++) {
+        const a = zones[names[i]].rect, b = zones[names[j]].rect;
+        const ov = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        if (ov > 0) overlaps.push({ a: names[i], b: names[j], px: Math.round(ov) });
+      }
+    }
+    const ln = gut.querySelector(".gutter-line");
+    return {
+      line: gut.getAttribute("data-line"),
+      gutter: (r => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }))(gut.getBoundingClientRect()),
+      chevron: { x: Math.round(cr.x), y: Math.round(cr.y), w: Math.round(cr.width), h: Math.round(cr.height) },
+      zones,
+      overlaps,
+      // The marker lane was widened to separate the two markers; this is what
+      // says the line number did not lose room it needed.
+      lineNumberClipped: ln ? ln.scrollWidth > ln.clientWidth + 1 : null,
+    };
+  });
+  report.gutter = { geom: gutterGeom };
+
+  if (gutterGeom) {
+    const clickAndWatch = async (pt) => {
+      const before = await page.evaluate(() => window.__gut());
+      await page.mouse.click(pt.x, pt.y);
+      await page.waitForTimeout(800);
+      const after = await page.evaluate(() => window.__gut());
+      return {
+        breakpointChanged: JSON.stringify(before.breakpoints) !== JSON.stringify(after.breakpoints),
+        folded: after.collapsed !== before.collapsed || after.lines !== before.lines,
+        before, after,
+      };
+    };
+
+    // A gutter click must set a breakpoint AND NOT FOLD.
+    report.gutter.clickGutter = await clickAndWatch(gutterGeom.zones.breakpoint.centre);
+    // Put it back.
+    await page.mouse.click(gutterGeom.zones.breakpoint.centre.x, gutterGeom.zones.breakpoint.centre.y);
+    await page.waitForTimeout(600);
+
+    // The dedicated control must fold AND NOT touch breakpoints.
+    report.gutter.clickChevron = await clickAndWatch({
+      x: Math.round(gutterGeom.chevron.x + gutterGeom.chevron.w / 2),
+      y: Math.round(gutterGeom.chevron.y + gutterGeom.chevron.h / 2),
+    });
+    await page.screenshot({ path: shots ? `${shots}/gutter.png` : "/dev/null", clip: { x: 300, y: 60, width: 340, height: 300 } }).catch(() => {});
   }
 } catch (e) {
   report.error = String(e).slice(0, 400);

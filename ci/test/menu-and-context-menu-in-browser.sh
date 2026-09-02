@@ -83,13 +83,14 @@ for tool in ${required_tools}; do
 		exit 2
 	}
 done
-node -e "require('playwright')" >/dev/null 2>&1 || {
-	echo "menu-and-context-menu-in-browser.sh: playwright is not installed." >&2
-	echo "  remedy: (cd src/tests/gui && npm install) and re-run with" >&2
-	# shellcheck disable=SC2016 # a literal remedy line, not an expansion
-	echo '  NODE_PATH=${PWD}/src/tests/gui/node_modules' >&2
+if [ ! -d node_modules/playwright ] && ! node -e "require('playwright')" >/dev/null 2>&1; then
+	# Same precondition, and the same remedy, as `ci/test/web-renderer-mounts.sh`:
+	# the dev shell provides `node_modules/playwright` at the repo root, which is
+	# what `ci/test/menu_and_context_menu_probe.mjs` resolves against.
+	echo "menu-and-context-menu-in-browser.sh: node_modules/playwright is missing;" >&2
+	echo "  run inside the dev shell (direnv exec ${repo_root} ...)" >&2
 	exit 2
-}
+fi
 
 echo "=== one menu on right-click, and a submenu you can click ==="
 echo
@@ -343,6 +344,35 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# THE MIXIN'S PRECONDITION, asked of every dropdown surface on screen rather
+# than of the one that was reported.  `dropdown-surface()` clips every
+# descendant, so any caller that acquires an absolutely-positioned child laid
+# out beside it has this defect — and would pass every markup assertion while
+# the child rendered perfectly and invisibly.
+#
+# NOT ANSWERABLE FROM THE STYLESHEET: a static pass over the compiled CSS
+# reports zero escaping children even for `#menu-main`, because
+# `.menu-nested-elements` is a sibling RULE and a child only in the DOM.
+# ---------------------------------------------------------------------------
+with_abs="$(q menu clipCheck withAbsoluteChildren)"
+if [ "${with_abs:-0}" -ge 1 ]; then
+	ck ok "[clip/instrument] $(q menu clipCheck containersExamined) dropdown surface(s)" \
+		"examined, ${with_abs} of them actually holding an absolutely-positioned" \
+		"child — so 'nothing escaped' is not a statement about an empty set"
+else
+	ck fail "[clip/instrument] no dropdown surface on screen held an" \
+		"absolutely-positioned child, so the escape check below measures nothing"
+fi
+
+escapes="$(q menu clipCheck escapes)"
+if [ "$(python3 -c "import json;print(len(json.loads('''${escapes}''')))")" = "0" ]; then
+	ck ok "[clip] no dropdown surface clips an absolutely-positioned child"
+else
+	ck fail "[clip] a dropdown surface clips a child that paints outside it:" \
+		"${escapes}"
+fi
+
+# ---------------------------------------------------------------------------
 # THE FLICKER — measured between the frames, not in a screenshot.
 # ---------------------------------------------------------------------------
 samples="$(q menu sweep opacitySamples)"
@@ -457,10 +487,78 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# THE GUTTER — one lane, one owner, and the ABSENCE of the second effect.
+#
+# Reported as "clicking the gutter to place a breakpoint also collapses the
+# function".  It does not reproduce on either the deployed build or `cloud`:
+# `.gutter` subtracts `--ct-gutter-folding-lane` from its own width, so Monaco's
+# chevron is never underneath us.  A test that checked each control WORKS would
+# have passed on the defect exactly as reported, so both directions here are
+# assertions about what must NOT also happen.
+#
+# The lanes are asserted too, because a third control is being added to this
+# strip: each lane must own the hit test at its own centre, and no two may
+# overlap.  They did — the breakpoint and tracepoint markers had independently
+# tuned right offsets that put the tracepoint over the breakpoint's centre.
+# ---------------------------------------------------------------------------
+if [ "$(q gutter geom line)" != "null" ]; then
+	ck ok "[gutter] a foldable line is on screen (line $(q gutter geom line)), so the" \
+		"two gestures below have a subject"
+else
+	ck fail "[gutter] no foldable line found; the gutter checks measure nothing"
+fi
+
+unowned="$(python3 -c "
+import json
+z = json.loads('''$(q gutter geom zones)''') or {}
+print(','.join(n for n, v in z.items() if not v['ownedBySelf']) or 'none')
+print(len(z))
+")"
+unowned_names="$(printf '%s\n' "${unowned}" | head -1)"
+zone_count="$(printf '%s\n' "${unowned}" | tail -1)"
+if [ "${zone_count:-0}" -ge 3 ] && [ "${unowned_names}" = "none" ]; then
+	ck ok "[gutter/lanes] all ${zone_count} lanes own the hit test at their own centre"
+else
+	ck fail "[gutter/lanes] ${zone_count} lane(s) found; these do not own their own" \
+		"centre: ${unowned_names} — $(q gutter geom zones)"
+fi
+
+overlaps="$(q gutter geom overlaps)"
+if [ "$(python3 -c "import json;print(len(json.loads('''${overlaps}''')))")" = "0" ]; then
+	ck ok "[gutter/lanes] no two lanes overlap horizontally"
+else
+	ck fail "[gutter/lanes] lanes overlap: ${overlaps}"
+fi
+
+if [ "$(q gutter geom lineNumberClipped)" = "false" ]; then
+	ck ok "[gutter/lanes] and the line number still fits its lane after the marker" \
+		"lane was widened to separate the markers"
+else
+	ck fail "[gutter/lanes] the line number is clipped by its lane"
+fi
+
+if [ "$(q gutter clickGutter breakpointChanged)" = "true" ] &&
+	[ "$(q gutter clickGutter folded)" = "false" ]; then
+	ck ok "[gutter/click] a gutter click toggles the breakpoint and does NOT fold"
+else
+	ck fail "[gutter/click] breakpointChanged=$(q gutter clickGutter breakpointChanged)" \
+		"folded=$(q gutter clickGutter folded) — expected a breakpoint and no fold"
+fi
+
+if [ "$(q gutter clickChevron folded)" = "true" ] &&
+	[ "$(q gutter clickChevron breakpointChanged)" = "false" ]; then
+	ck ok "[gutter/fold] the dedicated folding control folds and does NOT touch" \
+		"breakpoints"
+else
+	ck fail "[gutter/fold] folded=$(q gutter clickChevron folded)" \
+		"breakpointChanged=$(q gutter clickChevron breakpointChanged)"
+fi
+
+# ---------------------------------------------------------------------------
 # THE COUNT ITSELF, so a check skipped by an early `return` cannot read as a
 # pass.  Raise this deliberately when adding one.
 # ---------------------------------------------------------------------------
-EXPECTED_CHECKS=16
+EXPECTED_CHECKS=24
 echo
 if [ "${checks}" -ne "${EXPECTED_CHECKS}" ]; then
 	echo "RESULT: FAILED — ${checks} check(s) ran, ${EXPECTED_CHECKS} expected."

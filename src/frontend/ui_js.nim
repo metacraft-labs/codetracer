@@ -4556,6 +4556,21 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     if not vm.isNil: discard dispatchVideoPlayerAction(vm, VpaCancelPicker),
   proc(actionData: JsObject) = # aVerification
     data.openLayoutTab(Content.Verification),
+  # The five debug-toolbar controls that gained chords. Each one hands the
+  # toolbar's own action id to `ui/debug.nim`'s dispatcher — the same `case`
+  # the button's `onAction` bridge reaches — so the chord cannot drift from
+  # the click. Appended at the end, in enum order, matching the five members
+  # added at the end of `ClientAction`.
+  proc(actionData: JsObject) = # aHistoryBack
+    debug.invokeDebugToolbarAction("history-back"),
+  proc(actionData: JsObject) = # aHistoryForward
+    debug.invokeDebugToolbarAction("history-forward"),
+  proc(actionData: JsObject) = # aRunToEntry
+    debug.invokeDebugToolbarAction("run-to-entry"),
+  proc(actionData: JsObject) = # aResetOperation
+    debug.invokeDebugToolbarAction("reset-operation"),
+  proc(actionData: JsObject) = # aRunTests
+    debug.invokeDebugToolbarAction("run-tests"),
 ]
 
 data.actions = actions

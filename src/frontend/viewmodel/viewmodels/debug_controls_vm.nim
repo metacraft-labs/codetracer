@@ -106,6 +106,68 @@ type
       ## (e.g. "run-to-entry", "reset-operation", "history-back").
       ## Maps to `DebugComponent.action(id)` in the legacy system.
 
+    # -- Keyboard-chord lookup, for the toolbar tooltips --
+    #
+    # A THIRD BRIDGE CALLBACK, and for the reason the two above exist. The
+    # chords live in `data.config.shortcutMap`, whose `Config` is
+    # `frontend/types.nim`'s JS-flavoured ref object; `store/types.nim:3-8`
+    # states the layering rule this VM keeps — "intentionally independent of
+    # the legacy frontend types to avoid circular imports and keep the
+    # ViewModel layer self-contained" — and importing it here would also break
+    # the `vm-native` lane outright, since `frontend/types.nim` pulls in
+    # kdom. So the host injects a plain `proc(string): string`, exactly as it
+    # injects `onDapStep` / `onAction`.
+    shortcutFor*: proc(actionId: string): string
+      ## Returns the keyboard chord currently bound to a toolbar action id
+      ## ("next", "run-to-entry", …), rendered the way `menu.nim`'s
+      ## `loadShortcut` renders it, or "" when nothing is bound.
+      ##
+      ## Nil until `ui/debug.nim` wires it. Nil and "" are the same answer —
+      ## a tooltip with no chord in it — so no caller needs to distinguish.
+    shortcutsRevision*: Signal[int]
+      ## Bumped by the host whenever `shortcutFor` starts answering
+      ## differently — i.e. when a new `Config` is installed.
+      ##
+      ## THE ONE MUTABLE SIGNAL THIS VM OWNS, against the "holds no mutable
+      ## signals of its own" note at the top of this file, and it earns the
+      ## exception: `shortcutFor` is an opaque closure over `data.config`, so
+      ## the reactive graph cannot see through it to the config it reads.
+      ## Without a signal to depend on, `toolbarTooltip`'s render effect would
+      ## run once at mount and then never again, and a rebind would leave the
+      ## painted tooltip showing the OLD chord — the same stale-label defect
+      ## as the hardcoded strings this replaces, just with a longer fuse.
+
+# ---------------------------------------------------------------------------
+# Tooltip text
+# ---------------------------------------------------------------------------
+
+proc toolbarTooltip*(vm: DebugControlsVM; actionId, label: string): string =
+  ## The text of one toolbar button's tooltip: its label, plus the chord that
+  ## is bound to it RIGHT NOW, in parentheses.
+  ##
+  ## THE POINT OF THIS PROC IS THAT THE CHORD IS READ, NOT WRITTEN. The
+  ## toolbar used to carry `text "Next (F10)"` — a string literal, which
+  ## `isonim/dsl/transform.nim`'s `isDynamic` classifies as STATIC, so it was
+  ## painted once and could never change. It agreed with
+  ## `default_config.yaml` only by coincidence and only until somebody
+  ## rebound the key, at which point the toolbar would have gone on promising
+  ## a chord that no longer did anything.
+  ##
+  ## Called from inside `ui()`, where it is a CALL and therefore `isDynamic`,
+  ## so the DSL wraps it in a `createRenderEffect`. Reading
+  ## `shortcutsRevision` here is what puts this effect in the reactive graph:
+  ## bump the signal and every tooltip repaints from the new bindings.
+  ##
+  ## An unbound control gets its bare label rather than an empty pair of
+  ## parentheses — the honest rendering of "no chord", and the same thing
+  ## `menu.nim`'s `loadShortcut` does by returning "".
+  discard vm.shortcutsRevision.val
+  let chord =
+    if vm.shortcutFor.isNil: ""
+    else: vm.shortcutFor(actionId)
+  if chord.len == 0: label
+  else: label & " (" & chord & ")"
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
@@ -353,5 +415,6 @@ proc createDebugControlsVM*(store: ReplayDataStore): DebugControlsVM =
       capabilityRung: capabilityRung,
       divergenceDetected: divergenceDetected,
       traceTruncated: traceTruncated,
+      shortcutsRevision: createSignal(0),
       disposeProc: dispose,
     )
