@@ -1,17 +1,66 @@
 // Styles named monaco override the original editor's styles
 
+// THE GUTTER IS A ROW OF LANES, AND EACH ONE HAS EXACTLY ONE OWNER.
+//
+// Written down because a third control is being added to this strip and it
+// already carries six things: the current-line highlight, the line number, a
+// VCS slot, a tracepoint marker, a breakpoint marker, and — immediately to the
+// right of all of them, owned by Monaco rather than by us — the folding
+// chevron.  Reading from the left edge of `.gutter`:
+//
+//   pointer lane   --ct-gutter-pointer-lane   the current-line highlight
+//   line number    the remainder              .gutter-line
+//   marker lane    --ct-gutter-marker-lane    breakpoint, then tracepoint
+//   (gap)          --ct-gutter-marker-gap     nothing; keeps us off the chevron
+//   folding lane   --ct-gutter-folding-lane   MONACO'S.  `.gutter` subtracts
+//                                             this from its own width so the
+//                                             chevron is never under us.
+//
+// THE FOLDING LANE IS WHY A GUTTER CLICK DOES NOT FOLD, and it is why a
+// reported "clicking the gutter to place a breakpoint also collapses the
+// function" could not be reproduced on the deployed build OR on `cloud`.
+// Measured in a real tab: a click anywhere in `.gutter` toggles the breakpoint
+// and leaves the fold alone (22 rendered lines before and after), and a click
+// on the chevron folds (22 -> 20) and leaves breakpoints alone.
+//
+// That is not luck, and setting `--ct-gutter-folding-lane` to 0 is a mutation
+// arm which produces exactly the reported symptom's family: `.gutter` then
+// covers the chevron, and clicking the chevron toggles a breakpoint instead of
+// folding.  `ci/test/menu-and-context-menu-in-browser.sh` asserts BOTH
+// directions, because a test that checked each control merely WORKS would have
+// passed on the defect as it was reported.
+//
+// WITHIN the marker lane the two markers used to OVERLAP.  Their right offsets
+// were tuned independently — 1.05em and 0.6em against widths of 1.1ch and
+// 1.2ch — which put the breakpoint at x = 354..363 and the tracepoint at
+// x = 359..369, and the tracepoint's `z-index: 9` over the breakpoint's `8`.
+// So `elementFromPoint` at the CENTRE OF THE BREAKPOINT DOT returned the
+// tracepoint element: the breakpoint marker had no hit area of its own.  It did
+// no visible harm only because both markers currently route to the same
+// `lineActionClick`; the first handler to tell them apart would have fired the
+// wrong one, and that is precisely what adding a third control to this strip
+// requires.  The breakpoint offset is now DERIVED from the tracepoint lane, so
+// the two cannot overlap however the sizes are retuned.
 .monaco-editor
   --ct-gutter-breakpoint-size: 1.1ch
   --ct-gutter-trace-size: 1.2ch
   --ct-gutter-highlight-left: 0.15em
   --ct-gutter-pointer-lane: 0.75em
-  --ct-gutter-marker-lane: 1.9em
+  // 1.9em before the markers were separated; the extra 0.15em is the room the
+  // breakpoint dot moved left into, and the gate asserts the line number still
+  // fits what is left.
+  --ct-gutter-marker-lane: 2.05em
   --ct-gutter-folding-lane: 0.85em
   --ct-gutter-marker-gap: 0.45em
   --ct-gutter-line-gap: 0.15em
   --ct-gutter-highlight-size: 0.8em
-  --ct-gutter-breakpoint-right: 1.05em
   --ct-gutter-trace-right: 0.6em
+  // The clear space between the two markers.  Small, but it must not be zero:
+  // two hit areas that merely touch are one hit area to a rounding error.
+  --ct-gutter-marker-split: 0.15em
+  // DERIVED, never a literal.  This is what makes the two lanes disjoint by
+  // construction rather than by two numbers that happened to agree.
+  --ct-gutter-breakpoint-right: calc(var(--ct-gutter-trace-right) + var(--ct-gutter-trace-size) + var(--ct-gutter-marker-split))
   margin-left: 0
   border-bottom-left-radius: 0.375em
 
