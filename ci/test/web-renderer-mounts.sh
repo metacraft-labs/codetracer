@@ -2438,10 +2438,31 @@ else
 	else
 		ck fail "arm P: a run started with no worker script to start it ('${p_started}') — arm R's run-start assertion proves nothing"
 	fi
-	if [ -z "${p_results}" ] && [ "${p_headafter}" = "${p_headbefore}" ]; then
-		ck ok "arm P: no verdict reached the pane and the headline stayed '${p_headafter}', so arm R's verdict and pane-moved assertions can fail"
+	# THIS CHECK ASSERTED THE DEFECT `12c6ff48` FIXED, and went red the moment
+	# the fix landed. It required the headline to be UNCHANGED after a run that
+	# could not start — and "a pane positively asserting the tests have not run,
+	# one gesture after a run of them failed" is that commit's own description
+	# of what it was correcting. Measured on `cloud` 6d60d54f with no local
+	# change at all: 74 checks, this one failure, `'5 tests, not run yet' ->
+	# 'run failed, no tests ran'`.
+	#
+	# So it is inverted rather than deleted. The arm's job is to be arm R's
+	# negative control, and the half that still does that work is the VERDICT:
+	# no `test-results ok=true` line reaches the pane, which is what arm R's
+	# verdict assertion needs in order to be falsifiable.
+	#
+	# WHAT THIS ARM NO LONGER CONTROLS, said out loud rather than quietly
+	# dropped: arm R's "the pane moved" assertion. Both a successful run and a
+	# failed one now move the headline, deliberately, so this arm cannot show
+	# that assertion failing. It is the weaker half of arm R's pair — a headline
+	# that changed says something happened, the verdict line says WHAT — and the
+	# stronger half is still controlled here.
+	if [ -z "${p_results}" ] && [ "${p_headafter}" != "${p_headbefore}" ]; then
+		ck ok "arm P: no verdict reached the pane, so arm R's verdict assertion can fail — and the pane SAYS SO rather than standing still: '${p_headbefore}' -> '${p_headafter}'"
+	elif [ -z "${p_results}" ]; then
+		ck fail "arm P: no verdict reached the pane, but the headline stayed '${p_headafter}' — a pane asserting the tests have not run, one gesture after a run of them failed"
 	else
-		ck fail "arm P: the pane reported '${p_results}' / moved '${p_headbefore}' -> '${p_headafter}' with no worker — those two assertions of arm R prove nothing"
+		ck fail "arm P: the pane reported a verdict ('${p_results}') with no worker to produce one — arm R's verdict assertion proves nothing"
 	fi
 fi
 echo
