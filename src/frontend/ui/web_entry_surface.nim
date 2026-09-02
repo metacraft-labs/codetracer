@@ -100,6 +100,14 @@ import ../viewmodel/platform/web_entry
 import ../viewmodel/platform/web_deployment
 import ../viewmodel/platform/noir_template
 import ./web_replay_host
+# The one mutable project, and the path helpers that used to be defined here.
+# They moved because the save host needs all three to turn an absolute renderer
+# path into the project-relative key the store is keyed by, and a second copy
+# of "where the project is rooted" is exactly what `templateProjectRoot`'s own
+# doc comment warns against. Re-exported so this module's importers are
+# unaffected by the move.
+import ./web_project_store
+export templateProjectRoot, templateFilePath, templateFileFor, projectRelative
 from ../index/layout_config_repair import sanitizeLayoutConfig
 from ../edit_mode import chooseInitialEditPath
 from ../../ct_test/contracts import TestCatalog
@@ -186,9 +194,18 @@ when defined(js):
     ## `replaceState` would have been rewriting `/` — see
     ## `web_deployment.entryDocumentAddress`.
 
-var mountedTemplate*: ProjectTemplate
-  ## The template this page entered edit mode on, for anything that needs to
-  ## ask afterwards. Written only by `enterTemplateEditMode`.
+proc mountedTemplate*(): ProjectTemplate =
+  ## The project this page is editing, for anything that needs to ask
+  ## afterwards.
+  ##
+  ## WAS A `var`, and the change is part of the defect's fix rather than
+  ## tidying. As a `var` of a value type it was a private third copy of the
+  ## template, written once by `enterTemplateEditMode` and read by nothing in
+  ## Nim — so it could not observe an edit, and anything that later started
+  ## reading it would have silently got the bundled bytes. It is now the one
+  ## live project, which is the only value in the web arm that answers "what is
+  ## the user editing".
+  currentProject()
 
 proc currentRendererEntryRequest*(): EntryRequest =
   ## The location, as `web_entry` wants it — read through the one
@@ -293,24 +310,6 @@ proc currentRendererEntry*(): EntryResolution =
 #     Answering the question leaves every one of those steps where it is.
 # ---------------------------------------------------------------------------
 
-proc templateProjectRoot*(tmpl: ProjectTemplate): string =
-  ## The absolute path the project takes in this session.
-  ##
-  ## Absolute, with a leading `/`, and that is load-bearing rather than
-  ## cosmetic: `utils.openTab` treats a relative name as a path it must rescue
-  ## by matching the tail of an already-open tab, and `edit_mode.sourceScore`
-  ## awards `+10` for a `/src/` segment. A project rooted at `hello_noir`
-  ## instead of `/hello_noir` would take the rescue branch on every tab and
-  ## score `src/main.nr` ten points lower.
-  ##
-  ## It names no real filesystem and is not meant to: nothing in this build
-  ## reads or writes it. It is the identity a tab, a tree row and a breakpoint
-  ## table are keyed by, which is all a path is to the renderer.
-  "/" & tmpl.name
-
-proc templateFilePath*(tmpl: ProjectTemplate; path: string): string =
-  templateProjectRoot(tmpl) & "/" & path
-
 proc templateFilenames*(tmpl: ProjectTemplate): seq[string] =
   ## What the desktop's `loadFilenames` returns for the opened folder: the
   ## project's files, absolute, one per entry. `chooseInitialEditPath` scores
@@ -412,22 +411,6 @@ proc templateFilesystem*(tmpl: ProjectTemplate): CodetracerFile =
     original: CodetracerFileData(text: cstring"source folders", path: cstring""))
   result.toJs.path = cstring""
 
-proc templateFileFor*(tmpl: ProjectTemplate; path: string): int =
-  ## The index in `tmpl.files` of the file a tab-load names, or `-1`.
-  ##
-  ## The renderer asks by ABSOLUTE path (`/hello_noir/src/main.nr`) because
-  ## that is what it opened; the template stores project-relative paths. One
-  ## prefix strip, in one place, so `templateProjectRoot` stays the only thing
-  ## that knows the project's root.
-  let prefix = templateProjectRoot(tmpl) & "/"
-  if path.len <= prefix.len or path[0 ..< prefix.len] != prefix:
-    return -1
-  let relative = path[prefix.len .. ^1]
-  for index, file in tmpl.files:
-    if file.path == relative:
-      return index
-  -1
-
 proc templateTabInfo*(tmpl: ProjectTemplate; path: string): TabInfo =
   ## One document, in the shape `index/config.sendTabInfo` builds.
   ##
@@ -493,14 +476,76 @@ proc installTemplateHost*(tmpl: ProjectTemplate) =
   ## Registered BEFORE the `no-trace` delivery, because `onNoTrace` ends by
   ## opening the initial tab: a responder installed afterwards would be
   ## installed after the question it exists to answer.
+  ##
+  ## ## It answers from `currentProject()`, NOT from the captured `tmpl`
+  ##
+  ## The parameter is still taken — it is what `enterTemplateEditMode` has in
+  ## hand, and it seeds the store — but the responder must read the LIVE
+  ## project, and the difference is a real defect rather than a style
+  ## preference. `ProjectTemplate` is an `object`: a captured `tmpl` is a
+  ## private copy frozen at install time. A visitor who edits `src/utils.nr`,
+  ## closes the tab and reopens it would have been served the bundled bytes
+  ## back — their edit still in the store, still in what Build compiles, and
+  ## silently absent from the editor that reopened it. Reading the accessor
+  ## keeps the tab, the build and the store one value.
+  discard tmpl
   data.ipc.respond(cstring"CODETRACER::tab-load",
     proc(sender: js, payload: JsObject) =
       let location = cast[types.Location](payload["location"])
       let requested = location.highLevelPath
       data.ipc.deliver(cstring"CODETRACER::tab-load-received", js{
         argId: requested,
-        value: templateTabInfo(tmpl, $requested)
+        value: templateTabInfo(currentProject(), $requested)
       }))
+
+proc installProjectSaveHost*() =
+  ## Answer `CODETRACER::save-file` — THE MESSAGE WITH NO HOST.
+  ##
+  ## This is `installTemplateHost`'s pattern applied to the other half of the
+  ## defect, and the renderer needs no change at all because its half was
+  ## already complete and already correct:
+  ##
+  ##   * `default_config.yaml` binds `ctrl+s`, and `ui_js.update` calls
+  ##     `data.saveFiles(activePath)`.
+  ##   * `renderer.saveFiles` walks `saveTargets`, and
+  ##     `renderer.dispatchSaveEffect` reads the buffer with
+  ##     `tab.monacoEditor.getValue()` and sends
+  ##     `CODETRACER::save-file` as `{name, raw, saveAs}`.
+  ##   * `ui_js.configureIPC` has subscribed `saved-file` and
+  ##     `save-file-error` all along (`onSavedFile`, `onSaveFileError`).
+  ##
+  ## Every one of those ran on the web build. The chain ended at
+  ## `newWebIpc.send`, which found no responder and logged *"no host for
+  ## CODETRACER::save-file"*. So this proc is the twenty lines the whole path
+  ## was missing, and the reply channels are the desktop's own:
+  ## `index/files.nim:293` sends `CODETRACER::saved-file` as `js{name}` and
+  ## `index/files.nim:296` sends `CODETRACER::save-file-error` as
+  ## `js{name, error}`. Matching those spellings is what lets
+  ## `onSavedFile` clear `tab.changed` without knowing which platform answered.
+  ##
+  ## `save-untitled` is deliberately NOT answered. A browser session has no
+  ## "save as" destination and `rreSaveUntitled` is unreachable from a project
+  ## whose every tab has a path; answering it would be a host for a gesture the
+  ## product does not offer, which is the shape of claim this campaign exists
+  ## to stop making. It keeps warning, visibly, which is the honest state.
+  data.ipc.respond(cstring"CODETRACER::save-file",
+    proc(sender: js, payload: JsObject) =
+      let name = cast[cstring](payload["name"])
+      let raw = cast[cstring](payload["raw"])
+      let relative = projectRelative(currentProject(), $name)
+      if relative.len == 0:
+        data.ipc.deliver(cstring"CODETRACER::save-file-error", js{
+          name: name,
+          error: cstring("'" & $name & "' is outside the open project")
+        })
+        return
+      saveProjectFile(relative, $raw, proc(ok: bool; error: string) =
+        if ok:
+          data.ipc.deliver(cstring"CODETRACER::saved-file", js{name: name})
+        else:
+          data.ipc.deliver(cstring"CODETRACER::save-file-error", js{
+            name: name, error: cstring(error)
+          })))
 
 const webTestRunAbsence* =
   "This build cannot run the tests. A browser has no `nargo` and no " &
@@ -668,14 +713,27 @@ proc enterTemplateEditMode*(tmpl: ProjectTemplate): bool =
     # panes and no explanation.
     return false
 
-  installTemplateHost(tmpl)
-  installTemplatePaneHost(tmpl)
+  # SEED THE LIVE PROJECT, unless something already restored one.
+  #
+  # `ui_js.startWebArm` calls `web_project_persistence.prepareProject` before
+  # the renderer mounts, and that is what puts the STORE's copy — a returning
+  # visitor's edits — into `currentProject()`. When it ran, it wins, and the
+  # parameter is the bundle it was seeded from. When it did not (a unit test, a
+  # refused boot), the parameter is the whole truth and becomes the session's
+  # working tree. Either way there is exactly one value from here on, and
+  # `mountedTemplate` — a third copy nothing ever read — is gone.
+  if not hasLiveProject():
+    setCurrentProject(tmpl)
+  let effective = currentProject()
+
+  installTemplateHost(effective)
+  installProjectSaveHost()
+  installTemplatePaneHost(effective)
   # The replay host, registered here for the reason `installTemplateHost`'s
   # own header gives about itself: before the `no-trace` delivery, so it
   # exists before anything can ask. Nothing asks until a Run has produced a
   # trace, so this only makes the tab ABLE to open a session.
   installReplayHost()
-  mountedTemplate = tmpl
   discard data.ipc.deliver(cstring"CODETRACER::no-trace",
-                           templateNoTracePayload(tmpl, layout))
+                           templateNoTracePayload(effective, layout))
   true

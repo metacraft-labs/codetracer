@@ -4589,6 +4589,12 @@ when defined(ctWeb):
   # `ctPlatform().process` expecting the wasm host a browser tab has and an
   # Electron renderer does not.
   import ui/web_noir_build
+  # Where the user's edits live. `web_project_store` is the one mutable
+  # project — backend-neutral, so `web_entry_surface` can keep compiling on the
+  # C backend for unit tests — and `web_project_persistence` is the js-only
+  # half that connects it to the OPFS store `boot()` already opened.
+  import ui/web_project_store
+  import ui/web_project_persistence
   from viewmodel/platform/web_entry import
     EntryResolution, EntryVerdict, evTemplate, entryPath, entryPathOnHost
   from viewmodel/platform/noir_template import
@@ -4798,6 +4804,61 @@ when defined(ctWeb):
 
   const webRendererLinePrefix* = "codetracer-web-renderer:"
 
+  proc modifiedEditorNames(): seq[string] =
+    ## The project-relative names of every editor with unsaved changes.
+    ##
+    ## Read from `data.saveTargets()` — the same list `renderer.saveFiles`
+    ## walks — so the names in the pane header are the files that were actually
+    ## written and not a second, drifting idea of what "modified" means. Taken
+    ## BEFORE the save, because `onSavedFile` clears `changed` and the list
+    ## would be empty afterwards.
+    for target in data.saveTargets():
+      if target.changed and target.editorReady and not target.untitled:
+        let relative = web_entry_surface.projectRelative(
+          web_project_store.currentProject(), target.name)
+        result.add(if relative.len > 0: relative else: target.name)
+
+  proc saveThenCompile(runAfter: bool) =
+    ## EMT-D17, and the reason Ctrl+B alone is enough to compile an edit.
+    ##
+    ## ## Why the save is unconditional, and why Build gets it too
+    ##
+    ## The decision is written for Run — "Run **saves all modified editors
+    ## first, unconditionally**, and the Build pane header names the files
+    ## saved" — and its reasoning is that a recording replayed against source
+    ## on disk must match the source on screen. Build has the same requirement
+    ## for a stronger reason here: an unsaved buffer is not in
+    ## `currentProject()`, so a Build that did not save would compile the last
+    ## SAVED bytes and paint a result about code the user has since changed.
+    ## That is the original defect with a smaller radius, and it is exactly
+    ## what a visitor pressing Ctrl+B after typing would hit.
+    ##
+    ## This is also what the desktop already does: `update(build = true)` calls
+    ## `data.saveFiles()` before restarting anything. So both platforms save on
+    ## Build, through the same proc, for the same reason.
+    ##
+    ## ## Why a `setTimeout` and not a straight call
+    ##
+    ## `saveFiles` sends `CODETRACER::save-file` per modified buffer, and
+    ## `newWebIpc.send` hands every responder to `deferHostReply`, which is
+    ## `setTimeout(fn, 0)`. The save host is therefore not applied to
+    ## `currentProject()` until a later macrotask — so compiling on this tick
+    ## would compile the bytes from BEFORE the save, which is the whole bug.
+    ##
+    ## A zero-delay timer queued after them runs after them: the HTML standard
+    ## orders timers of equal delay by insertion, and `saveFiles` has already
+    ## queued all of its sends synchronously by the time this line runs. This is
+    ## the same ordering guarantee `deferHostReply` itself is built on, and its
+    ## comment explains why the deferral cannot simply be removed.
+    ##
+    ## A microtask would NOT do: `queueMicrotask` drains before the next
+    ## macrotask, so it would run before the very responders it is waiting for.
+    let saved = modifiedEditorNames()
+    data.saveFiles()
+    discard windowSetTimeout(proc() =
+      if runAfter: web_noir_build.startNoirRun(saved)
+      else: web_noir_build.startNoirBuild(saved), 0)
+
   proc startWebRenderer() =
     ## Install the transport, configure the renderer, mount the first surface.
     ##
@@ -4892,14 +4953,31 @@ when defined(ctWeb):
         # from `ctWeb` for the same defect from the other side; see the comment
         # there.
         data.actions[ClientAction.build] = proc(actionData: JsObject) =
-          web_noir_build.startNoirBuild()
+          saveThenCompile(runAfter = false)
 
         # RUN has no configured chord, so it gets one that nothing else binds.
         # NOT `ctrl+r` and NOT `F5`: both are the browser's own reload on every
         # platform, and a studio that ate either would be taking a key away
         # from the user rather than giving them one.
         Mousetrap.`bind`("ctrl+enter") do ():
-          web_noir_build.startNoirRun()
+          saveThenCompile(runAfter = true)
+
+        # EXPORT — the gesture every durability sentence instructs the user to
+        # perform, and which had no way to be performed.
+        #
+        # `web_platform.exportProjectArchive` walks the working tree, builds a
+        # tar and hands it to the browser's download path. It has been complete
+        # since the store landed and had ZERO callers, while the banner told
+        # every visitor to "export to keep them". A product that instructs an
+        # action it does not offer is making the same kind of false claim as
+        # one that accepts keystrokes and discards them.
+        #
+        # `ctrl+shift+e` rather than `ctrl+e`: the latter is a browser-level
+        # chord on several platforms, and `web_noir_build`'s Run binding
+        # records the rule this follows — a studio must not take a key away
+        # from the user.
+        Mousetrap.`bind`("ctrl+shift+e") do ():
+          web_project_persistence.exportOpenProject()
 
       if mounted:
         # The line names the ENTRY as well as the surface. Two builds — one
@@ -4995,7 +5073,27 @@ when defined(ctWeb):
     ## something other than an empty document. The renderer's own line reports
     ## `platform=pkHeadless run=false` in that case, so the two states are
     ## distinguishable in the log rather than being one shrug.
-    discard await startWebSession()
+    ## THE PROJECT IS PREPARED BETWEEN THE TWO, and that position is the whole
+    ## correctness argument for restoring edited files.
+    ##
+    ## `web_project_persistence.prepareProject` activates the project in the
+    ## store, shows §4.2's durability sentence, acknowledges it, and reads back
+    ## whatever a previous visit saved. All of that is asynchronous, and all of
+    ## it must be finished before `startWebRenderer` runs — because that call
+    ## mounts edit mode, and `onNoTrace` ends by opening the initial tab, which
+    ## asks `CODETRACER::tab-load`. A restore that landed after the mount would
+    ## paint the BUNDLED bytes into an editor whose file the store holds an
+    ## edited copy of, and the user would watch their work vanish on reload
+    ## while it was still on disk.
+    ##
+    ## It needs the entry resolution to know WHICH template, and `booted.entry`
+    ## already carries it — `boot()` resolves the address for the boot line, so
+    ## this reads the decision rather than making a second one. `ui_js`'s own
+    ## `currentRendererEntry()` below re-reads the location for the mount; the
+    ## two agree because both go through `platform/web_entry.resolveEntry`.
+    let booted = await startWebSession()
+    await web_project_persistence.prepareProject(
+      booted, templateFor(booted.entry.languageEntry))
     startWebRenderer()
 
   discard startWebArm()
