@@ -29,6 +29,7 @@ const NO_DEPTH_LIMIT: i64 = -1;
 /// args for `ct/load-locals`
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct CtLoadLocalsArguments {
     pub rr_ticks: i64,
     pub count_budget: i64,
@@ -160,6 +161,7 @@ impl<'de> Deserialize<'de> for FlowMode {
 /// args for `ct/load-locals`
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct CtLoadFlowArguments {
     pub flow_mode: FlowMode,
     pub location: Location,
@@ -168,6 +170,7 @@ pub struct CtLoadFlowArguments {
 /// args for `ct/update-table`: actually Datatables.net produces those most of this: `TableArgs`
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct UpdateTableArgs {
     pub table_args: TableArgs,
     /// The Nim JS frontend serializes `array[EventLogKind, bool]` as a JSON
@@ -476,6 +479,25 @@ pub struct CodeSnippet {
     pub source: String,
 }
 
+/// DO NOT ADD `#[serde(deny_unknown_fields)]` HERE.  `Location` is the
+/// most round-tripped shape in the protocol: the backend serializes it
+/// into responses and events, the frontend stores it, and the frontend
+/// sends it straight back (`src/frontend/middleware.nim:302` and `:305`
+/// echo the whole object via `value.toJs`).  The Nim `Location`
+/// (`src/common/common_types/language_features/code.nim:35-83`) declares
+/// `status`, `highLevelFunctionFirst` and `highLevelFunctionLast`, none
+/// of which exist below — so what comes back is a strict SUPERSET of
+/// what went out, by construction.
+///
+/// Several viewmodels also send hand-written literals that borrow the
+/// name but not the shape: `calltrace_vm.nim:232` adds `codeGeneration`,
+/// `no_source_vm.nim:132` sends `{previousPath, action}`,
+/// `origin_chain_vm.nim:220` sends `{expression, location, stepId}`.
+///
+/// It is additionally deserialized from a NON-frontend source — the
+/// recreator's replay-query responses (`recreator_session.rs:683`, `:943`
+/// and `recreator_origin.rs:799`) — so the wire contract here is not even
+/// owned by one peer.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct Location {
@@ -1002,6 +1024,13 @@ impl FlowUpdate {
     }
 }
 
+/// DO NOT ADD `#[serde(deny_unknown_fields)]` HERE.  The Nim
+/// `ProgramEvent` (`src/common/common_types/codetracer_features/events.nim:95-114`)
+/// matches this struct field for field, so the legacy echo path is
+/// clean — but the viewmodels do not go through it:
+/// `event_log_vm.nim:283-301` adds `eventId` and `line`, and
+/// `trace_log_vm.nim:157-161` sends `{eventId, rrTicks, path, line}`, of
+/// which none are declared below.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct ProgramEvent {
@@ -1061,6 +1090,7 @@ pub struct Call {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct FunctionLocation {
     pub path: String,
     pub name: String,
@@ -1068,6 +1098,32 @@ pub struct FunctionLocation {
     pub force_reload: bool,
 }
 
+/// Arguments of `ct/source-line-jump` (`dap_server.rs`), and a helper
+/// shape constructed in Rust elsewhere.
+///
+/// DO NOT ADD `#[serde(deny_unknown_fields)]` HERE.  The frontend sends
+/// `SourceLineJumpTarget` — `{path, line, behaviour}`
+/// (`src/common/common_types/debugger_features/jumps.nim:17-20`, sent by
+/// `src/frontend/ui/editor.nim:1090` and
+/// `src/frontend/event_helpers.nim:18`).  `behaviour` is not declared
+/// below, so denying unknown fields would fail EVERY source-line jump —
+/// the most-used navigation command there is.  `LaunchRequestArguments`
+/// already taught us what that costs: see the `trace_source` field in
+/// `dap.rs`, where a denied unknown field produced no launch response at
+/// all and the client simply hung.
+///
+/// `behaviour` is discarded today, which is its own defect — the menu
+/// offers a jump direction the backend throws away.  The two are the
+/// same field: this struct can only start denying unknown fields once
+/// `behaviour` is either honoured or deliberately declared-and-ignored.
+/// Denying first would convert a silent wrong-direction jump into a
+/// dead command.
+///
+/// The missing `rename_all` is harmless, incidentally: the only keys the
+/// frontend actually sends are `path` and `line`, single lowercase words
+/// that are identical in snake_case and camelCase.  `column`,
+/// `condition` and `log_message` are populated by Rust callers, never by
+/// the wire.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SourceLocation {
     pub path: String,
@@ -1107,6 +1163,12 @@ impl fmt::Display for SourceLocation {
     }
 }
 
+/// Arguments of `ct/source-call-jump`.
+///
+/// DO NOT ADD `#[serde(deny_unknown_fields)]` HERE, for the same reason
+/// as [`SourceLocation`]: the frontend's Nim `SourceCallJumpTarget`
+/// (`src/common/common_types/debugger_features/jumps.nim:22-26`) carries
+/// a fourth field, `behaviour`, which is not declared below.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SourceCallJumpTarget {
     pub path: String,
@@ -1115,6 +1177,7 @@ pub struct SourceCallJumpTarget {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CallSearchArg {
     pub value: String,
 }
@@ -1144,6 +1207,7 @@ pub struct CallSearchResponseBody {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct LoadHistoryArg {
     pub expression: String,
     pub location: Location,
@@ -1265,6 +1329,7 @@ pub struct TraceResult {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct TracepointId {
     pub id: usize,
 }
@@ -1506,6 +1571,7 @@ pub struct TraceSession {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct RunTracepointsArg {
     pub session: TraceSession,
     pub stop_after: i64,
@@ -1589,6 +1655,7 @@ impl HistoryUpdate {
 /// camelCase rendering the frontend already serialises.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct CtOriginChainArguments {
     /// The variable / expression to query.  V1 is identifier-only; dotted
     /// paths are reserved for M3.
@@ -2016,6 +2083,7 @@ impl From<TerminatorKind> for TerminatorKindWire {
 /// (spec §5.3.2).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct CtOriginSummaryArguments {
     pub tokens: Vec<String>,
 }
@@ -2105,6 +2173,7 @@ pub struct CallArg {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct CalltraceLoadArgs {
     pub location: Location,
     pub start_call_line_index: GlobalCallLineIndex,
@@ -2118,6 +2187,7 @@ pub struct CalltraceLoadArgs {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct CollapseCallsArgs {
     pub call_key: String,
     pub non_expanded_kind: CalltraceNonExpandedKind,
@@ -2575,6 +2645,7 @@ pub struct LineStepValue {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+#[serde(deny_unknown_fields)]
 pub struct LocalStepJump {
     pub path: String,
     pub line: i64,
@@ -2591,6 +2662,15 @@ pub struct LocalStepJump {
 /// Jumps the replay to a specific execution timestamp (RR ticks / step ID).
 /// Used by the Python API `trace.goto_ticks(n)` and by the GUI when jumping
 /// to log output events.
+/// DO NOT ADD `#[serde(deny_unknown_fields)]` HERE: the event-log view
+/// sends `{rrTicks, ticks}`
+/// (`src/frontend/viewmodel/viewmodels/event_log_vm.nim:683-686`), and
+/// `rrTicks` is not declared below.
+///
+/// That sender is also missing `threadId`, which has no `#[serde(default)]`,
+/// so `ct/goto-ticks` from the event log already fails to parse today —
+/// a separate pre-existing defect, noted here because it is the same
+/// mismatch and whoever fixes one should look at the other.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct GoToTicksArguments {
@@ -2905,6 +2985,90 @@ mod tests {
     //! contract.  The matching Nim consumer renames are M-REC-5 wire
     //! format work.
     use super::*;
+
+    /// An argument type that denies unknown fields rejects a typo rather
+    /// than silently ignoring it — the point of the whole exercise.
+    #[test]
+    fn argument_types_reject_unknown_fields() {
+        // `startCallLineIndex` misspelt.  Without `deny_unknown_fields`
+        // this parses "successfully" with the field left at its default,
+        // and the calltrace loads from the wrong place.
+        let typo = serde_json::json!({
+            "location": {},
+            "startCallLineIndexx": 3,
+            "depth": 1,
+            "height": 1,
+            "rawIgnorePatterns": "",
+            "autoCollapsing": false,
+            "optimizeCollapse": false,
+            "renderCallLineIndex": 0,
+        });
+        assert!(
+            serde_json::from_value::<CalltraceLoadArgs>(typo).is_err(),
+            "CalltraceLoadArgs must reject an unknown field"
+        );
+    }
+
+    /// The frontend sends `behaviour` on every `ct/source-line-jump`
+    /// (`src/common/common_types/debugger_features/jumps.nim:17-20`), and
+    /// [`SourceLocation`] does not declare it.
+    ///
+    /// This test exists to REDDEN if anyone adds
+    /// `#[serde(deny_unknown_fields)]` to `SourceLocation` while that is
+    /// still true: doing so would break every source-line jump in
+    /// production, exactly as denying `traceSource` once broke every
+    /// non-local-folder launch (see `dap.rs`).
+    ///
+    /// It is not an endorsement of discarding `behaviour` — that is an
+    /// open defect. It pins the ORDER: honour the field first, deny
+    /// unknown fields second.
+    #[test]
+    fn source_location_still_tolerates_the_behaviour_field_the_frontend_sends() {
+        let as_sent = serde_json::json!({
+            "path": "/src/main.rs",
+            "line": 42,
+            "behaviour": 1,
+        });
+        let parsed = serde_json::from_value::<SourceLocation>(as_sent)
+            .expect("ct/source-line-jump payloads must keep parsing; see SourceLocation's docs");
+        assert_eq!(parsed.path, "/src/main.rs");
+        assert_eq!(parsed.line, 42);
+    }
+
+    /// Same guard for `ct/source-call-jump`
+    /// (`jumps.nim:22-26` also carries `behaviour`).
+    #[test]
+    fn source_call_jump_target_still_tolerates_the_behaviour_field() {
+        let as_sent = serde_json::json!({
+            "path": "/src/main.rs",
+            "line": 42,
+            "token": "foo",
+            "behaviour": 0,
+        });
+        assert!(
+            serde_json::from_value::<SourceCallJumpTarget>(as_sent).is_ok(),
+            "ct/source-call-jump payloads must keep parsing; see SourceCallJumpTarget's docs"
+        );
+    }
+
+    /// `Location` round-trips through the frontend, which echoes back a
+    /// superset (`status`, `highLevelFunctionFirst`,
+    /// `highLevelFunctionLast` are declared in Nim but not here), and is
+    /// also fed by the recreator's replay-query responses.  Denying
+    /// unknown fields here would break calltrace and history jumps.
+    #[test]
+    fn location_still_tolerates_the_superset_the_frontend_echoes_back() {
+        let echoed = serde_json::json!({
+            "path": "/src/main.rs",
+            "line": 7,
+            "status": "LocationLoaded",
+            "highLevelFunctionFirst": 1,
+            "highLevelFunctionLast": 20,
+        });
+        let parsed = serde_json::from_value::<Location>(echoed)
+            .expect("frontend-echoed Location payloads must keep parsing; see Location's docs");
+        assert_eq!(parsed.line, 7);
+    }
 
     /// `CoreTrace.recording_id` (M-REC-4) flips both type (i64 → String)
     /// and JSON key (`traceId` → `recordingId`).  The Nim sibling
