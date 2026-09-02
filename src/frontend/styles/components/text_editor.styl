@@ -8,7 +8,9 @@
 // right of all of them, owned by Monaco rather than by us — the folding
 // chevron.  Reading from the left edge of `.gutter`:
 //
-//   pointer lane   --ct-gutter-pointer-lane   the current-line highlight
+//   pointer lane   --ct-gutter-pointer-lane   the current-line highlight, and
+//                                             — ON HOVER ONLY — the run-test
+//                                             control (.gutter-runtest)
 //   line number    the remainder              .gutter-line
 //   marker lane    --ct-gutter-marker-lane    breakpoint, then tracepoint
 //   (gap)          --ct-gutter-marker-gap     nothing; keeps us off the chevron
@@ -41,6 +43,24 @@
 // wrong one, and that is precisely what adding a third control to this strip
 // requires.  The breakpoint offset is now DERIVED from the tracepoint lane, so
 // the two cannot overlap however the sizes are retuned.
+// THE RUN-TEST CONTROL TAKES NO LANE, and that is a deliberate reading of the
+// rule above rather than an exception to it. Every lane here is RESERVED on
+// every line of every file — the widths are subtracted from `.gutter-line`
+// unconditionally, because a lane that appeared only on some lines would make
+// the line numbers jitter as a reader scrolled. Declaring one for a control
+// that exists on the few lines carrying a `#[test]` would cost that width in
+// every file, in every language, permanently.
+//
+// So it OVERLAYS the pointer lane, whose only other occupant is the current-line
+// arrow, which is on exactly one line at a time; and it is invisible until the
+// pointer is over its row. Nothing moves and nothing is reserved. It is nowhere
+// near the marker lane or the chevron, so the disjoint hit areas established
+// above are untouched — which is what made a third control possible at all.
+//
+// WHEN BOTH WANT THE LANE the run control wins, and only while hovered. A
+// reader whose pointer is on the current line is pointing AT something; the
+// arrow is a position they already know and the control is the action they are
+// reaching for.
 .monaco-editor
   --ct-gutter-breakpoint-size: 1.1ch
   --ct-gutter-trace-size: 1.2ch
@@ -974,6 +994,68 @@ line-number-type()
   background-color: ON_BG_COLOR
   position: relative
   z-index: -2
+
+// --- the run-test control -------------------------------------------------
+//
+// Sized to the pointer lane and the full line height, so the hit area is the
+// whole of the lane rather than the glyph. A control a reader has to hit
+// precisely is one they will miss and set a breakpoint with — which is the
+// failure the lane separation above exists to prevent, one lane over.
+.gutter-runtest
+  position: absolute
+  top: 0
+  left: 0
+  width: var(--ct-gutter-pointer-lane)
+  height: 100%
+  display: flex
+  align-items: center
+  justify-content: center
+  cursor: pointer
+  // INVISIBLE, NOT ABSENT. `visibility` rather than `display: none` so the
+  // element keeps its box and its hit area is stable the instant it appears —
+  // a control that is laid out only on hover moves under the pointer that
+  // revealed it.
+  opacity: 0
+  z-index: 2
+  transition: opacity 90ms ease
+
+  &:before
+    content: "\25b6"
+    font-size: 0.6em
+    line-height: 1
+    color: colors-ui-text-primary-label-subtle
+
+  &:hover:before
+    color: colors-ui-text-primary-active
+
+.gutter:hover .gutter-runtest
+  opacity: 1
+
+// AND THE ARROW YIELDS, but only while the row is hovered. Outside that the
+// current line keeps its marker exactly as before, so this control changes
+// nothing about how a reader finds where execution is.
+.gutter:hover .gutter-highlight-active:before
+  opacity: 0
+
+// RUNNING is visible without a hover, because at this point the slot is a
+// STATUS rather than an affordance — and a status a reader has to hover to see
+// is not one. This is also what the settle path clears: the class comes from
+// `trace.gutterRunningTest`, so a repaint is what removes it, and
+// `restoreEditorTestButton` is what causes the repaint.
+.gutter-runtest.running
+  opacity: 1
+  cursor: default
+
+  &:before
+    content: "\25cf"
+    color: colors-ui-text-primary-active
+    animation: ct-gutter-runtest-pulse 1s ease-in-out infinite
+
+@keyframes ct-gutter-runtest-pulse
+  0%, 100%
+    opacity: 0.35
+  50%
+    opacity: 1
 
 .gutter-highlight-active:before
   content: ""

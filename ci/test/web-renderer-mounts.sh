@@ -1564,6 +1564,43 @@ print(" ".join(r["name"] for r in rows))
 		ck fail "arm R: the run control is disabled ($(jsonraw route dom.testRunButton.title)) — indistinguishable from a working one in a screenshot, and useless"
 	fi
 
+	# AND THE EDITOR'S GUTTER CARRIES ONE PER TEST.
+	#
+	# THE LINES, NOT THE COUNT. `src/main.nr` declares two tests — line 13
+	# `#[test]` and line 18 `#[test(should_fail)]` — and the second is exactly
+	# what the text scan this replaced could not see: it matched
+	# `lineStr.strip() == "#[test]"` exactly, so the attribute forms got no
+	# control at all. `13` alone would be the defect; `13 18` is the fix, and a
+	# bare count of 2 would not tell them apart from any other pair.
+	r_runslots="$(python3 -c '
+import json, sys
+print(" ".join(json.load(open(sys.argv[1]))["dom"].get("gutterRunSlots") or []))
+' "${cache}/route.json")"
+	if [ "${r_runslots}" = "13 18" ]; then
+		ck ok "arm R: the gutter carries a run control on both of main.nr's tests, including the \`#[test(should_fail)]\` a text scan cannot see (lines ${r_runslots})"
+	else
+		ck fail "arm R: the gutter's run controls are on lines '${r_runslots}', expected '13 18'"
+	fi
+
+	# AND IT DOES NOT SIT ON THE BREAKPOINT. Two controls answering one point is
+	# the failure the marker lanes were separated to prevent; a third control
+	# overlapping either of them would reintroduce it, and a click meant to run
+	# a test would set a breakpoint instead. Asserted as GEOMETRY, because class
+	# names being different says nothing about where the boxes are.
+	r_overlap="$(python3 -c '
+import json, sys
+boxes = json.load(open(sys.argv[1]))["dom"].get("gutterRunSlotBoxes") or []
+bad = [b for b in boxes if b.get("overlapsMarker")]
+zero = [b for b in boxes if not b.get("width")]
+print(len(boxes), len(bad), len(zero))
+' "${cache}/route.json")"
+	set -- ${r_overlap}
+	if [ "${1:-0}" -gt 0 ] && [ "${2:-1}" -eq 0 ] && [ "${3:-1}" -eq 0 ]; then
+		ck ok "arm R: each run control has a hit area of its own (${1} measured, none overlapping the breakpoint, none zero-width)"
+	else
+		ck fail "arm R: ${1:-0} run control(s) measured, ${2:-?} overlapping the breakpoint marker and ${3:-?} with no width — a control a click cannot reach, or one that steals the breakpoint's"
+	fi
+
 	# CONSTRAINTS SHOWS A MEASURED NUMBER. 17 is `nargo info --json`'s answer
 	# for this template; `ci/test/noir-template-toolchain.sh` re-runs the
 	# producer and fails if the bundle's copy has drifted from it, so the
@@ -2068,7 +2105,7 @@ echo
 # 66, and the two new ones are the ▶'s presence and its enabled state. The
 # absence check that used to be here was inverted rather than added to — it
 # still costs one assertion, it now requires the opposite thing.
-expect_count 66
+expect_count 68
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"
