@@ -197,3 +197,261 @@ proc parseNargoInfoJson*(text: string; provenance: string): ConstraintReport =
     return absentReport(
       "nargo info reported a program with no functions, which a compiled " &
       "circuit cannot have — the answer was understood but is not usable")
+
+# ---------------------------------------------------------------------------
+# A report the PANE COMPUTED, from the compile it is describing
+# ---------------------------------------------------------------------------
+#
+# Everything above turns `nargo info`'s JSON into a report. That JSON cannot be
+# produced in a browser, so the web pane shipped a compile-time constant of it
+# instead — and `Generated-Code-Listing.md` §15.4 records what that cost: the
+# constant was measured by the NATIVE toolchain and rendered by the WEB engine,
+# which are different compilers, so it was wrong by two opcodes for every
+# visitor while a gate that compared it against the wrong `nargo` certified it.
+#
+# These procedures remove the need for it. Both derive the counts from the
+# artefact of the compile the pane is describing, so the number and the thing
+# it describes cannot drift apart: a number the pane computes cannot be stale
+# with respect to itself.
+
+type
+  AcirCountRead* = object
+    ## An opcode count, or a stated reason there is not a trustworthy one.
+    count*: int
+    ok*: bool
+    reason*: string
+      ## Empty when `ok`. Otherwise why the artefact could not be counted,
+      ## phrased for a pane rather than a log.
+
+proc acirCountFromDebugInfo*(debugSymbols: JsonNode): AcirCountRead =
+  ## The ACIR opcode count, from a DECODED `debug_symbols`.
+  ##
+  ## `debug_symbols` is base64 of RAW deflate; decoding it is transport's job
+  ## (`Generated-Code-Listing.md` GCL-D7) and this takes the decoded node, for
+  ## the same reason `noir_anchor_producer` does — so it runs in both ViewModel
+  ## lanes with no compression library.
+  ##
+  ## ## Why this REFUSES a sparse map instead of counting its keys
+  ##
+  ## `acir_locations` is a `BTreeMap<AcirOpcodeLocation, CallStackId>` in the
+  ## compiler. A map permits gaps: an opcode carrying no source location is
+  ## simply absent, and then `len` is not the opcode count — it is the count of
+  ## opcodes that happened to be attributable, which is a smaller number that
+  ## looks exactly like the right one.
+  ##
+  ## Measured dense (`0..n-1`, contiguous) on every artefact this campaign
+  ## produced — native beta.2, native beta.26, and the wasm module's own
+  ## `program` compile. That is evidence and not a guarantee, so the density is
+  ## CHECKED here rather than relied upon, and a sparse map produces a stated
+  ## absence instead of a confident undercount. §4's rule: this pane's failure
+  ## mode is a plausible wrong answer, so an unverifiable number is refused.
+  ##
+  ## The `debug` compile legitimately yields ZERO entries — `force_brillig`
+  ## moves every instruction into an unconstrained function and leaves no
+  ## located ACIR opcode at all (GCL-D9, measured through the wasm module). So
+  ## an empty map is reported as "this artefact has no constrained opcodes",
+  ## which is true of it, rather than as a fault.
+  if debugSymbols.isNil or debugSymbols.kind != JObject:
+    return AcirCountRead(count: 0, ok: false,
+      reason: "the compiler's debug symbols were not readable, so the " &
+              "opcode count could not be taken from this compile")
+
+  var circuit = debugSymbols
+  if circuit.hasKey("debug_infos"):
+    let infos = circuit["debug_infos"]
+    if infos.kind != JArray or infos.len == 0:
+      return AcirCountRead(count: 0, ok: false,
+        reason: "the compiler's debug symbols carry no circuit")
+    circuit = infos[0]
+
+  if circuit.isNil or circuit.kind != JObject:
+    return AcirCountRead(count: 0, ok: false,
+      reason: "the compiler's debug symbols carry no circuit")
+
+  # `acir_locations` is the current spelling; `locations` is what compilers
+  # before the call-stack tree emitted. Both are opcode-indexed maps, and the
+  # newer is tried first so a compiler emitting both is not read by the older
+  # path — the same precedence `noir_anchor_producer.readArtefact` uses.
+  var located: JsonNode = nil
+  if circuit.hasKey("acir_locations"):
+    located = circuit["acir_locations"]
+  elif circuit.hasKey("locations"):
+    located = circuit["locations"]
+
+  if located.isNil or located.kind != JObject:
+    return AcirCountRead(count: 0, ok: false,
+      reason: "the compiler's debug symbols name no opcode locations, so " &
+              "the opcode count could not be taken from this compile")
+
+  var indices: seq[int] = @[]
+  for key, _ in located:
+    var index = -1
+    try:
+      index = parseInt(key)
+    except CatchableError:
+      index = -1
+    if index < 0:
+      return AcirCountRead(count: 0, ok: false,
+        reason: "the compiler's debug symbols are keyed by something that " &
+                "is not an opcode index")
+    indices.add index
+
+  if indices.len == 0:
+    return AcirCountRead(count: 0, ok: true, reason: "")
+
+  var maxIndex = -1
+  for index in indices:
+    if index > maxIndex: maxIndex = index
+
+  # A map whose largest index runs far past its entry count is not something to
+  # allocate a bitmap for. The bound is generous — no circuit this pane opens is
+  # near it — and it exists so a malformed artefact cannot ask for a huge
+  # allocation on the strength of one absurd key.
+  const SparsityBound = 1 shl 20
+  if maxIndex >= SparsityBound or maxIndex >= indices.len + SparsityBound:
+    return AcirCountRead(count: 0, ok: false,
+      reason: "the compiler's opcode indices are too far apart to describe a " &
+              "circuit this pane can count")
+
+  var seen = newSeq[bool](maxIndex + 1)
+  for index in indices:
+    seen[index] = true
+
+  # THE GAP IS NAMED, and named before the count is. `len` on a map with a hole
+  # is the number of ATTRIBUTABLE opcodes — smaller than the circuit, and
+  # indistinguishable from the right answer once it reaches a headline.
+  for index, present in seen:
+    if not present:
+      return AcirCountRead(count: 0, ok: false,
+        reason: "the compiler left opcode " & $index & " unlocated, so the " &
+                "located count is smaller than the circuit and would be a " &
+                "confident wrong answer")
+
+  AcirCountRead(count: maxIndex + 1, ok: true, reason: "")
+
+proc isAcirHeaderLine(line: string): bool =
+  ## The four lines `display_compiled_program` prints before the opcodes.
+  ##
+  ## GCL-D6: these are NOT rows. `func 0`, `private parameters:`,
+  ## `public parameters:` and `return values:` precede every ACIR function, and
+  ## counting them would make the total wrong by a constant four per function —
+  ## the most plausible-looking failure available here, since the number would
+  ## still look like an opcode count.
+  let text = line.strip()
+  text.startsWith("func ") or
+    text.startsWith("private parameters:") or
+    text.startsWith("public parameters:") or
+    text.startsWith("return values:")
+
+proc reportFromAcirListing*(listing: string; package: string;
+                            provenance: string): ConstraintReport =
+  ## Build the whole report from `VfsResponse.acir_listing`.
+  ##
+  ## ## Why the LISTING and not `nargo info`
+  ##
+  ## They are the same numbers. `nargo info`'s opcode total for a function IS
+  ## the number of rows the listing prints for it, because the listing prints
+  ## one row per opcode — measured equal on the bundled template at 15 under
+  ## one compiler and at 17 under another, and equal at both. So the listing
+  ## answers everything `nargo info` answers, from an artefact the browser
+  ## already has, and `nargo info` cannot run in a tab.
+  ##
+  ## It answers the unconstrained half too, and by NAME:
+  ## `unconstrained func 0: directive_invert` heads a block of numbered rows.
+  ## Measured on the bundled template, the listing gives `directive_invert` 9
+  ## opcodes and `directive_integer_quotient` 8 — the same two names and the
+  ## same two counts `nargo info` reports for it.
+  ##
+  ## So this is the whole of §15.3's "one artefact, one provenance, one
+  ## timestamp": the counts and the listing are the same reading of the same
+  ## compile, and there is nothing left for them to disagree about.
+  ##
+  ## ACIR functions are named as the compiler prints them — `func 0` — and not
+  ## as `main`. The listing does not say which source function a circuit came
+  ## from, and inventing the name would be a positional claim this artefact
+  ## does not support (§4).
+  if listing.strip().len == 0:
+    return absentReport(
+      "this compile produced no constraint listing, so there are no counts " &
+      "to show for it")
+
+  var functions: seq[ConstraintFunction] = @[]
+  var currentAcir = -1
+  var acirRows = 0
+  var currentBrillig = ""
+  var brilligRows = 0
+
+  proc flushAcir() =
+    if currentAcir >= 0:
+      functions.add ConstraintFunction(
+        name: "func " & $currentAcir, kind: cfkAcir, opcodes: acirRows)
+    currentAcir = -1
+    acirRows = 0
+
+  proc flushBrillig() =
+    if currentBrillig.len > 0:
+      functions.add ConstraintFunction(
+        name: currentBrillig, kind: cfkUnconstrained, opcodes: brilligRows)
+    currentBrillig = ""
+    brilligRows = 0
+
+  for rawLine in listing.splitLines():
+    let line = rawLine.strip()
+    if line.len == 0:
+      continue
+
+    if line.startsWith("unconstrained func "):
+      flushAcir()
+      flushBrillig()
+      # `unconstrained func 0: directive_invert` — the name is what a user
+      # sees in `nargo info`, so it is carried through rather than renumbered.
+      let colon = line.find(':')
+      currentBrillig =
+        if colon >= 0 and colon + 1 < line.len: line[colon + 1 .. ^1].strip()
+        else: line["unconstrained func ".len .. ^1].strip()
+      if currentBrillig.len == 0:
+        currentBrillig = line
+      brilligRows = 0
+      continue
+
+    if currentBrillig.len > 0:
+      # Brillig rows are `<index>: <opcode>`; anything else ends the block.
+      let colon = line.find(':')
+      var index = -1
+      if colon > 0:
+        try:
+          index = parseInt(line[0 ..< colon].strip())
+        except CatchableError:
+          index = -1
+      if index >= 0:
+        brilligRows += 1
+        continue
+      flushBrillig()
+
+    if line.startsWith("func "):
+      flushAcir()
+      var index = -1
+      try:
+        index = parseInt(line["func ".len .. ^1].strip())
+      except CatchableError:
+        index = -1
+      currentAcir = max(index, 0)
+      acirRows = 0
+      continue
+
+    if isAcirHeaderLine(line):
+      continue
+
+    if currentAcir >= 0:
+      acirRows += 1
+
+  flushAcir()
+  flushBrillig()
+
+  if functions.len == 0:
+    return absentReport(
+      "this compile's constraint listing named no functions, which a " &
+      "compiled circuit cannot have — the listing was read but is not usable")
+
+  ConstraintReport(package: package, functions: functions,
+                   provenance: provenance, absence: "", stale: false)

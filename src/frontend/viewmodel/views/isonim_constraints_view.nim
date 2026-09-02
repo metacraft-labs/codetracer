@@ -30,9 +30,26 @@
 ##
 ## "17" measured a second ago and "17" shipped in a bundle are different
 ## claims, and only one of them survives an edit. The pane always says which
-## it has, and appends "(stale)" to the headline when the sources have moved
-## on — because an unlabelled stale count is indistinguishable from a current
-## one, which is the failure mode this pane could most easily have.
+## it has.
+##
+## THE `(stale)` HALF IS NOT REACHED. `headlineFor` appends it whenever
+## `report.stale` is set; the only thing in `src/` that sets it is
+## `constraints_vm.markStale`, WHICH HAS NO CALLERS. This paragraph used to say
+## the headline is appended "when the sources have moved on"; the sources moving
+## on is precisely the event nothing observes.
+##
+## The branch is nonetheless GREEN, which is how it stayed invisible:
+## `test_ns9_panes_vm`'s staleness test assigns `report.stale = true` itself and
+## checks the suffix. It covers `headlineFor`; it cannot cover a caller that is
+## not there. Any test that would have caught this has to start from an edit,
+## not from the flag.
+##
+## So the failure mode named below — an unlabelled stale count, indistinguishable
+## from a current one — is the pane's CURRENT behaviour rather than the one it
+## avoids. The mechanism is built and correct; the trigger is an open decision,
+## because "stale" means different things for a bundled constant and for a real
+## compile. See `viewmodels/constraints_vm.nim`'s header and
+## `Generated-Code-Listing.md` §15.
 
 import std/strutils
 

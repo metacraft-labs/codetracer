@@ -5089,6 +5089,29 @@ when defined(ctWeb):
             # left in is "running" over a run that is not.
             editor.settleEditorTestRun()
 
+          web_noir_build.noirConstraintsSink =
+            proc(listing: string; packageDir: string; provenance: string) =
+              # THE PANE COUNTS WHAT IT COMPILED. `reportFromAcirListing` reads
+              # the rows of the listing this very compile produced; nobody
+              # tells it a number. See `Generated-Code-Listing.md` §15.4 for
+              # the constant this replaces and why there was no correct value
+              # to write into it.
+              constraints.initConstraintsVM()
+              if constraints.constraintsVMInstance.isNil:
+                return
+              if listing.len == 0:
+                # ORDINARY, not a fault: a compiler module older than
+                # `VfsResponse.acir_listing` answers without one. Saying so
+                # beats showing a number this compile did not produce, which
+                # is the whole defect being removed here.
+                constraints.constraintsVMInstance.setAbsence(
+                  "This build's Noir compiler does not report a constraint " &
+                  "listing, so there are no counts to show for what it just " &
+                  "compiled.")
+                return
+              constraints.constraintsVMInstance.setReport(
+                reportFromAcirListing(listing, packageDir, provenance))
+
           web_noir_build.noirTestRunSink =
             proc(response: NoirTestResponse; packageDir: string) =
               # The catalog is read AT FOLD TIME rather than captured, because
