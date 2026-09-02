@@ -1639,6 +1639,23 @@ jobs:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
+      - name: One bundle, one definition per name
+        # A JS bundle is one script scope, so two top-level `function foo`
+        # declarations are not an error -- the last silently wins and the
+        # first one's callers run the wrong body. Two defects here were
+        # exactly that: `--hotCodeReloading` collided a generic's anonymous
+        # closures across modules until the editor stopped mounting, and two
+        # `{.exportc.}` procs named `debugRepl` left the service one
+        # unreachable in every build while throwing nothing.
+        #
+        # Placed immediately after the step that produces the bundles,
+        # because it checks that step's output. Carries the same shape as
+        # the other guards here: counted assertions with the count itself
+        # asserted -- a bundle yielding zero top-level functions, or an
+        # expected bundle never checked, fails rather than scoring zero, so
+        # it cannot pass by matching nothing.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-js-bundle-name-uniqueness
+
       - name: Run cross-process envelope
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"

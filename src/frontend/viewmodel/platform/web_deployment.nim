@@ -1626,9 +1626,20 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
 
   All three are `defer`, which preserves document order and keeps a 13 MB
   bundle off the parser's critical path. A `type="module"` would scope them
-  more strongly and was measured instead: it makes `ui.js` a `SyntaxError`
-  ("Identifier 'debugRepl' has already been declared"), because Nim's JS
-  backend emits declarations that are legal only in sloppy mode.
+  more strongly and was measured instead: it made `ui.js` a `SyntaxError`
+  ("Identifier 'debugRepl' has already been declared").
+
+  That was read at the time as "Nim's JS backend emits declarations that are
+  legal only in sloppy mode".  It was narrower and worse than that: TWO
+  `{.exportc.}` procs were named `debugRepl` — `renderer.debugRepl` and
+  `services/debugger_service.debugRepl` — and `exportc` fixes the emitted
+  name, so the bundle carried two top-level `function debugRepl`
+  declarations.  Module scope merely made a pre-existing collision loud.  In
+  sloppy mode it was silent and therefore worse: the last declaration won, so
+  the service method was unreachable in EVERY build, Electron included.  The
+  `exportc` is gone from the service method and
+  `ci/test/js-bundle-name-uniqueness.sh` fails on a duplicate name now.
+  Whether `type="module"` is viable has NOT been re-measured since.
 
   `ui.js` is still wrapped in an IIFE by `ci/test/web-bundle-assets.sh`, and
   the reason has changed: it is no longer keeping two Nim bundles apart,

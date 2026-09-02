@@ -3055,6 +3055,37 @@ test-chord-and-pane-uniqueness:
   exec > >(tee test-logs/test-chord-and-pane-uniqueness.log) 2>&1
   bash ci/test/chord-and-pane-uniqueness.sh
 
+# ONE BUNDLE, ONE DEFINITION PER NAME.
+#
+# A JS bundle is a single script scope, so two top-level `function foo`
+# declarations are not an error: the LAST one wins and every caller of the
+# first silently runs the second one's body. Two separate defects in this
+# repo were exactly that, and neither announced itself:
+#
+#   - `--hotCodeReloading` made jsgen name routines with a per-module
+#     counter, so a generic's anonymous `proc()` closures collided across
+#     modules and `createMemo[CapabilityRung]` ran another module's body,
+#     copying an enum through a tuple's type descriptor. The editor stopped
+#     mounting. See `repro.nim`.
+#   - Two `{.exportc.}` procs were both named `debugRepl`, so
+#     `services/debugger_service.debugRepl` was unreachable behind
+#     `renderer.debugRepl` in every build. It threw nothing; it just never
+#     ran.
+#
+# Duplicate names alone are not sufficient for a fault — if the colliding
+# bodies happen to agree, the wrong one wins and nothing looks wrong. So
+# this counts names rather than waiting for a symptom, and it asserts the
+# count was taken: a bundle with zero matched functions, or an expected
+# bundle that was never checked, is a FAILURE and not a clean tree.
+#
+# Needs a built tree; pass a directory to check somewhere else.
+test-js-bundle-name-uniqueness *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-js-bundle-name-uniqueness.log) 2>&1
+  bash ci/test/js-bundle-name-uniqueness.sh {{args}}
+
 # A SUBMENU YOU CAN CLICK, A BAR THAT DOES NOT FLICKER, AND ONE MENU ON RIGHT-CLICK.
 #
 # Three defects reported by one user against the deployed `ide.codetracer.com`

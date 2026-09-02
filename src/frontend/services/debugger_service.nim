@@ -64,7 +64,16 @@ proc tracepointToggle*(self: DebuggerService, tracepointId: TracepointId) {.asyn
     Future[void]
   )
 
-proc debugRepl*(self: DebuggerService, cmd: cstring) {.exportc.} =
+# NOT `{.exportc.}`.  `exportc` fixes the emitted JS name, and
+# `renderer.nim` already exports a devtools-console helper called
+# `debugRepl`.  Two `exportc` procs with one name land as two top-level
+# `function debugRepl` declarations in `ui.js`, where the LAST one wins —
+# so this method was silently replaced by the renderer's one-argument
+# version, which would have taken `self` as its `expression` and dropped
+# `cmd`.  A method taking a `DebuggerService` was never callable from a
+# console anyway, so the fixed name bought nothing.
+# `ci/test/js-bundle-name-uniqueness.sh` now fails on the collision.
+proc debugRepl*(self: DebuggerService, cmd: cstring) =
   if not self.stableBusy:
     self.stableBusy = true
     inc self.operationCount
