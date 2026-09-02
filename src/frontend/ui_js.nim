@@ -3291,6 +3291,29 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
     cerror "saved-file: could not refresh the editor tab for " &
       $response.name & ": " & getCurrentExceptionMsg()
   checkPendingReRecord(data)
+
+  # A SAVE CAN ADD OR REMOVE A TEST, so the catalog it was derived from is now
+  # stale — and everything downstream of it with it: the Test Results pane's
+  # rows, and the editor gutter's run controls.
+  #
+  # THIS IS THE LOOP THE FEATURE EXISTS FOR. "Write a test, run it" is the
+  # first thing anyone does, and without this the new `#[test]` gets no gutter
+  # control and no row until the tab is reloaded — a product that visibly did
+  # not notice what the user just wrote.
+  #
+  # Re-ASKED rather than re-derived here. `installTemplatePaneHost` parses the
+  # project's own sources with the same parser the `ct test` provider uses, and
+  # a second derivation in the renderer would be a second answer that can
+  # disagree with the pane's. The Electron host answers the same message the
+  # same way, so this works on both platforms without a branch.
+  #
+  # Edit sessions only, matching the send site in `onNoTrace`: "which tests does
+  # this workspace have" is a question about a workspace, and a replay session
+  # is looking at a recording.
+  if data.startOptions.edit:
+    data.ipc.send "CODETRACER::ns9-panes",
+      js{ folder: data.startOptions.folder }
+
   data.redraw()
 
 proc onSaveFileError(sender: js, response: jsobject(name=cstring, error=cstring)) =
