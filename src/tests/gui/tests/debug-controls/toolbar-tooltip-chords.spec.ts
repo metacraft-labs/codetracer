@@ -130,6 +130,97 @@ async function isTooltipShown(page: Page, id: string): Promise<boolean> {
   }, id);
 }
 
+
+/**
+ * Turn a chord as the TOOLTIP SPELLS IT into the key string Playwright presses.
+ *
+ * Deliberately a dumb transliteration with no table of known chords in it: the
+ * whole point of §10.5's strongest reading is that the test does not know what
+ * any control is bound to, it reads the claim off the page and tries it. A
+ * lookup table here would re-introduce exactly the second source of truth this
+ * work removed.
+ *
+ * `forwardContinue` is bound to two chords ("F8 F2") and the tooltip shows
+ * both; pressing the first is enough to test the claim.
+ */
+function chordToPlaywrightKey(chord: string): string {
+  const first = chord.trim().split(/\s+/)[0];
+  const parts = first.split("+");
+  const key = parts[parts.length - 1];
+  const modifiers = parts.slice(0, -1).map((m) => {
+    switch (m.toUpperCase()) {
+      case "CTRL":
+        return "Control";
+      case "SHIFT":
+        return "Shift";
+      case "ALT":
+        return "Alt";
+      case "COMMAND":
+      case "META":
+        return "Meta";
+      default:
+        throw new Error(`unrecognised modifier in chord "${chord}": ${m}`);
+    }
+  });
+  // A single character is a letter key and Playwright wants it lower case;
+  // anything longer is a named key (F10, PageUp, Home) and is passed through.
+  const mainKey = key.length === 1 ? key.toLowerCase() : key;
+  return [...modifiers, mainKey].join("+");
+}
+
+/** Read the chord a control's own tooltip claims, without hovering. */
+async function chordFromTooltip(page: Page, id: string): Promise<string> {
+  const text = await page.evaluate((elementId: string) => {
+    const tip = document.querySelector(`#${elementId} .custom-tooltip`);
+    return (tip?.textContent ?? "").trim();
+  }, id);
+  const match = /^(.+?) \(([^()]+)\)$/.exec(text);
+  if (!match) throw new Error(`#${id} tooltip names no chord: "${text}"`);
+  return match[2];
+}
+
+async function resetStepLog(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __CODETRACER_TEST__?: { vmBackendRequests?: unknown[] } };
+    w.__CODETRACER_TEST__ = w.__CODETRACER_TEST__ ?? {};
+    w.__CODETRACER_TEST__.vmBackendRequests = [];
+  });
+}
+
+/**
+ * The toolbar action id of the first step the page recorded, or "".
+ *
+ * `ui/debug.nim`'s `recordDapStep` logs the action id the toolbar dispatched
+ * ("next", "reverse-step-in", ...), and BOTH a click and a chord reach it
+ * through the same `invokeToolbarStep` bridge (`ui/debug.nim:83-93`). That
+ * shared path is what makes the comparison below meaningful rather than a
+ * coincidence of two similar code paths.
+ */
+async function firstRecordedStep(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    type R = { command?: string; source?: string };
+    const log =
+      ((window as unknown as { __CODETRACER_TEST__?: { vmBackendRequests?: R[] } })
+        .__CODETRACER_TEST__?.vmBackendRequests ?? []) as R[];
+    const step = log.find((r) => r.source === "dapStep");
+    return step?.command ?? "";
+  });
+}
+
+async function waitStableBusyFalse(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (window as unknown as { data?: { status?: { stableBusy?: boolean } } })
+              .data?.status?.stableBusy === false,
+        ),
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+}
+
 test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest", () => {
   test.describe.configure({ mode: "serial" });
   test.setTimeout(120_000);
@@ -275,5 +366,139 @@ test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest"
     // constant would give all 13 controls the same chord and pass every
     // assertion above.
     expect(chords.size).toBe(13);
+  });
+
+  test("EVERY control's tooltip names a chord the page actually has bound", async ({ ctPage }) => {
+    const page = ctPage as unknown as Page;
+    // §10.5, counted over every control on screen (rule 3): "one control with a
+    // stale tooltip is the defect". This is the half of the strongest reading
+    // that can be taken for ALL THIRTEEN without pressing anything — a chord
+    // the shortcut map does not contain is one that cannot possibly work, and
+    // that is decidable from the page alone.
+    //
+    // It relates two things the page reports — the chord the tooltip claims and
+    // the chords the running config has bound — and names neither.
+    const results = await page.evaluate((ids: string[]) => {
+      const shortcutActions =
+        (window as unknown as {
+          data?: { config?: { shortcutMap?: { shortcutActions?: Record<string, unknown> } } };
+        }).data?.config?.shortcutMap?.shortcutActions ?? {};
+      const bound = new Set(Object.keys(shortcutActions).map((k) => k.toUpperCase()));
+      return ids.map((id) => {
+        const tip = document.querySelector(`#${id} .custom-tooltip`);
+        const text = (tip?.textContent ?? "").trim();
+        const match = /^(.+?) \(([^()]+)\)$/.exec(text);
+        const chord = match ? match[2] : "";
+        // "F8 F2" is two chords; every one of them must be bound.
+        const chords = chord ? chord.split(/\s+/) : [];
+        return {
+          id,
+          chord,
+          chordCount: chords.length,
+          allBound: chords.length > 0 && chords.every((c) => bound.has(c.toUpperCase())),
+          boundTableSize: bound.size,
+        };
+      });
+    }, TOOLBAR_BUTTON_IDS as unknown as string[]);
+
+    // NON-VACUITY: an empty shortcut table would make `allBound` false for
+    // everything, but an assertion shaped as "no unbound chords found" would
+    // pass over an empty LIST of controls. Both populations are sized.
+    expect(results.length).toBe(13);
+    expect(results[0].boundTableSize).toBeGreaterThan(40);
+
+    let controlsBound = 0;
+    for (const r of results) {
+      expect(r.chordCount).toBeGreaterThan(0);
+      expect(r.allBound, `#${r.id} claims "${r.chord}", which nothing has bound`).toBe(true);
+      controlsBound += 1;
+    }
+    expect(controlsBound).toBe(13);
+  });
+
+  test("PRESSING the key a tooltip names does what that control does", async ({ ctPage }) => {
+    const page = ctPage as unknown as Page;
+    // §10.5's strongest reading: "read the key its own tooltip names, press
+    // that key, and assert the session moves the way that control moves it."
+    // This is the only assertion in the whole change that closes the loop —
+    // everything else proves the tooltip is DERIVED from a binding; this proves
+    // the binding it names is TRUE.
+    //
+    // The comparison is against CLICKING THE SAME CONTROL rather than against a
+    // named expectation, so the check names no key and no action. Both gestures
+    // reach `DebugControlsVM.invokeToolbarStep` (`ui/debug.nim:83-93`), and
+    // `recordDapStep` logs the toolbar action id each one dispatched — so
+    // "moves the way that control moves it" is readable as an equality between
+    // two things the page reported about itself.
+    //
+    // SCOPED TO THE STEPPING CONTROLS, and the exclusions are asserted rather
+    // than left implicit. The other five are not merely inconvenient: pressing
+    // `run-tests` opens a second window and starts a recording, `run-to-entry`
+    // and `reset-operation` restart the session out from under the loop, and
+    // the two history controls are the subject of a separate, tracked defect
+    // (`ui/debug.nim:417-421` maps `history-back` to `isForward = true`). A
+    // test that drove them would be asserting through a known-wrong mapping.
+    const STEPPING_CONTROLS = [
+      "next-image",
+      "step-in-image",
+      "reverse-next-image",
+      "reverse-step-in-image",
+    ] as const;
+    expect(STEPPING_CONTROLS.length).toBe(4);
+    expect(TOOLBAR_BUTTON_IDS.length - STEPPING_CONTROLS.length).toBe(9);
+
+    // Step forward a few times first so the REVERSE controls are enabled — at
+    // the start of a recording there is nothing behind the position, and a
+    // disabled control records nothing, which would pass a "commands match"
+    // assertion with two empty strings. The emptiness check below is what
+    // actually catches that, but arriving somewhere steppable makes the test
+    // about tooltips rather than about being at tick zero.
+    await waitStableBusyFalse(page);
+    for (let i = 0; i < 3; i += 1) {
+      await page.locator("#next-image").click();
+      await waitStableBusyFalse(page);
+    }
+
+    let comparedControls = 0;
+
+    for (const id of STEPPING_CONTROLS) {
+      const chord = await chordFromTooltip(page, id);
+      const key = chordToPlaywrightKey(chord);
+
+      // 1. Press the key the tooltip claims.
+      await resetStepLog(page);
+      await page.keyboard.press(key);
+      await expect
+        .poll(() => firstRecordedStep(page), { timeout: 30_000 })
+        .not.toBe("");
+      const fromKey = await firstRecordedStep(page);
+      await waitStableBusyFalse(page);
+
+      // 2. Click the control itself.
+      await resetStepLog(page);
+      await page.locator(`#${id}`).click();
+      await expect
+        .poll(() => firstRecordedStep(page), { timeout: 30_000 })
+        .not.toBe("");
+      const fromClick = await firstRecordedStep(page);
+      await waitStableBusyFalse(page);
+
+      // Neither gesture may have been a no-op: two empty strings are equal.
+      expect(fromKey, `#${id}: chord "${chord}" dispatched nothing`).not.toBe("");
+      expect(fromClick, `#${id}: clicking dispatched nothing`).not.toBe("");
+      // THE ASSERTION. The key the tooltip names moves the session the way the
+      // control it sits on moves it.
+      expect(
+        fromKey,
+        `#${id}: tooltip says "${chord}", but that key dispatched "${fromKey}" ` +
+          `while clicking the control dispatched "${fromClick}"`,
+      ).toBe(fromClick);
+
+      comparedControls += 1;
+    }
+
+    // Counted, so a loop that ranged over nothing cannot pass.
+    expect(comparedControls).toBe(STEPPING_CONTROLS.length);
+    expect(comparedControls).toBeGreaterThan(0);
   });
 });
