@@ -4589,6 +4589,7 @@ when defined(ctWeb):
   # `ctPlatform().process` expecting the wasm host a browser tab has and an
   # Electron renderer does not.
   import ui/web_noir_build
+  import ui/web_replay_host
   from viewmodel/platform/web_entry import
     EntryResolution, EntryVerdict, evTemplate, entryPath, entryPathOnHost
   from viewmodel/platform/noir_template import
@@ -4875,6 +4876,83 @@ when defined(ctWeb):
       # a Build button pointed at nothing is worse than one that is absent.
       if wantsTemplate and mounted:
         web_noir_build.installNoirBuildCommands(tmpl)
+
+        # RUN IS A MODE TRANSITION — "full surface, returnable".
+        #
+        # Installed here, beside the Build wiring, and for the same reason its
+        # comment gives: `enterTemplateEditMode` has already run, so the
+        # renderer's machinery exists, and this is the one place that can see
+        # all three things the transition needs at once. The replay host calls
+        # it when the engine is ready over a trace the tab produced.
+        #
+        # THREE STEPS THAT MUST HAPPEN TOGETHER, which is why this is one proc
+        # rather than a layout handed to the host:
+        #
+        #   1. `switchToDebug` — it already saves the edit layout into
+        #      `lastUsedEditLayout`, and `switchToEdit` already restores it
+        #      and saves the debug layout in turn, so the return leg is
+        #      symmetric and neither half is new. Both are bound actions
+        #      (`ctrl+f5`, and the `switchEdit`/`switchDebug` client actions),
+        #      so nothing state-dependent joins the topbar and
+        #      `menuRenderSignature` gains nothing it could silently miss.
+        #   2. CONSTRUCT the components the debug layout names.
+        #      `renderer.createUIComponents` walks `resolvedConfig` once at
+        #      startup, so a layout loaded later names GoldenLayout containers
+        #      with no component behind them. Measured: the layout visibly
+        #      switched, the panes came up empty, and uncaught page errors
+        #      went from 1 to 11.
+        #   3. `requestInitialPanelData` — what the desktop calls right after
+        #      `switchToDebug` so the Event Log and Terminal Output ask for
+        #      their data instead of sitting blank.
+        web_replay_host.installDebugSurfaceEntry(proc() =
+          let debugLayout = web_entry_surface.noirStudioDebugLayout()
+          if debugLayout.isNil:
+            cerror "replay: the bundled debug layout did not parse"
+            return
+          # A REPLAY SESSION HAS A TRACE, and until now `data.trace` was nil.
+          #
+          # `onNoTrace` sets it nil (there is no recording on an editing
+          # surface) and the desktop's `onTraceLoaded` sets it from the
+          # response. The web path reached neither, so every
+          # `editor.onCompleteMove` died on `data.trace.lang` — measured as
+          # seven identical uncaught `TypeError: Cannot read properties of
+          # null (reading 'lang')`, one per move, with the session otherwise
+          # working.
+          #
+          # Describing the recording the tab just made is the fix rather than
+          # a guard, because the session genuinely HAS one: `LangNoir` is what
+          # the tracer produced, and the workdir is the folder the engine was
+          # launched against. Fields nothing on this path reads are left at
+          # their defaults instead of being invented.
+          if data.trace.isNil:
+            data.trace = Trace(
+              lang: LangNoir,
+              program: cstring(tmpl.name),
+              workdir: cstring"trace",
+              imported: false,
+              calltrace: true,
+              events: true)
+          data.switchToDebug()
+          if not data.ui.layout.isNil:
+            let resolved = cast[GoldenLayoutResolvedConfig](debugLayout)
+            # `Content.Trace` is a retired id that survives only in
+            # `editModeHiddenContentIds`; `makeComponent` has no arm for it and
+            # raises `ValueError`. Skipping it by name keeps one dead pane from
+            # aborting the construction of the seven live ones.
+            for declared in web_entry_surface.layoutComponents(debugLayout):
+              if declared.content == ord(Content.Trace): continue
+              try:
+                discard data.makeComponent(Content(declared.content), declared.id)
+              except CatchableError as e:
+                cerror "replay: component " & $declared.content & ": " & e.msg
+              except:
+                cerror "replay: component " & $declared.content & " failed"
+            try:
+              data.ui.layout.loadLayout(resolved)
+              data.ui.resolvedConfig = resolved
+            except:
+              cerror "replay: could not load the debugging layout"
+          requestInitialPanelData(data))
 
         # BUILD IS THE CONFIGURED ACTION, NOT A NEW CHORD.
         #

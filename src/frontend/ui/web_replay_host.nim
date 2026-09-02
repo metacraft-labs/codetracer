@@ -49,6 +49,14 @@ import ../dap
 from ../../common/ct_event import
   CtEventKind, DapInitialize, DapLaunch, DapConfigurationDone
 
+var debugSurfaceEntry: proc()
+  ## Installed by `ui_js.configure`, because the mode switch, the component
+  ## constructor and the initial-panel-data request all live there and all
+  ## three are needed together. `web_entry_surface` owns the bundled layout
+  ## and already imports this module, so asking for any of it back would be a
+  ## cycle — the module that HAS the machinery hands over one proc, which is
+  ## the same shape `replay_session_service` uses in the other direction.
+
 var activeReplayTerminate: proc()
   ## The worker holding the current session, so a second Run replaces it
   ## rather than leaving two 18 MB wasm instances answering one store.
@@ -235,6 +243,31 @@ proc openSession(request: ReplaySessionRequest) =
           report("send " & $frameJsonText(packet))
           outcome.send(packet))
       report("engine ready; opening the trace")
+
+      # RUN LEAVES EDIT MODE. "Full surface, returnable": a Run brings up the
+      # normal CodeTracer debugging layout — stepping controls, State, Call
+      # Trace, Event Log — and an explicit action returns to editing with the
+      # project as it was.
+      #
+      # THE WHOLE TRANSITION IS ONE INJECTED PROC, and that is not indirection
+      # for its own sake. Installing a layout is three steps that must happen
+      # together: `switchToDebug` (which already saves the edit layout into
+      # `lastUsedEditLayout`, so the return leg is symmetric and needs nothing
+      # new), CONSTRUCTING the components the new layout names, and asking for
+      # the initial panel data. `renderer.createUIComponents` runs once at
+      # startup, so a layout loaded later names containers with no component
+      # behind them — measured here as a jump from 1 uncaught page error to
+      # 11, with the layout visibly switched and the panes empty.
+      if debugSurfaceEntry.isNil:
+        report("this build installs no debug surface; staying in edit mode")
+      else:
+        try:
+          debugSurfaceEntry()
+          report("switched to the debugging surface")
+        except CatchableError as e:
+          report("could not open the debugging surface: " & e.msg)
+        except:
+          report("could not open the debugging surface")
       # `initialize` was already sent once, from `configureMiddleware`, into a
       # channel with no peer — it timed out and resolved `{}`. Re-sending is
       # what gives the engine the handshake it expects; the DapApi's `seq`
@@ -242,6 +275,12 @@ proc openSession(request: ReplaySessionRequest) =
       data.dapApi.sendCtRequest(DapInitialize, js{clientName: cstring"codetracer"})
       data.dapApi.sendCtRequest(DapLaunch, js{traceFolder: cstring"trace"})
       data.dapApi.sendCtRequest(DapConfigurationDone, js{}))
+
+proc installDebugSurfaceEntry*(entry: proc()) =
+  ## Called from `ui_js.configure`. Separate from `installReplayHost` because
+  ## the two have different owners: `web_entry_surface` installs the host when
+  ## a template edit session starts, and only `ui_js` can supply this.
+  debugSurfaceEntry = entry
 
 proc installReplayHost*() =
   ## Make this tab able to answer a request for a replay session.

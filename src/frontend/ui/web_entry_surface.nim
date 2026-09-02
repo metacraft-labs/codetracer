@@ -344,6 +344,58 @@ proc noirStudioEditLayout*(): JsObject =
   sanitizeLayoutConfig(bundled, ord(Content.EditorView),
                        editModeHiddenContentIds())
 
+proc noirStudioDebugLayout*(): JsObject =
+  ## The DEBUGGING layout, from the same bundled config as the edit one.
+  ##
+  ## "Full surface, returnable" — Run leaves edit mode for the normal
+  ## CodeTracer debugging layout, and an explicit action comes back with the
+  ## project as it was. This is the first half, and it is deliberately the
+  ## same `config/default_layout.json` that `noirStudioEditLayout` starts
+  ## from: the only difference between the two modes is the SUPPRESSION.
+  ##
+  ## `noirStudioEditLayout` sanitizes with `editModeHiddenContentIds()` —
+  ## Trace, State, Calltrace, CalltraceEditor, TraceLog, AgentActivity,
+  ## TerminalOutput — because an edit surface has no recording to show them
+  ## over. A replay session has one, so the same config is sanitized with an
+  ## EMPTY hidden set and the panes come back.
+  ##
+  ## Deriving it from the same bundled JSON rather than writing a second
+  ## layout is the argument this file's own header makes about entering the
+  ## desktop product's edit mode instead of assembling a bespoke surface: two
+  ## layouts written separately are two statements of the product that no test
+  ## can tell apart until they disagree.
+  let bundled = parseLayoutJsonOrNil(cstring(bundledLayoutJson))
+  if bundled.isNil:
+    return nil
+  sanitizeLayoutConfig(bundled, ord(Content.EditorView), @[])
+
+proc layoutComponents*(layout: JsObject): seq[tuple[content: int, id: int]] =
+  ## Every `genericUiComponent` a layout config names, as (content id, dom id).
+  ##
+  ## `renderer.createUIComponents` walks `resolvedConfig.root` once at startup;
+  ## a layout installed later has to have its components constructed by hand
+  ## first, or GoldenLayout builds containers with nothing behind them. This is
+  ## that walk, exposed, so the caller does not re-implement the traversal and
+  ## get a different answer from the one the renderer would have given.
+  result = @[]
+  var found = newSeq[tuple[content: int, id: int]]()
+  proc visit(node: JsObject) =
+    if node.isNil or node.isUndefined: return
+    let state = node.componentState
+    if not state.isNil and not state.isUndefined:
+      let content = state.content
+      if not content.isNil and not content.isUndefined:
+        let id = state.id
+        found.add (content: cast[int](content),
+                   id: (if id.isNil or id.isUndefined: 0 else: cast[int](id)))
+    let children = node.content
+    if children.isNil or children.isUndefined: return
+    let count = cast[int](children.length)
+    for i in 0 ..< count:
+      visit(children[i])
+  visit(layout.root)
+  result = found
+
 proc templateFilesystem*(tmpl: ProjectTemplate): CodetracerFile =
   ## The project as the tree `index/files.loadFilesystem` returns.
   ##
