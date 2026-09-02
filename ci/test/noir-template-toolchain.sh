@@ -197,6 +197,27 @@ nargo_emitted_rows() {
 	grep -q '^[[:space:]]*{' "$1" 2>/dev/null
 }
 
+# The ACIR (constrained) opcode total carried by a `nargo info --json` document.
+#
+# Summed from the document rather than written here, for the reason arm I
+# learned the hard way: a numeral in this file is a second copy of the
+# template's count, and the second copy is the one that goes stale.
+# shellcheck disable=SC2016
+acir_total_of() {
+	printf '%s' "$1" | python3 -c '
+import json, sys
+try:
+    doc = json.loads(sys.stdin.read())
+except Exception:
+    sys.exit(0)
+total = 0
+for prog in doc.get("programs", []):
+    for fn in prog.get("functions", []):
+        total += int(fn.get("opcodes", 0))
+print(total)
+'
+}
+
 parser_selectors() {
 	# The selectors the SHARED parser found, sorted.
 	grep '^selector ' "$1" | sed 's/^selector //' | LC_ALL=C sort
@@ -344,12 +365,60 @@ else
 	ck fail "nargo info produced nothing (exit ${control_info_status}); the shipped constant cannot be checked against it:"
 	tail -8 "${cache}/control-info.err" | sed 's/^/      /'
 fi
-if [ "${shipped_compact}" = "${measured_info}" ]; then
-	ck ok "the constraint counts the bundle ships are the ones nargo info reports: ${measured_info}"
+# THE COMPARISON THAT DECIDES THE SHIPPED VALUE, against THE ENGINE THAT SHIPS.
+#
+# This compared the constant against `PATH`'s `nargo`, which is the flake's
+# `noir` pin -- and `ci/deploy/noir-wasm.pin` says in as many words that the
+# flake pin "is NOT this one". They are different compilers and they do not
+# agree on this template's opcode count. So the check enforced a number the
+# browser never produces, and reverted every correction toward the truth as
+# "drift". Beside it, the provenance check confirmed a CLAIM about which
+# command produced the value. Neither was independent of what it certified, so
+# both stayed green while the shipped number was wrong for the only compiler a
+# user can see -- and the pair reverted the fix.
+#
+# The count now comes from the wasm module the deploy publishes, measured
+# through `nv_compile_vfs` in `program` mode. That makes the constant
+# correct-by-construction against the engine that computes what the pane
+# describes, rather than correct-by-luck against one nobody runs in a tab.
+#
+# Only the ACIR total is compared. The unconstrained counts were never checked
+# against the shipping engine either -- they were checked against the wrong one
+# -- so this narrows what is CLAIMED to what is actually established, instead
+# of keeping a comparison that reads as broader than it is.
+#
+# Skipped, and COUNTED as skipped, when the module is unavailable: the same
+# accounting arm V uses, so a local run cannot silently drop the check that
+# decides the shipped value.
+shipped_acir="$(acir_total_of "${shipped_compact}")"
+engine_checks=0
+if [ -n "${CT_NOIR_WASM_COMPILER:-}" ] && [ -f "${CT_NOIR_WASM_COMPILER}" ] &&
+	command -v node >/dev/null 2>&1; then
+	engine_checks=3
+	measured_acir="$(node ci/test/noir-template-acir-count.mjs \
+		"${arm_dir}" hello_noir 2>"${cache}/engine-acir.err")"
+	sed 's/^/    /' "${cache}/engine-acir.err"
+	if [ -n "${measured_acir}" ] && [ -n "${shipped_acir}" ]; then
+		ck ok "the shipping engine compiled the template and reached a count, so the comparison below has a subject"
+	else
+		ck fail "the shipping engine produced no count; the shipped constant cannot be checked against the compiler a user actually runs"
+	fi
+	if [ -n "${measured_acir}" ] && [ "${shipped_acir}" = "${measured_acir}" ]; then
+		ck ok "the ACIR opcode count the bundle ships is the one the shipping engine computes (${measured_acir})"
+	else
+		ck fail "the shipped ACIR opcode count is not what the shipping engine computes"
+		note "shipped: ${shipped_acir:-<none>}"
+		note "engine:  ${measured_acir:-<none>}"
+	fi
 else
-	ck fail "the shipped constraint counts have drifted from the toolchain"
-	note "shipped:  ${shipped_compact}"
-	note "measured: ${measured_info}"
+	note "SKIPPED: the shipped count was NOT compared against the shipping engine."
+	note "  This is the check that decides whether the pane's number is right."
+	note "  Build the module and point at it:"
+	note "    bash ci/deploy/build-noir-wasm.sh /tmp/noir-wasm-out"
+	# Literal text in a two-line usage hint, not an escaped quote.
+	# shellcheck disable=SC1003
+	note '    CT_NOIR_WASM_COMPILER=/tmp/noir-wasm-out/noir_wasm.wasm \'
+	note "      bash ci/test/noir-template-toolchain.sh"
 fi
 
 provenance="$(grep '^provenance ' "${cache}/control-report.txt" | sed 's/^provenance //')"
@@ -413,52 +482,36 @@ echo "    Expect the INFO equality RED, everything else green."
 # THE PERTURBATION IS DERIVED FROM THE SHIPPED VALUE, NOT WRITTEN HERE.
 #
 # This said `sed 's/"opcodes":17/"opcodes":18/'`. That put the template's
-# opcode count in a SECOND place, so the day the real count stopped being 17
-# the substitution silently matched nothing, `mutated_info` came back equal to
-# the original, and the arm reported "could not be measured" — twice — turning
-# a corrected constant into a red gate. A mutation arm that names a constant
-# is a constant in two places, and the second one is the one nobody updates.
+# opcode count in a SECOND place, so the day the real count changed the
+# substitution silently matched nothing, the mutation came back equal to the
+# original, and the arm reported "could not be measured" — twice — turning a
+# corrected constant into a red gate. A mutation arm that names a constant is a
+# constant in two places, and the second one is the one nobody updates.
 #
-# Reading main's count out of the shipped JSON and adding one keeps the arm's
-# claim ("a one-opcode change must break the equality") true at any value. The
-# edit is textual and minimal rather than a re-serialisation, so the mutated
-# string differs from the shipped one in exactly one numeral and in nothing
-# else — a reformatted JSON would differ from `measured_info` for reasons that
-# have nothing to do with the perturbation, and would pass this arm by
-# accident.
+# Now that the check compares TOTALS rather than documents, the faithful
+# mutation is arithmetic: one more opcode than the bundle claims. That retires
+# the JSON-rewriting the old form needed, and with it the risk that a
+# re-serialisation differed from the measured side for reasons unrelated to the
+# perturbation and passed this arm by accident.
 #
-# The single quotes are load-bearing: the Python below must reach the
-# interpreter verbatim, not be expanded by the shell first.
-# shellcheck disable=SC2016
-mutated_info="$(printf '%s' "${shipped_compact}" | python3 -c '
-import json, sys
-s = sys.stdin.read()
-try:
-    n = json.loads(s)["programs"][0]["functions"][0]["opcodes"]
-except Exception:
-    sys.exit(0)
-# The first `"opcodes":<n>` is main constrained function, because `functions`
-# precedes `unconstrained_functions` in the shape this constant ships.
-out = s.replace("\"opcodes\":%d" % n, "\"opcodes\":%d" % (n + 1), 1)
-if out != s:
-    sys.stdout.write(out)
-')"
-if [ -z "${mutated_info}" ] || [ "${mutated_info}" = "${shipped_compact}" ]; then
-	ck fail "arm I could not be measured: the shipped constant does not contain the opcode count this arm perturbs"
-	ck fail "arm I could not be measured (second half)"
+# THE TWIN IS GONE, deliberately. It re-read the producer's answer to show the
+# perturbation had not disturbed it. With the shipped side now an integer in a
+# shell variable and the measured side a number from the wasm module, there is
+# no shared state for a perturbation to contaminate — the isolation is
+# structural. The check could not fail, and a check that cannot fail is not
+# coverage; it is a green line that reads like one.
+mutated_acir=""
+if [ -n "${shipped_acir}" ]; then
+	mutated_acir=$((shipped_acir + 1))
+fi
+if [ "${engine_checks}" -eq 0 ]; then
+	note "SKIPPED: arm I needs the shipping engine's count to perturb against."
+elif [ -z "${mutated_acir}" ]; then
+	ck fail "arm I could not be measured: the shipped constant carries no ACIR total to perturb"
+elif [ "${mutated_acir}" = "${measured_acir}" ]; then
+	ck fail "arm I: one more opcode than the bundle claims still equals the shipping engine's count — the equality check is not reading the counts"
 else
-	if [ "${mutated_info}" = "${measured_info}" ]; then
-		ck fail "arm I: the perturbed constant still equals what nargo info reports — the equality check is not reading the counts"
-	else
-		ck ok "arm I: a one-opcode change to the shipped constant no longer equals nargo info, so the drift check can fail"
-	fi
-	# The twin: this is a claim about the BUNDLE, not about the toolchain. The
-	# measured answer must be untouched by it.
-	if [ -n "${measured_info}" ] && [ "${measured_info}" = "$(tr -d ' \n' <"${cache}/control-info.json")" ]; then
-		ck ok "arm I: nargo info's own answer is unchanged, so this arm isolates the bundle's claim from the producer"
-	else
-		ck fail "arm I: the measured answer changed too — the arm is not isolating the bundle's claim"
-	fi
+	ck ok "arm I: one more opcode than the bundle claims no longer equals the shipping engine's count, so the drift check can fail"
 fi
 echo
 
@@ -584,12 +637,22 @@ ARM_V
 fi
 echo
 
-expect_count $((14 + arm_v_checks))
+expect_count $((11 + engine_checks + arm_v_checks))
 
 if [ "${failures}" -eq 0 ]; then
 	printf 'RESULT: OK — %d check(s); the bundled template compiles, its five tests pass,\n' "${checks}"
-	printf '            the browser'"'"'s parser names the runner'"'"'s tests, and the shipped\n'
-	printf '            constraint counts are the ones nargo info reports.\n'
+	printf '            and the browser'"'"'s parser names the runner'"'"'s tests.\n'
+	# WHAT WAS ACTUALLY COMPARED, rather than what this used to say. It read
+	# "the shipped constraint counts are the ones nargo info reports" — which
+	# was the wrong claim even when it was the wrong check, and would have been
+	# a stale claim about the right one. A summary that overstates a green run
+	# is the same defect as a check that certifies the wrong compiler: the
+	# reader is told something nobody measured.
+	if [ "${engine_checks}" -eq 0 ]; then
+		printf '            The shipped ACIR count was NOT compared against the shipping engine.\n'
+	else
+		printf '            The shipped ACIR count is the one the shipping engine computes.\n'
+	fi
 	if [ "${arm_v_checks}" -eq 0 ]; then
 		printf '            Arm V (the browser runner'"'"'s verdicts against nargo'"'"'s) was SKIPPED.\n'
 	else

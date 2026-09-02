@@ -298,7 +298,7 @@ proc fileContent*(tmpl: ProjectTemplate; path: string): string =
 # What the template COSTS, measured by the real producer
 # ---------------------------------------------------------------------------
 
-const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir","functions":[{"name":"main","opcodes":15}],"unconstrained_functions":[{"name":"directive_invert","opcodes":9},{"name":"directive_integer_quotient","opcodes":8}]}]}"""
+const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir","functions":[{"name":"main","opcodes":17}],"unconstrained_functions":[{"name":"directive_invert","opcodes":9},{"name":"directive_integer_quotient","opcodes":8}]}]}"""
   ## The bundled template's `nargo info --json`, verbatim.
   ##
   ## ## Why a constant is the honest representation, and not a cached answer
@@ -320,10 +320,17 @@ const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir",
   ## THIS NAMED `test_noir_template_constraints.nim` UNTIL 09-02, AND NO SUCH
   ## FILE HAS EVER EXISTED. The description was accurate and the filename was
   ## invented, so a reader who wanted to see the drift check ran out of places
-  ## to look, and a reader who merely saw a test named went away reassured. The
-  ## check it describes is real — it is the shell gate above — but it had never
-  ## run in CI, so the constant it guards was wrong (17 against a measured 15)
-  ## for a day before anything said so.
+  ## to look, and a reader who merely saw a test named went away reassured.
+  ##
+  ## The check it describes is real — it is the shell gate above — but until
+  ## 09-02 it compared this constant against whatever `nargo` was on `PATH`,
+  ## which is the flake's `noir` pin. `ci/deploy/noir-wasm.pin` states that the
+  ## flake pin "is NOT this one": the browser runs a different compiler, and the
+  ## two do not agree on this template's count. So the gate enforced a number
+  ## the pane could never display, and when the value was corrected TOWARD the
+  ## native pin the gate approved it and the pane went wrong. It is now measured
+  ## through the wasm module the deploy publishes, which is the only compiler
+  ## whose answer a user can see.
   ##
   ## ## And why the web needs it at all
   ##
