@@ -52,21 +52,75 @@
 #
 # Escape hatch: CODETRACER_SKIP_SIBLING_CHECK=1 bypasses the whole check, for
 # exotic layouts (vendored source trees, Nix builds that pre-stage the paths)
-# where the relative-path assumption does not hold.
+# where the relative-path assumption does not hold. It is NOT the answer to a
+# misplaced worktree -- see the `misplaced worktree` section below, which is the
+# one case where this script keeps talking even when the hatch is set.
 #
 # See: codetracer-specs/Working-with-the-CodeTracer-Repos.md
+#      AGENTS.md, "Where a checkout -- or a worktree -- has to live"
 # =============================================================================
 set -euo pipefail
-
-if [ -n "${CODETRACER_SKIP_SIBLING_CHECK:-}" ]; then
-	exit 0
-fi
 
 repo_root="${1:-}"
 if [ -z "$repo_root" ]; then
 	repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 workspace_root="$(cd "$repo_root/.." && pwd)"
+
+# -----------------------------------------------------------------------------
+# The misplaced-worktree case.
+#
+# `workspace_root` is the checkout's PARENT, and that is not an accident this
+# script could route around: `config.nims` (`repoRoot.parentDir()`),
+# `src/Tuprules.tup` (`$(ROOT)/../<sibling>`), `src/db-backend/Cargo.toml`
+# (`path = "../../../..."`), `build.rs` and `.envrc` all reach siblings by the
+# same relative path. The parent directory of a checkout IS the workspace root,
+# for four independent resolvers, and only one of them reads anything this
+# script could set.
+#
+# So a `git worktree` has to be created BESIDE the sibling repos -- directly
+# under the workspace root -- exactly like the main checkout. A worktree made in
+# a subdirectory (`<workspace>/.agent-wt/<name>` is the one that keeps happening)
+# has that subdirectory as its parent, finds no siblings there, and produces a
+# missing-sibling report that reads as a broken or half-cloned workspace. It is
+# neither: the repos are all present, one directory further up.
+#
+# This is worth detecting SPECIFICALLY because the generic remedies below are
+# actively wrong for it -- `repro ws enable` / `git clone` into the parent would
+# build a SECOND workspace inside a scratch directory, cloning gigabytes to
+# duplicate repos that are already on disk, and would then drift from the real
+# one. The remedy is to move the worktree, and nothing else.
+#
+# `main_workspace_root` answers "where does the main checkout of this repo
+# live?". For a linked worktree, `--git-common-dir` is the MAIN checkout's
+# `.git`, so its grandparent is the true workspace root. Empty when this is not
+# a linked worktree (or when git cannot answer), in which case none of the
+# messages below fire and the generic report stands.
+# -----------------------------------------------------------------------------
+main_workspace_root=""
+main_repo_name=""
+detect_main_workspace_root() {
+	local common_dir main_repo_root
+	command -v git >/dev/null 2>&1 || return 0
+	common_dir="$(cd "$repo_root" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null)" || return 0
+	[ -n "$common_dir" ] || return 0
+	case "$common_dir" in
+	/*) ;;
+	*) common_dir="$repo_root/$common_dir" ;;
+	esac
+	common_dir="$(cd "$common_dir" 2>/dev/null && pwd)" || return 0
+	main_repo_root="$(cd "$common_dir/.." 2>/dev/null && pwd)" || return 0
+	# Same directory => this IS the main checkout, not a linked worktree.
+	[ "$main_repo_root" != "$repo_root" ] || return 0
+	main_workspace_root="$(cd "$main_repo_root/.." 2>/dev/null && pwd)" || return 0
+	main_repo_name="${main_repo_root##*/}"
+	# A worktree that is already beside the siblings is correctly placed.
+	if [ "$main_workspace_root" = "$workspace_root" ]; then
+		main_workspace_root=""
+		main_repo_name=""
+	fi
+}
+detect_main_workspace_root
 
 # The remote every sibling below lives on. Kept as one variable so a fork /
 # mirror only has to be changed in one place.
@@ -240,7 +294,69 @@ resolve_sibling() {
 }
 
 missing_names=()
+missing_rows=()
 missing_report=""
+
+# True when EVERY required sibling missing from this checkout's parent is
+# present under the main checkout's workspace root -- i.e. the workspace is
+# complete and this worktree is simply not in it. That is the whole test for
+# "misplaced worktree, not broken checkout", and it is deliberately ALL rather
+# than ANY: if even one sibling is missing from the real workspace too, the
+# workspace is genuinely incomplete and the generic report is the honest one.
+misplacement_explains_everything() {
+	local row name probe
+	[ -n "$main_workspace_root" ] || return 1
+	[ ${#missing_rows[@]} -gt 0 ] || return 1
+	for row in "${missing_rows[@]}"; do
+		IFS='|' read -r name probe _ _ <<<"$row"
+		sibling_dir_has_probe "$main_workspace_root/$name" "$probe" || return 1
+	done
+	return 0
+}
+
+# The one diagnostic this script exists to add: name the location, not the
+# repos. Printed on failure, and also on the CODETRACER_SKIP_SIBLING_CHECK path,
+# where suppressing it would hand the caller the opaque late failure the hatch
+# is usually reached for in the first place.
+report_misplaced_worktree() {
+	local worktree_name="${repo_root##*/}"
+	cat <<EOF
+THIS IS A WORKTREE IN THE WRONG PLACE. It is not a broken or half-cloned
+checkout: all ${#missing_names[@]} of the repos named above are present, one directory further up.
+
+  this worktree:  $repo_root
+  its parent:     $workspace_root
+                  ^ searched for siblings, because this is where the build looks
+  the workspace:  $main_workspace_root
+                  ^ where the main checkout and every sibling actually are
+
+A checkout of this repo -- INCLUDING A WORKTREE -- must sit directly under the
+workspace root, beside the sibling repos. The parent directory of a checkout is
+the workspace root by definition for four independent resolvers, none of which
+can be redirected per-worktree: Nim (\`config.nims\`, \`src/Tuprules.tup\`), Cargo
+(\`src/db-backend/Cargo.toml\` path dependencies), cc (\`src/db-backend/build.rs\`)
+and direnv (\`.envrc\`). Moving the worktree is the only thing that fixes all four.
+
+Move this one:
+
+    git worktree move $repo_root \\
+        $main_workspace_root/$worktree_name
+
+or create the next one in the right place to begin with:
+
+    git -C $main_workspace_root/$main_repo_name worktree add \\
+        $main_workspace_root/<name> <branch>
+
+Do NOT reach for CODETRACER_SKIP_SIBLING_CHECK=1 here, and do NOT clone the
+siblings into $workspace_root.
+The first only deletes this message -- the build still cannot see the siblings,
+and fails minutes later naming a MODULE (\`cannot open file: runquota_process\`)
+rather than the location. The second builds a second workspace inside a scratch
+directory, duplicating repos that are already on disk and free to drift from them.
+
+See AGENTS.md, "Where a checkout -- or a worktree -- has to live".
+EOF
+}
 
 describe_missing() {
 	local name="$1" probe="$2" overrides="$3" reason="$4"
@@ -264,8 +380,28 @@ for row in "${required_siblings[@]}"; do
 		continue
 	fi
 	missing_names+=("$name")
+	missing_rows+=("$row")
 	describe_missing "$name" "$probe" "$overrides" "$reason"
 done
+
+# The escape hatch is honoured HERE rather than at the top of the script, so
+# that the one diagnosis it cannot help with still gets said. A misplaced
+# worktree is precisely the case where setting this variable converts a clear
+# failure into `cannot open file: <module>` several minutes later -- the exact
+# outcome the whole file exists to prevent -- so it warns and continues to exit
+# 0. Every other layout the hatch is meant for stays silent, as before.
+if [ -n "${CODETRACER_SKIP_SIBLING_CHECK:-}" ]; then
+	if [ ${#missing_names[@]} -gt 0 ] && misplacement_explains_everything; then
+		{
+			echo "CODETRACER_SKIP_SIBLING_CHECK=1 is set, so this is a WARNING and the build continues."
+			echo "It will not succeed. Read this anyway:"
+			echo
+			printf '%s' "$missing_report"
+			report_misplaced_worktree
+		} >&2
+	fi
+	exit 0
+fi
 
 # Advisory tier: name what will fail to resolve, and let the build proceed.
 # Anything here is something a build has been observed to survive without.
@@ -283,13 +419,38 @@ if [ ${#advisory_missing[@]} -gt 0 ]; then
 		echo "scripts/require-siblings.sh: ${#advisory_missing[@]} optional sibling repo(s) are missing."
 		printf '%s\n' "${advisory_missing[@]}"
 		echo '  The build continues. If it later fails with `cannot open file: <module>`,'
-		echo "  one of these is why -- clone it under $workspace_root, or re-run with"
-		echo "  CODETRACER_STRICT_SIBLING_CHECK=1 to make this a hard failure."
+		if [ -n "$main_workspace_root" ]; then
+			# A linked worktree outside the workspace. Cloning into this parent
+			# is the wrong advice here for the same reason as below, so give the
+			# location first and let the hard failure (if any) spell it out.
+			echo "  one of these is why. NOTE this checkout is a worktree at"
+			echo "  $repo_root, outside the workspace at"
+			echo "  $main_workspace_root -- if these siblings are"
+			echo "  present there, MOVE THE WORKTREE rather than cloning them again here."
+		else
+			echo "  one of these is why -- clone it under $workspace_root, or re-run with"
+			echo "  CODETRACER_STRICT_SIBLING_CHECK=1 to make this a hard failure."
+		fi
 	} >&2
 fi
 
 if [ ${#missing_names[@]} -eq 0 ]; then
 	exit 0
+fi
+
+if misplacement_explains_everything; then
+	# The workspace is complete; this checkout is outside it. Say THAT, and do
+	# not print the generic remedies -- `repro ws enable` and `git clone` into
+	# this parent directory would both make the situation worse, by building a
+	# duplicate workspace around a worktree that only needs to be moved.
+	{
+		echo "Cannot start the CodeTracer build: ${#missing_names[@]} required sibling repo(s) are missing from"
+		echo "this checkout's parent directory."
+		echo
+		printf '%s' "$missing_report"
+		report_misplaced_worktree
+	} >&2
+	exit 1
 fi
 
 {
