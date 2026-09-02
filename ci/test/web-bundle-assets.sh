@@ -305,6 +305,29 @@ scope_bundle() {
 	fi
 }
 scope_bundle renderer "${out_dir}/ui.js"
+
+# The storybook harness must not reach the deployed bundle.
+#
+# `src/frontend/storybook_components.nim` carries test-only instrumentation —
+# `storyBackendCommands()`, which hands out the commands a mounted story's
+# MockBackendService recorded. It exists so a real-Chromium check
+# (`ci/test/low_level_code_row_click_probe.mjs`) can assert what a click on the
+# SHIPPED web render arm actually asked the backend for, which the headless
+# suites cannot: they drive `renderInstructionRowMock` while the bundle renders
+# `renderInstructionRowWeb`.
+#
+# That is a legitimate dev-harness affordance and an illegitimate thing to
+# ship: it names a mock backend, and anything importing the harness for
+# convenience would drag the fixtures in with it. The line to hold is not "do
+# not write instrumentation" but "instrumentation does not reach users", and
+# that line is only real if something checks it.
+for harness_sym in "storyBackendCommands" "mountCodeTracerStory"; do
+	if grep -qF "${harness_sym}" "${out_dir}/ui.js"; then
+		bad "ui.js contains ${harness_sym}: the storybook harness reached the deployed bundle"
+	else
+		ok "ui.js does not contain ${harness_sym} (storybook harness stays out of the bundle)"
+	fi
+done
 echo
 
 # ---------------------------------------------------------------------------
