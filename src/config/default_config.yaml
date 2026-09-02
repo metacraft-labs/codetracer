@@ -185,10 +185,26 @@ bindings:
   # `ui/editor.nim`'s MONACO_SHORTCUTS_WHITELIST — Monaco binds no
   # CTRL+ALT+<letter> natively, so the ALT+F8 double-fire measured by the
   # error-navigation work cannot recur here.
-  aHistoryBack: "CTRL+ALT+B"        # CTRL+B is `build`; CTRL+ALT+B is free
-  aHistoryForward: "CTRL+ALT+F"     # CTRL+F is `findOrFilter`; CTRL+ALT+F is free
-  aRunToEntry: "CTRL+ALT+E"         # CTRL+E is `switchEdit`, ALT+E is hard-bound
-  aResetOperation: "CTRL+ALT+R"     # CTRL+R is hard-bound to re-record
+  # NO TRAILING COMMENTS ON THESE LINES, and that is not a style preference.
+  # `frontend/config.nim`'s `parseSimpleYamlConfig` — the parser a browser tab
+  # uses on this file, via `staticRead` — takes everything after the colon as
+  # the value and only strips quotes when the LAST character is one. A trailing
+  # `#` comment therefore becomes part of the chord, `splitWhitespace` shreds
+  # it into half a dozen bogus shortcuts, and they collide with each other in
+  # `initShortcutMap`. Measured: adding four such comments took `conflictList`
+  # from 5 entries to 12. The parser's own doc comment warns that "a fixture
+  # that grew an unsupported construct loses a key silently here"; this is that
+  # construct, and `shortcut_bindings_test.nim` is what caught it.
+  #
+  # CTRL+B is `build` and CTRL+ALT+B is free.
+  aHistoryBack: "CTRL+ALT+B"
+  # CTRL+F is `findOrFilter` and CTRL+ALT+F is free.
+  aHistoryForward: "CTRL+ALT+F"
+  # CTRL+E is `switchEdit` and ALT+E is hard-bound to `focusEventLog`;
+  # CTRL+ALT+E is free.
+  aRunToEntry: "CTRL+ALT+E"
+  # CTRL+R is hard-bound to re-record; CTRL+ALT+R is free.
+  aResetOperation: "CTRL+ALT+R"
   # MOVED HERE OUT OF `ui/shortcuts.nim`, where it was `Mousetrap.bind("alt+l")`
   # with no `ClientAction` behind it. The chord is unchanged, so no user's
   # muscle memory moves; what changes is that it is now readable — a hard-bound
