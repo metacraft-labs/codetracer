@@ -422,6 +422,26 @@ ck "$([ "${errors}" -eq 0 ] && echo ok || echo no)" \
 #      debugger-only pane still mounted, because `data.ui.mode` flipping is
 #      not the same as the layout coming back;
 #   4. and the edit is still there.
+# READ THESE ONLY WHEN THE CONTROL ABOVE IS GREEN, and the reason is measured
+# rather than cautionary.
+#
+# Run with a hand-supplied `CT_REPLAY_ENGINE_DIR` older than the tree, this
+# gate reported: 0 positions resolved, 6 missingPath, nothing painted — and
+# then `editorEditableAfterReturn: false`, all three debugger-only panes still
+# mounted, and a `NilAccessDefect` the same run without the edit/return
+# gestures does not produce. That reads exactly like "the return is broken",
+# and it was written up as one.
+#
+# It is not. The same probe against the DEPLOYED bundle, whose engine is built
+# from the tree by the deploy workflow, reports `resolvedCount: 6`,
+# `missingPathCount: 0`, 397 painted characters, `debugPanesPresent: []`,
+# `anyEditable: true`, the edit intact and ZERO page errors. The round trip
+# passes. The local red was an engine that could resolve no path, so the return
+# ran over a session with no source behind it.
+#
+# The moral is the one this repo keeps paying for: an assertion downstream of a
+# broken instrument reports the instrument, not the subject. The control
+# assertions above are that instrument, which is why they are above.
 edit_reached="$(field "${control}" '.editReachedModel')"
 return_sent="$(field "${control}" '.returnGestureSent')"
 returned="$(field "${control}" '.returnedToEditMode')"
