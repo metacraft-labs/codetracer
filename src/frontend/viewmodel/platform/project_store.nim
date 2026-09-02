@@ -226,6 +226,20 @@ proc acknowledgeDurability*(session: StoreSession) =
 proc announcement*(session: StoreSession): string =
   session.durability.announcement
 
+proc refreshDurability*(session: StoreSession; condition: StorageCondition) =
+  ## Re-derive the report after a LATER persistence answer.
+  ##
+  ## The condition was fixed at `openStore` because that is when the browser
+  ## was asked. It is not, however, a permanent fact: `mayBeGrantedLater` says
+  ## why an origin denied on a first visit is routinely granted afterwards, and
+  ## an origin that is now persistent must stop being described as evictable.
+  ##
+  ## The acknowledgement is NOT reset. It records that the user was told what
+  ## would happen to their work before they typed, which remains true; and
+  ## clearing it would re-close `readyForEditing` mid-session and start
+  ## refusing writes the moment the news got BETTER.
+  session.durability = durabilityReport(condition)
+
 # ---------------------------------------------------------------------------
 # One writer per project — §4.3
 # ---------------------------------------------------------------------------

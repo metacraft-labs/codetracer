@@ -52,7 +52,20 @@ const url = `http://127.0.0.1:${server.address().port}/noir`;
 
 const out = {
   mounted: false, mountedAfterReload: false,
-  bannerText: '', bannerPainted: false, bannerPaintedChars: 0,
+  // The durability sentence, as the product now delivers it: a Notification in
+  // the shared status-bar toast stack.
+  legacyBannerPresent: null,
+  noticeFound: false, noticeText: '', noticeChars: 0, noticePainted: false,
+  noticeClass: '', noticeHasDismiss: false, noticeHasExport: false,
+  noticeDismissed: null,
+  // THE COMPLAINT, MEASURED. The banner was `position:fixed; bottom:0;
+  // z-index:2147483646` and the status bar is the bottom strip underneath it.
+  statusBarFound: false, statusBarUnobscured: false,
+  statusBarProbePoints: 0, statusBarCoveredBy: [],
+  statusBarRect: null,
+  // Once per browser session, not once per load.
+  noticeAfterReload: null,
+  noticeInFreshContext: null,
   markerBeforeReload: false, markerAfterReload: false,
   editedContent: '', restoredContent: '', bundledContent: '',
   freshContextMarker: null,
@@ -75,32 +88,122 @@ async function waitForEditMode(page) {
   await page.waitForTimeout(1200);
 }
 
-// `paintedText`, not `innerText`. The instrument failure this codebase records:
-// 379 characters of diagnostic were counted by `innerText`, laid out in the
-// page, and visible to nobody because another element painted over them. So the
-// banner is hit-tested at its own centre and must BE the element found there.
-async function bannerPainted(page) {
+// Hit-tested, not read out of `innerText`. The instrument failure this codebase
+// records: 379 characters of diagnostic were counted by `innerText`, laid out in
+// the page, and visible to nobody because another element painted over them. So
+// the sentence must BE the element the browser finds at its own centre.
+//
+// It is now a Notification in `#active-notifications` — the toast stack in
+// `ui/status.nim` that every other message in this product goes through —
+// rather than a bespoke `<div id="codetracer-durability">` appended to
+// `document.body` at `bottom:0` with the largest representable z-index. The
+// old surface is asserted ABSENT below; it is the thing that covered the bar.
+async function durabilityNotice(page) {
   return await page.evaluate(() => {
-    const el = document.getElementById('codetracer-durability');
-    if (!el) return { painted: false, chars: 0, text: '' };
+    const out = {
+      legacyBanner: !!document.getElementById('codetracer-durability'),
+      found: false, text: '', chars: 0, painted: false, cls: '',
+      hasDismiss: false, hasExport: false,
+    };
+    const host = document.getElementById('active-notifications');
+    if (!host) return out;
+    const items = Array.from(host.querySelectorAll('.status-notification'));
+    // Identified by the gesture it names rather than by position in the stack,
+    // so an unrelated toast arriving first cannot be mistaken for it.
+    const el = items.find((n) => (n.textContent || '').includes('Ctrl+Shift+E'));
+    if (!el) return out;
+    out.found = true;
+    out.cls = el.className || '';
+    const msg = el.querySelector('.notification-message');
+    out.text = ((msg ? msg.textContent : el.textContent) || '').trim();
+    out.chars = out.text.length;
+    out.hasDismiss = !!el.querySelector('.dismiss-notification-button');
+    out.hasExport = Array.from(el.querySelectorAll('.notification-action-button'))
+      .some((a) => /export/i.test(a.textContent || ''));
     const r = el.getBoundingClientRect();
-    if (r.width < 1 || r.height < 1) return { painted: false, chars: 0, text: el.textContent || '' };
+    if (r.width < 1 || r.height < 1) return out;
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-    if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) {
-      return { painted: false, chars: 0, text: el.textContent || '' };
-    }
+    if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return out;
     const hit = document.elementFromPoint(cx, cy);
-    const isSelf = !!hit && (hit === el || el.contains(hit) || hit.contains(el));
     const style = getComputedStyle(el);
-    const visible = style.visibility !== 'hidden' && style.display !== 'none' &&
-      parseFloat(style.opacity || '1') > 0.05;
-    const text = el.textContent || '';
+    out.painted = !!hit && (hit === el || el.contains(hit)) &&
+      style.visibility !== 'hidden' && style.display !== 'none' &&
+      parseFloat(style.opacity || '1') > 0.05 && out.chars > 0;
+    return out;
+  });
+}
+
+// THE ACCEPTANCE. Not "a notification appears" — "the status bar is not
+// covered", measured while the notice is on screen, which is when the banner
+// used to cover it.
+//
+// `el.contains(hit)` alone would be satisfied vacuously by `document.body`,
+// which contains everything: an obscuring overlay is a child of body too. So
+// the test walks UP from the hit element and requires `#status` on the way —
+// "the pixel at this point belongs to the status bar" — and records what it
+// found when it does not.
+async function statusBarUnobscured(page) {
+  return await page.evaluate(() => {
+    const bar = document.getElementById('status-base');
+    if (!bar) return { found: false, unobscured: false, points: 0, coveredBy: [], rect: null };
+    const r = bar.getBoundingClientRect();
+    const rect = { x: r.left, y: r.top, w: r.width, h: r.height };
+    if (r.width < 1 || r.height < 1) {
+      return { found: true, unobscured: false, points: 0, coveredBy: ['zero-sized'], rect };
+    }
+    const owned = (node) => {
+      let n = node;
+      while (n) { if (n.id === 'status') return true; n = n.parentElement; }
+      return false;
+    };
+    const describe = (n) => !n ? 'nothing' :
+      (n.tagName.toLowerCase() +
+       (n.id ? '#' + n.id : '') +
+       (typeof n.className === 'string' && n.className
+         ? '.' + n.className.trim().split(/\s+/).join('.') : ''));
+    const cy = r.top + r.height / 2;
+    // Three points across the bar, not one: the old banner spanned the full
+    // width, but a narrower overlay covering only the location readout on the
+    // right would be just as much of a defect and a single centre probe would
+    // miss it.
+    const xs = [0.15, 0.5, 0.85].map((f) => r.left + r.width * f);
+    const coveredBy = [];
+    let points = 0;
+    for (const cx of xs) {
+      if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) continue;
+      points += 1;
+      const hit = document.elementFromPoint(cx, cy);
+      if (!owned(hit)) coveredBy.push(describe(hit));
+    }
     return {
-      painted: isSelf && visible && text.trim().length > 0,
-      chars: text.trim().length,
-      text,
+      found: true,
+      unobscured: points > 0 && coveredBy.length === 0,
+      points,
+      coveredBy,
+      rect,
     };
   });
+}
+
+// DISMISSIBLE, PROVED BY DISMISSING IT. "A warning that cannot be dismissed is
+// a banner by another name", which is the complaint this change answers, so
+// the affordance is exercised rather than merely located.
+async function dismissDurabilityNotice(page) {
+  const clicked = await page.evaluate(() => {
+    const host = document.getElementById('active-notifications');
+    if (!host) return false;
+    const el = Array.from(host.querySelectorAll('.status-notification'))
+      .find((n) => (n.textContent || '').includes('Ctrl+Shift+E'));
+    if (!el) return false;
+    const btn = el.querySelector('.dismiss-notification-button');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  });
+  if (!clicked) return false;
+  await page.waitForTimeout(600);
+  const still = await durabilityNotice(page);
+  return !still.found;
 }
 
 try {
@@ -114,10 +217,26 @@ try {
   await waitForEditMode(page);
   out.mounted = true;
 
-  const banner = await bannerPainted(page);
-  out.bannerText = banner.text;
-  out.bannerPainted = banner.painted;
-  out.bannerPaintedChars = banner.chars;
+  const notice = await durabilityNotice(page);
+  out.legacyBannerPresent = notice.legacyBanner;
+  out.noticeFound = notice.found;
+  out.noticeText = notice.text;
+  out.noticeChars = notice.chars;
+  out.noticePainted = notice.painted;
+  out.noticeClass = notice.cls;
+  out.noticeHasDismiss = notice.hasDismiss;
+  out.noticeHasExport = notice.hasExport;
+
+  // WHILE THE NOTICE IS STILL ON SCREEN. Measuring after dismissing it would
+  // prove nothing about the state the user complained of.
+  const bar = await statusBarUnobscured(page);
+  out.statusBarFound = bar.found;
+  out.statusBarUnobscured = bar.unobscured;
+  out.statusBarProbePoints = bar.points;
+  out.statusBarCoveredBy = bar.coveredBy;
+  out.statusBarRect = bar.rect;
+
+  out.noticeDismissed = await dismissDurabilityNotice(page);
 
   // THE EDIT, as keystrokes. Not `model.setValue`: that would bypass Monaco's
   // change listener, which is what marks the tab dirty and therefore what
@@ -161,6 +280,11 @@ try {
   out.markerAfterReload = after.marker;
   out.restoredContent = after.content;
   out.editorModels = after.models;
+
+  // ONCE PER BROWSER SESSION. `sessionStorage` survives `page.reload()` and
+  // dies with the context, so the same tab must NOT be told again — the reload
+  // is the case the old banner got wrong, re-announcing on every load.
+  out.noticeAfterReload = (await durabilityNotice(page)).found;
   await ctx.close();
 
   // -- THE CONTROL: a fresh origin partition, the same bytes -----------------
@@ -181,6 +305,11 @@ try {
   }, MARKER);
   out.freshContextMarker = freshInfo.marker;
   out.bundledContent = freshInfo.bundled;
+  // …AND IT COMES BACK FOR A NEW ONE. The twin of `noticeAfterReload`: without
+  // this, "once per session" would be indistinguishable from "suppressed
+  // forever", and a notice that never appears again is not a fix, it is the
+  // message being lost.
+  out.noticeInFreshContext = (await durabilityNotice(freshPage)).found;
   await fresh.close();
 } catch (e) {
   out.error = String(e && e.message ? e.message : e);

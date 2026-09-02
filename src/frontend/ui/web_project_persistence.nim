@@ -32,23 +32,27 @@
 ##
 ## `acknowledgeDurability`'s own doc comment says it is "called by the view
 ## that showed `session.durability.announcement`", and that "a call site which
-## has not shown anything reads as a lie". So the banner is inserted into the
-## document FIRST and the acknowledgement is the next statement. §4.2's
-## requirement is that the volatile session "**says so before the first
-## keystroke**" — and this whole proc runs inside `ui_js.startWebArm`, before
-## `startWebRenderer`, so there is no keystroke to be before: no editor exists
-## yet.
+## has not shown anything reads as a lie". `prepareProject` therefore does not
+## call it: it composes the sentence and ARMS the acknowledgement, and
+## `takeDurabilityAnnouncement` — which the renderer calls at the moment it
+## hands the sentence to the notification system — is what fires it. §4.2's
+## requirement is that the session "**says so before the first keystroke**",
+## and both halves still run inside `ui_js.startWebArm` before any editor is
+## interactive.
 ##
 ## ## What happens on reload, precisely
 ##
-## | Condition | Working tree | What the banner says |
+## | Condition | Working tree | What is raised |
 ## | --- | --- | --- |
-## | `scPersistenceGranted` | OPFS, survives reload and crash | that it is saved in this browser |
-## | `scPersistenceUnknown` / `scPersistenceDenied` | OPFS, survives reload; evictable under storage pressure | the report's sentence, and to export |
-## | `scVolatile` — no OPFS | memory only, lost on close | the report's sentence, in full |
+## | `scPersistenceGranted` | OPFS, survives reload and crash | a success notification: it is saved in this browser |
+## | `scPersistenceUnknown` / `scPersistenceDenied` | OPFS, survives reload; evictable under storage pressure | a dismissible warning that leads with what is saved, and an Export action |
+## | `scVolatile` — no OPFS | memory only, lost on close | a dismissible error, and an Export action |
 ##
 ## The first three all survive a reload; only `scVolatile` does not, and it is
 ## the one row that says so in the product rather than only in a report.
+##
+## Each is raised ONCE PER BROWSER SESSION, keyed on the condition — see
+## `durabilityNoticeSessionKey`.
 
 when not defined(js):
   {.error: "web_project_persistence.nim is part of the web instantiation; " &
@@ -64,94 +68,135 @@ import ../viewmodel/platform/noir_template
 import ../viewmodel/host/web_browser
 import ./web_project_store
 
-const durabilityBannerId* = "codetracer-durability"
-  ## The element the banner is rendered into. Named so the browser gate can
-  ## hit-test the painted sentence rather than reading `innerText` — the
-  ## instrument failure `ui_js.hideWebRendererStatus`'s header records, where
-  ## 379 characters of diagnostic were counted by `innerText` and visible to
-  ## nobody.
-
-# NO HASH CHARACTER MAY APPEAR IN THE `importjs` BODY BELOW — not in a string,
-# not in a comment. A hash is `importjs`'s parameter placeholder, so six CSS
-# hex colours made the compiler demand eight arguments for a two-argument proc:
+# ---------------------------------------------------------------------------
+# WHY THERE IS NO LONGER A BANNER HERE
+# ---------------------------------------------------------------------------
 #
-#     Error: wrong importcpp pattern; expected parameter at position 3
-#            but got only: 2
+# This module used to append a `<div id="codetracer-durability">` to
+# `document.body` at `position:fixed; bottom:0; z-index:2147483646` and paint
+# the durability sentence into it. Two things were wrong with that, and only
+# one of them was a bug:
 #
-# There is no escape for it. This is the same family as the defect
-# `web_boot.jsReport`'s header records from the other side (binding one
-# argument once because a second bare placeholder consumes a parameter that
-# does not exist), and the reason every colour below is spelled `rgb(...)`.
-
-proc renderDurabilityBanner(text: cstring; durable: bool) {.importjs: """
-(function (message, isDurable) {
-  try {
-    if (typeof document === 'undefined' || !document.body) { return; }
-    var id = 'codetracer-durability';
-    var el = document.getElementById(id);
-    if (!el) {
-      el = document.createElement('div');
-      el.id = id;
-      document.body.appendChild(el);
-    }
-    el.textContent = message;
-    // Painted, on top, and readable. A banner the layout covers is the same
-    // failure as no banner: web_entry_surface mounts GoldenLayout over the
-    // whole viewport, and the session container has already painted over one
-    // surface in this codebase's history (see arm V of the browser gate).
-    // rgb(), NOT hex -- see the Nim-side comment above this proc for why a
-    // hash character cannot appear anywhere in this body, comments included.
-    el.setAttribute('style', [
-      'position:fixed', 'left:0', 'right:0', 'bottom:0', 'z-index:2147483646',
-      'margin:0', 'padding:6px 12px', 'font:12px/1.5 sans-serif',
-      'text-align:center',
-      // NO 'pointer-events:none'. It was there to keep the strip from eating
-      // clicks, and it made the banner UNHIT-TESTABLE: `elementFromPoint` at
-      // the banner's own centre returned whatever was underneath, so a gate
-      // asking "is this sentence actually on top of the page" could not get a
-      // true answer, and neither could a user's mouse. An element the browser
-      // reports as not-there at its own centre is exactly the "laid out but
-      // visible to nobody" state this codebase has shipped once already.
-      // The strip is 31px at the very bottom edge and covers no pane.
-      'background:' + (isDurable ? 'rgb(29,59,42)' : 'rgb(74,45,18)'),
-      'color:' + (isDurable ? 'rgb(183,228,199)' : 'rgb(255,217,160)'),
-      'border-top:1px solid ' + (isDurable ? 'rgb(47,107,74)'
-                                           : 'rgb(138,90,36)')
-    ].join(';'));
-  } catch (e) {}
-})(#, #)""".}
+#   * IT SAT ON TOP OF THE STATUS BAR. `#status` is the bottom strip of the
+#     application; a fixed element pinned to `bottom:0` with the largest
+#     representable z-index covers it, and covered it on every load in the two
+#     degraded storage rows — which is every first visit, because browsers deny
+#     persistence to an origin a visitor has just arrived at. The banner's own
+#     comment argued it "covers no pane"; the status bar is not a pane, and it
+#     was the thing underneath.
+#
+#   * IT WAS A SECOND NOTIFICATION SYSTEM. `NotificationKind`,
+#     `newNotification`, the toast stack in `ui/status.nim`, its dismiss
+#     button, its action buttons and its auto-dismiss timers all already
+#     existed and are what every other message in this product goes through.
+#     `#active-notifications` is `position:fixed; bottom:38px; right:8px;
+#     z-index:100` — it stacks ABOVE the status bar rather than over it, which
+#     is the layout decision this file re-made and got wrong.
+#
+# So the sentence is now handed to the renderer instead of painted here.
+# `ui_js.raiseDurabilityNotice` takes it through `takeDurabilityAnnouncement`
+# below and raises it as a `Notification`, with the export offered as a
+# notification action beside the chord.
 
 const exportChordLabel* = "Ctrl+Shift+E"
   ## The gesture that performs the export every durability sentence tells the
   ## user to perform.
 
-proc announceDurability(web: WebPlatform) =
-  ## Show what will happen to the user's work, then record that it was shown.
+const durabilityNoticeSessionKey = "codetracer.durability.told"
+  ## `sessionStorage`, not `localStorage`, and the difference is the decision.
   ##
-  ## THE TWO STATEMENTS ARE IN THIS ORDER ON PURPOSE — see the header.
+  ## A reload is not a new visit: the tab is the same, the person is the same,
+  ## and they read the sentence a moment ago. `sessionStorage` is per tab and
+  ## dies with it, so the notice appears once per browser session and returns
+  ## for the next one — a fresh tab tomorrow is told again, which is right,
+  ## because the risk it describes has not gone away.
+  ##
+  ## The stored value is the CONDITION, not a flag: if the storage situation
+  ## changes mid-session (persistence granted after engagement, or a store that
+  ## refused to open) the tag no longer matches and the new state is announced.
+
+proc jsSessionTag(key: cstring): cstring {.importjs: """
+(function (k) {
+  try {
+    if (typeof sessionStorage === 'undefined') { return ''; }
+    return sessionStorage.getItem(k) || '';
+  } catch (e) { return ''; }
+})(#)""".}
+
+proc jsSetSessionTag(key, value: cstring) {.importjs: """
+(function (k, v) {
+  try {
+    if (typeof sessionStorage === 'undefined') { return; }
+    sessionStorage.setItem(k, v);
+  } catch (e) {}
+})(#, #)""".}
+
+type
+  DurabilityAnnouncement* = object
+    ## What the renderer should raise, and whether it should raise it at all.
+    text*: string
+    level*: DurabilityNoticeLevel
+    show*: bool
+      ## False when there is nothing to say, or when this browser session has
+      ## already been told this same thing.
+    offerExport*: bool
+      ## Whether an "Export project" action can be attached. False in the
+      ## refused-boot rows, where there is no project in a store to export and
+      ## a button that did nothing would be the exact defect
+      ## `exportOpenProject`'s header records.
+
+var pendingAcknowledgement: proc()
+  ## `web.store.acknowledgeDurability`, bound at announce time and called when
+  ## the sentence has actually been handed to the notification system.
+  ##
+  ## IT MOVED, AND THAT IS DELIBERATE. `acknowledgeDurability`'s own doc
+  ## comment says it is "called by the view that showed
+  ## `session.durability.announcement`", and that "a call site which has not
+  ## shown anything reads as a lie". While this module painted the sentence
+  ## itself, showing and acknowledging were adjacent statements. Now the
+  ## showing happens one step later — the status bar does not exist until
+  ## `startWebRenderer` has mounted — so the acknowledgement travels with it
+  ## rather than being made on its behalf in advance.
+
+var announcementTag: string
+  ## The condition tag for the sentence currently held in `web_project_store`.
+
+proc levelFor(report: DurabilityReport): DurabilityNoticeLevel =
+  ## Derived from `ExportUrgency`, which already exists and already encodes
+  ## exactly this ordering ("the export prompt is escalated rather than merely
+  ## available"). A second severity enum keyed off `StorageCondition` would be
+  ## a table that can disagree with the one beside it.
+  case report.exportUrgency
+  of euRoutine: dnlReassurance
+  of euEscalated: dnlEvictable
+  of euCritical: dnlUnstored
+
+proc withChord(sentence: string): string =
+  # NAME THE GESTURE. Every sentence ends by telling the user to export, and
+  # until `exportOpenProject` existed there was no way to. Appending the chord
+  # is what turns the instruction into something actionable rather than an
+  # instruction to do a thing the product does not offer.
+  sentence & "  (" & exportChordLabel & " exports this project.)"
+
+proc grantedSentence(report: DurabilityReport): string =
+  ## `scPersistenceGranted` has no announcement because there is no warning to
+  ## give. Saying nothing at all would still leave the user guessing where
+  ## their work is, so the durable case gets a short positive line DERIVED from
+  ## the same report rather than invented here.
+  "Your work is saved in this browser (" &
+    report.tiers[dtWorkingTree].mechanism & ") and will still be here when " &
+    "you come back. Export the project to keep a copy elsewhere."
+
+proc announceDurability(web: WebPlatform) =
+  ## Record what will happen to the user's work, and arm the acknowledgement.
   let report = web.store.durability
   let durable = report.tiers[dtWorkingTree].available
   let sentence =
-    if report.announcement.len > 0:
-      report.announcement
-    else:
-      # `scPersistenceGranted` has no announcement because there is no warning
-      # to give. Saying nothing at all would still leave the user guessing
-      # where their work is, so the durable case gets a short positive line
-      # DERIVED from the same report rather than invented here.
-      "Your work is saved in this browser (" &
-        report.tiers[dtWorkingTree].mechanism & ") and will still be here " &
-        "when you come back. Export the project to keep a copy elsewhere."
-  # NAME THE GESTURE. Every sentence above ends by telling the user to export,
-  # and until `exportOpenProject` existed there was no way to. Appending the
-  # chord is what turns the instruction into something actionable rather than
-  # an instruction to do a thing the product does not offer.
-  let full = sentence & "  (" & exportChordLabel & " exports this project.)"
-  setDurabilityNotice(full, durable)
-  renderDurabilityBanner(cstring(full), durable)
-  # Only now. `readyForEditing` gates every write in the facade, and this is
-  # the call it was waiting for since the store landed.
-  web.store.acknowledgeDurability()
+    if report.announcement.len > 0: report.announcement
+    else: grantedSentence(report)
+  setDurabilityNotice(withChord(sentence), durable, levelFor(report))
+  announcementTag = $report.condition
+  pendingAcknowledgement = proc() = web.store.acknowledgeDurability()
 
 var exportAction: proc()
 
@@ -176,6 +221,78 @@ proc exportOpenProject*() =
   if not exportAction.isNil:
     exportAction()
 
+proc takeDurabilityAnnouncement*(): DurabilityAnnouncement =
+  ## What to raise in the status bar, exactly once per page load.
+  ##
+  ## The acknowledgement happens here whether or not `show` comes back true,
+  ## and that is not a loophole: a session that is being suppressed is being
+  ## suppressed *because this browser session was already shown the sentence*,
+  ## which is the fact `acknowledgeDurability` records. Leaving it unset would
+  ## make `readyForEditing` false for the rest of a reloaded tab's life and
+  ## refuse every facade write — the failure §4.2 is about, reintroduced by the
+  ## fix for it.
+  result.text = durabilityNoticeText()
+  result.level = durabilityNoticeLevel()
+  result.offerExport = canExportProject()
+  if result.text.len == 0:
+    return
+  let tag = cstring(announcementTag)
+  result.show = jsSessionTag(cstring(durabilityNoticeSessionKey)) != tag
+  jsSetSessionTag(cstring(durabilityNoticeSessionKey), tag)
+  if not pendingAcknowledgement.isNil:
+    pendingAcknowledgement()
+    pendingAcknowledgement = nil
+
+# ---------------------------------------------------------------------------
+# ASKING AGAIN, ONCE THE VISITOR HAS INVESTED SOMETHING
+# ---------------------------------------------------------------------------
+#
+# `boot()` calls `navigator.storage.persist()` before a single character has
+# been typed. Browsers grant persistence on engagement — repeat visits, a
+# bookmark, an installed app — so a first visit is normally denied, and the
+# product used to treat that first "no" as the permanent state of the world:
+# nothing ever asked again, so a user who came back every day and did all their
+# work here would be warned about eviction forever while the browser would
+# happily have protected them.
+#
+# The first successful SAVE is the engagement signal: the visitor has typed
+# something and asked for it to be kept. Asking then costs one call — and no
+# prompt, because `jsRequestPersistence` checks `persisted()` first and every
+# engine either resolves from its heuristics or has already decided.
+
+var persistenceRecheckStarted = false
+var onPersistenceUpgrade: proc(message: string)
+
+proc setPersistenceUpgradeHandler*(handler: proc(message: string)) =
+  ## Installed by `ui_js`, which owns the notification system. Injected rather
+  ## than imported for the same reason the project writer is: this module is
+  ## reachable from the platform, and `ui_js` is not.
+  onPersistenceUpgrade = handler
+
+proc recheckPersistence(web: WebPlatform) {.async.} =
+  if persistenceRecheckStarted:
+    return
+  if not mayBeGrantedLater(web.store.durability.condition):
+    return
+  persistenceRecheckStarted = true
+  let answer = await requestPersistenceAgain()
+  if not (answer.answered and answer.granted):
+    return
+  # `scPersistenceGranted` DIRECTLY, without re-deriving from the volume.
+  # `mayBeGrantedLater` already excluded `scVolatile`, so the volume behind
+  # this session is durable; `conditionFor` would return the same value from
+  # one more indirection, and reading the volume back out of the bridge here
+  # would be a second source of truth for a fact already established above.
+  web.store.refreshDurability(scPersistenceGranted)
+  let sentence = withChord(grantedSentence(web.store.durability))
+  setDurabilityNotice(sentence, true, dnlReassurance)
+  announcementTag = $scPersistenceGranted
+  # The tag has changed, so `takeDurabilityAnnouncement` would announce this on
+  # the next load anyway; the handler is what tells the user NOW, in the
+  # session where their work just became protected.
+  if not onPersistenceUpgrade.isNil:
+    onPersistenceUpgrade(sentence)
+
 proc installExport(web: WebPlatform; projectId, displayName: string) =
   exportAction = proc() =
     proc run() {.async.} =
@@ -196,6 +313,9 @@ proc installWriter(web: WebPlatform; projectId: string) =
                                                      content)
       if written.ok:
         onDone(true, "")
+        # AFTER the save is reported, never before: the recheck is a courtesy
+        # and must not be able to delay or fail the thing the user asked for.
+        discard recheckPersistence(web)
       else:
         onDone(false, written.error.message)
     discard run())
@@ -224,8 +344,8 @@ proc prepareProject*(booted: WebBoot; tmpl: ProjectTemplate): Future[void]
       "This session has no project storage (" & booted.refusal & "), so " &
       "everything you write is held in this tab and will be lost when it " &
       "closes. You can still edit, compile and run — export before you leave.",
-      false)
-    renderDurabilityBanner(cstring(durabilityNoticeText()), false)
+      false, dnlUnstored)
+    announcementTag = "refused:" & booted.refusal
     return
 
   let web = booted.web
@@ -249,8 +369,8 @@ proc prepareProject*(booted: WebBoot; tmpl: ProjectTemplate): Future[void]
         "This project could not be opened in browser storage (" &
         created.error.message & "), so this session is held in this tab " &
         "only and will be lost when it closes. Export before you leave.",
-        false)
-      renderDurabilityBanner(cstring(durabilityNoticeText()), false)
+        false, dnlUnstored)
+      announcementTag = "unopenable:" & created.error.message
       return
     opened = await web.activateProject(projectId)
     if not opened.ok:

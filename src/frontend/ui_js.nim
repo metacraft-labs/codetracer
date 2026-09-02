@@ -5148,6 +5148,92 @@ when defined(ctWeb):
       reportWebRenderer(cstring(
         webRendererLinePrefix & " failed reason=" & getCurrentExceptionMsg()))
 
+  proc durabilityNotificationKind(
+      level: web_project_store.DurabilityNoticeLevel): NotificationKind =
+    ## The one place the storage tiers meet the notification severities.
+    ##
+    ## `dnlUnstored` is an ERROR rather than a warning: the work in that row is
+    ## not on disk anywhere and goes when the tab does, which is a failure of
+    ## the product's basic promise and not a caveat about it.
+    case level
+    of web_project_store.dnlReassurance: NotificationKind.NotificationSuccess
+    of web_project_store.dnlEvictable: NotificationKind.NotificationWarning
+    of web_project_store.dnlUnstored: NotificationKind.NotificationError
+
+  proc raiseDurabilityNotice() =
+    ## Deliver §4.2's sentence through the notification system every other
+    ## message in this product already uses.
+    ##
+    ## ## Why this is a separate call, after the mount
+    ##
+    ## `prepareProject` runs BEFORE `startWebRenderer` and must — it restores
+    ## the user's saved bytes, and a restore that landed after the mount would
+    ## paint the bundled template over their work. But `data.ui.status` does
+    ## not exist until `configure(data)` has built the components, so there is
+    ## no status bar to raise a notification into at the point the sentence is
+    ## composed. The sentence is therefore composed there and RAISED here; the
+    ## acknowledgement `readyForEditing` waits on travels with the raising, so
+    ## nothing claims to have shown something it has not.
+    ##
+    ## `startWebRenderer` catches its own exceptions and never rethrows, so a
+    ## surface that failed to mount still reaches this line — and a failure to
+    ## mount is exactly when a user most needs to be told where their work is.
+    let notice = web_project_persistence.takeDurabilityAnnouncement()
+    if not notice.show:
+      return
+
+    # THE ACTION, not just the chord. The sentence names `Ctrl+Shift+E`
+    # because a chord is what a returning user reaches for; the button is what
+    # a first-time visitor can actually press, and it is the same call.
+    var actions: seq[NotificationAction] = @[]
+    if notice.offerExport:
+      actions.add(newNotificationButtonAction(
+        cstring"Export project",
+        proc = web_project_persistence.exportOpenProject()))
+
+    # DISMISSIBLE, AND NOT AUTO-DISMISSED, for the two degraded rows.
+    # `status.canAutoDismiss` is false once a notification carries actions, so
+    # the warning stays until the user closes it — read at their pace — while
+    # `statusShellModel` renders every active notification with `dismiss =
+    # true`, so closing it is one click. A notice that cannot be dismissed is a
+    # banner by another name, which is the complaint this change answers.
+    data.viewsApi.showNotification(
+      newNotification(durabilityNotificationKind(notice.level), notice.text,
+                      actions = actions))
+
+  const durabilityNoticeMountAttempts = 40
+    ## 40 turns of ~25ms — one second — before the sentence goes to the console
+    ## instead. Generous next to a mount measured in tens of milliseconds, and
+    ## bounded so a surface that never mounts cannot leave a timer running for
+    ## the life of the tab.
+
+  proc awaitStatusBarThenRaise(attemptsLeft: int) =
+    ## `showNotification` EMITS; something has to be subscribed.
+    ##
+    ## `StatusComponent.register` is what subscribes to `CtNotification`, and
+    ## it runs inside `createUIComponents`, which runs while the layout is
+    ## being built. `enterTemplateEditMode` delivers `CODETRACER::no-trace`
+    ## synchronously, so in the ordinary case the component exists by the time
+    ## `startWebRenderer` returns — but "ordinarily synchronous" is not a
+    ## guarantee, and an emit with no subscriber is silently dropped. That is
+    ## the failure mode this whole change exists to stop repeating: a correct
+    ## sentence, computed, and shown to nobody.
+    ##
+    ## `takeDurabilityAnnouncement` is NOT called until the bar is there,
+    ## because it is what marks the session as told and acknowledges the store.
+    if not data.ui.isNil and not data.ui.status.isNil and
+       not data.viewsApi.isNil:
+      raiseDurabilityNotice()
+      return
+    if attemptsLeft <= 0:
+      # The one channel left. Better than dropping it, and it is what
+      # `ci/test/noir-edit-persists.sh` would report as the absence it is.
+      cwarn "durability: no status bar to announce into: " &
+        web_project_store.durabilityNoticeText()
+      return
+    discard windowSetTimeout(
+      proc() = awaitStatusBarThenRaise(attemptsLeft - 1), 25)
+
   proc startWebArm() {.async.} =
     ## Boot the platform, THEN render — and in that order for one reason.
     ##
@@ -5191,9 +5277,20 @@ when defined(ctWeb):
     ## `currentRendererEntry()` below re-reads the location for the mount; the
     ## two agree because both go through `platform/web_entry.resolveEntry`.
     let booted = await startWebSession()
+
+    # THE UPGRADE PATH, installed before anything can trigger it. A save is
+    # what triggers the re-request (see `recheckPersistence`), and the first
+    # save cannot happen until the renderer below has mounted — but installing
+    # after the mount would be a race against a fast first Ctrl+S.
+    web_project_persistence.setPersistenceUpgradeHandler(proc(message: string) =
+      if not data.viewsApi.isNil:
+        data.viewsApi.showNotification(
+          newNotification(NotificationKind.NotificationSuccess, message)))
+
     await web_project_persistence.prepareProject(
       booted, templateFor(booted.entry.languageEntry))
     startWebRenderer()
+    awaitStatusBarThenRaise(durabilityNoticeMountAttempts)
 
   discard startWebArm()
 

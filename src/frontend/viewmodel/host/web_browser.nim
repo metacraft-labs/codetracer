@@ -700,6 +700,23 @@ proc pageOrigin*(): string =
   ## the same reason `jsShareOrigin` is.
   $jsLocationOrigin()
 
+proc requestPersistenceAgain*(): Future[tuple[answered, granted: bool]]
+                             {.async.} =
+  ## Ask `navigator.storage.persist()` a second time, after engagement.
+  ##
+  ## Exactly the same call `boot()` makes, and deliberately the same one rather
+  ## than a variant: `jsRequestPersistence` already checks `persisted()` first,
+  ## so an origin the browser has since granted is reported as granted without
+  ## a second prompt, and one that is still best-effort is asked again. Boot
+  ## asks at the moment a visitor has invested nothing, which is when a browser
+  ## is least likely to say yes; this is the call that lets the answer improve
+  ## once they have.
+  let persistence = await jsRequestPersistence()
+  var answered = false
+  var granted = false
+  {.emit: "`answered` = !!`persistence`.answered; `granted` = !!`persistence`.granted;".}
+  return (answered: answered, granted: granted)
+
 proc boot*(): Future[WebBoot] {.async.} =
   ## The four steps in the module header.
   let persistence = await jsRequestPersistence()
