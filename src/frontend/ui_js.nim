@@ -1208,12 +1208,67 @@ proc switchToEdit*(data: Data) =
 
     for content, map in data.ui.componentMapping:
       for id, component in map:
+        # NIL IS A REAL ENTRY IN THIS TABLE, and until now it ended the whole
+        # transition.
+        #
+        # `clear` is a `{.base.}` METHOD (`types.nim:2649`), so calling it on a
+        # nil `Component` is a nil DISPATCH, and Nim raises `NilAccessDefect`
+        # — "cannot dispatch; dispatcher is nil". A `Defect` is not what the
+        # bare `except:` below survives, so the exception escaped `switchToEdit`
+        # from inside its own handler and everything after this loop never ran:
+        # `setEditorsReadOnlyState`, `redrawAfterModeSwitch`, and the topbar
+        # refresh. `data.ui.mode` had already been set to `EditMode` at the top,
+        # so the session was left claiming Edit while showing Debug, and the
+        # next `switchToDebug` was a no-op because the mode already said so.
+        #
+        # Measured in a browser on the assembled bundle: `data.actions[17]`
+        # (switchEdit) threw `NilAccessDefect` on EVERY call, trace innermost
+        # frame `ui_js.nim(1214) at ui_js.switchToEdit`, and the toolbar never
+        # came back. The web had NO working path from a replay session to Edit
+        # mode at all — the return leg of the build/run round trip.
+        #
+        # `closeAuxiliaryPanels` walks the same table and has guarded
+        # `component.isNil` since it was written; this loop simply never did.
+        if component.isNil:
+          continue
         try:
           component.clear()
-        except:
-          cerror "layout: component clear: " & getCurrentExceptionMsg()
+        except CatchableError:
+          cerror "layout: component clear " & $content & "/" & $id & ": " &
+            getCurrentExceptionMsg()
+        except Defect:
+          # AND A DEFECT IS THE CASE THAT ACTUALLY HAPPENS HERE.
+          #
+          # `clear` is `{.base.}` (`types.nim:2649`), so it dispatches through
+          # the object's type descriptor. A component that is NOT nil can still
+          # have no dispatcher — `nim js` resolves a method through `m_type`,
+          # and a component that reached this table without one raises
+          # `NilAccessDefect: cannot dispatch; dispatcher is nil`. A bare
+          # `except:` did not stop it: measured in a browser, `switchToEdit`
+          # threw on every call with its innermost frame inside this handler,
+          # so the whole tail of the proc — `setEditorsReadOnlyState`,
+          # `redrawAfterModeSwitch` and the topbar refresh — never ran, while
+          # `data.ui.mode` had already been set to `EditMode` at the top.
+          #
+          # The session was then a lie in both directions: it claimed Edit and
+          # showed Debug, and the next `switchToDebug` did nothing because the
+          # mode already agreed with it. There was NO working path back to edit
+          # mode in the browser.
+          #
+          # Naming `content` and `id` because a defect here is a malformed
+          # component, and the next person needs to know WHICH — the guard
+          # below keeps the product usable, it does not make the component
+          # correct.
+          cerror "layout: component clear " & $content & "/" & $id &
+            " raised a Defect and was skipped"
   data.setEditorsReadOnlyState(false)
   redrawAfterModeSwitch()
+  # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
+  # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw
+  # leaves whichever panel is mounted exactly where it is. Every one of these
+  # three call sites has just assigned `data.ui.mode`, so this is where the
+  # surface can have become wrong. A no-op when it has not.
+  debug.refreshTopbarSurface()
 
 proc switchToDebug*(data: Data) =
   # Save current edit layout before switching
@@ -1236,6 +1291,12 @@ proc switchToDebug*(data: Data) =
 
   data.setEditorsReadOnlyState(true)
   redrawAfterModeSwitch()
+  # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
+  # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw
+  # leaves whichever panel is mounted exactly where it is. Every one of these
+  # three call sites has just assigned `data.ui.mode`, so this is where the
+  # surface can have become wrong. A no-op when it has not.
+  debug.refreshTopbarSurface()
 
 proc toggleMode*(data: Data) =
   if data.ui.mode == DebugMode:
@@ -1252,6 +1313,12 @@ proc toggleReadOnly*(data: Data) =
   else:
     data.ui.mode = EditMode
   redrawAfterModeSwitch()
+  # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
+  # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw
+  # leaves whichever panel is mounted exactly where it is. Every one of these
+  # three call sites has just assigned `data.ui.mode`, so this is where the
+  # surface can have become wrong. A no-op when it has not.
+  debug.refreshTopbarSurface()
 
 data.functions.toggleMode = toggleMode
 data.functions.toggleReadOnly = toggleReadOnly
@@ -5055,6 +5122,39 @@ when defined(ctWeb):
             web_noir_build.startNoirTest($selector)
             cstring""
 
+        # THE EDIT-MODE TOPBAR, and the reason it is installed HERE.
+        #
+        # `viewmodels/edit_mode_toolbar.nim` has been complete and tested on
+        # both backends since it landed, and was imported by nothing outside
+        # its own two suites — so the top bar went on showing the debugger's
+        # stepping controls while a user edited a file, which is the bug
+        # report. The model is composed by `web_noir_build` (it needs the
+        # profile, the wasm registry and the project listing) and the ACTION
+        # each button reaches is supplied from here, because `saveThenCompile`
+        # is this module's and is the same proc `data.actions[build]` and
+        # Ctrl+B dispatch through. One path, three triggers.
+        web_noir_build.installEditModeToolbar(proc(id: string) =
+          case id
+          of "build-image": saveThenCompile(runAfter = false)
+          of "run-image": saveThenCompile(runAfter = true)
+          # RUN TESTS GOES TO THE TEST RUNNER, not to a second one.
+          #
+          # `startNoirTests` and the Test Results pane's ▶ landed while this
+          # toolbar was being written, and they are the same gesture arriving
+          # from a different control. Pointing this button at
+          # `saveThenCompile(runAfter = true)` instead would have been a second
+          # implementation of Run Tests — one that skips the catalog, the row
+          # ingestion and `noirTestRunSettled`, and would therefore leave the
+          # editor's own run-test control spinning over a run it never saw.
+          # Installed above, so by the time a user can press this the hooks
+          # exist.
+          of "run-tests-image": web_noir_build.startNoirTests()
+          # RECORD TESTS still compiles-then-replays. Noir's provider refuses
+          # test RECORDING (§13 reaches a replay session through Run, not
+          # Record Tests), so this is the honest behaviour until the milestone
+          # that gives the two buttons genuinely different answers.
+          of "record-tests-image": saveThenCompile(runAfter = true)
+          else: discard)
         # RUN IS A MODE TRANSITION — "full surface, returnable".
         #
         # Installed here, beside the Build wiring, and for the same reason its
