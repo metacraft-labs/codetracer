@@ -192,13 +192,13 @@ fn test_equal_inputs_are_rejected() {
         path: "src/tests.nr",
         content: """// Tests are a MODULE of the crate, declared by `mod tests;` in `main.nr`.
 //
-// Not a top-level `tests/` directory beside `src/`, which is what §1a's
-// mock-up draws — nargo compiles `src/` and nothing else, so a sibling
+// Not a top-level `tests/` directory beside `src/`, which is what section
+// 1a's mock-up draws: nargo compiles `src/` and nothing else, so a sibling
 // `tests/` folder would be shown in the file tree and never built. A tree
 // carrying a directory the toolchain ignores is precisely the
-// "misrepresents the language" failure §1a warns about, one level down from
-// the single-file playground it names. Measured: `nargo test` over the
-// earlier layout ran 3 of 4 tests and said nothing about the fourth.
+// "misrepresents the language" failure section 1a warns about, one level
+// down from the single-file playground it names. Measured: `nargo test`
+// over the earlier layout ran 3 of 4 tests and said nothing about the fourth.
 
 use crate::utils;
 
