@@ -206,8 +206,45 @@
     border-bottom: none
     border-radius: 0 0 DROPDOWN_RADIUS DROPDOWN_RADIUS
 
+  // When the non-interactive hint row follows, THAT row is the last thing in
+  // the surface, so the bottom rounding belongs to it and the command above it
+  // must go square again.  Without this the menu paints a rounded row with a
+  // square strip below it.
+  &:has(+ .context-menu-hint) .context-menu-item
+    border-bottom: none
+    border-radius: 0
+
 .context-menu-item
   // No per-item border-radius or margins — items flow flush like the main menu
+
+// A LABEL, NOT A COMMAND — the row naming the browser's own context-menu
+// gesture (`viewmodel/views/context_menu_hint.nim`).
+//
+// Every declaration here is about it not reading as selectable.  It carries
+// none of `.ct-menu-item`'s hover, background or pointer cursor; it is not
+// focusable (no `tabindex`, set in `renderer.appendContextMenuBrowserHint`);
+// and `pointer-events: none` means a click at its coordinates lands on the
+// menu surface behind it rather than on the row, so it cannot be the target of
+// one even by accident.  A row that looks selectable and does nothing is the
+// dead-affordance defect this product is already tracking three instances of,
+// and this row exists to fix a menu, not to add a fourth.
+.context-menu-hint
+  pointer-events: none
+  cursor: default
+  user-select: none
+  padding: 0.375rem 0.75rem
+  font-size: 0.6875rem
+  line-height: 1.4
+  white-space: nowrap
+  // `colors-ui-text-primary-body-subtle`, dimmed further, rather than
+  // `colors-ui-text-default-placeholder`: that token does not resolve in this
+  // theme (grep the compiled CSS — `components/input.styl:34` emits it
+  // verbatim today), and a hint row painted in the browser's default colour
+  // would be the most conspicuous thing in the menu.
+  color: colors-ui-text-primary-body-subtle
+  opacity: 0.72
+  border-top: 0.0625rem solid colors-ui-border-tertiary
+  border-radius: 0 0 DROPDOWN_RADIUS DROPDOWN_RADIUS
 
 .expansion-1
   .monaco-editor, .margin

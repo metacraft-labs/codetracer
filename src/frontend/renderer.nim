@@ -26,6 +26,8 @@ import
   # question by probing the runtime, and imports nothing.
   lib/[ logging, monaco_lib, jslib, misc_lib, electron_presence ],
   ui/file_conflict_dialog,
+  # Pure, DOM-free decision for the context menu's non-interactive hint row.
+  viewmodel/views/context_menu_hint,
   platform_host,
   lsp_client, lsp_controller
 
@@ -1343,6 +1345,31 @@ proc moveTab*(path: cstring) =
   #     break
   # redraw()
 
+proc appendContextMenuBrowserHint*(container: dom.Element) =
+  ## Append the one NON-INTERACTIVE row: the line naming the browser's own way
+  ## to reach its native menu, now that we suppress it properly.
+  ##
+  ## Everything about this row is chosen so it cannot read as a command, because
+  ## a row that looks selectable and does nothing is the defect this product is
+  ## already tracking three instances of. It carries neither `context-menu-item`
+  ## nor `ct-menu-item` (those are the hover highlight, the pointer cursor and
+  ## what keyboard traversal and the GUI suite select on), it gets no `onclick`,
+  ## no `tabindex`, `role="presentation"` and `aria-hidden`, and the stylesheet
+  ## gives it `pointer-events: none` so it cannot even be the target of a click.
+  ##
+  ## The text, and why it names browsers, is in
+  ## `viewmodel/views/context_menu_hint.nim`.
+  let text = contextMenuBrowserHint(electron_presence.inElectron)
+  if text.len == 0:
+    return
+  let hintRow = kdom.document.createElement("div")
+  hintRow.classList.add(cstring ContextMenuHintClass)
+  hintRow.id = cstring ContextMenuHintId
+  hintRow.setAttribute(cstring"role", cstring"presentation")
+  hintRow.setAttribute(cstring"aria-hidden", cstring"true")
+  hintRow.textContent = cstring text
+  container.append(cast[dom.Element](hintRow))
+
 proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtension: bool = false): void =
   let container = dom.document.getElementById("context-menu-container")
   container.style.display = "flex"
@@ -1377,6 +1404,8 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
       cast[dom.Element](newElement).append(cast[dom.Element](hint))
     cast[dom.Element](itemContainer).append(cast[dom.Element](newElement))
     container.append(cast[dom.Element](itemContainer))
+
+  appendContextMenuBrowserHint(cast[dom.Element](container))
 
   let contextWidth = cast[dom.Element](container).clientWidth
   let clientWidth = cast[int](dom.window.toJs.innerWidth)

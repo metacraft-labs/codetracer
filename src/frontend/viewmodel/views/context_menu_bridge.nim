@@ -2,6 +2,8 @@ when defined(js):
   import std/[dom, strformat, strutils]
   import kdom
   import ../../types
+  import context_menu_hint
+  from ../../lib/electron_presence import inElectron
 
   var contextMenuHandlers: seq[proc(ev: kdom.Event) {.closure.}]
 
@@ -63,6 +65,21 @@ when defined(js):
 
       discard cast[dom.Element](itemContainer).append(cast[dom.Element](item))
       discard cast[dom.Element](container).append(cast[dom.Element](itemContainer))
+
+    # The one NON-INTERACTIVE row.  The twin of this block is
+    # `renderer.appendContextMenuBrowserHint`, which carries the reasoning; the
+    # two implementations of this menu have to stay indistinguishable, so the
+    # row is added in both or the surface a user right-clicks decides whether
+    # they are told about the gesture.
+    let hintText = contextMenuBrowserHint(inElectron)
+    if hintText.len > 0:
+      let hintRow = kdom.document.createElement(cstring"div")
+      hintRow.classList.add(cstring ContextMenuHintClass)
+      hintRow.id = cstring ContextMenuHintId
+      hintRow.setAttribute(cstring"role", cstring"presentation")
+      hintRow.setAttribute(cstring"aria-hidden", cstring"true")
+      hintRow.textContent = cstring hintText
+      discard cast[dom.Element](container).append(cast[dom.Element](hintRow))
 
     let contextWidth = cast[dom.Element](container).clientWidth
     let contextHeight = cast[dom.Element](container).clientHeight

@@ -2630,6 +2630,37 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
 
   tabInfo.monacoEditor.onContextMenu(proc(ev: js) =
     console.log(cstring"editor: onContextMenu fired")
+    # TWO MENUS, and this is where the second one came from.  Reported
+    # 2026-09-02 against ide.codetracer.com: "when I right click in the editor
+    # area in the IDE, I see both the browser menu and the CodeTracer menu".
+    #
+    # `contextmenu: false` in the editor options (`:2508`, and `:1943` for the
+    # expansion editor) only stops MONACO's own menu — and it is also what stops
+    # Monaco's `ContextMenuController` from ever calling `preventDefault`, so the
+    # native `contextmenu` event ran to completion and the browser drew its menu
+    # over ours.
+    #
+    # AND THE GUTTER WAS NOT THE EXCEPTION IT LOOKED LIKE.  The listener below
+    # (`:2674`) does call `preventDefault`, but only for a target whose class
+    # list contains `gutter-line` or `gutter-breakpoint` — so on the rest of the
+    # margin (Monaco's own `.line-numbers`, `.margin`) nothing suppressed
+    # anything and the gutter showed two menus as well.  Measured against an
+    # assembled bundle before this change: right-clicking `div.gutter` gave
+    # `defaultPrevented == false`, exactly like the text surface.  This handler
+    # fires for the margin too, so one `preventDefault` here covers both, and
+    # `ci/test/menu-and-context-menu-in-browser.sh` asserts each separately.
+    #
+    # SHIFT IS THE ESCAPE HATCH AND IT IS DELIBERATELY NOT SUPPRESSED.  A page
+    # can suppress the native menu but has no API to summon it, so "show the
+    # browser menu" cannot be a command in ours.  What exists is the browser's
+    # own bypass: Chrome and Firefox show their native menu on Shift+right-click
+    # regardless of what the page does.  Rather than rely on that overriding our
+    # `preventDefault`, we stand down entirely when Shift is held — so exactly
+    # one menu appears under either gesture, and `contextMenuBrowserHint()`
+    # (`../renderer`) can name the gesture in our own menu without lying.
+    if cast[bool](ev.event.toJs.shiftKey):
+      return
+    ev.event.preventDefault()
     let contextMenu = createContextMenuItems(self, ev)
     console.log(cstring"editor: context menu items count = " & $contextMenu.len)
     if contextMenu.len > 0:

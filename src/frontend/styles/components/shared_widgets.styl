@@ -159,7 +159,14 @@ dropdown-scrollbar()
     opacity: 1
     transform: translateY(0)
 
-dropdown-surface()
+// The PAINT of that surface, with no behaviour attached.
+//
+// Split out of `dropdown-surface()` because two of its callers cannot take the
+// behaviour and were silently broken by it — see the block comment on
+// `dropdown-surface()` below.  A caller that hosts absolutely-positioned
+// children outside its own box, or that is rebuilt while it is on screen, wants
+// the look and neither the clip nor the reveal.
+dropdown-surface-chrome()
   // The VCS branch picker is the reference for every menu that opens over the
   // UI: a panel surface, a hairline border and a small radius, with no shadow.
   //
@@ -172,6 +179,42 @@ dropdown-surface()
   border: 0.03125rem solid colors-ui-border-primary
   border-radius: DROPDOWN_RADIUS
   box-shadow: none
+
+  dropdown-scrollbar()
+
+// The full dropdown behaviour: the chrome, plus a clip to the radius and a
+// reveal animation.
+//
+// TWO PRECONDITIONS, both of which `#menu-main` violated and neither of which
+// was stated until a user reported the result (2026-09-02, ide.codetracer.com:
+// "when I move my mouse over the menu, it flickers, briefly displaying the
+// content below it" and "the sub-menus are not displayed"):
+//
+//   * `overflow: hidden` clips EVERY descendant, not just the rows.  A caller
+//     whose submenus are absolutely-positioned children laid out beside it —
+//     which is exactly how `isonim_menu_shell_view.nim` builds
+//     `.menu-nested-elements`, as siblings of `#menu-elements` inside
+//     `#menu-main` — has those children erased.  Measured on the deployed
+//     `noirstudio.dev` (revision 5334f7aa): `#menu-main` occupied
+//     x = 10..180 and `#menu-nested-elements-1` was laid out at x = 181..356
+//     with nine rows, and `elementFromPoint` at the centre of its first row
+//     returned `section.lm_tabs` — the layout chrome BEHIND it.  Not covered:
+//     clipped out of existence, while every model- and markup-level assertion
+//     about it passed.
+//
+//   * `animation` on an element that is REPLACED rather than updated replays
+//     from `opacity: 0` on every replacement.  `ui/menu.nim`'s
+//     `requestMenuRender` rebuilds the whole caption chrome whenever the
+//     hovered menu row changes, so a pointer crossing five rows restarted the
+//     reveal five times.  Measured on the same deployment by counting
+//     `animationstart` on `#menu-main`: five transitions, five reveals.  That
+//     is the reported flicker, and "briefly displaying the content below it"
+//     is literally what `opacity: 0` shows.
+//
+// So a menu that is rebuilt in place, or that hosts an overflowing child, must
+// call `dropdown-surface-chrome()` instead.
+dropdown-surface()
+  dropdown-surface-chrome()
   overflow: hidden
   animation: ct-dropdown-reveal 120ms ease-out
 
@@ -179,8 +222,6 @@ dropdown-surface()
   // who has asked the system to reduce it.
   @media (prefers-reduced-motion: reduce)
     animation: none
-
-  dropdown-scrollbar()
 
 // One row inside that surface.  The row's colour, height and hover come from
 // the `ct-menu-item` component; this is only the hairline between rows and the

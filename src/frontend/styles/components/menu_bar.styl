@@ -274,7 +274,15 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
     // fraction of a pixel instead of clearing it.
     top: 2.5rem
     margin-left: 6px
-    dropdown-surface()
+    // CHROME ONLY — see `dropdown-surface()` in components/shared_widgets.styl
+    // for the two preconditions this element does not meet.  In short: the
+    // submenus are absolutely-positioned children laid out BESIDE this box, so
+    // `overflow: hidden` deleted them; and `ui/menu.nim` replaces this element
+    // on every hover, so the reveal animation replayed on every pointer move.
+    // The rows are still clipped to the radius — `#menu-elements` below carries
+    // its own `overflow: hidden`, which is the clip that was ever wanted here.
+    dropdown-surface-chrome()
+    overflow: visible
 
 
   // Search results still use the pre-design-system row markup
@@ -450,7 +458,11 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
     width: fit-content
     min-width: 12em
     padding: 0
-    dropdown-surface()
+    // CHROME ONLY, for the second reason given on `#menu-main` above: a submenu
+    // is rebuilt on every pointer move within it, so the reveal animation
+    // replayed from `opacity: 0` each time.  The clip is kept — a submenu's
+    // children ARE its rows, and they should be cut to its radius.
+    dropdown-surface-chrome()
     overflow: hidden
 
   #menu-elements, .menu-nested-elements

@@ -1128,11 +1128,17 @@ proc renderValueRowDom(
 
   let atomParent = newElement(cstring"div", atomClass)
   atomParent.addEventListener(cstring"contextmenu", proc(ev: Event) =
+    # `preventDefault` used to be conditional on `inExtension`, so everywhere
+    # else — the State pane, the value tooltips drawn over the editor — the
+    # browser menu opened on top of ours.  The third sibling of the leak fixed
+    # in `ui/editor.nim`; see the comment there, including why Shift stands
+    # down rather than being suppressed.
+    if cast[bool](ev.toJs.shiftKey):
+      return
+    ev.preventDefault()
     let contextMenu = self.createContextMenuItems(value, ev)
     let e = ev.toJs
     let inExtension = not self.state.isNil and self.state.inExtension
-    if inExtension:
-      ev.preventDefault()
     if contextMenu != []:
       showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), inExtension)
   )
