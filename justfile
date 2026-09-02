@@ -1477,18 +1477,25 @@ test-rust-flow-nightly:
   ../../scripts/with-rust-nightly cargo nextest run --no-capture test_rust_flow
   echo "Rust nightly flow test passed!"
 
-# Test with all supported Rust versions
+# Rust flow tests — STABLE ONLY, despite the `-all` name.
+#
+# Unlike `test-nim-flow-all` above, which really does invoke all three of its
+# per-version recipes, this invokes only `test-rust-flow-stable`.
+# `test-rust-flow` (ambient toolchain) and `test-rust-flow-nightly` exist and
+# are not run here; why they were left out is not recorded anywhere I could
+# find, so do not read this as a statement that they are unsupported.
 test-rust-flow-all:
   #!/usr/bin/env bash
   set -e
   echo "========================================"
-  echo "Testing Rust flow with supported versions"
+  echo "Testing Rust flow with Rust stable only"
   echo "========================================"
   echo ""
   just test-rust-flow-stable
   echo ""
   echo "========================================"
-  echo "All Rust flow tests passed!"
+  echo "Rust stable flow test passed!"
+  echo "(test-rust-flow and test-rust-flow-nightly were NOT run)"
   echo "========================================"
 
 # ====
@@ -2842,8 +2849,10 @@ test-host-instantiations:
 #
 # NEEDS isonim's `build/tailwind-styles.json`: `ui_js.nim` reaches
 # `isonim/dsl/tailwind`, which `staticRead`s it at compile time, and a missing
-# file is an uncatchable Nim error minutes in. `just build-tailwind` generates
-# it; CI seeds a `{}` placeholder in `.github/actions/setup-isonim-siblings`.
+# file is an uncatchable Nim error minutes in. `just vm-test-prereqs` generates
+# it (it runs `scripts/build-tailwind.sh`; there is no `build-tailwind`
+# recipe); CI seeds a `{}` placeholder in
+# `.github/actions/setup-isonim-siblings`.
 test-renderer-browser:
   #!/usr/bin/env bash
   set -euo pipefail

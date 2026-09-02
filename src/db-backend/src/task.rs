@@ -2683,10 +2683,10 @@ pub struct GoToTicksArguments {
     /// when it relays a `ct/py-navigate` `goto_ticks` (see
     /// `BackendManager`'s py-navigate arm — the Python client itself
     /// only sends `tracePath`/`method`/`ticks`), and the wasm-testing
-    /// harnesses (`wasm-testing/replay-test.js`,
-    /// `wasm-testing/node-host/probe_reverse_step_in.mjs`) send
-    /// `threadId: 1` directly. Silently rejecting a field a client
-    /// supplies is the habit this file is trying to break.
+    /// harnesses under `src/db-backend/wasm-testing/` — `replay-test.js`
+    /// and `node-host/probe_reverse_step_in.mjs` — send `threadId: 1`
+    /// directly. Silently rejecting a field a client supplies is the
+    /// habit this file is trying to break.
     #[serde(default)]
     pub thread_id: i64,
     pub ticks: i64,
