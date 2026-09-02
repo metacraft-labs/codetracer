@@ -330,9 +330,11 @@ fi
 provenance="$(grep '^provenance ' "${cache}/control-report.txt" | sed 's/^provenance //')"
 case "${provenance}" in
 *"nargo info"*)
-	ck ok "the shipped counts carry their provenance: ${provenance}" ;;
+	ck ok "the shipped counts carry their provenance: ${provenance}"
+	;;
 *)
-	ck fail "the shipped counts carry no provenance naming nargo info ('${provenance}') — a count a user cannot judge" ;;
+	ck fail "the shipped counts carry no provenance naming nargo info ('${provenance}') — a count a user cannot judge"
+	;;
 esac
 echo
 
@@ -383,8 +385,40 @@ echo
 echo "Arm I: MUTATION — the shipped constraint counts drift from the producer"
 echo "    Expect the INFO equality RED, everything else green."
 # ---------------------------------------------------------------------------
-mutated_info="$(printf '%s' "${shipped_compact}" | sed 's/"opcodes":17/"opcodes":18/')"
-if [ "${mutated_info}" = "${shipped_compact}" ]; then
+# THE PERTURBATION IS DERIVED FROM THE SHIPPED VALUE, NOT WRITTEN HERE.
+#
+# This said `sed 's/"opcodes":17/"opcodes":18/'`. That put the template's
+# opcode count in a SECOND place, so the day the real count stopped being 17
+# the substitution silently matched nothing, `mutated_info` came back equal to
+# the original, and the arm reported "could not be measured" — twice — turning
+# a corrected constant into a red gate. A mutation arm that names a constant
+# is a constant in two places, and the second one is the one nobody updates.
+#
+# Reading main's count out of the shipped JSON and adding one keeps the arm's
+# claim ("a one-opcode change must break the equality") true at any value. The
+# edit is textual and minimal rather than a re-serialisation, so the mutated
+# string differs from the shipped one in exactly one numeral and in nothing
+# else — a reformatted JSON would differ from `measured_info` for reasons that
+# have nothing to do with the perturbation, and would pass this arm by
+# accident.
+#
+# The single quotes are load-bearing: the Python below must reach the
+# interpreter verbatim, not be expanded by the shell first.
+# shellcheck disable=SC2016
+mutated_info="$(printf '%s' "${shipped_compact}" | python3 -c '
+import json, sys
+s = sys.stdin.read()
+try:
+    n = json.loads(s)["programs"][0]["functions"][0]["opcodes"]
+except Exception:
+    sys.exit(0)
+# The first `"opcodes":<n>` is main constrained function, because `functions`
+# precedes `unconstrained_functions` in the shape this constant ships.
+out = s.replace("\"opcodes\":%d" % n, "\"opcodes\":%d" % (n + 1), 1)
+if out != s:
+    sys.stdout.write(out)
+')"
+if [ -z "${mutated_info}" ] || [ "${mutated_info}" = "${shipped_compact}" ]; then
 	ck fail "arm I could not be measured: the shipped constant does not contain the opcode count this arm perturbs"
 	ck fail "arm I could not be measured (second half)"
 else
@@ -436,7 +470,10 @@ if [ -z "${CT_NOIR_WASM_COMPILER:-}" ] || [ ! -f "${CT_NOIR_WASM_COMPILER:-}" ];
 	note "  This arm compares the browser's test runner against nargo's. Build"
 	note "  the module and point at it:"
 	note "    bash ci/deploy/build-noir-wasm.sh /tmp/noir-wasm-out"
-	note "    CT_NOIR_WASM_COMPILER=/tmp/noir-wasm-out/noir_wasm.wasm \\"
+	# The trailing backslash is literal text in a two-line usage hint, not an
+	# attempt to escape a quote.
+	# shellcheck disable=SC1003
+	note '    CT_NOIR_WASM_COMPILER=/tmp/noir-wasm-out/noir_wasm.wasm \'
 	note "      bash ci/test/noir-template-toolchain.sh"
 elif ! command -v node >/dev/null 2>&1; then
 	note "SKIPPED: node is not on PATH, and the wasm module is driven from node."
@@ -468,7 +505,7 @@ ARM_V
 		test --format json
 	v_nargo_status=$?
 	nargo_verdicts "${cache}/v-nargo.json" >"${cache}/v-nargo.txt"
-	node ci/test/noir-template-verdicts.mjs "${arm_dir}" hello_noir 		>"${cache}/v-wasm.txt" 2>"${cache}/v-wasm.err"
+	node ci/test/noir-template-verdicts.mjs "${arm_dir}" hello_noir >"${cache}/v-wasm.txt" 2>"${cache}/v-wasm.err"
 	wasm_status=$?
 	sed 's/^/    /' "${cache}/v-wasm.err"
 
