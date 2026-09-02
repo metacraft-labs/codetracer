@@ -2701,12 +2701,17 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     #
     # SHIFT IS THE ESCAPE HATCH AND IT IS DELIBERATELY NOT SUPPRESSED.  A page
     # can suppress the native menu but has no API to summon it, so "show the
-    # browser menu" cannot be a command in ours.  What exists is the browser's
-    # own bypass: Chrome and Firefox show their native menu on Shift+right-click
-    # regardless of what the page does.  Rather than rely on that overriding our
-    # `preventDefault`, we stand down entirely when Shift is held — so exactly
-    # one menu appears under either gesture, and `contextMenuBrowserHint()`
-    # (`../renderer`) can name the gesture in our own menu without lying.
+    # browser menu" cannot be a command in ours.
+    #
+    # STANDING DOWN, rather than suppressing and trusting the browser to
+    # override us, is what makes the gesture work on every engine instead of
+    # two.  Measured (see `viewmodel/views/context_menu_hint.nim`): Firefox does
+    # not deliver the event at all when Shift is held, but Chromium AND WebKit
+    # both do — so on those two what happens next is the PAGE's decision, and a
+    # `preventDefault` here would have swallowed the modifier in exactly the
+    # browsers where the user would notice.  Returning early means we show
+    # nothing and prevent nothing, and the browser's default action for an
+    # unprevented `contextmenu` is its own menu.
     if cast[bool](ev.event.toJs.shiftKey):
       return
     ev.event.preventDefault()

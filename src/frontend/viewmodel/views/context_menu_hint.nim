@@ -17,22 +17,38 @@
 ## it names the gesture the browser itself provides and does nothing when
 ## clicked, because it is not clickable.
 ##
-## What is claimed, and what is not
-## --------------------------------
-## Shift+right-click bypasses a page's `contextmenu` handler in **Chrome and
-## Firefox**. WebKit/Safari has no equivalent documented bypass, and — unlike
-## the two engines named — that could not be verified here: a native context
-## menu is drawn by the browser chrome, outside the page, and is suppressed
-## entirely under automation, so no in-page or Playwright assertion can observe
-## one in any engine.
+## Why the text names no browser, and how that was earned
+## ------------------------------------------------------
+## The first draft read "(Chrome, Firefox)", on the usual folklore that those
+## two implement a Shift bypass and Safari does not. Measured instead, the
+## picture is different — and it is different because of how the handlers are
+## written, not because of what the browsers do.
 ##
-## Rather than sniff the user agent and risk hiding the hint from a browser that
-## does honour the gesture (or showing it to one that does not), the text NAMES
-## the browsers the claim covers. It is then true as written in every browser it
-## can appear in, including Safari, where it reads as "not for you" instead of
-## as a broken instruction. That is the trade this module is making, and it is
-## deliberate: a hint naming a gesture that does nothing is worse than no hint,
-## because the user tries it, it fails, and they conclude the app is broken.
+## What the engines do with Shift held, measured 2026-09-02 with Playwright on
+## a page whose `contextmenu` listener calls `preventDefault` unconditionally:
+##
+##     chromium 141.0.7390.37   the page STILL receives the event (shift: true)
+##     firefox  142.0.1         the page receives NOTHING — not dispatched
+##     webkit   26.0            the page STILL receives the event (shift: true)
+##
+## Firefox implements the bypass by not delivering the event at all, so the
+## native menu opens whatever the page would have done. Chromium and WebKit both
+## deliver it, which means what happens next is decided by the page.
+##
+## And our handlers STAND DOWN on Shift rather than suppressing and hoping the
+## browser overrides them (`ui/editor.nim`, `ui/flow.nim`, `ui/value.nim`). So on
+## every engine that delivers the event we show nothing and prevent nothing, and
+## the browser's default action for an unprevented `contextmenu` — its own menu
+## — happens. On the one engine that does not deliver it, the same menu happens
+## for the engine's own reason.
+##
+## That covers Safari through WebKit, which is why the browser names came out of
+## the text. What is still NOT claimed, and cannot be from here: that the menu
+## is actually *painted*. A native context menu is browser chrome, outside the
+## document, and every engine suppresses it under automation — so no in-page or
+## Playwright assertion can observe one anywhere. What is asserted, in
+## `ci/test/menu-and-context-menu-in-browser.sh`, is the half this code owns:
+## with Shift held, our menu is not shown and `defaultPrevented` is false.
 ##
 ## No DOM, no `js` backend, no platform import — the two renderers of this row
 ## (`renderer.showContextMenu` and its twin in `views/context_menu_bridge.nim`)
@@ -41,9 +57,11 @@
 
 const
   ContextMenuBrowserHintText* =
-    "Browser menu: Shift + right-click (Chrome, Firefox)"
-    ## The row's text. A statement about the browser, phrased so no engine makes
-    ## it false — see the module header.
+    "Browser menu: Shift + right-click"
+    ## The row's text. Unqualified because it is true on every engine measured,
+    ## and it is true because OUR handlers stand down on Shift rather than
+    ## relying on the browser to override them — see the module header for the
+    ## per-engine measurement that replaced an earlier "(Chrome, Firefox)".
 
   ContextMenuHintClass* = "context-menu-hint"
     ## The row's only class. Deliberately NOT `context-menu-item` and NOT
