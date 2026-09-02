@@ -567,8 +567,22 @@ expect_says ".pre-commit-config.yaml" "and names the generated file that is miss
 expect_says "direnv allow" "and names the remedy"
 
 ln -s /dev/null "$REPO/.pre-commit-config.yaml"
+# The generated tree-sitter parser: only asked about when its directory exists,
+# because CI clones with `submodules: false` and skips the regen on purpose.
+mkdir -p "$REPO/libs/tree-sitter-nim/src"
 run_guard --devshell-init
-expect_rc 0 "once the generated symlink is there, it passes"
+expect_rc 1 "an initialised tree-sitter-nim submodule with no generated parser.c fails"
+expect_says "libs/tree-sitter-nim/src/parser.c" "and names the generated file"
+
+rm -rf "$REPO/libs"
+run_guard --devshell-init
+expect_rc 0 "and does NOT ask about it where the directory is absent (the CI shape)"
+expect_says "the dev shell has initialised this checkout" "reporting a pass instead"
+
+mkdir -p "$REPO/libs/tree-sitter-nim/src"
+: >"$REPO/libs/tree-sitter-nim/src/parser.c"
+run_guard --devshell-init
+expect_rc 0 "once the generated symlink and the parser are there, it passes"
 expect_says "It does not say the shell is entered NOW" "and its passing line refuses to be read as --verify"
 
 # -----------------------------------------------------------------------------
