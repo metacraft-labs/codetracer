@@ -899,6 +899,22 @@ jobs:
                 fail=1
                 continue
               fi
+              # AND THE `max-age` IS ACTUALLY LONG, not merely accompanied by
+              # the word `immutable`. Measured 2026-09-02: the pages.dev origin
+              # serves `.js` and `.wasm` under `/assets/` identically, and every
+              # CUSTOM DOMAIN edge-caches the `.js` (`cf-cache-status:
+              # REVALIDATED`) and rewrites its browser TTL to 14400, while the
+              # `.wasm` is not edge-cached (`DYNAMIC`) and passes through. That
+              # is also why the 2026-09-01 staleness hit the worker and not the
+              # modules. A zone can therefore return `max-age=14400, immutable`,
+              # where the digest bought four hours rather than a year, and a
+              # grep for the word would call it a success.
+              max_age="$(printf '%s' "$cc" | sed -n 's/.*max-age=\([0-9][0-9]*\).*/\1/p')"
+              if [ "$hashed" -eq 1 ] && [ -n "$max_age" ] && [ "$max_age" -lt 86400 ]; then
+                echo "  $base/$rel carries a digest and is served '$cc' — max-age=$max_age is under a day, so the content-addressed name is buying revalidation, not caching" >&2
+                fail=1
+                continue
+              fi
               if printf '%s' "$cc" | grep -qi 'immutable'; then
                 if [ "$hashed" -eq 1 ]; then
                   echo "  ok: $base/$rel -> ${cc:-<none>}"
