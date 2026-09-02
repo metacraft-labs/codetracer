@@ -49,11 +49,13 @@ pub struct CtLoadLocalsResponseBody {
 /// The wire spellings of [`FlowMode`], in variant order.
 ///
 /// These strings are the cross-language contract for `ct/load-flow`.
-/// `src/common/common_types/codetracer_features/flow.nim` declares the
-/// identical list next to its own `FlowMode`, and
-/// `tests/flow_mode_wire_test.rs` reads that file and fails if the two ever
-/// disagree — the drift this constant exists to prevent was silent for as
-/// long as the wire form was an ordinal.
+/// `src/common/flow_mode_wire.nim` declares the identical list as
+/// `FlowModeWireNames` (the engine `FlowMode` it spells lives in
+/// `src/common/common_types/codetracer_features/flow.nim`), and
+/// `tests/flow_mode_wire_test.rs` reads that file — plus
+/// `viewmodels/flow_vm.nim` for the view-granularity enum — and fails if
+/// the vocabularies ever disagree; the drift this constant exists to
+/// prevent was silent for as long as the wire form was an ordinal.
 pub const FLOW_MODE_WIRE_NAMES: &[&str] = &["call", "diff"];
 
 /// Flow mode for the flow preloader.
@@ -158,7 +160,7 @@ impl<'de> Deserialize<'de> for FlowMode {
     }
 }
 
-/// args for `ct/load-locals`
+/// args for `ct/load-flow`
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
@@ -2675,10 +2677,16 @@ pub struct GoToTicksArguments {
     ///
     /// Nothing reads it: `Handler::goto_ticks` uses only `ticks`, and
     /// the sibling `ct/timeline-seek` path already passes
-    /// `thread_id: 0` (`dap_server.rs:2144`). It is kept rather than
-    /// deleted because the Python API's `trace.goto_ticks` still sends
-    /// it, and silently rejecting a field a client supplies is the
-    /// habit this file is trying to break.
+    /// `thread_id: 0`. It is kept rather than deleted because live
+    /// senders still put it on the wire: the Python bridge in
+    /// `backend-manager` synthesizes `{"threadId": 1, "ticks": …}`
+    /// when it relays a `ct/py-navigate` `goto_ticks` (see
+    /// `BackendManager`'s py-navigate arm — the Python client itself
+    /// only sends `tracePath`/`method`/`ticks`), and the wasm-testing
+    /// harnesses (`wasm-testing/replay-test.js`,
+    /// `wasm-testing/node-host/probe_reverse_step_in.mjs`) send
+    /// `threadId: 1` directly. Silently rejecting a field a client
+    /// supplies is the habit this file is trying to break.
     #[serde(default)]
     pub thread_id: i64,
     pub ticks: i64,
