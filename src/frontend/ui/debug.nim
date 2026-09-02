@@ -228,6 +228,47 @@ proc initDebugControlsVMWithStore*(store: ReplayDataStore) =
     clog "DebugControlsVM: re-wired onDapStep/onAction bridge after replacement"
   tryMountIsoNimDebugControls()
 
+proc remountDebugControls*() =
+  ## Re-attempt the toolbar mount after the surface has changed under it.
+  ##
+  ## THE MOUNT GIVES UP, AND NOTHING RETRIES IT. `initDebugControlsVMWithStore`
+  ## ends by calling `tryMountIsoNimDebugControls`, whose `doMount` polls for
+  ## `#isonim-debug-controls` on `setTimeout(0)` and abandons the attempt after
+  ## 100 ticks. On the web that call happens inside `onNoTrace`, which runs
+  ## while `enterTemplateEditMode` is still delivering — before GoldenLayout
+  ## and the menu shell have drawn — so the host does not exist yet and the
+  ## hundred ticks expire against an empty document. The sibling panels log the
+  ## same shape out loud (`tryMountIsoNimStatePanel: not ready after 200
+  ## retries, giving up`); this one gives up quietly because `isoNimDebugMounted`
+  ## stays `false` and no later event calls it again.
+  ##
+  ## So a caller that has just CHANGED the surface asks for the mount again.
+  ##
+  ## THROUGH THE REPAIR PREDICATE, NOT PAST IT. The first version of this proc
+  ## called `tryMountIsoNimDebugControls` directly and did nothing at all,
+  ## because the toolbar HAD mounted — at boot, into the menu shell's host —
+  ## and `isoNimDebugMounted` was still `true`. What the layout swap does is
+  ## rebuild the menu shell, and `renderMenuShellInto` begins with
+  ## `clearChildren(container)`: the flag stays true over a host that is now
+  ## empty, which is exactly the state `shouldRemountDebugControls` exists to
+  ## name. Measured: `mount COMPLETE` at boot, then `skipping (already
+  ## mounted)` after the transition, with no toolbar on screen.
+  ##
+  ## So this asks the predicate the same question `requestDebugControlsRender`
+  ## asks, and clears the flag before re-mounting when the host has been
+  ## emptied underneath it. A no-op when the toolbar is genuinely up.
+  let container = dom_api.getElementById(
+    dom_api.document,
+    cstring"isonim-debug-controls")
+  if dom_api.isNodeNil(dom_api.Node(container)):
+    return
+  if not shouldRemountDebugControls(
+      isoNimDebugMounted,
+      not dom_api.isNodeNil(dom_api.Node(container).firstChild)):
+    return
+  isoNimDebugMounted = false
+  tryMountIsoNimDebugControls()
+
 proc initDebugControlsVM() =
   ## Lazily create the parallel DebugControlsVM backed by a stub
   ## BackendService.  Fallback when no shared store has been provided

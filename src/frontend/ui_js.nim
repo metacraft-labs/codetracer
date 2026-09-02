@@ -4952,7 +4952,11 @@ when defined(ctWeb):
               data.ui.resolvedConfig = resolved
             except:
               cerror "replay: could not load the debugging layout"
-          requestInitialPanelData(data))
+          requestInitialPanelData(data)
+          # The toolbar's own mount gave up during boot, against a document
+          # that had not drawn the menu shell yet. Now that the surface exists
+          # and has just been rebuilt, ask again — a no-op if it is already up.
+          debug.remountDebugControls())
 
         # BUILD IS THE CONFIGURED ACTION, NOT A NEW CHORD.
         #

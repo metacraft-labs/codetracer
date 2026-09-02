@@ -339,8 +339,9 @@ ck "$([ "${distinct}" -gt 1 ] && echo ok || echo no)" \
 # its position and leave the editor on line 1 forever.
 step_button="$(field "${control}" '.stepButtonPresent')"
 carets="$(field "${control}" '.caretPositions | length')"
+wait_ms="$(field "${control}" '.stepButtonWaitMs')"
 ck "$([ "${step_button}" = true ] && echo ok || echo no)" \
-	"the debugger's step control is mounted (Run leaves edit mode)"
+	"the debugger's step control is mounted (Run leaves edit mode), after ${wait_ms}ms"
 ck "$([ "${carets}" -gt 1 ] && echo ok || echo no)" \
 	"and stepping moved the painted caret through ${carets} position(s)"
 

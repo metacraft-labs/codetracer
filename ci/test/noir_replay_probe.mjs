@@ -150,6 +150,7 @@ const report = {
   editorRejected: [],
   editorWidgetCount: -1,
   stepButtonPresent: false,
+  stepButtonWaitMs: -1,
   caretPositions: [],
   gestureError: '',
   noSourceVisible: false,
@@ -301,8 +302,28 @@ try {
   // user makes rather than a ViewModel call a user cannot reach. A shortcut
   // was the first shape and it measured Mousetrap's `stopCallback` more than
   // it measured the debugger.
-  report.stepButtonPresent = await page.evaluate(
-    () => !!document.querySelector('.step-forward'));
+  // WAITED FOR, NOT SAMPLED ONCE. The debug toolbar mounts when the layout
+  // swap has rebuilt the menu shell and the repair has re-run, which is
+  // several asynchronous steps after the `start` message this probe settles
+  // on — an 18 MB engine has to instantiate, answer a handshake and report a
+  // position first. A single `querySelector` immediately after the settle
+  // read `false` over a control the renderer mounted moments later, and the
+  // console said `mount COMPLETE` in the same run.
+  //
+  // Absence after a BOUNDED wait is still absence, so this does not weaken
+  // the assertion; `stepButtonWaitMs` is reported so a control that only
+  // appears after an implausible delay is visible as such rather than as a
+  // clean pass.
+  {
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline) {
+      if (await page.evaluate(() => !!document.querySelector('.step-forward'))) break;
+      await page.waitForTimeout(500);
+    }
+    report.stepButtonPresent = await page.evaluate(
+      () => !!document.querySelector('.step-forward'));
+    report.stepButtonWaitMs = 20000 - Math.max(0, deadline - Date.now());
+  }
   // The debug controls live in a pane the EDIT layout does not mount, so the
   // control is asked for and its absence RECORDED rather than treated as a
   // harness failure: whether a replay session brings the debugger panes up is
@@ -448,8 +469,15 @@ report.engineRequests = wasmRequests.filter((r) => isEnginePath(r.url));
 report.engineFetched = report.engineRequests.some(
   (r) => r.status === 200 && String(r.contentType).includes('wasm'));
 report.pageErrors = pageErrors;
+// THE FILTER IS PART OF THE INSTRUMENT, and it hid the answer twice. The
+// renderer's own mount traces are `cdebug` lines carrying a module name and no
+// `codetracer-` prefix, so a filter keyed on that prefix reported an empty set
+// for a question the page had already answered out loud. Anything naming a
+// mount, a panel or the debug toolbar is kept.
 report.consoleLines = consoleLines.filter((l) =>
-  l.includes('codetracer-') || l.includes('Error') || l.includes('error:'));
+  l.includes('codetracer-') || l.includes('Error') || l.includes('error:') ||
+  l.includes('Mount') || l.includes('mount') || l.includes('isonim') ||
+  l.includes('DebugControls') || l.includes('retries'));
 
 await browser.close();
 console.log(JSON.stringify(report, null, 2));
