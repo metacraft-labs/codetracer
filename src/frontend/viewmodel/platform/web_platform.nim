@@ -597,6 +597,30 @@ proc buildShell(web: WebPlatform; profile: PlatformProfile): ShellFacade =
 # Construction
 # ---------------------------------------------------------------------------
 
+var installedRegistry: WasmRegistry
+  ## The registry the LIVE platform was built over.
+  ##
+  ## `Platform` deliberately carries no registry — it is a capability facade,
+  ## and "which wasm modules exist" is not a capability. But the edit-mode
+  ## toolbar needs exactly that: on the browser tier `platformVerdict` resolves
+  ## a command *at subcommand granularity*, so `nargo compile` is enabled and
+  ## `nargo fmt` is refused BY NAME from the same profile. Handing it an empty
+  ## registry would disable Build and Run on a deployment that ships a working
+  ## compiler — a dead button with a true-sounding reason, which is worse than
+  ## no button.
+  ##
+  ## Module-level rather than threaded through `Platform` because the
+  ## alternative is a field on a type in the host-free surface that only one
+  ## instantiation can populate, and `capabilities.nim`'s own argument against
+  ## `kind`-branching applies: the facade should stay about what you *can do*.
+
+proc currentWasmRegistry*(): WasmRegistry =
+  ## What the installed web platform can run. An empty registry is the honest
+  ## answer on every other instantiation and before `newWebPlatform` runs, and
+  ## it is also the answer that makes the toolbar refuse *with the profile's
+  ## own sentence* rather than claim a compiler it does not have.
+  installedRegistry
+
 proc newWebPlatform*(bridge: BrowserBridge; store: StoreSession): WebPlatform =
   ## Assemble the seven facades over a store that is already open.
   ##
@@ -629,6 +653,11 @@ proc newWebPlatform*(bridge: BrowserBridge; store: StoreSession): WebPlatform =
       capability: capProcessSignal, behaviour: webNoModulesLoaded)
 
   profile = profile.withCapabilities(capabilities, degradations)
+
+  # Recorded here, beside the branch that reads the same field to decide
+  # `capProcessSpawn`, so the registry the toolbar resolves against and the
+  # registry the profile was derived from cannot be two different values.
+  installedRegistry = bridge.wasm.registry
 
   result = WebPlatform(
     platform: newPlatform(profile),

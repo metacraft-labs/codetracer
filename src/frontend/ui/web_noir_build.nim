@@ -97,6 +97,13 @@ import ./build as build_pane
 from ./errors import
   syncErrorsAppendProblem, syncErrorsClear, highlightFirstBuildError
 from ../viewmodel/store/types import BuildProblemLine
+# THE EDIT-MODE TOPBAR. `editModeToolbar` composes the model, `debug` mounts
+# it, and `currentWasmRegistry` is what lets the browser tier resolve
+# `nargo compile` at subcommand granularity instead of refusing every command.
+from ../viewmodel/viewmodels/edit_mode_toolbar import
+  editModeToolbar, EditToolbarModel, ToolbarMode
+from ../viewmodel/platform/web_platform import currentWasmRegistry
+import ./debug
 
 export noir_build_producer
 
@@ -602,6 +609,53 @@ proc stopNoirBuild*() =
 # ---------------------------------------------------------------------------
 # Installation
 # ---------------------------------------------------------------------------
+
+proc installEditModeToolbar*(invoke: proc(id: string)) =
+  ## Compose the edit-mode topbar from what this tab actually is, and hand it
+  ## to the mount.
+  ##
+  ## `invoke` is the caller's, because the thing a Build button must do —
+  ## SAVE, then compile — lives in `ui_js.nim` as `saveThenCompile`, which is
+  ## also what `data.actions[ClientAction.build]` and Ctrl+B dispatch through.
+  ## Reaching it from here would be an import cycle; reproducing it would be a
+  ## second path to the same feature, and the two would drift on the first fix
+  ## applied to one of them.
+  ##
+  ## THIS PROC IS THE WHOLE OF WHY THE FEATURE WAS INVISIBLE.
+  ## `viewmodels/edit_mode_toolbar.nim` is 1043 lines, tested on both backends,
+  ## and until now was imported by nothing outside its own two suites — a
+  ## correct capability that nothing reached, which is this campaign's most
+  ## common defect and was the user's bug report in its visible form.
+  ##
+  ## Composed HERE rather than in `ui/debug.nim` because a model needs three
+  ## things only a platform knows, and `debug.nim` is shared with the desktop:
+  ##
+  ##   * the PROFILE — `capProcessArbitraryPrograms` vs the browser's
+  ##     `capProcessSpawn`, which is what makes Build enabled or refused;
+  ##   * the REGISTRY — resolved at subcommand granularity, so `nargo compile`
+  ##     is allowed and a subcommand this build lacks is refused by name;
+  ##   * the LISTING — `Nargo.toml` is what `projectKinds` recognises, and it
+  ##     is read from `currentProject()` for the same reason the build
+  ##     callbacks are: a frozen copy compiles a project the user has since
+  ##     edited away from.
+  ##
+  ## Called on every install and after every save, so a file that adds a
+  ## `Nargo.toml` changes the toolbar rather than waiting for a reload.
+  let platform = ctPlatform()
+  let project = currentProject()
+  var listing: seq[string] = @[]
+  for file in project.files:
+    listing.add file.path
+
+  let model = editModeToolbar(
+    platform.profile,
+    ToolbarMode(data.ui.mode.ord),
+    listing = listing,
+    wasm = currentWasmRegistry())
+
+  debug.setEditModeToolbar(model, invoke)
+  report("edit-toolbar", "buttons=" & $model.buttons.len &
+    " kinds=" & $model.kinds.len & " group=" & $model.commandGroupVisible)
 
 proc installNoirBuildCommands*(tmpl: ProjectTemplate) =
   ## Point the BUILD pane's ▶ and ■ at the wasm toolchain.

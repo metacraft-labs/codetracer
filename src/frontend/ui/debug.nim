@@ -23,6 +23,16 @@ from ../viewmodel/viewmodels/debug_controls_vm import
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_debug_controls_view import
   mountIsoNimDebugControls
+# THE EDIT-MODE TOPBAR. `viewmodels/edit_mode_toolbar` shipped complete and
+# reached nobody; this import and the branch in `doMount` are what make it
+# reachable. The model is composed by the platform (it needs the profile, the
+# wasm registry and the project's file listing, none of which this module
+# knows) and handed here through `setEditModeToolbar`.
+from ../viewmodel/viewmodels/edit_mode_toolbar import
+  EditToolbarModel, ToolbarMode, TopbarSurface, topbarSurface,
+  tsEditCommands, tsDebuggerControls
+from ../viewmodel/views/isonim_edit_mode_toolbar_view import
+  mountIsoNimEditModeToolbar
 from ../viewmodel/views/isonim_debug_shell_view import
   DebugShellId, commandPaletteHostId, renderDebugChromeInto
 from isonim/web/web_renderer import WebRenderer
@@ -34,6 +44,52 @@ var debugControlsVMInstance: DebugControlsVM
 var debugControlsVMStore: ReplayDataStore
 var isoNimDebugMounted: bool = false
 var debugShellMountedCommandPaletteId: int = -2
+
+# ---------------------------------------------------------------------------
+# WHICH SURFACE THE TOPBAR HOST IS CARRYING
+# ---------------------------------------------------------------------------
+#
+# `#isonim-debug-controls` holds ONE of two panels, never both, and which one
+# is a function of the layout mode. Recording the surface that is actually
+# mounted — rather than deriving it again when asked — is what lets a mode
+# transition be detected: `isoNimDebugMounted` is true and the host has
+# children in BOTH modes, so `shouldRemountDebugControls` correctly declines,
+# and a switch would otherwise leave the previous mode's panel on screen.
+# That predicate answers "was my host emptied underneath me"; this variable
+# answers "is my host showing the wrong thing", and they are different
+# questions.
+var mountedTopbarSurface: TopbarSurface = tsDebuggerControls
+
+var editToolbarModel: EditToolbarModel
+var editToolbarInvoke: proc(id: string)
+var editToolbarAvailable: bool = false
+  ## Whether a platform has handed us a model. FALSE is a working state, not a
+  ## failure: `topbarSurface` then answers `tsDebuggerControls` for every mode,
+  ## which is exactly what shipped before this feature. A platform that never
+  ## installs a model is unchanged rather than blank, and an empty topbar would
+  ## be a worse defect than the one this fixes.
+
+proc refreshTopbarSurface*()
+
+proc currentTopbarSurface(): TopbarSurface =
+  ## `LayoutMode` and `ToolbarMode` are ordinal-for-ordinal mirrors, and
+  ## `edit_mode_toolbar.nim` carries a `static` assertion that fails the build
+  ## if they ever drift — so this conversion cannot silently mean the wrong
+  ## mode.
+  topbarSurface(ToolbarMode(data.ui.mode.ord), editToolbarAvailable)
+
+proc setEditModeToolbar*(model: EditToolbarModel; invoke: proc(id: string)) =
+  ## Install (or replace) the composed edit-mode toolbar.
+  ##
+  ## Replacing is the common case, not the rare one: the model is a value, so
+  ## every change a user makes that could alter it — saving a file that adds a
+  ## `Nargo.toml`, a build finishing — arrives as a NEW model rather than as a
+  ## signal the panel is watching. Re-mounting on install is therefore how the
+  ## toolbar stays true, and it is cheap: four buttons.
+  editToolbarModel = model
+  editToolbarInvoke = invoke
+  editToolbarAvailable = true
+  refreshTopbarSurface()
 
 # Reference to the live `DebugComponent` (and its mediator API) that
 # was wired with `register()`. Captured by `register()` and consulted
@@ -140,8 +196,18 @@ proc tryMountIsoNimDebugControls() =
 
     cdebug "tryMountIsoNimDebugControls: container found, mounting now"
     isoNimDebugMounted = true
-    mountIsoNimDebugControls(container, debugControlsVMInstance)
-    cdebug "tryMountIsoNimDebugControls: mount COMPLETE"
+    # THE BRANCH THIS WHOLE FEATURE IS. Everything above is the host-finding
+    # retry loop and is unchanged; the only new question is which panel goes
+    # into the host it found.
+    let surface = currentTopbarSurface()
+    mountedTopbarSurface = surface
+    case surface
+    of tsEditCommands:
+      mountIsoNimEditModeToolbar(container, editToolbarModel,
+                                 editToolbarInvoke)
+    of tsDebuggerControls:
+      mountIsoNimDebugControls(container, debugControlsVMInstance)
+    cdebug "tryMountIsoNimDebugControls: mount COMPLETE surface=" & $surface
     # The legacy Karax `#debug` div is hidden on next Karax redraw
     # cycle — see the `isoNimDebugMounted` check at the top of
     # `DebugComponent.render`.
@@ -296,6 +362,36 @@ proc remountDebugControls*() =
       isoNimDebugMounted,
       not dom_api.isNodeNil(dom_api.Node(container).firstChild)):
     return
+  isoNimDebugMounted = false
+  tryMountIsoNimDebugControls()
+
+proc refreshTopbarSurface*() =
+  ## Re-mount when the host is showing the WRONG surface.
+  ##
+  ## WHY THIS CANNOT GO THROUGH `shouldRemountDebugControls`. That predicate is
+  ## `not (mounted and hostHasChildren)` — it exists to notice a host that a
+  ## menu-shell rebuild emptied underneath a still-`true` flag. After a mode
+  ## switch neither term helps: the flag is true and the host is full, because
+  ## the PREVIOUS mode's panel is sitting in it. Asking that question here
+  ## would return false every time and the debugger controls would stay on
+  ## screen in Edit mode — which is the bug report, reintroduced one layer up.
+  ##
+  ## So the question this asks is the other one: is what is mounted what the
+  ## mode calls for. A no-op when they already agree, which is what makes it
+  ## safe to call from every transition rather than from a chosen few.
+  if not isoNimDebugMounted:
+    # Nothing is up yet; the pending mount will read the mode itself.
+    tryMountIsoNimDebugControls()
+    return
+  if currentTopbarSurface() == mountedTopbarSurface:
+    return
+  let container = dom_api.getElementById(
+    dom_api.document,
+    cstring"isonim-debug-controls")
+  if dom_api.isNodeNil(dom_api.Node(container)):
+    return
+  cdebug "refreshTopbarSurface: " & $mountedTopbarSurface & " -> " &
+    $currentTopbarSurface()
   isoNimDebugMounted = false
   tryMountIsoNimDebugControls()
 
