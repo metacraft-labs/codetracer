@@ -362,7 +362,27 @@ suite "EMT §3/§7.1 reading declarations, and selecting among them":
         desktopProfile, EditMode,
         tasksJson = FourBuildTasksOneDefault, listing = @["Cargo.toml"])
       ck declared.build.provenance == cpDeclared
-      ck declared.build.command != "cargo"
+      # THE ASSERTION THIS REPLACES WAS `declared.build.command != "cargo"`,
+      # and it could not pass on any correct implementation.
+      #
+      # `ToolbarButton.command` is THE EXECUTABLE — its own doc comment says
+      # so, and the twin four lines down (`guessed.build.command == "cargo"`)
+      # depends on that meaning. Every one of `FourBuildTasksOneDefault`'s four
+      # tasks runs `cargo`, so the declared winner's executable IS `cargo`, and
+      # a model that answered anything else would be reporting the wrong
+      # program. The check was asking the executable field to carry a fact
+      # about provenance that the line above already carries properly.
+      #
+      # What the test's own docstring asks for is `cargo build` DOES NOT APPEAR
+      # AT ALL — a statement about the command LINE, which is the field the
+      # model gives that meaning to (`commandLine`, "the full line"). So the
+      # line is what is asserted, and it is asserted positively: the default
+      # declared task is `release`, i.e. `cargo build --release`. That is
+      # strictly stronger than the inequality it replaces — it rules out the
+      # conventional `cargo build` AND pins that the `isDefault` task won over
+      # the three non-default ones, which is the other half of "a declaration
+      # beats the guess".
+      ck declared.build.commandLine == "cargo build --release"
       let guessed = editModeToolbar(
         desktopProfile, EditMode, tasksJson = "", listing = @["Cargo.toml"])
       ck guessed.build.provenance == cpConventional
