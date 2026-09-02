@@ -62,10 +62,16 @@
 # `--require <tool>…` is that rule as one command: it verifies STRICTLY and
 # then prints the one-line stamp, and there is no way to obtain the stamp
 # without having passed the refusal. A measurement script calls it, and puts
-# the line it prints next to the number. `ci/deploy/build-noir-wasm.sh` is the
-# first caller — its `EXPECT_COMPILER_BYTES` / `EXPECT_TRACER_BYTES` land in a
-# tracked file, and its own pin file already records that "a rustc bump moves
-# them further", which is the toolchain reaching a committed number.
+# the line it prints next to the number.
+#
+# The first caller is `ci/deploy/build-noir-wasm.sh`, WHICH EXISTS ONLY ON THE
+# `cloud` MAINLINE — said here explicitly because this file is identical on both
+# and a reader on `dev` would otherwise go looking for a path that is not there.
+# Its `EXPECT_COMPILER_BYTES` / `EXPECT_TRACER_BYTES` land in a tracked file, and
+# its own pin file already records that "a rustc bump moves them further", which
+# is the toolchain reaching a committed number. There is no such caller on `dev`
+# yet; the rule is stated here and enforced wherever it is invoked, not assumed
+# to be in force everywhere.
 #
 # ## What is pinned, what is verified, and why the split is drawn here
 #
