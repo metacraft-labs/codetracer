@@ -26,6 +26,8 @@ import isonim/core/[signals, computation]
 import isonim/dsl/ui
 import isonim/testing/mock_dom
 
+import ./debug_control_marks
+
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
@@ -297,6 +299,15 @@ when defined(js):
     # reactiveDisabled(r, jumpLiveBtn,   proc(): bool = not vm.canJumpToLive.val)  # TODO: re-enable with jump-to-live-debug
     # reactiveDisabled(r, jumpLiveBtn,   proc(): bool = not vm.showJumpToLive.val)  # TODO: re-enable with jump-to-live-debug
     reactiveHidden(r, headIndicator,   proc(): bool = not vm.showRecordingHead.val)
+
+    # The stepping marks. They are attached from the `ControlMarks` table
+    # rather than written into the twelve `button(...)` calls above, so the
+    # bar's structure stays readable at one glance and the marks stay in one
+    # place. They are inline SVG painted with `currentColor` — see
+    # `debug_control_marks` for why a `background-image` could not be themed.
+    # A short count logs itself there: a bar whose marks failed to attach
+    # still renders its buttons and they still click, so nothing else notices.
+    discard attachControlMarks(panel)
 
     panel
 

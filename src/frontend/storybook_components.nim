@@ -63,6 +63,7 @@ import viewmodel/views/[
   isonim_calltrace_view,
   isonim_command_palette_view,
   isonim_debug_controls_view,
+  debug_control_marks,
   isonim_debug_shell_view,
   isonim_editor_view,
   isonim_errors_view,
@@ -1634,3 +1635,20 @@ proc mountTerminalOutputPanel*(container: isonim_dom.Element;
                                fixture: cstring): DisposeProc {.exportc.} =
   ## Backward-compatible export used by the original terminal story.
   mountTerminalOutput(container, $fixture)
+
+proc ctAttachDebugControlMarks*(container: isonim_dom.Element): int
+    {.exportc, discardable.} =
+  ## Put the debugger strip's marks on a toolbar that some OTHER producer
+  ## built, and answer how many were placed.
+  ##
+  ## `CodeTracerSurfaces.stories.js` hand-builds a reference shell whose
+  ## header is a row of empty `#{action}-image` buttons. It used to be filled
+  ## in by `button.styl`'s `background-image` rules, and when those went away
+  ## — the marks are inline SVG now, so that a theme can colour them — that
+  ## replica would have started drawing a bar of blank buttons.
+  ##
+  ## Exporting the real attachment is the fix, rather than transcribing
+  ## twelve paths into the story: a transcription is a second copy of the
+  ## geometry that nothing compares against, which is exactly the failure
+  ## mode `ControlMarks` exists to prevent.
+  attachControlMarks(container)
