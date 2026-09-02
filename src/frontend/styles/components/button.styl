@@ -21,7 +21,19 @@ button
     color: colors-ui-text-primary-body
 
   &:disabled
-    color: colors-ui-text-disabled-default !important
+    // `colors-ui-text-disabled-default` was never a token. The generated set
+    // spells it `colors-ui-text-primary-disabled` (`generated/mapped.styl`),
+    // and Stylus passes an unknown identifier through as a bare literal
+    // rather than failing, so the built CSS carried
+    // `color: colors-ui-text-disabled-default` — which no browser can parse
+    // and every browser drops. A disabled button therefore got `opacity` and
+    // no colour change at all, for as long as the rule has existed.
+    //
+    // That matters here beyond tidiness: the toolbar's marks are now inline
+    // SVG painted `currentColor`, so this declaration IS the inert treatment.
+    // Left misspelled, the marks would inherit the enabled colour and be told
+    // apart from live controls by opacity alone.
+    color: colors-ui-text-primary-disabled !important
     opacity: 0.5
     pointer-events: none
     cursor: not-allowed
@@ -80,6 +92,11 @@ button
   background-size: auto 1em !important
   background-repeat: no-repeat
   border-radius: 0.375em !important
+  // `button` is already `display: inline-flex`; these two centre an inline
+  // SVG mark the way `background-position: center` centred the images that
+  // some of these buttons still use.
+  align-items: center
+  justify-content: center
 
 [class*="ct-button-image-lg-"]
   width: 2em
@@ -105,32 +122,31 @@ button
   height: 1em
   max-height: 1em
 
-#next-image
-  background-image: ct-images-next
-
-#reverse-next-image
-  background-image: ct-images-reverse-next
-
-#step-in-image
-  background-image: ct-images-step-in
-
-#reverse-step-in-image
-  background-image: ct-images-reverse-step-in
-
-#step-out-image
-  background-image: ct-images-step-out
-
-#reverse-step-out-image
-  background-image: ct-images-reverse-step-out
-
-#continue-image
-  background-image: ct-images-continue
-
-#reverse-continue-image
-  background-image: ct-images-reverse-continue
-
-#reset-operation-image
-  background-image: ct-images-reset-operation
+// -- The debugger control strip's marks --
+//
+// The twelve marks on this bar are inline SVG (`views/debug_control_marks`),
+// not `background-image`. They used to be twelve `.svg` files with a
+// near-white fill baked in, named by `ct-images-*` variables that ONLY
+// `default_dark_theme.styl` defined. On the white theme those identifiers
+// resolved to nothing, and Stylus emits an unknown identifier as a bare
+// literal instead of failing — so the built white CSS carried
+// `background-image: ct-images-continue`, which every browser drops, and the
+// strip rendered twelve blank buttons. A mark that inherits `color` cannot
+// have either failure: there is no asset to leave undefined and no colour to
+// bake in.
+//
+// This rule sizes them and nothing else. No `fill` or `stroke` here: those
+// are `currentColor` on the paths themselves, and a CSS `fill` would override
+// the `fill="none"` that the stroked marks need on their arrow.
+.ct-control-mark
+  // 1em square, which is the height `background-size: auto 1em` gave the
+  // assets this replaces, so the strip's optical weight is unchanged.
+  width: 1em
+  height: 1em
+  flex: 0 0 auto
+  // The mark is decoration inside a button that already handles the click;
+  // without this, `:hover` flickers as the pointer crosses the glyph's edge.
+  pointer-events: none
 
 #reset-operation-loading-image
   background-image: ct-images-reset-operation-loading
@@ -144,21 +160,12 @@ button
 #jump-after-image
   background-image: ct-images-jump-after
 
-#run-to-entry-image
-  background-image: ct-images-run-to-entry
-
 #run-tests-image
 #jump-to-live-debug
   background-image: ct-images-run-tests
 
 #run-tests-loading-image
   background-image: ct-images-run-tests-loading
-
-#history-back-image
-  background-image: ct-images-history-back
-
-#history-forward-image
-  background-image: ct-images-history-forward
 
 #copy-path-image
   background-image: ct-images-copy-path

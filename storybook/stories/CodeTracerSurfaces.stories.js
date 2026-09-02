@@ -1306,6 +1306,16 @@ function renderDefaultDebugLayout(container, fixture) {
   const mounts = appendDefaultDebugLayout(root, variant);
 
   ensureComponentsLoaded().then(() => {
+    // The reference shell builds its own header of empty `#{action}-image`
+    // buttons. The marks that fill them are inline SVG owned by the Nim side
+    // (`views/debug_control_marks`), so they are fetched from there rather
+    // than transcribed here — a second copy of twelve paths in a story file
+    // is a copy nothing compares against.
+    const debugHeader = root.querySelector("#debug");
+    if (debugHeader && typeof ctAttachDebugControlMarks !== "undefined") {
+      ctAttachDebugControlMarks(debugHeader);
+    }
+
     const disposes = [];
     for (const { name, mount, fixture } of mounts) {
       try {
