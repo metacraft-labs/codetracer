@@ -679,8 +679,38 @@ proc jumpToCounterpart*(vm: EventLogVM; row: MarkerEventRow) =
     # ignores every argument — so the click moved the timeline inside
     # whichever recording happened to be active and nothing rotated.
     vm.onSwitchProcessProc(row.recordingId)
+  # `threadId` is REQUIRED and was missing. Rust's `GoToTicksArguments`
+  # declares `{thread_id, ticks}` with no `#[serde(default)]`, so a payload
+  # without it never reaches the handler: `load_args` fails and the engine
+  # answers `JSON error: missing field \`threadId\``. Measured against a real
+  # replay-server, not inferred — the jump moved nothing.
+  #
+  # It looked correct because of a coincidence of routing. `dap.nim` stamps a
+  # `threadId` onto outgoing requests only when `activeSessionThreadId != 0`,
+  # i.e. only after a MULTI-process session has rotated — which the
+  # `onSwitchProcessProc` call just above does when the counterpart lives in a
+  # sibling recording. So the cross-recording path was accidentally
+  # well-formed, and every other path sent an incomplete request and silently
+  # did nothing: any single-recording session, and any case where
+  # `entryForRecording` / `routingThreadId` bails out and leaves routing
+  # unchanged (both of which only `cerror` and return).
+  #
+  # Sending it explicitly makes the payload complete by construction rather
+  # than by side effect. `dap.nim` still overwrites it when multi-process
+  # routing is active, which is the precedence we want: that value is the
+  # recording-routing id.
+  #
+  # The dropped `rrTicks` was read by nothing: `dap_server.rs` deserialises
+  # `GoToTicksArguments` (`ticks` only) and the backend-manager arm reads
+  # `arguments.ticks`. A field no consumer reads, sitting beside the one that
+  # matters, makes the next reader think the payload was considered.
+  let threadId =
+    if vm.store.debugger.val.threadId != 0'u32:
+      int(vm.store.debugger.val.threadId)
+    else:
+      1
   let gotoArgs = %*{
-    "rrTicks": row.stepId,
+    "threadId": threadId,
     "ticks": row.stepId,
   }
   discard vm.store.backend.send("ct/goto-ticks", gotoArgs)

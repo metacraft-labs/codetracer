@@ -59,6 +59,7 @@ import ../../headless_session
 import ../../store/[replay_data_store, types]
 import ../../viewmodels/step_list_vm
 import ../../viewmodels/low_level_code_vm
+import ../../viewmodels/event_log_vm
 
 # ---------------------------------------------------------------------------
 # Fixture location
@@ -287,5 +288,50 @@ suite "row-click jumps move the debugger (real replay-server)":
     # THE EFFECT: the session is back at the row's tick and line.
     check session.getCurrentRRTicks() == start.ticks
     check session.getCurrentLine() == start.line
+    check session.getCurrentRRTicks() != away.ticks
+    check session.session.store.debugger.val.rrTicks == start.ticks
+
+  test "Event Log boundary chip lands the session on the counterpart's tick":
+    ## `EventLogVM.jumpToCounterpart` sent `{rrTicks, ticks}` and no
+    ## `threadId`. `GoToTicksArguments` has no serde default, so the engine
+    ## refused the request outright (`missing field threadId`) and the jump
+    ## moved nothing.
+    ##
+    ## It had tests. They asserted `mock.findCommand("ct/goto-ticks").isSome`
+    ## — true of a request the engine never accepts. This asserts the tick the
+    ## session actually landed on.
+    ##
+    ## Single-recording on purpose: that is the case the old payload could
+    ## never satisfy. With a sibling recording, `onSwitchProcessProc` rotates
+    ## the session first and `dap.nim` stamps a routing `threadId` onto the
+    ## request, which accidentally completed it — so a multi-recording fixture
+    ## would have passed either way and measured nothing.
+    let session = newHeadlessDebugSession(tracePath(), findReplayServer())
+    defer: session.close()
+
+    let start = session.positionOf()
+    let away = session.findDistinctLaterPosition(start, maxSteps = 20)
+    check away.ticks != start.ticks
+    check session.getCurrentRRTicks() == away.ticks
+
+    let vm = session.session.eventLogVM
+    check not vm.isNil
+    # No `recordingId`: nothing to rotate to, so nothing else can supply the
+    # `threadId` this request needs.
+    vm.jumpToCounterpart(MarkerEventRow(
+      eventIndex: 0,
+      markerId: 0,
+      boundaryId: "b",
+      keyText: "key",
+      keyValue: "k",
+      sourcePath: start.file,
+      sourceLine: start.line,
+      stepId: int64(start.ticks),
+    ))
+    session.checkMoveWasEmitted("Event Log boundary chip (ct/goto-ticks)")
+    session.consumeNextCompleteMove()
+
+    # THE EFFECT: the session is on the counterpart's tick.
+    check session.getCurrentRRTicks() == start.ticks
     check session.getCurrentRRTicks() != away.ticks
     check session.session.store.debugger.val.rrTicks == start.ticks
