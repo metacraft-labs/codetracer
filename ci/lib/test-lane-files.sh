@@ -572,8 +572,18 @@ test_lane_files() {
 		# exactly as the native desktop instantiation is on the JS one. So it is
 		# subtracted here and ADDED to `vm-unit-js`, which is the only lane that
 		# can run it.
+		# `headless_session` joins `recorder_gate` in the subtraction for the
+		# same reason, one dependency further down: importing it means the
+		# suite SPAWNS a real `replay-server`, and this lane's recipe
+		# (`just test-vm-unit`) does not build one. Every such suite happened
+		# to import `recorder_gate` too until `test_row_click_jump_vm.nim`,
+		# which needs the replay-server but no recorder — so matching only on
+		# `recorder_gate` would have left it here, failed `findReplayServer`,
+		# produced no `[OK]` line and scored `DID NOT RUN`. That is exactly
+		# the shape described above for `test_js_subdir_trace_vm.nim`; naming
+		# the second dependency keeps it from recurring.
 		_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
-			_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+recorder_gate([[:space:],]|$)' |
+			_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+((\.\./)*recorder_gate|(\.\./)*headless_session)([[:space:],]|$)' |
 			_tlf_reject '/test_collab_[a-z0-9_]*\.nim$' \
 				'/test_opfs_volume\.nim$'
 		;;
@@ -780,8 +790,12 @@ test_lane_files() {
 		# dependency rather than on three filename families is what puts
 		# `test_js_subdir_trace_vm.nim` in the lane whose runner builds a
 		# recorder — see the note in `vm-unit`.
+		# Extended to `headless_session` alongside `recorder_gate` so this stays
+		# the exact complement of `vm-unit`'s subtraction — the two predicates
+		# are one string, and a suite that needs a spawned `replay-server` but
+		# no recorder still lands in the only lane whose recipe builds one.
 		_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
-			_tlf_keep_matching_file '^[[:space:]]*import[[:space:]]+recorder_gate([[:space:],]|$)'
+			_tlf_keep_matching_file '^[[:space:]]*import[[:space:]]+((\.\./)*recorder_gate|(\.\./)*headless_session)([[:space:],]|$)'
 		;;
 
 	m16-release-gate)
