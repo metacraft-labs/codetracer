@@ -441,7 +441,13 @@ probe_dir() {
 		mkdir -p "${CT_PROBE_SCREENSHOT_DIR}"
 		shot="${CT_PROBE_SCREENSHOT_DIR}/${label}.png"
 	fi
+	# `probe_click_run` is a caller-set shell variable rather than an exported
+	# env var, so exactly the arm that wants it gets it. The click MUTATES the
+	# page — it clears the previous verdicts and moves the pane out of "not run
+	# yet" — so an arm that measured the pane after one would be measuring a
+	# different subject than every other arm.
 	CT_PROBE_SCREENSHOT="${shot}" CT_PROBE_HOST_MAP="${host_map}" \
+		CT_PROBE_CLICK_RUN="${probe_click_run:-}" \
 		node ci/test/web_renderer_probe.mjs "${url}" \
 		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
 	local rc=$?
@@ -517,6 +523,26 @@ run_arm() {
 
 # Read one field out of an arm's report. `json` is the only reader, so a
 # malformed report is one failure rather than eight.
+#
+# BOOLEANS COME BACK AS `true`/`false`, NOT AS PYTHON'S `True`/`False`, and
+# that spelling is the whole of this note. Until it was fixed this printed
+# `repr` — so a caller had to compare against `"True"`, which every caller but
+# one did. The one that did not was the newest check in the file:
+#
+#     r_rundisabled="$(json route dom.testRunButton.disabled)"
+#     if [ "${r_rundisabled}" = "false" ]; then ...
+#
+# `False` never equals `false`, so that check reported the Noir template's run
+# control DEAD on every run since it landed, and blocked the deploy. The
+# button was live the whole time: the probe's own report in
+# `pre-publish-mount-observations` said `"disabled": false` beside a title of
+# "Run the tests (nargo test)", which is the ENABLED title — the two agreed,
+# and only the reader disagreed with both.
+#
+# The lesson is not "spell it True". A gate that reports a defect the product
+# does not have costs exactly what a missed defect costs, and it cost a day
+# here plus a false report to the pane's owner. So the reader now speaks the
+# JSON the probe wrote, and a caller writing the obvious `"false"` is right.
 json() {
 	python3 -c '
 import json, sys
@@ -526,7 +552,14 @@ for key in sys.argv[2].split("."):
     if d is None:
         print("")
         sys.exit(0)
-print(d if not isinstance(d, list) else len(d))
+if isinstance(d, list):
+    print(len(d))
+elif d is True:
+    print("true")
+elif d is False:
+    print("false")
+else:
+    print(d)
 ' "${cache}/$1.json" "$2"
 }
 
@@ -926,6 +959,41 @@ PY2
 # that the user cannot see — and it is what arm R's visibility assertion
 # claims to detect. It must take the rows to ZERO while leaving the panel
 # mounted; anything else and the pair is not isolating paint from presence.
+# Arm P — THE DEPLOYMENT DELIVERS NO WASM WORKER SCRIPT.
+#
+# The negative control for the four checks that PRESS the run control. Without
+# it those four are the same unearned claim the check they replaced was making:
+# "the button worked" is only a measurement if there is a state in which this
+# harness would say it did not.
+#
+# THE FIRST VERSION OF THIS ARM DELETED `assets/noir_wasm*.wasm` AND FAILED,
+# which is what a negative control is for. Removing the compiler module does
+# NOT stop the dispatch: the worker is started optimistically and only then
+# discovers it has nothing to load, so `nbpTest-started` was reported and arm
+# R's run-start assertion would not have gone red. (It also showed the pane
+# still stating no reason a run cannot start with the module absent — a
+# separate observation about `noirTestRunAbsence`, and not what this arm is
+# for.) The worker SCRIPT is a step earlier in the same path: with it missing
+# `wasm_registry` cannot start anything, so the dispatch is refused, which is
+# the state that reddens the checks.
+#
+# It splits the four checks apart, which a cruder mutation would not: the
+# control stays painted and stays CLICKABLE here, so arm R's press check holds
+# while its run-start, verdict and pane-moved checks go red. That is the seam
+# that matters — the defect being guarded against is a control that takes a
+# click and runs nothing.
+mutate_no_wasm_worker() {
+	local dir="$1"
+	local before after
+	before="$(find "${dir}/assets" -maxdepth 1 -name 'wasm-worker*.js' 2>/dev/null | wc -l | tr -d ' ')"
+	# A mutation that found nothing to mutate must not report success: the arm
+	# would then measure an UNMUTATED bundle and call its verdict evidence.
+	[ "${before}" -gt 0 ] || return 1
+	find "${dir}/assets" -maxdepth 1 -name 'wasm-worker*.js' -delete
+	after="$(find "${dir}/assets" -maxdepth 1 -name 'wasm-worker*.js' 2>/dev/null | wc -l | tr -d ' ')"
+	[ "${after}" = "0" ]
+}
+
 mutate_covered_surface() {
 	local dir="$1"
 	grep -q '</div>' "${dir}/index.html" || return 1
@@ -1087,7 +1155,7 @@ c_renderer="$(json control rendererLine)"
 
 # NON-VACUITY FIRST. Everything after this reads `#dom-root`; if the probe
 # never found it, the rest are assertions about nothing.
-if [ "${c_present}" = "True" ]; then
+if [ "${c_present}" = "true" ]; then
 	ck ok "the probe reached a document that has #dom-root, so the checks below have a subject"
 else
 	ck fail "the probe found no #dom-root — every DOM check below would be vacuous"
@@ -1313,7 +1381,13 @@ echo "       welcome screen"
 # welcome screen (rule 0 — the language-neutral root names no language, so
 # there is no template to select) and `/noir` must not be. Either assertion
 # alone is satisfiable by a product that mounts one thing everywhere.
+# THE ONLY ARM THAT PRESSES ANYTHING. See `probe_dir`: the click is last in the
+# probe, after every measurement and after the screenshot, so the facts the
+# checks below read are the untouched pane; `runClick` alone describes what
+# happened afterwards.
+probe_click_run=1
 if ! run_arm route "" "/noir"; then
+	probe_click_run=""
 	ck fail "arm R could not be measured"
 	ck fail "arm R could not be measured (second half)"
 	ck fail "arm R could not be measured (third half)"
@@ -1322,7 +1396,11 @@ if ! run_arm route "" "/noir"; then
 	ck fail "arm R could not be measured (sixth half)"
 	ck fail "arm R could not be measured (status bar present)"
 	ck fail "arm R could not be measured (status bar unobscured)"
+	ck fail "arm R could not be measured (the run control was never pressed)"
 else
+	# Reset in BOTH branches: every arm after this one measures a pane nobody
+	# touched, and a leaked `1` would silently start running tests in them.
+	probe_click_run=""
 	r_present="$(json route dom.domRootPresent)"
 	r_welcome="$(json route dom.welcomeScreenRoots)"
 	r_fs="$(json route dom.filesystemPanels)"
@@ -1337,7 +1415,7 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 
 	# NON-VACUITY, same rule as the control arm: `welcomeScreenRoots == 0` over
 	# a page the probe never reached is indistinguishable from a correct route.
-	if [ "${r_present}" = "True" ]; then
+	if [ "${r_present}" = "true" ]; then
 		ck ok "arm R: /noir served the application document, so the checks below have a subject"
 	else
 		ck fail "arm R: /noir produced no #dom-root — the rewrite did not reach the SPA and every check below would be vacuous"
@@ -1438,13 +1516,13 @@ print(", ".join((d.get("dom", {}).get("statusBar") or {}).get("coveredBy") or []
 ' "${cache}/route.json" 2>/dev/null)"
 	# NON-VACUITY FIRST. `unobscured` over a page with no status bar would be
 	# an absence reported as a pass, which is this gate's founding defect.
-	if [ "${r_bar_found}" = "True" ] && [ "${r_bar_points}" = "3" ]; then
+	if [ "${r_bar_found}" = "true" ] && [ "${r_bar_points}" = "3" ]; then
 		ck ok "arm R: the status bar is in the document and all three probe points across it are testable"
 	else
 		ck fail "arm R: no testable status bar (found=${r_bar_found}, points=${r_bar_points}) — the occlusion check below would be vacuous"
 		dump_arm route
 	fi
-	if [ "${r_bar_clear}" = "True" ]; then
+	if [ "${r_bar_clear}" = "true" ]; then
 		ck ok "arm R: nothing is painted over the status bar"
 	else
 		ck fail "arm R: the status bar is covered by ${r_bar_by} — a surface has taken the bottom of the screen, which is the defect the durability banner shipped"
@@ -1636,10 +1714,61 @@ print(" ".join(r["name"] for r in rows))
 	else
 		ck fail "arm R: Test Results paints no run control — five rows and no way to run them"
 	fi
-	if [ "${r_rundisabled}" = "false" ]; then
-		ck ok "arm R: and it is live rather than a painted-but-dead affordance"
+	# AND THE ASSERTION IS THE PRESS, NOT THE CLASS.
+	#
+	# This check used to read `dom.testRunButton.disabled`, which is
+	# `className.includes('disabled')` — and that is precisely the fact that
+	# cannot distinguish the two cases it was written to distinguish. A control
+	# that is painted, not styled dead, correctly titled and WIRED TO NOTHING
+	# scores identically to a working one. It is the screenshot's own blindness
+	# one abstraction up, inside the check meant to cure it.
+	#
+	# It also spent its whole life red for a reason that had nothing to do with
+	# the product: `json` returned Python's `False` and this line compared it to
+	# `"false"`. The button was live throughout; only the reader disagreed. See
+	# `json`'s header. A gate that reports a defect the product does not have
+	# costs what a missed defect costs.
+	#
+	# So the class is still read — it is reported below as context — and the
+	# verdict now comes from pressing the thing and watching for the run.
+	r_clicked="$(json route runClick.clicked)"
+	r_clickerr="$(json route runClick.clickError)"
+	r_started="$(json route runClick.startedLine)"
+	r_refused="$(json route runClick.refusedLine)"
+	r_headbefore="$(json route runClick.headlineBefore)"
+	r_headafter="$(json route runClick.headlineAfter)"
+	r_results="$(json route runClick.resultsLine)"
+	if [ "${r_clicked}" = "true" ]; then
+		ck ok "arm R: the run control took a real pointer click at its own hit point (class was '${r_rundisabled}'=disabled)"
 	else
-		ck fail "arm R: the run control is disabled ($(jsonraw route dom.testRunButton.title)) — indistinguishable from a working one in a screenshot, and useless"
+		ck fail "arm R: the run control could not be clicked — '${r_clickerr}'. Painted, and out of a user's reach"
+	fi
+	if [ -n "${r_started}" ]; then
+		ck ok "arm R: THE CLICK STARTED A RUN — ${r_started}"
+	else
+		ck fail "arm R: the click started nothing. Refusal line: '${r_refused:-none}'; headline went '${r_headbefore}' -> '${r_headafter}'. A control that looks live and runs nothing is the dead affordance in its worst form, because the pane also states no reason"
+		jsonraw route runClick.newConsole 2>/dev/null | head -3 | sed 's/^/      /'
+	fi
+	# ...AND THE RUN REACHED ITS VERDICTS. `nbpTest-started` proves the worker
+	# accepted the dispatch; only this proves `nv_test_vfs` ran the suite and
+	# the pane was told. The template ships 5 tests and one of them is a
+	# `should_fail`, so `tests=5` is also the count assertion — a run that
+	# discovered nothing and said ok would otherwise read as a pass.
+	case "${r_results}" in
+	*"ok=true"*"tests=5"*)
+		ck ok "arm R: and the run reached its verdicts — ${r_results}"
+		;;
+	*)
+		ck fail "arm R: the run started but no 5-test verdict reached the pane — '${r_results:-none}'"
+		;;
+	esac
+	# The pane a user is left looking at is not the one they started from. This
+	# is the same event seen from the DOM rather than the console, and it is
+	# what makes the two above a product claim rather than a logging claim.
+	if [ -n "${r_headafter}" ] && [ "${r_headafter}" != "${r_headbefore}" ]; then
+		ck ok "arm R: and the pane moved with it — headline '${r_headbefore}' -> '${r_headafter}'"
+	else
+		ck fail "arm R: the pane still reads '${r_headafter}' after the run — the user is shown nothing happened"
 	fi
 
 	# AND THE EDITOR'S GUTTER CARRIES ONE PER TEST.
@@ -1801,7 +1930,7 @@ else
 	# same assertion for the wrong reason, and would vouch for nothing.
 	v_bar_found="$(json covered dom.statusBar.found)"
 	v_bar_clear="$(json covered dom.statusBar.unobscured)"
-	if [ "${v_bar_found}" = "True" ] && [ "${v_bar_clear}" = "False" ]; then
+	if [ "${v_bar_found}" = "true" ] && [ "${v_bar_clear}" = "false" ]; then
 		ck ok "arm V: the status bar is still in the document and reads as COVERED, so arm R's occlusion guard can fail"
 	else
 		ck fail "arm V: status bar found=${v_bar_found} unobscured=${v_bar_clear} under a full-viewport overlay — arm R's occlusion guard cannot detect occlusion and proves nothing"
@@ -2196,6 +2325,43 @@ print(" ".join(r["name"] + "=" + r["count"] for r in rows))
 fi
 echo
 
+# ---------------------------------------------------------------------------
+echo "Arm P: MUTATION — the deployment delivers no wasm worker script"
+echo "    The negative control for the PRESS. Expect arm R's run-start,"
+echo "    verdict and pane-moved checks RED, and its press check GREEN:"
+echo "    the control is still painted and still takes a click."
+probe_click_run=1
+if ! run_arm no-worker mutate_no_wasm_worker "/noir"; then
+	probe_click_run=""
+	ck fail "arm P could not be measured"
+	ck fail "arm P could not be measured (second half)"
+	ck fail "arm P could not be measured (third half)"
+else
+	probe_click_run=""
+	p_runbtn="$(jsonraw no-worker dom.testRunButton.text)"
+	p_clicked="$(json no-worker runClick.clicked)"
+	p_started="$(json no-worker runClick.startedLine)"
+	p_results="$(json no-worker runClick.resultsLine)"
+	p_headbefore="$(json no-worker runClick.headlineBefore)"
+	p_headafter="$(json no-worker runClick.headlineAfter)"
+	if [ "${p_clicked}" = "true" ] && [ "${p_runbtn}" != "null" ] && [ -n "${p_runbtn}" ]; then
+		ck ok "arm P: the control is still painted (${p_runbtn}) and still takes a real click, so arm R's press check is not what this arm reddens"
+	else
+		ck fail "arm P: the control was not painted or not clickable (painted=${p_runbtn}, clicked=${p_clicked}) — the arm is not isolating the RUN from the CONTROL"
+	fi
+	if [ -z "${p_started}" ]; then
+		ck ok "arm P: and the click started no run, so arm R's run-start assertion can fail"
+	else
+		ck fail "arm P: a run started with no worker script to start it ('${p_started}') — arm R's run-start assertion proves nothing"
+	fi
+	if [ -z "${p_results}" ] && [ "${p_headafter}" = "${p_headbefore}" ]; then
+		ck ok "arm P: no verdict reached the pane and the headline stayed '${p_headafter}', so arm R's verdict and pane-moved assertions can fail"
+	else
+		ck fail "arm P: the pane reported '${p_results}' / moved '${p_headbefore}' -> '${p_headafter}' with no worker — those two assertions of arm R prove nothing"
+	fi
+fi
+echo
+
 # 59 -> 61. NS9 added two to the CONTROL arm — the renderer's own
 # `ctPlatform()` is the booted web platform, and what the deployment delivered
 # agrees with what the renderer can run. Arm C's two are unchanged in number
@@ -2209,7 +2375,18 @@ echo
 # 66, and the two new ones are the ▶'s presence and its enabled state. The
 # absence check that used to be here was inverted rather than added to — it
 # still costs one assertion, it now requires the opposite thing.
-expect_count 68
+#
+# 68 -> 71. The ▶'s "enabled state" check above turned out to assert a CLASS
+# NAME, which is the one fact that cannot tell a live control from a dead one;
+# it is now four checks that press the control and watch for the run — it took
+# the click, the click started a run, the run reached its verdicts, and the
+# pane moved. Three of the four are facts no amount of rendering can produce.
+#
+# 71 -> 74. Arm P is those four checks' negative control: it deletes the
+# compiler module the deployment is supposed to carry and requires the press to
+# go through while the RUN does not. Without it "the button worked" would be
+# the same unearned claim the class check was making.
+expect_count 74
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

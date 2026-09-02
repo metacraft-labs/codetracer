@@ -464,6 +464,94 @@ if (process.env.CT_PROBE_SCREENSHOT) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// AND THEN PRESS IT. Everything above is a description of a page; this is the
+// only part that finds out whether the page DOES anything.
+// ---------------------------------------------------------------------------
+//
+// THE CHECK THIS REPLACES ASSERTED A CLASS NAME, and the class name is exactly
+// what lied. `dom.testRunButton.disabled` reads `className.includes('disabled')`
+// — so a control that is painted, unstyled-as-dead, correctly titled, and wired
+// to nothing scores identically to a working one. That is the same failure as
+// the screenshot the whole file exists to improve on, one abstraction up: a
+// picture cannot tell a live button from a dead one, and neither can its class.
+//
+// So: click it the way a user does and watch for the run.
+//
+// `page.click` and not `el.click()`. The DOM method dispatches an event at a
+// node regardless of whether a person could reach it; Playwright's actionability
+// requires the element to be visible, stable, enabled and — the one that matters
+// here — TO RECEIVE THE POINTER at its own hit point. A run control covered by
+// an overlay would pass `el.click()` and fail this, which is the correct verdict:
+// the gutter checks above already reason about hit areas for the same reason.
+//
+// The evidence is the CONSOLE, not the DOM. `ui/web_noir_build.report` prints
+// `codetracer-noir-build: nbpTest-started handle=N` at the moment the worker
+// accepts the dispatch, and `nbpTest-refused reason=...` when it does not. Those
+// two are the distinction this phase exists to draw, and they are unreachable
+// from any state the page paints before the click. A pane headline is reported
+// beside them because the headline is what the user actually sees, but the
+// started line is the one that cannot be faked by rendering.
+let runClick = null;
+if (process.env.CT_PROBE_CLICK_RUN) {
+  const marker = 'codetracer-noir-build:';
+  const linesBefore = consoleLines.length;
+  runClick = {
+    attempted: true,
+    clicked: false,
+    clickError: '',
+    headlineBefore: '',
+    headlineAfter: '',
+    startedLine: '',
+    refusedLine: '',
+    resultsLine: '',
+    exitLine: '',
+    newConsole: [],
+  };
+  try {
+    const headlineOf = () =>
+      page.evaluate(() =>
+        ((document.querySelector('.test-results-headline') || {}).textContent ||
+          '').trim());
+    runClick.headlineBefore = await headlineOf();
+    await page.click('.test-results-run-btn', { timeout: 15000 });
+    runClick.clicked = true;
+
+    // The dispatch is synchronous with the click, but the worker has ~16 MB of
+    // wasm to fetch and instantiate before it answers, so the STARTED line and
+    // the verdicts are waited for separately and with very different budgets.
+    const waitForLine = async (test, budgetMs) => {
+      const deadline = Date.now() + budgetMs;
+      while (Date.now() < deadline) {
+        const hit = consoleLines.slice(linesBefore).find(test);
+        if (hit) return hit;
+        await page.waitForTimeout(250);
+      }
+      return '';
+    };
+    runClick.startedLine = await waitForLine(
+      (l) => l.includes(marker) && l.includes('nbpTest-started'), 30000);
+    // Reported whether or not the run started, because "it started" and "it was
+    // refused for a named reason" are both answers, and only silence is not.
+    runClick.refusedLine = consoleLines.slice(linesBefore).find(
+      (l) => l.includes(marker) &&
+             (l.includes('test-refused') || l.includes('test-ignored') ||
+              l.includes('nbpTest-refused'))) || '';
+    runClick.headlineAfter = await headlineOf();
+    if (runClick.startedLine) {
+      runClick.exitLine = await waitForLine(
+        (l) => l.includes(marker) && l.includes('nbpTest-exit'), 180000);
+      runClick.resultsLine = await waitForLine(
+        (l) => l.includes(marker) && l.includes('test-results '), 10000);
+      runClick.headlineAfter = await headlineOf();
+    }
+  } catch (e) {
+    runClick.clickError = String((e && e.message) || e).slice(0, 300);
+  }
+  runClick.newConsole = consoleLines.slice(linesBefore)
+    .filter((l) => l.includes(marker)).slice(0, 40);
+}
+
 await browser.close();
 
 console.log(
@@ -472,6 +560,7 @@ console.log(
       url,
       loadError,
       dom,
+      runClick,
       pageErrors,
       failedRequests: [...new Set(failedRequests)],
       // The two arms' own sentences, picked out of the console rather than the
