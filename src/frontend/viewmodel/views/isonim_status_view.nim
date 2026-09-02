@@ -39,6 +39,24 @@ type
     locationText*: string
     locationTitle*: string
     copyTooltipActive*: bool
+    buildLabel*: string
+      ## WHAT THIS PAGE WAS BUILT FROM, e.g. `cloud 7ae43783`, or "" when the
+      ## build does not know — which is every desktop build, because Electron
+      ## is not served by anything and carries no deployment descriptor.
+      ##
+      ## "" renders NO ELEMENT. That is the property that keeps this change
+      ## invisible to the desktop: `#status-base`'s DOM is byte-for-byte what
+      ## it was, so the status-bar footer contract, the render-stability spec
+      ## and the bottom-strip selector guard all see exactly what they saw.
+      ##
+      ## Status-Bar.md's inclusion rule is "the status bar shows facts that are
+      ## currently true", and "this tab is running commit X" is one — it is,
+      ## in fact, the only fact about the page that a user cannot obtain from
+      ## the page by any other means.
+    buildTitle*: string
+      ## The full 40-hex identity for the label's `title=`. The label is
+      ## abbreviated so it fits; the tooltip is what a user copies into a bug
+      ## report.
 
   StatusShellModel* = object
     activeNotifications*: seq[StatusNotificationRecord]
@@ -145,6 +163,13 @@ proc statusStructureSignature*(model: StatusShellModel): string =
   result.add("|dc:" & (if model.base.showDisconnected: "1" else: "0"))
   result.add("|fi:" & (if model.base.showFinished: "1" else: "0"))
   result.add("|lo:" & (if model.base.locationText.len > 0: "1" else: "0"))
+  # THE WHOLE LABEL, not a presence bit. It is a deployment constant, so it
+  # never changes within a page and can never cost a rebuild; including it in
+  # full is the cheapest way to satisfy this proc's own rule — every field of
+  # the model appears here or in `patchStatusValues` — without adding a patch
+  # path for a value that cannot vary. `buildTitle` is derived from the same
+  # identity and rides along with it.
+  result.add("|bu:" & model.base.buildLabel)
   result.add("|nh:" & (if model.showNotifications: "1" else: "0"))
   result.add("|br:" & (if model.showBugReport: "1" else: "0"))
   result.add("|op:" & (if model.hasOperationNotification: "1" else: "0"))
@@ -242,6 +267,14 @@ template renderStatusShellImpl(
           span(class = "test-movement"):
             text model.base.testMovementText
         span(class = "status-right"):
+          # THE BUILD IDENTITY, first in the right-hand group and rendered only
+          # when this build knows one. See `StatusBaseModel.buildLabel`: on the
+          # desktop it is "" and nothing at all is emitted here.
+          if model.base.buildLabel.len > 0:
+            span(
+                class = "build-identity status-inline",
+                title = model.base.buildTitle):
+              text model.base.buildLabel
           if model.base.showDisconnected:
             span(
                 class = "status-inline disconnected-status",

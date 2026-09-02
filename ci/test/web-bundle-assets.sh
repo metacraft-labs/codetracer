@@ -665,6 +665,27 @@ origin="${CT_WEB_ORIGIN:-https://ide.codetracer.com}"
 language_origins="${CT_WEB_LANGUAGE_ORIGINS:-}"
 revision="${CT_WEB_REVISION:-$(git -C "${repo_root}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 
+# THE FULL IDENTITY, for `/build-id.txt` and for the descriptor the page reads.
+#
+# `revision` above is an ABBREVIATION and always was, which is why it cannot be
+# the published identity: `curl`ing an abbreviation back gives you a prefix to
+# guess with, not a name to compare with. These are exported rather than passed
+# positionally — `web_deployment_render.nim`'s header says why — and every one
+# of them may be empty, which is a local build rather than an error.
+#
+# DEFAULTED FROM GIT, so a developer's own `web-bundle-assets.sh` run produces a
+# real, checkable build-id file. That matters more than it sounds: it means the
+# gate below runs on every push through the `web-bundle-assets` lane and not
+# only inside a deploy, so the identity cannot quietly stop being written
+# between deploys — which, with deploys currently not running at all, is the
+# only place it can be observed.
+export CT_WEB_COMMIT="${CT_WEB_COMMIT:-$(git -C "${repo_root}" rev-parse HEAD 2>/dev/null || echo '')}"
+export CT_WEB_BRANCH="${CT_WEB_BRANCH:-$(git -C "${repo_root}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')}"
+export CT_WEB_PROJECT="${CT_WEB_PROJECT:-}"
+export CT_WEB_RUN_ID="${CT_WEB_RUN_ID:-}"
+export CT_WEB_RUN_ATTEMPT="${CT_WEB_RUN_ATTEMPT:-}"
+export CT_WEB_BUILT_AT="${CT_WEB_BUILT_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+
 # The provenance strings. Read from the environment because only the caller
 # that BUILT the modules knows which `noir` ref they came from, and a module
 # that cannot say where it came from is dropped by `registrableModules` — so
@@ -772,6 +793,53 @@ else
 	else
 		bad "the deployment renderer failed"
 		sed 's/^/      /' "${cache}/render-out.log"
+	fi
+fi
+echo
+
+# ---------------------------------------------------------------------------
+echo "Step 3c: the bundle SAYS WHICH REVISION IT IS"
+echo "    /build-id.txt, one line, the same spelling BlockTracer publishes."
+echo "    Asserted on the CONTENT and not on a status code: Cloudflare Pages"
+echo "    answers an absent path with the entry document -- 200, text/html --"
+echo "    so a probe that asked only whether the path returned 200 would be"
+echo "    green against every deployment that never published the file."
+# ---------------------------------------------------------------------------
+if ! nim c --hints:off --warnings:off --nimcache:"${cache}/buildid" \
+	-o:"${cache}/build-id-check" ci/test/build_id_check.nim \
+	>"${cache}/build-id-check-build.log" 2>&1; then
+	bad "the build-id grader did not compile"
+	grep -E 'Error:' "${cache}/build-id-check-build.log" | head -3 | sed 's/^/      /'
+else
+	expect_commit="${CT_WEB_COMMIT:-}"
+	[ -n "${expect_commit}" ] || expect_commit="-"
+	if "${cache}/build-id-check" "${expect_commit}" "the staged bundle" \
+		"${out_dir}/build-id.txt" >"${cache}/build-id.log" 2>&1; then
+		ok "$(sed 's/^ok: //' "${cache}/build-id.log")"
+	else
+		bad "the staged bundle does not publish a usable build identity"
+		sed 's/^/      /' "${cache}/build-id.log"
+	fi
+
+	# THE MUTATION ARM, run here rather than described in a comment.
+	#
+	# The entire value of this check is that it distinguishes the file from the
+	# SPA fallback, and "it accepted the real file" is evidence for that only if
+	# something also shows it REJECTS the fallback. The entry document this very
+	# run just rendered is the exact body Cloudflare returns for an absent
+	# `/build-id.txt`, so the fallback is not simulated here -- it is the real
+	# artefact, graded by the real predicate.
+	#
+	# A green arm here is what makes the deploy-time gate meaningful. Without it
+	# the probe could have been `curl -fs .../build-id.txt >/dev/null` and
+	# nobody would have been able to tell.
+	if "${cache}/build-id-check" "-" "the SPA fallback" \
+		"${out_dir}/index.html" >"${cache}/build-id-fallback.log" 2>&1; then
+		bad "the build-id grader ACCEPTED the entry document — it cannot tell a build identity from Cloudflare's SPA fallback, so it proves nothing"
+		sed 's/^/      /' "${cache}/build-id-fallback.log"
+	else
+		ok "the grader rejects the entry document, so a 200-with-HTML cannot pass it"
+		sed 's/^/      /' "${cache}/build-id-fallback.log"
 	fi
 fi
 echo

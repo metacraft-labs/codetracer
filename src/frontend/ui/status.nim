@@ -4,6 +4,13 @@ import
   ../../common/ct_event,
   ui_imports, auto_hide
 
+# The build identity this renderer is showing. Unconditional, not under
+# `when defined(js)`: the accessors answer "" on every backend that never set
+# one, which is the desktop's correct answer and keeps `statusBaseModel`
+# backend-neutral.
+from ../viewmodel/platform/displayed_build_identity import
+  displayedBuildLabel, displayedBuildTitle
+
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
@@ -180,7 +187,14 @@ when defined(js):
       showFinished: self.state.finished,
       locationText: locationText,
       locationTitle: locationTitle,
-      copyTooltipActive: self.copyMessageActive)
+      copyTooltipActive: self.copyMessageActive,
+      # WHAT THIS PAGE WAS BUILT FROM. Both are "" on the desktop and on any
+      # web build whose entry document carries no `commit`, and the view then
+      # renders no element — see `StatusBaseModel.buildLabel`. The value is
+      # pushed here once by `ui_js.nim`'s web arm, which is the only code that
+      # reads the deployment descriptor.
+      buildLabel: displayedBuildLabel(),
+      buildTitle: displayedBuildTitle())
 
   proc statusShellModel(self: StatusComponent): StatusShellModel =
     var activeNotifications: seq[StatusNotificationRecord] = @[]

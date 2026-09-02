@@ -27,6 +27,14 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 from ../../../ct/version import CodeTracerVersionStr
+# THE DEPLOYED REVISION, when there is one. `CodeTracerVersionStr` is a
+# `2026.09.0`-style release number compiled in; it is the same string for every
+# build of a month and therefore cannot answer "does this page carry the fix?".
+# On the web the answer is in the entry document's descriptor, and
+# `versionLineText` appends it to the line that already exists rather than
+# adding an element. On the desktop the label is "" and this line is byte-for-
+# byte what it was.
+import ../platform/displayed_build_identity
 import ../store/types
 import ../viewmodels/welcome_screen_vm
 
@@ -232,7 +240,7 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
               tdiv: text "Welcome to"
               tdiv: text "CodeTracer IDE"
           tdiv(class = "welcome-version"):
-            text "Version " & CodeTracerVersionStr
+            text versionLineText(CodeTracerVersionStr, displayedBuildLabel())
         tdiv(class = "welcome-content"):
           tdiv(class = "welcome-left-panel"):
             tdiv(class = "recent-folders"):
@@ -568,7 +576,7 @@ when defined(js):
                 tdiv: text "Welcome to"
                 tdiv: text "CodeTracer IDE"
             tdiv(class = "welcome-version"):
-              text "Version " & CodeTracerVersionStr
+              text versionLineText(CodeTracerVersionStr, displayedBuildLabel())
           tdiv(class = "welcome-content"):
             tdiv(class = "welcome-left-panel"):
               tdiv(class = "recent-folders"):

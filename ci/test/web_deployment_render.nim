@@ -19,6 +19,20 @@
 ##   web_deployment_render <origin> <revision> <out-dir> [language-origins]
 ##     < modules.tsv
 ##
+## Environment, all optional, all describing WHAT BUILT THIS:
+##   CT_WEB_COMMIT       the full 40-hex object name (refused if malformed)
+##   CT_WEB_BRANCH       the branch the deploy published from
+##   CT_WEB_PROJECT      the Pages project serving it
+##   CT_WEB_RUN_ID       the workflow run
+##   CT_WEB_RUN_ATTEMPT  the attempt within that run
+##   CT_WEB_BUILT_AT     ISO-8601 UTC
+##
+## They produce `/build-id.txt` beside the entry document, and the first two
+## also travel in the document's own descriptor so the page can show them. The
+## file is what a human with `curl` and a deploy gate read; see the
+## `/build-id.txt` section of `platform/web_deployment.nim` for why a status
+## code cannot answer the question it answers.
+##
 ## `language-origins` is a comma-separated list of `<origin>=<language>` pairs
 ## naming the hosts whose ROOT is a language entry point — e.g.
 ## `https://noirstudio.dev=noir`. It is an ARGUMENT and not a constant for the
@@ -64,7 +78,38 @@ when isMainModule:
   let outDir = paramStr(3)
   let languageOriginsArg = if paramCount() >= 4: paramStr(4) else: ""
 
-  var descriptor = DeploymentDescriptor(origin: origin, revision: revision)
+  # THE BUILD IDENTITY, from the environment rather than from a positional
+  # argument. Six more `paramStr`s would make every call site a row of
+  # quoted-and-possibly-empty strings in positional order, which is how the
+  # wrong value ends up in the right slot; and the caller that knows these is
+  # the workflow, which is already passing `CT_WEB_REVISION` this way.
+  #
+  # EVERY FIELD MAY BE EMPTY and that is a supported build: a local
+  # `web-bundle-assets.sh` run has no run id, and a checkout with no git
+  # metadata has no commit. `renderBuildId` omits what it does not know, and
+  # the gate below refuses only what it can prove wrong.
+  let identity = BuildIdentity(
+    commit: getEnv("CT_WEB_COMMIT"),
+    branch: getEnv("CT_WEB_BRANCH"),
+    project: getEnv("CT_WEB_PROJECT"),
+    runId: getEnv("CT_WEB_RUN_ID"),
+    runAttempt: getEnv("CT_WEB_RUN_ATTEMPT"),
+    builtAt: getEnv("CT_WEB_BUILT_AT"))
+
+  # A MALFORMED COMMIT IS REFUSED HERE, not published. An abbreviation, a tag
+  # name or a truncated variable would produce a `/build-id.txt` that reads
+  # perfectly and that no probe can compare against a `github.sha` — the file
+  # would exist, the gate would parse nothing, and the deployment would be back
+  # to being unidentifiable while looking identified. Empty is allowed; wrong
+  # is not.
+  if identity.commit.len > 0 and not isCommitName(identity.commit):
+    stderr.writeLine "CT_WEB_COMMIT is not a 40-hex object name: " &
+      identity.commit
+    quit 2
+
+  var descriptor = DeploymentDescriptor(
+    origin: origin, revision: revision,
+    commit: identity.commit, branch: identity.branch)
   for rawPair in languageOriginsArg.split(','):
     let pair = rawPair.strip()
     if pair.len == 0: continue
@@ -160,6 +205,20 @@ when isMainModule:
   # added to the product reaches the CDN without anybody editing a second file.
   writeFile outDir / "_headers", renderCacheConfig(contract)
   writeFile outDir / "_redirects", renderRewriteConfig(contract)
+
+  # THE ONE-LINE BUILD IDENTITY, written from the SAME `identity` the entry
+  # document's descriptor carries, so the page and the file cannot disagree
+  # about what built them. See `web_deployment.nim`'s `/build-id.txt` section
+  # for why it exists and why it is spelled the way BlockTracer spells it.
+  #
+  # Written unconditionally, including for a build with no commit: a file
+  # reading `builtFrom` with nothing after it is a deployment SAYING it does
+  # not know, which a probe reads as a defect and names. Omitting the file
+  # instead would make that same deployment indistinguishable from one that
+  # predates this feature, and Cloudflare would answer the probe with the SPA
+  # fallback — the exact ambiguity this file was added to remove.
+  writeFile outDir / buildIdPath, renderBuildId(identity)
+  echo "build-id\t" & renderBuildId(identity).strip()
 
   # For the gate and the deploy log: what was declared, so a human reading the
   # run can see the delivery without opening the HTML.

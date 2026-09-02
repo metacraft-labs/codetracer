@@ -4876,6 +4876,12 @@ when defined(ctWeb) and not defined(ctInExtension):
   import ui/web_project_persistence
   from viewmodel/platform/web_entry import
     EntryResolution, EntryVerdict, evTemplate, entryPath, entryPathOnHost
+  # The revision this page was served as, for the surfaces that show it.
+  # Web-only alongside `web_entry_surface`, for the same reason: only a served
+  # deployment has a descriptor to read.
+  from viewmodel/platform/web_deployment import buildIdentityOf
+  from viewmodel/platform/displayed_build_identity import
+    setDisplayedBuildIdentity
   from viewmodel/platform/noir_template import
     ProjectTemplate, templateFor, hasFiles, templateFileCount
 
@@ -5157,6 +5163,19 @@ when defined(ctWeb) and not defined(ctInExtension):
       data.ipc = ipc
       configureIPC(data)
       configure(data)
+
+      # WHAT THIS PAGE WAS BUILT FROM, read out of the entry document once and
+      # handed to the surfaces that show it (the welcome screen's version line
+      # and the status bar's right-hand group).
+      #
+      # HERE, before either surface mounts, and exactly once. The descriptor is
+      # already in the DOM — no request — and `rendererDeploymentDescriptor`
+      # is the one reader of it, so this adds a use rather than a second
+      # source. A page whose document carries no `commit` sets the empty
+      # identity, both surfaces render nothing, and that is a correct
+      # deployment rather than a failure.
+      setDisplayedBuildIdentity(
+        buildIdentityOf(web_entry_surface.rendererDeploymentDescriptor()))
 
       # THE CALL THAT WAS MISSING, and the reason `/noir` opened the welcome
       # screen. `ui/web_entry_surface.nim`'s header has the full account; the

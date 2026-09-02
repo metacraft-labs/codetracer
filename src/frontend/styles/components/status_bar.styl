@@ -416,6 +416,24 @@
       min-width: 0
     // margin-right: 3vw
 
+    // WHICH REVISION THIS PAGE IS, when the deployment declares one.
+    //
+    // Rendered only by a served build — `StatusBaseModel.buildLabel` is "" on
+    // the desktop and the view emits no element at all — so this rule matches
+    // nothing in Electron and the footer's box layout is untouched. It is the
+    // one fact about the page a user cannot obtain from the page any other
+    // way, so it is present rather than hidden, and quiet rather than loud:
+    // dimmed, `nowrap`, never a flex item that can push `.location-path` out
+    // of its ellipsis. The full 40-hex identity is in its `title`.
+    .build-identity
+      display: inline-flex
+      align-items: center
+      flex: 0 0 auto
+      white-space: nowrap
+      margin-right: 8px
+      opacity: 0.6
+      cursor: default
+
     #location-status
       float: left
       display: flex

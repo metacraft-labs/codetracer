@@ -995,7 +995,28 @@ type
   DeploymentDescriptor* = object
     origin*: string
     revision*: string
-      ## The codetracer commit the bundle was built from.
+      ## The codetracer commit the bundle was built from, SHORTENED for a
+      ## human to read — it is what a module's `builtFrom` clause carries.
+      ## `commit` beside it is the same fact at full width; see there for why
+      ## both exist.
+    commit*: string
+      ## The codetracer commit the bundle was built from, as the full 40-hex
+      ## object name, or "" when the build did not know it.
+      ##
+      ## NOT a duplicate of `revision`, and the difference is the whole reason
+      ## `/build-id.txt` exists. `revision` is an abbreviation, and an
+      ## abbreviation is a string you cannot hand to `git` without hoping: it
+      ## is not a name a `git cat-file` accepts across every repository, it
+      ## cannot be compared for equality against a workflow's `github.sha`
+      ## without truncating one side, and truncation is precisely where a
+      ## probe stops being able to tell two builds apart. The published
+      ## identity carries the full name so that "is the fix in?" is an
+      ## equality test rather than a prefix guess.
+    branch*: string
+      ## The branch the deploy published from, or "" when unknown. Two
+      ## deployments of this product exist at once (`cloud` is production;
+      ## anything else is a preview), and a bare SHA does not say which one is
+      ## being looked at.
     modules*: seq[DeployedModule]
     assets*: seq[PublishedAsset]
       ## The published, non-fetched `/assets/` files. See `PublishedAsset`.
@@ -1070,6 +1091,8 @@ proc renderDeploymentDescriptor*(descriptor: DeploymentDescriptor): string =
   jsonStringForHtml(%*{
     "origin": descriptor.origin,
     "revision": descriptor.revision,
+    "commit": descriptor.commit,
+    "branch": descriptor.branch,
     "modules": modules,
     "assets": assets,
     "languageOrigins": languageOrigins})
@@ -1103,6 +1126,11 @@ proc parseDeploymentDescriptor*(text: string): DeploymentDescriptor =
   if parsed.kind != JObject: return DeploymentDescriptor()
   result.origin = parsed{"origin"}.getStr
   result.revision = parsed{"revision"}.getStr
+  # ABSENT IS "", NOT AN ERROR. A document rendered before this field existed
+  # is still a working deployment; it simply cannot say which commit it is, and
+  # `buildIdentityOf` answers `unknown` for it rather than inventing one.
+  result.commit = parsed{"commit"}.getStr
+  result.branch = parsed{"branch"}.getStr
   # EACH SECTION IS PARSED INDEPENDENTLY, and that is a fix rather than a
   # rearrangement. This used to `return` when `modules` was absent or not an
   # array, which silently took `languageOrigins` — and now `assets` — with it. A
@@ -1654,3 +1682,213 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
 <script src="/public/third_party/jstree.min.js" defer></script>
 <script src="/""" & rendererBundlePath & """" defer></script>
 """
+
+# ---------------------------------------------------------------------------
+# THE PUBLISHED BUILD IDENTITY — `/build-id.txt`
+#
+# ## The question this answers, and why nothing could answer it
+#
+# "Which revision is noirstudio.dev serving?" had no cheap answer. Everything
+# the deployment already published names a BUILD without naming a COMMIT: the
+# hashed asset names (`assets/db_backend.7c9b88e3….js`) identify bytes and no
+# revision, and `revision` in the entry document is an abbreviation buried in a
+# JSON island inside 9 KB of HTML. So the answer was assembled by reading
+# workflow logs and comparing asset filenames — an inference chain with several
+# places to be wrong, and this campaign has been wrong in most of them: verdicts
+# that could not name the artefact they measured, and three different
+# host-discriminators proposed in one brief because nobody could ask a host what
+# it was.
+#
+# ## Why a file and not just the descriptor
+#
+# The descriptor is for the PAGE; this is for a human with `curl` and for a
+# script. One line, one request, no HTML parsing, no JSON:
+#
+#     $ curl https://noirstudio.dev/build-id.txt
+#     builtFrom 7ae43783f001eb832cab9996934afd08449ea0bc branch=cloud …
+#
+# ## Why blocktracer's exact format
+#
+# BlockTracer publishes this file already, at the same path, with the same
+# leading `builtFrom <sha>` and `branch=<name>`. Matching it is not deference:
+# it means ONE probe reads both products, so an operator does not need to know
+# which repository built the page in order to ask what built it. Inventing a
+# second spelling of the same fact would put the cost of the difference on
+# every future reader.
+#
+# ## Why the SHA is 40 hex characters and the check says so
+#
+# Cloudflare Pages answers an absent path with the SPA fallback: `/build-id.txt`
+# on a deployment that does not publish it returns **200 OK, `text/html`, the
+# entry document**. A gate that fetched the path and asserted a 200 would
+# therefore pass against every deployment that has never heard of this file —
+# it would be a check that cannot fail, which is the exact failure mode this
+# repository keeps finding. So the assertion is on the CONTENT: the body must
+# parse as this one-line form and name a full object name. `parseBuildId`
+# returns the empty identity for an HTML document, and `buildIdDefects` says so
+# in a sentence.
+# ---------------------------------------------------------------------------
+
+type
+  BuildIdentity* = object
+    ## What a deployment says it was built from. Every field may be "" — an
+    ## identity that cannot be established is reported as unknown rather than
+    ## guessed, for the reason `parseDeploymentDescriptor` gives about
+    ## half-declared modules.
+    commit*: string
+      ## The full 40-hex object name. "" when unknown or malformed.
+    branch*: string
+    project*: string
+      ## Which Pages project served it. BlockTracer's file carries this because
+      ## one repository deploys several; ours carries it for symmetry and
+      ## because `web-codetracer` serving `noirstudio.dev` is not obvious.
+    runId*: string
+    runAttempt*: string
+    builtAt*: string
+      ## ISO-8601 UTC, as the workflow stamped it.
+
+const
+  buildIdPath* = "build-id.txt"
+    ## Relative to the publish root, like `entryDocumentPath`.
+  buildIdAddress* = "/" & buildIdPath
+    ## The URL, which is the whole interface. Exported because four things must
+    ## agree on it: this renderer, `ci/test/web_deployment_render.nim`,
+    ## `ci/test/verify-build-id.sh`, and BlockTracer's deploy — the last one by
+    ## having chosen it first.
+
+proc isCommitName*(text: string): bool =
+  ## Exactly 40 hex characters: a full git object name and nothing else.
+  ##
+  ## NOT `len >= 7 and all-hex`, which would accept an abbreviation — and an
+  ## abbreviation is what makes "does this host carry the fix?" a prefix guess
+  ## instead of an equality test. Not case-normalised either: git writes lower
+  ## case, and a build stamping upper case is a build doing something
+  ## unexplained, so both are accepted for reading and `renderBuildId` writes
+  ## what it was given.
+  if text.len != 40: return false
+  for c in text:
+    if c notin {'0' .. '9', 'a' .. 'f', 'A' .. 'F'}: return false
+  true
+
+proc renderBuildId*(identity: BuildIdentity): string =
+  ## The file, as BlockTracer spells it.
+  ##
+  ## `builtFrom <sha>` first and unkeyed, because that is the form the sibling
+  ## already publishes and the form `awk '{print $2}'` reads. The keyed clauses
+  ## follow in a fixed order; an empty one is OMITTED rather than emitted as
+  ## `key=`, so a reader never has to distinguish "absent" from "present and
+  ## empty", and a local build with no run id is a shorter line rather than a
+  ## line full of blanks.
+  ##
+  ## Single trailing newline: this is a text file people `cat`.
+  result = "builtFrom " & identity.commit
+  if identity.branch.len > 0: result.add " branch=" & identity.branch
+  if identity.project.len > 0: result.add " project=" & identity.project
+  if identity.runId.len > 0: result.add " run=" & identity.runId
+  if identity.runAttempt.len > 0: result.add " attempt=" & identity.runAttempt
+  if identity.builtAt.len > 0: result.add " at=" & identity.builtAt
+  result.add "\n"
+
+proc parseBuildId*(text: string): BuildIdentity =
+  ## The inverse, and the reason the gate cannot pass vacuously.
+  ##
+  ## Returns the EMPTY identity for anything that is not the one-line form —
+  ## most importantly for an HTML document, which is what Cloudflare Pages
+  ## serves at this path with a 200 when the file was never published. So
+  ## "parsed" is a real claim about the bytes rather than about the request.
+  ##
+  ## Only the first non-empty line is read: BlockTracer's file is one line, and
+  ## a reader that scanned the whole body would happily find a `builtFrom` in a
+  ## page that merely mentioned one.
+  var first = ""
+  for rawLine in text.splitLines():
+    let line = rawLine.strip()
+    if line.len == 0: continue
+    first = line
+    break
+  if first.len == 0: return BuildIdentity()
+  let fields = first.splitWhitespace()
+  if fields.len < 2 or fields[0] != "builtFrom": return BuildIdentity()
+  if not isCommitName(fields[1]): return BuildIdentity()
+  result.commit = fields[1]
+  for field in fields[2 .. ^1]:
+    let cut = field.find('=')
+    if cut <= 0 or cut == field.len - 1: continue
+    let key = field[0 ..< cut]
+    let value = field[cut + 1 .. ^1]
+    case key
+    of "branch": result.branch = value
+    of "project": result.project = value
+    of "run": result.runId = value
+    of "attempt": result.runAttempt = value
+    of "at": result.builtAt = value
+    else: discard
+
+proc buildIdDefects*(body: string; expectedCommit: string): seq[string] =
+  ## Everything wrong with a body served at `/build-id.txt`, as sentences.
+  ## Empty is the assertion a deploy makes about the host it just published to.
+  ##
+  ## `expectedCommit` is the revision the run BUILT. Passing "" asks only "is
+  ## this a build identity at all", which is what a by-hand probe of an
+  ## arbitrary host wants; passing a commit makes it the identity test the
+  ## deploy needs, and THAT is the half a status-code check cannot reach.
+  ##
+  ## A value rather than a shell pipeline for the same reason
+  ## `deployGuardDefects` is: the rule is testable on both backends, on inputs
+  ## that never touch a network — including the SPA fallback, which is the
+  ## input that made every previous version of this check meaningless.
+  let identity = parseBuildId(body)
+  if identity.commit.len == 0:
+    let trimmed = body.strip()
+    if trimmed.len == 0:
+      result.add "the body is empty, so this host publishes no build identity"
+    elif trimmed.len > 0 and trimmed[0] == '<':
+      # NAMED, because this is the answer a host gives for a file it does not
+      # have, and reading it as "absent" rather than as "broken" is what tells
+      # an operator to look at the deploy rather than at the file.
+      result.add "the body is an HTML document, not a build identity — " &
+        "Cloudflare Pages answers an absent " & buildIdAddress & " with the " &
+        "SPA entry document at 200, so this is exactly what a deployment " &
+        "that never published the file looks like"
+    else:
+      result.add "the body is not a build identity: expected a line " &
+        "`builtFrom <40-hex-sha> branch=<name>`, got: " &
+        (if trimmed.len > 120: trimmed[0 ..< 120] & "…" else: trimmed)
+    return
+  if identity.branch.len == 0:
+    result.add "the build identity names commit " & identity.commit &
+      " but no branch, so it cannot say which deployment this is"
+  if expectedCommit.len > 0 and identity.commit != expectedCommit:
+    result.add "this host serves " & identity.commit & ", but the revision " &
+      "under test is " & expectedCommit & " — the deployment is not the one " &
+      "that was just built"
+
+proc buildIdentityOf*(descriptor: DeploymentDescriptor): BuildIdentity =
+  ## The identity carried by an entry document, so the page and the file are
+  ## two renderings of one fact rather than two facts that can disagree.
+  BuildIdentity(commit: descriptor.commit, branch: descriptor.branch)
+
+proc buildIdentityLabel*(identity: BuildIdentity): string =
+  ## The identity as ONE SHORT STRING for a UI, or "" when there is none.
+  ##
+  ## "" is load-bearing: a desktop build carries no deployment descriptor, and
+  ## a label reading `build unknown` in the Electron app would be a new piece
+  ## of furniture that says nothing. The surfaces that show this render nothing
+  ## at all for the empty string, so the desktop DOM is byte-for-byte what it
+  ## was.
+  ##
+  ## The commit is ABBREVIATED here and only here. The file publishes the full
+  ## name because a machine compares it; a person reading a status bar wants
+  ## the eight characters they will type into `git show`, and `title=` carries
+  ## the rest (see the callers).
+  if identity.commit.len == 0: return ""
+  result = identity.commit[0 ..< min(8, identity.commit.len)]
+  if identity.branch.len > 0: result = identity.branch & " " & result
+
+proc buildIdentityTitle*(identity: BuildIdentity): string =
+  ## The full identity, for a `title=` attribute — the affordance that turns an
+  ## eight-character label into something a user can paste into a bug report.
+  if identity.commit.len == 0: return ""
+  result = "built from " & identity.commit
+  if identity.branch.len > 0: result.add " on branch " & identity.branch
+  if identity.builtAt.len > 0: result.add " at " & identity.builtAt

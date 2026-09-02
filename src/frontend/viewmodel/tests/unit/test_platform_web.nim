@@ -28,6 +28,7 @@ import ../../platform/project_store
 import ../../platform/web_platform
 import ../../platform/web_entry
 import ../../platform/web_deployment
+import ../../platform/displayed_build_identity
 import ../../platform/noir_template
 import ../../platform/archive
 
@@ -1917,3 +1918,201 @@ suite "which hosts are language entry points is deployment configuration":
     let roundTripped = parseDeploymentDescriptor(renderDeploymentDescriptor(bad))
     check roundTripped.languageOrigins.len == 3
     check languageForOrigin(roundTripped, "http://noirstudio.dev") == "noir"
+
+suite "a deployment can be asked which revision it is":
+  ## `/build-id.txt` — Noir-Studio.md is silent on this, and the gap is what
+  ## the suite is about: until this existed there was no way to ask
+  ## `noirstudio.dev` or `ide.codetracer.com/noir` what commit they were
+  ## serving. The hashed asset names identify BYTES and name no revision, so
+  ## the answer had to be assembled from workflow logs and filename
+  ## comparisons — an inference chain this campaign has been wrong in.
+  ##
+  ## Every test below runs on the C and the JS backend, over inputs no network
+  ## can produce. That is deliberate: the input that matters most is the one a
+  ## live probe would find hardest to arrange on purpose — Cloudflare's SPA
+  ## fallback, which is a 200 with an HTML body at the path the file should be.
+
+  test "the published line is the one BlockTracer already publishes":
+    ## Format, asserted as a whole string rather than field by field. The point
+    ## of matching the sibling is that ONE probe reads both products, and a
+    ## check that only asserted "contains a sha" would pass over a file that
+    ## had quietly grown a different shape.
+    let identity = BuildIdentity(
+      commit: "7ae43783f001eb832cab9996934afd08449ea0bc",
+      branch: "cloud",
+      project: "web-codetracer",
+      runId: "12345",
+      runAttempt: "1",
+      builtAt: "2026-09-03T00:11:22Z")
+    check renderBuildId(identity) ==
+      "builtFrom 7ae43783f001eb832cab9996934afd08449ea0bc branch=cloud " &
+      "project=web-codetracer run=12345 attempt=1 at=2026-09-03T00:11:22Z\n"
+    # `builtFrom <sha>` is the first two whitespace-separated fields, which is
+    # what `awk '{print $2}'` and a human skimming a terminal both read.
+    check renderBuildId(identity).splitWhitespace()[0] == "builtFrom"
+    check renderBuildId(identity).splitWhitespace()[1] == identity.commit
+
+  test "an unknown field is omitted rather than emitted empty":
+    ## A local build has no run id. `run=` with nothing after it would make
+    ## every reader distinguish "absent" from "present and empty" forever.
+    let local = BuildIdentity(
+      commit: "0123456789abcdef0123456789abcdef01234567", branch: "dev")
+    check renderBuildId(local) ==
+      "builtFrom 0123456789abcdef0123456789abcdef01234567 branch=dev\n"
+    check "run=" notin renderBuildId(local)
+    # And it round-trips: the fields that were not written come back empty.
+    let parsed = parseBuildId(renderBuildId(local))
+    check parsed.commit == local.commit
+    check parsed.branch == "dev"
+    check parsed.project.len == 0
+    check parsed.runId.len == 0
+
+  test "every field survives the round trip":
+    let identity = BuildIdentity(
+      commit: "7ae43783f001eb832cab9996934afd08449ea0bc",
+      branch: "cloud", project: "web-codetracer",
+      runId: "999", runAttempt: "2", builtAt: "2026-09-03T00:00:00Z")
+    let parsed = parseBuildId(renderBuildId(identity))
+    # Field by field, so a field that stopped being written is named rather
+    # than folded into one red line.
+    check parsed.commit == identity.commit
+    check parsed.branch == identity.branch
+    check parsed.project == identity.project
+    check parsed.runId == identity.runId
+    check parsed.runAttempt == identity.runAttempt
+    check parsed.builtAt == identity.builtAt
+
+  test "an abbreviation is not a commit name":
+    ## THE REASON THE PUBLISHED FIELD IS 40 CHARACTERS. `revision` in the entry
+    ## document is `${GITHUB_SHA:0:8}` and always was; comparing it against a
+    ## workflow's `github.sha` means truncating one side, and truncation is
+    ## where a probe stops being able to tell two builds apart.
+    check isCommitName("7ae43783f001eb832cab9996934afd08449ea0bc")
+    check isCommitName("7AE43783F001EB832CAB9996934AFD08449EA0BC")
+    check not isCommitName("7ae43783")
+    check not isCommitName("")
+    check not isCommitName("7ae43783f001eb832cab9996934afd08449ea0b")   # 39
+    check not isCommitName("7ae43783f001eb832cab9996934afd08449ea0bcd")  # 41
+    check not isCommitName("7ae43783f001eb832cab9996934afd08449ea0bg")   # not hex
+
+  test "THE SPA FALLBACK IS NOT A BUILD IDENTITY":
+    ## The trap this whole feature is built around, asserted against the REAL
+    ## artefact rather than a stand-in: `renderEntryDocument` produces exactly
+    ## the bytes Cloudflare Pages returns, with a 200, for a `/build-id.txt`
+    ## that was never published.
+    ##
+    ## A gate that fetched the path and asserted a 200 would be green over
+    ## this. So the gate reads the body, and this is the test that says it can
+    ## fail.
+    var descriptor = DeploymentDescriptor(
+      origin: "https://ide.codetracer.com", revision: "7ae43783")
+    let fallback = renderEntryDocument(descriptor)
+    check fallback.len > 1000  # non-vacuity: it really is a document
+    check parseBuildId(fallback).commit.len == 0
+    let defects = buildIdDefects(fallback, "")
+    check defects.len == 1
+    check "HTML document" in defects[0]
+    check "SPA entry document" in defects[0]
+
+  test "an empty body, and prose, are refused with their own sentences":
+    check buildIdDefects("", "").len == 1
+    check "publishes no build identity" in buildIdDefects("", "")[0]
+    check buildIdDefects("   \n\n", "").len == 1
+    let prose = buildIdDefects("built from cloud, probably", "")
+    check prose.len == 1
+    check "not a build identity" in prose[0]
+    # The offending body is QUOTED, because "it is not a build identity" over a
+    # host that returned a redirect page, an error page or a proxy notice are
+    # three different problems with one sentence between them.
+    check "built from cloud, probably" in prose[0]
+
+  test "a body naming an abbreviation is refused, not accepted at face value":
+    ## The failure that looks most like success: a stamping step that used
+    ## `${GITHUB_SHA:0:8}` would produce a file that reads perfectly.
+    let short = "builtFrom 7ae43783 branch=cloud\n"
+    check parseBuildId(short).commit.len == 0
+    check buildIdDefects(short, "").len == 1
+
+  test "the identity must name a branch as well as a commit":
+    ## Two deployments of this product exist at once — `cloud` is production
+    ## and anything else is a preview — so a bare sha does not say which one is
+    ## being looked at.
+    let noBranch = "builtFrom 7ae43783f001eb832cab9996934afd08449ea0bc\n"
+    check parseBuildId(noBranch).commit.len == 40
+    let defects = buildIdDefects(noBranch, "")
+    check defects.len == 1
+    check "no branch" in defects[0]
+
+  test "the wrong revision is a defect, and it names both sides":
+    ## The half a status code cannot reach: the host answered, the file is a
+    ## real build identity, and it is the PREVIOUS deployment.
+    let served = "builtFrom 0123456789abcdef0123456789abcdef01234567 branch=cloud\n"
+    let wanted = "7ae43783f001eb832cab9996934afd08449ea0bc"
+    check buildIdDefects(served, "").len == 0        # as a bare identity, fine
+    let defects = buildIdDefects(served, wanted)     # as THIS run's, not
+    check defects.len == 1
+    check "0123456789abcdef0123456789abcdef01234567" in defects[0]
+    check wanted in defects[0]
+    # And the matching case is clean, so the test above is not passing because
+    # the predicate rejects everything.
+    check buildIdDefects("builtFrom " & wanted & " branch=cloud\n", wanted).len == 0
+
+  test "only the first line is read":
+    ## A page that merely MENTIONS a commit is not a page that declares one.
+    let noisy = "<!doctype html>\n<p>builtFrom " &
+      "7ae43783f001eb832cab9996934afd08449ea0bc branch=cloud</p>\n"
+    check parseBuildId(noisy).commit.len == 0
+    check buildIdDefects(noisy, "").len == 1
+
+  test "the document and the file are two renderings of one fact":
+    ## `commit` and `branch` travel in the descriptor as well as in the file,
+    ## so the page can show what the file publishes without a request. If they
+    ## could disagree there would be two answers to one question.
+    var descriptor = DeploymentDescriptor(
+      origin: "https://ide.codetracer.com",
+      revision: "7ae43783",
+      commit: "7ae43783f001eb832cab9996934afd08449ea0bc",
+      branch: "cloud")
+    let parsed = parseDeploymentDescriptor(renderDeploymentDescriptor(descriptor))
+    check parsed.commit == descriptor.commit
+    check parsed.branch == "cloud"
+    check buildIdentityOf(parsed).commit == descriptor.commit
+    # A DOCUMENT FROM BEFORE THIS FIELD EXISTED is a working deployment that
+    # simply cannot say which commit it is — not a parse failure.
+    let older = parseDeploymentDescriptor(
+      "{\"origin\":\"https://ide.codetracer.com\",\"revision\":\"7ae43783\"}")
+    check older.origin == "https://ide.codetracer.com"
+    check older.commit.len == 0
+    check buildIdentityLabel(buildIdentityOf(older)).len == 0
+
+  test "the UI label is short, the tooltip is complete, and both vanish when unknown":
+    ## What the welcome screen's version line and the status bar render. The
+    ## empty case is the DESKTOP, and it must produce nothing at all: both
+    ## surfaces render no element for "", which is what keeps this change
+    ## invisible to every GUI assertion about the status bar's shape.
+    let identity = BuildIdentity(
+      commit: "7ae43783f001eb832cab9996934afd08449ea0bc",
+      branch: "cloud", builtAt: "2026-09-03T00:00:00Z")
+    check buildIdentityLabel(identity) == "cloud 7ae43783"
+    check buildIdentityTitle(identity) ==
+      "built from 7ae43783f001eb832cab9996934afd08449ea0bc on branch cloud " &
+      "at 2026-09-03T00:00:00Z"
+    check buildIdentityLabel(BuildIdentity()).len == 0
+    check buildIdentityTitle(BuildIdentity()).len == 0
+    # A build that knows its commit but not its branch still says something.
+    check buildIdentityLabel(BuildIdentity(
+      commit: "7ae43783f001eb832cab9996934afd08449ea0bc")) == "7ae43783"
+
+  test "the version line is unchanged on a build with no deployed identity":
+    ## The desktop's string, asserted byte for byte, because the welcome
+    ## screen's `.welcome-version` element is read by the GUI suites and this
+    ## change must not move it.
+    check versionLineText("2026.09.0", "") == "Version 2026.09.0"
+    check versionLineText("2026.09.0", "cloud 7ae43783") ==
+      "Version 2026.09.0 · cloud 7ae43783"
+
+  test "the published path is the one BlockTracer chose":
+    ## Not a preference. A single probe must read both products, so the address
+    ## is a shared constant and this is where a rename would be caught.
+    check buildIdPath == "build-id.txt"
+    check buildIdAddress == "/build-id.txt"

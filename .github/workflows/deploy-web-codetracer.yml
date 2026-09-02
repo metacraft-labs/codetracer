@@ -549,10 +549,32 @@ jobs:
         # the moment it is added to the Pages project — no redeploy and no
         # second artifact. Adding the domain itself is a Cloudflare dashboard
         # action plus a DNS change, and is NOT done by this workflow.
+        #
+        # CT_WEB_COMMIT / CT_WEB_BRANCH and the run coordinates become
+        # `/build-id.txt` — the file that answers "which revision is this host
+        # serving?" in one request. Until it existed there was no way to ask:
+        # the hashed asset names identify bytes and name no commit, so the
+        # answer had to be assembled from workflow logs, and this campaign has
+        # repeatedly produced verdicts that could not name the artefact they
+        # measured because of it. BlockTracer publishes the same file with the
+        # same spelling at the same path, so ONE probe reads both products.
+        #
+        # THE COMMIT IS THE FULL 40-HEX NAME, not `${GITHUB_SHA:0:8}` like
+        # `CT_WEB_REVISION` beside it. An abbreviation cannot be compared for
+        # equality against this run's `github.sha` without truncating one side,
+        # and truncation is exactly where a probe stops being able to tell two
+        # builds apart. `web_deployment_render.nim` refuses anything that is
+        # not a full object name rather than publishing an identity nothing can
+        # check.
         env:
           CT_WEB_ORIGIN: https://ide.codetracer.com
           CT_WEB_LANGUAGE_ORIGINS: https://noirstudio.dev=noir,https://www.noirstudio.dev=noir
           CT_NOIR_WASM_REF: ${{ steps.noir_wasm.outputs.short_rev }}
+          CT_WEB_COMMIT: ${{ github.sha }}
+          CT_WEB_BRANCH: ${{ github.ref_name }}
+          CT_WEB_PROJECT: web-codetracer
+          CT_WEB_RUN_ID: ${{ github.run_id }}
+          CT_WEB_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           nix develop .#ci --command bash -c '
@@ -1239,6 +1261,60 @@ jobs:
 
           [ "$fail" -eq 0 ] || { echo "the deployed artifact is not what was built" >&2; exit 1; }
           echo "the deployed bytes are the bytes that were built."
+
+      - name: Every served host can NAME the revision it is running
+        # THE CHEAPEST POSSIBLE CHECK, and the one whose absence cost the most.
+        #
+        # Everything above compares this deployment against ITSELF: the bytes
+        # uploaded against the bytes served, the document against the tree. All
+        # of it is silent on the question a person actually asks — "is the page
+        # I am looking at the one with the fix in it?" — because nothing the
+        # deployment published named a commit. Asset filenames identify bytes;
+        # `assets/db_backend.7c9b88e330a5f2b2.js` is not a revision.
+        #
+        # THIS STEP CANNOT PASS BY NOT RUNNING, which is the whole design
+        # constraint. Cloudflare Pages answers an absent path with the SPA
+        # fallback — 200, `text/html`, the entry document — so a probe that
+        # fetched `/build-id.txt` and asserted a 200 would be green against
+        # every deployment that never published the file, including every
+        # deployment before this one. The assertion is therefore on the BYTES,
+        # through `platform/web_deployment.buildIdDefects`: the body must be
+        # the one-line form, name a full 40-hex object name, name a branch, and
+        # equal THIS run's `github.sha`. The same predicate is run against the
+        # entry document by `ci/test/web-bundle-assets.sh` on every push, as a
+        # mutation arm, and must reject it — so "it accepted the real file" is
+        # evidence rather than a coincidence.
+        #
+        # THE HOSTS ARE DERIVED from the staged descriptor, for the reason the
+        # size sweep above wrote at length: a hand-written set of hosts cannot
+        # be made to agree with the product, and `noirstudio.dev` was missing
+        # from exactly such a list while serving a stale worker.
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          python3 - site/index.html > "$RUNNER_TEMP/build-id-hosts.txt" <<'PY'
+          import json, re, sys
+          html = open(sys.argv[1]).read()
+          m = re.search(r'id="codetracer-deployment"[^>]*>(.*?)</script>', html, re.S)
+          if not m:
+              raise SystemExit('no deployment descriptor in the staged entry document')
+          d = json.loads(m.group(1))
+          hosts, seen = [], set()
+          for origin in [d['origin']] + [o['origin'] for o in d.get('languageOrigins', [])]:
+              if origin and origin not in seen:
+                  seen.add(origin)
+                  hosts.append(origin)
+          print('\n'.join(hosts))
+          PY
+          hosts=( "https://web-codetracer.pages.dev" )
+          while IFS= read -r h; do
+            [ -n "$h" ] && hosts+=( "$h" )
+          done < "$RUNNER_TEMP/build-id-hosts.txt"
+          echo "asking ${#hosts[@]} host(s) what they were built from"
+          nix develop .#ci --command bash ci/test/verify-build-id.sh \
+            "$EXPECTED_COMMIT" "${hosts[@]}"
 
       - name: Load the DEPLOYED pages in a browser and assert the product is on them
         # The last and least substitutable check. Everything above this line
