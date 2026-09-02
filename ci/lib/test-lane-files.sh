@@ -622,7 +622,27 @@ test_lane_files() {
 				'/test_test_explorer_vm\.nim$' \
 				'/test_sdk_facade_boundary\.nim$' \
 				'/test_project_action_runner\.nim$' \
-				'/test_platform_desktop_native\.nim$'
+				'/test_platform_desktop_native\.nim$' \
+				'/test_pane_mount_markers_are_released\.nim$'
+		# `test_pane_mount_markers_are_released` walks `src/frontend/ui/*.nim`
+		# with `std/os`'s `walkFiles` and reads each file, because its subject
+		# is a property of the SOURCE TREE — which panes declare a mount marker
+		# and which release it — and not of any running program. `walkFiles` is
+		# an `{.error.}` on the JS target, so this suite has never compiled in
+		# this lane: it fails at the `nim js` step, before a single case runs.
+		#
+		# THAT IS WHY THE REJECTION IS THE FIX AND NOT A `when defined(js)`
+		# GUARD. Compiling the file under `nim js` with its scan elided would
+		# leave a suite that reports green having asserted nothing about the
+		# tree — a vacuous pass, which is worse than an honest absence, since
+		# the whole point of the file is a counted debt list. A structural scan
+		# has one correct backend, and it already runs there: `vm-unit` covers
+		# it on native, where the filesystem exists.
+		#
+		# It was added to this lane by discovery — `vm-unit-js` is `vm-unit`
+		# minus explicit rejections, so a new file lands here without an edit,
+		# which is the property this lane wants and the reason this rejection
+		# has to be written down rather than assumed.
 		# `test_platform_desktop_native` (NS1) exercises the platform facade's
 		# NATIVE desktop instantiation against the real host — `std/os`,
 		# `std/osproc`, real child processes. Its subject,
