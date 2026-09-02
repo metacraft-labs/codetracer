@@ -287,6 +287,21 @@ for k in sys.argv[1:]:
 print(json.dumps(d))
 " "$@"; }
 
+# The same walk, but a string comes back as ITS TEXT rather than as a JSON
+# string literal.  `q` is right for numbers, booleans and `null`, and wrong for
+# anything compared against a name — `"GUTTER_LINE_DECORATIONS"` with the
+# quotes is not equal to `GUTTER_LINE_DECORATIONS` without them, and a check
+# written with the wrong one of the two is red for a reason that has nothing to
+# do with the product.
+qraw() { python3 -c "
+import json,sys
+d=json.load(open('${cache}/report.json'))
+for k in sys.argv[1:]:
+    if d is None: break
+    d = d.get(k) if isinstance(d,dict) else None
+print(d if isinstance(d,str) else json.dumps(d))
+" "$@"; }
+
 # ---------------------------------------------------------------------------
 # NON-VACUITY FIRST.  Every assertion below is about something a user sees, so
 # if the product did not mount there is nothing to be right about.
@@ -555,10 +570,72 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# MONACO'S OWN VERDICT ON THE SAME TWO PRESSES.
+#
+# The two checks above measure what each click DID.  These measure what Monaco
+# thought each click WAS, and they are here because the previous investigation
+# of this report concluded "does not reproduce" while recording nothing from
+# Monaco at all — so it could say the fold did not happen but not why it could
+# not.  `editor.onMouseDown` reports a `MouseTargetType`, and the answer turns
+# out to be sharper than "the boxes do not overlap":
+#
+#   gutter click    NO Monaco mouse target whatsoever
+#   chevron click   exactly one, GUTTER_LINE_DECORATIONS
+#
+# The first is the mechanism.  Every node `ui/trace.editorLineNumber` emits
+# carries `onmousedown='event.stopPropagation()'`, so a press on our markup
+# never reaches Monaco's mouse handling — there is no folding contribution that
+# could act on it, whatever the geometry.  The second says the chevron is in a
+# DIFFERENT band by Monaco's own reckoning: `GUTTER_LINE_DECORATIONS` and not
+# `GUTTER_LINE_NUMBERS`, which is the band our gutter is painted into.
+#
+# ASSERTED AS THE NAMES AND THE COUNT, not as a boolean.  A press that reached
+# Monaco as GUTTER_LINE_NUMBERS would mean the `stopPropagation` guards had
+# been dropped — the state measured in `editorLineNumber`'s own doc block,
+# where Monaco selects the line and the breakpoint is never toggled at all.
+hooked_n="$(q monacoHook hooked)"
+case "${hooked_n}" in
+[1-9]*)
+	ck ok "[gutter/monaco] ${hooked_n} editor(s) hooked, so the two target-type" \
+		"readings below are measurements and not empty defaults"
+	;;
+*)
+	ck fail "[gutter/monaco] no editor could be hooked (hooked=${hooked_n}," \
+		"error: $(qraw monacoHook error)) — the target-type checks measure nothing"
+	;;
+esac
+
+gut_targets="$(qraw gutter clickGutter monacoTargetNames)"
+gut_target_n="$(python3 -c "
+import json
+print(len(json.loads('''$(q gutter clickGutter monacoTargets)''') or []))
+" 2>/dev/null || echo "?")"
+if [ "${gut_target_n}" = "0" ]; then
+	ck ok "[gutter/monaco] a gutter click reaches Monaco as NO mouse target at all" \
+		"(${gut_target_n} recorded) — the stopPropagation guards keep our markup" \
+		"out of Monaco's mouse handling, which is why no folding contribution can" \
+		"act on it"
+else
+	ck fail "[gutter/monaco] a gutter click reached Monaco as ${gut_target_n} target(s):" \
+		"${gut_targets} — expected none. The stopPropagation guards on the custom" \
+		"gutter markup have been lost, and Monaco now selects the line on press."
+fi
+
+chev_targets="$(qraw gutter clickChevron monacoTargetNames)"
+if [ "${chev_targets}" = "GUTTER_LINE_DECORATIONS" ]; then
+	ck ok "[gutter/monaco] and the chevron reaches Monaco as ${chev_targets}, a" \
+		"different band from the GUTTER_LINE_NUMBERS our gutter is painted into"
+else
+	ck fail "[gutter/monaco] the chevron reached Monaco as '${chev_targets}';" \
+		"expected exactly GUTTER_LINE_DECORATIONS. Anything else means the folding" \
+		"control and our gutter are being resolved into the same band."
+fi
+
+# ---------------------------------------------------------------------------
 # THE COUNT ITSELF, so a check skipped by an early `return` cannot read as a
 # pass.  Raise this deliberately when adding one.
 # ---------------------------------------------------------------------------
-EXPECTED_CHECKS=24
+EXPECTED_CHECKS=27
 echo
 if [ "${checks}" -ne "${EXPECTED_CHECKS}" ]; then
 	echo "RESULT: FAILED — ${checks} check(s) ran, ${EXPECTED_CHECKS} expected."

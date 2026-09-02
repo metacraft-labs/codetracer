@@ -448,6 +448,54 @@ try {
   // collapses the function".  It does not reproduce — but a test that checked
   // each control WORKS would have passed on the defect as reported, so what is
   // measured here is the ABSENCE of the other effect in each direction.
+  // MONACO'S OWN CLASSIFICATION OF THE PIXEL, recorded before any click.
+  //
+  // The report was "clicking the gutter to place a breakpoint also triggers
+  // the folding collapse of the function". The checks below already measure
+  // the EFFECT of each click; this measures what Monaco thought the click WAS,
+  // which is the evidence that says whether a folding decoration is claiming
+  // the same column band as the breakpoint marker or whether the two are
+  // simply disjoint.
+  //
+  // `editor.onMouseDown`'s `e.target.type` is a `MouseTargetType`, and the
+  // three values that matter here are neighbours in the same enum:
+  // GUTTER_GLYPH_MARGIN (2), GUTTER_LINE_NUMBERS (3), GUTTER_LINE_DECORATIONS
+  // (4). The names are read off `monaco.editor.MouseTargetType` rather than
+  // written down, so a Monaco upgrade that renumbers them renames them here
+  // too instead of silently shifting what the assertion means.
+  report.monacoHook = await page.evaluate(() => {
+    const w = window;
+    w.__mt = [];
+    let names = {};
+    try {
+      const T = w.monaco.editor.MouseTargetType;
+      for (const k of Object.keys(T)) if (typeof T[k] === "number") names[T[k]] = k;
+    } catch (e) {
+      return { hooked: 0, error: String(e).slice(0, 150), names: {} };
+    }
+    w.__mtNames = names;
+    let hooked = 0;
+    try {
+      for (const ed of w.monaco.editor.getEditors()) {
+        ed.onMouseDown((e) => {
+          w.__mt.push({
+            type: e.target.type,
+            typeName: names[e.target.type] || String(e.target.type),
+            line: e.target.position ? e.target.position.lineNumber : null,
+            cls:
+              e.target.element && typeof e.target.element.className === "string"
+                ? e.target.element.className.slice(0, 60)
+                : null,
+          });
+        });
+        hooked++;
+      }
+    } catch (e) {
+      return { hooked, error: String(e).slice(0, 150), names };
+    }
+    return { hooked, error: "", names };
+  });
+
   await page.evaluate(() => {
     const c = document.getElementById("context-menu-container");
     if (c) c.style.display = "none";
@@ -521,12 +569,21 @@ try {
   if (gutterGeom) {
     const clickAndWatch = async (pt) => {
       const before = await page.evaluate(() => window.__gut());
+      await page.evaluate(() => { window.__mt = []; });
       await page.mouse.click(pt.x, pt.y);
       await page.waitForTimeout(800);
       const after = await page.evaluate(() => window.__gut());
+      // Monaco's own view of the same press. An empty list is a RESULT and not
+      // a missing measurement: every node the custom gutter emits carries
+      // `onmousedown='event.stopPropagation()'`, so a press on our markup is
+      // one Monaco never hears about — which is why no folding handler of its
+      // can act on it.
+      const monacoTargets = await page.evaluate(() => window.__mt);
       return {
         breakpointChanged: JSON.stringify(before.breakpoints) !== JSON.stringify(after.breakpoints),
         folded: after.collapsed !== before.collapsed || after.lines !== before.lines,
+        monacoTargets,
+        monacoTargetNames: monacoTargets.map((t) => t.typeName).join(","),
         before, after,
       };
     };

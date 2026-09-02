@@ -311,6 +311,81 @@ try {
             overlapsMarker: m ? !(r.right <= m.left || r.left >= m.right) : null,
           };
         }),
+      // THE GUTTER'S BAND MAP, MEASURED.
+      //
+      // The strip carries FOUR concerns and they must not collide:
+      // breakpoints/tracepoints, VCS change indicators, the line number, and
+      // the run-test control. `viewmodel/viewmodels/editor_gutter_lanes.nim`
+      // declares which band owns which, left to right; this reads back where
+      // each one actually LANDED, so the declaration and the paint can be
+      // compared rather than each being believed on its own.
+      //
+      // Reported as NUMBERS — every band's left and right edge in device
+      // pixels — because a band map asserted as a boolean is the shape of
+      // check that let `.diff-line` sit in this strip at 73x0 px for a year
+      // while every gutter test stayed green.
+      gutterBands: (() => {
+        // A row with no run control, so the bands measured are the ones
+        // RESERVED on every line. The run control is measured separately, on
+        // its own row, by `gutterRunSlotBoxes`.
+        const guts = [...document.querySelectorAll('.margin-view-overlays .gutter')];
+        const gut = guts.find((g) => !g.querySelector('.gutter-runtest')) || guts[0];
+        if (!gut) return null;
+        const sel = {
+          pointer: '[class*="gutter-highlight"], [class*="gutter-no-highlight"]',
+          lineNumber: '.gutter-line',
+          vcs: '.diff-line',
+          breakpoint: '[class*="gutter-no-breakpoint"], [class*="gutter-breakpoint-"]',
+          tracepoint: '[class*="gutter-no-trace"], [class*="gutter-trace"], [class*="gutter-disabled-trace"]',
+        };
+        const bands = {};
+        for (const [name, s] of Object.entries(sel)) {
+          const el = gut.querySelector(s);
+          if (!el) { bands[name] = null; continue; }
+          const r = el.getBoundingClientRect();
+          const cx = Math.round(r.x + r.width / 2);
+          const cy = Math.round(r.y + r.height / 2);
+          const hit = r.width && r.height ? document.elementFromPoint(cx, cy) : null;
+          bands[name] = {
+            left: Math.round(r.left), right: Math.round(r.right),
+            width: Math.round(r.width), height: Math.round(r.height),
+            ownsHitArea: hit ? (hit === el || el.contains(hit)) : false,
+            hitElement: hit
+              ? `${hit.tagName}.${typeof hit.className === 'string' ? hit.className.slice(0, 40) : ''}`
+              : null,
+          };
+        }
+        // Pairwise horizontal overlap, computed rather than assumed. Two bands
+        // that merely touch are one band to a rounding error, so a zero-width
+        // gap is reported as an overlap of 0 and read as such by the gate.
+        const names = Object.keys(bands).filter((n) => bands[n] && bands[n].width > 0);
+        const overlaps = [];
+        for (let i = 0; i < names.length; i++) {
+          for (let j = i + 1; j < names.length; j++) {
+            const a = bands[names[i]], b = bands[names[j]];
+            const ov = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+            if (ov > 0) overlaps.push({ a: names[i], b: names[j], px: ov });
+          }
+        }
+        // Left-to-right order of the bands that have a box, by left edge. The
+        // declaration in `editor_gutter_lanes.nim` names this same order.
+        const order = names.slice().sort((a, b) => bands[a].left - bands[b].left);
+        const ln = gut.querySelector('.gutter-line');
+        const chev = (() => {
+          const row = gut.closest('.margin-view-overlays > div');
+          const c = row && row.querySelector('[class*="codicon-folding"]');
+          if (!c) return null;
+          const r = c.getBoundingClientRect();
+          return { left: Math.round(r.left), right: Math.round(r.right) };
+        })();
+        return {
+          line: gut.getAttribute('data-line'),
+          gutter: (r => ({ left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) }))(gut.getBoundingClientRect()),
+          chevron: chev,
+          bands, overlaps, order,
+          lineNumberClipped: ln ? ln.scrollWidth > ln.clientWidth + 1 : null,
+        };
+      })(),
       testRunButton: (() => {
         const btn = document.querySelector('.test-results-run-btn');
         if (!btn) return null;
@@ -552,6 +627,134 @@ if (process.env.CT_PROBE_CLICK_RUN) {
     .filter((l) => l.includes(marker)).slice(0, 40);
 }
 
+// THE EDITOR'S OWN RUN CONTROL, PRESSED.
+//
+// The report this exists for is verbatim: "I tried to interact with the 'Run
+// test' feature in Codetracer inserted in the monaco editor... Naturally, it
+// just hanged in the browser without the ability to run the actual test."
+//
+// `runClick` above presses the Test Results pane's control and is the proof
+// that A run can start. It says nothing about THIS control, which is a
+// different element, on a different surface, wired through a different hook
+// (`editor.editorTestRunHook` -> `web_noir_build.startNoirTestRecording`), and
+// which is the one the user pressed. The two were separately capable of being
+// broken and only one was ever measured.
+//
+// WHAT IS RECORDED, and why each field is not the others:
+//
+//   * `ownsHitArea` — `elementFromPoint` at the control's own centre. A
+//     control painted under the breakpoint marker would be pressed by nobody,
+//     and a screenshot cannot tell that apart from a working one.
+//   * `startedLine` / `refusedLine` — the dispatch, from the console. "It
+//     started" and "it was refused, for this reason" are both answers; only
+//     silence is the reported defect.
+//   * `runningAfterClick` — the slot took a RUNNING state. On its own this is
+//     the defect, not the fix: the shipped bug was a control that span forever
+//     over a message no host answered.
+//   * `runningAfterSettle` — and it STOPPED. This is the pair that separates
+//     "ran" from "hanged", and it is why both are recorded rather than the
+//     first alone.
+let gutterRunClick = null;
+if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
+  const marker = 'codetracer-noir-build:';
+  const linesBefore = consoleLines.length;
+  gutterRunClick = {
+    attempted: true,
+    slot: null,
+    clicked: false,
+    clickError: '',
+    startedLine: '',
+    refusedLine: '',
+    exitLine: '',
+    resultsLine: '',
+    runningAfterClick: null,
+    runningAfterSettle: null,
+    headlineBefore: '',
+    headlineAfter: '',
+    newConsole: [],
+  };
+  try {
+    const headlineOf = () =>
+      page.evaluate(() =>
+        ((document.querySelector('.test-results-headline') || {}).textContent ||
+          '').trim());
+    const runningCount = () =>
+      page.evaluate(() =>
+        document.querySelectorAll('.gutter-runtest.running').length);
+
+    // The row has to be HOVERED for the control to be visible; it is laid out
+    // at all times (`opacity`, not `display`) so its box is stable, but a
+    // press with no hover is not the gesture a user makes.
+    gutterRunClick.slot = await page.evaluate(() => {
+      const el = document.querySelector('.gutter-runtest[data-runtest-line]');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const row = el.closest('.gutter');
+      const bp = row && row.querySelector(
+        '[class*="gutter-breakpoint-"], [class*="gutter-no-breakpoint"]');
+      const br = bp ? bp.getBoundingClientRect() : null;
+      const cx = Math.round(r.x + r.width / 2);
+      const cy = Math.round(r.y + r.height / 2);
+      const hit = document.elementFromPoint(cx, cy);
+      return {
+        line: el.getAttribute('data-runtest-line'),
+        left: Math.round(r.left), right: Math.round(r.right),
+        width: Math.round(r.width), height: Math.round(r.height),
+        centre: { x: cx, y: cy },
+        breakpointLeft: br ? Math.round(br.left) : null,
+        breakpointRight: br ? Math.round(br.right) : null,
+        overlapsBreakpoint: br ? !(r.right <= br.left || r.left >= br.right) : null,
+        ownsHitArea: hit === el || el.contains(hit),
+        hitElement: hit
+          ? `${hit.tagName}.${typeof hit.className === 'string' ? hit.className.slice(0, 40) : ''}`
+          : null,
+      };
+    });
+    if (gutterRunClick.slot) {
+      gutterRunClick.headlineBefore = await headlineOf();
+      await page.mouse.move(
+        gutterRunClick.slot.centre.x, gutterRunClick.slot.centre.y);
+      await page.waitForTimeout(300);
+      await page.mouse.click(
+        gutterRunClick.slot.centre.x, gutterRunClick.slot.centre.y);
+      gutterRunClick.clicked = true;
+      await page.waitForTimeout(500);
+      gutterRunClick.runningAfterClick = await runningCount();
+
+      const waitForLine = async (test, budgetMs) => {
+        const deadline = Date.now() + budgetMs;
+        while (Date.now() < deadline) {
+          const hit = consoleLines.slice(linesBefore).find(test);
+          if (hit) return hit;
+          await page.waitForTimeout(250);
+        }
+        return '';
+      };
+      gutterRunClick.startedLine = await waitForLine(
+        (l) => l.includes(marker) && l.includes('nbpTest-started'), 30000);
+      gutterRunClick.refusedLine = consoleLines.slice(linesBefore).find(
+        (l) => l.includes(marker) &&
+               (l.includes('test-record-refused') ||
+                l.includes('test-record-ignored') ||
+                l.includes('test-refused') || l.includes('test-ignored') ||
+                l.includes('nbpTest-refused'))) || '';
+      if (gutterRunClick.startedLine) {
+        gutterRunClick.exitLine = await waitForLine(
+          (l) => l.includes(marker) && l.includes('nbpTest-exit'), 180000);
+        gutterRunClick.resultsLine = await waitForLine(
+          (l) => l.includes(marker) && l.includes('test-results '), 10000);
+      }
+      await page.waitForTimeout(1500);
+      gutterRunClick.runningAfterSettle = await runningCount();
+      gutterRunClick.headlineAfter = await headlineOf();
+    }
+  } catch (e) {
+    gutterRunClick.clickError = String((e && e.message) || e).slice(0, 300);
+  }
+  gutterRunClick.newConsole = consoleLines.slice(linesBefore)
+    .filter((l) => l.includes(marker)).slice(0, 40);
+}
+
 await browser.close();
 
 console.log(
@@ -561,6 +764,7 @@ console.log(
       loadError,
       dom,
       runClick,
+      gutterRunClick,
       pageErrors,
       failedRequests: [...new Set(failedRequests)],
       // The two arms' own sentences, picked out of the console rather than the

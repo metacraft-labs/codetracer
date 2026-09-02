@@ -12,25 +12,68 @@
 //                                             — ON HOVER ONLY — the run-test
 //                                             control (.gutter-runtest)
 //   line number    the remainder              .gutter-line
+//   VCS lane       --ct-gutter-vcs-lane       the per-line change indicator
+//                                             (.diff-line)
+//   (split)        --ct-gutter-vcs-split      nothing; keeps the VCS band off
+//                                             the breakpoint's hit area
 //   marker lane    --ct-gutter-marker-lane    breakpoint, then tracepoint
 //   (gap)          --ct-gutter-marker-gap     nothing; keeps us off the chevron
 //   folding lane   --ct-gutter-folding-lane   MONACO'S.  `.gutter` subtracts
 //                                             this from its own width so the
 //                                             chevron is never under us.
 //
-// THE FOLDING LANE IS WHY A GUTTER CLICK DOES NOT FOLD, and it is why a
-// reported "clicking the gutter to place a breakpoint also collapses the
-// function" could not be reproduced on the deployed build OR on `cloud`.
-// Measured in a real tab: a click anywhere in `.gutter` toggles the breakpoint
-// and leaves the fold alone (22 rendered lines before and after), and a click
-// on the chevron folds (22 -> 20) and leaves breakpoints alone.
+// The same order, with the concern each band answers to rather than the
+// element, is declared once in `viewmodel/viewmodels/editor_gutter_lanes.nim`
+// and asserted against the PAINTED boxes by `ci/test/web-renderer-mounts.sh`.
+// Two statements of a layout is one too many; the reason there are two is that
+// Stylus cannot be read by a Nim test and a Nim constant cannot be read by
+// Stylus, so they are instead made to fail apart.
 //
-// That is not luck, and setting `--ct-gutter-folding-lane` to 0 is a mutation
-// arm which produces exactly the reported symptom's family: `.gutter` then
-// covers the chevron, and clicking the chevron toggles a breakpoint instead of
-// folding.  `ci/test/menu-and-context-menu-in-browser.sh` asserts BOTH
-// directions, because a test that checked each control merely WORKS would have
-// passed on the defect as it was reported.
+// THE VCS LANE IS NEW AND IT REPLACES A HOLE, not a working indicator.  What
+// was here was `<div class="diff-line">` and it measured, on `cloud` 402c1d35
+// at `/noir`:
+//
+//     .gutter      left 293  right 366  width 73
+//     .diff-line   left 293  right 366  width 73  HEIGHT 0
+//
+// — a box spanning the entire strip, lying across the line number by 29px, the
+// breakpoint by 9px and the tracepoint by 10px, with no height and therefore
+// no hit area and nothing drawn.  It was a slot in name only, and the fourth
+// concern this gutter has to hold had nowhere to be.  It now has 0.35em of its
+// own between the line number and the markers, reserved on every line so the
+// numbers do not jitter when a file becomes a working copy, and
+// `monacoLineDecorationsWidth` grows by the same amount so the reservation is
+// paid for out of the margin rather than out of the line number.
+//
+// THE FOLDING LANE IS ONE OF TWO REASONS A GUTTER CLICK DOES NOT FOLD, and
+// this paragraph used to claim it was the only one.  A reported "clicking the
+// gutter to place a breakpoint also collapses the function" does not reproduce
+// on the deployed build or on `cloud`: measured in a real tab, a click anywhere
+// in `.gutter` toggles the breakpoint and leaves the fold alone (22 rendered
+// lines before and after), and a click on the chevron folds (22 -> 20) and
+// leaves breakpoints alone.
+//
+// Two independent things hold that apart, and only one of them is here:
+//
+//   * THE LANE.  `.gutter` subtracts `--ct-gutter-folding-lane` from its own
+//     width, so the chevron is never underneath us.  Setting it to 0 is a
+//     mutation arm and produces the reported symptom's family in reverse:
+//     `.gutter` covers the chevron and clicking the chevron toggles a
+//     breakpoint instead of folding.
+//
+//   * THE `onmousedown='event.stopPropagation()'` GUARDS on every node
+//     `ui/trace.editorLineNumber` emits, and these turn out to be the load-
+//     bearing half.  Stripped, the SAME CLICK AT THE SAME COORDINATES both
+//     toggles the breakpoint and folds the function — measured — because
+//     Monaco then classifies the press as `GUTTER_LINE_DECORATIONS`, which is
+//     the band its own folding contribution owns.  Geometry does not enter
+//     into it: the classification is by band, not by which element was hit.
+//
+// `ci/test/menu-and-context-menu-in-browser.sh` asserts both directions of the
+// gesture AND reads back Monaco's own `MouseTargetType` for each press, because
+// a test that checked each control merely WORKS would have passed on the defect
+// as it was reported, and one that checked only the geometry would have gone on
+// passing if the guards were deleted.
 //
 // WITHIN the marker lane the two markers used to OVERLAP.  Their right offsets
 // were tuned independently — 1.05em and 0.6em against widths of 1.1ch and
@@ -70,6 +113,18 @@
   // breakpoint dot moved left into, and the gate asserts the line number still
   // fits what is left.
   --ct-gutter-marker-lane: 2.05em
+  // The VCS change indicator's own band.  Narrow, because what goes here is a
+  // BAR and not a glyph — the same shape every editor draws for "this line
+  // differs from the index" — but not narrower than a pointer can hit.
+  --ct-gutter-vcs-lane: 0.35em
+  // The clear space between the VCS band and the marker lane, and it is the
+  // same sentence as `--ct-gutter-marker-split` one band over: two hit areas
+  // that merely touch are one hit area to a rounding error.  Measured with
+  // this at zero, the VCS band resolved to [337,342] against a breakpoint at
+  // [341,350] and `elementFromPoint` at the VCS band's own centre returned the
+  // BREAKPOINT.  The marker lane's left edge and the breakpoint's left edge
+  // coincide, so anything flush against the lane is flush against the marker.
+  --ct-gutter-vcs-split: 0.25em
   --ct-gutter-folding-lane: 0.85em
   --ct-gutter-marker-gap: 0.45em
   --ct-gutter-line-gap: 0.15em
@@ -907,13 +962,60 @@
     display: none
 
 
+  // THE VCS CHANGE INDICATOR'S BAND.
+  //
+  // Between the line number and the markers, so it is disjoint from all three
+  // of the other concerns this strip carries: the run control is at the far
+  // left, the markers at the far right, and the number is what this band is
+  // subtracted from.
+  //
+  // ALWAYS LAID OUT, NEVER ALWAYS PAINTED.  The box exists on every line —
+  // `.diff-line` is emitted by `ui/trace.editorLineNumber` unconditionally —
+  // and the colour is what a container class turns on (`.diff-added-gutter` /
+  // `.diff-deleted-gutter`).  A band that appeared only on changed lines would
+  // shift the line numbers sideways the moment a file was edited, which is the
+  // one thing every band in this strip is reserved to prevent.
+  .diff-line
+    position: absolute
+    top: 0
+    height: 100%
+    width: var(--ct-gutter-vcs-lane)
+    right: calc(var(--ct-gutter-marker-lane) + var(--ct-gutter-vcs-split))
+    box-sizing: border-box
+    // Under the markers and over nothing.  It cannot reach them — the bands do
+    // not touch — but a stacking order stated here is one that survives the
+    // next band someone adds.
+    z-index: 4
+
+  .diff-line:before
+    content: ""
+    display: block
+    height: 100%
+    // The bar itself is narrower than its band, so the band's hit area is
+    // comfortable while the mark stays the thin rule a reader expects.
+    width: 0.15em
+    margin: 0 auto
+    background: transparent
+
+  // AND THE BAND IS NOW AN INDICATOR, which is the half a reserved width does
+  // not give you.  `.diff-added-gutter` and `.diff-deleted-gutter` are set on
+  // `.gutter` itself by `ui/trace.editorLineNumber`; until now the only thing
+  // either did was recolour the line NUMBER, which is a signal that competes
+  // with the number's own meaning and disappears entirely on the active line
+  // (`.active-line-number` overrides the colour).  The bar does not.
+  &.diff-added-gutter .diff-line:before
+    background: colors-ui-text-success-primary
+
+  &.diff-deleted-gutter .diff-line:before
+    background: colors-ui-text-error-primary
+
   .gutter-line
-    width: calc(100% - var(--ct-gutter-pointer-lane) - var(--ct-gutter-marker-lane) - (var(--ct-gutter-line-gap) * 2))
+    width: calc(100% - var(--ct-gutter-pointer-lane) - var(--ct-gutter-vcs-lane) - var(--ct-gutter-vcs-split) - var(--ct-gutter-marker-lane) - (var(--ct-gutter-line-gap) * 2))
     height: 100%
     display: block
     box-sizing: border-box
     margin-left: calc(var(--ct-gutter-pointer-lane) + var(--ct-gutter-line-gap))
-    margin-right: var(--ct-gutter-line-gap)
+    margin-right: calc(var(--ct-gutter-line-gap) + var(--ct-gutter-vcs-lane) + var(--ct-gutter-vcs-split))
     padding-left: 0
     padding-right: 0.15em
     text-align: right

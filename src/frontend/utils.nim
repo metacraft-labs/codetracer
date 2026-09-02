@@ -5,6 +5,8 @@ import
   lib / [ logging, monaco_lib, jslib ],
   ui / auto_hide
 
+import viewmodel / viewmodels / editor_gutter_lanes
+
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
 const
@@ -42,12 +44,17 @@ proc monacoLineNumbersMinChars*(lineCount: int): int =
   max(4, ($max(1, lineCount)).len + 2)
 
 proc monacoLineDecorationsWidth*(fontSize: int): int =
-  ## Reserve only the custom marker lane and the folding chevron lane.
+  ## Reserve the custom marker lane, the VCS lane and the folding chevron lane.
   ## The line-number column width is controlled separately via
   ## `lineNumbersMinChars`.
-  let markerLane = (fontSize * 9) div 5
-  let foldingLane = fontSize div 2
-  max(20, markerLane + foldingLane)
+  ##
+  ## DELEGATED, so the band map has one statement. The arithmetic and the
+  ## reason the VCS band belongs in it are in
+  ## `viewmodel/viewmodels/editor_gutter_lanes.lineDecorationsWidthPx`, which
+  ## is a pure module and is therefore the version a test on either backend can
+  ## reach — this one cannot be imported by a headless suite, because
+  ## `utils.nim` reaches `kdom`.
+  editor_gutter_lanes.lineDecorationsWidthPx(fontSize)
 
 proc renderLineElement*(x1, y1, x2, y2: float): dom.Element =
   result = dom.createElementNS(dom.document, SVG_NAMESPACE, cstring"line")

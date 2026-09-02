@@ -1149,19 +1149,40 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
   ##                            not toggled at all
   ##
   ##    So they stop Monaco's line-selection on press, which is their job, and
-  ##    they are also what keeps the click path working.  They do not stop
-  ##    folding — but nothing needs to, because `.gutter` subtracts
-  ##    `--ct-gutter-folding-lane` from its own width and the chevron is never
-  ##    underneath us (components/text_editor.styl).
+  ##    they are also what keeps the click path working.
   ##
-  ## 2. `diffHtml` IS A DEAD SLOT.  It is an empty div, and NO rule in the
-  ##    compiled theme targets `.diff-line` — the VCS signal a user actually
-  ##    sees comes from the CONTAINER classes below (`.diff-added-gutter`
-  ##    colours the number and `.line-numbers:has(.diff-added-gutter)` draws the
-  ##    edge).  Measured: `.diff-line` renders at 73x0 px.  It is left in place
-  ##    rather than deleted because a VCS-gutter feature may want the slot, but
-  ##    it is a slot, not an indicator, and anything placing a control in this
-  ##    strip should not count it as an occupied lane.
+  ##    AND THEY DO STOP THE FOLD.  The paragraph that used to end this item
+  ##    said they did not, and that "nothing needs to, because `.gutter`
+  ##    subtracts `--ct-gutter-folding-lane` and the chevron is never underneath
+  ##    us".  The second half is true and the first is false, and the whole of
+  ##    the reported defect (c) — "clicking in the gutter to place a breakpoint
+  ##    also triggers the folding collapse" — lives in the difference.
+  ##
+  ##    Measured by stripping the guards from THIS PROC, rebuilding, and
+  ##    repeating the same click at the same coordinates
+  ##    (`ci/test/menu-and-context-menu-in-browser.sh`, which now records
+  ##    Monaco's own `MouseTargetType` for the press):
+  ##
+  ##        with the guards     0 Monaco mouse targets; breakpoint toggled,
+  ##                            22 rendered lines before and after
+  ##        without them        1 target, GUTTER_LINE_DECORATIONS; breakpoint
+  ##                            toggled AND the function folded
+  ##
+  ##    `GUTTER_LINE_DECORATIONS` is the band Monaco's own folding contribution
+  ##    owns, and Monaco resolves a press on OUR markup into it — the chevron's
+  ##    box being elsewhere does not enter into it, because the classification
+  ##    is by band and not by which element was hit.  So the guards are the only
+  ##    thing standing between this gutter and the reported symptom, and they
+  ##    are now asserted by name rather than reasoned about.
+  ##
+  ## 2. `diffHtml` IS THE VCS BAND, and it was a dead slot until it was given
+  ##    one.  Measured on `cloud` 402c1d35: `.diff-line` rendered at 73x0 px —
+  ##    a box spanning the whole gutter, lying across the line number by 29px,
+  ##    the breakpoint by 9px and the tracepoint by 10px at once, with no
+  ##    height, no hit area and nothing drawn.  It now has a reserved band of
+  ##    its own between the line number and the markers, with clearance from
+  ##    both; `viewmodel/viewmodels/editor_gutter_lanes.nim` declares the order
+  ##    and `ci/test/web-renderer-mounts.sh` asserts the painted boxes.
   let realLine =
     if isDeleteChunk:
       -1

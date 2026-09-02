@@ -448,6 +448,7 @@ probe_dir() {
 	# different subject than every other arm.
 	CT_PROBE_SCREENSHOT="${shot}" CT_PROBE_HOST_MAP="${host_map}" \
 		CT_PROBE_CLICK_RUN="${probe_click_run:-}" \
+		CT_PROBE_CLICK_GUTTER_RUN="${probe_click_gutter_run:-}" \
 		node ci/test/web_renderer_probe.mjs "${url}" \
 		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
 	local rc=$?
@@ -1400,6 +1401,9 @@ if ! run_arm route "" "/noir"; then
 	ck fail "arm R could not be measured (status bar present)"
 	ck fail "arm R could not be measured (status bar unobscured)"
 	ck fail "arm R could not be measured (the run control was never pressed)"
+	ck fail "arm R could not be measured (the gutter's four bands)"
+	ck fail "arm R could not be measured (the VCS band's height)"
+	ck fail "arm R could not be measured (the gutter bands' disjointness)"
 else
 	# Reset in BOTH branches: every arm after this one measures a pane nobody
 	# touched, and a leaked `1` would silently start running tests in them.
@@ -1810,6 +1814,81 @@ print(len(boxes), len(bad), len(zero))
 		ck ok "arm R: each run control has a hit area of its own (${1} measured, none overlapping the breakpoint, none zero-width)"
 	else
 		ck fail "arm R: ${1:-0} run control(s) measured, ${2:-?} overlapping the breakpoint marker and ${3:-?} with no width — a control a click cannot reach, or one that steals the breakpoint's"
+	fi
+
+	# AND THE STRIP HOLDS ALL FOUR CONCERNS AT ONCE.
+	#
+	# The gutter carries breakpoints/tracepoints, VCS change indicators, line
+	# numbers and the run-test control, and the fourth of those had nowhere to
+	# be. `.diff-line` — the slot the VCS indicator was supposed to occupy —
+	# measured 73 x 0 px on `cloud` 402c1d35: a box spanning the ENTIRE gutter,
+	# lying across the line number by 29px, the breakpoint by 9px and the
+	# tracepoint by 10px simultaneously, with no height and therefore nothing
+	# drawn and nothing to click.
+	#
+	# It did no visible harm, which is exactly why nothing caught it. A
+	# zero-height box paints no pixels, so every screenshot was right and every
+	# check that asked whether a control WORKED was right, and the strip still
+	# had no room for a change indicator.
+	#
+	# THE NUMBERS ARE PRINTED, PASS OR FAIL. `viewmodel/viewmodels/
+	# editor_gutter_lanes.nim` declares this band order and its unit suite
+	# asserts the arithmetic; this reads back where the boxes LANDED. Neither
+	# half is evidence on its own — the declaration cannot see a stylesheet and
+	# the stylesheet cannot see the declaration — and a band map reported as a
+	# boolean would be readable against neither.
+	r_bands="$(python3 -c '
+import json, sys
+b = json.load(open(sys.argv[1]))["dom"].get("gutterBands") or {}
+bands = b.get("bands") or {}
+print(" ".join(
+    "%s[%s,%s]h%s" % (n, v["left"], v["right"], v["height"]) if v else n + "=absent"
+    for n, v in bands.items()))
+' "${cache}/route.json")"
+	r_bandstate="$(python3 -c '
+import json, sys
+b = json.load(open(sys.argv[1]))["dom"].get("gutterBands") or {}
+bands = b.get("bands") or {}
+vcs = bands.get("vcs")
+# Every band that must be a real, hittable box on every line. The pointer band
+# is NOT in this list: its occupants are the current-line arrow (one line at a
+# time) and the run-test control (hover-only), so on an ordinary row it
+# correctly has no box.
+need = ["lineNumber", "vcs", "breakpoint", "tracepoint"]
+missing = [n for n in need if not bands.get(n) or not bands[n]["width"] or not bands[n]["height"]]
+unowned = [n for n in need if bands.get(n) and not bands[n]["ownsHitArea"]]
+print(len(b.get("overlaps") or []))
+print(",".join(missing) or "none")
+print(",".join(unowned) or "none")
+print(",".join(b.get("order") or []))
+print(json.dumps(b.get("overlaps") or []))
+print((vcs or {}).get("height", 0))
+' "${cache}/route.json")"
+	r_band_overlaps="$(printf '%s\n' "${r_bandstate}" | sed -n 1p)"
+	r_band_missing="$(printf '%s\n' "${r_bandstate}" | sed -n 2p)"
+	r_band_unowned="$(printf '%s\n' "${r_bandstate}" | sed -n 3p)"
+	r_band_order="$(printf '%s\n' "${r_bandstate}" | sed -n 4p)"
+	r_band_overlap_list="$(printf '%s\n' "${r_bandstate}" | sed -n 5p)"
+	r_vcs_height="$(printf '%s\n' "${r_bandstate}" | sed -n 6p)"
+
+	if [ "${r_band_missing}" = "none" ]; then
+		ck ok "arm R: all four of the gutter's reserved concerns have a real box — ${r_bands}"
+	else
+		ck fail "arm R: these gutter bands have no box a pointer can reach: ${r_band_missing} — ${r_bands}"
+	fi
+
+	# THE VCS BAND SPECIFICALLY, and its HEIGHT, because that is the field the
+	# defect lived in. Width alone was never wrong: `.diff-line` was 73px wide.
+	if [ "${r_vcs_height:-0}" -gt 0 ]; then
+		ck ok "arm R: the VCS change band is ${r_vcs_height}px tall, so the strip has somewhere to draw a per-line change indicator"
+	else
+		ck fail "arm R: the VCS change band is ${r_vcs_height}px tall — it is a slot in name only and the gutter has no room for a VCS indicator"
+	fi
+
+	if [ "${r_band_overlaps}" = "0" ] && [ "${r_band_unowned}" = "none" ]; then
+		ck ok "arm R: and no two of them share a pixel, each owning the hit test at its own centre — left to right: ${r_band_order}"
+	else
+		ck fail "arm R: gutter bands overlap (${r_band_overlap_list}) or do not own their own centre (${r_band_unowned}) — ${r_bands}"
 	fi
 
 	# CONSTRAINTS SHOWS A MEASURED NUMBER. 17 is the ACIR total the SHIPPING
@@ -2367,6 +2446,159 @@ else
 fi
 echo
 
+# ---------------------------------------------------------------------------
+echo "Arm G: the EDITOR'S OWN run-test control, pressed"
+echo "    The report, verbatim: \"I tried to interact with the 'Run test'"
+echo "    feature ... it just hanged in the browser without the ability to run"
+echo "    the actual test.\" Arm R presses the TEST RESULTS pane's control and"
+echo "    says nothing about this one — a different element, on a different"
+echo "    surface, through a different hook."
+# ---------------------------------------------------------------------------
+# WHY THIS IS ITS OWN ARM AND NOT THREE MORE CHECKS IN ARM R.
+#
+# Arm R's press MUTATES the page: it clears the previous verdicts and moves the
+# pane out of "not run yet". A second press measured after it would be pressing
+# a control whose starting state the first press had already changed, and
+# "5 tests, not run yet" -> "1 passed" is the transition that says this control
+# did something. So the arm loads `/noir` again, untouched, and presses only
+# the gutter.
+#
+# THE FOUR THINGS IT SEPARATES, because the reported defect satisfies the first
+# two of them and fails the last two:
+#
+#   1. the control has a hit area of its own, disjoint from the breakpoint's;
+#   2. the press was taken;
+#   3. a run STARTED — the console line no amount of rendering can produce;
+#   4. and the control STOPPED. The shipped bug was a control that span
+#      forever over a message no host answered, so "it started spinning" is
+#      the defect and not the fix.
+probe_click_gutter_run=1
+if ! run_arm gutter-run "" "/noir"; then
+	probe_click_gutter_run=""
+	ck fail "arm G could not be measured"
+	ck fail "arm G could not be measured (second half)"
+	ck fail "arm G could not be measured (third half)"
+	ck fail "arm G could not be measured (fourth half)"
+else
+	probe_click_gutter_run=""
+	g_slot="$(python3 -c '
+import json, sys
+s = (json.load(open(sys.argv[1])).get("gutterRunClick") or {}).get("slot")
+if not s:
+    print("absent"); raise SystemExit
+print("line=%s box=[%s,%s]x%s ownsHitArea=%s overlapsBreakpoint=%s hit=%s" % (
+    s["line"], s["left"], s["right"], s["height"], s["ownsHitArea"],
+    s["overlapsBreakpoint"], s["hitElement"]))
+' "${cache}/gutter-run.json")"
+	g_ok="$(python3 -c '
+import json, sys
+s = (json.load(open(sys.argv[1])).get("gutterRunClick") or {}).get("slot")
+print("yes" if s and s["ownsHitArea"] and not s["overlapsBreakpoint"]
+      and s["width"] and s["height"] else "no")
+' "${cache}/gutter-run.json")"
+	g_clicked="$(json gutter-run gutterRunClick.clicked)"
+	g_started="$(json gutter-run gutterRunClick.startedLine)"
+	g_refused="$(json gutter-run gutterRunClick.refusedLine)"
+	g_results="$(json gutter-run gutterRunClick.resultsLine)"
+	g_running="$(json gutter-run gutterRunClick.runningAfterClick)"
+	g_settled="$(json gutter-run gutterRunClick.runningAfterSettle)"
+	g_headbefore="$(json gutter-run gutterRunClick.headlineBefore)"
+	g_headafter="$(json gutter-run gutterRunClick.headlineAfter)"
+
+	if [ "${g_ok}" = "yes" ]; then
+		ck ok "arm G: the run control has a hit area of its own and it is not the breakpoint's — ${g_slot}"
+	else
+		ck fail "arm G: the run control is unreachable or shares the breakpoint's hit area — ${g_slot}"
+	fi
+
+	if [ "${g_clicked}" = "true" ] && [ -n "${g_started}" ]; then
+		ck ok "arm G: pressing it STARTED a run — ${g_started}"
+	else
+		ck fail "arm G: the press started no run (clicked=${g_clicked}, refusal='${g_refused}') — this is the reported defect: a control that takes the click and reaches no runner"
+	fi
+
+	# THE VERDICT, and it must name a passing test. `startNoirTestRecording`
+	# dispatches `nargo test --exact <selector>`, so ONE test is asked for and
+	# one verdict is expected — which is what distinguishes this control from
+	# the pane's ▶ (five) rather than merely repeating it.
+	case "${g_results}" in
+	*"ok=true passed=1 failed=0"*)
+		ck ok "arm G: and the run reached a verdict for the one test it selected — ${g_results}"
+		;;
+	*)
+		ck fail "arm G: no single-test verdict reached the pane — '${g_results:-none}'"
+		;;
+	esac
+
+	# AND IT STOPPED. Both halves, because either alone is consistent with the
+	# defect: a control that never span was never wired, and one that span and
+	# stayed spinning is the bug exactly as reported.
+	if [ "${g_running}" -ge 1 ] 2>/dev/null && [ "${g_settled}" = "0" ]; then
+		ck ok "arm G: the control showed a running state (${g_running} slot) and CLEARED it once the run settled (${g_settled}) — headline '${g_headbefore}' -> '${g_headafter}'"
+	else
+		ck fail "arm G: running slots after the click=${g_running}, after the run settled=${g_settled} — expected at least one and then none. A slot left spinning is the reported 'it just hanged in the browser'."
+	fi
+fi
+echo
+
+# ---------------------------------------------------------------------------
+echo "Arm Q: MUTATION — the same press with no wasm worker script"
+echo "    Arm G's negative control. Expect its press check GREEN and its"
+echo "    run-start and verdict checks RED: the control is still painted and"
+echo "    still takes a click, and there is nothing behind it to run."
+# ---------------------------------------------------------------------------
+probe_click_gutter_run=1
+if ! run_arm gutter-run-no-worker mutate_no_wasm_worker "/noir"; then
+	probe_click_gutter_run=""
+	ck fail "arm Q could not be measured"
+	ck fail "arm Q could not be measured (second half)"
+	ck fail "arm Q could not be measured (the slot's running state)"
+else
+	probe_click_gutter_run=""
+	q_clicked="$(json gutter-run-no-worker gutterRunClick.clicked)"
+	q_present="$(python3 -c '
+import json, sys
+s = (json.load(open(sys.argv[1])).get("gutterRunClick") or {}).get("slot")
+print("yes" if s and s["width"] and s["height"] else "no")
+' "${cache}/gutter-run-no-worker.json")"
+	q_started="$(json gutter-run-no-worker gutterRunClick.startedLine)"
+	q_results="$(json gutter-run-no-worker gutterRunClick.resultsLine)"
+	q_settled="$(json gutter-run-no-worker gutterRunClick.runningAfterSettle)"
+	q_refused="$(json gutter-run-no-worker gutterRunClick.refusedLine)"
+	if [ "${q_present}" = "yes" ] && [ "${q_clicked}" = "true" ]; then
+		ck ok "arm Q: the control is still painted and still takes a real click, so arm G's press check is not what this arm reddens"
+	else
+		ck fail "arm Q: the control was not painted or not clickable (painted=${q_present}, clicked=${q_clicked}) — the arm does not isolate the RUN from the CONTROL"
+	fi
+	if [ -z "${q_started}" ]; then
+		ck ok "arm Q: and the press started no run and reached no verdict ('${q_results:-none}'), so arm G's run-start and verdict assertions can fail"
+	else
+		ck fail "arm Q: a run started with no worker script to start it ('${q_started}') — arm G's run-start assertion proves nothing"
+	fi
+
+	# AND THE SLOT STOPPED ANYWAY, which is the half this arm found rather than
+	# confirmed. The refusal here is SYNCHRONOUS — the console line is
+	#
+	#     codetracer-noir-build: nbpTest-refused starts=0 reason=pkCancelled
+	#
+	# and it is emitted inside the hook, before the press has finished being
+	# handled. `runTestFromGutter` used to arm its spinner on the line AFTER
+	# that hook returned, so the settle swept an empty list and the slot span
+	# for the full two-minute deadline over a run refused at the click. That is
+	# the reported "it just hanged in the browser", reachable on any deployment
+	# whose worker script is missing.
+	#
+	# Measured here at ~30s after the press, which is well inside that deadline:
+	# before the fix this read 1, and the only thing that would have cleared it
+	# is a timeout no user waits through.
+	if [ "${q_settled}" = "0" ]; then
+		ck ok "arm Q: and the control did NOT stay spinning over the refusal (${q_settled} running slot(s) ~30s after the press, far inside the two-minute deadline)"
+	else
+		ck fail "arm Q: ${q_settled} slot(s) still spinning ~30s after a run that was refused synchronously ('${q_refused}') — the control is showing a run that is not happening, which is the reported defect"
+	fi
+fi
+echo
+
 # 59 -> 61. NS9 added two to the CONTROL arm — the renderer's own
 # `ctPlatform()` is the booted web platform, and what the deployment delivered
 # agrees with what the renderer can run. Arm C's two are unchanged in number
@@ -2391,7 +2623,28 @@ echo
 # compiler module the deployment is supposed to carry and requires the press to
 # go through while the RUN does not. Without it "the button worked" would be
 # the same unearned claim the class check was making.
-expect_count 74
+#
+# 74 -> 83, and the nine are three subjects.
+#
+#   * THREE in arm R for the gutter's BAND MAP. The strip carries four
+#     concerns — breakpoints/tracepoints, VCS change indicators, line numbers
+#     and the run-test control — and the VCS one had a slot measuring 73 x 0
+#     px that lay across the other three at once. It painted nothing, so every
+#     screenshot agreed with it and every check that asked whether a control
+#     worked was satisfied by it.
+#
+#   * FOUR in arm G, which presses the EDITOR'S run control rather than the
+#     pane's. The two are different elements on different surfaces through
+#     different hooks, and only one of them was ever pressed by anything here
+#     — while the one that was not is the one the bug report is about.
+#
+#   * THREE in arm Q, arm G's negative control. Without it "the gutter control
+#     ran the test" would rest on a press whose failure mode nothing had
+#     reconstructed — and its third check found a live defect rather than
+#     confirming an absence: a dispatch refused SYNCHRONOUSLY left the slot
+#     spinning for the full two-minute deadline, because `runTestFromGutter`
+#     armed the spinner on the line after the hook that had already settled.
+expect_count 84
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

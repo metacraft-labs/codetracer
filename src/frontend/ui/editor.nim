@@ -2260,16 +2260,54 @@ proc runTestFromGutter(self: EditorViewComponent; attrLine: int) =
   if editorTestRunHook.isNil:
     self.api.errorMessage("No host in this build can run the tests.")
     return
-  # REFUSE BEFORE SHOWING A RUNNING STATE. A slot that starts spinning over a
-  # request nothing took is the defect this control is being repaired for.
-  let refusal = editorTestRunHook(self.name, selector, attrLine)
-  if refusal.len > 0:
-    self.api.errorMessage($refusal)
-    return
+
+  # ARM THE SPINNER BEFORE THE DISPATCH, and the ordering is the whole of a
+  # defect rather than a preference.
+  #
+  # It used to be the other way round, for a reason that reads well and is
+  # incomplete: "refuse before showing a running state — a slot that starts
+  # spinning over a request nothing took is the defect this control is being
+  # repaired for." That covers a hook which REFUSES BY RETURNING A SENTENCE,
+  # and it is still handled below. It does not cover a hook that accepts the
+  # call and whose dispatch is refused SYNCHRONOUSLY INSIDE IT.
+  #
+  # That second path is real and it was measured. With the deployment's wasm
+  # worker script removed, pressing this control produced
+  #
+  #     codetracer-noir-build: nbpTest-refused starts=0 reason=pkCancelled
+  #
+  # and left the slot spinning. `startNoirTestRecording` does the right thing —
+  # it notices `activeInFlight` is false and calls `noirTestRunSettled`, which
+  # reaches `settleEditorTestRun` — but that ran while `spinningTestEditors`
+  # was still EMPTY and `gutterRunningTest` still UNSET, because both were set
+  # on the line after the hook returned. The settle swept nothing, and then
+  # this proc armed a spinner that no second settle would ever arrive to clear.
+  # The two-minute deadline below was the only thing that ended it, which is
+  # two minutes of "running" over a run that was refused before the click
+  # finished — the user's report almost word for word.
+  #
+  # Armed first, the same settle finds this editor in the list and clears it,
+  # and the refusal path below unwinds what it armed.
   trace.gutterRunningTest[self.name] = attrLine
   if spinningTestEditors.find(self) < 0:
     spinningTestEditors.add(self)
   self.updateLineNumbersOnly()
+
+  let refusal = editorTestRunHook(self.name, selector, attrLine)
+  if refusal.len > 0:
+    # UNWIND, so a refusal by sentence still shows no running state. `settle`
+    # rather than `restoreTestButton` because the list must be emptied too, and
+    # emptying it is what `restoreTestButton` alone does not do.
+    settleEditorTestRun()
+    self.api.errorMessage($refusal)
+    return
+
+  # ALREADY SETTLED, INSIDE THE CALL. The dispatch was refused or answered
+  # synchronously and the settle has already cleared this slot. There is no run
+  # to put a deadline on and nothing started, so neither is claimed.
+  if not trace.gutterRunningTest.hasKey(self.name):
+    return
+
   # THE DEADLINE APPLIES HERE TOO. `loadAnimation` carries it for the inline
   # widget; this slot has no animation to hang a frame counter on, so the cap is
   # a timeout. Without it a host that never settled would leave the slot
