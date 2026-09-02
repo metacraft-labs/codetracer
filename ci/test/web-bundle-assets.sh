@@ -34,9 +34,11 @@
 # gate deliberately does not restate its result. What is new here is that the
 # files that protocol needs are now placed where a tab can fetch them.
 #
-# THE TWO WASM MODULES ARE NOT IN THE REPO (~16 MB and ~4.6 MB, built from
-# published refs in the `noir` fork). Point CT_NOIR_WASM_COMPILER and
-# CT_NOIR_WASM_TRACER at them. WITHOUT THEM THIS SKIPS THAT PART LOUDLY AND
+# THE THREE WASM MODULES ARE NOT IN THE REPO (~16 MB and ~4.6 MB from published
+# refs in the `noir` fork; ~5.2 MB from `aztec-avm-runtime`'s
+# `avm-transpiler-wasm`, which wraps Aztec's own transpiler). Point
+# CT_NOIR_WASM_COMPILER, CT_NOIR_WASM_TRACER and CT_AVM_TRANSPILER_WASM at
+# them. WITHOUT THEM THIS SKIPS THAT PART LOUDLY AND
 # STILL CHECKS EVERYTHING ELSE — the same convention `noir-wasm-worker-e2e.sh`
 # established, and for the same reason: a gate that silently passes over an
 # absent input is how a deployment ships with no modules and nobody notices.
@@ -46,6 +48,9 @@
 #         CT_NOIR_WASM_TRACER    path to noir_tracer_wasm.wasm     (optional)
 #         CT_REPLAY_ENGINE_DIR   a wasm-pack `pkg/` holding db_backend.js
 #                                and db_backend_bg.wasm             (optional)
+#         CT_AVM_TRANSPILER_WASM path to avm_transpiler_wasm.wasm  (optional)
+#         CT_NOIR_WASM_REF       the `noir` rev the first two came from
+#         CT_AVM_TRANSPILER_REF  the rev the transpiler came from
 #         CT_WEB_BUNDLE_DIR      output dir (default src/build-debug/web)
 #         ISONIM_SRC             isonim source tree
 
@@ -623,6 +628,11 @@ if [ -n "${name_a}" ] && [ -n "${name_b}" ] && [ "${name_a}" != "${name_b}" ]; t
 else
 	bad "two different files were published at the same address ('${name_a}' vs '${name_b}') — a deploy would not dislodge the cached copy"
 fi
+# The third module is NOT from the `noir` fork — it wraps Aztec's own
+# `avm-transpiler` — which is why it has its own variable and its own ref below
+# rather than riding on `CT_NOIR_WASM_REF`. A deployment that placed it under
+# the Noir ref would be claiming a provenance that names the wrong repository.
+place_module CT_AVM_TRANSPILER_WASM avm-transpiler
 echo
 
 # ---------------------------------------------------------------------------
@@ -660,6 +670,10 @@ revision="${CT_WEB_REVISION:-$(git -C "${repo_root}" rev-parse --short HEAD 2>/d
 # that cannot say where it came from is dropped by `registrableModules` — so
 # an unset value here disables the module rather than shipping it anonymously.
 noir_ref="${CT_NOIR_WASM_REF:-}"
+# The transpiler's own, for the reason `place_module` gives above: it is a
+# different repository and a different crate, and one variable covering both
+# would make either module able to ship under the other's provenance.
+avm_transpiler_ref="${CT_AVM_TRANSPILER_REF:-}"
 
 descriptor_tsv="${cache}/descriptor-rows.tsv"
 : >"${descriptor_tsv}"
@@ -692,6 +706,14 @@ noir_provenance=""
 [ -n "${noir_ref}" ] && noir_provenance="noir@codetracer ${noir_ref} "
 declare_module noir-compiler "compiler/wasm" "${noir_provenance}"
 declare_module noir-tracer "tooling/tracer_wasm" "${noir_provenance}"
+
+# THE THIRD MODULE IS NOT FROM THE `noir` FORK — it wraps Aztec's own
+# `avm-transpiler` — so it carries its own ref and its own repository label
+# rather than riding on `noir_provenance`. A deployment that placed it under
+# the Noir ref would be claiming a provenance that names the wrong repository.
+avm_transpiler_provenance=""
+[ -n "${avm_transpiler_ref}" ] && avm_transpiler_provenance="aztec-avm-runtime@browser/vendor-aztec-nr ${avm_transpiler_ref} "
+declare_module avm-transpiler "avm-transpiler-wasm" "${avm_transpiler_provenance}"
 
 # THE ENGINE IS DECLARED, and it has to be for two independent reasons.
 #

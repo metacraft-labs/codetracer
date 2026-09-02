@@ -154,6 +154,11 @@ const post = (message) => self.postMessage(JSON.stringify(message));
 // modules are built to need none, so "reached no import" is a property worth
 // measuring; a silent no-op stub would let a module that quietly depends on
 // WASI produce wrong answers instead of an error naming the import.
+// ONLY function imports are stubbable this way, and that is now checked rather
+// than assumed. `WebAssembly.Module.imports` reports a `kind` for every entry —
+// `function`, `memory`, `table`, `global` — and a throwing function is a legal
+// stand-in for exactly one of them. The other three fail at LINK time with a
+// message about the import's shape, before the module runs at all.
 const stubImports = (mod) => {
   const imports = {};
   for (const { module: m, name } of WebAssembly.Module.imports(mod)) {
@@ -162,6 +167,12 @@ const stubImports = (mod) => {
   }
   return imports;
 };
+
+/** Imports this host cannot satisfy with a throwing function, as `kind module.name`. */
+const unstubbableImports = (mod) =>
+  WebAssembly.Module.imports(mod)
+    .filter((i) => i.kind !== 'function')
+    .map((i) => `${i.kind} ${i.module}.${i.name}`);
 
 // Supplied by a `configure` message rather than baked in: the bundle's asset
 // URLs are content-addressed and so are not known when this file is written.
@@ -190,9 +201,26 @@ const modules = new Map();
 //                    an HTML error page with a 200, or built against a
 //                    different ABI. The only one of the three that is a bug in
 //                    the module itself.
+//   HOST MISMATCH    the bytes arrived and ARE a usable module, and THIS HOST
+//                    cannot run it. Nothing is broken and nothing is missing:
+//                    the module asks for an environment the worker does not
+//                    offer.
+//
+// THE FOURTH ONE IS NOT SYMMETRY, IT IS A DEFECT THIS FILE SHIPPED. `load`
+// satisfied EVERY declared import with a throwing FUNCTION, including imports
+// that are not functions. A module importing its own linear memory — which
+// `avm.wasm` does, as `env.memory` — fails to link before a single instruction
+// runs, because a `Memory` cannot be a function; and the failure was caught by
+// the `catch` below and reported as BROKEN, "was served as a wasm module and is
+// not a usable one". That sentence is false in every part that matters: the
+// module is usable, it was served correctly, and the bug is here. Whoever read
+// it would go and re-examine the module and the deploy, which is exactly the
+// wrong half of the system — the same cost the three-sentence rule above was
+// written to avoid, reintroduced one import kind down.
 const NOT_DELIVERED = 'not-delivered';
 const NOT_SERVED = 'not-served';
 const BROKEN = 'broken';
+const HOST_MISMATCH = 'host-mismatch';
 
 const loadFault = (kind, id, detail) => {
   const error = new Error(detail);
@@ -200,6 +228,22 @@ const loadFault = (kind, id, detail) => {
   error.ctModule = id;
   return error;
 };
+
+// HOST PROVIDERS, keyed by module id.
+//
+// A module listed here is instantiated against an environment this file builds
+// for it instead of against throwing stubs, and may be initialised afterwards.
+// It is a REGISTRY rather than a branch inside `load` so that the default stays
+// the strict one: a module nobody registered gets throwing stubs and is
+// REFUSED, by name, if it needs anything else. Adding a capability is then an
+// explicit entry rather than a loosening that applies to every module at once.
+//
+// Empty until the AVM runtime lands. `avm.wasm` needs all three of a real
+// `env.memory`, a WASI implementation and an `_initialize()` call, and the
+// second of those is 345 lines that already exist in `aztec-avm-runtime`
+// (`browser/src/wasi.ts`) — a second copy here would be a second instrument,
+// which is what this campaign's shared `wasm_host.mjs` exists to avoid.
+const HOST_PROVIDERS = {};
 
 async function load(id) {
   if (modules.has(id)) return modules.get(id);
@@ -290,8 +334,45 @@ async function load(id) {
         mod = await WebAssembly.compile(await response.arrayBuffer());
       }
     }
-    ({ exports } = await WebAssembly.instantiate(mod, stubImports(mod)));
+    // A module with a HOST PROVIDER gets the environment that provider builds;
+    // everything else gets throwing stubs, which is what makes "reached no
+    // import" a measurement for the Noir modules.
+    const provider = HOST_PROVIDERS[id];
+    if (provider) {
+      const environment = provider(mod);
+      ({ exports } = await WebAssembly.instantiate(mod, environment.imports));
+      // A REACTOR HAS TO BE INITIALISED. `_initialize` runs the C++ static
+      // constructors; calling any other export first reads uninitialised
+      // globals and returns plausible garbage rather than failing.
+      if (environment.afterInstantiate) environment.afterInstantiate(exports);
+    } else {
+      // Reported BEFORE instantiate, so the message can name the import and its
+      // KIND. Left to the `catch` it would arrive as a LinkError whose text is
+      // about JavaScript types, under a fault that blames the module.
+      const unstubbable = unstubbableImports(mod);
+      if (unstubbable.length > 0) {
+        throw loadFault(HOST_MISMATCH, id,
+          `\`${id}\` is a valid wasm module that this worker cannot host: it ` +
+          `imports ${unstubbable.join(', ')}, and this loader satisfies every ` +
+          `import with a throwing function, which is only a legal stand-in for ` +
+          `a function import. The module is not broken and it was served ` +
+          `correctly — the worker has no host provider registered for it.`);
+      }
+      ({ exports } = await WebAssembly.instantiate(mod, stubImports(mod)));
+    }
   } catch (e) {
+    if (e && e.ctFault) throw e;
+    // A LinkError is ALWAYS about the fit between a module and its host, never
+    // about the bytes: the module parsed and validated to get this far. So it
+    // cannot be BROKEN, whatever else it is.
+    if (typeof WebAssembly.LinkError === 'function' &&
+        e instanceof WebAssembly.LinkError) {
+      throw loadFault(HOST_MISMATCH, id,
+        `\`${id}\` parsed and validated as wasm and then failed to LINK ` +
+        `against the environment this worker offers: ${e.message}. The bytes ` +
+        `are a module; the mismatch is between what it imports and what the ` +
+        `host provides.`);
+    }
     throw loadFault(BROKEN, id,
       `\`${id}\` was served from ${url} as a wasm module and is not a usable ` +
       `one: ${e && e.message ? e.message : e}`);
@@ -326,6 +407,36 @@ async function traceArtifact(artifact, inputs) {
   const text = new TextDecoder().decode(
     new Uint8Array(exports.memory.buffer, tPtr, tLen).slice());
   if (isErr) throw new Error(`tracing failed inside wasm: ${text.slice(0, 300)}`);
+  return text;
+}
+
+// The compile module's output, turned into AVM bytecode. Deliberately the same
+// `alloc` / call / `result_len` / `free` shape as the two above — upstream's
+// crate spells its exports `avmt_*` and `compile_vfs.rs` spells its `nv_*`, and
+// the shim crate that wraps the transpiler says in its own header that it
+// mirrors `nv_*` so that one loader can drive both without knowing which it
+// holds. This function is that loader's third case and nothing more.
+//
+// THE ARTIFACT IS PASSED AS AN OBJECT AND SERIALISED HERE. Taking a string
+// instead would let a caller hand over an artifact it read from somewhere else,
+// which is exactly the join this routing exists to make — a contract compiled
+// in the tab, transpiled in the tab — being quietly satisfied by a contract
+// compiled elsewhere.
+async function transpileArtifact(artifact) {
+  const exports = await load('avm-transpiler');
+  const [ptr, len] = put(exports, 'avmt_alloc', JSON.stringify(artifact));
+  const outPtr = exports.avmt_transpile(ptr, len);
+  const ok = exports.avmt_ok();
+  const outLen = exports.avmt_result_len();
+  const text = new TextDecoder().decode(
+    new Uint8Array(exports.memory.buffer, outPtr, outLen).slice());
+  exports.avmt_free(outPtr, outLen);
+  exports.avmt_free(ptr, len);
+  // `avmt_ok` is THREE-valued and the -1 is load-bearing: a host that read it
+  // without transpiling would otherwise see a 0 and report a refusal, which is
+  // a different and much more alarming sentence than "nothing ran".
+  if (ok === -1) throw new Error('the transpiler was loaded but never called');
+  if (ok !== 1) throw new Error(`the transpiler refused the artifact: ${text.slice(0, 300)}`);
   return text;
 }
 
@@ -714,6 +825,15 @@ self.onmessage = async (event) => {
     } else if (sub === 'trace') {
       const payload = JSON.parse(request.stdin);
       const text = await traceArtifact(payload.artifact, payload.inputs);
+      post({ seq, kind: 'output', stream: 'stdout', text });
+      post({ seq, kind: 'exit', exitCode: 0, signalled: false });
+    } else if (sub === 'transpile') {
+      // The stdin shape is `{artifact}` — the same envelope `trace` uses, so a
+      // caller that has a compile response in hand passes `response.artifact`
+      // to either without reshaping it. That is what makes
+      // compile -> transpile and compile -> trace the same move.
+      const payload = JSON.parse(request.stdin);
+      const text = await transpileArtifact(payload.artifact);
       post({ seq, kind: 'output', stream: 'stdout', text });
       post({ seq, kind: 'exit', exitCode: 0, signalled: false });
     } else {

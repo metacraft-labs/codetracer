@@ -1582,6 +1582,7 @@ pub fn setup_from_vfs(
             }
 
             let origin_metadata_decoder = load_materialized_origin_metadata_decoder_from_bytes(bytes.clone());
+            let bundled_source_bytes = bytes.clone();
             match CTFSTraceReader::from_bytes(bytes) {
                 Ok(ctfs_reader) => {
                     info!(
@@ -1603,6 +1604,16 @@ pub fn setup_from_vfs(
                     if let Some(decoder) = origin_metadata_decoder {
                         handler.install_materialized_origin_metadata_decoder(decoder);
                     }
+                    // §5.2 — the browser counterpart of the `load_bundled_sources`
+                    // call the native `setup()` makes. That function is filesystem
+                    // -bound end to end (see its doc comment) and calling it here
+                    // would be three no-ops in a row; this reads the same kind-0
+                    // srcviews out of the container bytes we already hold and
+                    // writes them into the VFS, so a container that ships its own
+                    // sources is reachable in a browser too. Additive: a trace with
+                    // no srcviews leaves `bundled_sources_root` `None` and every
+                    // source read takes the path it took before.
+                    handler.load_bundled_sources_from_vfs(candidate, bundled_source_bytes);
                     handler.raw_diff_index = raw_diff_index;
                     if for_launch {
                         handler.run_to_entry(dap::Request::default(), restore_location, sender)?;

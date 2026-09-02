@@ -598,6 +598,8 @@ const
   noirTracerModuleId* = "noir-tracer"
   noirCompilerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_wasm.wasm"
   noirTracerWasmPath* = staticAssetPrefix[1 .. ^1] & "noir_tracer_wasm.wasm"
+  avmTranspilerModuleId* = "avm-transpiler"
+  avmTranspilerWasmPath* = staticAssetPrefix[1 .. ^1] & "avm_transpiler_wasm.wasm"
 
   # THE REPLAY ENGINE. Three files, and they are the Studio's OWN copies.
   #
@@ -679,7 +681,14 @@ proc webRuntimeAssets*(): seq[RuntimeAsset] =
       required: false, fetchedBy: fcReplayEngine,
       absenceBehaviour:
         "a trace can be produced in the tab and not replayed in it; the " &
-        "session says so by name instead of opening on an empty timeline")]
+        "session says so by name instead of opening on an empty timeline"),
+    RuntimeAsset(
+      id: avmTranspilerModuleId, path: avmTranspilerWasmPath, mode: damFetched,
+      required: false, fetchedBy: fcNoirWasmWorker,
+      absenceBehaviour:
+        "an Aztec contract compiled in the tab cannot be turned into AVM " &
+        "bytecode, so `avm-transpiler transpile` is reported as having no " &
+        "wasm build in this deployment and a contract stops at the artifact")]
 
 proc requiredRuntimeAssets*(): seq[RuntimeAsset] =
   for asset in webRuntimeAssets():
