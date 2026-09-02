@@ -4885,24 +4885,33 @@ suite "IsoNim Build Panel — line rendering":
 
 suite "IsoNim Build Panel — interactions":
 
-  test "stop button click dispatches ct/build-cancel while running":
+  # This asserted that ■ Stop enqueued `ct/build-cancel` on the mock. It did,
+  # and no engine implements it (`dap_dialect.md` §7), so the button stopped
+  # nothing while the case stayed green. The build is owned by whichever host
+  # is running it, so the assertion is now that the host is asked.
+
+  test "stop button click asks the host to stop the build while running":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
+      var stopped = 0
+      vm.cancelBuildProc = proc() = inc stopped
+
       let panel = renderBuildPanel(r, vm)
 
       # Stop is a no-op when the panel is idle.  Flip to running and
-      # confirm the click actually reaches the backend.
+      # confirm the click actually reaches the host.
       vm.setRunning(true)
-      mock.clearReceivedCommands()
 
       let stopBtn = findByClass(panel, "build-stop-btn")
       stopBtn.fireEvent("click")
 
-      let req = mock.findCommand("ct/build-cancel")
-      check req.isSome
+      # Exactly once: a Stop that fired twice would terminate a Worker that a
+      # subsequent build had already replaced.
+      check stopped == 1
+      check mock.receivedCommands.len == 0
 
       dispose()
 
@@ -4912,13 +4921,16 @@ suite "IsoNim Build Panel — interactions":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
+      var stopped = 0
+      vm.cancelBuildProc = proc() = inc stopped
+
       let panel = renderBuildPanel(r, vm)
 
-      mock.clearReceivedCommands()
       let stopBtn = findByClass(panel, "build-stop-btn")
       stopBtn.fireEvent("click")
 
-      check mock.findCommand("ct/build-cancel").isNone
+      check stopped == 0
+      check mock.receivedCommands.len == 0
 
       dispose()
 

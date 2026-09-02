@@ -214,17 +214,33 @@ proc toggleAutoScroll*(vm: BuildVM) =
   vm.autoScroll.val = not vm.autoScroll.val
 
 proc cancelBuild*(vm: BuildVM) =
-  ## Dispatch a build-cancel request via the backend.  Production code
-  ## also calls the legacy IPC channel directly from the view; the VM
-  ## exposing the same action keeps the signal flow self-contained for
-  ## headless tests.
+  ## Ask the host that owns the running build to stop it.
   ##
-  ## A host that installed ``cancelBuildProc`` owns the running build and is
-  ## asked instead — see that field.  Exactly one of the two runs.
-  if not vm.cancelBuildProc.isNil:
-    vm.cancelBuildProc()
+  ## This used to fall back to ``vm.store.backend.send("ct/build-cancel")``
+  ## when no host was installed, described in the comment above it as the
+  ## "legacy IPC channel" that "production code also calls directly from the
+  ## view". Both halves of that were wrong:
+  ##
+  ##   * ``ct/build-cancel`` is not an IPC channel. It went to the DAP
+  ##     backend, and `backend/dap_dialect.md` §7 records it as one of nine
+  ##     commands with no engine implementation — no arm in either dispatch
+  ##     table in ``dap_server.rs``.
+  ##   * No view calls any build-cancel channel directly. Searching the
+  ##     renderer for one turns up ``cancelBuildAutoDismiss`` (which dismisses
+  ##     a notification) and nothing else.
+  ##
+  ## So the fallback stopped nothing, and the view test asserting the dispatch
+  ## passed over it.
+  ##
+  ## **Known product defect:** the only host that installs ``cancelBuildProc``
+  ## is the web/Noir pane (``ui/web_noir_build.nim``, which terminates the
+  ## Worker). On the desktop the field is nil, so ■ Stop currently does not
+  ## stop a desktop build. Removing the dead dispatch does not cause that — it
+  ## stops the code from claiming otherwise. Fixing it needs a real desktop
+  ## cancellation path, which is a product decision and not a rename.
+  if vm.cancelBuildProc.isNil:
     return
-  discard vm.store.backend.send("ct/build-cancel", %*{})
+  vm.cancelBuildProc()
 
 # ---------------------------------------------------------------------------
 # Factory
