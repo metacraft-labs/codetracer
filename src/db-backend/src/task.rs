@@ -2666,14 +2666,20 @@ pub struct LocalStepJump {
 /// sends `{rrTicks, ticks}`
 /// (`src/frontend/viewmodel/viewmodels/event_log_vm.nim:683-686`), and
 /// `rrTicks` is not declared below.
-///
-/// That sender is also missing `threadId`, which has no `#[serde(default)]`,
-/// so `ct/goto-ticks` from the event log already fails to parse today —
-/// a separate pre-existing defect, noted here because it is the same
-/// mismatch and whoever fixes one should look at the other.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct GoToTicksArguments {
+    /// Defaulted because the event-log sender above omits it entirely,
+    /// and without a default the whole request failed to deserialize —
+    /// clicking a row to jump did nothing.
+    ///
+    /// Nothing reads it: `Handler::goto_ticks` uses only `ticks`, and
+    /// the sibling `ct/timeline-seek` path already passes
+    /// `thread_id: 0` (`dap_server.rs:2144`). It is kept rather than
+    /// deleted because the Python API's `trace.goto_ticks` still sends
+    /// it, and silently rejecting a field a client supplies is the
+    /// habit this file is trying to break.
+    #[serde(default)]
     pub thread_id: i64,
     pub ticks: i64,
 }
@@ -3068,6 +3074,31 @@ mod tests {
         let parsed = serde_json::from_value::<Location>(echoed)
             .expect("frontend-echoed Location payloads must keep parsing; see Location's docs");
         assert_eq!(parsed.line, 7);
+    }
+
+    /// Clicking an event-log row to jump must actually parse.
+    ///
+    /// The payload is verbatim from
+    /// `src/frontend/viewmodel/viewmodels/event_log_vm.nim:683-686`:
+    /// `{rrTicks, ticks}`, with no `threadId`. `thread_id` had no
+    /// `#[serde(default)]`, so the request failed to deserialize and the
+    /// jump did nothing — a live defect in the shipped product, not a
+    /// latent one.
+    ///
+    /// `Handler::goto_ticks` never reads `thread_id` (it uses only
+    /// `ticks`), and the sibling `ct/timeline-seek` path already
+    /// hardcodes `thread_id: 0` at `dap_server.rs:2144`, so defaulting
+    /// it changes no behaviour that existed.
+    #[test]
+    fn goto_ticks_parses_the_payload_the_event_log_actually_sends() {
+        let as_sent = serde_json::json!({
+            "rrTicks": 1234,
+            "ticks": 1234,
+        });
+        let parsed = serde_json::from_value::<GoToTicksArguments>(as_sent)
+            .expect("ct/goto-ticks from the event log must parse; see event_log_vm.nim:683");
+        assert_eq!(parsed.ticks, 1234);
+        assert_eq!(parsed.thread_id, 0, "the absent threadId defaults rather than failing");
     }
 
     /// `CoreTrace.recording_id` (M-REC-4) flips both type (i64 → String)
