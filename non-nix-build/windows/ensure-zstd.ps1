@@ -66,21 +66,22 @@ function Ensure-Zstd {
   New-Item -ItemType Directory -Force -Path $zstdVersionRoot | Out-Null
   $baseUrl = "https://github.com/facebook/zstd/releases/download/v$version"
   $zipUrl = "$baseUrl/$asset"
-  $shaUrl = "$baseUrl/zstd-v$version-release-notes-checksums.txt"
 
   $tempZip = Join-Path $env:TEMP $asset
   Download-File -Url $zipUrl -OutFile $tempZip
 
   try {
-    # Try to verify SHA256 from the checksums file; if the file doesn't exist,
-    # fall back to just extracting (zstd releases have varied checksum naming).
-    try {
-      $shaText = Download-String -Url $shaUrl
-      $expected = Get-ExpectedSha256 -ShaSource $shaText -AssetName $asset
-      Assert-FileSha256 -Path $tempZip -Expected $expected
-    } catch {
-      Write-Warning "Could not verify zstd SHA256 checksum: $($_.Exception.Message). Proceeding with extraction."
+    # Verify against the SHA256 pinned in toolchain-versions.env. zstd releases
+    # do NOT ship a per-asset checksums sidecar under a predictable name (the
+    # old `zstd-v<ver>-release-notes-checksums.txt` URL 404s), so this code used
+    # to warn-and-proceed with NO verification. The release asset itself is
+    # immutable (fixed tag), so its digest is stable and belongs in the pin file
+    # alongside every other Windows toolchain SHA. Hard-fail on mismatch.
+    $expected = $Toolchain["ZSTD_WIN_X64_SHA256"]
+    if ([string]::IsNullOrWhiteSpace($expected)) {
+      throw "ZSTD_WIN_X64_SHA256 is not set in toolchain-versions.env; refusing to install an unverified zstd."
     }
+    Assert-FileSha256 -Path $tempZip -Expected $expected
 
     Ensure-CleanDirectory -Path $zstdVersionRoot
     Expand-Archive -Path $tempZip -DestinationPath $zstdVersionRoot -Force
