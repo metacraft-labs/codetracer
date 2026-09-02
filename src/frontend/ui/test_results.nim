@@ -104,6 +104,22 @@ method register*(self: TestResultsComponent, api: MediatorWithSubscribers) =
     testResultsComponentRef = self
     tryMountIsoNimTestResultsPanel()
 
+method unregister*(self: TestResultsComponent) =
+  ## Release the module-global slot and the mounted marker. See
+  ## `ui/constraints.nim`'s twin for the full account — the two panes share the
+  ## write-once ref plus write-once mounted-marker shape, and therefore share
+  ## the failure: after a session switch or a panel close the pane comes back
+  ## blank and silent, because its mount returns early at a guard that nothing
+  ## ever clears.
+  ##
+  ## The VM stays, deliberately: a test catalog and the last run's rows describe
+  ## a project rather than a panel, and re-running the suite because someone
+  ## closed a pane would be a worse answer than keeping them.
+  if testResultsComponentRef == self:
+    testResultsComponentRef = nil
+  discard jsDelete(isoNimTestResultsMountedIds[self.id])
+  procCall unregister(Component(self))
+
 proc registerTestResultsComponent*(component: TestResultsComponent,
                                    api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)

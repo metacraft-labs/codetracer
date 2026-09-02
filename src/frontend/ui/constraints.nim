@@ -93,6 +93,39 @@ method register*(self: ConstraintsComponent, api: MediatorWithSubscribers) =
     constraintsComponentRef = self
     tryMountIsoNimConstraintsPanel()
 
+method unregister*(self: ConstraintsComponent) =
+  ## Release the module-global slot and the mounted marker before the base
+  ## implementation drops the event-bus subscriptions.
+  ##
+  ## WITHOUT THIS THE PANE COMES BACK BLANK, PERMANENTLY. Both globals above
+  ## are write-once — `register` assigns the ref only `if isNil`, and
+  ## `tryMountIsoNimConstraintsPanel` returns early at its
+  ## `isoNimConstraintsMountedIds.hasKey` guard. Neither is ever cleared, so
+  ## after a teardown:
+  ##
+  ##   * `constraintsComponentRef` still points at a component whose DOM
+  ##     container no longer exists, and
+  ##   * the mounted marker for its id survives into the next component that
+  ##     is given the same id, whose mount then returns at the guard and draws
+  ##     nothing.
+  ##
+  ## `ui/session_switch.nim` unregisters EVERY component of the closing
+  ## session, and `ui/layout.nim` unregisters a closed panel, so this is an
+  ## ordinary transition rather than an exotic one — and the failure is silent,
+  ## because a pane that returns early at a guard looks exactly like a pane
+  ## with nothing to show.
+  ##
+  ## The VM is deliberately NOT reset. `constraintsVMInstance` is a singleton
+  ## by design (`initConstraintsVM` returns early when it exists), and the
+  ## report it holds describes a project, not a panel — dropping it would make
+  ## closing and reopening the pane lose counts that are still true.
+  ##
+  ## Modelled on `ui/scratchpad.nim`, which is the only pane that had this.
+  if constraintsComponentRef == self:
+    constraintsComponentRef = nil
+  discard jsDelete(isoNimConstraintsMountedIds[self.id])
+  procCall unregister(Component(self))
+
 proc registerConstraintsComponent*(component: ConstraintsComponent,
                                    api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
