@@ -256,6 +256,14 @@ type
     passed*: int
     failed*: int
     skipped*: int
+    artifact*: JsonNode
+      ## The traceable artifact a RECORD request asked for; `nil` otherwise.
+      ##
+      ## `nargo compile`'s own `ProgramArtifact` shape, so it goes to the
+      ## tracer through `noirTraceRequest` unchanged — the same value a
+      ## `compile` answers in `NoirCompileResponse.artifact`. That is what
+      ## makes "run this test in the debugger" reuse the Run path's second half
+      ## rather than needing a second tracer route.
     decoded*: bool
       ## False when the text was not a `TestVfsResponse` at all. Same third
       ## outcome, and same reason, as `NoirCompileResponse.decoded`.
@@ -347,6 +355,40 @@ proc noirCompileArgs*(): seq[string] = @[noirCompileSubcommand]
 proc noirTraceArgs*(): seq[string] = @[noirTraceSubcommand]
 
 proc noirTestArgs*(): seq[string] = @[noirTestSubcommand]
+
+proc noirTestRecordRequest*(files: seq[NoirSourceEntry]; packageDir: string;
+                            selector: string): JsonNode =
+  ## `TestVfsRequest` with `record` set: compile ONE test as a traceable entry
+  ## point and answer the artifact, running nothing.
+  ##
+  ## A DIFFERENT REQUEST FROM RUNNING, not a flag on it, and the Rust side
+  ## spends a doc comment on why: `nargo test` compiles with
+  ## `CompileOptions::default()` and a recording needs `instrument_debug` +
+  ## `force_brillig`. One request that did both would have to pick one set, and
+  ## either choice makes the other answer wrong — an uninstrumented artifact
+  ## traces to one event and zero steps with every module reporting `ok`.
+  ##
+  ## So "run this test in the debugger" is three dispatches: the verdict, the
+  ## artifact, the trace. That is the same shape Run already has (compile then
+  ## trace) with one more step, rather than a second pipeline.
+  var tree = newJObject()
+  for entry in files:
+    tree[entry.path] = %entry.content
+  %*{
+    "files": tree,
+    "package_dir": packageDir,
+    "record": selector
+  }
+
+const noirTestRecordInputs* = ""
+  ## What a recorded test is traced against.
+  ##
+  ## EMPTY, and that is the correct value rather than a missing one: a `#[test]`
+  ## function takes no arguments — the module refuses to record one that does —
+  ## so its ABI has no parameters and `Format::Toml.parse("", &abi)` yields an
+  ## empty input map. Sending the project's `Prover.toml` here would encode
+  ## `main`'s arguments against a test's ABI, which is an encode error at best
+  ## and the wrong program's inputs at worst.
 
 proc noirTestRequest*(files: seq[NoirSourceEntry]; packageDir: string;
                       tests: seq[string] = @[]): JsonNode =
@@ -571,7 +613,7 @@ proc parseNoirTestOutcome*(node: JsonNode): NoirTestOutcome =
 
 proc undecodedTestResponse(raw: string): NoirTestResponse =
   NoirTestResponse(ok: false, decoded: false, raw: raw,
-                   diagnostics: @[], warnings: @[], tests: @[])
+                   diagnostics: @[], warnings: @[], tests: @[], artifact: nil)
 
 proc parseNoirTestResponse*(raw: string): NoirTestResponse =
   ## Decode a `TestVfsResponse` out of the worker's stdout.
@@ -600,7 +642,12 @@ proc parseNoirTestResponse*(raw: string): NoirTestResponse =
     for item in parsed["tests"]:
       if item.kind == JObject: tests.add parseNoirTestOutcome(item)
 
+  var artifact: JsonNode = nil
+  if parsed.hasKey("artifact") and parsed["artifact"].kind != JNull:
+    artifact = parsed["artifact"]
+
   NoirTestResponse(
+    artifact: artifact,
     ok: parsed["ok"].kind == JBool and parsed["ok"].getBool,
     stage: getStrOr(parsed, "stage"),
     kind: getStrOr(parsed, "kind"),

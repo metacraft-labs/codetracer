@@ -55,6 +55,13 @@ const testFiles = {
     'fn wrong_message() { assert(1 == 2, "one is not two"); }\n',
 };
 const testRequest = { files: testFiles, package_dir: 'suite' };
+// RECORDING one of those tests. `record` is a different request from running —
+// it compiles that one test through the instrumented `force_brillig` path and
+// answers an artifact, running nothing — and the two halves are what makes
+// "run this test" mean "step through it" rather than "see a verdict".
+const recordRequest = {
+  files: testFiles, package_dir: 'suite', record: 'passes',
+};
 const expectedVerdicts = {
   passes: 'pass',
   fails: 'fail',
@@ -93,6 +100,14 @@ function put(exports, alloc, str) {
 async function directTests() {
   const c = await load(compiler);
   const [rp, rl] = put(c, 'nv_alloc', JSON.stringify(testRequest));
+  const ptr = c.nv_test_vfs(rp, rl);
+  return JSON.parse(new TextDecoder().decode(
+    new Uint8Array(c.memory.buffer, ptr, c.nv_result_len()).slice()));
+}
+
+async function directRecord() {
+  const c = await load(compiler);
+  const [rp, rl] = put(c, 'nv_alloc', JSON.stringify(recordRequest));
   const ptr = c.nv_test_vfs(rp, rl);
   return JSON.parse(new TextDecoder().decode(
     new Uint8Array(c.memory.buffer, ptr, c.nv_result_len()).slice()));
@@ -277,8 +292,61 @@ if (workerRunResult.exitCode === 1) {
   bad(`a red suite exited ${workerRunResult.exitCode} through the worker`);
 }
 
+// --- and the recording, which is what "run this test" actually produces ------
+//
+// THE STEP COUNT IS THE ASSERTION, not the artifact's existence. `vfs.rs`'s own
+// header records the measurement this guards: an UNINSTRUMENTED compile of the
+// same test yields an artifact that is present, well-formed, carries
+// `debug_symbols`, and traces to ONE EVENT AND ZERO STEPS — with both modules
+// reporting ok. A check that asserted "we got an artifact" would pass on exactly
+// that, and the user would click Run test and land in a debugger with nothing to
+// step.
+const recorded = await directRecord();
+if (recorded.ok && recorded.artifact) {
+  ok('a test compiles to a traceable artifact');
+  const t = await load(tracer);
+  const [ap, al] = put(t, 'ct_alloc', JSON.stringify(recorded.artifact));
+  // EMPTY INPUTS. A `#[test]` takes no arguments — the module refuses to record
+  // one that does — so its ABI has nothing to encode. Sending the project's
+  // `Prover.toml` here would encode `main`'s arguments against a test's ABI.
+  const [ip, il] = put(t, 'ct_alloc', '');
+  const tp = t.ct_trace(ap, al, ip, il, 0);
+  const tl = t.ct_result_len();
+  const text = new TextDecoder().decode(
+    new Uint8Array(t.memory.buffer, tp, tl).slice());
+  if (t.ct_result_is_error() !== 0) {
+    bad(`the tracer refused the recorded test: ${text.slice(0, 200)}`);
+  } else {
+    const rTrace = JSON.parse(text);
+    const rSteps = rTrace.events.filter((e) => 'Step' in e).length;
+    const rCalls = rTrace.events.filter((e) => 'Call' in e).length;
+    console.log(`  recorded: ${rTrace.events.length} events, ${rSteps} steps, ${rCalls} calls`);
+    if (rTrace.events.length > 1 && rSteps > 0 && rCalls > 0) {
+      ok(`the recorded test traces with ${rSteps} steps — a session opened over ` +
+         'it has something to step');
+    } else {
+      bad(`ONE-EVENT-ZERO-STEPS over a recorded test: ${rTrace.events.length} ` +
+          `events, ${rSteps} steps — this is what an uninstrumented compile ` +
+          'produces, and both modules report ok over it');
+    }
+  }
+} else {
+  bad(`recording a test was refused: ${recorded.kind ?? '?'} ${recorded.message ?? ''}`);
+}
+
+// A RECORDING RUNS NOTHING, and a run records nothing. Asking for one must not
+// silently do the other — a `record` that also ran the suite would compile every
+// test twice, and a run that returned an artifact would let a caller trace the
+// wrong program.
+if ((recorded.tests || []).length === 0 && !directRun.artifact) {
+  ok('recording and running are separate requests over the same tree');
+} else {
+  bad(`recording returned ${(recorded.tests || []).length} verdict(s) and the ` +
+      `run returned ${directRun.artifact ? 'an' : 'no'} artifact`);
+}
+
 console.log(failures === 0
   ? '\nRESULT: OK — the worker path and the direct path agree, over a real ' +
-    'trace and a real test run'
+    'trace, a real test run and a recorded test that steps'
   : `\nRESULT: FAILED — ${failures} check(s)`);
 process.exit(failures === 0 ? 0 : 1);

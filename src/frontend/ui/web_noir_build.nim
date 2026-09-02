@@ -115,9 +115,21 @@ type
     nriBuild
     nriRun
     nriTest
-      ## `nargo test`. One phase, not two: the module compiles each test
-      ## function and executes it inside one `nv_test_vfs` call, so there is
-      ## nothing for this module to chain.
+      ## `nargo test`. One phase: the module compiles each test function and
+      ## executes it inside one `nv_test_vfs` call, so there is nothing for
+      ## this module to chain.
+    nriTestRecord
+      ## RUN THIS TEST IN THE DEBUGGER — the editor's Run-test control, and
+      ## what "running a test" means in this product.
+      ##
+      ## Three phases, chained here: the VERDICT (`nbpTest`, which fills the
+      ## Test Results pane), the ARTIFACT (`nbpTestRecord`, which compiles that
+      ## one test through the instrumented `force_brillig` path), and the TRACE
+      ## (`nbpTrace`, whose existing exit path hands the recording to
+      ## `requestReplaySession`). The debugger session is the product; the
+      ## verdict is a by-product that arrives first because it is cheap and
+      ## because a user who clicked Run on a test wants to know it failed even
+      ## if the recording then cannot be opened.
 
 var
   noirTestRunSink*: proc(response: NoirTestResponse; packageDir: string)
@@ -143,6 +155,12 @@ var
     ## pane left `inFlight` would disable its own button permanently.
 
 var
+  activeRecordSelector = ""
+    ## Which test the in-flight `nriTestRecord` gesture is about. Held here
+    ## rather than derived from the response because the RECORD dispatch needs
+    ## it after the VERDICT dispatch has already answered, and the verdict
+    ## response names every test that ran rather than the one that was clicked.
+
   activeProducer: NoirBuildProducer
   activeHandle: ProcessHandle
   activeIntent: NoirRunIntent
@@ -312,6 +330,14 @@ proc producerFor(tmpl: ProjectTemplate): NoirBuildProducer =
 
 proc startTrace(producer: NoirBuildProducer; tmpl: ProjectTemplate)
 
+proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
+              phase: NoirBuildPhase; args: seq[string]; stdin: string;
+              label: string)
+  ## Forward-declared because `onPhaseExit` chains — `nriTestRecord` runs three
+  ## phases and each dispatch happens inside the previous one's exit — and the
+  ## definition needs `onPhaseExit` for its own callbacks. `startTrace` above
+  ## is forward-declared for the same reason, one gesture earlier.
+
 proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
                  exit: ProcessExit) =
   ## The worker's `exit`, and the one place the two phases are chained.
@@ -322,6 +348,50 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
   if phase == nbpCompile and verdict == npvSucceeded and
      activeIntent == nriRun:
     startTrace(producer, tmpl)
+    return
+
+  if phase == nbpTest and activeIntent == nriTestRecord and
+     producer.lastTests.ok and activeRecordSelector.len > 0:
+    # THE VERDICT LANDED; NOW RECORD IT. Published to the pane first — the
+    # block below runs on the same exit — so a user sees the pass or the
+    # failure while the recording compiles, rather than watching nothing for
+    # the seconds an instrumented compile takes.
+    if not noirTestRunSink.isNil:
+      noirTestRunSink(producer.lastTests, tmpl.name)
+    report("test-results",
+           "ok=true passed=" & $producer.lastTests.passed &
+           " failed=" & $producer.lastTests.failed &
+           " recording=" & activeRecordSelector)
+    dispatch(producer, tmpl, nbpTestRecord, noirTestArgs(),
+             $noirTestRecordRequest(templateVfsEntries(tmpl), tmpl.name,
+                                    activeRecordSelector),
+             "nargo test --record " & activeRecordSelector)
+    if not activeInFlight and not noirTestRunSettled.isNil:
+      noirTestRunSettled()
+    return
+
+  if phase == nbpTestRecord:
+    if verdict == npvSucceeded:
+      # THE ARTIFACT IS THE TEST'S, so the trace is of the test and not of
+      # `main`. Empty inputs: a `#[test]` takes no arguments and the module
+      # refuses to record one that does, so its ABI has nothing to encode.
+      dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
+               $noirTraceRequest(producer.artifact, noirTestRecordInputs),
+               "nargo trace " & activeRecordSelector)
+      if activeInFlight:
+        return
+    # Either the recording was refused, or the trace could not be dispatched.
+    # Settling here is what releases the editor's Run-test button; without it
+    # the gesture would end with a spinner over a run that is over.
+    if not noirTestRunSettled.isNil:
+      noirTestRunSettled()
+    return
+
+  if phase == nbpTrace and activeIntent == nriTestRecord:
+    # The trace arm of `noir_build_producer.onExit` has already offered the
+    # recording to `requestReplaySession` and painted what it contains.
+    if not noirTestRunSettled.isNil:
+      noirTestRunSettled()
     return
 
   if phase == nbpTest:
@@ -566,6 +636,46 @@ proc startNoirTests*(saved: seq[string] = @[]; only: seq[string] = @[]) =
     # `dispatch` refused before the worker saw anything — no `onExit` will
     # arrive, so the pane would sit `inFlight` forever behind a disabled ▶.
     # The refusal itself is already painted in the build pane by `onRefusal`.
+    if not noirTestRunSink.isNil:
+      noirTestRunSink(producer.lastTests, tmpl.name)
+    if not noirTestRunSettled.isNil:
+      noirTestRunSettled()
+
+proc startNoirTestRecording*(selector: string) =
+  ## RUN ONE TEST IN THE DEBUGGER — the editor's Run-test control.
+  ##
+  ## "Running a test" in this product means recording it and replaying it: the
+  ## test executes, its execution is captured, and the user lands in a
+  ## time-travel session on it. The pass or fail is a by-product and arrives
+  ## first; the session is what was asked for.
+  ##
+  ## THE VERDICT IS NOT SKIPPED to save a dispatch. A recording compiles the
+  ## test through the instrumented `force_brillig` path, which is a DIFFERENT
+  ## program from the one `nargo test` runs — so a session opened without the
+  ## verdict would show an execution whose pass/fail nobody had established
+  ## against the compile options a developer's own terminal uses.
+  if activeInFlight:
+    report("test-record-ignored", "reason=already-running")
+    return
+  if selector.len == 0:
+    report("test-record-refused", "reason=no-selector")
+    return
+  let tmpl = currentProject()
+  if not tmpl.hasFiles:
+    report("test-record-refused", "reason=no-project")
+    return
+  let producer = producerFor(tmpl)
+  if producer.isNil:
+    report("test-record-refused", "reason=no-build-vm")
+    return
+  activeIntent = nriTestRecord
+  activeRecordSelector = selector
+  if not noirTestRunStarted.isNil:
+    noirTestRunStarted()
+  dispatch(producer, tmpl, nbpTest, noirTestArgs(),
+           $noirTestRequest(templateVfsEntries(tmpl), tmpl.name, @[selector]),
+           "nargo test --exact " & selector)
+  if not activeInFlight:
     if not noirTestRunSink.isNil:
       noirTestRunSink(producer.lastTests, tmpl.name)
     if not noirTestRunSettled.isNil:

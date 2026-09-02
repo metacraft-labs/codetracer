@@ -71,6 +71,10 @@ type
     nbpCompile
     nbpTrace
     nbpTest
+    nbpTestRecord
+      ## `test` with `record` set: compile ONE test as a traceable entry point
+      ## and answer the artifact, running nothing. The middle step of
+      ## "run this test in the debugger" — verdict, artifact, trace.
 
   NoirPhaseVerdict* = enum
     ## What `onExit` concluded. Returned rather than stored so the caller can
@@ -395,6 +399,12 @@ proc beginPhase*(producer: NoirBuildProducer; phase: NoirBuildPhase;
   if phase == nbpCompile:
     producer.artifact = nil
     producer.lastSummary = NoirTraceSummary()
+  if phase == nbpTestRecord:
+    # A recording replaces whatever artifact was carried. Not left alone like a
+    # trace's: the artifact a Build produced compiles `main`, and tracing it
+    # here would step the program instead of the test that was clicked.
+    producer.artifact = nil
+    producer.lastSummary = NoirTraceSummary()
   if phase == nbpTest:
     # The previous run's verdicts, gone before the new one starts. A pane that
     # kept them would show a green row for a test the current sources no longer
@@ -403,7 +413,7 @@ proc beginPhase*(producer: NoirBuildProducer; phase: NoirBuildPhase;
   producer.vm.setCommand(command)
   producer.vm.setBuildStartTime(nowMs)
   producer.vm.setRunning(true)
-  if phase != nbpTrace:
+  if phase notin {nbpTrace, nbpTestRecord}:
     # Only the SECOND phase of a Run leaves the pane alone. A trace that wiped
     # it would delete the compile's own warnings before the user had read them.
     # A test run is a run of its own and starts from an empty pane, exactly as
@@ -655,6 +665,41 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
     let response = parseNoirTestResponse(producer.stdoutText)
     producer.lastTests = response
     producer.lastVerdict = producer.paintTestResult(response)
+  of nbpTestRecord:
+    let response = parseNoirTestResponse(producer.stdoutText)
+    if not response.decoded:
+      producer.note(
+        "the Noir toolchain answered with something this build could not " &
+        "decode when asked to record the test. Nothing was recorded.")
+      producer.lastVerdict = npvFaulted
+    elif not response.ok:
+      # A REFUSAL WITH A NAME. `no-such-test` and `test-takes-arguments` are
+      # the two a user can act on, and both are about the test rather than
+      # about the project — so they are painted as the toolchain's sentence
+      # rather than as a compile failure.
+      for diagnostic in response.diagnostics:
+        producer.paintDiagnostic(diagnostic)
+      producer.note(
+        "the test could not be recorded" &
+        (if response.kind.len > 0: " (" & response.kind & ")" else: "") & ".")
+      if response.message.len > 0:
+        producer.emit(response.message, isStdout = false, severity = blsError)
+      producer.lastVerdict = npvRefused
+    elif response.artifact.isNil:
+      # `ok` WITH NO ARTIFACT is a protocol fault and not a refusal: the module
+      # said the compile succeeded and then answered nothing to trace. Reported
+      # as such, because a caller that went on to trace `null` would fail one
+      # layer down with a message naming the tracer.
+      producer.note(
+        "the toolchain reported the test compiled and produced no artifact " &
+        "to record. That is a protocol fault, not a fault in your test.")
+      producer.lastVerdict = npvFaulted
+    else:
+      producer.artifact = response.artifact
+      for warning in response.warnings:
+        producer.paintDiagnostic(warning)
+      producer.note("compiled the test for recording")
+      producer.lastVerdict = npvSucceeded
   of nbpTrace:
     let summary = summariseNoirTrace(producer.stdoutText)
     producer.lastSummary = summary
