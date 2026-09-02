@@ -95,6 +95,13 @@ type
     startByte*: int
     endByte*: int
 
+  LocationNode* = object
+    ## One `location_tree.locations[]` entry. `parent` is `NoParentNode` only
+    ## for the root sentinel — a parent of *zero* is an ordinary reference to
+    ## the root node and must not be confused with the absence of one.
+    parent*: int
+    span*: NoirSpan
+
   NoirDebugArtefact* = object
     ## The decoded artefact, as much of it as anchoring needs.
     files*: Table[int, NoirSourceFile]
@@ -122,6 +129,19 @@ type
     artefact*: NoirDebugArtefact
     detail*: string
       ## Non-empty whenever the outcome is not `aroOk`.
+
+const NoParentNode* = -1
+  ## `parent: null` — the root of a call-stack tree, and the only value that
+  ## terminates the walk in `callStackSpans`.
+
+proc locatedOpcodeCount*(a: NoirDebugArtefact): int =
+  ## How many opcodes carry at least one resolvable-looking span. Exposed so a
+  ## caller — and a test — can tell "this artefact has debug information" from
+  ## "this artefact was read by a parser that did not understand its envelope",
+  ## which are the two states §0a.3 records as having been indistinguishable.
+  for _, spans in a.locations:
+    if spans.len > 0:
+      inc result
 
 # ---------------------------------------------------------------------------
 # Span resolution
@@ -340,15 +360,113 @@ proc readLocations(node: JsonNode; into: var Table[int, seq[NoirSpan]]) =
     # `mfUnmapped` there by the same path as a resolvable-but-unresolved span.
     into[opcode] = spans
 
+proc readCallStackTree(node: JsonNode): seq[LocationNode] =
+  ## `location_tree.locations` — a flat array in which each entry names its
+  ## parent by index. Index 0 is the root sentinel.
+  result = @[]
+  if node.isNil or node.kind != JArray:
+    return
+  for entry in node:
+    var n = LocationNode(parent: NoParentNode,
+                         span: NoirSpan(fileId: -1, startByte: 0, endByte: 0))
+    if entry.kind != JObject:
+      result.add n
+      continue
+    # `parent` is compared against JSON null, NEVER against falsiness. A
+    # parent of 0 is a legitimate reference to the root, and the walk below
+    # relies on distinguishing "my parent is node 0" from "I have no parent".
+    if entry.hasKey("parent") and entry["parent"].kind == JInt:
+      n.parent = entry["parent"].getInt
+    if entry.hasKey("value") and entry["value"].kind == JObject:
+      let value = entry["value"]
+      if value.hasKey("file") and value["file"].kind == JInt:
+        n.span.fileId = value["file"].getInt
+      if value.hasKey("span") and value["span"].kind == JObject:
+        let span = value["span"]
+        if span.hasKey("start") and span["start"].kind == JInt:
+          n.span.startByte = span["start"].getInt
+        if span.hasKey("end") and span["end"].kind == JInt:
+          n.span.endByte = span["end"].getInt
+    result.add n
+
+proc callStackSpans(tree: seq[LocationNode]; startId: int): seq[NoirSpan] =
+  ## Walk `startId`'s parent chain to the root and return the frames
+  ## OUTERMOST FIRST — `Generated-Code-Listing.md` GCL-D1, which makes the last
+  ## element the innermost frame and lets the editor highlight where the code
+  ## is rather than where the call was written.
+  ##
+  ## THE ROOT IS EXCLUDED. Node 0 is a sentinel carrying `span 0..0, file 0`,
+  ## and file 0 is typically absent from `file_map` entirely. Including it
+  ## would attribute every opcode to byte 0 of a file that does not exist —
+  ## which resolves to nothing, and would therefore silently DEGRADE every
+  ## two-frame merge into a one-frame exact. A confidently wrong mapping of
+  ## precisely the kind §4 exists to prevent, arrived at by an off-by-one.
+  result = @[]
+  var id = startId
+  # A malformed tree could contain a cycle; the visit budget makes that a
+  # truncated stack rather than a hung renderer.
+  var budget = tree.len + 1
+  while id >= 0 and id < tree.len and budget > 0:
+    let node = tree[id]
+    if node.parent == NoParentNode:
+      break                       # the root: stop, and do not take its value
+    result.add node.span
+    id = node.parent
+    dec budget
+  reverse(result)
+
+proc readAcirLocations(node: JsonNode; tree: seq[LocationNode];
+                       into: var Table[int, seq[NoirSpan]]) =
+  ## `acir_locations` — `{"<opcode>": <callStackId>}`. The value is an INDEX
+  ## into the location tree, not a span list; resolving it is the walk above.
+  if node.isNil or node.kind != JObject:
+    return
+  for key, entry in node:
+    var opcode: int
+    try:
+      opcode = parseInt(key)
+    except CatchableError:
+      continue
+    if entry.kind != JInt:
+      continue
+    # An opcode whose stack resolves to nothing is recorded as
+    # present-with-no-spans rather than dropped, so it reaches `rungFor` and
+    # becomes `mfUnmapped` by the same path as an unresolvable span.
+    into[opcode] = callStackSpans(tree, entry.getInt)
+
 proc readArtefact*(fileMap: JsonNode; debugSymbols: JsonNode;
                    opcodeCount: int): ArtefactRead =
   ## Build the artefact from the two decoded nodes.
   ##
-  ## `debugSymbols` is the decompressed per-circuit node — either the object
-  ## with a `locations` key, or an array of them, in which case the FIRST
-  ## circuit is read. Multi-circuit programs are out of scope and saying so
-  ## beats silently merging opcode indices from different circuits, which
-  ## would produce anchors that are confidently wrong in exactly §4's sense.
+  ## ## The shape this reads, MEASURED rather than assumed
+  ##
+  ## `Generated-Code-Listing.md` §0a.3 records what this used to read and why
+  ## it never matched a compiler. A shipped `debug_symbols`, once base64-decoded
+  ## and RAW-inflated, is:
+  ##
+  ##     {"debug_infos": [ {"acir_locations":   {"<opcode>": <callStackId>},
+  ##                        "location_tree":    {"locations": [ {"parent": …,
+  ##                                                             "value": …} ]},
+  ##                        "brillig_locations": {…}} ]}
+  ##
+  ## — one `DebugInfo` per ACIR function, an opcode-to-CALL-STACK-ID map, and a
+  ## tree the id indexes into. Not a span list. Measured against `nargo`
+  ## 1.0.0-beta.26 and confirmed in the pinned fork's
+  ## `tooling/noirc_artifacts/src/debug.rs` (`ProgramDebugInfo`, `DebugInfo`).
+  ##
+  ## The FIRST `debug_infos` entry is read. Multi-circuit programs are out of
+  ## scope, and saying so beats silently merging opcode indices from different
+  ## circuits — which would produce anchors that are confidently wrong in
+  ## exactly §4's sense.
+  ##
+  ## ## The legacy flat shape is still accepted, and that is not politeness
+  ##
+  ## Compilers before the call-stack tree emitted `{"locations": {"<opcode>":
+  ## [{"span":…,"file":…}]}}`. It is accepted as a FALLBACK because the pane
+  ## opens whatever artefact a project directory happens to contain, and an
+  ## older `target/*.json` left on disk is an ordinary thing to encounter. It is
+  ## tried second so that a compiler emitting both cannot be read by the weaker
+  ## path.
   var artefact = NoirDebugArtefact(
     files: initTable[int, NoirSourceFile](),
     locations: initTable[int, seq[NoirSpan]](),
@@ -361,12 +479,24 @@ proc readArtefact*(fileMap: JsonNode; debugSymbols: JsonNode;
 
   readFileMap(fileMap, artefact.files)
 
+  # Unwrap `{"debug_infos": [...]}`, then a bare array, to the first circuit.
   var circuit = debugSymbols
+  if not circuit.isNil and circuit.kind == JObject and
+      circuit.hasKey("debug_infos"):
+    circuit = circuit["debug_infos"]
   if not circuit.isNil and circuit.kind == JArray:
     circuit = if circuit.len > 0: circuit[0] else: nil
-  if not circuit.isNil and circuit.kind == JObject and
-      circuit.hasKey("locations"):
-    readLocations(circuit["locations"], artefact.locations)
+
+  if not circuit.isNil and circuit.kind == JObject:
+    if circuit.hasKey("acir_locations"):
+      var tree: seq[LocationNode] = @[]
+      if circuit.hasKey("location_tree") and
+          circuit["location_tree"].kind == JObject and
+          circuit["location_tree"].hasKey("locations"):
+        tree = readCallStackTree(circuit["location_tree"]["locations"])
+      readAcirLocations(circuit["acir_locations"], tree, artefact.locations)
+    elif circuit.hasKey("locations"):
+      readLocations(circuit["locations"], artefact.locations)
 
   ArtefactRead(outcome: aroOk, artefact: artefact, detail: "")
 
