@@ -145,6 +145,33 @@ materialise() {
 	"${fixture_bin}" "${dir}"
 }
 
+# Run nargo with its JSON on stdout and its DIAGNOSTICS KEPT SEPARATE, and
+# return nargo's own exit status.
+#
+#   nargo_json <dir> <out.json> <err.txt> [args...]
+#
+# Folding stderr into the JSON file (`>out 2>&1`) is what this replaces. It
+# made a crashing nargo indistinguishable from a nargo that ran and found
+# nothing: the parsers skip every line that does not start with `{`, so the
+# tool's own explanation of why it died was read as "no tests" and thrown
+# away. The gate then reported "the engines disagree" when the truth was
+# "one engine never ran" — a verdict about something that did not happen.
+nargo_json() {
+	local dir="$1" out="$2" err="$3"
+	shift 3
+	(cd "${dir}" && nargo "$@" >"${out}" 2>"${err}")
+}
+
+# 0 if nargo emitted at least one JSON event, i.e. IT RAN.
+#
+# This is the discriminator the exit status cannot provide: `nargo test`
+# exits non-zero both when it crashes and when it runs perfectly and a test
+# fails — and arm V *needs* two tests to fail. An emitted event means the
+# toolchain got as far as a verdict; an empty file means it never did.
+nargo_emitted_rows() {
+	grep -q '^[[:space:]]*{' "$1" 2>/dev/null
+}
+
 parser_selectors() {
 	# The selectors the SHARED parser found, sorted.
 	grep '^selector ' "$1" | sed 's/^selector //' | LC_ALL=C sort
@@ -246,10 +273,15 @@ fi
 # 2. Its tests pass, and there are five of them. The count is written here
 #    because §1a promises a project "its tests already passing"; a template
 #    that silently lost a test would still be "all passing".
-(cd "${arm_dir}" && nargo test --format json >"${cache}/control-test.json" 2>&1)
+nargo_json "${arm_dir}" "${cache}/control-test.json" "${cache}/control-test.err" \
+	test --format json
+control_test_status=$?
 read -r passed failed <<<"$(nargo_passed_count "${cache}/control-test.json")"
 if [ "${passed}" = "5" ] && [ "${failed}" = "0" ]; then
 	ck ok "nargo test runs 5 tests and all 5 pass"
+elif ! nargo_emitted_rows "${cache}/control-test.json"; then
+	ck fail "nargo test produced NO verdicts at all (exit ${control_test_status}) — the toolchain never ran, so this is not a claim about the template's tests:"
+	tail -8 "${cache}/control-test.err" | sed 's/^/      /'
 else
 	ck fail "nargo test reports ${passed} passed / ${failed} failed; the template must ship 5 passing tests"
 	tail -5 "${cache}/control-test.json" | sed 's/^/      /'
@@ -275,14 +307,17 @@ else
 fi
 
 # 4. The shipped constraint constant is what the producer says today.
-(cd "${arm_dir}" && nargo info --json >"${cache}/control-info.json" 2>/dev/null)
+nargo_json "${arm_dir}" "${cache}/control-info.json" "${cache}/control-info.err" \
+	info --json
+control_info_status=$?
 shipped_info="$(grep '^info ' "${cache}/control-report.txt" | sed 's/^info //')"
 measured_info="$(tr -d ' \n' <"${cache}/control-info.json")"
 shipped_compact="$(printf '%s' "${shipped_info}" | tr -d ' \n')"
 if [ -n "${measured_info}" ]; then
 	ck ok "nargo info produced an answer for the template, so the comparison below has a subject"
 else
-	ck fail "nargo info produced nothing; the shipped constant cannot be checked against it"
+	ck fail "nargo info produced nothing (exit ${control_info_status}); the shipped constant cannot be checked against it:"
+	tail -8 "${cache}/control-info.err" | sed 's/^/      /'
 fi
 if [ "${shipped_compact}" = "${measured_info}" ]; then
 	ck ok "the constraint counts the bundle ships are the ones nargo info reports: ${measured_info}"
@@ -320,11 +355,18 @@ s = open(p).read()
 assert s.count("#[test]") == 1, s.count("#[test]")
 open(p, "w").write(s.replace("#[test]", "// [test]", 1))
 PY
-(cd "${arm_dir}" && nargo test --format json >"${cache}/p-test.json" 2>&1)
+nargo_json "${arm_dir}" "${cache}/p-test.json" "${cache}/p-test.err" \
+	test --format json
 nargo_selectors "${cache}/p-test.json" >"${cache}/p-nargo.txt"
 parser_selectors "${cache}/p-report.txt" >"${cache}/p-parser.txt"
 if diff -q "${cache}/p-nargo.txt" "${cache}/p-parser.txt" >/dev/null 2>&1; then
 	ck fail "arm P: the selector sets still match after a #[test] was removed — the cross-check cannot detect parser drift, so it proves nothing"
+elif ! nargo_emitted_rows "${cache}/p-test.json"; then
+	# Divergence is worthless if it comes from an empty list: a nargo that
+	# never ran differs from the parser too, and would have shown this arm
+	# green while demonstrating nothing.
+	ck fail "arm P: nargo emitted no events, so the sets differ only because one is empty — this arm demonstrates nothing:"
+	tail -8 "${cache}/p-test.err" | sed 's/^/      /'
 else
 	ck ok "arm P: the selector sets diverge when a #[test] is removed ($(wc -l <"${cache}/p-nargo.txt" | tr -d ' ') from nargo vs $(wc -l <"${cache}/p-parser.txt" | tr -d ' ') from the parser), so the cross-check can fail"
 fi
@@ -419,7 +461,12 @@ fn ci_should_fail_but_does_not() {
 }
 ARM_V
 
-	(cd "${arm_dir}" && nargo test --format json >"${cache}/v-nargo.json" 2>&1)
+	# Non-zero is EXPECTED here: two of the seven tests are meant to fail. So
+	# the status alone cannot tell a real run from a crash — `nargo_emitted_rows`
+	# is what separates them, and it is consulted before any verdict is read.
+	nargo_json "${arm_dir}" "${cache}/v-nargo.json" "${cache}/v-nargo.err" \
+		test --format json
+	v_nargo_status=$?
 	nargo_verdicts "${cache}/v-nargo.json" >"${cache}/v-nargo.txt"
 	node ci/test/noir-template-verdicts.mjs "${arm_dir}" hello_noir 		>"${cache}/v-wasm.txt" 2>"${cache}/v-wasm.err"
 	wasm_status=$?
@@ -430,6 +477,12 @@ ARM_V
 
 	if [ "${wasm_status}" -eq 0 ] && [ "${nargo_v}" -eq 7 ] && [ "${wasm_v}" -eq 7 ]; then
 		ck ok "both engines reached a verdict on all 7 tests, so the diff below is not between two empty lists"
+	elif ! nargo_emitted_rows "${cache}/v-nargo.json"; then
+		# ZERO VERDICTS IS NOT DISAGREEMENT. One engine never ran; the other
+		# ran fine. Saying "the engines disagree" here would name the wrong
+		# component and send the reader to the wasm runner, which is healthy.
+		ck fail "nargo emitted NO events (exit ${v_nargo_status}) — it never ran, so this arm has nothing to compare and the wasm module's ${wasm_v} verdict(s) are not in dispute. nargo's own words:"
+		tail -8 "${cache}/v-nargo.err" | sed 's/^/      /'
 	else
 		ck fail "nargo reported ${nargo_v} verdict(s) and the wasm module ${wasm_v} (exit ${wasm_status}) — two equal empty lists would compare as a pass, so this is checked first"
 	fi
@@ -448,6 +501,9 @@ ARM_V
 	if diff -u "${cache}/v-nargo.txt" "${cache}/v-wasm.txt" \
 		>"${cache}/v-verdict.diff" 2>&1; then
 		ck ok "the wasm module's verdicts are nargo's own, line for line ($(tr '\n' '; ' <"${cache}/v-wasm.txt"))"
+	elif ! nargo_emitted_rows "${cache}/v-nargo.json"; then
+		ck fail "the verdict lists differ only because nargo's is EMPTY — this is nargo failing to run (exit ${v_nargo_status}), not the browser's runner disagreeing with it; fix the toolchain before reading the diff below:"
+		sed 's/^/      /' "${cache}/v-verdict.diff" | head -14
 	else
 		ck fail "the browser's runner and nargo disagree about what happened — a Test Results pane fed by this would contradict the developer's own terminal:"
 		sed 's/^/      /' "${cache}/v-verdict.diff" | head -14
