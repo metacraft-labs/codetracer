@@ -298,7 +298,7 @@ proc fileContent*(tmpl: ProjectTemplate; path: string): string =
 # What the template COSTS, measured by the real producer
 # ---------------------------------------------------------------------------
 
-const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir","functions":[{"name":"main","opcodes":17}],"unconstrained_functions":[{"name":"directive_invert","opcodes":9},{"name":"directive_integer_quotient","opcodes":8}]}]}"""
+const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir","functions":[{"name":"main","opcodes":15}],"unconstrained_functions":[{"name":"directive_invert","opcodes":9},{"name":"directive_integer_quotient","opcodes":8}]}]}"""
   ## The bundled template's `nargo info --json`, verbatim.
   ##
   ## ## Why a constant is the honest representation, and not a cached answer
