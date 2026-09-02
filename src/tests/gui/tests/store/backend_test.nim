@@ -14,6 +14,30 @@
 ## Uses IsoNim reactive primitives (signals, createRoot) to confirm
 ## that the service-injection pattern integrates correctly.
 ##
+## ## Why the command strings here are real ones
+##
+## This suite is about the **transport** — proc-field delegation, the
+## expectation FIFO, autoRespond, the null fallthrough — and not about any
+## particular command, so it used placeholder strings: `ct/step`,
+## `ct/anything`, `ct/unknown`. `MockBackendService.send` now validates what it
+## is handed against `VALID_DAP_COMMANDS`, because a mock that accepted any
+## string is why the nine commands in `backend/dap_dialect.md` §7 each had
+## passing tests over an engine that implements none of them.
+##
+## The placeholders are therefore replaced with real commands rather than
+## silenced with `validateCommands = false`. A suite that does not care which
+## command it sends can just as easily send a real one, and then it keeps
+## testing the transport without also carving a hole in the validation. The
+## opt-out exists (see the field's documentation) but spending it here would
+## buy nothing.
+##
+## One case changed meaning rather than just its string: "strict mode rejects
+## unexpected commands" sent `ct/unknown`, which is now invalid *as well as*
+## unexpected. Since `InvalidDapCommandDefect` derives from `AssertionDefect`,
+## that case would still have gone green — for the wrong reason, proving
+## validation rather than strict mode. It now sends `stepIn`: a real command,
+## genuinely unexpected, so the assertion measures what its name claims.
+##
 ## Compile and run:
 ##   nim c -r src/frontend/viewmodel/tests/test_backend.nim
 
@@ -33,10 +57,10 @@ suite "BackendService interface":
 
   test "send delegates to sendProc":
     let mock = newMockBackendService()
-    mock.expect("ct/step", %*{"direction": "forward"})
+    mock.expect("next", %*{"direction": "forward"})
     let svc = mock.toBackendService()
 
-    let resp = waitForTest svc.send("ct/step", %*{"direction": "forward"})
+    let resp = waitForTest svc.send("next", %*{"direction": "forward"})
     check resp == %*{"direction": "forward"}
 
   test "onEvent delegates to onEventProc":
@@ -68,12 +92,12 @@ suite "MockBackendService":
 
   test "consumes expectations in FIFO order":
     let mock = newMockBackendService()
-    mock.expect("ct/step", %*{"seq": 1})
-    mock.expect("ct/step", %*{"seq": 2})
+    mock.expect("next", %*{"seq": 1})
+    mock.expect("next", %*{"seq": 2})
     let svc = mock.toBackendService()
 
-    let r1 = waitForTest svc.send("ct/step", %*{})
-    let r2 = waitForTest svc.send("ct/step", %*{})
+    let r1 = waitForTest svc.send("next", %*{})
+    let r2 = waitForTest svc.send("next", %*{})
     check r1 == %*{"seq": 1}
     check r2 == %*{"seq": 2}
 
@@ -81,11 +105,11 @@ suite "MockBackendService":
     let mock = newMockBackendService(autoRespond = true)
     let svc = mock.toBackendService()
 
-    discard waitForTest svc.send("ct/step", %*{"a": 1})
+    discard waitForTest svc.send("next", %*{"a": 1})
     discard waitForTest svc.send("ct/load-locals", %*{"b": 2})
 
     check mock.receivedCommands.len == 2
-    check mock.receivedCommands[0].command == "ct/step"
+    check mock.receivedCommands[0].command == "next"
     check mock.receivedCommands[0].args == %*{"a": 1}
     check mock.receivedCommands[1].command == "ct/load-locals"
     check mock.receivedCommands[1].args == %*{"b": 2}
@@ -94,25 +118,30 @@ suite "MockBackendService":
     let mock = newMockBackendService(strict = true)
     let svc = mock.toBackendService()
 
+    # `stepIn` is a real DAP command with no expectation queued: unexpected,
+    # but not invalid. That distinction is the point — an invalid string would
+    # raise `InvalidDapCommandDefect`, which is itself an `AssertionDefect`, so
+    # this case would pass while measuring validation instead of strict mode.
+    #
     # On JS, the mock raises AssertionDefect synchronously from send().
     # On native, it returns a failed future that raises on read.
     # Either way, the exception should be AssertionDefect.
     expect(AssertionDefect):
-      let fut = svc.send("ct/unknown", %*{})
+      let fut = svc.send("stepIn", %*{})
       discard waitForTest fut
 
   test "autoRespond returns empty object for unmatched commands":
     let mock = newMockBackendService(autoRespond = true)
     let svc = mock.toBackendService()
 
-    let resp = waitForTest svc.send("ct/anything", %*{})
+    let resp = waitForTest svc.send("ct/load-locals", %*{})
     check resp == %*{}
 
   test "returns null for unmatched non-strict non-autoRespond":
     let mock = newMockBackendService()
     let svc = mock.toBackendService()
 
-    let resp = waitForTest svc.send("ct/anything", %*{})
+    let resp = waitForTest svc.send("ct/load-locals", %*{})
     check resp.kind == JNull
 
   test "emitEvent reaches multiple handlers":
@@ -156,7 +185,7 @@ suite "IsoNim integration":
         lastResponse: Signal[JsonNode]
 
     let mock = newMockBackendService()
-    mock.expect("ct/step", %*{"ok": true})
+    mock.expect("next", %*{"ok": true})
 
     var vm: TestViewModel
     createRoot proc(dispose: proc()) =
@@ -166,7 +195,7 @@ suite "IsoNim integration":
         disposeProc: dispose,
       )
 
-    let fut = vm.svc.send("ct/step", %*{})
+    let fut = vm.svc.send("next", %*{})
     vm.lastResponse.val = waitForTest fut
 
     check vm.lastResponse.val == %*{"ok": true}
