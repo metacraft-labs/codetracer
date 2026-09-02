@@ -557,15 +557,41 @@ build-storybook-components:
     --out:storybook/dist/components.js \
     js src/frontend/storybook_components.nim
 
-storybook: build-storybook-components
+# Install `storybook/node_modules` from the committed lockfile.
+#
+# Every `npm run` under `storybook/` resolves its binary from that directory's
+# `node_modules/.bin`, and NOTHING in this repo ever created it: the recipes
+# below jumped straight to `npm run build-storybook`, which fails with
+# `storybook: command not found`. Because `just test-e2e` with no arguments
+# routes through `ensure-storybook-static` -> `storybook-build`, that missing
+# directory made the bare entry point unrunnable, and every `*storybook*.spec.ts`
+# a permanent red that no one could act on. `npm ci` from the committed
+# `package-lock.json` takes ~17s and is idempotent, so the guard below is a
+# no-op on a warm checkout.
+storybook-deps:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd storybook
+  if [ -x node_modules/.bin/storybook ]; then
+    exit 0
+  fi
+  npm ci --no-audit --no-fund
+  # `npm ci` exits 0 on a lockfile that installs nothing useful, so assert the
+  # binary the `npm run` scripts below actually invoke.
+  test -x node_modules/.bin/storybook
+
+storybook: build-storybook-components storybook-deps
   cd storybook && npm run storybook
 
-storybook-build: build-storybook-components
+storybook-build: build-storybook-components storybook-deps
   chmod -R u+w storybook/storybook-static 2>/dev/null || true
   rm -rf storybook/storybook-static
   cd storybook && npm run build-storybook
+  # tup/webpack/storybook all exit 0 on an empty output tree; assert the
+  # artefact `ensure-storybook-static` promises its callers.
+  test -f storybook/storybook-static/index.html
 
-storybook-check-styles:
+storybook-check-styles: storybook-deps
   cd storybook && npm run check-styles
 
 ensure-storybook-static *args:
