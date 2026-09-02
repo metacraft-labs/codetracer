@@ -524,6 +524,34 @@ engine implements, and editing it implements nothing.
 Turning the mock strict reddened 26 cases in three files. None of the four
 allow-lists were touched, and no command string was added anywhere.
 
+> **Re-measured after integration (2026-09-02): 23 cases, not 26 — 12 fixed and
+> 11 still red, not 15.** The four `ct/line-step-jump` and
+> `ct/asm-instruction-jump` rows below no longer redden anything, because the
+> dispatches they describe were removed by the row-click work that landed in the
+> same push (`step_list_vm.nim:235` and `low_level_code_vm.nim:61` now both read
+> "This used to emit…"). The triage was accurate against the base it was written
+> on; the numbers went stale when the two branches met. Measured:
+> `vm-unit` 43 files / 0 failed / 944 cases; `vm-native` 91 files / 3 failed /
+> 2022 cases — 9 in `welcome_screen_vm_test.nim` and 2 in `isonim_views_test.nim`
+> are these reds, and the third file's single failure is the unrelated
+> pre-existing `editModeHiddenContentIds` grep.
+>
+> **THERE IS NO KNOWN-FAILURE MECHANISM IN THIS REPO.** Grepping for
+> `known.?failure`, `xfail`, `expected.fail` and every neighbouring spelling
+> across `src/`, `ci/` and the `justfile` returns nothing: no registry, no
+> annotation, no allow-list, no skip. "Registered as a known failure" means only
+> that a human wrote a row in this table. So these 11 are ORDINARY REDS —
+> `just test-vm` (which is `test-vm-native test-vm-js`, run by
+> `codetracer.yml:1892`) now exits 1 on every PR and every `dev`/`main` push.
+> The deploy lane is unaffected, because `codetracer.yml` does not trigger on
+> `cloud`.
+>
+> That is worth stating plainly rather than leaving in prose, because the defect
+> message this branch added (`mock_backend.nim:272-281`) tells the reader to
+> "state the correct expectation and register the test as a known failure" — and
+> points at a facility that does not exist. Either the 11 get fixed, or that
+> facility gets built and the message means something.
+
 | command | verdict | disposition |
 | --- | --- | --- |
 | `ct/jump-location` | **product code was wrong** — the Problems and Find-in-Files row click is *editor navigation*, which only the host can do. The dispatch was a fallback that ran when no host was installed, so it never jumped. | **Fixed.** Fallback removed from `errors_vm.nim` / `search_results_vm.nim`; the 4 tests now assert what the host was asked to open. No DAP command substituted: a build diagnostic can name a file the recording never executed, so `ct/source-line-jump` (a *debugger* move) is a different action, not a synonym. |
