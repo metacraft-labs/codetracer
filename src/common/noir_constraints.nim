@@ -67,10 +67,45 @@ type
       ## execute but are not constrained, so their opcodes cost witness
       ## generation time and not proof size.
 
+  ConstraintOpcode* = object
+    ## ONE PRINTED ROW OF THE COMPILER'S OWN LISTING, kept rather than tallied.
+    ##
+    ## `reportFromAcirListing` used to read these rows and keep only how many
+    ## there were. That made the count honest — it is derived from the compile
+    ## the pane describes — and it threw away the thing a reader actually asked
+    ## for. `Noir-Studio.md` §9.2 is explicit that the constraint view IS a
+    ## generated-code listing, in the shape `low_level_code_vm`'s
+    ## `LowLevelInstruction` already carries: an index, an opcode name and its
+    ## operands. So the split is the same one
+    ## `ci/test/low_level_code_browser_probe.nim` makes — first token is the
+    ## name, the remainder is the arguments — and not a new vocabulary.
+    index*: int
+      ## The opcode's position in its function, 0-based. THIS IS THE ANCHOR
+      ## KEY: `debug_symbols.acir_locations` is an opcode-indexed map, so a row
+      ## that did not carry its index could never be tied to a source span.
+      ## Nothing anchors yet; the index is kept so that it can.
+    name*: string
+      ## `ASSERT`, `BRILLIG CALL`, `BLACKBOX::RANGE` — the first token as the
+      ## compiler printed it.
+    args*: string
+      ## Everything after the first token, verbatim. NOT re-formatted: the
+      ## compiler's spacing is the compiler's, and a pane that tidied it would
+      ## be showing something other than what was generated.
+
   ConstraintFunction* = object
     name*: string
     kind*: ConstraintFunctionKind
     opcodes*: int
+      ## How many opcodes this function has. Kept when there are `rows`, and
+      ## then it is exactly `rows.len` — see `reportFromAcirListing`, which
+      ## derives it rather than accumulating a separate tally, so a total and
+      ## the listing under it cannot disagree about the same compile.
+    rows*: seq[ConstraintOpcode]
+      ## The listing itself, when there is one. EMPTY IS A REAL STATE and not
+      ## a defect: `parseNargoInfoJson` reports counts from `nargo info`, which
+      ## prints no opcodes at all, so a report from that producer has counts
+      ## and no rows. `hasListing` is what tells the two apart, and the pane
+      ## says which it is holding rather than rendering an empty body.
 
   ConstraintReport* = object
     ## One `nargo info` answer, or a stated absence of one.
@@ -89,9 +124,62 @@ type
       ## The sources changed after these counts were produced. A stale number
       ## is worse than no number if it is not labelled, because it looks
       ## exactly like a current one.
+    listingAbsence*: string
+      ## Why this report has counts but no printed rows, when the reason is
+      ## something the pane was TOLD rather than something it can infer.
+      ##
+      ## DISTINCT FROM `absence`, which is the whole content of the pane and
+      ## means there is nothing to show at all. This one is a caption on a pane
+      ## that still has counts in it: the compile worked, the totals stand, and
+      ## the generated code specifically could not be obtained. Collapsing the
+      ## two is what made a successful build blank a correct pane — see
+      ## `constraints_vm.noteListingUnavailable`.
+      ##
+      ## Empty means "no special reason", and then `listingNoticeFor` supplies
+      ## the ordinary one: `nargo info` reports totals and prints no opcodes.
 
 proc hasCounts*(report: ConstraintReport): bool =
   report.absence.len == 0 and report.functions.len > 0
+
+proc hasListing*(report: ConstraintReport): bool =
+  ## Whether this report carries the compiler's printed rows, and not only how
+  ## many of them there were.
+  ##
+  ## THE DISTINCTION THE PANE IS FOR. A report from `nargo info` has counts and
+  ## no rows; a report from an ACIR listing has both. Rendering an empty body
+  ## for the first would be a pane that looks broken rather than one that is
+  ## holding a different kind of answer, so the view asks this and says so.
+  if report.absence.len > 0:
+    return false
+  for fn in report.functions:
+    if fn.rows.len > 0:
+      return true
+  false
+
+proc totalRows*(report: ConstraintReport): int =
+  ## How many printed rows the whole report carries, across every function.
+  ## Used by the headline to say how much listing there is to read.
+  for fn in report.functions:
+    result += fn.rows.len
+
+proc splitOpcodeRow*(index: int; text: string): ConstraintOpcode =
+  ## One printed line, split into the name/args shape the generated-code
+  ## listing already uses.
+  ##
+  ## The rule is `ci/test/low_level_code_browser_probe.nim:listingRows`'s,
+  ## verbatim: split ONCE on the first space. `BRILLIG CALL func: 0, ...`
+  ## therefore has the name `BRILLIG` and the arguments `CALL func: 0, ...`,
+  ## which is not a tokenisation anybody would choose from scratch — and it is
+  ## the one the Low Level Code pane's rows are already built with. Matching it
+  ## keeps one row shape in the product; inventing a better split here would
+  ## give the same opcode two different renderings in two panes, which §1a.1's
+  ## "no pane is invented for the web" exists to prevent.
+  let trimmed = text.strip()
+  let parts = trimmed.split(' ', 1)
+  ConstraintOpcode(
+    index: index,
+    name: (if parts.len > 0: parts[0] else: trimmed),
+    args: (if parts.len > 1: parts[1] else: ""))
 
 proc totalFor*(report: ConstraintReport; kind: ConstraintFunctionKind): int =
   for fn in report.functions:
@@ -345,7 +433,21 @@ proc isAcirHeaderLine(line: string): bool =
 
 proc reportFromAcirListing*(listing: string; package: string;
                             provenance: string): ConstraintReport =
-  ## Build the whole report from `VfsResponse.acir_listing`.
+  ## Build the whole report from `VfsResponse.acir_listing` — THE ROWS AND THE
+  ## COUNTS, from one reading of one artefact.
+  ##
+  ## ## What this used to throw away
+  ##
+  ## The first version of this procedure parsed the listing and kept only how
+  ## many rows it had seen. That was the right correction to make first — the
+  ## number stopped being a constant measured by a different compiler — and it
+  ## left the pane doing the one thing a reader had not asked for. A user
+  ## opening CONSTRAINTS wants to READ the generated code; "17" is a summary of
+  ## a document the pane had already parsed and then discarded.
+  ##
+  ## So the rows are kept. `opcodes` is now `rows.len` rather than a parallel
+  ## tally, which is what makes the headline and the listing beneath it two
+  ## views of one quantity instead of two quantities that agree today.
   ##
   ## ## Why the LISTING and not `nargo info`
   ##
@@ -377,23 +479,31 @@ proc reportFromAcirListing*(listing: string; package: string;
 
   var functions: seq[ConstraintFunction] = @[]
   var currentAcir = -1
-  var acirRows = 0
+  var acirRows: seq[ConstraintOpcode] = @[]
   var currentBrillig = ""
-  var brilligRows = 0
+  var brilligRows: seq[ConstraintOpcode] = @[]
 
+  # THE COUNT IS `rows.len`, NOT A SEPARATE TALLY. The two used to be one
+  # integer incremented per line; keeping the rows and *also* counting them
+  # would reintroduce the exact drift this module spent a commit removing, one
+  # level down — a headline that disagrees with the listing printed beneath it,
+  # on the same compile, in the same pane. There is nothing to reconcile if
+  # there is only one quantity.
   proc flushAcir() =
     if currentAcir >= 0:
       functions.add ConstraintFunction(
-        name: "func " & $currentAcir, kind: cfkAcir, opcodes: acirRows)
+        name: "func " & $currentAcir, kind: cfkAcir,
+        opcodes: acirRows.len, rows: acirRows)
     currentAcir = -1
-    acirRows = 0
+    acirRows = @[]
 
   proc flushBrillig() =
     if currentBrillig.len > 0:
       functions.add ConstraintFunction(
-        name: currentBrillig, kind: cfkUnconstrained, opcodes: brilligRows)
+        name: currentBrillig, kind: cfkUnconstrained,
+        opcodes: brilligRows.len, rows: brilligRows)
     currentBrillig = ""
-    brilligRows = 0
+    brilligRows = @[]
 
   for rawLine in listing.splitLines():
     let line = rawLine.strip()
@@ -411,7 +521,7 @@ proc reportFromAcirListing*(listing: string; package: string;
         else: line["unconstrained func ".len .. ^1].strip()
       if currentBrillig.len == 0:
         currentBrillig = line
-      brilligRows = 0
+      brilligRows = @[]
       continue
 
     if currentBrillig.len > 0:
@@ -424,7 +534,14 @@ proc reportFromAcirListing*(listing: string; package: string;
         except CatchableError:
           index = -1
       if index >= 0:
-        brilligRows += 1
+        # THE INDEX IS THE COMPILER'S, not this loop's. Brillig rows are
+        # printed `<index>: <opcode>`, so the number is already on the line and
+        # re-deriving it from the row's position would silently renumber a
+        # listing the compiler chose to number itself. The opcode text is what
+        # follows the colon.
+        let body =
+          if colon + 1 < line.len: line[colon + 1 .. ^1].strip() else: ""
+        brilligRows.add splitOpcodeRow(index, body)
         continue
       flushBrillig()
 
@@ -436,14 +553,20 @@ proc reportFromAcirListing*(listing: string; package: string;
       except CatchableError:
         index = -1
       currentAcir = max(index, 0)
-      acirRows = 0
+      acirRows = @[]
       continue
 
     if isAcirHeaderLine(line):
       continue
 
     if currentAcir >= 0:
-      acirRows += 1
+      # ACIR rows are NOT numbered by the compiler — `display_compiled_program`
+      # prints the opcode alone. The index is therefore this row's position in
+      # its function, which is exactly what `acir_locations` is keyed by, so a
+      # later change can anchor a row to a source span without renumbering
+      # anything. GCL-D6's four header lines are skipped above and so never
+      # take an index, which is what keeps that key aligned.
+      acirRows.add splitOpcodeRow(acirRows.len, line)
 
   flushAcir()
   flushBrillig()

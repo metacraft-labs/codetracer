@@ -206,3 +206,68 @@ ns9-row-padding = 2px 8px
 
 .constraints-row.unconstrained
   opacity: 0.75
+
+// ---------------------------------------------------------------------------
+// The generated code itself
+// ---------------------------------------------------------------------------
+
+// A function is its count row plus the opcodes under it, so the two scroll and
+// dim together. Without the wrapper a long listing would separate a heading
+// from the rows it heads the moment the pane scrolled.
+.constraints-function
+  display: flex
+  flex-direction: column
+
+// The count row is the listing's heading, so it stops being a table row and
+// starts looking like one: it sticks to the top of the pane while its opcodes
+// scroll past, which is the only way to know which function you are reading
+// once the rows outnumber the pane.
+.constraints-function > .constraints-row
+  position: sticky
+  top: 0
+  z-index: 1
+  background-color: colors-ui-surface-base-card
+
+// MONOSPACE, because these are the compiler's characters. The pane's default
+// is SpaceGrotesk, which is proportional — operand lists like `[w0 - w1]` and
+// the 60-digit field constants the listing prints do not line up in it, and a
+// listing whose columns do not line up is harder to read than the count it
+// replaced.
+.constraints-opcodes
+  font-family: monospace
+  font-size: 0.85em
+  padding: 0
+
+// The Low Level Code pane's row, re-columned for this pane's width.
+//
+// That pane's seven-column grid is sized for a full-width editor (5em + 6em +
+// 18em + 14em + 7em + auto + 1fr) and this pane is a ~400px sidebar, so
+// inheriting it would push the operands out of sight. The COLUMNS are what
+// changes; the classes, the hover and the borders are the Low Level Code
+// pane's own, which is the part §9.2 asks to be shared.
+.constraints-opcode.low-level-code-instruction
+  // index | name | operands.  The operands take the slack.
+  grid-template-columns: 3em auto minmax(0, 1fr)
+  column-gap: 0.5em
+  padding-left: 1em
+  // The listing is WIDER THAN THE PANE and must stay so: wrapping an opcode
+  // across two lines would break the one-row-per-opcode identity the index
+  // gutter asserts. The pane scrolls horizontally instead.
+  white-space: nowrap
+
+.constraints-opcode .low-level-code-instruction-offset
+  text-align: right
+  font-variant-numeric: tabular-nums
+  opacity: 0.45
+
+.constraints-opcode .low-level-code-instruction-args
+  overflow: hidden
+  text-overflow: ellipsis
+
+// Totals with no rows behind them. Says which of the two kinds of answer the
+// pane is holding; see `listingNoticeFor`.
+.constraints-listing-notice
+  padding: 6px 8px
+  font-size: 0.85em
+  line-height: 1.35
+  opacity: 0.6

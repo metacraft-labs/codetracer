@@ -5577,13 +5577,20 @@ when defined(ctWeb) and not defined(ctInExtension):
                 return
               if listing.len == 0:
                 # ORDINARY, not a fault: a compiler module older than
-                # `VfsResponse.acir_listing` answers without one. Saying so
-                # beats showing a number this compile did not produce, which
-                # is the whole defect being removed here.
-                constraints.constraintsVMInstance.setAbsence(
-                  "This build's Noir compiler does not report a constraint " &
-                  "listing, so there are no counts to show for what it just " &
-                  "compiled.")
+                # `VfsResponse.acir_listing` answers without one — which is
+                # every build on the current deploy pin.
+                #
+                # THIS NO LONGER BLANKS THE PANE. `setAbsence` replaced the
+                # whole report, so a successful build turned three correct
+                # named counts into the word "unavailable"; measured on the
+                # live site, that is what pressing BUILD did. The counts were
+                # not invalidated by a compile that declined to print its
+                # opcodes, so they stay and the reason is captioned beside
+                # them. See `constraints_vm.noteListingUnavailable`.
+                constraints.constraintsVMInstance.noteListingUnavailable(
+                  "This build's Noir compiler does not print a constraint " &
+                  "listing, so the generated code cannot be shown for what " &
+                  "it just compiled.")
                 return
               constraints.constraintsVMInstance.setReport(
                 reportFromAcirListing(listing, packageDir, provenance))

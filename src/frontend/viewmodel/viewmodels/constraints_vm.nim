@@ -122,6 +122,36 @@ proc setReport*(vm: ConstraintsVM; report: ConstraintReport) =
 proc setAbsence*(vm: ConstraintsVM; reason: string) =
   vm.report.val = absentReport(reason)
 
+proc noteListingUnavailable*(vm: ConstraintsVM; reason: string) =
+  ## A compile SUCCEEDED but emitted no constraint listing.
+  ##
+  ## ## What this replaces, and why it is not a refinement
+  ##
+  ## The sink used to call `setAbsence` here, which replaces the whole report.
+  ## Measured against the live deployment on 2026-09-03: the pane opened
+  ## showing `17 ACIR opcodes, 17 unconstrained` with three named rows, and
+  ## pressing BUILD replaced all of it with the single word `unavailable`. A
+  ## user's gesture DESTROYED correct information and put nothing in its place
+  ## — the counts had not become wrong, and the compile had not failed.
+  ##
+  ## That is the shipped engine's state and not a rare one:
+  ## `ci/deploy/noir-wasm.pin` is a revision that predates
+  ## `VfsResponse.acir_listing`, so EVERY build on the live site takes this
+  ## path. The absence was correct about the listing and wrong about
+  ## everything else in the pane.
+  ##
+  ## So the counts are KEPT and the reason is stated beside them. This is
+  ## decision 2 above applied to a second cause: a report that is partly
+  ## available is shown partly, labelled, rather than discarded whole. An
+  ## absence remains an absence — if there were no counts to begin with, there
+  ## are none now, and `absentReport` is still what says so.
+  var current = vm.report.val
+  if current.absence.len > 0 or current.functions.len == 0:
+    vm.report.val = absentReport(reason)
+    return
+  current.listingAbsence = reason
+  vm.report.val = current
+
 proc markStale*(vm: ConstraintsVM; stale: bool) =
   ## Flag the counts as describing sources that have since changed. Does
   ## nothing to an absent report: "there are no counts" cannot become "the

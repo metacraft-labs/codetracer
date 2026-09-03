@@ -276,3 +276,103 @@ suite "Live constraints — the pane computes what it compiled":
     check not acirCountFromDebugInfo(nil).ok
     check not acirCountFromDebugInfo(newJArray()).ok
     check acirCountFromDebugInfo(nil).reason.len > 10
+
+suite "Live constraints — the pane SHOWS the generated code, not a tally of it":
+  ## ## Why this suite exists beside the one above
+  ##
+  ## Every test above is satisfied by a parser that reads the listing and
+  ## throws it away, because every one of them asserts a NUMBER. That is
+  ## exactly what shipped: `reportFromAcirListing` parsed the compiler's
+  ## printed opcodes and kept `len`. The pane was measured, correct, and still
+  ## showed a user three integers where they had asked to read their circuit.
+  ##
+  ## So these assert the ROWS. A count-only implementation passes the whole
+  ## suite above and fails on the first check here, which is the property the
+  ## goal needed and did not have.
+
+  test "listing_the_rows_are_kept_and_not_merely_counted":
+    # THE ASSERTION THE OLD PANE COULD NOT PASS. `opcodes` was a tally; there
+    # was no `rows` at all, so a pane had nothing to render but the tally.
+    let report = reportFromAcirListing(
+      TemplateAcirListing, "hello_noir", "compiled here")
+    check report.hasListing()
+    check report.totalRows() == 34
+    var acir: seq[ConstraintOpcode] = @[]
+    for fn in report.functions:
+      if fn.kind == cfkAcir:
+        acir = fn.rows
+    check acir.len == 17
+
+  test "listing_every_function_count_IS_its_row_count":
+    # THE HEADLINE AND THE LISTING ARE ONE QUANTITY. `opcodes` is now
+    # `rows.len` rather than a parallel tally, so there is no arithmetic that
+    # could make the total above the listing disagree with the listing. A
+    # separate counter would pass today and drift the first time either loop
+    # changed.
+    let report = reportFromAcirListing(
+      TemplateAcirListing, "hello_noir", "compiled here")
+    check report.functions.len == 3
+    for fn in report.functions:
+      check fn.opcodes == fn.rows.len
+
+  test "listing_an_opcode_row_carries_the_compiler_s_own_text":
+    # VERBATIM, not summarised. The first ACIR row of this template is a
+    # `BRILLIG CALL`, and the split is the Low Level Code pane's — first token
+    # is the name, the rest is the operands — so `BRILLIG` / `CALL func: ...`
+    # is expected rather than a bug. See `splitOpcodeRow`.
+    let report = reportFromAcirListing(
+      TemplateAcirListing, "hello_noir", "compiled here")
+    var acir: seq[ConstraintOpcode] = @[]
+    for fn in report.functions:
+      if fn.kind == cfkAcir:
+        acir = fn.rows
+    check acir[0].name == "BRILLIG"
+    check acir[0].args == "CALL func: 0, predicate: 1, inputs: [w0 - w1], outputs: [w2]"
+    check acir[1].name == "ASSERT"
+    check acir[1].args == "0 = w0*w2 - w1*w2 - 1"
+    # The 60-digit field constant is the one a summariser would truncate.
+    check acir[6].args.contains("5096253676302562286669017222071363378443840053029366383258766538131")
+
+  test "listing_acir_rows_are_indexed_by_position_so_a_span_can_anchor_later":
+    # `acir_locations` is an OPCODE-INDEXED map, so a row's index is the key
+    # anchoring will join on. The four GCL-D6 header lines take no index --
+    # if they did, every anchor would land four rows out, which is the defect
+    # `isAcirHeaderLine` exists to prevent, one layer further on.
+    let report = reportFromAcirListing(
+      TemplateAcirListing, "hello_noir", "compiled here")
+    for fn in report.functions:
+      if fn.kind != cfkAcir: continue
+      check fn.rows.len == 17
+      for i, row in fn.rows:
+        check row.index == i
+      check fn.rows[0].index == 0
+      check fn.rows[^1].index == 16
+
+  test "listing_brillig_rows_keep_the_index_the_compiler_printed":
+    # Brillig rows arrive pre-numbered (`0: @21 = const u32 1`). The number is
+    # the COMPILER'S, so it is parsed off the line rather than re-derived from
+    # position -- a listing that renumbered itself would be showing something
+    # the compiler did not print.
+    let report = reportFromAcirListing(
+      TemplateAcirListing, "hello_noir", "compiled here")
+    for fn in report.functions:
+      if fn.name != "directive_invert": continue
+      check fn.rows.len == 9
+      check fn.rows[0].index == 0
+      check fn.rows[0].name == "@21"
+      check fn.rows[0].args == "= const u32 1"
+      check fn.rows[8].index == 8
+      check fn.rows[8].name == "stop"
+
+  test "listing_a_nargo_info_report_has_counts_and_states_that_it_has_no_rows":
+    # THE STATE THE LIVE SITE IS IN. `nargo info` prints totals and no
+    # opcodes, so a report from it has counts and an empty listing. That is a
+    # different answer from "there are no counts", and the pane must not
+    # render it as a blank listing body.
+    const NargoInfo = """{"programs":[{"package_name":"hello_noir",
+      "functions":[{"name":"main","opcodes":17}],
+      "unconstrained_functions":[{"name":"directive_invert","opcodes":9}]}]}"""
+    let report = parseNargoInfoJson(NargoInfo, "measured at build time")
+    check report.hasCounts()
+    check not report.hasListing()
+    check report.totalRows() == 0
