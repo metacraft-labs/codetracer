@@ -12,6 +12,7 @@ import
   # is gone; this import is what makes the call reach the implementation, and
   # what makes its absence a build error rather than a dead gesture.
   ./debug,
+  ./shortcut_presets,
   ./video_player,
   ../viewmodel/viewmodels/video_player_vm,
   ../../common/ct_event,
@@ -30,7 +31,20 @@ const
   # `test_history_cursor` can state which physical button walks which way.
 
 proc shortcut*(shortcut: string): int =
-  let tokens = shortcut.split("+", 2)
+  # `chordTokens` SPLITS ON EVERY `+`. This line used to read
+  # `shortcut.split("+", 2)` — a maximum of two splits, therefore a maximum of
+  # three tokens — and the consequence was silent: a four-token chord like
+  # `CTRL+ALT+SHIFT+R` had its key parsed as `"SHIFT+R"`, `monaco.KeyCode` has
+  # no such member, `button` came back nil and the proc returned `NO_CODE`. So
+  # `delegateShortcut` logged one `cerror` and registered nothing, and the
+  # chord was dead with the caret in the editor while working everywhere else.
+  #
+  # Nothing in `default_config.yaml` had four tokens, so the limit cost
+  # nothing until a preset wanted `SHIFT` as its "backwards" modifier on top of
+  # `CTRL+ALT`. It is shared with `ui/shortcut_presets.nim` rather than
+  # duplicated because the dialog and this parser must agree about where a
+  # chord's modifiers end and its key begins.
+  let tokens = chordTokens(shortcut)
   var buttonToken = if tokens[^1].len == 1: cstring(&"Key{tokens[^1].toUpperAscii}") else: cstring(tokens[^1])
 
   if tokens[^1] == "=":

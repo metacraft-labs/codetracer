@@ -219,6 +219,55 @@ const MONACO_SHORTCUTS_WHITELIST*: seq[cstring] =
       # Monaco the event never reaches Mousetrap (measured above), and with
       # the caret outside, the delegated Monaco command does not run.
       "CTRL+B",
+      # ---------------------------------------------------------------------
+      # THE PRESET CHORDS.
+      #
+      # Every chord any preset in `ui/shortcut_presets.nim` binds must appear
+      # here, for the reason the `SHIFT+F5` and `CTRL+B` entries above already
+      # record: Monaco stops keydown propagation before the bubble phase
+      # Mousetrap listens on, so a chord off this list is DEAD while the caret
+      # is in the editor. In an IDE that is where the caret usually is, so an
+      # omission here does not degrade a preset — it silently empties it.
+      #
+      # THIS LIST IS HAND-MAINTAINED ON PURPOSE. Deriving it from the preset
+      # tables would guarantee the containment and thereby make
+      # `shortcut_presets_test.nim`'s assertion of it unfalsifiable — a check
+      # that cannot fail, which is the failure this repository's test files
+      # keep naming. Hand-maintained, adding a preset chord and forgetting this
+      # list reddens, which is exactly the `SHIFT+F5` bug caught one step
+      # earlier than it was last time.
+      #
+      # ONLY THE FUNCTION KEYS, and that asymmetry is the whole rule.
+      #
+      # A chord needs to be here when MONACO WOULD OTHERWISE EAT IT. Monaco
+      # binds the function row, so `F5` and the `ALT` forms below must be
+      # delegated or they are dead with the caret in the editor. Monaco binds
+      # nothing in the `CTRL+ALT+<letter>` family, so the browser-safe preset's
+      # nine chords reach `document`'s bubble phase on their own and Mousetrap's
+      # global bind already answers them.
+      #
+      # PUTTING THEM HERE ANYWAY WOULD BE THE `ALT+F8` BUG. Registering a
+      # Monaco command for a chord that also reaches Mousetrap is what made
+      # `ALT+F8` fire TWICE per press. `default_config.yaml` states the same
+      # conclusion from the other side for this exact family — "no chord here
+      # is in `ui/editor.nim`'s MONACO_SHORTCUTS_WHITELIST — Monaco binds no
+      # CTRL+ALT+<letter> natively" — and the six `CTRL+ALT` chords it already
+      # ships are deliberately absent from this list for that reason. The
+      # browser-safe preset follows the decision this repository already made
+      # rather than reopening it.
+      #
+      # `shortcut_presets_test.nim` asserts reachability with both arms, so
+      # neither "off the list and eaten by Monaco" nor "on the list and fired
+      # twice" can be introduced silently.
+      #
+      # `F5` and `ALT+F5` are the VS Code preset's Continue pair; `ALT+F11` and
+      # `ALT+SHIFT+F11` are its two reverse moves. `ALT+F10` is NOT here,
+      # because that chord is hard-bound to `stepOverStatement` and no preset
+      # may use it.
+      "F5",
+      "ALT+F5",
+      "ALT+F11",
+      "ALT+SHIFT+F11",
   ]
   # BUILD-ERROR NAVIGATION IS DELIBERATELY *NOT* IN THE LIST ABOVE, and the
   # reason is worth recording because the obvious change is the wrong one.

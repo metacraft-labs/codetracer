@@ -1,8 +1,11 @@
 import
-  std / [json, strutils, sequtils, jsffi],
+  std / [json, strutils, sequtils, jsffi, options],
   types,
   lib/jslib,
+  ui / shortcut_presets,
   .. / common / ct_logging
+
+export shortcut_presets
 
 let
   configPath* = ".config.yaml"
@@ -174,8 +177,45 @@ proc flowUIFromName*(name: cstring): FlowUI =
   of "multiline": FlowMultiline
   else: FlowParallel
 
-proc defaultRendererConfig*(): Config =
+proc applyShortcutPreset*(bindings: JsAssoc[cstring, cstring];
+                          preset: ShortcutPresetId) =
+  ## Overwrite the nine preset-governed bindings, in place, before the map is
+  ## built.
+  ##
+  ## THIS IS THE WHOLE INTEGRATION, and its smallness is the point. A preset
+  ## changes VALUES in the `InputShortcutMap`; `initShortcutMap` below then
+  ## produces the same `ShortcutMap` it always did, and every consumer —
+  ## `configureShortcuts`' Mousetrap binds, `delegateShortcuts`' Monaco
+  ## commands, `renderChord`'s labels, `loadShortcut`'s menu text and
+  ## `toolbarTooltip`'s parentheses — follows without knowing presets exist.
+  ##
+  ## `Keyboard-Shortcuts-System.md` § Requirements is what forbids the
+  ## alternative: a preset that installed its own binds would be "a chord bound
+  ## in code and not routed through the YAML", which is one "the user cannot
+  ## change and cannot discover".
+  ##
+  ## `spNone` DELETES rather than leaves. Its meaning is "the nine debugger
+  ## commands have no chord", and leaving the YAML's would mean "the nine
+  ## debugger commands have the chords you were trying to turn off".
+  let chosen = presetOf(preset)
+  for action in PresetActions:
+    let key = cstring($action)
+    let chord = chosen.chordFor(action)
+    if chord.isSome:
+      bindings[key] = cstring(chord.get)
+    else:
+      # `JsAssoc` has no `del`; assigning `undefined` is how a key is removed
+      # from the iteration `initShortcutMap` performs over it.
+      {.emit: ["delete ", bindings, "[", key, "];"].}
+
+proc defaultRendererConfig*(preset: ShortcutPresetId =
+                              DefaultShortcutPresetId): Config =
   ## The bundled defaults as a `Config` the renderer can use immediately.
+  ##
+  ## The `preset` argument defaults to `DefaultShortcutPresetId`, whose table
+  ## is byte-for-byte `default_config.yaml`'s own — so every existing caller
+  ## gets exactly the config it got before presets existed, and
+  ## `shortcut_presets_test.nim` asserts that rather than assuming it.
   ##
   ## `rrBackend` is constructed explicitly and that is not decoration: it is a
   ## `ref object`, `ui/welcome_screen.nim:197` reads `.enabled` after checking
@@ -241,6 +281,7 @@ proc defaultRendererConfig*(): Config =
       discard
 
   result.flow.realFlowUI = flowUIFromName(result.flow.ui)
+  applyShortcutPreset(bindings, preset)
   result.bindings = bindings
   result.shortcutMap = initShortcutMap(bindings)
 
