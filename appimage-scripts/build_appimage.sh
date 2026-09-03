@@ -301,12 +301,22 @@ fi
 #       not found (required by .../bin/ct_unwrapped)
 #
 # Note the second one: it is ct_unwrapped ITSELF, not just a bundled dependency.
-# There is a single root cause -- we build against the pinned nixpkgs' glibc
-# 2.42 -- with two symptoms.  `GLIBC_2.36`/`GLIBC_2.38` are ordinary version
-# floors (new-ish functions we call).  `GLIBC_ABI_GNU2_TLS` is not a version at
-# all but an ABI marker that glibc 2.42 stamps on objects using GNU2/TLSDESC
-# thread-local storage; only glibc >= 2.42 provides it, which is why the
-# AppImage ran on rolling-release Arch and on nothing else.
+# There is a single root cause -- we build against a glibc newer than the
+# oldest host we ship to -- with two symptoms.  `GLIBC_2.36`/`GLIBC_2.38` are
+# ordinary version floors (new-ish functions we call), and they disappear on
+# the glibc-2.39 hosts.  `GLIBC_ABI_GNU2_TLS` is not a version at all but an
+# ABI marker stamped on objects using GNU2/TLSDESC thread-local storage, and it
+# is the binding constraint: it is the ONLY error left on Fedora 40 and Ubuntu
+# 24.04, which no version floor explains.
+#
+# MEASURED, because the arithmetic here is easy to get wrong and this comment
+# asserted the wrong number once already.  The toolchain glibc is 2.40
+# (glibc-2.40-224; it comes from the codetracer-toolchains pin, NOT from
+# evaluating this repo's `nixpkgs` input, which is a different and newer node).
+# Its libc.so.6 defines version sets up to GLIBC_2.39 AND defines
+# GLIBC_ABI_GNU2_TLS.  The marker therefore arrived in 2.40 -- the 2.39 hosts
+# error on it, Arch's 2.42 has it -- and a bundled 2.40 satisfies every
+# requirement listed above: GLIBC_2.36, GLIBC_2.38 and GLIBC_ABI_GNU2_TLS.
 #
 # Rebuilding against an older glibc (the conventional AppImage answer) would
 # mean overriding the toolchain glibc that every CodeTracer repo shares through
