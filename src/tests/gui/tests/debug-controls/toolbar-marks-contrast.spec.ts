@@ -94,7 +94,7 @@ const MARK_SIGNATURES: ReadonlyArray<{ action: string; startsWith: string }> = [
   { action: "step-out", startsWith: "M7.09078 0.349609L2.2299 5.31913" },
   { action: "reverse-continue", startsWith: "M8 4C9.10457 4 10 3.10457 10 2" },
   { action: "continue", startsWith: "M8 12C9.10457 12 10 12.8954 10 14" },
-  { action: "run-to-entry", startsWith: "M14 8C14 8.81 13.842 9.596" },
+  { action: "run-to-entry", startsWith: "M16 14L5.33333 14" },
   { action: "reset-operation", startsWith: "M9.38451 0.379639" },
 ];
 

@@ -70,8 +70,20 @@
 ##   stroke on the rect inset by 0.5 with its radius reduced by 0.5, so that is
 ##   what they are here — one stroked path each, no mask, same pixels.
 ##
-## The other four — the two history chevrons, the reset arc and `run-to-entry`
-## — are unchanged from the asset files they came from and always were.
+## `run-to-entry` came back with them, for the same reason and from the same
+## revision. `a30f10cd` did not only move that mark in here — it redrew it,
+## from a play triangle beside a stack of rules to the `debug-restart` codicon,
+## arguing that the control sends DAP `restart` and that a bare triangle reads
+## as "start" next to `continue`. That argument may well be sound, but it is
+## the same align-with-BlockTracer pass the user asked to be taken back out of
+## CodeTracer, and settling it here would pre-empt the designer on the one
+## control the rework is most likely to touch. It is
+## `src/public/resources/debug/run_to_entry_dark.svg` at `1b898556` again.
+##
+## The remaining three — the two history chevrons and the reset arc — are
+## unchanged from the asset files they came from and always were. Nothing in
+## this strip's geometry now differs from what CodeTracer shipped before
+## `93be377c`.
 ##
 ## ## What the old set looks like, so the rework is not walking in blind
 ##
@@ -221,28 +233,25 @@ const
     ## Figma's rounding of zero — giving x∈[3.74939, 17.05639],
     ## y∈[0.42947, 6.57117].
 
-  RunToEntryPath = "M14 8C14 8.81 13.842 9.596 13.528 10.336C13.224 11.053 1" &
-    "2.791 11.694 12.241 12.243C11.694 12.791 11.053 13.224 10.337 13.528C9" &
-    ".59602 13.841 8.81002 14 8.00002 14C7.19002 14 6.40402 13.842 5.66402 " &
-    "13.528C4.94702 13.224 4.30602 12.791 3.75702 12.242C3.20802 11.693 2.7" &
-    "7602 11.053 2.47202 10.337C2.31002 9.956 2.48802 9.516 2.86902 9.354C3" &
-    ".25102 9.19 3.69002 9.37 3.85202 9.751C4.08102 10.288 4.40502 10.77 4." &
-    "81802 11.181C5.23002 11.595 5.71202 11.919 6.24902 12.148C7.35602 12.6" &
-    "15 8.64302 12.615 9.75202 12.148C10.288 11.919 10.77 11.595 11.181 11." &
-    "183C11.595 10.77 11.919 10.288 12.148 9.751C12.381 9.197 12.501 8.608 " &
-    "12.501 8C12.501 7.392 12.382 6.803 12.148 6.248C11.919 5.712 11.595 5." &
-    "23 11.182 4.819C10.77 4.405 10.288 4.081 9.75102 3.852C8.64402 3.385 7" &
-    ".35702 3.385 6.24802 3.852C5.71202 4.081 5.23002 4.405 4.81902 4.817C4" &
-    ".60802 5.027 4.42002 5.256 4.25702 5.5H6.24902C6.66302 5.5 6.99902 5.8" &
-    "36 6.99902 6.25C6.99902 6.664 6.66302 7 6.24902 7H2.74902C2.33502 7 1." &
-    "99902 6.664 1.99902 6.25V2.75C1.99902 2.336 2.33502 2 2.74902 2C3.1630" &
-    "2 2 3.49902 2.336 3.49902 2.75V4.032C3.58202 3.938 3.66802 3.845 3.758" &
-    "02 3.757C4.30502 3.209 4.94602 2.776 5.66202 2.472C7.14402 1.845 8.854" &
-    "02 1.845 10.335 2.472C11.052 2.776 11.693 3.209 12.242 3.758C12.791 4." &
-    "307 13.223 4.947 13.527 5.663C13.84 6.404 13.999 7.19 13.999 8H14Z"
-    ## `debug-restart`. One subpath: a near-full circular sweep that breaks at
-    ## the upper left into the arrowhead bracket. No triangle anywhere in it,
-    ## which is the point — see the note at the top of this file.
+  RunToEntryRulePaths = ["M16 14L5.33333 14", "M16 11L5.33333 11",
+                         "M16 8H8.88889", "M16 5L5.33333 5",
+                         "M16 2L5.33333 2"]
+  RunToEntryTrianglePath = "M7.46011e-07 4.83221L5.33336 7.91627L-9.01353e-0" &
+    "7 11.0003"
+    ## `run_to_entry_dark.svg`: five rules with a triangle pointing into them,
+    ## the third rule shortened so the triangle's tip has somewhere to land.
+    ##
+    ## The triangle is an OPEN path that is filled — SVG closes a subpath
+    ## implicitly for the purpose of filling it, so the two coordinates that
+    ## Figma wrote as 7.46e-07 and -9.01e-07 are its left edge at x=0. It is
+    ## carried across as written rather than tidied to zero.
+    ##
+    ## `a30f10cd` replaced this with the `debug-restart` codicon on the
+    ## reasoning that the control sends DAP `restart` and a play triangle
+    ## reads as "start". That reasoning may well be right, but it is the same
+    ## alignment-with-BlockTracer pass the user asked to be taken out of
+    ## CodeTracer, so it goes back with the other eight and the argument goes
+    ## to the designer rather than being settled here.
 
   HistoryBackPath = "M11.5 15L4.5 8L11.5 1"
   HistoryForwardPath = "M4.5 1L11.5 8L4.5 15"
@@ -304,7 +313,12 @@ const ControlMarks*: seq[ControlMark] = @[
                         drawn(ContinueChevronPath)]),
   ControlMark(buttonId: "run-to-entry-image", action: "run-to-entry",
               viewBox: DefaultViewBox,
-              shapes: @[filled(RunToEntryPath)]),
+              shapes: @[drawn(RunToEntryRulePaths[0]),
+                        drawn(RunToEntryRulePaths[1]),
+                        drawn(RunToEntryRulePaths[2]),
+                        drawn(RunToEntryRulePaths[3]),
+                        drawn(RunToEntryRulePaths[4]),
+                        filled(RunToEntryTrianglePath)]),
   ControlMark(buttonId: "reset-operation-image", action: "reset-operation",
               viewBox: "0 0 16 17",
               shapes: @[stroked(ResetOperationArrowPath, "1"),

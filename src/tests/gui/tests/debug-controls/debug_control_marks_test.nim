@@ -314,22 +314,51 @@ suite "Debugger control marks — the table":
           echo "  '", a, "' and '", b, "' differ by dx=", maxDx,
                " dy=", maxDy, " — they are no longer the same drawing"
 
-  test "run-to-entry is a restart mark, not a transport control":
-    # It sends DAP `restart`, and every product surveyed draws a restart as a
-    # circular arrow. It used to be a play triangle beside a stack of lines,
-    # which is what a reader identified as a media control on the sibling
-    # product. `debug-restart` carries no triangle: one subpath, all curves,
-    # and the only straight runs are the arrowhead bracket.
+  test "run-to-entry is the triangle-and-rules mark this product shipped":
+    # This assertion used to say the opposite: "run-to-entry is a restart
+    # mark, not a transport control", asserting the `debug-restart` codicon
+    # `a30f10cd` redrew it as. That redraw is part of the same
+    # align-with-BlockTracer work the user asked to be taken out of
+    # CodeTracer, so the mark went back and the assertion follows the product
+    # rather than the product being held to the assertion.
+    #
+    # The design argument behind the codicon — the control sends DAP
+    # `restart`, and a bare triangle reads as "start" two buttons from
+    # `continue` — is NOT refuted by this check and is not meant to be. It is
+    # left for the designer, which is the whole point of restoring the old set
+    # rather than picking a third one here.
     let m = markFor("run-to-entry")
     check m.buttonId == "run-to-entry-image"
-    check m.shapes.len == 1
-    let d = m.shapes[0].d
-    check d.count('C') > 20          # a sweep built from cubics
-    check d.count('Z') == 1          # one closed subpath, not a triangle
-                                     # sitting beside a stack of rules
-    # The old mark was five parallel `M x yLx y` rules plus a triangle; it had
-    # no curves at all.
-    check d.count('C') > d.count('L')
+    check m.shapes.len == 6
+
+    # Five horizontal rules, evenly spaced, all flush to the right edge, and
+    # one of them short — the third, so the triangle's tip has somewhere to
+    # land. Checked as geometry rather than as a string, so the mark can be
+    # renumbered or reformatted without this needing an edit.
+    var rows: seq[float]
+    for i in 0 ..< 5:
+      let s = m.shapes[i]
+      check s.stroked
+      let ps = s.d.points
+      check ps.len == 2
+      check abs(ps[0].y - ps[1].y) < 1e-6     # horizontal
+      check abs(max(ps[0].x, ps[1].x) - 16.0) < 1e-6   # flush right
+      rows.add ps[0].y
+    for i in 1 ..< rows.len:
+      check abs((rows[i - 1] - rows[i]) - 3.0) < 1e-6  # evenly spaced
+
+    # And the triangle: three points, filled, its tip to the RIGHT of its
+    # base, which is what makes it a play mark rather than a rewind one.
+    let tri = m.shapes[5]
+    check not tri.stroked
+    let tp = tri.d.points
+    check tp.len == 3
+    check tp[1].x > tp[0].x
+    check tp[1].x > tp[2].x
+    # A vertical base. 1e-4 and not 1e-6: the file writes the base's two x
+    # coordinates as 7.46011e-07 and -9.01353e-07, Figma's two roundings of
+    # the same zero, so they differ by 1.6e-06 in a 16-unit box.
+    check abs(tp[0].x - tp[2].x) < 1e-4
 
   test "markFor answers nothing for a command the strip does not have":
     check markFor("no-such-command").buttonId.len == 0
