@@ -311,12 +311,19 @@ if [ "${hits:-0}" -gt 0 ]; then
 else
 	ck fail "no line-flow-hit markers — the flow view painted nothing"
 fi
-# THE ASSERTION THE WHOLE DEMO EXISTS FOR. `243180, 242990` is the low outlier
-# standing at index 3 of the ordered array -- the slot `median_of` reads. If
-# the flow view stops showing it, a visitor can no longer SEE the bug happen
-# and the demo is a story rather than a demonstration.
+# The third pass RETURNING the outlier at index 3 — the slot `median_of` reads.
+# This is step 7 of the path in Noir-Studio.md §1b.7: the moment a visitor SEES
+# the bug happen rather than being told about it.
+#
+# IT IS NOT A BUG DETECTOR, stated here because the label reads like one. A
+# mutation applying the one-line repair leaves this arm GREEN, and that is
+# correct: passes 1 to 3 are identical whatever `SETTLE_PASSES` is, and the
+# repair adds three passes AFTER this one rather than changing it. The arms
+# that discriminate are C's frame count and D's settled price, and both were
+# measured reddening under exactly that mutation — 6 frames instead of 3, and
+# `settled price: 243180` with no refusal.
 if [ "$(q flow.showsOutlierAtMedian)" = "True" ]; then
-	ck ok "and it shows 242990 arriving at index 3 — the median slot — during the last pass"
+	ck ok "and the third pass returns 242990 at index 3 — the outlier reaching the median slot"
 else
 	ck fail "the flow view does not show the outlier reaching the median slot"
 	note "rows: $(q flow.sample | cut -c1-260)"

@@ -157,10 +157,31 @@ out.flow = await page.evaluate(() => {
   return {
     hitLines: document.querySelectorAll('.line-flow-hit').length,
     rowCount: rows.length,
-    // The value that IS the bug: the low outlier standing at index 3 of the
-    // ordered array, which is the slot the median is read from.
-    showsOutlierAtMedian: rows.some((r) => /243180,\s*242990/.test(r)),
-    sample: rows.slice(0, 6),
+    // The third pass RETURNING the low outlier at index 3 — the slot
+    // `median_of` reads. This is the moment the demo is about, and it is what
+    // makes step 7 of the path (Noir-Studio.md §1b.7) something a visitor can
+    // see rather than be told.
+    //
+    // IT IS NOT A BUG DETECTOR, and saying so is the point of this note. A
+    // mutation applying the one-line repair leaves it GREEN, and that is
+    // CORRECT rather than a hole: passes 1 to 3 are identical whatever
+    // `SETTLE_PASSES` is, so the third frame returns the same array in both
+    // circuits. The repair does not change this pass; it adds three more
+    // AFTER it.
+    //
+    // So what discriminates the broken circuit from the fixed one is the
+    // NUMBER of frames (`onePassFrames`) and the settled price in the event
+    // log — both verified to redden under that mutation. This field asserts
+    // the flow view still PAINTS, with values a reader can follow. Do not
+    // rewrite it into a bug check; there is nothing at this position to
+    // detect.
+    //
+    // Matched on `return` and on position: requiring exactly three values
+    // before 242990 pins it to index 3, so a flow view rendering some other
+    // array cannot satisfy it.
+    showsOutlierAtMedian: rows.some(
+      (r) => /return\s*@\[\s*\d+,\s*\d+,\s*\d+,\s*242990\b/.test(r)),
+    sample: rows.slice(0, 8),
   };
 });
 out.openTabs = await page.evaluate(() =>
