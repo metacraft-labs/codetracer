@@ -449,6 +449,12 @@ for pass in 1 2 3 4; do
 	[ "${before}" = "${after}" ] && break
 done
 
+# Nix store files are read-only and `cp` preserves that. The tree-wide
+# `chmod -R 777` happens further up, BEFORE these copies, so without this the
+# rpath rewrite below dies on the newly-copied libraries with the singularly
+# unhelpful `patchelf: open: Permission denied`.
+chmod -R u+w "${APP_DIR}/lib" "${APP_DIR}/bin"
+
 for binary in "${PATCHELF_BINARIES[@]}"; do
 	try_patchelf "$binary" --set-interpreter "${INTERPRETER_PATH}"
 done
