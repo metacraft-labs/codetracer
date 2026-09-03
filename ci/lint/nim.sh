@@ -58,6 +58,26 @@ lint_step "shell-gate coverage guard: contract suite" \
 lint_step "shell-gate coverage: every gate in ci/test/ is reachable from CI" \
 	bash ci/test/shell-gate-coverage.sh
 
+# AND THE THIRD ASKING OF THE SAME QUESTION, one level down: not "does this file
+# run" but "does anything reach this symbol". Its own header calls it "CI entry
+# point for the exported-symbol reachability guard" and no CI root has ever
+# named it — the guard against unreachable capability was itself unreachable,
+# which `shell-gate-coverage.sh` above has been reporting as an UNRECORDED dark
+# gate.
+#
+# It belongs in this stage rather than a heavier one because it is pure python3
+# over the checked-out tree: no Nim toolchain, no browser, no network, under
+# five seconds.
+#
+# IT CANNOT REDDEN THIS LANE OVER THE BACKLOG, and that is deliberate on its
+# part, not a concession here: the default mode is REPORT — today 1217 findings,
+# printed and grouped, exit 0 — because a guard that reddens CI on day one is a
+# guard that gets disabled on day one. What it DOES fail on today is allow-list
+# hygiene: an entry with no reason, or naming a symbol that no longer exists.
+# Set CT_REACHABILITY_MAX to today's count to start ratcheting.
+lint_step "frontend reachability: exported symbols nothing reaches (report + allow-list hygiene)" \
+	bash ci/test/frontend-reachability.sh
+
 # The Embed SDK's boundary, in both directions: a consumer may reach the SDK
 # only through `codetracer_embed`, and the SDK's own import graph carries no
 # rendering and no chain concept. CodeTracer-Embed-SDK.md §3.2 says in as many

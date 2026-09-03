@@ -47,3 +47,37 @@ worker-backend-wasm-e2e.sh
 
 # `ui-tests-db.sh` is wired and this is not, though the two are siblings.
 ui-tests.sh
+
+# --- added 2026-09-03, while clearing lint-bash's shellcheck backlog ---------
+#
+# Three gates were UNRECORDED dark, which is what had `shell-gate-coverage.sh`
+# — and therefore `lint-nim`, and therefore `dmg-build` — red. The third,
+# `frontend-reachability.sh`, is not listed here because it was WIRED instead:
+# it is pure python3, under five seconds, report-only by design, and
+# `ci/lint/nim.sh` now runs it. These two could not be given the same answer.
+
+# Builds the WEB arm with `nim js` and drives it in Chromium, reading the
+# painted DOM. Both halves are the cost: a Nim toolchain and a Chromium that
+# CAN RENDER TEXT — its own header records the 2026-08-31 run where a nix
+# Chromium with no fonts laid every string out with zero glyphs and blocked a
+# deploy over a DOM that was correct. No job owns browser gates on the linux
+# lanes today (`web-renderer-mounts.sh`, its nearest sibling, runs only inside
+# the deploy-web workflow, against a deployed page rather than a `file://`
+# fixture). Wiring it means choosing that job and its runner image, and
+# answering "does it pass today" first — neither of which is decided here.
+low-level-code-browser.sh
+
+# Runs against LIVE hosts: it fetches the deployment descriptor from
+# `web-codetracer.pages.dev` and compares every declared host's bytes against
+# the origin's. The deploy workflow says what it is for in as many words —
+# "this block is also the harness a human runs by hand after a cache purge
+# (ci/test/verify-deployed-bytes.sh)" — and the deploy lane's own step already
+# asks the same question against the `site/` tree it just built, which is the
+# form that has a build to compare with. What has no owner is the POST-PURGE
+# run, which by definition happens outside a deploy. Wiring it would mean
+# adding a network-dependent job on a schedule or a workflow_dispatch to the
+# production deploy workflow; that is the deploy lane's call, not this one's.
+#
+# WORTH SAYING PLAINLY: this gate has never executed in CI. Any confidence in
+# its verdicts comes from runs somebody did by hand.
+verify-deployed-bytes.sh
