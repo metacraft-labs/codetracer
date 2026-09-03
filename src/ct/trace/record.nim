@@ -560,7 +560,7 @@ proc recordTest*(testName: string, path: string, line: int, column: int, withDif
       var args = @[
         "record-test",
         testName, fullPath, $line, $column,
-        langAsText, getAppFilename()
+        langAsText, ctAppFilename()
       ]
       if withDiff.len > 0:
         args.add("--with-diff")

@@ -27,7 +27,12 @@
 #   The smoke commands escalate from cheapest to most realistic:
 #     1. --version          fast sanity check (fatal: gates portability)
 #     2. --help             confirms argument parser loads (fatal)
-#     3. record a tiny Noir package and read the recording back
+#     3. bundled-glibc assertion (fatal): the AppImage ships its own glibc and
+#        dynamic loader, and a passing --version does not prove they are what
+#        got used -- it also passes when the HOST glibc happened to be new
+#        enough. Assert on the resolved libc path, via `ld.so --list` and again
+#        via LD_DEBUG on the real process.
+#     4. record a tiny Noir package and read the recording back
 #        (informational, NON-fatal): nargo / wazero / db-backend-record are
 #        bundled INSIDE the AppImage, so this is the one record->replay we can
 #        run with nothing installed in the container. A failure is reported but
@@ -181,7 +186,53 @@ echo "--- $($APPIMAGE --appimage-extract-and-run --version) ---"
 #    Nim runtime than --version does.
 $APPIMAGE --appimage-extract-and-run --help >/dev/null
 
-# 3. record -> replay a tiny Noir package (INFORMATIONAL, non-fatal).
+# 3. Prove the bundled glibc is the one actually resolved.
+#
+#    A green --version is NOT evidence of portability on its own: it also
+#    passes on a host whose glibc simply happens to be new enough, which is
+#    exactly how "works on Arch, broken on the four other distros we ship to"
+#    went unnoticed. Assert on the resolved path instead of on the exit code.
+echo "--- verifying the AppImage resolves its OWN glibc ---"
+rm -rf /tmp/verify && mkdir -p /tmp/verify && cd /tmp/verify
+$APPIMAGE --appimage-extract >/dev/null
+APPDIR=/tmp/verify/squashfs-root
+
+LOADER=$(ls "$APPDIR"/bin/ld-linux-*.so.* 2>/dev/null | head -1)
+if [ -z "$LOADER" ]; then
+	echo "FAIL: no bundled dynamic loader under $APPDIR/bin" >&2
+	exit 1
+fi
+echo "bundled loader: $LOADER"
+
+# (a) Deterministic: ask the bundled loader where it WOULD resolve libc from.
+TARGET="$APPDIR/bin/ct_unwrapped.real"
+[ -f "$TARGET" ] || TARGET="$APPDIR/bin/ct_unwrapped"
+resolved=$("$LOADER" --library-path "$APPDIR/lib" --list "$TARGET" |
+	awk '$1=="libc.so.6"{print $3}')
+echo "ld.so --list  : libc.so.6 => ${resolved:-<unresolved>}"
+case "$resolved" in
+"$APPDIR"/*) ;;
+*)
+	echo "FAIL: libc.so.6 resolves outside the AppDir (${resolved:-<unresolved>})" >&2
+	exit 1
+	;;
+esac
+
+# (b) Reality: the same claim about the process that actually runs. LD_DEBUG
+#     reports what the loader really mapped, not what it would have chosen.
+LD_DEBUG=libs "$APPDIR/bin/ct_unwrapped" --version >/dev/null 2>/tmp/lddbg.txt || true
+initpath=$(grep -oE "calling init: [^ ]*libc\.so\.6" /tmp/lddbg.txt | head -1 | sed 's/calling init: //')
+echo "LD_DEBUG=libs : libc.so.6 => ${initpath:-<not reported>}"
+case "$initpath" in
+"$APPDIR"/*) echo "OK: the running process is linked against the bundled glibc" ;;
+*)
+	echo "FAIL: the running process used a libc outside the AppDir (${initpath:-<not reported>})" >&2
+	exit 1
+	;;
+esac
+cd /tmp
+
+# 4. record -> replay a tiny Noir package (INFORMATIONAL, non-fatal).
 #    Unlike Python/Ruby, whose recorders are an explicit out-of-AppImage
 #    install, Noir's whole toolchain (nargo + wazero + db-backend-record) is
 #    bundled inside the AppImage, so this is the record->replay we can run in a

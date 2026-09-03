@@ -19,6 +19,7 @@
 import
   std/[os, osproc, strutils, strformat],
   results,
+  paths,
   strings
 
 const
@@ -192,7 +193,12 @@ proc installNativeBpf*(
 ): Result[void, string] =
   ## Sets capabilities on the ``ct`` binary itself and
   ## installs ``monitor.bpf.o`` to the install directory.
-  let ctBinary = getAppFilename()
+  ##
+  ## Must be ``ctAppFilename()``, not ``getAppFilename()``: inside the AppImage
+  ## the process is started through the bundled dynamic loader, so
+  ## /proc/self/exe names the loader, and setcap'ing a dynamic loader would
+  ## grant capabilities to anything it is asked to run.
+  let ctBinary = ctAppFilename()
   if ctBinary.len == 0:
     return err("Cannot determine ct binary path")
   if not isShellSafe(ctBinary):

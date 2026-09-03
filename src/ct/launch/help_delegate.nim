@@ -50,6 +50,7 @@
 
 import
   std/[ os, osproc, streams, strutils, tables, algorithm ],
+  ../../common/paths,
   ../codetracerconf,
   ../version,
   confutils,
@@ -692,7 +693,7 @@ proc ensureSelfPresent(asm0: var HelpAssembly) =
   var self = InstalledComponent(
     name: helpDelegateComponentName,
     version: version.CodeTracerVersionStr,
-    binPath: getAppFilename(),
+    binPath: ctAppFilename(),
     levelLabel: "self",
     isHelpDelegate: true,
     description: "CodeTracer desktop application -- launcher help delegate",

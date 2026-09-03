@@ -285,6 +285,89 @@ else
 	INTERPRETER_PATH=/lib64/ld-linux-x86-64.so.2
 fi
 
+# =============================================================================
+# Bundle glibc AND its dynamic loader.
+#
+# WHY.  Everything else in this AppDir is already self-contained: each binary's
+# RPATH is rewritten to $ORIGIN/../lib below, and the bundled .so files load
+# correctly on every distro.  glibc was the one exception -- it was deliberately
+# excluded (`lddtree -l ... | grep -v glibc` above) and PT_INTERP was pointed at
+# the HOST's /lib64/ld-linux-x86-64.so.2.  So the bundled libraries loaded and
+# then asked the *host* libc for symbol versions it could not supply:
+#
+#   ct_unwrapped: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_ABI_GNU2_TLS'
+#       not found (required by .../lib/libbpf.so.1)
+#   ct_unwrapped: /lib/x86_64-linux-gnu/libm.so.6: version `GLIBC_2.38'
+#       not found (required by .../bin/ct_unwrapped)
+#
+# Note the second one: it is ct_unwrapped ITSELF, not just a bundled dependency.
+# There is a single root cause -- we build against the pinned nixpkgs' glibc
+# 2.42 -- with two symptoms.  `GLIBC_2.36`/`GLIBC_2.38` are ordinary version
+# floors (new-ish functions we call).  `GLIBC_ABI_GNU2_TLS` is not a version at
+# all but an ABI marker that glibc 2.42 stamps on objects using GNU2/TLSDESC
+# thread-local storage; only glibc >= 2.42 provides it, which is why the
+# AppImage ran on rolling-release Arch and on nothing else.
+#
+# Rebuilding against an older glibc (the conventional AppImage answer) would
+# mean overriding the toolchain glibc that every CodeTracer repo shares through
+# the codetracer-toolchains pin, and would cap the toolchain permanently.  We
+# already have the right glibc sitting in the Nix closure, so ship it.
+#
+# WHY A WRAPPER AND NOT patchelf --set-interpreter.  PT_INTERP must be an
+# ABSOLUTE path, and the kernel resolves it before any of our code runs, so
+# neither $ORIGIN nor LD_LIBRARY_PATH can redirect it.  An AppImage extracts to
+# an unpredictable directory (/tmp/appimage_extracted_<random> or
+# ./squashfs-root), so there is no absolute path to bake in.  The only portable
+# way to use a bundled loader is to invoke it explicitly, which is what the
+# generated wrappers below do.
+#
+# The loader and libc MUST be the matched pair the binaries were linked
+# against, so take both from the exact store path ct_unwrapped's PT_INTERP
+# already points at.  This must run BEFORE the --set-interpreter loop rewrites
+# that value away.
+#
+# WHY THE LOADER GOES IN bin/ AND NOT lib/.  When a program is started as
+# `ld.so prog`, the kernel sets /proc/self/exe to the LOADER, not to prog --
+# measured, and `--argv0` fixes argv[0] only.  Nim's getAppFilename() and
+# getAppDir() read /proc/self/exe, and this tree calls them in a dozen places to
+# locate sibling binaries (ct_gfx_player, ct-mcr), the share/ directory and the
+# prefix.  Keeping the loader in bin/ makes getAppDir() still return
+# <AppDir>/bin exactly as it does today, so every getAppDir()-based lookup keeps
+# working untouched; only the four getAppFilename() callers that want the full
+# path to the ct executable need help, and they get it from
+# CODETRACER_APP_FILENAME which the wrappers below export.
+# =============================================================================
+GLIBC_LOADER_SRC=$(patchelf --print-interpreter "${APP_DIR}/bin/ct_unwrapped")
+GLIBC_LIB_SRC=$(dirname "${GLIBC_LOADER_SRC}")
+BUNDLED_LOADER=$(basename "${GLIBC_LOADER_SRC}")
+echo "Bundling glibc from ${GLIBC_LIB_SRC} (loader: ${BUNDLED_LOADER})"
+
+cp -L "${GLIBC_LOADER_SRC}" "${APP_DIR}/bin/${BUNDLED_LOADER}"
+chmod +x "${APP_DIR}/bin/${BUNDLED_LOADER}"
+
+# libpthread/libdl/librt/libutil are stubs since glibc 2.34 (everything moved
+# into libc) but binaries built earlier still carry NEEDED entries for them, so
+# copy whichever the closure actually has.
+for glibc_lib in libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0 librt.so.1 \
+	libutil.so.1 libresolv.so.2 libanl.so.1 libnsl.so.1 \
+	libBrokenLocale.so.1 libthread_db.so.1 libnss_files.so.2 \
+	libnss_dns.so.2 libnss_compat.so.2; do
+	if [ -e "${GLIBC_LIB_SRC}/${glibc_lib}" ]; then
+		cp -L "${GLIBC_LIB_SRC}/${glibc_lib}" "${APP_DIR}/lib/"
+	fi
+done
+
+# libgcc_s.so.1 comes from gcc rather than glibc, but glibc dlopen()s it for
+# pthread_cancel and backtraces, and a dlopen has no RPATH to fall back on.
+if [ ! -e "${APP_DIR}/lib/libgcc_s.so.1" ]; then
+	libgcc_src=$(lddtree -l "${APP_DIR}/bin/ct_unwrapped" 2>/dev/null | grep '/libgcc_s\.so\.1$' | head -1 || true)
+	if [ -n "${libgcc_src}" ]; then
+		cp -L "${libgcc_src}" "${APP_DIR}/lib/"
+	fi
+fi
+
+ls -al "${APP_DIR}"/lib
+
 # Helper: skip patchelf on statically-linked binaries (e.g. Go binaries built with CGO_ENABLED=0)
 try_patchelf() {
 	local binary="$1"
@@ -344,6 +427,72 @@ for binary in "${RPATH_BINARIES[@]}"; do
 	try_patchelf "$binary" --set-rpath '$ORIGIN/../lib'
 done
 
+# Route every bundled executable through the bundled loader.
+#
+# Renames `foo` to `foo.real` and puts a wrapper at `foo` that execs
+#
+#   $APPDIR/lib/ld-linux-x86-64.so.2 --library-path $APPDIR/lib $APPDIR/bin/foo.real
+#
+# `--library-path` is a loader ARGUMENT, not the LD_LIBRARY_PATH environment
+# variable, so it applies to this process only and is not inherited by children.
+# That matters: Electron is intentionally NOT wrapped (it ships prebuilt against
+# an old glibc and works on the host loader today), and leaking our glibc 2.42
+# into it via the environment is exactly the kind of accidental coupling that
+# would turn a packaging fix into a GUI regression.
+#
+# The wrapper must be generated AFTER every patchelf call above -- patchelf on a
+# shell script is an error. PT_INTERP is still set to the host path so a binary
+# run directly (bypassing the wrapper) degrades to the old behaviour instead of
+# failing to exec at all.
+wrap_with_bundled_loader() {
+	local binary="$1"
+	local dir base rel_lib rel_bin
+	dir=$(dirname "${binary}")
+	base=$(basename "${binary}")
+
+	# Statically-linked binaries (e.g. Go with CGO_ENABLED=0) have no PT_INTERP
+	# and must not be run through a loader.
+	if ! patchelf --print-interpreter "${binary}" >/dev/null 2>&1; then
+		echo "Skipping loader wrapper for non-dynamic binary: ${binary}"
+		return 0
+	fi
+
+	# Works for bin/* and ruby/bin/ruby alike.
+	rel_lib=$(realpath --relative-to="${dir}" "${APP_DIR}/lib")
+	rel_bin=$(realpath --relative-to="${dir}" "${APP_DIR}/bin")
+
+	mv "${binary}" "${dir}/${base}.real"
+	cat >"${binary}" <<EOF
+#!/usr/bin/env bash
+# GENERATED by appimage-scripts/build_appimage.sh -- do not edit.
+# Runs ${base}.real against the glibc bundled in the AppImage rather than the
+# host's, which is the only way the AppImage can be portable across distros
+# whose glibc is older than the one we build against.
+# Deliberately NOT named HERE/LIB/BIN. AppRun does \`export HERE=<AppDir>\` and
+# bin/ruby reads it as \${HERE}/ruby/bin/ruby; assigning to an already-exported
+# name updates the EXPORTED value, so reusing HERE here would hand every child
+# process <AppDir>/bin and break the Ruby recorder. These names are private and
+# were never exported.
+_ctw_here=\$(dirname "\$(readlink -f "\${0}")")
+_ctw_lib=\${_ctw_here}/${rel_lib}
+_ctw_bin=\${_ctw_here}/${rel_bin}
+# Starting via the loader makes /proc/self/exe name the loader, so hand the
+# process the path it should report for itself. See src/common/paths.nim.
+# Set unconditionally, never inherited: a wrapped child (db-backend-record,
+# session-manager) must report ITSELF, not whichever ct spawned it.
+export CODETRACER_APP_FILENAME="\${_ctw_here}/${base}"
+# --argv0 keeps usage/error text saying "${base}" rather than "${base}.real"
+# (confutils and friends read argv[0]); it does NOT affect /proc/self/exe.
+exec "\${_ctw_bin}/${BUNDLED_LOADER}" --argv0 "\${_ctw_here}/${base}" --library-path "\${_ctw_lib}" "\${_ctw_here}/${base}.real" "\$@"
+EOF
+	chmod +x "${binary}"
+	echo "Wrapped ${binary} -> ${base}.real via ${BUNDLED_LOADER}"
+}
+
+for binary in "${PATCHELF_BINARIES[@]}"; do
+	wrap_with_bundled_loader "$binary"
+done
+
 # Measure the staged tree before it is sealed. This is the only moment the
 # artefact's contents are readable without unpacking a squashfs: `cleanup` on
 # EXIT deletes ${APP_DIR}. The guard reports the RESOLVED Electron version and
@@ -365,4 +514,5 @@ try_patchelf "${ROOT_PATH}"/CodeTracer.AppImage --remove-rpath
 
 echo "============================"
 echo "AppImage successfully built!"
+echo "size: $(du -h "${ROOT_PATH}"/CodeTracer.AppImage | cut -f1) ($(stat -c %s "${ROOT_PATH}"/CodeTracer.AppImage 2>/dev/null || stat -f %z "${ROOT_PATH}"/CodeTracer.AppImage) bytes)"
 echo "============================"

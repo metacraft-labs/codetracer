@@ -151,7 +151,7 @@ proc runInitial*(conf: CodetracerConf) =
             # Skip over the Contents directory
             parentDir.parentDir.parentDir
           else:
-            getAppFilename()
+            ctAppFilename()
           appLocationFile = appInstallFsLocationPath()
 
         try:

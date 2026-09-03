@@ -66,6 +66,29 @@ else:
     else: codetracerExeDir)
 
 when not defined(js):
+  proc ctAppFilename*(): string =
+    ## The path this process should report as "the executable I am".
+    ##
+    ## `getAppFilename()` reads /proc/self/exe, which names the file the kernel
+    ## exec'd. The AppImage starts its binaries as
+    ##
+    ##   <AppDir>/bin/ld-linux-x86-64.so.2 --library-path <AppDir>/lib <prog>
+    ##
+    ## so that they link against the glibc bundled in the AppImage rather than
+    ## the host's -- without that, every distro whose glibc is older than the
+    ## one we build against fails to start. /proc/self/exe then names the
+    ## LOADER, and there is no way to change that from userspace (`--argv0`
+    ## rewrites argv[0] only). So the generated wrapper passes the real path in
+    ## CODETRACER_APP_FILENAME and we prefer it when present.
+    ##
+    ## Use this instead of `getAppFilename()` wherever the result is handed to
+    ## another process or recorded as "where ct lives". `getAppDir()` needs no
+    ## equivalent: the loader is bundled in bin/ alongside the programs, so the
+    ## directory is right either way.
+    result = env.get("CODETRACER_APP_FILENAME", "")
+    if result.len == 0:
+      result = getAppFilename()
+
   proc findTool*(name: string): string =
     ## Find an external tool on PATH.
     ## Returns the full path, or "" if not found.
