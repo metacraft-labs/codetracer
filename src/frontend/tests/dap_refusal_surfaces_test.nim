@@ -213,6 +213,25 @@ suite "a refused ct/ request reaches the user as readable text":
     # And it names the request, so a user knows WHICH thing failed.
     check painted.contains("ct/run-tracepoints")
 
+  test "a successful outcome has no failure text at all":
+    ## The contract that makes every consumer's `if text.len > 0` safe —
+    ## production's `middleware` observer is written exactly that way.
+    ##
+    ## Asserted DIRECTLY rather than through a send, because with
+    ## `sendCtRequest`'s own gate in place this proc is never reached with a
+    ## success and a mutation breaking it left the whole suite green. An
+    ## unreachable guard is still a guard someone will later rely on, so it
+    ## gets a check of its own rather than a comment claiming it is fine.
+    check $requestFailureText(DapRequestOutcome(
+      succeeded: true, timedOut: false,
+      command: cstring"ct/run-tracepoints", message: cstring"")) == ""
+
+    # Even a success that somehow carries a message stays silent: `succeeded`
+    # is the field that decides, not the presence of text.
+    check $requestFailureText(DapRequestOutcome(
+      succeeded: true, timedOut: false,
+      command: cstring"ct/run-tracepoints", message: BackendSentence)) == ""
+
   test "a refusal and a timeout do not say the same thing":
     ## The point of `DapRequestOutcome`. Both used to arrive as `{}`.
     let refused = DapRequestOutcome(
