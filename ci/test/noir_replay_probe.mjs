@@ -446,16 +446,51 @@ try {
 
   if (report.stepButtonPresent) {
     const tops = new Set();
+    // The engine's own account of each step, kept beside the caret pixels so a
+    // failure can say whether the move was never reported or was reported and
+    // landed where it started.
+    report.caretMoveLines = [];
     const first = await caretTop();
     if (first >= 0) tops.add(first);
     for (let i = 0; i < steps; i += 1) {
+      const movesBefore = consoleLines.length;
       try {
         await page.click('#next-image', { timeout: 3000 });
       } catch (e) {
         report.gestureError = String((e && e.message) || e).slice(0, 200);
         break;
       }
-      await page.waitForTimeout(900);
+      // WAIT FOR THE MOVE THE ENGINE REPORTS, not for 900ms and a hope.
+      //
+      // 900ms was chosen against nothing, and the reading it guards is a
+      // PIXEL — the caret's `y` — which is exactly the kind of value that is
+      // wrong rather than absent when it is read early: a caret read mid-step
+      // returns the PREVIOUS position's offset, and `tops` is a Set, so an
+      // early read silently collapses two distinct positions into one and the
+      // journey concludes the caret did not move.
+      //
+      // `ui/web_replay_host.nim` already reports every completed move:
+      //
+      //     codetracer-replay: move <path>:<line> missingPath=<bool>
+      //
+      // emitted on every `ct/complete-move`, WHETHER OR NOT the position
+      // changed. That is the distinction a DOM poll cannot draw and the reason
+      // this is not "wait until the caret differs": a step that lands on the
+      // same line is a RESULT, and a step still in flight is a WAIT, and they
+      // look identical from the caret alone.
+      //
+      // The probe already captured this line — it applies no severity filter —
+      // so nothing about the product changes here. The signal was present and
+      // unused.
+      const moveDeadline = Date.now() + 15000;
+      let moveLine = '';
+      while (Date.now() < moveDeadline) {
+        moveLine = consoleLines.slice(movesBefore).find(
+          (l) => l.includes('codetracer-replay: move ')) || '';
+        if (moveLine) break;
+        await page.waitForTimeout(100);
+      }
+      report.caretMoveLines.push(moveLine || '(no move reported within 15s)');
       const t = await caretTop();
       if (t >= 0) tops.add(t);
     }

@@ -524,14 +524,45 @@ try {
       const tops = new Set();
       const first = await caretTops(page);
       if (first >= 0) tops.add(first);
+      const moveLines = [];
       for (let i = 0; i < stepCount; i += 1) {
+        const movesBefore = report.consoleMilestones.length;
         const c = await hitTestedClick(page, '#next-image', `${who}: step ${i + 1}`);
         if (!c.clicked) break;
-        await page.waitForTimeout(800);
+        // WAIT FOR THE MOVE THE ENGINE REPORTS, not for 800ms.
+        //
+        // The reading this guards is the caret's `y` — a PIXEL, which is wrong
+        // rather than absent when read early: mid-step it returns the previous
+        // position's offset, and `tops` is a Set, so an early read collapses
+        // two distinct positions into one and the leg concludes the caret did
+        // not move. A duration that is usually long enough produces a wrong
+        // NUMBER here, not a missing one.
+        //
+        // `ui/web_replay_host.nim` reports `codetracer-replay: move
+        // <path>:<line> missingPath=<bool>` on every `ct/complete-move`,
+        // whether or not the position changed — which is the distinction a
+        // caret poll cannot draw. This probe's console filter is by CONTENT
+        // and `codetracer-replay:` is already in its allowlist, so the line was
+        // being captured and not used.
+        const moveDeadline = Date.now() + 15000;
+        let moveLine = '';
+        while (Date.now() < moveDeadline) {
+          moveLine = report.consoleMilestones.slice(movesBefore).find(
+            (l) => l.includes('codetracer-replay: move ')) || '';
+          if (moveLine) break;
+          await page.waitForTimeout(100);
+        }
+        moveLines.push(moveLine || '(no move reported within 15s)');
         const t = await caretTops(page);
         if (t >= 0) tops.add(t);
       }
-      report.legs.push({ leg: `${prefix}-step`, caretPositions: Array.from(tops) });
+      report.legs.push({
+        leg: `${prefix}-step`,
+        caretPositions: Array.from(tops),
+        // Beside the pixels, so a failure says whether the move was never
+        // reported or was reported and landed where it started.
+        moveLines,
+      });
     }
 
     // -----------------------------------------------------------------
