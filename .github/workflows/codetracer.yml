@@ -44,6 +44,55 @@ on:
       - cloud
   pull_request:
 
+  # PERIODIC COVERAGE ON `dev`, WHICH PUSH RUNS NO LONGER PROVIDE.
+  #
+  # Measured on 2026-09-03: THIRTEEN consecutive `dev` runs (1a427e3e
+  # through a3068f90) ended `cancelled` with ZERO job records ever created,
+  # and `dev` had produced no `lint-bash` result -- of any kind -- for 22
+  # commits. The runs did not fail; they never started.
+  #
+  # The mechanism is the `concurrency` block below, and the timings name it
+  # exactly: each run's `updated_at` equals the NEXT run's `created_at`.
+  #
+  #     aedc094c  created 13:05:43  updated 13:11:18
+  #     54e88f92  created 13:11:16  updated 13:12:29
+  #     2880155b  created 13:12:27  updated 13:19:01
+  #     141293d6  created 13:19:00  updated 15:09:08
+  #
+  # `cancel-in-progress: false` protects a run that has STARTED. On a fleet
+  # where jobs wait hours for a runner, a mainline run never starts before
+  # the next push arrives, so it is evicted as the single PENDING run its
+  # group is allowed. The block's own rationale assumes "a burst of twenty
+  # pushes leaves one running plus one pending"; what it actually leaves is
+  # ZERO running and one pending, and that one is evicted too. The premise
+  # is right about drainage and wrong about coverage.
+  #
+  # WHY NOT JUST REVERT THE GROUPING. Per-commit coverage and a short queue
+  # cannot both hold on a saturated fleet. `github.run_id` grouping buys the
+  # first at the cost of an unbounded queue -- the state that produced 46
+  # pending runs whose survivors were eight hours old -- and a queue that
+  # deep does not deliver coverage either, because it never reaches most of
+  # its entries. A PERIODIC run on the current tip gets the part that
+  # matters (a real verdict on `dev`, regularly) without the queue growing,
+  # because it fires on a clock rather than per push.
+  #
+  # WHY `workflow_dispatch` AND NOT `schedule:` HERE. A `schedule:` trigger
+  # fires ONLY on the repository's default branch, using THAT branch's copy
+  # of this file. This repo's default branch is `stable`
+  # (`gh api repos/metacraft-labs/codetracer --jq .default_branch`), not
+  # `dev` -- so a `schedule:` entry added here would give `stable` periodic
+  # coverage and `dev` none, which is the opposite of the problem. Dispatch
+  # is the trigger that can target `dev`'s tip and run `dev`'s copy of this
+  # file. The recurring clock is a companion workflow on the default branch;
+  # see .github/workflows/dev-coverage-schedule.yml.
+  #
+  # NOTE: this also activates `origin-dap-macos-nightly` and
+  # `origin-dap-windows-nightly`, whose `if:` already names
+  # `workflow_dispatch`. That is what they were written for; they have never
+  # run. Neither is in ci/verdict/required-jobs.txt, so neither can corrupt
+  # the verdict this run exists to produce.
+  workflow_dispatch:
+
 # Collapse superseded runs -- on pull requests AND on the mainline branches.
 #
 # This is the widest workflow in the repository -- Windows, Linux and macOS
@@ -109,8 +158,27 @@ on:
 # cancellation expression here, retune it there too -- the two were the first
 # and second largest contributors to the queue backlog, and fixing one alone
 # leaves the fleet paying for the other.
+# PERIODIC COVERAGE RUNS GET A GROUP OF THEIR OWN, AND THIS IS THE WHOLE POINT.
+#
+# The group below is a revolving door: it admits one pending run and evicts it
+# the moment the next push lands (see the measurements in the
+# `workflow_dispatch` note above). A coverage run placed in that same group
+# would be evicted by the very next push exactly like every other `dev` run,
+# and would be the same failure wearing a different trigger.
+#
+# So `schedule` and `workflow_dispatch` runs are keyed on `coverage-<ref>`,
+# which no push or pull request can ever produce: a push falls through to
+# `github.ref_name` (`dev`) and a PR to `github.head_ref`, neither of which
+# carries the `coverage-` prefix. A push therefore cannot evict a coverage run,
+# and a coverage run cannot evict a push -- the two no longer contend at all.
+#
+# `cancel-in-progress` needs no change: it is already an expression that is
+# true ONLY for `pull_request`, so it is false here, and a later coverage run
+# never kills an executing one. Coverage runs still collapse among THEMSELVES
+# -- one running plus one pending -- so a clock that ticks faster than the
+# fleet drains cannot pile them up.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  group: ${{ github.workflow }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('coverage-{0}', github.ref_name) || github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
