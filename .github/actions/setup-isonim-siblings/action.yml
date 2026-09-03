@@ -81,10 +81,11 @@ runs:
         # revision for a moving branch tip — a real loss of reproducibility,
         # and invisible, because CI would go on passing.
         #
-        # The five pinned entries are the ones the lock genuinely cannot
-        # answer: they are not members of codetracer's project in
-        # `metacraft-labs/metacraft-manifests`, so the lock has nothing to say
-        # about them and a bare entry fails the step outright:
+        # ALL NINE ARE BARE, and that is new. Five of them — isonim,
+        # isonim-tui, isonim-gpui, nim-termctl, nim-pty — carried `=dev` until
+        # metacraft-manifests@8ddec34f, because they were not members of
+        # codetracer's project there, so the lock had nothing to say about them
+        # and a bare entry failed the step outright:
         #
         #   The workspace lock for codetracer@<sha> pins no revision for these
         #   sibling(s): isonim isonim-tui isonim-gpui nim-termctl nim-pty
@@ -94,18 +95,23 @@ runs:
         # ct-test gates — because they all reach this action through
         # `Setup dev env`.
         #
-        # THE PROPER FIX is to declare these five in codetracer's project
-        # manifest so the lock pins them too, and then delete the `=dev` from
-        # all five. It is a change in `metacraft-manifests` and CI stays red
-        # until it lands and a new lock publishes, which is the only reason it
-        # is not done here. Until then these five, and ONLY these five, are
-        # unpinned.
+        # TWO changes were needed, and only the first had been made. The
+        # project declaration (3c625e7) covered isonim and runquota; the other
+        # four stayed undeclared, and — the part that made the first look
+        # ineffective — declaring a repo does not put it in a lock.
+        # `publish-workspace-lock.yml` re-anchors each mainline commit's lock
+        # from its PARENT, copying the repo SET verbatim, so the 99-repo
+        # lineage in flight simply never grew the new members. The lock for dev
+        # HEAD 79275598, published after that declaration, still pinned none of
+        # them. metacraft-manifests@8ddec34f declares the remaining four AND
+        # seeds that lock with all six, so the carry propagates them from here
+        # on.
         siblings: |
-          isonim=dev
-          isonim-tui=dev
-          isonim-gpui=dev
-          nim-termctl=dev
-          nim-pty=dev
+          isonim
+          isonim-tui
+          isonim-gpui
+          nim-termctl
+          nim-pty
           nim-everywhere
           nim-acp
           nim-agent-harbor
