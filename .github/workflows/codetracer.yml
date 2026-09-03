@@ -4270,8 +4270,25 @@ jobs:
         # The durable fix is upstream in reprobuild (add the missing
         # `chdir("/")` in the fork path, and make the daemon tolerate a
         # vanished cwd); this only stops codetracer's jobs being the victim.
+        #
+        # PATH gets /usr/bin for the same reason the ct-mcr step above does,
+        # and this is the second confirmed instance of that one root cause.
+        # With the daemon de-poisoned, `repro build` runs the real graph and
+        # 41 of its 42 actions succeed; the `dmg` action then dies with
+        #
+        #     repro build: action failed: dmg (exit code 127)
+        #     .../create-dmg: line 16: sw_vers: command not found
+        #
+        # Exit 127 is command-not-found, and `sw_vers` exists ONLY at
+        # /usr/bin/sw_vers -- no nixpkgs input provides it. repro's own log
+        # confirms the mechanism: `PATH: 0 hermetic (keyed by value), 22
+        # inherited (passthrough)`, so every action inherits this step's PATH,
+        # and on a nix-darwin self-hosted runner that PATH has no /usr/bin.
+        # Appending it is what a developer's shell supplies. APPEND, never
+        # prepend, so the devShell toolchain keeps winning.
         run: |
           set -euo pipefail
+          export PATH="$PATH:/usr/bin"
           nix develop . --command repro daemon stop >/dev/null 2>&1 || true
           nix develop . --command just build-once
 
