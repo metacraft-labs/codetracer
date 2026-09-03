@@ -1600,14 +1600,44 @@ proc configure(data: Data) =
   Mousetrap.`bind`("ctrl+f5") do ():
     data.toggleMode()
 
-  Mousetrap.`bind`("ctrl+e") do ():
-    data.toggleReadOnly()
+  # `ctrl+e` AND `alt+1` STOOD HERE, AND NEITHER OF THEM DID ANYTHING.
+  #
+  # THE LOAD ORDER IN THIS FILE IS THE OPPOSITE OF THE ONE THE REGISTRY
+  # ASSUMED, and that is the whole finding. `hardBoundChords`' note in
+  # `ui/shortcut_labels.nim` said a hardcoded bind wins "because
+  # `configureShortcuts` registers them AFTER its loop over the config table".
+  # That is true of the binds written INSIDE `configureShortcuts`
+  # (`ui/shortcuts.nim`). It is false of these, and measurably so: `configure`
+  # runs at boot (`main`, below) and `configureShortcuts()` runs later, from
+  # `onInit` / `onNoTrace` / `onWelcomeScreen` — all of them IPC replies. So
+  # the config loop was the LAST writer for every chord this proc bound that
+  # the YAML also declared, and `Mousetrap.bind` replaces rather than chains.
+  #
+  # Measured in a browser on the assembled bundle, caret outside the editor:
+  # `ALT+1` dispatched `data.actions[aLowLevel1]` and logged
+  # `shortcuts: global handle`, which is the CONFIG bind and not this one. The
+  # two lines deleted here had been unreachable, and `hardBindShadowedActions`
+  # was reporting the shadow in the wrong direction — naming the live config
+  # entry as the dead one.
+  #
+  #   `alt+1`  — `default_config.yaml` declares `aLowLevel1: "ALT+1"` and its
+  #              handler is `data.openLowLevelCode()`, the identical call. The
+  #              config drives it in BOTH focus contexts (`ALT+1` is not
+  #              consumed by Monaco, so it reaches Mousetrap's document
+  #              listener with the caret in the editor too). Nothing is lost.
+  #
+  #   `ctrl+e` — now `aToggleReadOnly` in the YAML, dispatching the same
+  #              `data.toggleReadOnly()` through `data.actions`. See that
+  #              member's note in `codetracer_features/frontend.nim` for why
+  #              the chord belongs to toggle-read-only rather than to
+  #              `switchEdit`.
+  #
+  # `ctrl+f5` and `ctrl+s` are left alone: no YAML entry declares either
+  # (`aSave` is spelled `CTRL+KeyS`), so nothing overwrites them and they are
+  # the live binding for their chord.
 
   Mousetrap.`bind`("ctrl+s") do ():
     data.update()
-
-  Mousetrap.`bind`("alt+1") do ():
-    data.openLowLevelCode()
 
   # Mousetrap.`bind`("alt+2") do ():
   #   data.openAlternativeView(2)
@@ -5040,6 +5070,14 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     debug.invokeDebugToolbarAction("run-tests"),
   proc(actionData: JsObject) = # aKeyboardShortcuts
     openShortcutsDialog(),
+  proc(actionData: JsObject) = # aToggleReadOnly
+    ## `CTRL+E`. The same `toggleReadOnly` the two deleted hardcoded binds
+    ## called, reached through the table so that the chord is rebindable and so
+    ## that both delivery paths dispatch ONE action — `CTRL+E` is in
+    ## `MONACO_SHORTCUTS_WHITELIST`, so with the caret in the editor
+    ## `delegateShortcuts` calls this slot and with the caret outside
+    ## `configureShortcuts`' Mousetrap bind does.
+    data.toggleReadOnly(),
 ]
 
 data.actions = actions

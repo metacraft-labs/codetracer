@@ -245,7 +245,35 @@ type
     #
     # Appended, per the note above — `actions` in `ui_js.nim` is a positional
     # literal and an insertion anywhere else re-points every handler after it.
-    aKeyboardShortcuts            # CTRL+ALT+K — menu `Keyboard Shortcuts`
+    aKeyboardShortcuts,           # CTRL+ALT+K — menu `Keyboard Shortcuts`
+    # TOGGLE READ-ONLY — `CTRL+E`, and the reason it is an action rather than
+    # the two hardcoded binds it replaces.
+    #
+    # The chord had three claimants and dispatched two different things
+    # depending on where the caret was. `default_config.yaml` declared it for
+    # `switchEdit`; `ui_js.nim` bound it in code to `data.toggleReadOnly()`;
+    # `ui/editor.nim`'s Monaco `commands` table bound it to the same proc "to
+    # mirror the Mousetrap shortcut". Measured in a browser on the assembled
+    # bundle: outside the editor `CTRL+E` dispatched `switchEdit`, and inside it
+    # toggled read-only. One key, two actions, chosen by focus — which
+    # `GUI/Keyboard-Shortcuts-System.md` forbids in as many words.
+    #
+    # Toggle read-only is the claim that wins, because it is the one the
+    # product is documented to have (that document's own hardcoded-binding
+    # table and `GUI/Core-Panes/Editor-Pane.md` both say `CTRL+E` toggles
+    # read-only) and the one a user in the editor actually gets. `switchEdit`
+    # is its one-way half: it can enter Edit mode and cannot leave, so handing
+    # it the chord would have removed the way back.
+    #
+    # It is an ACTION and not a fourth hardcoded bind because a hardcoded bind
+    # is what made this invisible: `initShortcutMap`'s `conflictList` sees only
+    # collisions between two YAML entries, and `renderChord` — which the menu,
+    # the toolbar tooltips and the shortcuts dialog all resolve through — can
+    # only print a chord the config declares.
+    #
+    # Appended, per the note above: `actions` in `ui_js.nim` is a positional
+    # literal, so an insertion anywhere else re-points every handler after it.
+    aToggleReadOnly               # CTRL+E — toggle Monaco read-only + mode
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

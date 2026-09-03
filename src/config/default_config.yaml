@@ -85,7 +85,7 @@ bindings:
   goDown: "Down"
   pageUp: "PageUp"
   pageDown: "PageDown"
-  switchEdit: "CTRL+E"
+  aToggleReadOnly: "CTRL+E"
   fileSearch: "CTRL+P"
   commandSearch: "ALT+P"
   fixedSearch: "CTRL+SHIFT+P"
@@ -200,7 +200,7 @@ bindings:
   aHistoryBack: "CTRL+ALT+B"
   # CTRL+F is `findOrFilter` and CTRL+ALT+F is free.
   aHistoryForward: "CTRL+ALT+F"
-  # CTRL+E is `switchEdit` and ALT+E is hard-bound to `focusEventLog`;
+  # CTRL+E is `aToggleReadOnly` and ALT+E is hard-bound to `focusEventLog`;
   # CTRL+ALT+E is free.
   aRunToEntry: "CTRL+ALT+E"
   # CTRL+R is hard-bound to re-record; CTRL+ALT+R is free.

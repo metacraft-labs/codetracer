@@ -242,6 +242,41 @@ probe() {
 
 jq_py() { /usr/bin/python3 -c "$1" "${cache}/$2.json" "${3:-}"; }
 
+# `action_ordinal <ClientAction member>` — the array index the probe's counter
+# map is keyed by, DERIVED from the enum rather than written here.
+#
+# `data.actions` is `array[ClientAction, ClientActionHandler]`, so the ordinal IS
+# the JS index. Writing the number in this file would be a copy of a declaration
+# one directory over, and the failure mode is silent: an enum member inserted in
+# the middle re-points every index after it, and a check reading a stale number
+# would go on passing while grading the wrong action. Prints nothing and returns
+# non-zero when the member does not exist, so a rename becomes a FAILED check
+# rather than an empty string compared against an empty string.
+action_ordinal() {
+	/usr/bin/python3 - "$1" <<'PY'
+import re
+import sys
+
+want = sys.argv[1]
+path = "src/common/common_types/codetracer_features/frontend.nim"
+src = open(path, encoding="utf-8").read()
+start = src.index("ClientAction* = enum")
+end = src.index("InputShortcutMap*", start)
+members = []
+for line in src[start:end].splitlines()[1:]:
+    s = line.strip()
+    if not s or s.startswith("#"):
+        continue
+    m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*(,|#|$)", s)
+    if m:
+        members.append(m.group(1))
+if want not in members:
+    sys.stderr.write("no ClientAction member named %s\n" % want)
+    sys.exit(3)
+print(members.index(want))
+PY
+}
+
 # ===========================================================================
 # PART 1 — THE CHORD
 # ===========================================================================
@@ -432,6 +467,180 @@ ck "$([ "${dbl}" = "caught" ] && echo ok || echo fail)" \
 echo
 
 # ===========================================================================
+# PART 1b — THE SHADOWED CHORDS
+# ===========================================================================
+#
+# `CTRL+E` and `ALT+1`: the two chords `hardBindShadowedActions` reported as
+# config entries a hardcoded bind had killed. Pressed here because the report
+# was WRONG about both of them, and only a press could say so.
+#
+# WHAT THE REPORT ASSUMED. `hardBoundChords`' note said a hardcoded bind wins
+# "because `configureShortcuts` registers them AFTER its loop over the config
+# table". That is true of the binds inside `configureShortcuts`
+# (`ui/shortcuts.nim`) — it is the F2 defect's mechanism. It is FALSE of the
+# binds in `ui_js.nim`'s `configure`, which runs at boot while
+# `configureShortcuts` runs later from an IPC reply. For those, the config loop
+# is the last writer and the hardcoded bind is the dead one.
+#
+# MEASURED, both arms, on two assembled bundles, one press per fresh page:
+#
+#   CTRL+E   before  editor  switchEdit 0/0/0   readOnly false->true
+#                    outside switchEdit 1/1/0   readOnly false->false
+#            after   editor  aToggleReadOnly 1/0/1   readOnly false->true
+#                    outside aToggleReadOnly 1/1/0   readOnly false->true
+#
+#   ALT+1    before  editor  aLowLevel1 1/1/0   lowLevelTabs 0->1
+#                    outside aLowLevel1 1/1/0   lowLevelTabs 0->1
+#            after   identical
+#
+# So CTRL+E ran TWO DIFFERENT ACTIONS depending on where the caret was —
+# `switchEdit` outside, toggle-read-only inside, the second of them from
+# `ui/editor.nim`'s Monaco `commands` table, which neither `conflictList` nor
+# `hardBoundChords` can see. And ALT+1 was never shadowed at all: its config
+# entry drove it in both contexts the whole time, and the `ui_js.nim` bind the
+# report blamed was unreachable code.
+#
+# THE ALT+1 ARMS DO NOT REDDEN ON THE CONTROL BUNDLE, AND THAT IS THE RESULT.
+# They are here to hold the claim that deleting an unreachable bind changed
+# nothing — the numbers either side are identical, which is what "unreachable"
+# has to mean if it is true. Their instrument is the CTRL+E arms beside them,
+# which redden on control against the same probe and the same comparison.
+#
+# ONE CHORD AND ONE FOCUS CONTEXT PER PAGE. Both of these move state the other
+# presses would then be measured against (CTRL+E flips the mode; ALT+1 leaves a
+# tab open, and `openLowLevelCode` only CREATES that tab the first time), so a
+# second press on the same page would move no counter and "the effect did not
+# happen" would be indistinguishable from "it already had".
+echo "Part 1b: the two chords the hard-bind registry reported, pressed"
+echo
+
+toggle_ix="$(action_ordinal aToggleReadOnly)"
+switch_ix="$(action_ordinal switchEdit)"
+lowlevel_ix="$(action_ordinal aLowLevel1)"
+ck "$([ -n "${toggle_ix}" ] && [ -n "${switch_ix}" ] && [ -n "${lowlevel_ix}" ] &&
+	[ "${toggle_ix}" != "${switch_ix}" ] && echo ok || echo fail)" \
+	"the three ClientAction ordinals were derived from the enum and are distinct (aToggleReadOnly=${toggle_ix:-?} switchEdit=${switch_ix:-?} aLowLevel1=${lowlevel_ix:-?})"
+
+for arm in ctrle-editor ctrle-outside alt1-editor alt1-outside; do
+	case "${arm}" in
+	ctrle-*) export CT_CHORD_SUBJECTS="Control+e" ;;
+	alt1-*) export CT_CHORD_SUBJECTS="Alt+1" ;;
+	esac
+	case "${arm}" in
+	*-editor) export CT_CHORD_FOCUS="editor" ;;
+	*-outside) export CT_CHORD_FOCUS="outside" ;;
+	esac
+	if probe "${arm}" ci/test/chord_double_fire_probe.mjs /noir; then
+		ck ok "the chord probe produced a report (${arm})"
+	else
+		ck fail "the chord probe produced a report (${arm})"
+	fi
+	unset CT_CHORD_SUBJECTS CT_CHORD_FOCUS
+done
+
+# THE SLOT EXISTS. `data.actions[aToggleReadOnly]` is read below by index, and
+# an index past the end of the table reads `undefined` — which the probe's
+# counter map reports as a missing key, i.e. as zero. "The chord delivered 0"
+# and "the bundle has no such action" would then be the same reading, and the
+# first is a defect while the second is a bundle built from the wrong tree.
+tbl_len="$(jq_py '
+import json,sys
+print(json.load(open(sys.argv[1]))["pre"]["actionsLength"])
+' ctrle-editor)"
+ck "$([ -n "${tbl_len}" ] && [ "${tbl_len}" -gt "${toggle_ix:-0}" ] && echo ok || echo fail)" \
+	"the shipped action table has a slot at aToggleReadOnly's ordinal (length ${tbl_len}, ordinal ${toggle_ix})"
+
+# `chord_row <arm> <index>` -> "deliveries/mousetrap/monaco" for the one press
+# the arm made, or "missing" if it did not make exactly one.
+chord_row() {
+	jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+ix=sys.argv[2]
+r=d["results"]
+if len(r) != 1:
+    print("missing")
+else:
+    r=r[0]
+    print("%s/%s/%s" % (r["allDeliveries"].get(ix, 0), r["mousetrapPath"], r["monacoPath"]))
+' "$1" "$2"
+}
+
+# CTRL+E, BOTH CONTEXTS, AND THE PER-PATH COUNTERS. `deliveries == 1` cannot
+# tell "Mousetrap delivered" from "Monaco delivered", and the whole content of
+# this fix is that the two contexts now dispatch the SAME action through
+# different paths rather than two different actions.
+ctrle_in="$(chord_row ctrle-editor "${toggle_ix}")"
+ck "$([ "${ctrle_in}" = "1/0/1" ] && echo ok || echo fail)" \
+	"CTRL+E inside the editor dispatches aToggleReadOnly exactly once, through Monaco (deliveries/mousetrap/monaco = ${ctrle_in}, want 1/0/1)"
+
+ctrle_out="$(chord_row ctrle-outside "${toggle_ix}")"
+ck "$([ "${ctrle_out}" = "1/1/0" ] && echo ok || echo fail)" \
+	"CTRL+E outside the editor dispatches aToggleReadOnly exactly once, through Mousetrap (deliveries/mousetrap/monaco = ${ctrle_out}, want 1/1/0)"
+
+# AND `switchEdit` IS NOT WHAT IT REACHES, in either context. This is the half
+# the delivery counts above cannot state: a chord that dispatched BOTH would
+# satisfy "aToggleReadOnly exactly once" perfectly. `switchEdit` held CTRL+E in
+# the YAML until this change and reached it outside the editor only, which is
+# the asymmetry that made the chord mean two things.
+switch_hits="$(
+	a="$(jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+print(d["results"][0]["allDeliveries"].get(sys.argv[2], 0) if len(d["results"])==1 else "?")
+' ctrle-editor "${switch_ix}")"
+	b="$(jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+print(d["results"][0]["allDeliveries"].get(sys.argv[2], 0) if len(d["results"])==1 else "?")
+' ctrle-outside "${switch_ix}")"
+	echo "${a}/${b}"
+)"
+ck "$([ "${switch_hits}" = "0/0" ] && echo ok || echo fail)" \
+	"CTRL+E dispatches switchEdit in NEITHER context (editor/outside = ${switch_hits}, want 0/0)"
+
+# THE EFFECT, not only the dispatch. Every check above counts a call into
+# `data.actions`, and a handler that had been replaced by a no-op would satisfy
+# all of them. `toggleReadOnly` moves `data.ui.readOnly` and `data.ui.mode`;
+# both must move, in BOTH contexts, or the chord is delivered and inert.
+ctrle_effect="$(
+	for arm in ctrle-editor ctrle-outside; do
+		jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+r=d["results"][0] if len(d["results"])==1 else None
+print("yes" if r and r["readOnlyChanged"] and r["modeChanged"] else "no", end=",")
+' "${arm}"
+	done
+)"
+ck "$([ "${ctrle_effect}" = "yes,yes," ] && echo ok || echo fail)" \
+	"CTRL+E really toggles read-only and mode in BOTH contexts, not merely dispatches (editor,outside = ${ctrle_effect})"
+
+# ALT+1 — the arm that must NOT change between the two bundles.
+alt1_in="$(chord_row alt1-editor "${lowlevel_ix}")"
+ck "$([ "${alt1_in}" = "1/1/0" ] && echo ok || echo fail)" \
+	"ALT+1 inside the editor dispatches aLowLevel1 exactly once, through Mousetrap — Monaco does not consume it (deliveries/mousetrap/monaco = ${alt1_in}, want 1/1/0)"
+
+alt1_out="$(chord_row alt1-outside "${lowlevel_ix}")"
+ck "$([ "${alt1_out}" = "1/1/0" ] && echo ok || echo fail)" \
+	"ALT+1 outside the editor dispatches aLowLevel1 exactly once, through Mousetrap (deliveries/mousetrap/monaco = ${alt1_out}, want 1/1/0)"
+
+alt1_effect="$(
+	for arm in alt1-editor alt1-outside; do
+		jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+r=d["results"][0] if len(d["results"])==1 else None
+print(r["lowLevelTabsOpened"] if r else "?", end=",")
+' "${arm}"
+	done
+)"
+ck "$([ "${alt1_effect}" = "1,1," ] && echo ok || echo fail)" \
+	"ALT+1 opens exactly one Low Level Code pane in each context (editor,outside = ${alt1_effect}, want 1,1)"
+
+echo
+
+# ===========================================================================
 # PART 2 — THE PANE
 # ===========================================================================
 echo "Part 2: one pane id names exactly one node"
@@ -441,7 +650,7 @@ echo
 # panes, so each is created once by the standalone path and parked offscreen.
 if ! probe panes-control ci/test/pane_mount_probe.mjs /noir; then
 	ck fail "the pane probe produced a report (control)"
-	expect_count 14
+	expect_count 27
 fi
 ck ok "the pane probe produced a report (control)"
 
@@ -476,7 +685,7 @@ export CT_PLANT_GL_CONTAINER=errorsComponent-0
 if ! probe panes-docked ci/test/pane_mount_probe.mjs /noir; then
 	ck fail "the pane probe produced a report (docked)"
 	unset CT_PLANT_GL_CONTAINER
-	expect_count 18
+	expect_count 31
 fi
 unset CT_PLANT_GL_CONTAINER
 ck ok "the pane probe produced a report (docked)"
@@ -520,7 +729,7 @@ export CT_PLANT_DUPLICATE_ID=errorsComponent-0
 if ! probe panes-instrument ci/test/pane_mount_probe.mjs /noir; then
 	ck fail "the pane probe produced a report (instrument)"
 	unset CT_PLANT_DUPLICATE_ID
-	expect_count 22
+	expect_count 35
 fi
 unset CT_PLANT_DUPLICATE_ID
 ck ok "the pane probe produced a report (instrument)"
@@ -537,9 +746,9 @@ ck "$([ "${inst}" = "2" ] && echo ok || echo fail)" \
 echo
 if [ "${failures}" -ne 0 ]; then
 	printf 'RESULT: FAILED — %d of %d check(s)\n' "${failures}" "${checks}"
-	expect_count 23
+	expect_count 36
 	exit 1
 fi
 printf '%d check(s), 0 failure(s)\n' "${checks}"
-expect_count 23
+expect_count 36
 echo "RESULT: OK — one press runs one action, and one pane id names one node"

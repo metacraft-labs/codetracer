@@ -52,7 +52,8 @@ import ../config
 import ../types
 import ../lib/jslib
 from ../ui/shortcut_labels import
-  MONACO_SHORTCUTS_WHITELIST, hardBoundChords, hardBindShadowedActions
+  MONACO_SHORTCUTS_WHITELIST, hardBoundChords, hardBindShadowedActions,
+  PERMITTED_HARD_BIND_SHADOWS
 
 var countedAssertions = 0
 
@@ -60,20 +61,24 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 104
+const ExpectedAssertions = 107
   ## 31 before the two Stop cases below; +5 for the binding pin and +20 for the
   ## Monaco-delegation family (9 non-vacuity checks, 10 membership checks and
   ## the total) — 56.
   ##
-  ## +41 for the hard-bound registry's staleness guard: 1 sizing check, 19
-  ## source-literal-in-registry checks, 19 registry-entry-in-source checks and
-  ## the 2 discriminating negatives. The two 19s are the count of
+  ## +37 for the hard-bound registry's staleness guard: 1 sizing check, 17
+  ## source-literal-in-registry checks, 17 registry-entry-in-source checks and
+  ## the 2 discriminating negatives. The two 17s are the count of
   ## `Mousetrap.bind("...")` literals in `ui/shortcuts.nim` and `ui_js.nim`, so
   ## adding or removing a hardcoded bind moves this number — deliberately.
   ##
-  ## +7 for the F2 regression: 3 on F2 itself, 2 on the shadow list (its exact
-  ## membership, and F2's absence from it), 2 on the instrument that proves the
-  ## shadow list can report anything at all.
+  ## +14 for the shadow rule: 3 on F2; 1 sizing the permitted table; 1 per
+  ## REPORTED shadow (there is one, `CTRL+B`, so this number moves the day a
+  ## shadow is added or removed — deliberately); 3 asserting that F2, CTRL+E
+  ## and ALT+1 are NOT reported; 4 asserting the config still claims CTRL+E and
+  ## ALT+1 for the right actions, which is what distinguishes "the hard bind
+  ## was removed" from "the config entry was"; and 2 on the instrument that
+  ## proves the reporter can report anything at all.
 
 proc chordsFor(config: Config; action: ClientAction): seq[Shortcut] =
   for shortcut in config.shortcutMap.actionShortcuts[action]:
@@ -312,7 +317,7 @@ suite "shipped shortcut bindings":
     # membership check below while measuring nothing at all — the empty-haystack
     # pass this repository's harnesses keep naming. The count is pinned, so a
     # bind added or removed has to be accounted for deliberately.
-    counted found.len == 19
+    counted found.len == 17
 
     for chord in found:
       checkpoint("hardcoded Mousetrap bind: " & chord)
@@ -358,40 +363,65 @@ suite "shipped shortcut bindings":
     counted config.shortcutMap.shortcutActions[cstring"F2"] ==
       ClientAction.forwardContinue
 
-    # AND THE GENERAL PROPERTY, which is what stops the next one — and which
-    # found two more of these the moment it was written.
+    # AND THE GENERAL PROPERTY, WHICH IS NOW ENFORCED RATHER THAN RECORDED.
     #
     # `hardBindShadowedActions` reports every chord the config declares that a
-    # hardcoded bind then overwrites. F2 was one. THE OTHER THREE ARE REAL AND
-    # PRE-EXISTING, pinned here rather than fixed, because each is a separate
-    # decision and none of them is this change's business:
+    # hardcoded bind overwrites. This used to pin that report as a LITERAL LIST
+    # — `@["CTRL+B", "CTRL+E", "ALT+1"]` — with a comment saying the last two
+    # were real defects left for later. A list of the answer can only ever
+    # agree with itself: it went green on a tree carrying two known defects,
+    # and it would have gone green on a tree carrying a third the moment
+    # somebody updated the literal.
     #
-    #   CTRL+B  `build` — the DELIBERATE one. `ui/shortcuts.nim` records why it
-    #           shadows the config on the desktop and excludes itself from the
-    #           web build where the shadowed action is the only useful one.
-    #   CTRL+E  `switchEdit` — NOT deliberate as far as anything records.
-    #           `ui_js.nim` binds `ctrl+e` to `data.toggleReadOnly()`, so the
-    #           YAML's Switch-to-Edit chord has never fired. Same shape as F2:
-    #           a config entry that dispatches nothing it claims to.
-    #   ALT+1   `aLowLevel1` — `ui_js.nim` binds `alt+1` to
-    #           `data.openLowLevelCode()`. The INTENT matches, so unlike CTRL+E
-    #           the user sees roughly the right thing happen; but the chord is
-    #           still unrebindable and the config entry still dead.
-    #
-    # Pinned as a LIST rather than a count, so that fixing one of them reddens
-    # here and the pin can shrink, and so that a NEW one cannot hide inside an
-    # unchanged total. F2's absence from this list is the regression assertion.
+    # `GUI/Keyboard-Shortcuts-System.md` states the rule as a rule: "Every
+    # other shadow is a defect. A chord in `hardBindShadowedActions` that is
+    # not listed above must be resolved by removing one of the two claims,
+    # never by leaving the config entry declared and dead." So the check is
+    # against `PERMITTED_HARD_BIND_SHADOWS`, which is that table. A new shadow
+    # fails HERE, and the only way to make it pass is to remove a claim or to
+    # change the spec — which `ci/test/shortcut-shadow-spec-agreement.sh`
+    # requires, because it compares the constant with the spec's own table.
     let shadowed = hardBindShadowedActions(config)
     var shadowedChords: seq[string] = @[]
     for (chord, _) in shadowed:
       shadowedChords.add($chord)
     checkpoint("config entries killed by a hard bind: " & shadowedChords.join(", "))
-    counted shadowedChords == @["CTRL+B", "CTRL+E", "ALT+1"]
+
+    # NON-VACUITY FIRST, and on the RULE rather than on the report. "Every
+    # reported shadow is permitted" is vacuously true of an empty permitted
+    # list AND of an empty report; the second is checked by the instrument arm
+    # below, and this is the first.
+    counted PERMITTED_HARD_BIND_SHADOWS.len == 1
+
+    # THE RULE. Chord AND action, because permitting `CTRL+B` to shadow `build`
+    # is not permitting it to shadow whatever a future YAML puts there.
+    for (chord, action) in shadowed:
+      checkpoint("shadow: " & $chord & " kills " & $action)
+      counted (chord, action) in PERMITTED_HARD_BIND_SHADOWS
+
+    # THE REGRESSIONS, named individually so a re-introduction says WHICH.
+    # These are not restatements of the loop above: the loop is silent about a
+    # chord that is absent from the report, and "absent from the report" is
+    # exactly what these three assert.
     counted "F2" notin shadowedChords
+    counted "CTRL+E" notin shadowedChords
+    counted "ALT+1" notin shadowedChords
+
+    # AND THE OTHER HALF OF EACH, because a chord leaves the report either by
+    # having its hard bind removed (what happened) or by having its CONFIG
+    # entry removed (which would leave the key unrebindable and the action
+    # unreachable — the outcome the spec forbids). Only the first is a fix, and
+    # only these say which one landed.
+    counted config.shortcutMap.shortcutActions.hasKey(cstring"CTRL+E")
+    counted config.shortcutMap.shortcutActions[cstring"CTRL+E"] ==
+      ClientAction.aToggleReadOnly
+    counted config.shortcutMap.shortcutActions.hasKey(cstring"ALT+1")
+    counted config.shortcutMap.shortcutActions[cstring"ALT+1"] ==
+      ClientAction.aLowLevel1
 
     # THE INSTRUMENT. `hardBindShadowedActions` must be able to REPORT a shadow,
-    # or "only CTRL+B" above is satisfied by a proc that always returns nothing
-    # — which is precisely what a fix that deleted the registry would produce.
+    # or the rule above is satisfied by a proc that always returns nothing —
+    # which is precisely what a fix that deleted the registry would produce.
     counted cstring"CTRL+B" in hardBoundChords
     counted config.shortcutMap.shortcutActions[cstring"CTRL+B"] ==
       ClientAction.build

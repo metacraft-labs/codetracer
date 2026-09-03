@@ -231,6 +231,31 @@ const MONACO_SHORTCUTS_WHITELIST*: seq[cstring] =
       # Monaco the event never reaches Mousetrap (measured above), and with
       # the caret outside, the delegated Monaco command does not run.
       "CTRL+B",
+      # TOGGLE READ-ONLY — `CTRL+E`, spelled as `default_config.yaml` spells it
+      # (`aToggleReadOnly: "CTRL+E"`); `ui/shortcuts.nim:18` is what makes that
+      # equivalent to Monaco's `CTRL+KeyE`.
+      #
+      # It is here for the reason `CTRL+B` above is, and the measurement is the
+      # same one: a `CTRL+<letter>` keydown raised inside Monaco never reaches
+      # `document`'s bubble phase, so the global Mousetrap bind cannot answer
+      # it. Measured on the assembled bundle, caret in the editor: `CTRL+E`
+      # produced no `shortcuts: global handle` line.
+      #
+      # WHAT IT REPLACES, so the entry is not read as a new delegation. A
+      # hardcoded `commands[cstring"CTRL+KeyE"]` in `ui/editor.nim` used to
+      # register this chord on every Monaco instance, calling
+      # `data.functions.toggleReadOnly` directly. That is a claim on a chord
+      # that neither `conflictList` nor `hardBoundChords` can see, and it made
+      # `CTRL+E` dispatch `switchEdit` outside the editor and toggle read-only
+      # inside it. Delegating from the CONFIG instead is what makes the two
+      # contexts one action.
+      #
+      # NOT A DOUBLE-DELIVERY, and it is asserted rather than assumed:
+      # `ci/test/chord-and-pane-uniqueness.sh` presses `CTRL+E` in both focus
+      # contexts and requires `mousetrap`/`monaco` to be `1/0` outside and
+      # `0/1` inside, so a Monaco version that started binding `ctrl+e`
+      # natively reddens here instead of toggling read-only twice per press.
+      "CTRL+E",
       # ---------------------------------------------------------------------
       # THE PRESET CHORDS.
       #
@@ -321,10 +346,28 @@ const MONACO_SHORTCUTS_WHITELIST*: seq[cstring] =
 # `initShortcutMap` (`frontend/config.nim:26`) detects conflicts BETWEEN TWO
 # YAML ENTRIES and reports them in `conflictList`. It cannot see a chord that
 # never passed through the YAML. About two dozen are bound directly with
-# `Mousetrap.bind` in `ui/shortcuts.nim` and `ui_js.nim`, and because
-# `configureShortcuts` registers them AFTER its loop over the config table —
-# and `Mousetrap.bind` REPLACES rather than chains — each one silently
-# overrides whatever the config gave the same chord.
+# `Mousetrap.bind` in `ui/shortcuts.nim` and `ui_js.nim`, and `Mousetrap.bind`
+# REPLACES rather than chains — so wherever such a bind and a config entry name
+# the same chord, ONE OF THEM IS DEAD and nothing reports which.
+#
+# WHICH ONE DIES DEPENDS ON THE FILE, and getting that backwards is how this
+# list first reported two non-defects as defects.
+#
+#   * `ui/shortcuts.nim` — the binds sit INSIDE `configureShortcuts`, below its
+#     own loop over the config table. The bind wins; the config entry is dead.
+#     This is the F2 defect's mechanism.
+#   * `ui_js.nim` — the binds sit in `configure`, which runs at BOOT.
+#     `configureShortcuts` runs later, from the `onInit` / `onNoTrace` /
+#     `onWelcomeScreen` IPC replies. The CONFIG wins; the hardcoded bind is
+#     dead.
+#
+# Measured on the assembled bundle rather than reasoned from the call graph:
+# with the caret outside the editor, `ALT+1` dispatched
+# `data.actions[aLowLevel1]` and logged `shortcuts: global handle` — the config
+# bind — while `ui_js.nim` still carried `Mousetrap.bind("alt+1")`. A bind that
+# loses is still a defect (it is unreachable code claiming a chord), but it is
+# the opposite defect from the one this list was built to name, and a report
+# that names the wrong casualty sends the next reader to fix the wrong file.
 #
 # THIS IS NOT HYPOTHETICAL; IT IS THE BUG THIS LIST WAS EXTRACTED FOR.
 # `default_config.yaml:67` gives `forwardContinue` two chords, "F8 F2".
@@ -384,10 +427,23 @@ const hardBoundChords*: seq[cstring] =
     cstring"ALT+F10",
     cstring"ALT+SHIFT+F10",
     # `ui_js.nim`.
+    #
+    # THE LOAD ORDER IS THE OTHER WAY ROUND FOR THIS FILE, which is why
+    # `hardBindShadowedActions` below reports what it reports and why two of
+    # the entries that used to be here are gone.
+    #
+    # `configure` (`ui_js.nim`) binds these at BOOT. `configureShortcuts`
+    # (`ui/shortcuts.nim`), whose config loop is what they were assumed to
+    # overwrite, runs LATER — from `onInit`, `onNoTrace` and `onWelcomeScreen`,
+    # which are IPC replies. So for any chord the YAML also declares, the
+    # config loop is the last writer and one of these binds is the dead one.
+    # Measured on the assembled bundle, and it is the reverse of what the note
+    # at the head of this list used to claim.
+    #
+    # `CTRL+E` and `ALT+1` were here and are deleted from `ui_js.nim`: the YAML
+    # declared both, so both binds were already unreachable.
     cstring"CTRL+F5",
-    cstring"CTRL+E",
     cstring"CTRL+S",
-    cstring"ALT+1",
     cstring"CTRL+ENTER",
     cstring"CTRL+SHIFT+E",
   ]
@@ -398,6 +454,36 @@ const hardBoundChords*: seq[cstring] =
   ## over a range rather than as literals, no YAML entry claims any of them, and
   ## listing nine chords to state one fact would be the copy this module exists
   ## to avoid. The staleness guard skips non-literal binds for the same reason.
+
+const PERMITTED_HARD_BIND_SHADOWS*: seq[(cstring, ClientAction)] =
+  @[
+    # `ui/shortcuts.nim` re-binds `ctrl+b` to `reRecordCurrent(projectOnly =
+    # true)` after the config loop, and excludes itself from the web build
+    # where the shadowed `build` action is the only useful one. Deliberate,
+    # documented at the bind, and the ONE row the spec's table carries.
+    (cstring"CTRL+B", ClientAction.build),
+  ]
+  ## The shadows that are allowed to exist, as
+  ## `GUI/Keyboard-Shortcuts-System.md` § "Hard binds are enumerated and their
+  ## shadowing is reported" lists them.
+  ##
+  ## THIS IS A RULE AND NOT A REPORT, which is the difference between it and
+  ## `hardBindShadowedActions` below. That proc says what the shipped table
+  ## DOES; this says what it is permitted to do. Until this constant existed
+  ## the registry only reported, `configureShortcuts` only warned, and a new
+  ## shadow could land and go on warning into a log nobody reads —
+  ## `shortcut_bindings_test.nim` now fails on any entry this list does not
+  ## carry.
+  ##
+  ## THE ACTION IS PART OF THE PERMISSION, not just the chord. `CTRL+B` is
+  ## permitted to shadow `build`; a future YAML that moved some other action
+  ## onto `CTRL+B` would be a shadow nobody had agreed to, and pinning the
+  ## chord alone would let it through.
+  ##
+  ## KEPT HONEST AGAINST THE SPEC BY `ci/test/shortcut-shadow-spec-agreement.sh`,
+  ## which parses the table out of the spec and this list out of this file and
+  ## requires them to name the same rows. A constant that quietly widened would
+  ## otherwise be a way to make the gate below agree with itself.
 
 proc hardBindShadowedActions*(config: Config): seq[(cstring, ClientAction)] =
   ## Every chord the config declares that a later hardcoded bind will replace.

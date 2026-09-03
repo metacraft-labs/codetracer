@@ -95,10 +95,65 @@ const CHORDS = [
   { key: 'Control+b', action: 'build', index: 9 },
 ];
 
+// THE SHADOWED CHORDS — the ones a hard `Mousetrap.bind` claimed after the
+// config loop had already claimed them, so that the config entry names an
+// action the key never dispatches.
+//
+// They are NOT in `CHORDS` above and are never pressed in the same page as it,
+// and that separation is deliberate rather than tidy. Both of them change
+// application state that the other presses are measured against: `CTRL+E`
+// flips `data.ui.readOnly` and `data.ui.mode` and rebuilds the layout, and
+// `ALT+1` opens a Low Level Code tab which stays open. Pressed in the middle of
+// the 22-press sweep, they would move the eleven chords after them into a
+// different mode and the run would be measuring a different product either side
+// of them. Selected with `CT_CHORD_SUBJECTS`, one chord and one focus context
+// per page load, so every press below lands on a page in its BOOT state.
+//
+// That freshness is also what makes `lowLevelTabs` readable. `openLowLevelCode`
+// creates a component the FIRST time and only redraws afterwards
+// (`utils.nim`), so a second press on the same page moves no counter — and
+// "the effect did not happen" and "the effect had already happened" would be
+// the same reading.
+const SHADOW_CHORDS = [
+  // CTRL+E — `default_config.yaml` declares `switchEdit: "CTRL+E"`, and
+  // `switchEdit` is `data.actions[17]` = `data.switchToEdit()`.
+  { key: 'Control+e', action: 'switchEdit', index: 17 },
+  // ALT+1 — `default_config.yaml` declares `aLowLevel1: "ALT+1"`, and
+  // `aLowLevel1` is `data.actions[88]` = `data.openLowLevelCode()`.
+  { key: 'Alt+1', action: 'aLowLevel1', index: 88 },
+];
+
+const ALL_CHORDS = CHORDS.concat(SHADOW_CHORDS);
+
 // The two places a caret can be when a chord is pressed, because the whole
 // question is which of them each path is live in. `editor` is the case the
 // override exists for; `outside` is the case that worked without it.
-const FOCUS_CONTEXTS = ['editor', 'outside'];
+const ALL_FOCUS_CONTEXTS = ['editor', 'outside'];
+
+// SELECTION, and the default is the historical one so the 22-press sweep this
+// program was written for is byte-for-byte what it always was.
+const subjectSel = (process.env.CT_CHORD_SUBJECTS || '').trim();
+const focusSel = (process.env.CT_CHORD_FOCUS || '').trim();
+const SUBJECTS = subjectSel
+  ? subjectSel.split(',').map((s) => s.trim()).filter(Boolean)
+      .map((k) => {
+        const c = ALL_CHORDS.find((x) => x.key === k);
+        if (!c) {
+          console.error(`unknown chord in CT_CHORD_SUBJECTS: ${k}`);
+          process.exit(2);
+        }
+        return c;
+      })
+  : CHORDS;
+const FOCUS_CONTEXTS = focusSel
+  ? focusSel.split(',').map((s) => s.trim()).filter(Boolean)
+  : ALL_FOCUS_CONTEXTS;
+for (const f of FOCUS_CONTEXTS) {
+  if (!ALL_FOCUS_CONTEXTS.includes(f)) {
+    console.error(`unknown focus context in CT_CHORD_FOCUS: ${f}`);
+    process.exit(2);
+  }
+}
 
 const browser = await chromium.launch({});
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -223,28 +278,89 @@ async function setFocus(where) {
 // watermark taken before and after so the per-path tallies belong to THIS
 // press.
 // ---------------------------------------------------------------------------
+
+// THE EFFECT, read either side of every press.
+//
+// The delivery counters above answer "was the config's action dispatched".
+// That is the whole question for a chord whose two claimants both go through
+// `data.actions`, and it is HALF the question for a shadowed one: a hard
+// `Mousetrap.bind` calls its target proc DIRECTLY (`ui_js.nim`'s `alt+1` runs
+// `data.openLowLevelCode()`, not `data.actions[aLowLevel1]`), so the action
+// counter reads 0 while the user plainly sees something happen. Reading 0 and
+// concluding "the key is dead" would be wrong, and reading 0 after a fix and
+// concluding "the key is alive" would be wrong in the other direction.
+//
+// So the observable state is reported too, and it is state the product owns
+// rather than anything this probe installs: `data.ui.readOnly` and
+// `data.ui.mode` are what `toggleReadOnly` and `switchToEdit` both move, and
+// `data.ui.componentMapping[18]` (`Content.LowLevelCode`) is the table
+// `openLowLevelCode` registers into. Same fields on both bundles, so control
+// and fix are graded by one instrument.
+async function uiState() {
+  return page.evaluate(() => {
+    const d = window.data;
+    const ui = d && d.ui;
+    if (!ui) return { present: false };
+    let lowLevelTabs = -1;
+    try {
+      const m = ui.componentMapping && ui.componentMapping[18];
+      lowLevelTabs = m ? Object.keys(m).length : 0;
+    } catch (e) {
+      lowLevelTabs = -1;
+    }
+    return {
+      present: true,
+      // `LayoutMode` — `DebugMode` and `EditMode`, as ordinals.
+      mode: typeof ui.mode === 'number' ? ui.mode : null,
+      readOnly: typeof ui.readOnly === 'boolean' ? ui.readOnly : null,
+      lowLevelTabs,
+    };
+  });
+}
+
 const focusReports = [];
 const results = [];
 for (const where of FOCUS_CONTEXTS) {
   const f = await setFocus(where);
   focusReports.push(f);
-  for (const c of CHORDS) {
+  for (const c of SUBJECTS) {
     // Re-assert focus before every press: a chord that opens a panel or moves
     // the caret would otherwise silently change the context for the next one.
     await setFocus(where);
     const before = consoleLines.length;
+    const stateBefore = await uiState();
     await page.evaluate(() => { window.__chordCounts = {}; });
     await page.keyboard.press(c.key);
     await page.waitForTimeout(600);
     const counts = await page.evaluate(() => window.__chordCounts);
+    const stateAfter = await uiState();
     const fresh = consoleLines.slice(before);
     results.push({
       focus: where,
       key: c.key,
       action: c.action,
       index: c.index,
+      stateBefore,
+      stateAfter,
+      // The three effect deltas, named so a shell check reads as a statement
+      // about the product rather than as arithmetic on two blobs.
+      modeChanged: stateBefore.mode !== stateAfter.mode,
+      readOnlyChanged: stateBefore.readOnly !== stateAfter.readOnly,
+      lowLevelTabsOpened: stateAfter.lowLevelTabs - stateBefore.lowLevelTabs,
       // The number this whole program exists to produce.
       deliveries: counts[String(c.index)] || 0,
+      // AND THE WHOLE MAP, which is what lets ONE probe grade two bundles
+      // whose action tables are not the same table.
+      //
+      // `index` above is a number baked into this file, and a fix that moves a
+      // chord from one `ClientAction` to another moves the slot the check must
+      // read. Baking the post-fix index in would make the probe agree with the
+      // fix by construction and could not be run against the control at all;
+      // reporting the raw counter map instead leaves the naming to the shell,
+      // so the control arm and the fixed arm are read by the same program.
+      // `pre.actionsLength` says how many slots existed, so "index 184
+      // delivered 0" cannot be confused with "index 184 is not a slot".
+      allDeliveries: counts,
       // Anything else the press ran, so "it doubled" is not confused with
       // "it also fired something unrelated".
       otherActions: Object.entries(counts)
@@ -263,6 +379,14 @@ console.log(JSON.stringify({
   url,
   loadError,
   pageErrors,
+  // WHAT WAS ASKED FOR, so a shell arm can assert that the selection it passed
+  // is the selection that ran. `CT_CHORD_SUBJECTS` naming a chord this program
+  // does not know is already fatal above; this is the other half — a run whose
+  // report the shell reads under the wrong label.
+  requested: {
+    subjects: SUBJECTS.map((c) => c.key),
+    focusContexts: FOCUS_CONTEXTS,
+  },
   pre,
   focusReports,
   results,

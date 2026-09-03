@@ -86,7 +86,7 @@ bindings:
   pageUp: "PageUp"
   pageDown: "PageDown"
   switchDebug: "CTRL+D"
-  switchEdit: "CTRL+E"
+  aToggleReadOnly: "CTRL+E"
   fileSearch: "CTRL+P"
   commandSearch: "ALT+P"
   fixedSearch: "CTRL+SHIFT+P"

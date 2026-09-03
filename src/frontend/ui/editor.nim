@@ -225,13 +225,25 @@ var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewCompone
     if not data.functions.toggleMode.isNil:
       data.functions.toggleMode(data),
 
-  cstring"CTRL+KeyE":   proc(editor: MonacoEditor, e: EditorViewComponent) =
-    ## Mirror the Mousetrap shortcut so toggling works while Monaco has focus.
-    if not data.functions.toggleReadOnly.isNil:
-      data.functions.toggleReadOnly(data)
-      return
-    if not data.functions.toggleMode.isNil:
-      data.functions.toggleMode(data),
+  # `CTRL+KeyE` STOOD HERE, AND IT IS WHY ONE KEY RAN TWO DIFFERENT ACTIONS.
+  #
+  # Its doc comment said "mirror the Mousetrap shortcut so toggling works while
+  # Monaco has focus". The Mousetrap shortcut it mirrored — `ui_js.nim`'s
+  # `Mousetrap.bind("ctrl+e")` — was itself overwritten by the config loop that
+  # runs after it, so what this entry actually did was make `CTRL+E` mean
+  # something the global layer did not: measured on the assembled bundle,
+  # `CTRL+E` dispatched `switchEdit` outside the editor and toggled read-only
+  # inside it.
+  #
+  # THIS TABLE IS THE THIRD CLAIMANT AND THE INVISIBLE ONE. `conflictList` sees
+  # collisions between two YAML entries; `hardBoundChords` enumerates the
+  # `Mousetrap.bind` literals. Neither can see a chord claimed HERE, so a
+  # Monaco command that contradicts the config produces no warning anywhere.
+  #
+  # `CTRL+E` is now `aToggleReadOnly` in `default_config.yaml` and a member of
+  # `MONACO_SHORTCUTS_WHITELIST`, so the SECOND loop in `delegateShortcuts`
+  # registers the Monaco command from the config — same proc, one action, and
+  # the chord is rebindable and printable.
 
   cstring"CTRL+F8": proc(editor: MonacoEditor, e: EditorViewComponent) =
     if editor.hasTextFocus():
