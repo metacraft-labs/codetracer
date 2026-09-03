@@ -685,9 +685,24 @@ pub struct EmulatorReplaySession {
     /// so a fresh session starts from 1, matching the
     /// `MaterializedReplaySession` convention.
     next_breakpoint_id: i64,
-    /// Whether breakpoints currently fire. `disable_breakpoints` flips
-    /// this to `false` without removing entries.
-    breakpoints_enabled: bool,
+    /// Session-level suppression installed by `disable_breakpoints` for
+    /// the duration of an internal run-to-line bracket. `Some(threshold)`
+    /// suppresses every breakpoint whose id is `< threshold`, i.e. every
+    /// breakpoint that already existed when the bracket opened.
+    ///
+    /// This mirrors `MaterializedReplaySession::breakpoint_suppression`
+    /// exactly, and for the reason spelled out at that field: a plain
+    /// session-wide `bool` also suppresses the bracket's OWN temporary
+    /// target breakpoint (added *after* the disable), so `Continue`
+    /// never stops and the jump runs off the end of the trace. The
+    /// threshold distinguishes "breakpoints that existed when
+    /// suppression began" from "the one the bracket just added".
+    ///
+    /// Orthogonal to the per-breakpoint `enabled` flag, which carries
+    /// the USER's intent and is only ever changed by `toggle_breakpoint`.
+    /// A breakpoint fires only when BOTH say yes — see
+    /// [`Self::breakpoint_is_active`].
+    breakpoint_suppression: Option<i64>,
     /// Cached step id returned by `current_step_id`. The emulator's own
     /// step counter is the source of truth (`mcrGetStepCounter`); we
     /// keep this field so unit tests can deterministically inspect the
@@ -804,7 +819,7 @@ impl std::fmt::Debug for EmulatorReplaySession {
             .field("meta", &self.meta)
             .field("breakpoints", &self.breakpoints)
             .field("next_breakpoint_id", &self.next_breakpoint_id)
-            .field("breakpoints_enabled", &self.breakpoints_enabled)
+            .field("breakpoint_suppression", &self.breakpoint_suppression)
             .field("current_step_id", &self.current_step_id)
             .field("has_cp0_mem", &self.cp0_mem_bytes.is_some())
             .field("has_cp0_regs", &self.cp0_regs_bytes.is_some())
@@ -870,7 +885,7 @@ impl EmulatorReplaySession {
             },
             breakpoints: HashMap::new(),
             next_breakpoint_id: 1,
-            breakpoints_enabled: true,
+            breakpoint_suppression: None,
             current_step_id: StepId(0),
             cp0_mem_bytes: None,
             cp0_regs_bytes: None,
@@ -1053,7 +1068,7 @@ impl EmulatorReplaySession {
             meta,
             breakpoints: HashMap::new(),
             next_breakpoint_id: 1,
-            breakpoints_enabled: true,
+            breakpoint_suppression: None,
             current_step_id: StepId(0),
             cp0_mem_bytes,
             cp0_regs_bytes,
@@ -1149,7 +1164,14 @@ impl EmulatorReplaySession {
     fn allocate_breakpoint(&mut self, path: &str, line: i64) -> Breakpoint {
         let breakpoint = Breakpoint {
             id: self.next_breakpoint_id,
-            enabled: self.breakpoints_enabled,
+            // `enabled` is the USER's intent, and a breakpoint the user
+            // just set is one they want. It is deliberately NOT seeded
+            // from the session-level suppression: a run-to-line bracket
+            // adds its own temporary target *after* calling
+            // `disable_breakpoints`, and that target must fire.
+            // `MaterializedReplaySession` hardcodes `enabled: true` here
+            // for the same reason.
+            enabled: true,
             column: None,
             condition: None,
         };
@@ -1407,24 +1429,60 @@ impl EmulatorReplaySession {
 const MAX_STEP_INSTRUCTIONS: usize = 10_000;
 
 impl EmulatorReplaySession {
-    /// Re-resolve every registered breakpoint to its static PC set.
+    /// Whether `breakpoint` should currently halt a `Continue`.
+    ///
+    /// Two independent gates, both of which must say yes:
+    ///
+    ///   * `enabled` — the USER's intent, flipped only by
+    ///     [`ReplaySession::toggle_breakpoint`].
+    ///   * `breakpoint_suppression` — an internal run-to-line bracket,
+    ///     which suppresses everything that predates it while leaving
+    ///     its own freshly-added target free to fire.
+    ///
+    /// Mirrors `MaterializedReplaySession::breakpoint_suppressed` plus
+    /// its `bp.enabled` check, so the two backends agree on when a
+    /// breakpoint fires.
+    fn breakpoint_is_active(&self, breakpoint: &Breakpoint) -> bool {
+        let suppressed = matches!(self.breakpoint_suppression, Some(threshold) if breakpoint.id < threshold);
+        breakpoint.enabled && !suppressed
+    }
+
+    /// Re-resolve every ACTIVE breakpoint to its static PC set.
+    ///
+    /// `breakpoint_static_pcs` is the one and only thing `run_continue`
+    /// consults, so it is also the only place where `enabled` and
+    /// `breakpoint_suppression` can take effect: the emulator's stop
+    /// check compares a raw PC and has no way to get back to the
+    /// `Breakpoint` record it came from. Every mutation that can change
+    /// whether a breakpoint is active — add, delete, toggle, enable,
+    /// disable — must therefore run through here, or the flag it wrote
+    /// is a claim the engine does not honour.
     ///
     /// Called after `delete_breakpoint` removes one entry — there may
     /// still be other `(path, line)` slots referring to the same PC
     /// (e.g. the same line was reached by two CUs for inlined code),
     /// so we can't just remove the deleted breakpoint's PCs from the
     /// set. Rebuilding from scratch is O(N · DWARF lookup); N is
-    /// the number of active breakpoints which is rarely above a
+    /// the number of registered breakpoints which is rarely above a
     /// dozen in practice, so the cost is negligible compared to the
     /// `Continue` loop that uses the set.
     fn rebuild_breakpoint_static_pcs(&mut self) {
         self.breakpoint_static_pcs.clear();
+        if self.dwarf.is_none() {
+            return;
+        }
+        // Collect the (path, line) keys that still have at least one
+        // ACTIVE breakpoint first, so we don't hold a borrow on
+        // `self.breakpoints` while mutating `self.breakpoint_static_pcs`.
+        let keys: Vec<(String, i64)> = self
+            .breakpoints
+            .iter()
+            .filter(|(_, entries)| entries.iter().any(|b| self.breakpoint_is_active(b)))
+            .map(|(key, _)| key.clone())
+            .collect();
         let Some(dwarf) = self.dwarf.as_ref() else {
             return;
         };
-        // Collect (path, line) keys first so we don't hold a borrow on
-        // `self.breakpoints` while mutating `self.breakpoint_static_pcs`.
-        let keys: Vec<(String, i64)> = self.breakpoints.keys().cloned().collect();
         for (path, line) in keys {
             let Ok(line_u32) = u32::try_from(line) else {
                 continue;
@@ -1883,13 +1941,14 @@ impl ReplaySession for EmulatorReplaySession {
         // a path that doesn't match any CU are all silent — we still
         // mint the breakpoint so the GUI's breakpoint marker shows up,
         // but `Continue` won't halt on it.
-        if let Some(dwarf) = self.dwarf.as_ref()
-            && let Ok(line_u32) = u32::try_from(line)
-        {
-            for pc in dwarf.pcs_for_line(Path::new(path), line_u32) {
-                self.breakpoint_static_pcs.insert(pc);
-            }
-        }
+        //
+        // We rebuild the whole set rather than inserting this one
+        // breakpoint's PCs, so the set stays consistent with the
+        // `enabled` / suppression state of every OTHER breakpoint. An
+        // insert-only path would silently resurrect the PCs of a
+        // breakpoint the user had toggled off, whenever it shared a
+        // line with a newly added one.
+        self.rebuild_breakpoint_static_pcs();
         Ok(breakpoint)
     }
 
@@ -1921,27 +1980,69 @@ impl ReplaySession for EmulatorReplaySession {
         Ok(true)
     }
 
-    fn toggle_breakpoint(&mut self, _breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>> {
-        todo!("F5c-3: flip emulator breakpoint state")
-    }
-
-    fn enable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
-        self.breakpoints_enabled = true;
+    /// Flip the user's `enabled` intent for one registered breakpoint
+    /// and re-resolve the `Continue` stop set so the flip takes effect.
+    ///
+    /// This used to be `todo!("F5c-3: flip emulator breakpoint state")`.
+    /// That was not merely an unimplemented feature: the route is
+    /// browser-reachable (`ct/run-tracepoints` →
+    /// `Handler::run_tracepoints` → `Handler::handle_trace_steps`, which
+    /// toggles every enabled user breakpoint off around the tracepoint
+    /// run), and on wasm a `todo!()` traps — taking the whole worker
+    /// down rather than declining the operation. Setting one breakpoint
+    /// and running one tracepoint was enough to reach it.
+    ///
+    /// An unknown id is a named refusal rather than a panic, matching
+    /// `MaterializedReplaySession::toggle_breakpoint`, so the caller
+    /// gets a DAP error response and the session stays alive.
+    fn toggle_breakpoint(&mut self, breakpoint: &Breakpoint) -> Result<Breakpoint, Box<dyn Error>> {
+        let mut toggled = None;
         for entries in self.breakpoints.values_mut() {
-            for b in entries.iter_mut() {
-                b.enabled = true;
+            if let Some(stored) = entries.iter_mut().find(|stored| stored.id == breakpoint.id) {
+                stored.enabled = !stored.enabled;
+                toggled = Some(stored.clone());
+                break;
             }
         }
+
+        match toggled {
+            Some(toggled) => {
+                // The flip only means something once the stop set agrees.
+                self.rebuild_breakpoint_static_pcs();
+                Ok(toggled)
+            }
+            None => Err(format!("breakpoint id {} not found", breakpoint.id).into()),
+        }
+    }
+
+    /// Lift the session-level suppression installed by
+    /// `disable_breakpoints`, ending a run-to-line bracket.
+    ///
+    /// This restores each breakpoint to exactly the state the USER left
+    /// it in, because the bracket never touched the per-breakpoint
+    /// `enabled` flags in the first place. The previous implementation
+    /// set `enabled = true` on every entry, which silently re-enabled a
+    /// breakpoint the user had deliberately switched off. Restore-all is
+    /// not restore.
+    fn enable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
+        self.breakpoint_suppression = None;
+        self.rebuild_breakpoint_static_pcs();
         Ok(())
     }
 
+    /// Suppress every breakpoint that exists right now, for the duration
+    /// of an internal move bracket. Breakpoints added after this call
+    /// (the bracket's own temporary target) still fire.
+    ///
+    /// The old implementation wrote `enabled = false` on each entry and
+    /// set a session-wide flag — and then `run_continue` stopped purely
+    /// on `breakpoint_static_pcs`, which neither of those writes ever
+    /// touched. The suppression was a no-op: a run-to-line on an MCR
+    /// trace still halted at the user's pre-existing breakpoints. The
+    /// rebuild below is what makes the flags load-bearing.
     fn disable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
-        self.breakpoints_enabled = false;
-        for entries in self.breakpoints.values_mut() {
-            for b in entries.iter_mut() {
-                b.enabled = false;
-            }
-        }
+        self.breakpoint_suppression = Some(self.next_breakpoint_id);
+        self.rebuild_breakpoint_static_pcs();
         Ok(())
     }
 
@@ -3792,6 +3893,218 @@ mod tests {
         assert!(!session.breakpoint_static_pcs.is_empty());
         session.delete_breakpoints().unwrap();
         assert!(session.breakpoint_static_pcs.is_empty());
+    }
+
+    /// `disable_breakpoints` must actually stop the user's breakpoints
+    /// from halting a `Continue`.
+    ///
+    /// `run_continue` stops purely on `breakpoint_static_pcs`. This test
+    /// reddens against the previous implementation, which set a
+    /// session-wide `breakpoints_enabled = false` plus `b.enabled =
+    /// false` on every entry and then never consulted either — leaving
+    /// PC_ADD_BODY in the stop set, so a run-to-line on an MCR trace
+    /// still halted at the user's pre-existing breakpoint.
+    #[test]
+    fn disable_breakpoints_removes_user_breakpoints_from_the_continue_stop_set() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        let user_bp = session
+            .add_breakpoint("hello.c", PC_ADD_BODY_LINE, None, None)
+            .expect("add_breakpoint must succeed");
+        assert!(
+            session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "precondition: the user's breakpoint at hello.c:{PC_ADD_BODY_LINE} must be in the \
+             Continue stop set before suppression; PC_ADD_BODY={PC_ADD_BODY:#x}, set={:?}",
+            session.breakpoint_static_pcs,
+        );
+
+        session.disable_breakpoints().expect("disable_breakpoints must succeed");
+        assert!(
+            !session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "after disable_breakpoints, PC_ADD_BODY ({PC_ADD_BODY:#x}) must be OUT of the \
+             Continue stop set — `run_continue` consults nothing else; set={:?}",
+            session.breakpoint_static_pcs,
+        );
+
+        session.enable_breakpoints().expect("enable_breakpoints must succeed");
+        assert!(
+            session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "closing the bracket must put PC_ADD_BODY ({PC_ADD_BODY:#x}) back in the stop set; \
+             set={:?}",
+            session.breakpoint_static_pcs,
+        );
+
+        // The record itself must be untouched: a bracket is not a way to
+        // rewrite the user's intent.
+        assert!(
+            user_bp.enabled,
+            "the returned breakpoint record must still read enabled=true; got enabled={}",
+            user_bp.enabled,
+        );
+    }
+
+    /// The bracket's OWN temporary target — added AFTER
+    /// `disable_breakpoints` — must still fire, or run-to-line could
+    /// never stop anywhere.
+    ///
+    /// This is the emulator mirror of
+    /// `db::tests::bracket_temporary_breakpoint_fires_while_others_are_suppressed`.
+    /// It reddens against a naive session-wide boolean that gates every
+    /// breakpoint unconditionally.
+    #[test]
+    fn bracket_temporary_breakpoint_fires_while_others_are_suppressed() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        session
+            .add_breakpoint("hello.c", PC_ADD_BODY_LINE, None, None)
+            .expect("pre-existing user breakpoint at hello.c:24");
+
+        session.disable_breakpoints().expect("open the bracket");
+        let temporary = session
+            .add_breakpoint("hello.c", HELLO_LINE_AFTER_CALL, None, None)
+            .expect("the bracket's own target at hello.c:30");
+
+        assert!(
+            !session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "the pre-existing breakpoint (PC {PC_ADD_BODY:#x}) must stay suppressed inside the \
+             bracket; set={:?}",
+            session.breakpoint_static_pcs,
+        );
+        assert!(
+            session.breakpoint_static_pcs.contains(&PC_COMPUTE_LINE_30),
+            "the bracket's own temporary target (PC {PC_COMPUTE_LINE_30:#x}) must still fire; \
+             set={:?}",
+            session.breakpoint_static_pcs,
+        );
+
+        session
+            .delete_breakpoint(&temporary)
+            .expect("remove the temporary target");
+        session.enable_breakpoints().expect("close the bracket");
+
+        assert!(
+            session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "the user breakpoint (PC {PC_ADD_BODY:#x}) must fire again once the bracket closes; \
+             set={:?}",
+            session.breakpoint_static_pcs,
+        );
+    }
+
+    /// `toggle_breakpoint` must flip the user's `enabled` intent AND
+    /// make that flip take effect on `Continue`.
+    ///
+    /// It used to be `todo!()`, which on wasm traps and kills the
+    /// worker; the route that reaches it (`ct/run-tracepoints`) is
+    /// browser-reachable with one user breakpoint set.
+    #[test]
+    fn toggle_breakpoint_flips_enabled_and_updates_the_stop_set() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        let bp = session
+            .add_breakpoint("hello.c", PC_ADD_BODY_LINE, None, None)
+            .expect("add_breakpoint must succeed");
+        assert!(bp.enabled, "precondition: got enabled={}", bp.enabled);
+
+        let off = session
+            .toggle_breakpoint(&bp)
+            .expect("toggle_breakpoint must not panic");
+        assert!(
+            !off.enabled,
+            "toggling an enabled breakpoint must return enabled=false; got enabled={}",
+            off.enabled,
+        );
+        assert_eq!(
+            off.id, bp.id,
+            "toggle must return the SAME breakpoint; got id={} want id={}",
+            off.id, bp.id,
+        );
+        assert!(
+            !session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "a toggled-off breakpoint must leave the Continue stop set (PC {PC_ADD_BODY:#x}); \
+             set={:?}",
+            session.breakpoint_static_pcs,
+        );
+
+        let on = session.toggle_breakpoint(&off).expect("toggling back must succeed");
+        assert!(
+            on.enabled,
+            "toggling back must return enabled=true; got enabled={}",
+            on.enabled
+        );
+        assert!(
+            session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "a toggled-back-on breakpoint must re-enter the stop set (PC {PC_ADD_BODY:#x}); \
+             set={:?}",
+            session.breakpoint_static_pcs,
+        );
+    }
+
+    /// An id the session does not know must be DECLINED by name, not
+    /// trapped. On wasm a trap takes the worker down with it, so the
+    /// distinction is the difference between "this one request failed"
+    /// and "the rest of the visit is gone".
+    #[test]
+    fn toggle_breakpoint_declines_an_unknown_id_instead_of_trapping() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        const UNKNOWN_ID: i64 = 987_654;
+        let unknown = Breakpoint {
+            id: UNKNOWN_ID,
+            enabled: true,
+            column: None,
+            condition: None,
+        };
+
+        let err = session
+            .toggle_breakpoint(&unknown)
+            .expect_err("an unknown breakpoint id must be refused, not accepted");
+        let message = err.to_string();
+        assert!(
+            message.contains(&UNKNOWN_ID.to_string()),
+            "the refusal must name the id it could not find ({UNKNOWN_ID}); got {message:?}",
+        );
+
+        // And the session is still usable afterwards — the whole point
+        // of declining rather than trapping.
+        let bp = session
+            .add_breakpoint("hello.c", PC_ADD_BODY_LINE, None, None)
+            .expect("the session must still serve requests after a refusal");
+        assert!(bp.enabled, "got enabled={}", bp.enabled);
+    }
+
+    /// Closing a run-to-line bracket must restore the user's intent, not
+    /// overwrite it. Reddens against the previous `enable_breakpoints`,
+    /// which wrote `enabled = true` onto every entry and so silently
+    /// re-enabled a breakpoint the user had switched off.
+    #[test]
+    fn enable_breakpoints_does_not_resurrect_a_user_disabled_breakpoint() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_with_dwarf();
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        let bp = session
+            .add_breakpoint("hello.c", PC_ADD_BODY_LINE, None, None)
+            .expect("add_breakpoint must succeed");
+        let off = session.toggle_breakpoint(&bp).expect("user switches it off");
+        assert!(!off.enabled, "precondition: got enabled={}", off.enabled);
+
+        session.disable_breakpoints().expect("open an unrelated bracket");
+        session.enable_breakpoints().expect("close it again");
+
+        assert!(
+            !session.breakpoint_static_pcs.contains(&PC_ADD_BODY),
+            "the bracket must not resurrect a breakpoint the user switched off \
+             (PC {PC_ADD_BODY:#x}); set={:?}",
+            session.breakpoint_static_pcs,
+        );
     }
 
     /// `step(Action::Next, true)` from PC_COMPUTE_CALL_ADD (line 29,
