@@ -391,6 +391,7 @@ fi
 # the spacing legitimately changed, and would have to be edited by the same
 # commit that changed it — a test that agrees with whatever it is told.
 gap_matches() {
+	# shellcheck disable=SC2016 # prose about `getBoundingClientRect`, not an expansion
 	python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
