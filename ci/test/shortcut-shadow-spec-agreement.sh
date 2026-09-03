@@ -42,14 +42,21 @@
 #     the same comparison the green arm uses. Without them "the two agree" is
 #     satisfied by two parsers that both return nothing.
 #
-# ABSENT SPEC REPOSITORY. Reported as a loud SKIP with a non-zero skip count,
-# the convention `web-bundle-assets.sh` set for an input that is not in the
-# repository. It is NOT reported as a pass: a run that could not compare prints
-# so, and the exit status is 0 only because no CI lane can supply the sibling
-# today. The moment a lane does, this becomes an ordinary red on disagreement.
+# ABSENT SPEC REPOSITORY. Reported as a loud SKIP with a non-zero skip count and
+# a RESULT line that says INCOMPLETE rather than OK — the convention
+# `web-bundle-assets.sh` set for an input that is not in the repository.
+#
+# THIS IS THE ONE PLACE THIS GATE CAN LIE, so it is spelled out. No CI lane
+# supplies the sibling today: `codetracer-specs` is not in `.github/sibling-repos`
+# and no workflow clones it, so a run there compares the product against nothing.
+# `CT_SPECS_REQUIRED=1` turns that state into a FAILURE, and it is what a lane
+# that does provision the sibling should set — one variable is all that stands
+# between this script and being enforcing, deliberately, so that provisioning the
+# sibling is the only remaining work.
 #
 # Usage:  bash ci/test/shortcut-shadow-spec-agreement.sh
-# Env:    CT_SPECS_DIR   a `codetracer-specs` checkout (default: ../codetracer-specs)
+# Env:    CT_SPECS_DIR       a `codetracer-specs` checkout (default: ../codetracer-specs)
+#         CT_SPECS_REQUIRED  set to 1 to fail rather than skip when it is absent
 
 set -uo pipefail
 
@@ -244,6 +251,13 @@ done <"${cache}/const.rows"
 # THE SPEC SIDE, which may not be.
 # ---------------------------------------------------------------------------
 if [ ! -s "${spec_file}" ]; then
+	if [ "${CT_SPECS_REQUIRED:-0}" = "1" ]; then
+		ck fail "the spec table was required and is not present at ${spec_file}"
+		note "CT_SPECS_REQUIRED=1 was set, so an unread spec is a failure and not a skip."
+		expect_count 3
+		printf 'RESULT: FAILED\n'
+		exit 1
+	fi
 	skips=$((skips + 1))
 	echo
 	printf '  [SKIPPED] the spec table could not be compared: %s is not present\n' \
@@ -251,6 +265,7 @@ if [ ! -s "${spec_file}" ]; then
 	note "This run did NOT verify that the product's permitted-shadow list"
 	note "matches ${spec_rel}. Set CT_SPECS_DIR to a codetracer-specs"
 	note "checkout, or place one beside this repository, to compare them."
+	note "Set CT_SPECS_REQUIRED=1 to make this state a failure instead."
 	echo
 	printf '%d check(s), %d failure(s), %d skipped\n' "${checks}" "${failures}" "${skips}"
 	expect_count 2

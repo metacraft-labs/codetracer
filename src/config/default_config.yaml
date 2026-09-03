@@ -85,6 +85,21 @@ bindings:
   goDown: "Down"
   pageUp: "PageUp"
   pageDown: "PageDown"
+  # CTRL+E TOGGLES READ-ONLY, and it used to say `switchEdit` here.
+  # `ui_js.nim` bound the chord in code to `data.toggleReadOnly()` and
+  # `ui/editor.nim`'s Monaco `commands` table bound it to the same proc, so the
+  # key toggled read-only inside the editor and dispatched `switchEdit` outside
+  # it -- one chord, two actions, chosen by where the caret was. Toggle
+  # read-only is the behaviour the specs describe and the one a user in the
+  # editor gets, so it is the claim that keeps the chord; it is an action here
+  # rather than a hardcoded bind so that it is rebindable and so that
+  # `renderChord` can print it.
+  #
+  # `switchEdit` IS NOW UNBOUND, DELIBERATELY, and that is symmetric rather
+  # than a loss: its twin `switchDebug` has never been bound here either, and
+  # the pair is reached by `toggleMode` on CTRL+F5. A one-way "enter Edit mode"
+  # chord with no "leave" beside it is what CTRL+E was, and it is why handing
+  # the chord to `switchEdit` would have been the wrong resolution.
   aToggleReadOnly: "CTRL+E"
   fileSearch: "CTRL+P"
   commandSearch: "ALT+P"

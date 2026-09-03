@@ -3203,6 +3203,26 @@ test-chord-and-pane-uniqueness:
   exec > >(tee test-logs/test-chord-and-pane-uniqueness.log) 2>&1
   bash ci/test/chord-and-pane-uniqueness.sh
 
+# THE PERMITTED-SHADOW TABLE IS THE SAME ON BOTH SIDES.
+#
+# `shortcut_bindings_test.nim` fails on any chord `hardBindShadowedActions`
+# reports that `PERMITTED_HARD_BIND_SHADOWS` does not carry. That constant is a
+# copy of a table in `codetracer-specs`, so widening it by one row would make
+# the rule permit exactly the shadow it exists to catch, and every test over it
+# would go on passing. This compares the two texts.
+#
+# SKIPS LOUDLY when `codetracer-specs` is not a sibling -- no CI lane provisions
+# it today -- and `CT_SPECS_REQUIRED=1` turns that skip into a failure, which is
+# the one variable between this recipe and being enforcing in a lane that does.
+# Both instrument arms plant an extra row, one per side, so a run that compared
+# nothing cannot report agreement.
+test-shortcut-shadow-spec-agreement:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-shortcut-shadow-spec-agreement.log) 2>&1
+  bash ci/test/shortcut-shadow-spec-agreement.sh
+
 # ONE BUNDLE, ONE DEFINITION PER NAME.
 #
 # A JS bundle is a single script scope, so two top-level `function foo`

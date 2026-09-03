@@ -1561,6 +1561,15 @@ proc toggleReadOnly*(data: Data) =
   debug.refreshTopbarSurface()
 
 data.functions.toggleMode = toggleMode
+# NOTHING CALLS THIS ONE ANY MORE, and that is worth saying here rather than
+# leaving the next reader to assume it is the keyboard path. `data.functions` is
+# the callback surface `ui/` modules use to reach this module without an import
+# cycle, and `ui/editor.nim`'s Monaco `commands` table was this entry's only
+# consumer. `CTRL+E` now comes from the config as `ClientAction.aToggleReadOnly`,
+# so the keyboard reaches `toggleReadOnly` through `data.actions` instead. The
+# hook is left in place because it is the surface any future non-keyboard
+# caller — a toolbar control, a menu item — would use; it is not a second path
+# the keyboard takes.
 data.functions.toggleReadOnly = toggleReadOnly
 data.functions.update = update
 data.functions.switchToEdit = switchToEdit
