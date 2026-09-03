@@ -269,6 +269,13 @@ tup-generate.vardict
 # npm (project uses yarn; package-lock.json is generated accidentally by npm install)
 package-lock.json
 !storybook/package-lock.json
+# The AppImage's Electron pin. This one is DELIBERATE: it is the whole
+# mechanism by which a release records which Electron it bundled, and it is
+# what makes Electron visible to GitHub's dependency graph. The blanket rule
+# above hid it on the first attempt to commit it, which is a pin that is not
+# in git — ci/test/electron-supply-chain.sh therefore asserts the file is
+# TRACKED, not merely present on disk.
+!appimage-scripts/electron/package-lock.json
 
 # yarn
 .pnp.*

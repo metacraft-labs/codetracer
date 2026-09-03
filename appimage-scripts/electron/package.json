@@ -1,0 +1,9 @@
+{
+  "name": "codetracer-appimage-electron",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pins the Electron runtime bundled into the CodeTracer AppImage. See ../install_electron.sh.",
+  "dependencies": {
+    "electron": "44.1.1"
+  }
+}
