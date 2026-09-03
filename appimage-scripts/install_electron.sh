@@ -44,60 +44,34 @@
 # where the postinstall hook does not run, and (b) REFUSES to produce an AppDir
 # without a runtime. A red build is the cheaper failure.
 
+# THE npm ci + VERIFY HALF NOW LIVES IN scripts/stage-electron-runtime.sh.
+#
+# Not a tidy-up: the macOS dmg ships no Electron AT ALL (its `node_modules` is a
+# store symlink to a tree with 880 packages and no `electron`), and the fix for
+# that has to install the SAME pin this file installs. Two copies of "npm ci the
+# pin, then check the runtime landed" is how the two desktop artefacts drift
+# apart again — this time silently, because both would be green. One
+# implementation, two callers, one lockfile.
+#
+# What stays here is the part that is genuinely AppImage-specific: the
+# destination layout (`${APP_DIR}/electron/node_modules/electron`, which
+# `ci/test/electron-supply-chain.sh` looks for by name) and the Linux launcher
+# below, with its LD_LIBRARY_PATH and its `--no-sandbox`.
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PIN_DIR="${SCRIPT_DIR}/electron"
 DEST="${APP_DIR}/electron"
 
-declared="$(node -p "require('${PIN_DIR}/package.json').dependencies.electron")"
-
-echo "==========="
-echo "codetracer build: install electron"
-echo "  declared pin: ${declared}  (${PIN_DIR#"${SCRIPT_DIR%/*}"/}/package.json)"
-echo "==========="
-
 mkdir -p "${DEST}" "${APP_DIR}/bin"
 
+# Kept beside the package so the AppDir carries the pin it was built from, not
+# only the package's own generated manifest.
 cp "${PIN_DIR}/package.json" "${PIN_DIR}/package-lock.json" "${DEST}/"
 
-# `npm ci` refuses to run when the lock disagrees with the manifest, which is
-# the property being bought here: the AppDir cannot be built from a pin that
-# was edited without regenerating the lock.
-npm ci --omit=dev --prefix "${DEST}"
-
-resolved="$(node -p "require('${DEST}/node_modules/electron/package.json').version")"
-echo "electron: declared=${declared} resolved=${resolved}"
-
-if [ "${resolved}" != "${declared}" ]; then
-	echo "ERROR: npm resolved electron ${resolved}, but the pin declares ${declared}." >&2
-	echo "       ${PIN_DIR}/package-lock.json is not the lock that produced this tree." >&2
-	exit 1
-fi
-
-# The binary download is a postinstall hook, and a hook that does not run is
-# exactly how the 2026-08-30 artefact lost its runtime. Ask for it directly
-# when it is missing rather than assuming npm ran it.
-if [ ! -f "${DEST}/node_modules/electron/dist/electron" ]; then
-	echo "electron: dist/ absent after 'npm ci'; running the binary installer directly"
-	(cd "${DEST}/node_modules/electron" && node install.js)
-fi
-
-if [ ! -f "${DEST}/node_modules/electron/dist/electron" ]; then
-	echo "ERROR: the Electron runtime was not downloaded." >&2
-	echo "       ${DEST}/node_modules/electron/dist/electron does not exist, so the" >&2
-	echo "       AppImage's bin/electron wrapper would exec a path that is not there" >&2
-	echo "       and the GUI would not start. This is the defect that shipped in" >&2
-	echo "       CodeTracer-latest-amd64.AppImage built 2026-08-30." >&2
-	echo "" >&2
-	echo "       Check network access to the Electron release assets, and whether" >&2
-	echo "       ELECTRON_SKIP_BINARY_DOWNLOAD or npm's ignore-scripts is set in" >&2
-	echo "       this shell. ELECTRON_MIRROR selects an alternate download host." >&2
-	exit 1
-fi
-
-dist_files="$(find "${DEST}/node_modules/electron/dist" -type f | wc -l | tr -d ' ')"
-echo "electron: runtime present, ${dist_files} file(s) under dist/"
+bash "${REPO_ROOT}/scripts/stage-electron-runtime.sh" "${DEST}/node_modules/electron"
 
 cat <<'EOF' >"${APP_DIR}/bin/electron"
 #!/usr/bin/env bash

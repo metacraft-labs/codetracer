@@ -1212,7 +1212,30 @@ package codeTracer:
           "cp resources/electron \"$MACOS/bin/electron\"\n" &
           "cp src/helpers.js \"$MACOS/src/helpers.js\"\n" &
           "cp src/helpers.js \"$MACOS/helpers.js\"\n" &
-          "if [ -d node_modules ]; then cp -a node_modules \"$MACOS/node_modules\"; fi\n" &
+          # `cp -a node_modules` used to sit here, and `cp -a` implies `-d`:
+          # it preserves symlinks. In a Nix dev shell `node_modules` IS a
+          # symlink into the store (nix/shells/ci-base.nix and
+          # scripts/build-once.sh both create it that way), so the .app shipped
+          # to users carried
+          #
+          #   Contents/MacOS/node_modules
+          #     -> /nix/store/dfpgz…-node-modules-derivation/bin/node_modules
+          #
+          # an ABSOLUTE path into the build machine's store. Measured on the
+          # published `CodeTracer-latest-arm64.dmg` (downloaded 2026-09-03,
+          # built 2026-08-30): 566 regular files in the whole bundle, no
+          # dependency tree at all. It resolved on the builder and on the
+          # `dmg-lib-check` runner because those are the same self-hosted
+          # aarch64-darwin host, which is why no release check ever saw it.
+          #
+          # The stager copies the CONTENTS, pruned to the production closure —
+          # both halves, because dereferencing alone would ship the development
+          # tree (measured here: 550 packages / 26,452 files / 297.6 MB outside
+          # the closure) that the AppImage stopped shipping in 0d5ad67d.
+          "if [ -e node_modules ]; then\n" &
+          "  python3 scripts/stage-desktop-node-modules.py stage " &
+            "node_modules \"$MACOS/node_modules\"\n" &
+          "fi\n" &
           "if [ -e \"$MACOS/bin/ct\" ]; then\n" &
           "  mv \"$MACOS/bin/ct\" \"$MACOS/bin/ct_unwrapped\"\n" &
           "  cat >\"$MACOS/bin/ct\" <<'EOF'\n" &
@@ -1323,7 +1346,19 @@ package codeTracer:
           "  chmod u+w \"$dylib\"\n" &
           "  install_name_tool -id \"@rpath/$(basename \"$dylib\")\" \"$dylib\" 2>/dev/null || true\n" &
           "  rewrite_macho_deps \"$dylib\" '@loader_path'\n" &
-          "done",
+          "done\n" &
+          # LAST, because it has to see the finished tree.
+          #
+          # Six of the .app's eight symlinks come from `src/public/third_party/`
+          # — committed links whose `../../../..` counts levels from the BUILD
+          # TREE to the repository root. Copied into the bundle that same count
+          # lands on `CodeTracer.app` itself, which has no `node_modules`, so
+          # they are broken in the published dmg on every machine including the
+          # builder's. `relink` re-aims them at the staged tree and FAILS on any
+          # symlink it cannot resolve inside the bundle, so a future asset that
+          # points outside is a red build rather than a missing panel.
+          "python3 scripts/stage-desktop-node-modules.py relink " &
+            "\"$APP_ROOT\" \"$MACOS/node_modules\"",
           extraInputsValue = @[
             "resources/electron",
             "resources/Icon.iconset",
@@ -1331,7 +1366,15 @@ package codeTracer:
             "src/ct/version.nim",
             "src/helpers.js",
             "node_modules",
-            "scripts/build-once.sh"
+            "scripts/build-once.sh",
+            # The stager and everything it reads: it computes the production
+            # closure from the workspace manifest + lockfile through the same
+            # module `ci/test/electron-supply-chain.sh` checks the artefact
+            # against, so a change to any of them changes this bundle.
+            "scripts/stage-desktop-node-modules.py",
+            "ci/test/electron-supply-chain-closure.py",
+            "node-packages/package.json",
+            "node-packages/yarn.lock"
           ],
           extraOutputsValue = @["non-nix-build/CodeTracer.app"],
           afterValue = codetracerActions & frontendActions & styleActions)
@@ -1397,16 +1440,47 @@ package codeTracer:
           "fs.cpSync(" & escape(buildDebugRootPath) & ",APP_ROOT,{recursive:true});" &
           "fs.copyFileSync('src/helpers.js',path.join(APP_ROOT,'src/helpers.js'));" &
           "fs.copyFileSync('src/helpers.js',path.join(APP_ROOT,'helpers.js'));" &
-          "if(fs.existsSync('node_modules'))" &
-            "fs.cpSync('node_modules',path.join(APP_ROOT,'node_modules')," &
-              "{recursive:true,dereference:false});" &
+          # node_modules is NOT copied here any more. `dereference:false` had
+          # the same shape as macOS's `cp -a`: it preserves symlinks, and
+          # `node_modules` in a configured checkout is one
+          # (`non-nix-build/env.sh:88` links it at `node-packages/node_modules`,
+          # `scripts/build-once.sh:322` at the Nix store path). The installer's
+          # `File /r "${STAGING_DIR}\*.*"` would then pack a link whose target
+          # is nowhere on the user's machine — the same defect measured in the
+          # published macOS dmg, on a platform where dangling symlinks are worse
+          # because creating them needs a privilege the installer may not have.
+          #
+          # `scripts/stage-desktop-node-modules.py` does the copy instead, so
+          # both desktop bundles get the same dereferenced, production-pruned
+          # tree from one implementation. `python3` is a declared tool of this
+          # recipe on every platform (see the `uses:` block above), unlike the
+          # POSIX-only entries next to it.
           "fs.copyFileSync('resources/CodeTracer.ico',path.join(APP_ROOT,'CodeTracer.ico'));" &
           "const ctExe=path.join(APP_ROOT,'bin','ct.exe');" &
           "if(fs.existsSync(ctExe)){" &
             "fs.renameSync(ctExe,path.join(APP_ROOT,'bin','ct_unwrapped.exe'));" &
             "fs.writeFileSync(path.join(APP_ROOT,'bin','ct.bat')," &
               escape(ctBatContents) & ");" &
-          "}"
+          "}" &
+          # `execFileSync`, not a shell: this action is `node -e` rather than a
+          # `ctShell` precisely to keep every child a single CreateProcessW and
+          # stay clear of the Git-Bash fork-emulation wedge documented above.
+          # `python3` first, then `python`, because Windows Python installs
+          # publish the latter and reprobuild's tool provisioning resolves the
+          # declared `python3` on POSIX.
+          "const cp=require('node:child_process');" &
+          "function py(args){" &
+            "for(const exe of ['python3','python']){" &
+              "try{cp.execFileSync(exe,args,{stdio:'inherit'});return;}" &
+              "catch(e){if(e.code==='ENOENT')continue;throw e;}" &
+            "}" &
+            "throw new Error('windows-app: no python3/python on PATH; " &
+              "cannot stage node_modules');" &
+          "}" &
+          "const NM=path.join(APP_ROOT,'node_modules');" &
+          "if(fs.existsSync('node_modules'))" &
+            "py(['scripts/stage-desktop-node-modules.py','stage','node_modules',NM]);" &
+          "py(['scripts/stage-desktop-node-modules.py','relink',APP_ROOT,NM]);"
         let windowsApp = node(
           args = @["-e", windowsAppScript],
           actionId = "windows-app",
@@ -1414,7 +1488,11 @@ package codeTracer:
             "resources/CodeTracer.ico",
             "src/ct/version.nim",
             "src/helpers.js",
-            "node_modules"
+            "node_modules",
+            "scripts/stage-desktop-node-modules.py",
+            "ci/test/electron-supply-chain-closure.py",
+            "node-packages/package.json",
+            "node-packages/yarn.lock"
           ],
           extraOutputs = @[appRoot],
           after = codetracerActions & frontendActions & styleActions)

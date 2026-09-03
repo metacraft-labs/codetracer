@@ -247,4 +247,20 @@ lint_step "Electron pin + dev-dependency prune (static half)" \
 lint_step "contract suite: Electron pin + dev-dependency prune" \
 	bash ci/test/electron-supply-chain-test.sh
 
+# Whether every path inside a shipped desktop bundle resolves inside it. Run
+# WITHOUT a bundle here, which exercises the half that needs no build: the
+# stager exists and is tracked, and repro.nim's two staging steps copy
+# node_modules' CONTENTS rather than the symlink. The artefact half runs in the
+# `dmg-build` workflow job, on `non-nix-build/CodeTracer.app`, because that is
+# the only place and moment the tree exists.
+lint_step "desktop bundle self-containment (static half)" \
+	bash ci/test/desktop-bundle-self-contained.sh
+
+# Its arms are the failure paths, and the first one is the reason the defect
+# shipped: an ABSOLUTE /nix/store symlink whose target EXISTS on the machine
+# running the check. A guard written as "find broken symlinks" is green on the
+# exact artefact that is broken for every user.
+lint_step "contract suite: desktop bundle self-containment" \
+	bash ci/test/desktop-bundle-self-contained-test.sh
+
 lint_summary

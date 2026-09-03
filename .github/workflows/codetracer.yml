@@ -2619,6 +2619,46 @@ jobs:
           CODETRACER_REPROBUILD_TARGET: .#macos-app
         run: nix develop . --command bash ci/reprobuild/macos-daemon-build.sh
 
+      - name: Stage the pinned Electron runtime into the app bundle
+        # THE PUBLISHED DMG HAS NO ELECTRON. Measured on
+        # CodeTracer-latest-arm64.dmg (downloaded 2026-09-03, built 2026-08-30):
+        # `Contents/MacOS/bin/electron` execs
+        # `../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,
+        # and the Nix `node-modules-derivation` the bundle pointed at holds 880
+        # top-level packages, none of them `electron` — `node-packages/
+        # package.json` declares no `electron` at all, so no yarn install could
+        # have produced one. The macOS GUI could not start, the same outcome the
+        # 2026-08-30 AppImage had by a different route.
+        #
+        # WHY THIS IS A SEPARATE STEP AND NOT PART OF `.#macos-app`: reprobuild
+        # runs every action with a scrubbed PATH and no network, and staging the
+        # runtime is `npm ci` against a committed lockfile plus a download from
+        # Electron's release assets. Same reason the "Package DMG" step below is
+        # not a reprobuild action. The hermetic half stays hermetic; this step
+        # adds the one input that cannot be.
+        #
+        # The pin is `appimage-scripts/electron/package.json` — the SAME file
+        # the AppImage installs from, so both desktop artefacts carry the same
+        # Electron by construction rather than by coincidence.
+        run: nix develop . --command bash scripts/stage-electron-runtime.sh
+          non-nix-build/CodeTracer.app/Contents/MacOS/node_modules/electron
+
+      - name: Gate the app bundle before packaging it
+        # Two gates, both pointed at the tree that is about to become the dmg.
+        # This is the only moment it exists, and it is BEFORE the upload, so a
+        # bundle that would dangle on a user's Mac cannot be published.
+        #
+        # `dmg-lib-check` cannot substitute for this: it runs on the same
+        # self-hosted aarch64-darwin host that built the bundle, where the
+        # /nix/store path in the old symlink RESOLVES. That is precisely how a
+        # bundle with no dependency tree passed every release check.
+        run: |
+          nix develop . --command bash -c '
+            set -eu
+            bash ci/test/desktop-bundle-self-contained.sh non-nix-build/CodeTracer.app
+            bash ci/test/electron-supply-chain.sh non-nix-build/CodeTracer.app
+          '
+
       - name: Package DMG
         # Package `non-nix-build/CodeTracer.app` into `CodeTracer.dmg` using the
         # devShell's create-dmg. This runs in a plain `nix develop .` shell (NOT
