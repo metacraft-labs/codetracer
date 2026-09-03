@@ -5696,6 +5696,10 @@ when defined(ctWeb) and not defined(ctInExtension):
               imported: false,
               calltrace: true,
               events: true)
+          # THE FILE THE USER WAS EDITING IS THE FILE THEY ARE ABOUT TO
+          # REPLAY, and the layout swap below is about to take its pane away.
+          # Read before the transition, re-opened after it.
+          let sourceTabBeforeRun = data.services.editor.active
           data.switchToDebug()
           if not data.ui.layout.isNil:
             let resolved = cast[GoldenLayoutResolvedConfig](debugLayout)
@@ -5773,6 +5777,42 @@ when defined(ctWeb) and not defined(ctInExtension):
             # not be undone by a timer this Run queued.
             discard windowSetTimeout(
               proc() = data.setEditorsEditable(not data.ui.readOnly), 0)
+
+            # A REPLAY WITH NO SOURCE VIEW CANNOT SHOW YOU WHERE YOU ARE.
+            #
+            # The debugging layout is `config/default_layout.json`, and
+            # `index/layout_config_repair.sanitizeLayoutConfig` strips
+            # per-trace editor tabs out of it by design — so it declares no
+            # editor pane at all, and the swap above replaces the source the
+            # user was editing with nothing. Measured on the assembled bundle,
+            # three round trips: through every replay leg the tab bar carried
+            # `NO SOURCE`, `document.querySelectorAll('.view-line').length` was
+            # 0, and `ci/test/noir-mode-roundtrip.sh`'s "stepping moved the
+            # painted caret" read 0 positions on every trip. The session was
+            # live — the complete-move events carried
+            # `/hello_noir/src/main.nr line 11` and the call depth advanced
+            # with each step — there was simply no source view for the caret to
+            # be painted in.
+            #
+            # Through `openLayoutTab` with `isEditor = true`, which is the same
+            # call `makeEditorViewDetailed` makes and which reuses the editor
+            # already in `data.ui.editors` rather than building a second one.
+            # Nothing is re-read from disk and nothing the user typed is
+            # discarded: the tab is the one that was open, and
+            # `reattachMonacoIfDetached` carries its live Monaco into the new
+            # pane.
+            if not sourceTabBeforeRun.isNil and
+                data.ui.editors.hasKey(sourceTabBeforeRun):
+              try:
+                data.openLayoutTab(
+                  Content.EditorView,
+                  isEditor = true,
+                  path = sourceTabBeforeRun,
+                  editorView = EditorView.ViewSource)
+                data.services.editor.active = sourceTabBeforeRun
+              except CatchableError:
+                cerror "replay: could not re-open the source tab " &
+                  $sourceTabBeforeRun & ": " & getCurrentExceptionMsg()
           requestInitialPanelData(data)
           # The toolbar's own mount gave up during boot, against a document
           # that had not drawn the menu shell yet. Now that the surface exists

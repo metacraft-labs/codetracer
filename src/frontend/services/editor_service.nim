@@ -52,12 +52,35 @@ data.services.editor.onCompleteMove = proc(self: EditorService, response: MoveSt
         # via ``service.changeLine`` and the periodic ``gotoLine`` interval.
         self.data.openTab(editorPath, line = response.location.line)
     else:
-      # eventually TODO(alexander: I wrote this: a more elegant way to pass
-      # to the component)
-      let noInfoMessage = cstring(
-        fmt"We were not able to open the given location path: maybe a missing/internal file: {response.location.path}")
-      echo "no source!"
-      self.data.openTab("NO SOURCE", ViewNoSource, noInfoMessage = noInfoMessage)
+      # THE BACKEND NOT RESOLVING A PATH IS NOT THE SAME AS THERE BEING NO
+      # SOURCE, and on the web the difference is the whole replay.
+      #
+      # `missingPath` is the BACKEND saying it could not find the file on
+      # disk. The renderer may still have it: on Noir Studio the file being
+      # replayed is the file that was open in the editor a moment earlier, and
+      # its text is in `EditorService.open`.
+      #
+      # Measured on the assembled bundle: the FIRST complete-move of a fresh
+      # replay reports `move /hello_noir/src/main.nr:1 missingPath=true` for
+      # exactly that open file. The `NO SOURCE` tab it opened became the ACTIVE
+      # tab of the editor stack, so the source pane next to it was laid out
+      # 0x0 and the debugger's caret was painted where nothing could see it —
+      # `ci/test/noir-mode-roundtrip.sh`'s "stepping moved the painted caret"
+      # read 0 positions on the first trip and 2 on every trip afterwards, once
+      # the backend stopped calling the path missing.
+      #
+      # So the renderer's own open tabs are consulted first. `NO SOURCE` stays
+      # for what it is for: a location whose file this session genuinely does
+      # not have.
+      let knownPath = canonicalSourceRevisionPath(response.location.path)
+      if self.open.hasKey(knownPath) or self.open.hasKey(response.location.path):
+        self.data.openTab(knownPath, line = response.location.line)
+      else:
+        # eventually TODO(alexander: I wrote this: a more elegant way to pass
+        # to the component)
+        let noInfoMessage = cstring(
+          fmt"We were not able to open the given location path: maybe a missing/internal file: {response.location.path}")
+        self.data.openTab("NO SOURCE", ViewNoSource, noInfoMessage = noInfoMessage)
   else:
     discard
 
