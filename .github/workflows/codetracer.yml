@@ -1268,7 +1268,24 @@ jobs:
           # anonymous one. Never printed; see the action.
           gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/bash.sh"
+      # `devShells.lint`, NOT `.default`. The default shell reaches the Cargo
+      # git closure of Sui and Solana through `nix-blockchain-development` when
+      # its `nativeBuildInputs` are evaluated, and this stage runs bash,
+      # shellcheck, python3, node and nimsuggest. That is what the whole
+      # `lint-*` stage has been dying inside, before a single lint ran:
+      #
+      #   error: Failed to fetch git repository https://github.com/anza-xyz/crossbeam
+      #   fatal: could not read Username for 'https://github.com'
+      #
+      # The lint shell takes `pkgs` and nothing else, so that closure is never
+      # forced. See nix/shells/lint.nix for how its package list was derived
+      # (what the scripts INVOKE, not what they mention) and for why this does
+      # not serve `lint-nix` or `lint-rust`.
+      #
+      # `ci/lib/require-tools.sh` runs as the stage's first `lint_step`, so a
+      # shell missing a tool says which one BY NAME instead of dying obscurely
+      # inside a contract suite.
+      - run: "nix develop .#devShells.x86_64-linux.lint -c ./ci/lint/bash.sh"
 
   lint-nim:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
@@ -1332,7 +1349,24 @@ jobs:
           # anonymous one. Never printed; see the action.
           gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh"
+      # `devShells.lint`, NOT `.default`. The default shell reaches the Cargo
+      # git closure of Sui and Solana through `nix-blockchain-development` when
+      # its `nativeBuildInputs` are evaluated, and this stage runs bash,
+      # shellcheck, python3, node and nimsuggest. That is what the whole
+      # `lint-*` stage has been dying inside, before a single lint ran:
+      #
+      #   error: Failed to fetch git repository https://github.com/anza-xyz/crossbeam
+      #   fatal: could not read Username for 'https://github.com'
+      #
+      # The lint shell takes `pkgs` and nothing else, so that closure is never
+      # forced. See nix/shells/lint.nix for how its package list was derived
+      # (what the scripts INVOKE, not what they mention) and for why this does
+      # not serve `lint-nix` or `lint-rust`.
+      #
+      # `ci/lib/require-tools.sh` runs as the stage's first `lint_step`, so a
+      # shell missing a tool says which one BY NAME instead of dying obscurely
+      # inside a contract suite.
+      - run: "nix develop .#devShells.x86_64-linux.lint -c ./ci/lint/nim.sh"
 
   lint-nix:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002

@@ -24,6 +24,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 # shellcheck source=ci/lib/lint-steps.sh disable=SC1091
 source ci/lib/lint-steps.sh
 
+# See the note in ci/lint/bash.sh: the stage names its tools before it runs, so
+# a shell missing one says so by name instead of failing obscurely inside a
+# contract suite. `nimsuggest` is here for ci/test/nimsuggest-check.sh, and
+# python3 for ci/test/dap-command-sync.py.
+lint_step "tools this stage invokes are present" \
+	bash ci/lib/require-tools.sh bash git python3 nimsuggest awk diff sha256sum
+
 # The contract suite runs before the guard it covers, and for the same reason
 # ci/lint/bash.sh executes scripts/resolve-sibling-rev-test.sh: a guard that has
 # only ever been watched printing OK is not evidence. It drives the guard

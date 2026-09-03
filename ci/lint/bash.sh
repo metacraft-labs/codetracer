@@ -29,6 +29,21 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 # shellcheck source=ci/lib/lint-steps.sh disable=SC1091
 source ci/lib/lint-steps.sh
 
+# THE TOOLS THIS STAGE INVOKES, NAMED BEFORE ANYTHING RUNS.
+#
+# `devShells.lint` carries only what the lint stages actually call, which is
+# what keeps this job away from the Cargo git closure of Sui and Solana. The
+# risk that buys is a step silently losing a tool, so the stage says what it
+# needs and fails BY NAME if the shell is missing it — rather than a contract
+# suite dying three lines in on `node: command not found`, or skipping the half
+# of itself that needed it and reporting OK.
+#
+# Derived from what these scripts INVOKE, not what they mention: this file
+# names `cargo`, `nim` and `node` in prose and invokes none of them directly.
+# `node` is here because tools/visual-review/deepreview-harness-test.sh runs it.
+lint_step "tools this stage invokes are present" \
+	bash ci/lib/require-tools.sh shellcheck bash git python3 node awk diff sort comm timeout
+
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh
 
