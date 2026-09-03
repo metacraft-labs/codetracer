@@ -249,13 +249,15 @@ runs:
             # appears in argv where anything reading /proc could see it.
             out="$(printf 'header = "Authorization: Basic %s"\n' \
               "$(printf 'x-access-token:%s' "${DGFE_GH_TOKEN}" | base64 | tr -d '\n')" \
-              | curl -sS -K - -o /dev/null -D - --max-time 30 ${ua[@]+"${ua[@]}"} "${url}" 2>&1)"
+              | curl -sS -K - -o /dev/null -D - -w 'resolved-ip: %{remote_ip}\n' \
+                  --max-time 30 ${ua[@]+"${ua[@]}"} "${url}" 2>&1)"
           else
-            out="$(curl -sS -o /dev/null -D - --max-time 30 ${ua[@]+"${ua[@]}"} "${url}" 2>&1)"
+            out="$(curl -sS -o /dev/null -D - -w 'resolved-ip: %{remote_ip}\n' \
+              --max-time 30 ${ua[@]+"${ua[@]}"} "${url}" 2>&1)"
           fi
           printf '  %s\n' "${label}"
           printf '%s\n' "${out}" \
-            | grep -iE '^HTTP/|^x-ratelimit|^retry-after|^x-github-request-id' \
+            | grep -iE '^HTTP/|^x-ratelimit|^retry-after|^x-github-request-id|^resolved-ip' \
             | tr -d '\r' | sed 's/^/      /'
         }
 
@@ -300,6 +302,74 @@ runs:
         #          picking whichever run agrees with you.
         echo "  (see the comment block in this action; the readings were fixed"
         echo "   before the probes ran, so they cannot be fitted afterwards)"
+
+        echo
+        echo "=== WHAT GIT ITSELF SENDS AND RECEIVES ========================="
+        # THE FIRST MEASUREMENT THAT LOOKS INSIDE GIT RATHER THAN AROUND IT.
+        #
+        # Four explanations have been proposed for the `could not read
+        # Username` failure and all four were disproven by measurement:
+        # checkout's global extraheader (written under a temporary HOME), nix's
+        # `access-tokens` (not applied to plain https git fetches), a rev that
+        # no longer exists (different error), and GitHub metering
+        # unauthenticated git (probe D returns 200 presenting as git). Five
+        # HTTPS requests to this exact `info/refs` succeed while `git ls-remote`
+        # of the same URL on the same host in the same second is challenged.
+        #
+        # So: stop reasoning about what git might be doing and read what it
+        # does. `GIT_TRACE_CURL` prints the request line, every request and
+        # response header, redirects, and the connection details.
+        #
+        # READINGS FIXED IN ADVANCE, so the trace cannot be fitted afterwards:
+        #
+        #   `<= Recv header: HTTP/... 401`
+        #       -> GitHub challenged GIT's actual request while answering the
+        #          same URL 200 to curl with the same User-Agent. The
+        #          `=> Send header` lines then say what differs about it; that
+        #          difference is the defect.
+        #
+        #   `<= Recv header: HTTP/... 200` and git still prompts
+        #       -> A DIFFERENT DEFECT. The challenge is not on ref discovery at
+        #          all; git got its 200 and something after it asked for
+        #          credentials. Look at what follows the 200 in the trace, not
+        #          at the request.
+        #
+        #   a `Connected to github.com (ADDR)` that differs from the
+        #   `resolved-ip` curl reported above
+        #       -> curl and git are not reaching the same host. Resolution or
+        #          routing, and nobody has to theorise about it.
+        #
+        #   no `Connected to` line at all
+        #       -> it never got to HTTP. DNS or TLS, before any of this.
+        #
+        # `Authorization` and `Cookie` lines are dropped below. Git redacts
+        # `Authorization` in this trace itself, but a filter that depends on
+        # another tool's redaction is not a filter.
+        GIT_TRACE_CURL=1 GIT_TRACE_CURL_NO_DATA=1 GIT_TERMINAL_PROMPT=0 \
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+          timeout 60 git ls-remote "${probe_repo}" HEAD \
+          >/dev/null 2>/tmp/gfe-trace.txt
+        rc_trace=$?
+        echo "  git ls-remote exit status: ${rc_trace}"
+        # THREE SLICES WITH THEIR OWN BUDGETS, not one `head` over everything.
+        # A TLS handshake is thirty lines of chatter and would push the HTTP
+        # exchange — the only part that answers the question — off the end of a
+        # single truncated dump. A diagnostic that truncates away its own
+        # subject is the shape this file exists to avoid.
+        trace_strip() {
+          grep -aivE 'authorization|cookie' \
+            | sed -E 's/^[0-9:.]+ +[a-z_]+\.c:[0-9]+ +//' | sed 's/^/      /'
+        }
+        echo "  --- who git connected to (compare with resolved-ip above) ---"
+        grep -aE '== Info: (Connected to|Host .* was resolved|Trying |IPv4:|IPv6:)' \
+          /tmp/gfe-trace.txt | head -8 | trace_strip
+        echo "  --- what git SENT (Authorization/Cookie removed) ---"
+        grep -a '=> Send header' /tmp/gfe-trace.txt | head -25 | trace_strip
+        echo "  --- what git RECEIVED ---"
+        grep -a '<= Recv header' /tmp/gfe-trace.txt | head -25 | trace_strip
+        echo "  --- git's own error ---"
+        grep -av 'trace:' /tmp/gfe-trace.txt | grep -aiE 'fatal|error|warning' \
+          | grep -aivE 'authorization|cookie' | head -5 | sed 's/^/      /'
 
         echo
         echo "(diagnostic only — this step never fails a job)"
