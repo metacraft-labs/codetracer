@@ -117,7 +117,10 @@ fi
 # diagnostics, and every navigation assertion below would be a statement about
 # an empty list — which is exactly the vacuous pass this gate exists to avoid.
 # RESOLVED BY STEM; see `noir-build-in-browser.sh` for the same correction.
-if ! compiler="$(published_asset "${bundle}" assets/noir_wasm.wasm)"; then
+# The resolved path is not needed here — only whether the tree ships one at all,
+# under its plain name or a content-addressed one — so the answer is discarded
+# rather than bound to a variable nothing reads.
+if ! published_asset "${bundle}" assets/noir_wasm.wasm >/dev/null; then
 	echo "  the assembled tree at ${bundle} ships no assets/noir_wasm.wasm," >&2
 	echo "  under that name or a content-addressed one," >&2
 	echo "  so no build can fail with real diagnostics and this gate would" >&2

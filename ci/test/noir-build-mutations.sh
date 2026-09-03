@@ -129,7 +129,9 @@ arm() {
 	echo
 	echo "Arm ${arms}: ${name}"
 
-	local backup="${cache}/$(basename "${file}").${arms}.orig"
+	local base backup
+	base="$(basename "${file}")"
+	backup="${cache}/${base}.${arms}.orig"
 	cp "${file}" "${backup}"
 
 	perl -0pi -e "${expr}" "${file}"
@@ -259,6 +261,10 @@ arm "an undecodable compile response is reported as a success" \
 	"an undecodable answer is a FAULT" \
 	's/    return npvFaulted\n\n  # Warnings are painted/    return npvSucceeded\n\n  # Warnings are painted/'
 
+# The backticks in the pattern below are LITERAL: they are part of the Nim
+# source comment (`` # `process.nim` ``) that this patch has to match, not a
+# command substitution that lost its double quotes.
+# shellcheck disable=SC2016
 arm "a stopped run is reported as a failure" \
 	"${PRODUCER}" "${PRODUCER_TEST}" producer \
 	"a STOP is not a failure" \

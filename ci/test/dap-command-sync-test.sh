@@ -160,7 +160,11 @@ E="${work}/engine.rs"
 mk_engine "${E}"
 
 # The synthetic engine dispatches exactly these six.
-ENGINE_SET="stepIn ct/reverseStepIn scopes ct/originMode next disconnect"
+# AN ARRAY, not a space-separated string. The string form needed an unquoted
+# expansion at every use site, which is word splitting AND globbing: a DAP
+# command name containing a glob character would have been silently replaced by
+# whatever filenames happened to match in the cwd.
+ENGINE_SET=(stepIn ct/reverseStepIn scopes ct/originMode next disconnect)
 
 # ---------------------------------------------------------------------------
 # 1. ENGINE — engine dispatches it, allow-list does not name it
@@ -177,8 +181,8 @@ expect "a command the engine dispatches but the allow-list omits fails, by name"
 # ---------------------------------------------------------------------------
 # 2. MAPPING — EVENT_KIND_TO_DAP_MAPPING names it, allow-list does not
 # ---------------------------------------------------------------------------
-mk_commands "${C}" ${ENGINE_SET}
-mk_mapping "${M}" ${ENGINE_SET} ct/install-source-view
+mk_commands "${C}" "${ENGINE_SET[@]}"
+mk_mapping "${M}" "${ENGINE_SET[@]}" ct/install-source-view
 out="$(run_guard "${C}" "${M}" "${E}" "")"
 status=$?
 expect "a mapped event kind missing from the allow-list fails, by name" \
@@ -189,8 +193,8 @@ expect "a mapped event kind missing from the allow-list fails, by name" \
 # ---------------------------------------------------------------------------
 # 3. RESIDUE — an allow-list entry with no CtEventKind, unexpectedly
 # ---------------------------------------------------------------------------
-mk_commands "${C}" ${ENGINE_SET} ct/emitted-event
-mk_mapping "${M}" ${ENGINE_SET}
+mk_commands "${C}" "${ENGINE_SET[@]}" ct/emitted-event
+mk_mapping "${M}" "${ENGINE_SET[@]}"
 out="$(run_guard "${C}" "${M}" "${E}" "")"
 status=$?
 expect "an unexpected untranslatable command fails the residue pin, by name" \
@@ -208,7 +212,7 @@ expect "the residue pin accepts exactly the command it names" \
 
 # A residue entry that DISAPPEARS is also a failure — the pin is an equality,
 # not a subset, so a command silently dropped from the allow-list is loud too.
-mk_commands "${C}" ${ENGINE_SET}
+mk_commands "${C}" "${ENGINE_SET[@]}"
 out="$(run_guard "${C}" "${M}" "${E}" "ct/emitted-event")"
 status=$?
 expect "a residue entry that vanished fails the pin too" \
@@ -218,8 +222,8 @@ expect "a residue entry that vanished fails the pin too" \
 # ---------------------------------------------------------------------------
 # 4. the all-green case
 # ---------------------------------------------------------------------------
-mk_commands "${C}" ${ENGINE_SET}
-mk_mapping "${M}" ${ENGINE_SET}
+mk_commands "${C}" "${ENGINE_SET[@]}"
+mk_mapping "${M}" "${ENGINE_SET[@]}"
 out="$(run_guard "${C}" "${M}" "${E}" "")"
 status=$?
 expect "a fully synchronised set of tables passes" \
@@ -242,14 +246,12 @@ for probe in stepIn:step-action-match \
 	disconnect:message-loop-guard; do
 	cmd="${probe%%:*}"
 	construct="${probe##*:}"
-	kept=""
-	for c in ${ENGINE_SET}; do
-		[ "${c}" = "${cmd}" ] || kept="${kept} ${c}"
+	kept=()
+	for c in "${ENGINE_SET[@]}"; do
+		[ "${c}" = "${cmd}" ] || kept+=("${c}")
 	done
-	# shellcheck disable=SC2086 # deliberate word splitting of the kept list
-	mk_commands "${C}" ${kept}
-	# shellcheck disable=SC2086
-	mk_mapping "${M}" ${kept}
+	mk_commands "${C}" "${kept[@]}"
+	mk_mapping "${M}" "${kept[@]}"
 	out="$(run_guard "${C}" "${M}" "${E}" "")"
 	status=$?
 	expect "extraction reaches the ${construct}: dropping '${cmd}' reddens the guard" \
@@ -261,8 +263,8 @@ done
 # ---------------------------------------------------------------------------
 # 6. #[cfg(test)] content is not engine dispatch
 # ---------------------------------------------------------------------------
-mk_commands "${C}" ${ENGINE_SET}
-mk_mapping "${M}" ${ENGINE_SET}
+mk_commands "${C}" "${ENGINE_SET[@]}"
+mk_mapping "${M}" "${ENGINE_SET[@]}"
 out="$(run_guard "${C}" "${M}" "${E}" "")"
 status=$?
 expect "commands that appear only under #[cfg(test)] are not required" \

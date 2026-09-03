@@ -77,8 +77,12 @@
 #
 set -uo pipefail
 
-cd "$(dirname "$0")/../.."
-root="$(pwd)"
+# `|| exit` MATTERS HERE. This file runs under `set -uo pipefail` with no `-e`,
+# so a `cd` that failed used to be ignored and everything below — the bundle
+# assembly, the probe, the fixture paths — would have been resolved against
+# whatever directory the caller happened to be in. That is the vacuous-pass
+# shape this gate exists to rule out, arriving through its own first line.
+cd "$(dirname "$0")/../.." || exit 1
 cache="${CT_EDIT_PERSIST_CACHE:-$(mktemp -d)}"
 mkdir -p "${cache}"
 
@@ -195,51 +199,71 @@ if [ "${err}" != '""' ]; then
 	note "probe reported: ${err}"
 fi
 
-[ "$(jbool "${cache}/control.json" mounted)" = "1" ] &&
-	ck ok "the studio mounts on /noir" ||
+if [ "$(jbool "${cache}/control.json" mounted)" = "1" ]; then
+	ck ok "the studio mounts on /noir"
+else
 	ck fail "the studio did not mount; every assertion below is about a page that is not there"
+fi
 
-[ "$(jbool "${cache}/control.json" markerBeforeReload)" = "1" ] &&
-	ck ok "typing reaches the editor's model" ||
+if [ "$(jbool "${cache}/control.json" markerBeforeReload)" = "1" ]; then
+	ck ok "typing reaches the editor's model"
+else
 	ck fail "the typed text never reached a Monaco model"
+fi
 
 # THE MESSAGE THAT HAD NO HOST.
-[ "$(jbool "${cache}/control.json" sawNoHostForSaveFile)" = "0" ] &&
-	ck ok "Ctrl+S is answered — no 'no host for CODETRACER::save-file'" ||
+if [ "$(jbool "${cache}/control.json" sawNoHostForSaveFile)" = "0" ]; then
+	ck ok "Ctrl+S is answered — no 'no host for CODETRACER::save-file'"
+else
 	ck fail "Ctrl+S still logs 'no host for CODETRACER::save-file'"
+fi
 
-[ "$(jbool "${cache}/control.json" mountedAfterReload)" = "1" ] &&
-	ck ok "the studio mounts again after a real reload" ||
+if [ "$(jbool "${cache}/control.json" mountedAfterReload)" = "1" ]; then
+	ck ok "the studio mounts again after a real reload"
+else
 	ck fail "the studio did not come back after the reload"
+fi
 
 # THE HEADLINE. Exact equality: what came back is what was saved.
-[ "$(jbool "${cache}/control.json" markerAfterReload)" = "1" ] &&
-	ck ok "the edit is still there after a reload that destroyed every JS value" ||
+if [ "$(jbool "${cache}/control.json" markerAfterReload)" = "1" ]; then
+	ck ok "the edit is still there after a reload that destroyed every JS value"
+else
 	ck fail "the edit did NOT survive the reload"
+fi
 
-[ "$(jeq "${cache}/control.json" editedContent restoredContent)" = "1" ] &&
-	ck ok "the restored bytes EQUAL the bytes that were saved" ||
+if [ "$(jeq "${cache}/control.json" editedContent restoredContent)" = "1" ]; then
+	ck ok "the restored bytes EQUAL the bytes that were saved"
+else
 	ck fail "the restored bytes differ from what was saved"
+fi
 
 # THE NEGATIVE TWIN, and the one that is red on the shipped build: the restore
 # must not be the bundle.
-[ "$(jeq "${cache}/control.json" restoredContent bundledContent)" = "0" ] &&
-	ck ok "the restored bytes are NOT the bundled template's" ||
+if [ "$(jeq "${cache}/control.json" restoredContent bundledContent)" = "0" ]; then
+	ck ok "the restored bytes are NOT the bundled template's"
+else
 	ck fail "after the reload the tab holds the BUNDLED template — the edit was lost and re-seeded"
+fi
 
-[ "$(jeq "${cache}/control.json" editedContent bundledContent)" = "0" ] &&
-	ck ok "the edit genuinely changed the file (so the check above can fail)" ||
+if [ "$(jeq "${cache}/control.json" editedContent bundledContent)" = "0" ]; then
+	ck ok "the edit genuinely changed the file (so the check above can fail)"
+else
 	ck fail "the 'edit' left the file identical to the bundle; this gate would pass vacuously"
+fi
 
 # A fresh origin partition must NOT have the marker — that is what makes the
 # assertions above statements about STORAGE rather than about the bundle.
-[ "$(jbool "${cache}/control.json" freshContextMarker)" = "0" ] &&
-	ck ok "a browser context that never edited sees the bundled template" ||
+if [ "$(jbool "${cache}/control.json" freshContextMarker)" = "0" ]; then
+	ck ok "a browser context that never edited sees the bundled template"
+else
 	ck fail "a fresh context already contains the marker; the bundle carries it and nothing was proved"
+fi
 
-[ "$(jstrlen "${cache}/control.json" bundledContent)" -gt 100 ] &&
-	ck ok "the fresh context really loaded a project ($(jstrlen "${cache}/control.json" bundledContent) chars)" ||
+if [ "$(jstrlen "${cache}/control.json" bundledContent)" -gt 100 ]; then
+	ck ok "the fresh context really loaded a project ($(jstrlen "${cache}/control.json" bundledContent) chars)"
+else
 	ck fail "the fresh context loaded nothing, so the comparison above is against an empty string"
+fi
 
 # ---------------------------------------------------------------------------
 # §4.2's sentence, DELIVERED THROUGH THE NOTIFICATION SYSTEM — and the status
@@ -257,60 +281,86 @@ fi
 # THE SURFACE IS GONE. Asserted directly, because "a notification appears"
 # would still be true of a build that raised the notification AND kept the
 # banner, which would leave the bar just as covered.
-[ "$(jbool "${cache}/control.json" legacyBannerPresent)" = "0" ] &&
-	ck ok "the bespoke bottom banner is gone from the document" ||
+if [ "$(jbool "${cache}/control.json" legacyBannerPresent)" = "0" ]; then
+	ck ok "the bespoke bottom banner is gone from the document"
+else
 	ck fail "'#codetracer-durability' is still in the page — the covering surface was not removed"
+fi
 
-[ "$(jbool "${cache}/control.json" noticeFound)" = "1" ] &&
-	ck ok "the durability sentence is raised as a Notification in the status bar's stack" ||
+if [ "$(jbool "${cache}/control.json" noticeFound)" = "1" ]; then
+	ck ok "the durability sentence is raised as a Notification in the status bar's stack"
+else
 	ck fail "no durability notification in '#active-notifications' — the sentence reaches no one"
+fi
 
-[ "$(jbool "${cache}/control.json" noticePainted)" = "1" ] &&
-	ck ok "the notification is painted and is the element at its own centre" ||
+if [ "$(jbool "${cache}/control.json" noticePainted)" = "1" ]; then
+	ck ok "the notification is painted and is the element at its own centre"
+else
 	ck fail "the notification is laid out but is not what the browser finds at its own centre"
+fi
 
-[ "$(jget "${cache}/control.json" noticeChars)" -ge 80 ] &&
-	ck ok "the sentence is $(jget "${cache}/control.json" noticeChars) painted characters" ||
+if [ "$(jget "${cache}/control.json" noticeChars)" -ge 80 ]; then
+	ck ok "the sentence is $(jget "${cache}/control.json" noticeChars) painted characters"
+else
 	ck fail "the sentence is too short to be the announcement"
+fi
 
 # THE ACCEPTANCE. Hit-tested at three points across the bar, WHILE the notice
 # is on screen.
-[ "$(jbool "${cache}/control.json" statusBarFound)" = "1" ] &&
-	ck ok "the status bar is in the document, so the check below is about something" ||
+if [ "$(jbool "${cache}/control.json" statusBarFound)" = "1" ]; then
+	ck ok "the status bar is in the document, so the check below is about something"
+else
 	ck fail "'#status-base' is absent; the obscuring check would pass vacuously"
+fi
 
-[ "$(jget "${cache}/control.json" statusBarProbePoints)" -eq 3 ] &&
-	ck ok "all three probe points across the bar are inside the viewport" ||
+if [ "$(jget "${cache}/control.json" statusBarProbePoints)" -eq 3 ]; then
+	ck ok "all three probe points across the bar are inside the viewport"
+else
 	ck fail "only $(jget "${cache}/control.json" statusBarProbePoints) of 3 probe points were testable"
+fi
 
-[ "$(jbool "${cache}/control.json" statusBarUnobscured)" = "1" ] &&
-	ck ok "the status bar is unobscured while the notice is showing" ||
+if [ "$(jbool "${cache}/control.json" statusBarUnobscured)" = "1" ]; then
+	ck ok "the status bar is unobscured while the notice is showing"
+else
 	ck fail "the status bar is covered by $(jget "${cache}/control.json" statusBarCoveredBy)"
+fi
 
 # DISMISSIBLE, AND DISMISSED.
-[ "$(jbool "${cache}/control.json" noticeHasDismiss)" = "1" ] &&
-	ck ok "the notification carries a dismiss control" ||
+if [ "$(jbool "${cache}/control.json" noticeHasDismiss)" = "1" ]; then
+	ck ok "the notification carries a dismiss control"
+else
 	ck fail "the notification cannot be dismissed — that is a banner by another name"
+fi
 
-[ "$(jbool "${cache}/control.json" noticeDismissed)" = "1" ] &&
-	ck ok "clicking dismiss actually removes it" ||
+if [ "$(jbool "${cache}/control.json" noticeDismissed)" = "1" ]; then
+	ck ok "clicking dismiss actually removes it"
+else
 	ck fail "the dismiss control is present and does not dismiss"
+fi
 
 # THE ACTION, beside the chord.
-[ "$(jbool "${cache}/control.json" noticeHasExport)" = "1" ] &&
-	ck ok "the notification offers Export as an action, not only as a chord" ||
+if [ "$(jbool "${cache}/control.json" noticeHasExport)" = "1" ]; then
+	ck ok "the notification offers Export as an action, not only as a chord"
+else
 	ck fail "the notification tells the user to export and offers no button"
+fi
 
-python3 - "${cache}/control.json" <<'PY' && ck ok "the sentence names the export gesture it tells the user to perform" || ck fail "the sentence tells the user to export and does not say how"
+if python3 - "${cache}/control.json" <<'PY'; then
 import json,sys
 d=json.load(open(sys.argv[1]))
 sys.exit(0 if "Ctrl+Shift+E" in (d.get("noticeText") or "") else 1)
 PY
+	ck ok "the sentence names the export gesture it tells the user to perform"
+else
+	ck fail "the sentence tells the user to export and does not say how"
+fi
 
-[ "$(jget "${cache}/control.json" noticeClass)" != "null" ] &&
-	python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));sys.exit(0 if "warning" in (d.get("noticeClass") or "") else 1)' "${cache}/control.json" &&
-	ck ok "it is raised at NotificationWarning — the level the product already has for this" ||
+if [ "$(jget "${cache}/control.json" noticeClass)" != "null" ] &&
+	python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));sys.exit(0 if "warning" in (d.get("noticeClass") or "") else 1)' "${cache}/control.json"; then
+	ck ok "it is raised at NotificationWarning — the level the product already has for this"
+else
 	ck fail "the notification is not a warning; class was $(jget "${cache}/control.json" noticeClass)"
+fi
 
 # ---------------------------------------------------------------------------
 # THE WORDING. Accurate, and no longer opening on a refusal.
@@ -326,36 +376,52 @@ PY
 #
 # The risk is NOT softened away: both halves are asserted.
 # ---------------------------------------------------------------------------
-python3 - "${cache}/control.json" <<'PY' && ck ok "the sentence leads with what is true — the work IS saved" || ck fail "the sentence does not open by saying the work is saved"
+if python3 - "${cache}/control.json" <<'PY'; then
 import json,sys
 d=json.load(open(sys.argv[1]))
 sys.exit(0 if (d.get("noticeText") or "").startswith("Your work is saved in this browser") else 1)
 PY
+	ck ok "the sentence leads with what is true — the work IS saved"
+else
+	ck fail "the sentence does not open by saying the work is saved"
+fi
 
-python3 - "${cache}/control.json" <<'PY' && ck ok "it does not open on a browser refusal" || ck fail "the sentence still reports a refusal as the headline"
+if python3 - "${cache}/control.json" <<'PY'; then
 import json,sys
 d=json.load(open(sys.argv[1]))
 sys.exit(0 if "refused" not in (d.get("noticeText") or "") else 1)
 PY
+	ck ok "it does not open on a browser refusal"
+else
+	ck fail "the sentence still reports a refusal as the headline"
+fi
 
-python3 - "${cache}/control.json" <<'PY' && ck ok "the eviction risk and the export mitigation are both still stated" || ck fail "the wording was softened into dishonesty — the real risk is no longer named"
+if python3 - "${cache}/control.json" <<'PY'; then
 import json,sys
 d=json.load(open(sys.argv[1]))
 t=(d.get("noticeText") or "")
 sys.exit(0 if ("storage" in t and "export the project" in t) else 1)
 PY
+	ck ok "the eviction risk and the export mitigation are both still stated"
+else
+	ck fail "the wording was softened into dishonesty — the real risk is no longer named"
+fi
 
 # ---------------------------------------------------------------------------
 # ONCE PER BROWSER SESSION — and the twin that stops "once" from meaning
 # "never again".
 # ---------------------------------------------------------------------------
-[ "$(jbool "${cache}/control.json" noticeAfterReload)" = "0" ] &&
-	ck ok "a reload in the same tab is not re-nagged" ||
+if [ "$(jbool "${cache}/control.json" noticeAfterReload)" = "0" ]; then
+	ck ok "a reload in the same tab is not re-nagged"
+else
 	ck fail "the notice returns on every load; the reader already read it a moment ago"
+fi
 
-[ "$(jbool "${cache}/control.json" noticeInFreshContext)" = "1" ] &&
-	ck ok "a new browser session IS told — the message is suppressed, not lost" ||
+if [ "$(jbool "${cache}/control.json" noticeInFreshContext)" = "1" ]; then
+	ck ok "a new browser session IS told — the message is suppressed, not lost"
+else
 	ck fail "a fresh context sees no notice at all; the message has been suppressed into silence"
+fi
 
 echo
 

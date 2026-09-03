@@ -485,6 +485,10 @@ else
 	note "$(j c pageErrors)"
 fi
 
+# The backticks inside the JS comment below are LITERAL prose (`endsWith`), not
+# a command substitution, and the single quotes are what keep the JS out of the
+# shell's hands.
+# shellcheck disable=SC2016
 worker_200="$(node -e '
 const doc = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 // THE PUBLISHED URL IS PASSED IN rather than spelled here. `endsWith` on the

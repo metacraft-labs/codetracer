@@ -241,6 +241,13 @@ if [ -f "${known_dark_file}" ]; then
 	known_dark="$(grep -vE '^[[:space:]]*(#|$)' "${known_dark_file}" || true)"
 fi
 known_dark_count="$(printf '%s\n' "${known_dark}" | grep -c . || true)"
+# PRINTED, because it is not the same number as `listed_dark` below and the
+# difference is the interesting part: this counts INVENTORY LINES, while
+# `listed_dark` counts gates that are actually dark and recorded. They diverge
+# when a line names a gate that no longer exists, or names one that has since
+# been wired up — the two rots the checks below catch by name. It was computed
+# and dropped on the floor, which made that divergence invisible in the log.
+note "${known_dark_file} records ${known_dark_count} gate(s)"
 
 dark=0
 listed_dark=0

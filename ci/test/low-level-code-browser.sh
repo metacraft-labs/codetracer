@@ -110,18 +110,19 @@ if [ ! -s "${cache}/probe.one.json" ]; then
 fi
 j() { python3 -c "import json;print(json.load(open('${cache}/probe.one.json')).get('$1'))"; }
 
-[ "$(j paneMounted)" = "True" ] && ck ok "the pane mounted in a real browser" || ck no "the pane mounted in a real browser"
-[ "$(j rowCount)" = "17" ] && ck ok "17 rows — one per ACIR opcode, agreeing with nargo info" || ck no "17 rows (got $(j rowCount))"
-[ "$(j countColumns)" = "0" ] && ck ok "no count column for cpNone — a 0 would read as 'never ran'" || ck no "no count column for cpNone"
+if [ "$(j paneMounted)" = "True" ]; then ck ok "the pane mounted in a real browser"; else ck no "the pane mounted in a real browser"; fi
+if [ "$(j rowCount)" = "17" ]; then ck ok "17 rows — one per ACIR opcode, agreeing with nargo info"; else ck no "17 rows (got $(j rowCount))"; fi
+if [ "$(j countColumns)" = "0" ]; then ck ok "no count column for cpNone — a 0 would read as 'never ran'"; else ck no "no count column for cpNone"; fi
 tally="$(python3 -c "import json;t=json.load(open('${cache}/probe.one.json'))['fidelityTally'];print(','.join(f'{k}={v}' for k,v in sorted(t.items())))")"
 # THE ASSERTION THIS GATE EXISTS FOR. Not "a badge is present" — the exact
 # split the model computes: rows 0-1 exact (main.nr:9), rows 2-16 merged
 # (main.nr:10 inlined into utils.nr:7). A view that stamped one rung on every
 # row would satisfy an existence check and have lost all the information.
-[ "${tally}" = "exact=2,merged=15" ] && ck ok "fidelity on screen is exact=2, merged=15 — the model's own answer" || ck no "fidelity tally is ${tally}, expected exact=2,merged=15"
-[ "$(j syncText)" = "sync on" ] && ck ok "the sync toggle draws its default-on state" || ck no "the sync toggle draws its default-on state"
-[ "$(j pageErrors)" = "[]" ] && ck ok "no page errors" || ck no "no page errors: $(j pageErrors)"
-pc="$(j paintedChars)"; [ "${pc:-0}" -gt 200 ] && ck ok "${pc} characters painted" || ck no "only ${pc} characters painted"
+if [ "${tally}" = "exact=2,merged=15" ]; then ck ok "fidelity on screen is exact=2, merged=15 — the model's own answer"; else ck no "fidelity tally is ${tally}, expected exact=2,merged=15"; fi
+if [ "$(j syncText)" = "sync on" ]; then ck ok "the sync toggle draws its default-on state"; else ck no "the sync toggle draws its default-on state"; fi
+if [ "$(j pageErrors)" = "[]" ]; then ck ok "no page errors"; else ck no "no page errors: $(j pageErrors)"; fi
+pc="$(j paintedChars)"
+if [ "${pc:-0}" -gt 200 ]; then ck ok "${pc} characters painted"; else ck no "only ${pc} characters painted"; fi
 
 echo
 echo "checks: ${checks}, failures: ${failures}"

@@ -178,10 +178,12 @@ echo "    carries the boot sequence that used to live in a second bundle."
 build() {
 	local label="$1" target="$2" out="$3"
 	shift 3
-	local log
+	local log rc=0
 	log="$(nim js --hints:off --warnings:off "$@" \
-		--nimcache:"${cache}/${label}" -o:"${out}" "${target}" 2>&1)"
-	if [ $? -ne 0 ] || [ ! -f "${out}" ]; then
+		--nimcache:"${cache}/${label}" -o:"${out}" "${target}" 2>&1)" || rc=$?
+	# THE ARTIFACT IS TESTED FOR AS WELL AS THE EXIT CODE: `nim js` exits 0
+	# while writing nothing, which is why this is `||` and not `elif`.
+	if [ "${rc}" -ne 0 ] || [ ! -f "${out}" ]; then
 		bad "${label}: did not build"
 		printf '%s\n' "${log}" | grep -E 'Error:' | head -3 | sed 's/^/      /'
 		return 1
@@ -293,7 +295,9 @@ scope_bundle() {
 		ok "${label}: already scoped"
 		return
 	fi
-	local tmp="${cache}/$(basename "${file}").scoped"
+	local base tmp
+	base="$(basename "${file}")"
+	tmp="${cache}/${base}.scoped"
 	{
 		printf '(function(){\n'
 		cat "${file}"
@@ -566,8 +570,12 @@ while IFS=$'\t' read -r id path mode req behaviour consumer; do
 		bad "${id}: could not digest ${path}; refusing to publish it under any name"
 		continue
 	fi
-	named="$("${cache}/asset-name-bin" "${path}" "${digest}")"
-	if [ $? -ne 0 ] || [ -z "${named}" ]; then
+	name_rc=0
+	named="$("${cache}/asset-name-bin" "${path}" "${digest}")" || name_rc=$?
+	# BOTH HALVES. `web_asset_name` can refuse loudly (non-zero) or hand back an
+	# empty string, and publishing an asset under the empty name is the worse of
+	# the two, so neither is allowed to pass.
+	if [ "${name_rc}" -ne 0 ] || [ -z "${named}" ]; then
 		bad "${id}: web_asset_name refused to name ${path} — see its message above"
 		continue
 	fi

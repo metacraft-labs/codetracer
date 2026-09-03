@@ -102,6 +102,28 @@ check_passed() {
 	grep -F "[OK]" "${cache}/$1.log" | grep -qF "$2"
 }
 
+# THE BASELINE, and the reason `check_passed` above exists. It was written and
+# never called, and what went missing with it is the premise every arm rests on:
+# `check_failed` after a mutation only means something if the target check was
+# GREEN before it. A check that is permanently red — because it was written
+# against a selector that no longer exists, say — is reported [FAILED] by every
+# run, so every arm "kills" it and this gate prints "6 killed" while measuring
+# nothing at all. That is precisely the vacuous pass a mutation gate exists to
+# rule out, and it was reachable through the gate itself.
+#
+# One extra run of the browser gate, on the unmutated tree, before any arm.
+echo "Baseline: the gate on an UNMUTATED tree"
+baseline_rc="$(run_gate baseline)"
+if [ "${baseline_rc}" != "0" ]; then
+	echo "      the gate does not pass on the unmutated tree (exit ${baseline_rc})." >&2
+	echo "      Every arm below would be comparing a red tree against a red tree," >&2
+	echo "      so no arm can prove anything. See ${cache}/baseline.log" >&2
+	grep -F "[FAILED]" "${cache}/baseline.log" | head -6 | sed 's/^/      /' >&2
+	exit 2
+fi
+echo "      green — every target check below is asserted green here before it is killed"
+echo
+
 # `arm <label> <description> <target-check-text> <patch-command...>`
 arm() {
 	local label="$1" description="$2" target="$3"
@@ -109,6 +131,17 @@ arm() {
 	arms=$((arms + 1))
 	echo "ARM ${label}: ${description}"
 	echo "      must kill: \"${target}\""
+
+	# THE PREMISE, from the baseline run. A target that is not green on the
+	# unmutated tree cannot be killed by anything this arm does.
+	if ! check_passed baseline "${target}"; then
+		echo "      [MISS] \"${target}\" is not [OK] on the unmutated tree, so a red"
+		echo "             here would prove nothing. Either the check text moved or"
+		echo "             the check is already failing. Fix that before this arm."
+		missed=$((missed + 1))
+		echo
+		return
+	fi
 
 	restore_tree
 	# THE PATCH MUST CHANGE SOMETHING.
@@ -172,6 +205,9 @@ arm() {
 # says whether "landed on the line AND COLUMN" is doing any work beyond what
 # "the caret moved" already says.
 # ---------------------------------------------------------------------------
+# INVOKED INDIRECTLY. `arm` takes the patch as its trailing argv and runs it
+# with `"$@"`, which shellcheck cannot follow.
+# shellcheck disable=SC2329
 patch_drop_column() {
 	perl -0pi -e 's/discard data\.openLocation\(cstring\(path\), line, col\)/discard data.openLocation(cstring(path), line)/' \
 		src/frontend/ui/errors.nim
@@ -187,6 +223,9 @@ arm column "the column is dropped between the diagnostic and the caret" \
 # not told. EMT-D22.2 calls silent wrapping the thing that makes a three-error
 # list feel infinite, so it has its own check and this arm must reach it.
 # ---------------------------------------------------------------------------
+# INVOKED INDIRECTLY. `arm` takes the patch as its trailing argv and runs it
+# with `"$@"`, which shellcheck cannot follow.
+# shellcheck disable=SC2329
 patch_silent_wrap() {
 	perl -0pi -e 's/    vm\.announce\(\n      if step == ensNext: "wrapped to first error" else: "wrapped to last error"\)/    vm.announce("")/' \
 		src/frontend/viewmodel/viewmodels/errors_vm.nim
@@ -205,6 +244,9 @@ arm silentwrap "a wrap happens but is never announced" \
 # the target below is the MENU check: if removing the binding only reddened the
 # caret checks, the menu assertions would not be covering discoverability.
 # ---------------------------------------------------------------------------
+# INVOKED INDIRECTLY. `arm` takes the patch as its trailing argv and runs it
+# with `"$@"`, which shellcheck cannot follow.
+# shellcheck disable=SC2329
 patch_unbind() {
 	perl -0pi -e 's/^  aGotoNextError: "CTRL\+ALT\+N"$/  aGotoNextErrorUnbound: "CTRL+ALT+N"/m' \
 		src/config/default_config.yaml
@@ -222,6 +264,9 @@ arm unbound "the chord is removed from default_config.yaml" \
 # run of this gate found, and the reason its row assertions are hit-tested
 # rather than counted off `innerText`.
 # ---------------------------------------------------------------------------
+# INVOKED INDIRECTLY. `arm` takes the patch as its trailing argv and runs it
+# with `"$@"`, which shellcheck cannot follow.
+# shellcheck disable=SC2329
 patch_no_reveal() {
 	perl -0pi -e 's/  vm\.onRevealPanel = proc\(\) =\n    revealProblemsPanel\(\)/  vm.onRevealPanel = proc() =\n    discard/' \
 		src/frontend/ui/errors.nim
@@ -237,6 +282,9 @@ arm noreveal "navigating no longer reveals the Problems pane" \
 # third row, so a navigator that ignored severity lands on the warning and the
 # caret no longer matches the first error row's position.
 # ---------------------------------------------------------------------------
+# INVOKED INDIRECTLY. `arm` takes the patch as its trailing argv and runs it
+# with `"$@"`, which shellcheck cannot follow.
+# shellcheck disable=SC2329
 patch_all_severities() {
 	perl -0pi -e 's/    if problem\.severity == blsError and problem\.isNavigable:/    if problem.isNavigable:/' \
 		src/frontend/viewmodel/viewmodels/errors_vm.nim
@@ -255,6 +303,9 @@ arm allseverities "navigation stops filtering to errors" \
 # class name could not have caught it, which is the whole point of asserting
 # the computed paint.
 # ---------------------------------------------------------------------------
+# INVOKED INDIRECTLY. `arm` takes the patch as its trailing argv and runs it
+# with `"$@"`, which shellcheck cannot follow.
+# shellcheck disable=SC2329
 patch_unstyled_selection() {
 	perl -0pi -e 's/\.problems-row-selected\n  background: colors-ui-surface-base-selected\n  box-shadow: inset 0\.1875em 0 0 colors-ui-surface-action-primary\n  &:hover\n    background: colors-ui-surface-base-selected/.problems-row-selected\n  color: inherit/' \
 		src/frontend/styles/components/problems.styl

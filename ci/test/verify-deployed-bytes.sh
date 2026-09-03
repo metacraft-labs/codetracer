@@ -151,7 +151,8 @@ for row in list(d.get("modules", [])) + list(d.get("assets", [])):
     if row.get("id"):
         print(row["id"])
 ')"
-for required_id in wasm-worker; do
+required_ids=(wasm-worker)
+for required_id in "${required_ids[@]}"; do
 	if printf '%s\n' "$declared_ids" | grep -qx "$required_id"; then
 		echo "ok: the descriptor declares \`$required_id\`"
 	else
@@ -172,7 +173,7 @@ fi
 
 echo "origin : $origin"
 echo "hosts  : $host_count declared"
-printf '         %s\n' $hosts_declared
+while IFS= read -r h; do [ -n "$h" ] && printf '         %s\n' "$h"; done <<<"$hosts_declared"
 echo "paths  : $path_count per host"
 echo
 
