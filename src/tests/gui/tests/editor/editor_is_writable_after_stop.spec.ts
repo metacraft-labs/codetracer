@@ -34,10 +34,29 @@ import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
 
 const testFolder = path.join(codetracerInstallDir, "test-programs");
 
-/** The model text of the editor Monaco considers first, plus its readOnly. */
-async function readEditorState(
-  page: any,
-): Promise<{ text: string; readOnly: boolean }> {
+/**
+ * The state of THE SOURCE EDITOR THE USER IS LOOKING AT.
+ *
+ * Resolved through `data.ui.editors[data.services.editor.active]` rather than
+ * `monaco.editor.getEditors()[0]`, and the difference is not cosmetic.
+ * `getEditors()` returns every Monaco instance on the page, including two that
+ * are constructed with a hard-coded flag and never follow the mode: the
+ * tracepoint editor is built `readOnly: false` unconditionally
+ * (`ui/trace.nim:1671-1680`) and the inline diff editor `readOnly: true`
+ * (`ui/editor.nim:1938`). So "some editor is editable" — which is what
+ * `ci/test/noir_mode_roundtrip_probe.mjs:147` computes as `anyEditable`, and
+ * what the three-round-trip gate asserts after every Stop — is satisfied by a
+ * tracepoint editor alone, with the source editor read-only.
+ *
+ * `readOnlyFlags` is carried along for the failure message: it is the reading
+ * the existing gate would have taken, so a failure here shows both what the
+ * user experiences and what the weaker instrument would have said.
+ */
+async function readEditorState(page: any): Promise<{
+  text: string;
+  readOnly: boolean;
+  readOnlyFlags: boolean[];
+}> {
   await page.waitForFunction(
     () =>
       typeof (globalThis as any).monaco !== "undefined" &&
@@ -46,11 +65,18 @@ async function readEditorState(
   );
 
   return page.evaluate(() => {
-    const m = (globalThis as any).monaco;
-    const editor = m.editor.getEditors()[0];
+    const w = globalThis as any;
+    const m = w.monaco;
+    const data = w.data;
+    const editor =
+      data?.ui?.editors?.[data?.services?.editor?.active]?.monacoEditor ??
+      m.editor.getEditors()[0];
     return {
       text: editor.getModel().getValue() as string,
       readOnly: editor.getOption(m.editor.EditorOption.readOnly) as boolean,
+      readOnlyFlags: m.editor
+        .getEditors()
+        .map((e: any) => e.getOption(m.editor.EditorOption.readOnly) as boolean),
     };
   });
 }
@@ -65,8 +91,11 @@ async function typeIntoEditor(page: any, marker: string): Promise<boolean> {
   const before = (await readEditorState(page)).text;
 
   await page.evaluate(() => {
-    const m = (globalThis as any).monaco;
-    const editor = m.editor.getEditors()[0];
+    const w = globalThis as any;
+    const data = w.data;
+    const editor =
+      data?.ui?.editors?.[data?.services?.editor?.active]?.monacoEditor ??
+      w.monaco.editor.getEditors()[0];
     editor.setPosition({ lineNumber: 1, column: 1 });
     editor.focus();
   });
@@ -110,10 +139,14 @@ test.describe("The editor after a debug session is stopped", () => {
     const writableAfter = await typeIntoEditor(ctPage, "CT_AFTER_STOP");
     expect(
       writableAfter,
-      "the editor did not accept a keystroke after Stop — Monaco's own " +
-        `readOnly option reads ${stateAfter.readOnly} at this moment. ` +
-        "Stop is specified to return to edit mode, where a new debugging " +
-        "session can be started in the usual way.",
+      "the editor did not accept a keystroke after Stop. The ACTIVE source " +
+        `editor's readOnly option reads ${stateAfter.readOnly}; across every ` +
+        `Monaco instance on the page the flags are ` +
+        `${JSON.stringify(stateAfter.readOnlyFlags)}, so the existing gate's ` +
+        `anyEditable would report ` +
+        `${stateAfter.readOnlyFlags.some((f) => f === false)}. Stop is ` +
+        "specified to return to edit mode, where a new debugging session can " +
+        "be started in the usual way (Mode-Transitions.md §5a).",
     ).toBe(true);
   });
 
