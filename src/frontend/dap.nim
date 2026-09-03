@@ -5,6 +5,41 @@ import
   types,
   communication
 
+type
+  DapRequestOutcome* = object
+    ## WHAT ACTUALLY HAPPENED to a `ct/...` request, as distinct from what
+    ## came back in its body.
+    ##
+    ## Before this type existed the only thing a caller could observe was the
+    ## response's `body`, and the backend answers a refusal with `body: {}`
+    ## (`dap_server.rs::handle_message_browser` builds exactly that frame:
+    ## `success: false`, `message: Some(...)`, `body: json!({})`). The
+    ## liveness timeout also released the continuation with `js{}`. So the two
+    ## were BYTE-IDENTICAL at every call site: a request the backend refused
+    ## by name and a request that was never answered at all produced the same
+    ## empty object, and no caller could tell which had happened — nor,
+    ## therefore, render either one.
+    ##
+    ## That is the same defect shape as a check that cannot tell "did not run"
+    ## from "failed": the diagnostic existed, reached the renderer process,
+    ## and was dropped one layer above the wire.
+    ##
+    ## The three states are now separate fields rather than three spellings of
+    ## absence:
+    ## - `succeeded` — the backend answered and said `success: true`.
+    ## - `timedOut`  — nothing came back within `DAP_RESPONSE_TIMEOUT_MS`.
+    ##   Never set together with a `message` from the backend, because there
+    ##   was no backend answer to take one from.
+    ## - `message`   — THE BACKEND'S OWN SENTENCE, verbatim. Not a generic
+    ##   string composed here: `toggle_breakpoint`'s named refusal, the
+    ##   handshake error, "the trace handler exists but is not initialized"
+    ##   are each more specific than anything this layer could invent.
+    succeeded*: bool
+    timedOut*: bool
+    command*: cstring
+    message*: cstring
+    body*: JsObject
+
 when not defined(ctInExtension):
 
   type
@@ -13,7 +48,7 @@ when not defined(ctInExtension):
       ipc*: Jsobject
       seq*: int
       sessionId*: int  ## M8: id of the owning ReplaySession, attached to outgoing DAP requests.
-      pendingResponses*: JsAssoc[cstring, proc(body: JsObject)]
+      pendingResponses*: JsAssoc[cstring, proc(outcome: DapRequestOutcome)]
         ## M49 — in-flight `asyncSendCtRequest` continuations, keyed by
         ## the request's wire `seq`.
         ##
@@ -40,7 +75,7 @@ when not defined(ctInExtension):
     result = DapApi(
       seq: 0,
       sessionId: 0,
-      pendingResponses: JsAssoc[cstring, proc(body: JsObject)]{}
+      pendingResponses: JsAssoc[cstring, proc(outcome: DapRequestOutcome)]{}
     )
 
 else:
@@ -388,7 +423,7 @@ when not defined(ctInExtension):
     ## code that depends on it instead of spread across every
     ## construction site.
     if dap.pendingResponses.isNil:
-      dap.pendingResponses = JsAssoc[cstring, proc(body: JsObject)]{}
+      dap.pendingResponses = JsAssoc[cstring, proc(outcome: DapRequestOutcome)]{}
 
   const DAP_RESPONSE_TIMEOUT_MS* = 30_000
     ## M49 — how long a request waits for its response before its
@@ -401,6 +436,76 @@ when not defined(ctInExtension):
     ## every caller received before M49, so the worst case after this
     ## change is the pre-M49 behaviour arriving late rather than a new
     ## failure mode.
+
+  proc requestFailureText*(outcome: DapRequestOutcome): cstring =
+    ## The sentence a user reads when a request they triggered did not
+    ## succeed — or "" when it did, which is what keeps this from firing on
+    ## healthy traffic.
+    ##
+    ## THE THREE OUTCOMES GET THREE DIFFERENT SENTENCES, and that is the
+    ## whole requirement. A pane that shows the same thing for "refused
+    ## instantly" and "still working after 30s" has not removed the
+    ## ambiguity, only moved it.
+    ##
+    ## - A refusal quotes THE BACKEND'S OWN WORDS. `toggle_breakpoint`'s
+    ##   named refusal for an unknown id, `handshake_error`, "the trace
+    ##   handler exists but is not initialized" — each says something this
+    ##   layer could not have known and a user can act on. Composing a
+    ##   generic "the request failed" here would throw away the only part
+    ##   worth reading, which is precisely what dropping `message` did.
+    ## - A refusal with an EMPTY message still says it was refused, and says
+    ##   that no reason was given, rather than falling through to silence.
+    ## - A timeout says it TIMED OUT and deliberately does not say "refused":
+    ##   nothing refused anything, nothing answered at all, and the backend
+    ##   may still be working on it.
+    if outcome.succeeded:
+      return cstring""
+    let named =
+      if outcome.command.len > 0: outcome.command else: cstring"the request"
+    if outcome.timedOut:
+      return cstring(&"{named} got no answer from the debugger after " &
+        $(DAP_RESPONSE_TIMEOUT_MS div 1000) & " seconds")
+    if outcome.message.len == 0:
+      return cstring(&"the debugger refused {named}, without saying why")
+    cstring(&"the debugger refused {named}: {outcome.message}")
+
+  var ctRequestFailedObservers: seq[proc(outcome: DapRequestOutcome)] = @[]
+
+  proc onCtRequestFailed*(handler: proc(outcome: DapRequestOutcome)) =
+    ## Register interest in every `sendCtRequest` that does not succeed.
+    ##
+    ## A SEAM RATHER THAN A DIRECT CALL because the notification system lives
+    ## in `event_helpers`/`middleware`, which already import this module —
+    ## calling into it from here is a cycle. This mirrors the pattern the Test
+    ## Results pane uses for `runTests`: the transport declares the seam and
+    ## the wiring layer fills it in. With nobody registered, a refusal is
+    ## logged and dropped exactly as it was before.
+    ##
+    ## A LIST, NOT ONE SLOT, because a refusal is two different facts to two
+    ## different places and they must not have to fight over the hook: the
+    ## status bar has to SAY what happened, and the pane that made the request
+    ## has to STOP CLAIMING IT IS LOADING. A single assignable hook would let
+    ## whichever module initialised second silently disable the other, which
+    ## is the kind of defect this whole change exists to stop shipping.
+    ##
+    ## Module-level rather than per-`DapApi`: every replay session's refusals
+    ## go to the same status bar, and a per-session hook would silently drop
+    ## the second tab's.
+    if not handler.isNil:
+      ctRequestFailedObservers.add(handler)
+
+  proc notifyCtRequestFailed*(outcome: DapRequestOutcome) =
+    ## Fan a failed outcome out to every observer.
+    ##
+    ## Each is isolated: an observer that raises must not stop the ones after
+    ## it from running, or a bug in the pane's cleanup would take the user's
+    ## only notification down with it.
+    for handler in ctRequestFailedObservers:
+      try:
+        handler(outcome)
+      except:
+        console.log cstring"ct request failure observer raised: ",
+          cstring(getCurrentExceptionMsg())
 
   proc resolvePendingDapResponse*(dap: DapApi, raw: JsObject) =
     ## M49 — hand a DAP response frame to the `asyncSendCtRequest`
@@ -423,11 +528,47 @@ when not defined(ctInExtension):
     let pending = dap.pendingResponses[key]
     dap.pendingResponses.jsDeleteKey(key)
     let body = if jsHasOwn(raw, cstring"body"): raw["body"] else: js{}
-    pending(body)
 
-  proc asyncSendCtRequest*(dap: DapApi,
+    # `success` AND `message` ARE READ HERE, and this is the fix.
+    #
+    # They were on the wire all along — `handle_message_browser` has been
+    # sending `success: false` with the refusal's own sentence in `message`
+    # since it learned to answer an `Err` with a response instead of letting
+    # the worker die. This proc simply threw both away and handed on `body`,
+    # which for every failure is `{}`.
+    #
+    # A frame with no `success` key is treated as a SUCCESS, not a failure:
+    # DAP makes the field mandatory on responses, but events and any
+    # hand-rolled frame that reaches here without one must not be reported to
+    # the user as a refusal. Defaulting the other way would make the
+    # notification fire on traffic that never failed.
+    let succeeded =
+      if jsHasOwn(raw, cstring"success"): raw["success"].to(bool) else: true
+    let message =
+      if jsHasOwn(raw, cstring"message"): raw["message"].to(cstring) else: cstring""
+    let command =
+      if jsHasOwn(raw, cstring"command"): raw["command"].to(cstring) else: cstring""
+
+    pending(DapRequestOutcome(
+      succeeded: succeeded,
+      timedOut: false,
+      command: command,
+      message: message,
+      body: body))
+
+  proc dispatchCtRequest(dap: DapApi,
                          kind: CtEventKind,
-                         rawValue: JsObject): Future[JsObject] =
+                         rawValue: JsObject,
+                         onOutcome: proc(outcome: DapRequestOutcome)) =
+    ## Write one `ct/...` request frame and hand its OUTCOME to `onOutcome`.
+    ##
+    ## The single send path. It exists so that the two ways of issuing a
+    ## request — `asyncSendCtRequest`, which wants the body, and
+    ## `sendCtRequest`, which wants to know whether it was refused — cannot
+    ## drift apart in how they park continuations, stamp thread ids or time
+    ## out. Before this split, `sendCtRequest` was `discard
+    ## dap.asyncSendCtRequest(...)` and the second question had no answer at
+    ## all.
 
     # M42 §14.8 — stamp the active recording's composed thread id so the
     # session router in `dap_server.rs` dispatches to the process the
@@ -440,10 +581,11 @@ when not defined(ctInExtension):
       args["threadId"] = activeSessionThreadId
 
     let requestSeq = dap.seq
+    let command = toDapCommandOrEvent(kind)
     let packet = JsObject{
       seq:        requestSeq,
       `type`:     cstring"request",
-      command:    toDapCommandOrEvent(kind),
+      command:    command,
       arguments:  args
     }
 
@@ -460,20 +602,48 @@ when not defined(ctInExtension):
     let key = cstring($requestSeq)
     let api = dap
     api.ensurePendingResponses()
-    result = newPromise proc(resolve: proc(response: JsObject)) =
-      var settled = false
-      api.pendingResponses[key] = proc(body: JsObject) =
-        if settled:
-          return
-        settled = true
-        resolve(body)
-      setResponseTimeout(proc() =
-        if settled:
-          return
-        settled = true
-        api.pendingResponses.jsDeleteKey(key)
-        resolve(js{}), DAP_RESPONSE_TIMEOUT_MS)
-      api.ipc.send("CODETRACER::dap-raw-message", packet)
+    var settled = false
+    api.pendingResponses[key] = proc(outcome: DapRequestOutcome) =
+      if settled:
+        return
+      settled = true
+      var claimed = outcome
+      # The response frame's `command` is authoritative when present, but a
+      # frame that arrived without one must still name the request the user
+      # is waiting on — otherwise the notification says "something failed".
+      if claimed.command.len == 0:
+        claimed.command = command
+      onOutcome(claimed)
+    setResponseTimeout(proc() =
+      if settled:
+        return
+      settled = true
+      api.pendingResponses.jsDeleteKey(key)
+      # A TIMEOUT IS ITS OWN OUTCOME, and saying so is half the point of
+      # `DapRequestOutcome`. `succeeded: false` with `timedOut: true` and no
+      # `message`: nothing answered, so there is no backend sentence to
+      # quote, and the caller must not present this as a refusal — the
+      # backend may still be working.
+      onOutcome(DapRequestOutcome(
+        succeeded: false,
+        timedOut: true,
+        command: command,
+        message: cstring"",
+        body: js{})), DAP_RESPONSE_TIMEOUT_MS)
+    api.ipc.send("CODETRACER::dap-raw-message", packet)
+
+  proc asyncSendCtRequest*(dap: DapApi,
+                         kind: CtEventKind,
+                         rawValue: JsObject): Future[JsObject] =
+    ## Unchanged in shape for its 16 callers: still `Future[JsObject]`, still
+    ## resolved with the response `body`, still `js{}` when nothing came back.
+    ## The outcome is available to anyone who needs it via
+    ## `dispatchCtRequest`; forcing every existing caller to destructure one
+    ## would have been a wide change for no gain at sites that only read a
+    ## body.
+    newPromise proc(resolve: proc(response: JsObject)) =
+      dap.dispatchCtRequest(kind, rawValue, proc(outcome: DapRequestOutcome) =
+        resolve(outcome.body))
 
 
 else:
@@ -551,5 +721,33 @@ else:
     )
 
 proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
+  ## Fire a `ct/...` request whose body the caller does not need.
+  ##
+  ## ## `discard dap.asyncSendCtRequest(...)` WAS THE ROOT OF THE INVISIBLE
+  ## ## REFUSAL, and it is the line this proc used to be
+  ##
+  ## This is the send that 66 of the 82 call sites in `src/frontend` use —
+  ## every menu action, every pane's refresh, `ct/run-tracepoints` among them
+  ## (`middleware.nim:316`). "The caller does not need the body" is true and
+  ## was never the problem. The problem is that discarding the future also
+  ## discarded WHETHER THE REQUEST SUCCEEDED, so a caller could not observe
+  ## the outcome of its own request, and a thing that cannot be observed
+  ## cannot be rendered. Fixing one pane to read its own result would have
+  ## left the other 65 exactly as blind.
+  ##
+  ## So the future is no longer discarded. The body still is — that part was
+  ## right — but a failure now reaches `onCtRequestFailed`, which the wiring
+  ## layer points at the notification system. One change, every call site.
   console.log "Sending ct request: ", kind, " with val ", rawValue
-  discard dap.asyncSendCtRequest(kind, rawValue)
+  when not defined(ctInExtension):
+    dap.dispatchCtRequest(kind, rawValue, proc(outcome: DapRequestOutcome) =
+      if outcome.succeeded:
+        return
+      let text = requestFailureText(outcome)
+      # LOGGED WHETHER OR NOT ANYBODY IS LISTENING. If no host installed the
+      # hook the refusal must still leave a trace, or this proc reintroduces
+      # the silence it exists to remove.
+      console.log cstring"ct request failed: ", text
+      notifyCtRequestFailed(outcome))
+  else:
+    discard dap.asyncSendCtRequest(kind, rawValue)

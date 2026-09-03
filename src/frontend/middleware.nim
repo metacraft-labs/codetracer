@@ -122,6 +122,31 @@ when not defined(ctInExtension):
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
   var lastCompleteMove: MoveState = nil
 
+  when not defined(ctInExtension):
+    # A REFUSED REQUEST BECOMES A NOTIFICATION THE USER CAN READ.
+    #
+    # This is the seam `dap.onCtRequestFailed` declares and nothing filled in
+    # until now. `sendCtRequest` is fire-and-forget by design — the callers
+    # below genuinely do not want the response body — but "I do not want the
+    # body" was being implemented as "I do not want to know whether it
+    # worked", and a backend that answered `success: false` with a sentence
+    # explaining why produced no visible change of any kind.
+    #
+    # `ct/notification` is the route that already works: `ui/status.nim`
+    # subscribes to `CtNotification` and renders every one into the status
+    # bar, and the backend emits them for its own diagnostics
+    # (`dap_handler.rs`). A client-side refusal is the same class of fact and
+    # belongs in the same place, so `errorMessage` is used rather than a new
+    # surface — one notification list, whoever noticed the problem.
+    #
+    # Installed here, once, for every `DapApi`: the hook is module-level in
+    # `dap`, because every replay session's refusals go to the same status
+    # bar and a per-session hook would silently drop the second tab's.
+    onCtRequestFailed(proc(outcome: DapRequestOutcome) =
+      let text = requestFailureText(outcome)
+      if text.len > 0:
+        viewsApi.errorMessage(text))
+
   # for event in ..
   # dapApi.onRaw(DapStopped, proc(kind: CtEventKind, value: JsObject) = viewsApi.emit(DapStopped, value))
 

@@ -2218,6 +2218,52 @@ proc closeTrace*(self: TraceComponent) =
 proc registerTracepointComponent*(component: TraceComponent, api: MediatorWithSubscribers) {.exportc.} =
   component.register(api)
 
+when not defined(ctInExtension):
+  # ---------------------------------------------------------------------------
+  # A REFUSED RUN MUST STOP THE PANE CLAIMING IT IS LOADING
+  #
+  # `runTracepoints` sets `isLoading` before sending `ct/run-tracepoints` and
+  # clears it in exactly two places: `onUpdatedTrace` and
+  # `onTracepointResultsAggregate`. A run the backend REFUSES emits neither —
+  # it answers `success: false` and stops — so `isLoading` stayed true and
+  # `refreshTrace` painted "Loading..." over the results panel forever. The
+  # user saw a spinner for a request that was over before it started.
+  #
+  # ## THIS IS NOT A TIMEOUT, and it must not become one
+  #
+  # A pane that gave up after N seconds would show the same thing whether the
+  # backend refused instantly or is still working — the exact ambiguity this
+  # change removes, at a smaller scale. Nothing here counts time. The arm
+  # fires on the REFUSAL ITSELF, so a slow-but-live run is untouched and keeps
+  # its spinner for as long as it genuinely takes.
+  #
+  # `tracepointError` is reused rather than a new field added: it is already
+  # the pane's channel for "this tracepoint has something to say instead of
+  # results", already rendered by `showErrorMessage` as `.trace-error`, and
+  # already cleared on the next run by `runTracepoints`. A second, parallel
+  # error field would have needed its own clearing rule and would eventually
+  # have disagreed with this one.
+  proc reportTracepointRunFailure(outcome: DapRequestOutcome) =
+    if outcome.command != cstring"ct/run-tracepoints" and
+       outcome.command != cstring"ct/setup-trace-session":
+      return
+    if data.isNil or data.ui.componentMapping[Content.Trace].isNil:
+      return
+    let text = requestFailureText(outcome)
+    for id, component in data.ui.componentMapping[Content.Trace]:
+      let trace = TraceComponent(component)
+      # ONLY THE PANES THAT WERE ACTUALLY WAITING. A tracepoint that was not
+      # part of this run has nothing to correct, and overwriting its results
+      # with someone else's failure would be a new way of lying.
+      if trace.isNil or not trace.isLoading:
+        continue
+      trace.isLoading = false
+      if not trace.tracepoint.isNil:
+        trace.tracepoint.tracepointError = text
+      trace.refreshTrace()
+
+  onCtRequestFailed(reportTracepointRunFailure)
+
 # ---------------------------------------------------------------------------
 # THE VS CODE EXTENSION'S ENTRY POINTS. Last in the module ON PURPOSE — see the
 # long note where this block used to live (just above `calcTraceWidth`). An
