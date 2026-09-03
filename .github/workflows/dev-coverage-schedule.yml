@@ -81,6 +81,59 @@ jobs:
       actions: write
       contents: read
     steps:
+      - name: Fail if the PREVIOUS coverage run never ran
+        # THE GUARD ON THIS MECHANISM, AND IT HAS TO LIVE OUT HERE.
+        #
+        # The failure this whole workflow exists to escape is a run that is
+        # evicted while still PENDING, having created no jobs. The natural
+        # instinct is to let `queue-watchdog` inside `codetracer.yml` report
+        # that -- but it cannot, and the reason is worth writing down so nobody
+        # wires it up later expecting it to work: if the coverage run is
+        # evicted while pending, NOTHING in it runs, and that includes the
+        # watchdog. An alarm inside the run shares the fate of the run.
+        # (`queue-watchdog` also stays PR-only for its own stated reason: on a
+        # coverage run `RUNNING == 0 && QUEUED > 0` holds for hours during the
+        # normal ~15h eph-win-x64 tail, so it would be red on every single
+        # coverage run and become exactly the wallpaper its `if:` guards
+        # against.)
+        #
+        # So the check runs HERE: a different workflow, a different concurrency
+        # group, a stock GitHub-hosted runner that is never starved. It looks at
+        # what the last tick actually produced rather than at configuration,
+        # because "the schedule is configured" and "the schedule delivers a
+        # verdict" are the two things this campaign keeps discovering are not
+        # the same claim.
+        #
+        # `jobs == 0 && completed` is the precise signature of eviction: a run
+        # that started always has job records, and a run still legitimately in
+        # flight is not `completed`. A long-running previous run is NOT an
+        # error -- a full suite needs 12-18h against a 24h clock, so overlap is
+        # expected and reported rather than failed.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prev="$(gh api \
+            "repos/${GH_REPO}/actions/workflows/codetracer.yml/runs?event=workflow_dispatch&branch=dev&per_page=1" \
+            --jq '.workflow_runs[0] | "\(.id) \(.status) \(.conclusion)"' 2>/dev/null || true)"
+          if [ -z "${prev}" ] || [ "${prev}" = "null null null" ]; then
+            echo "no previous coverage run to check — first tick, nothing to verify"
+            exit 0
+          fi
+          read -r prev_id prev_status prev_conclusion <<<"${prev}"
+          njobs="$(gh api \
+            "repos/${GH_REPO}/actions/runs/${prev_id}/jobs?per_page=100" \
+            --jq '.jobs | length')"
+          echo "previous coverage run ${prev_id}: status=${prev_status} conclusion=${prev_conclusion} jobs=${njobs}"
+          if [ "${prev_status}" = "completed" ] && [ "${njobs}" -eq 0 ]; then
+            echo "::error::Coverage run ${prev_id} completed having created ZERO jobs (conclusion=${prev_conclusion}). It was evicted while pending and produced no verdict — the same failure the push group has, now in the coverage group. dev is NOT being measured."
+            exit 1
+          fi
+          if [ "${prev_status}" != "completed" ]; then
+            echo "::notice::Coverage run ${prev_id} is still ${prev_status} with ${njobs} jobs; a full suite needs 12-18h, so overlap with the 24h clock is expected."
+          fi
+
       - name: Dispatch Codetracer CI against the current dev tip
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
