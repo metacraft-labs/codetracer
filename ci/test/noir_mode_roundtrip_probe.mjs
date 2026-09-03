@@ -120,6 +120,35 @@ const snapshotScript = () => {
     } catch (err) { return 'threw'; }
   });
 
+  // THE EDITOR THE USER IS TYPING INTO, ASKED ABOUT BY NAME.
+  //
+  // `anyEditable` below is `some(f === false)` over EVERY Monaco instance in
+  // the document, and two of them never follow the mode at all: the tracepoint
+  // editor is constructed `readOnly: false` unconditionally
+  // (`src/frontend/ui/trace.nim:1671-1680`) and the inline diff editor
+  // `readOnly: true` (`src/frontend/ui/editor.nim:1938`). So one mounted
+  // tracepoint editor satisfies "the editors are writable again" on its own,
+  // with the source editor read-only — which is precisely the failure a mode
+  // transition makes possible, since a rebuilt pane can leave the visible
+  // instance behind while another instance carries the new state.
+  //
+  // An existential over a heterogeneous collection cannot fail for the reason
+  // it was written to detect, because some other member always answers for it.
+  // This resolves the ONE editor the frontend considers active, the same way
+  // the frontend's own code reaches it.
+  let activeSourceEditorReadOnly = 'no-active-editor';
+  try {
+    const data = window.data;
+    const active = data && data.ui && data.ui.editors &&
+      data.ui.editors[data.services && data.services.editor &&
+        data.services.editor.active];
+    const mon = active && active.monacoEditor;
+    if (mon && mon.getRawOptions) {
+      const v = mon.getRawOptions().readOnly;
+      activeSourceEditorReadOnly = typeof v === 'boolean' ? v : String(v);
+    }
+  } catch (err) { activeSourceEditorReadOnly = 'threw'; }
+
   // Debugger-only panes. Their presence is the LAYOUT half of the mode
   // question, and `Mode-Transitions.md` §7 makes it the primary signal:
   // "Which panes are present is the primary signal; the toolbar is the
@@ -145,6 +174,11 @@ const snapshotScript = () => {
     editorCount: editors.length,
     readOnlyFlags,
     anyEditable: readOnlyFlags.some((f) => f === false),
+    // The claim `anyEditable` was meant to make. Kept alongside it rather than
+    // replacing it, so a disagreement between the two is visible in the
+    // recorded snapshot and names itself.
+    activeSourceEditorReadOnly,
+    activeSourceEditorEditable: activeSourceEditorReadOnly === false,
     allReadOnly: readOnlyFlags.length > 0 && readOnlyFlags.every((f) => f === true),
     domEditors: document.querySelectorAll('.monaco-editor').length,
     debugPanesPresent: debugPaneSelectors.filter((s) => document.querySelector(s)),

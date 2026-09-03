@@ -427,6 +427,7 @@ while [ "${trip}" -le "${trips}" ]; do
 	f_surface="$(leg "${control}" "trip-${trip}-edit" '.topbarSurface')"
 	f_panes="$(num "$(leg "${control}" "trip-${trip}-edit" '.debugPanesPresent | length')")"
 	f_editable="$(leg "${control}" "trip-${trip}-edit" '.anyEditable')"
+	f_src_editable="$(leg "${control}" "trip-${trip}-edit" '.activeSourceEditorEditable')"
 	f_run="$(leg "${control}" "trip-${trip}-edit" '.runButtonPresent')"
 	m_present="$(jq -r --argjson t "${trip}" \
 		'[.markerPresentPerLeg[] | select(.trip == $t)] | first | .present' <"${control}")"
@@ -478,6 +479,14 @@ while [ "${trip}" -le "${trips}" ]; do
 		"trip ${trip}: and no debugger pane is still mounted (${f_panes}) — the edit layout came back"
 	ck "$([ "${f_editable}" = true ] && echo ok || echo no)" \
 		"trip ${trip}: and the editors are writable again — switchToEdit ran, not just the mode flag"
+
+	# THE SAME QUESTION, ASKED ABOUT THE RIGHT EDITOR. `anyEditable` above is an
+	# existential over every Monaco instance in the document, two of which never
+	# follow the mode (the tracepoint editor is built readOnly:false and the
+	# inline diff editor readOnly:true), so it is satisfied by an instance the
+	# user is not typing into. See Mode-Transitions.md §5a.
+	ck "$([ "${f_src_editable}" = true ] && echo ok || echo no)" \
+		"trip ${trip}: and THE ACTIVE SOURCE EDITOR is writable (readOnly=$(leg "${control}" "trip-${trip}-edit" '.activeSourceEditorReadOnly')) — not merely some editor on the page"
 	ck "$([ "${f_run}" = true ] && echo ok || echo no)" \
 		"trip ${trip}: and Run is back on the topbar, so the next trip has a gesture"
 	ck "$([ "${m_present}" = true ] && echo ok || echo no)" \
