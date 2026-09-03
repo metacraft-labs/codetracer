@@ -1,3 +1,45 @@
+// ---------------------------------------------------------------------------
+// THE BOTTOM STRIP AND WHAT STACKS ON TOP OF IT
+// ---------------------------------------------------------------------------
+//
+// Three rules in this file used to spell the same geometry as three unrelated
+// literals, and one of them was wrong: `#active-notifications` and
+// `.debug-notification` both sat at `bottom: 38px` while the bar they stack
+// above measures 40px. So the lowest toast was drawn two pixels UNDER the
+// status bar and clipped by it — reported from the live site as "the one at
+// the bottom is partially obscured by the status bar".
+//
+// 38 was not a wrong guess about a fixed number; it was a number that stopped
+// tracking the thing it was derived from. `#status-base` is `2em` tall at
+// `font-size: 1rem` with `0.25em` of padding on each side and no
+// `box-sizing: border-box`, so its outer height is 2rem + 0.5rem = 2.5rem =
+// 40px. Nothing linked the two, so the bar could grow and the toasts would
+// keep addressing where it used to end.
+//
+// So the bar's height is a value, and the stack's offset is COMPUTED from it
+// plus the very gap the toasts already put between each other. The clearance
+// between the lowest toast and the bar is now the same measurement as the
+// clearance between two toasts, by construction rather than by coincidence —
+// `ci/test/noir_edit_persists_probe.mjs` measures the two and
+// `ci/test/noir-edit-persists.sh` asserts they are equal, so a future change
+// to `NOTIFICATION_STACK_GAP` moves both and keeps the gate green, while a
+// change to only one of them cannot be spelled.
+
+NOTIFICATION_STACK_GAP = 0.5rem
+  // The gap between stacked toasts, and — via NOTIFICATION_STACK_BOTTOM —
+  // the gap between the lowest toast and the status bar.
+
+STATUS_BAR_CONTENT_HEIGHT = 2rem
+STATUS_BAR_VERTICAL_PADDING = 0.25rem
+  // Breathing room so the tab curve pseudo-elements are visible above the
+  // tabs; mirrored by the side strip's padding-left/right.
+
+STATUS_BAR_OUTER_HEIGHT = STATUS_BAR_CONTENT_HEIGHT + 2 * STATUS_BAR_VERTICAL_PADDING
+  // 2.5rem. `#status-base` is content-box, so the paddings are outside the
+  // declared height and a reader of `bottom:` has to add them back.
+
+NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
+  // 3rem. Clears the bar, then leaves exactly one inter-toast gap above it.
 
 .build-panel
   height: 100%
@@ -131,10 +173,13 @@
 #active-notifications
   width: fit-content
   height: fit-content
-  bottom: 38px
+  bottom: NOTIFICATION_STACK_BOTTOM
   display: flex
+  // `column-reverse`, so the newest toast is at the BOTTOM of the stack and
+  // the lowest one on screen is the FIRST DOM child. The clipped notification
+  // in the report was therefore `:first-child`, not `:last-child`.
   flex-direction: column-reverse
-  gap: 0.5rem
+  gap: NOTIFICATION_STACK_GAP
   position: fixed
   z-index: 100
   right: 8px
@@ -220,16 +265,20 @@
     // file after `just build-once`.
     bottom: 0
     background-color: colors-ui-surface-primary-default
-    height: 2em
-    font-size: 1rem    // reset from 0.75rem so 2em == 2rem exactly
+    // THE BAR'S HEIGHT IS READ FROM A VALUE, and `#active-notifications`
+    // reads the same one. These used to be `2em`/`0.25em` here and a bare
+    // `38px` there, which is how the toast stack came to address a bar edge
+    // that had moved. See the header of this file.
+    height: STATUS_BAR_CONTENT_HEIGHT
+    font-size: 1rem    // reset from 0.75rem so the rem values above land 1:1
     position: fixed
     width: 100%
     z-index: 100 !important
     display: flex
     align-items: stretch
     overflow: visible   // allow tab curve pseudo-elements to bleed above the bar
-    padding-top: 0.25em    // breathing room so curves are visible above the tabs
-    padding-bottom: 0.25em // mirrors side-strip padding-left/right: 0.25em
+    padding-top: STATUS_BAR_VERTICAL_PADDING    // curves visible above the tabs
+    padding-bottom: STATUS_BAR_VERTICAL_PADDING // mirrors side-strip padding
 
     // The footer drags the window, like the caption bar does.
     //
@@ -610,7 +659,10 @@
   min-width: fit-content
   max-width: 466px
   height: fit-content
-  bottom: 38px
+  // The left-hand operation toast stacks above the same bar as
+  // `#active-notifications` and carried the same stale 38px, so it is clipped
+  // by the same two pixels. One value, both sides of the footer.
+  bottom: NOTIFICATION_STACK_BOTTOM
   position: fixed
   z-index: 100
   left: 8px

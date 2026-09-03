@@ -89,9 +89,16 @@ import ./web_project_store
 #     `newNotification`, the toast stack in `ui/status.nim`, its dismiss
 #     button, its action buttons and its auto-dismiss timers all already
 #     existed and are what every other message in this product goes through.
-#     `#active-notifications` is `position:fixed; bottom:38px; right:8px;
-#     z-index:100` — it stacks ABOVE the status bar rather than over it, which
-#     is the layout decision this file re-made and got wrong.
+#     `#active-notifications` is `position:fixed; right:8px; z-index:100` with
+#     its `bottom` computed from the status bar's height plus the stack's own
+#     inter-toast gap — it stacks ABOVE the status bar rather than over it,
+#     which is the layout decision this file re-made and got wrong.
+#
+#     The offset is deliberately NOT quoted here as a number. It was `38px`
+#     against a 40px bar until a user reported the lowest toast being clipped,
+#     and this comment repeated the wrong figure for as long as the stylesheet
+#     did. `styles/components/status_bar.styl` derives it now; that file is
+#     the one place to read it from.
 #
 # So the sentence is now handed to the renderer instead of painted here.
 # `ui_js.raiseDurabilityNotice` takes it through `takeDurabilityAnnouncement`

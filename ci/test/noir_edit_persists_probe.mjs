@@ -58,6 +58,18 @@ const out = {
   noticeFound: false, noticeText: '', noticeChars: 0, noticePainted: false,
   noticeClass: '', noticeHasDismiss: false, noticeHasExport: false,
   noticeDismissed: null,
+  // HOW MANY OF IT THERE ARE, and how far the lowest one clears the bar.
+  // Both reported from the live page; the caller compares
+  // `noticeGapToStatusBar` against `noticeRowGap` rather than against a
+  // number, so the spacing can change without editing an assertion.
+  noticeCount: 0, toastCount: 0,
+  noticeRowGap: null, noticeInterGap: null, noticeGapToStatusBar: null,
+  noticeLowestBottom: null, noticeBarTop: null,
+  noticeLowestBottomCovered: null, noticeLowestBottomHit: '',
+  // `ui/status.nim`'s delivery counter, either side of the load.
+  statsBefore: null, statsAfter: null,
+  // Diagnostics for a duplication report; nothing asserts on these.
+  notificationFanout: [], statusRegistrations: [],
   // THE COMPLAINT, MEASURED. The banner was `position:fixed; bottom:0;
   // z-index:2147483646` and the status bar is the bottom strip underneath it.
   statusBarFound: false, statusBarUnobscured: false,
@@ -185,6 +197,109 @@ async function statusBarUnobscured(page) {
   });
 }
 
+// HOW MANY, AND HOW FAR ABOVE THE BAR. Two measurements the checks above
+// could not make, both from a report against the live site: three identical
+// copies of the durability notice, the lowest of them clipped by the status
+// bar.
+//
+// NEITHER DEFECT WAS VISIBLE TO THE ASSERTIONS BESIDE THIS ONE, and that is
+// worth stating because both gates were green while both defects shipped:
+//
+//   * `durabilityNotice` uses `items.find(...)`, which takes the FIRST match
+//     and cannot report that there were three. A duplicate is indistinguishable
+//     from the intended single notice through that lens.
+//   * `statusBarUnobscured` asks whether the BAR is covered by a toast. This
+//     defect is the other direction — the bar covers the TOAST — and a bar
+//     that is fully painted is exactly what a clipped toast underneath it
+//     looks like.
+//   * `noticePainted` hit-tests the toast's CENTRE. A toast whose bottom two
+//     pixels are behind the bar still answers for its own centre.
+//
+// So the count is counted, and the clearance is measured against the spacing
+// the stack already uses between toasts rather than against a number written
+// here. `gap` is read from the live computed style, so this stays correct when
+// the design changes the spacing — a test naming the number would have to be
+// edited in the same commit and would pass for the wrong reason if it were not.
+async function noticeGeometry(page) {
+  return await page.evaluate(() => {
+    const out = {
+      count: 0, total: 0, rowGap: null, interGap: null, gapToStatusBar: null,
+      lowestBottomCovered: null, lowestBottomHit: '', barTop: null,
+      lowestBottom: null,
+    };
+    const host = document.getElementById('active-notifications');
+    const bar = document.getElementById('status-base');
+    if (!host || !bar) return out;
+    const items = Array.from(host.querySelectorAll('.status-notification'));
+    out.total = items.length;
+    // Counted by the same identification `durabilityNotice` uses to FIND one,
+    // so "how many" and "which" cannot disagree about what they are talking
+    // about.
+    const mine = items.filter((n) => (n.textContent || '').includes('Ctrl+Shift+E'));
+    out.count = mine.length;
+    if (!items.length) return out;
+
+    // THE INTER-NOTIFICATION SPACING, RESOLVED BY THE BROWSER. This is the
+    // value the user asked the bottom clearance to match, read from the live
+    // page rather than restated, so the assertion is a relation between two
+    // measurements and not a comparison against a constant.
+    const cs = getComputedStyle(host);
+    const g = parseFloat(cs.rowGap === 'normal' ? cs.gap : cs.rowGap);
+    out.rowGap = Number.isFinite(g) ? Math.round(g * 100) / 100 : null;
+
+    // Sorted by screen position. `#active-notifications` is
+    // `flex-direction: column-reverse`, so DOM order is NOT screen order and
+    // "the last one" would name the wrong element half the time.
+    const rects = items.map((n) => n.getBoundingClientRect())
+      .sort((a, b) => a.top - b.top);
+    if (rects.length >= 2) {
+      const a = rects[rects.length - 2];
+      const b = rects[rects.length - 1];
+      out.interGap = Math.round((b.top - a.bottom) * 100) / 100;
+    }
+    const lowest = rects[rects.length - 1];
+    const br = bar.getBoundingClientRect();
+    out.lowestBottom = Math.round(lowest.bottom * 100) / 100;
+    out.barTop = Math.round(br.top * 100) / 100;
+    out.gapToStatusBar = Math.round((br.top - lowest.bottom) * 100) / 100;
+
+    // AND THE COMPLAINT ITSELF, HIT-TESTED: is the bottom edge of the lowest
+    // toast the thing the browser finds there? A positive `gapToStatusBar`
+    // that some other element still covers would be a pass on the arithmetic
+    // and a failure on the screen.
+    const cx = lowest.left + lowest.width / 2;
+    const cy = lowest.bottom - 2;
+    if (cx >= 0 && cy >= 0 && cx <= innerWidth && cy <= innerHeight) {
+      const hit = document.elementFromPoint(cx, cy);
+      const inHost = !!hit && host.contains(hit);
+      out.lowestBottomCovered = !inHost;
+      out.lowestBottomHit = !hit ? 'nothing' :
+        (hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') +
+         (typeof hit.className === 'string' && hit.className
+           ? '.' + hit.className.trim().split(/\s+/).join('.') : ''));
+    }
+    return out;
+  });
+}
+
+// The status bar's own bookkeeping — `ui/status.nim`'s `notificationsDelivered`,
+// exposed on the existing `window.__ctStatusRenderStats` hook. Absent on a
+// build that predates it, which is reported as null rather than as 0: a
+// missing instrument and an instrument reading zero are different facts and
+// the caller asserts on them differently.
+async function statusStats(page) {
+  return await page.evaluate(() => {
+    if (typeof window.__ctStatusRenderStats !== 'function') return null;
+    try {
+      const s = window.__ctStatusRenderStats();
+      return {
+        passes: s.passes, rebuilds: s.rebuilds,
+        delivered: typeof s.delivered === 'number' ? s.delivered : null,
+      };
+    } catch (e) { return null; }
+  });
+}
+
 // DISMISSIBLE, PROVED BY DISMISSING IT. "A warning that cannot be dismissed is
 // a banner by another name", which is the complaint this change answers, so
 // the affordance is exercised rather than merely located.
@@ -214,9 +329,24 @@ try {
   page.on('console', (m) => logs.push(m.text()));
 
   await page.goto(url, { waitUntil: 'load' });
+
+  // THE BASELINE, TAKEN BEFORE THE NOTICE CAN HAVE BEEN RAISED. `load` has
+  // fired but `startWebArm` mounts the renderer and only then walks up to a
+  // status bar, so nothing has been delivered yet. Reading the counter here
+  // rather than assuming it starts at zero is what makes the delta below a
+  // measurement of THIS page load: if the hook is ever pre-warmed, or the
+  // baseline is already non-zero for a reason nobody predicted, the delta is
+  // still right and the raw numbers are in the JSON to be looked at.
+  out.statsBefore = await statusStats(page);
+
   await waitForEditMode(page);
   out.mounted = true;
 
+  // AFTER LAYOUT HAS SETTLED, not merely after the element exists. `waitForEditMode`
+  // ends on a 1200ms settle, and the geometry below is read after the notice has
+  // been located — a rect read while the stack is still being built returns the
+  // previous frame's number, which is wrong in whichever direction the stale
+  // value points and says nothing about it, whereas a missing element throws.
   const notice = await durabilityNotice(page);
   out.legacyBannerPresent = notice.legacyBanner;
   out.noticeFound = notice.found;
@@ -235,6 +365,39 @@ try {
   out.statusBarProbePoints = bar.points;
   out.statusBarCoveredBy = bar.coveredBy;
   out.statusBarRect = bar.rect;
+
+  // HOW MANY, AND HOW HIGH ABOVE THE BAR — also while the notice is on screen,
+  // and before the dismissal below removes the thing being measured.
+  const geom = await noticeGeometry(page);
+  out.noticeCount = geom.count;
+  out.toastCount = geom.total;
+  out.noticeRowGap = geom.rowGap;
+  out.noticeInterGap = geom.interGap;
+  out.noticeGapToStatusBar = geom.gapToStatusBar;
+  out.noticeLowestBottom = geom.lowestBottom;
+  out.noticeBarTop = geom.barTop;
+  out.noticeLowestBottomCovered = geom.lowestBottomCovered;
+  out.noticeLowestBottomHit = geom.lowestBottomHit;
+
+  // DIAGNOSTIC, NOT AN ASSERTION. `communication.nim`'s `emit` already logs
+  // the length of the fan-out list for the event it is emitting, and `receive`
+  // logs how many handlers it is about to call. If a notice ever appears N
+  // times these lines say WHICH multiplicity produced it — N subscribers on
+  // `viewsApi`, or N handlers re-emitting — without adding instrumentation to
+  // the product. Kept in the JSON so a future duplication report starts from a
+  // measurement instead of a re-derivation.
+  out.notificationFanout = logs
+    .filter((l) => /CtNotification/.test(l))
+    .slice(0, 40);
+  out.statusRegistrations = logs
+    .filter((l) => /register component Status|api for Status/.test(l))
+    .slice(0, 20);
+
+  // The same counter, now that the notice has been delivered. The DELTA is
+  // what the caller asserts on: `after - before` is how many notifications
+  // this page load produced, and a run in which nothing was delivered leaves
+  // it at 0 rather than at a plausible-looking 1.
+  out.statsAfter = await statusStats(page);
 
   out.noticeDismissed = await dismissDurabilityNotice(page);
 

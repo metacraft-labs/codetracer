@@ -34,8 +34,14 @@
 # `document.body` at `position:fixed; bottom:0; z-index:2147483646` — which is
 # the status bar's own strip, so the product covered its own footer on every
 # first visit. `NotificationKind`, `newNotification` and the toast stack in
-# `ui/status.nim` already existed and already stack ABOVE the bar
-# (`#active-notifications` is `bottom:38px`), so the sentence moved there.
+# `ui/status.nim` already existed and already stack ABOVE the bar, so the
+# sentence moved there. HOW FAR above is computed in
+# `styles/components/status_bar.styl` from the bar's height plus the stack's
+# own inter-toast gap. It was a bare `38px` against a 40px bar until a user
+# reported the lowest toast being clipped by the footer, and this comment
+# repeated the wrong number for as long as the stylesheet did — so it names
+# the derivation now, and the assertions below MEASURE the clearance instead
+# of restating it.
 #
 # The acceptance is therefore not "a notification appears" but "the status bar
 # is not covered", hit-tested at three points across the bar WHILE the notice
@@ -325,6 +331,114 @@ else
 	ck fail "the status bar is covered by $(jget "${cache}/control.json" statusBarCoveredBy)"
 fi
 
+# ---------------------------------------------------------------------------
+# ONCE, AND CLEAR OF THE BAR
+# ---------------------------------------------------------------------------
+#
+# Both reported from the live site against the same notice, and neither was
+# visible to any assertion above:
+#
+#   "I also see 3 duplicate notifications ... The one at the bottom is
+#    partially obscured by the status bar (it needs to have the same margin
+#    that is used in between the notifications, separating it from the status
+#    bar)"
+#
+# `noticeFound` is produced by `items.find(...)` and answers "at least one",
+# so three copies satisfied it. `statusBarUnobscured` asks whether a toast
+# covers the BAR; this is the bar covering a TOAST, which is the state a fully
+# painted bar is indistinguishable from. And `noticePainted` hit-tests the
+# toast's centre, which a toast clipped at its bottom edge still owns. Three
+# green checks, two live defects.
+#
+# THE COUNT IS A DELTA, NOT A READING. `statsBefore`/`statsAfter` bracket the
+# load around `ui/status.nim`'s `notificationsDelivered`, so an arm in which
+# nothing was delivered scores 0 rather than a plausible-looking 1 — a check
+# that passes when nothing renders is worse than no check.
+delivered_delta() {
+	python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+before, after = d.get("statsBefore"), d.get("statsAfter")
+if not isinstance(after, dict) or after.get("delivered") is None:
+    print("nohook"); raise SystemExit
+b = 0 if not isinstance(before, dict) or before.get("delivered") is None \
+      else before["delivered"]
+print(after["delivered"] - b)
+' "$1"
+}
+
+control_delta="$(delivered_delta "${cache}/control.json")"
+if [ "${control_delta}" = "nohook" ]; then
+	ck fail "window.__ctStatusRenderStats().delivered is missing — the count cannot be measured"
+elif [ "${control_delta}" -eq 1 ]; then
+	ck ok "exactly 1 notification was delivered to the status bar for this page load"
+else
+	ck fail "${control_delta} notifications were delivered for one page load (want exactly 1)"
+fi
+
+if [ "$(jget "${cache}/control.json" noticeCount)" -eq 1 ]; then
+	ck ok "exactly 1 durability notice is on screen"
+else
+	ck fail "$(jget "${cache}/control.json" noticeCount) copies of the durability notice are on screen (want 1)"
+fi
+
+# THE MARGIN, AS A RELATION BETWEEN TWO MEASURED VALUES. `noticeRowGap` is the
+# stack's own inter-notification spacing as the browser computed it, and
+# `noticeGapToStatusBar` is the measured distance from the lowest toast's
+# bottom edge to the top of `#status-base`. Asserting they are EQUAL is the
+# user's request stated exactly ("the same margin that is used in between the
+# notifications"). Naming the pixel value here instead would keep passing after
+# the spacing legitimately changed, and would have to be edited by the same
+# commit that changed it — a test that agrees with whatever it is told.
+gap_matches() {
+	python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+want, got = d.get("noticeRowGap"), d.get("noticeGapToStatusBar")
+if want is None or got is None:
+    print("unmeasured"); raise SystemExit
+# A tolerance, because both numbers come from `getBoundingClientRect` on a
+# fractionally scaled layout; half a pixel cannot hide a 0.5rem discrepancy.
+print("same" if abs(float(want) - float(got)) <= 0.5 else "differ")
+print(want); print(got)
+' "$1"
+}
+
+# Read with `read`, not `mapfile`: this file runs on the macOS bash 3.2 that
+# `/usr/bin/env bash` finds by default on a developer laptop, and `mapfile` is
+# a bash 4 builtin. An unrecognised builtin under `set -uo pipefail` without
+# `-e` fails the line and leaves the variable unset, which would report every
+# gap as unmeasured — a red arm with the wrong explanation attached.
+gap_verdict=""
+gap_want=""
+gap_got=""
+{
+	read -r gap_verdict
+	read -r gap_want
+	read -r gap_got
+} < <(gap_matches "${cache}/control.json")
+
+case "${gap_verdict}" in
+same)
+	ck ok "the lowest notice clears the status bar by ${gap_got}px, the same as the ${gap_want}px gap between notices"
+	;;
+unmeasured)
+	ck fail "the notice/status-bar clearance could not be measured — nothing was on screen to measure"
+	;;
+*)
+	ck fail "the lowest notice clears the status bar by ${gap_got}px but notices are spaced ${gap_want}px apart"
+	;;
+esac
+
+# AND THE COMPLAINT ITSELF. Arithmetic that says the toast clears the bar is
+# still only arithmetic; this is the pixel two above the toast's bottom edge,
+# asked who owns it.
+if [ "$(jbool "${cache}/control.json" noticeLowestBottomCovered)" = "0" ]; then
+	ck ok "the bottom edge of the lowest notice is not covered"
+else
+	ck fail "the bottom of the lowest notice is covered by $(jget "${cache}/control.json" noticeLowestBottomHit)"
+fi
+
 # DISMISSIBLE, AND DISMISSED.
 if [ "$(jbool "${cache}/control.json" noticeHasDismiss)" = "1" ]; then
 	ck ok "the notification carries a dismiss control"
@@ -550,7 +664,7 @@ arm F "the sentence opens on the refusal again" \
 	'not (d.get("noticeText") or "").startswith("Your work is saved in this browser")'
 
 # ---------------------------------------------------------------------------
-expect_count 33
+expect_count 37
 if [ "${failures}" -ne 0 ]; then
 	printf '\nRESULT: FAILED — %d check(s), %d failure(s).\n' "${checks}" "${failures}"
 	exit 1

@@ -99,7 +99,29 @@ proc onStatusUpdate*(self: StatusComponent, update: StatusState) =
   self.state = update
   self.redraw()
 
+var notificationsDelivered* = 0
+  ## How many notifications this page load has handed to a status bar.
+  ##
+  ## A COUNTER, NOT A FLAG, and that is the whole point of it. "Was the notice
+  ## shown?" is answerable by a boolean, and a boolean is exactly what cannot
+  ## tell a notice that was raised once from the same notice raised three
+  ## times — which is what a user reported seeing on the live site. A flag read
+  ## early is also stale-but-plausible, whereas a counter that has not advanced
+  ## is unambiguous.
+  ##
+  ## It counts DELIVERIES rather than rendered nodes, so it separates the two
+  ## explanations for N copies on screen: an emitter that fired N times moves
+  ## this by N, while one delivery drawn N times by a render fault does not
+  ## move it at all. `ci/test/noir_edit_persists_probe.mjs` reads it either
+  ## side of a page load and `ci/test/noir-edit-persists.sh` asserts the delta.
+  ##
+  ## Module-level rather than a field, because the question is about the page
+  ## and not about one component: a second status component would keep its own
+  ## field at 1 each and hide precisely the duplication being measured.
+
 proc onNotification*(self: StatusComponent, notification: Notification) =
+  inc notificationsDelivered
+
   if self.notifications.len == self.maxNotificationsCount:
     self.notifications.delete(0)
 
@@ -337,7 +359,11 @@ when defined(js):
     js{
       requests: statusRenderRequests,
       passes: statusRenderPasses,
-      rebuilds: statusShellRebuilds
+      rebuilds: statusShellRebuilds,
+      # Not a render count — see `notificationsDelivered`. It rides on this
+      # hook because a second `window.__ct*` global for one integer would be a
+      # second thing for a probe to discover and keep in step.
+      delivered: notificationsDelivered
     }
 
   {.emit: """
