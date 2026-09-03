@@ -4841,6 +4841,28 @@ jobs:
         # silently becomes an empty token rather than an error.
         run: bash ci/test/sibling-provisioning-test.sh
 
+      - name: Check every build-once job provisions the workspace the build needs
+        # The other end of the sibling contract. The suite above asks whether a
+        # `siblings:` entry is PINNED reproducibly; this one asks whether the
+        # list is COMPLETE for a job that compiles the desktop core.
+        #
+        # `just build-once` runs `scripts/require-siblings.sh` before anything
+        # else and refuses a workspace missing any of nine repos. A workflow can
+        # therefore be perfectly pinned and still unable to start a build --
+        # which is what `launcher-recorder-e2e` was from the day it was written:
+        # it provisions the three repos the GATE spans, asks for a core that
+        # needs eleven, and failed on all three matrix arms identically, 0.45
+        # seconds in, with no compiler ever started. Nothing there was
+        # language-specific and nothing was wrong with the lock.
+        #
+        # It is a static property of the workflow file, so it belongs in this
+        # bash-only lane rather than in a forty-minute queue on a self-hosted
+        # runner. The suite also EXECUTES the preflight against a throwaway repo
+        # built to reproduce the CI condition, because the same gate's refusal
+        # was invisible for a day: a `grep -c` counting zero exits 1, and under
+        # `set -euo pipefail` that killed the script before it printed a word.
+        run: bash ci/test/build-once-workspace-test.sh
+
       - name: Check the launcher<->recorder gate's cross-repo workflow wiring
         # The other half of the same class of defect, reached from the
         # `workflow_call` side. `actionlint` does not check a caller's `with:`

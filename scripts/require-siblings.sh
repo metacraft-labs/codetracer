@@ -534,7 +534,30 @@ if [ -f "$devshell_guard" ]; then
 		# the delegate's single exit code to mean the same thing forever.
 		uninit_submodules=0
 		if command -v git >/dev/null 2>&1; then
-			uninit_submodules="$(git -C "$repo_root" submodule status 2>/dev/null | grep -c '^-' | tr -d ' ')"
+			# `grep -c` PRINTS 0 and EXITS 1 when nothing matches -- the same
+			# trap ci/test/renderer-pane-parity.sh's `in_bundle` documents. Under
+			# this file's `set -euo pipefail` (line 62) `pipefail` propagates that
+			# 1 out of the pipeline and `-e` then kills the SCRIPT, at an
+			# assignment, before a single line of the report below is printed.
+			#
+			# That is not a hypothetical. It took out `launcher-recorder-e2e
+			# (desktop edge)`: every arm reported only
+			#
+			#   bash scripts/build-once.sh
+			#   error: Recipe `build-once` failed on line 5 with exit code 1
+			#
+			# 0.45s apart with NOTHING in between, and the several-hundred-line
+			# "N required sibling repo(s) are missing" report that the same run
+			# printed a day earlier had simply vanished from the log. A CI
+			# checkout is precisely the case that triggers it: actions/checkout
+			# lands the submodules, so the count is zero, so `grep -c` fails --
+			# a guard that goes silent exactly when the thing it guards is
+			# healthy, while some OTHER precondition is the real failure.
+			#
+			# Capture, then default only if the capture is genuinely empty; a
+			# trailing `|| echo 0` would emit "0\n0" and break the comparison.
+			uninit_submodules="$(git -C "$repo_root" submodule status 2>/dev/null | grep -c '^-' | tr -d ' ')" || true
+			[ -n "$uninit_submodules" ] || uninit_submodules=0
 		fi
 		if [ "${uninit_submodules:-0}" -gt 0 ]; then
 			{
