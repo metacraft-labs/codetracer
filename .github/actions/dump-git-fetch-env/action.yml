@@ -372,5 +372,64 @@ runs:
           | grep -aivE 'authorization|cookie' | head -5 | sed 's/^/      /'
 
         echo
+        echo "=== IS THERE A BUDGET? N ANONYMOUS GIT FETCHES IN A ROW ========"
+        # THE ONLY MEASUREMENT AIMED AT THE SURVIVING HYPOTHESIS RATHER THAN AT
+        # A SPECIAL CASE OF IT.
+        #
+        # Probe D returning 200 killed "EVERY anonymous git request from this
+        # runner is refused". It left "anonymous git requests are refused AFTER
+        # N" completely untouched — a universal and a threshold are different
+        # claims, and every probe above fires five to seven requests from a
+        # fresh budget while `nix develop` fetches the whole Cargo git closure
+        # of Sui and Solana, which is dozens.
+        #
+        # Two observations this has to explain, and only a threshold does:
+        #   * The failure is INTERMITTENT. The same `git ls-remote` in this same
+        #     step returned FAILED on two runs and OK on the next.
+        #   * The repository it dies on MOVES: `anza-xyz/crossbeam` three times,
+        #     `MystenLabs/mysten-sim.git` once, `mystenlabs/tidehunter` for
+        #     lint-nix. It is not attached to a repository at all.
+        #
+        # READINGS FIXED IN ADVANCE:
+        #
+        #   first refusal at some N, roughly repeatable across runs
+        #       -> the budget is real and named. Its size is the number below,
+        #          and the headers captured at the refusal say which limit.
+        #   refusal at N = 1
+        #       -> the budget was already spent by earlier steps in this job
+        #          (checkout, submodules, nine sibling clones). Also a threshold,
+        #          and it says the accounting is per job rather than per step.
+        #   no refusal in the whole loop
+        #       -> at THIS volume the hypothesis is unsupported. It is not yet
+        #          dead — nix makes far more requests than this loop — but it
+        #          stops being the leading explanation, and the honest report is
+        #          "not reproduced at N=<count>", not "disproven".
+        #
+        # Bounded hard: 40 iterations with a 20s cap each, and it stops at the
+        # FIRST refusal, so the normal cost is a few seconds.
+        budget_n=0
+        budget_fail=0
+        for budget_i in $(seq 1 40); do
+          if ! GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null \
+               GIT_CONFIG_SYSTEM=/dev/null \
+               timeout 20 git ls-remote "${probe_repo}" HEAD >/dev/null 2>&1; then
+            budget_fail="${budget_i}"
+            break
+          fi
+          budget_n="${budget_i}"
+        done
+        if [ "${budget_fail}" -ne 0 ]; then
+          echo "  FIRST REFUSAL at anonymous git request #${budget_fail}"
+          echo "  (${budget_n} succeeded before it)"
+          echo "  --- headers on a git-shaped request at that moment ---"
+          gh_headers "     refusal-time probe" "${pub}" 0 1
+        else
+          echo "  NO REFUSAL in ${budget_n} consecutive anonymous git fetches."
+          echo "  Not reproduced at this volume. A flake evaluation makes many"
+          echo "  more fetches than this loop does,"
+          echo "  so this bounds the budget from below rather than disproving it."
+        fi
+
+        echo
         echo "(diagnostic only — this step never fails a job)"
         exit 0
