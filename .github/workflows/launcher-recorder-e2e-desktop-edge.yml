@@ -144,6 +144,9 @@ on:
 #
 # This gate has never yet executed in CI (see the header), so there is no
 # in-flight result here that collapsing could destroy.
+#
+# KEPT IN STEP WITH `codetracer.yml`, which carries the byte-identical block and
+# points back here. Retune one and you must retune the other.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
