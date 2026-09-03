@@ -102,6 +102,13 @@ on:
 # PR path is preserved EXACTLY as it was today: same group, same cancellation.
 #
 # `cancel-in-progress` accepts an expression, so both live in one block.
+#
+# KEPT IN STEP WITH `launcher-recorder-e2e-desktop-edge.yml`. That caller fires
+# on the same push and pull-request edges as this workflow and carries a
+# byte-identical `concurrency` block. If you retune the group or the
+# cancellation expression here, retune it there too -- the two were the first
+# and second largest contributors to the queue backlog, and fixing one alone
+# leaves the fleet paying for the other.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
