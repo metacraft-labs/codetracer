@@ -1539,6 +1539,96 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      - name: Sweep read-only leftovers from the persistent work directory
+        # MODE 3 of the self-hosted checkout outage: a gitignored
+        # `non-nix-build/CodeTracer.app` staged out of the Nix store leaves 0555
+        # directories in this PERSISTENT work tree, and the next job's
+        # `git clean -ffdx` cannot unlink anything inside them. Full rationale,
+        # the measured run, and why the source fix in
+        # scripts/stage-desktop-node-modules.py does not make this redundant:
+        # see the copy of this step in the `test-non-gui` job, and
+        # ci/runner/sweep-readonly-leftovers.sh, with which this body is kept
+        # byte-identical by ci/test/readonly-leftovers-sweep-test.sh.
+        run: |
+          set -uo pipefail
+          shopt -s dotglob nullglob
+          root="${RUNNER_WORKSPACE:-}"
+          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          # Directory-only recursion via a trailing-slash glob, so bash never has to test
+          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
+          # symlinks TO directories; those are skipped, because following them leaves the
+          # work directory (these checkouts link into /nix/store) and a store path is not
+          # ours to chmod.
+          scan() {
+            local d="$1" e p
+            for e in "$d"/*/; do
+              p="${e%/}"
+              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
+              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
+              # a fatal command. Every branch here is a condition, never a bare list.
+              if [ -L "$p" ]; then
+                continue
+              fi
+              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
+                ro_blind=$((ro_blind + 1))
+                continue
+              fi
+              if [ ! -w "$p" ]; then
+                ro_count=$((ro_count + 1))
+                if [ "$ro_shown" -lt 10 ]; then
+                  ro_shown=$((ro_shown + 1))
+                  echo "ro-sweep:   unwritable $p"
+                fi
+              fi
+              scan "$p"
+            done
+            return 0
+          }
+          scan "$root"
+          before="$ro_count"
+          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
+          if [ "$before" -eq 0 ]; then
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          # Prove the tool exists before claiming it worked: a `chmod` that is not on
+          # PATH exits 127, and a `|| true` would turn that into a silent pass.
+          chmod_bin="$(command -v chmod 2>/dev/null || true)"
+          if [ -z "$chmod_bin" ]; then
+            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
+              if [ -x "$candidate" ]; then
+                chmod_bin="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$chmod_bin" ]; then
+            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
+              "$before directory(ies) CANNOT be fixed" >&2
+            exit 1
+          fi
+          echo "ro-sweep: using $chmod_bin"
+          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          scan "$root"
+          after="$ro_count"
+          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
+          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
+          if [ "$after" -ne 0 ]; then
+            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
+              "checkout will still fail to clean them"
+          fi
+
       - name: Evict stale git credentials from this runner's persistent home
         # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
         # `http.https://github.com/metacraft-labs/.extraHeader` left in the
@@ -1681,6 +1771,96 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      - name: Sweep read-only leftovers from the persistent work directory
+        # MODE 3 of the self-hosted checkout outage: a gitignored
+        # `non-nix-build/CodeTracer.app` staged out of the Nix store leaves 0555
+        # directories in this PERSISTENT work tree, and the next job's
+        # `git clean -ffdx` cannot unlink anything inside them. Full rationale,
+        # the measured run, and why the source fix in
+        # scripts/stage-desktop-node-modules.py does not make this redundant:
+        # see the copy of this step in the `test-non-gui` job, and
+        # ci/runner/sweep-readonly-leftovers.sh, with which this body is kept
+        # byte-identical by ci/test/readonly-leftovers-sweep-test.sh.
+        run: |
+          set -uo pipefail
+          shopt -s dotglob nullglob
+          root="${RUNNER_WORKSPACE:-}"
+          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          # Directory-only recursion via a trailing-slash glob, so bash never has to test
+          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
+          # symlinks TO directories; those are skipped, because following them leaves the
+          # work directory (these checkouts link into /nix/store) and a store path is not
+          # ours to chmod.
+          scan() {
+            local d="$1" e p
+            for e in "$d"/*/; do
+              p="${e%/}"
+              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
+              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
+              # a fatal command. Every branch here is a condition, never a bare list.
+              if [ -L "$p" ]; then
+                continue
+              fi
+              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
+                ro_blind=$((ro_blind + 1))
+                continue
+              fi
+              if [ ! -w "$p" ]; then
+                ro_count=$((ro_count + 1))
+                if [ "$ro_shown" -lt 10 ]; then
+                  ro_shown=$((ro_shown + 1))
+                  echo "ro-sweep:   unwritable $p"
+                fi
+              fi
+              scan "$p"
+            done
+            return 0
+          }
+          scan "$root"
+          before="$ro_count"
+          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
+          if [ "$before" -eq 0 ]; then
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          # Prove the tool exists before claiming it worked: a `chmod` that is not on
+          # PATH exits 127, and a `|| true` would turn that into a silent pass.
+          chmod_bin="$(command -v chmod 2>/dev/null || true)"
+          if [ -z "$chmod_bin" ]; then
+            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
+              if [ -x "$candidate" ]; then
+                chmod_bin="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$chmod_bin" ]; then
+            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
+              "$before directory(ies) CANNOT be fixed" >&2
+            exit 1
+          fi
+          echo "ro-sweep: using $chmod_bin"
+          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          scan "$root"
+          after="$ro_count"
+          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
+          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
+          if [ "$after" -ne 0 ]; then
+            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
+              "checkout will still fail to clean them"
+          fi
+
       - name: Evict stale git credentials from this runner's persistent home
         # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
         # `http.https://github.com/metacraft-labs/.extraHeader` left in the
@@ -1792,6 +1972,96 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+
+      - name: Sweep read-only leftovers from the persistent work directory
+        # MODE 3 of the self-hosted checkout outage: a gitignored
+        # `non-nix-build/CodeTracer.app` staged out of the Nix store leaves 0555
+        # directories in this PERSISTENT work tree, and the next job's
+        # `git clean -ffdx` cannot unlink anything inside them. Full rationale,
+        # the measured run, and why the source fix in
+        # scripts/stage-desktop-node-modules.py does not make this redundant:
+        # see the copy of this step in the `test-non-gui` job, and
+        # ci/runner/sweep-readonly-leftovers.sh, with which this body is kept
+        # byte-identical by ci/test/readonly-leftovers-sweep-test.sh.
+        run: |
+          set -uo pipefail
+          shopt -s dotglob nullglob
+          root="${RUNNER_WORKSPACE:-}"
+          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          # Directory-only recursion via a trailing-slash glob, so bash never has to test
+          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
+          # symlinks TO directories; those are skipped, because following them leaves the
+          # work directory (these checkouts link into /nix/store) and a store path is not
+          # ours to chmod.
+          scan() {
+            local d="$1" e p
+            for e in "$d"/*/; do
+              p="${e%/}"
+              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
+              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
+              # a fatal command. Every branch here is a condition, never a bare list.
+              if [ -L "$p" ]; then
+                continue
+              fi
+              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
+                ro_blind=$((ro_blind + 1))
+                continue
+              fi
+              if [ ! -w "$p" ]; then
+                ro_count=$((ro_count + 1))
+                if [ "$ro_shown" -lt 10 ]; then
+                  ro_shown=$((ro_shown + 1))
+                  echo "ro-sweep:   unwritable $p"
+                fi
+              fi
+              scan "$p"
+            done
+            return 0
+          }
+          scan "$root"
+          before="$ro_count"
+          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
+          if [ "$before" -eq 0 ]; then
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          # Prove the tool exists before claiming it worked: a `chmod` that is not on
+          # PATH exits 127, and a `|| true` would turn that into a silent pass.
+          chmod_bin="$(command -v chmod 2>/dev/null || true)"
+          if [ -z "$chmod_bin" ]; then
+            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
+              if [ -x "$candidate" ]; then
+                chmod_bin="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$chmod_bin" ]; then
+            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
+              "$before directory(ies) CANNOT be fixed" >&2
+            exit 1
+          fi
+          echo "ro-sweep: using $chmod_bin"
+          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          scan "$root"
+          after="$ro_count"
+          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
+          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
+          if [ "$after" -ne 0 ]; then
+            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
+              "checkout will still fail to clean them"
+          fi
 
       - name: Evict stale git credentials from this runner's persistent home
         # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
@@ -2778,6 +3048,96 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      - name: Sweep read-only leftovers from the persistent work directory
+        # MODE 3 of the self-hosted checkout outage: a gitignored
+        # `non-nix-build/CodeTracer.app` staged out of the Nix store leaves 0555
+        # directories in this PERSISTENT work tree, and the next job's
+        # `git clean -ffdx` cannot unlink anything inside them. Full rationale,
+        # the measured run, and why the source fix in
+        # scripts/stage-desktop-node-modules.py does not make this redundant:
+        # see the copy of this step in the `test-non-gui` job, and
+        # ci/runner/sweep-readonly-leftovers.sh, with which this body is kept
+        # byte-identical by ci/test/readonly-leftovers-sweep-test.sh.
+        run: |
+          set -uo pipefail
+          shopt -s dotglob nullglob
+          root="${RUNNER_WORKSPACE:-}"
+          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          # Directory-only recursion via a trailing-slash glob, so bash never has to test
+          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
+          # symlinks TO directories; those are skipped, because following them leaves the
+          # work directory (these checkouts link into /nix/store) and a store path is not
+          # ours to chmod.
+          scan() {
+            local d="$1" e p
+            for e in "$d"/*/; do
+              p="${e%/}"
+              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
+              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
+              # a fatal command. Every branch here is a condition, never a bare list.
+              if [ -L "$p" ]; then
+                continue
+              fi
+              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
+                ro_blind=$((ro_blind + 1))
+                continue
+              fi
+              if [ ! -w "$p" ]; then
+                ro_count=$((ro_count + 1))
+                if [ "$ro_shown" -lt 10 ]; then
+                  ro_shown=$((ro_shown + 1))
+                  echo "ro-sweep:   unwritable $p"
+                fi
+              fi
+              scan "$p"
+            done
+            return 0
+          }
+          scan "$root"
+          before="$ro_count"
+          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
+          if [ "$before" -eq 0 ]; then
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          # Prove the tool exists before claiming it worked: a `chmod` that is not on
+          # PATH exits 127, and a `|| true` would turn that into a silent pass.
+          chmod_bin="$(command -v chmod 2>/dev/null || true)"
+          if [ -z "$chmod_bin" ]; then
+            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
+              if [ -x "$candidate" ]; then
+                chmod_bin="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$chmod_bin" ]; then
+            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
+              "$before directory(ies) CANNOT be fixed" >&2
+            exit 1
+          fi
+          echo "ro-sweep: using $chmod_bin"
+          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          scan "$root"
+          after="$ro_count"
+          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
+          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
+          if [ "$after" -ne 0 ]; then
+            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
+              "checkout will still fail to clean them"
+          fi
+
       - name: Evict stale git credentials from this runner's persistent home
         # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
         # `http.https://github.com/metacraft-labs/.extraHeader` left in the
@@ -3191,6 +3551,96 @@ jobs:
     needs:
       - dmg-build
     steps:
+      - name: Sweep read-only leftovers from the persistent work directory
+        # MODE 3 of the self-hosted checkout outage: a gitignored
+        # `non-nix-build/CodeTracer.app` staged out of the Nix store leaves 0555
+        # directories in this PERSISTENT work tree, and the next job's
+        # `git clean -ffdx` cannot unlink anything inside them. Full rationale,
+        # the measured run, and why the source fix in
+        # scripts/stage-desktop-node-modules.py does not make this redundant:
+        # see the copy of this step in the `test-non-gui` job, and
+        # ci/runner/sweep-readonly-leftovers.sh, with which this body is kept
+        # byte-identical by ci/test/readonly-leftovers-sweep-test.sh.
+        run: |
+          set -uo pipefail
+          shopt -s dotglob nullglob
+          root="${RUNNER_WORKSPACE:-}"
+          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          # Directory-only recursion via a trailing-slash glob, so bash never has to test
+          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
+          # symlinks TO directories; those are skipped, because following them leaves the
+          # work directory (these checkouts link into /nix/store) and a store path is not
+          # ours to chmod.
+          scan() {
+            local d="$1" e p
+            for e in "$d"/*/; do
+              p="${e%/}"
+              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
+              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
+              # a fatal command. Every branch here is a condition, never a bare list.
+              if [ -L "$p" ]; then
+                continue
+              fi
+              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
+                ro_blind=$((ro_blind + 1))
+                continue
+              fi
+              if [ ! -w "$p" ]; then
+                ro_count=$((ro_count + 1))
+                if [ "$ro_shown" -lt 10 ]; then
+                  ro_shown=$((ro_shown + 1))
+                  echo "ro-sweep:   unwritable $p"
+                fi
+              fi
+              scan "$p"
+            done
+            return 0
+          }
+          scan "$root"
+          before="$ro_count"
+          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
+          if [ "$before" -eq 0 ]; then
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          # Prove the tool exists before claiming it worked: a `chmod` that is not on
+          # PATH exits 127, and a `|| true` would turn that into a silent pass.
+          chmod_bin="$(command -v chmod 2>/dev/null || true)"
+          if [ -z "$chmod_bin" ]; then
+            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
+              if [ -x "$candidate" ]; then
+                chmod_bin="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$chmod_bin" ]; then
+            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
+              "$before directory(ies) CANNOT be fixed" >&2
+            exit 1
+          fi
+          echo "ro-sweep: using $chmod_bin"
+          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          scan "$root"
+          after="$ro_count"
+          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
+          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
+          if [ "$after" -ne 0 ]; then
+            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
+              "checkout will still fail to clean them"
+          fi
+
       - name: Evict stale git credentials from this runner's persistent home
         # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
         # `http.https://github.com/metacraft-labs/.extraHeader` left in the
@@ -3534,6 +3984,128 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+
+      - name: Sweep read-only leftovers from the persistent work directory
+        # MODE 3 of the self-hosted checkout outage, and the first one seen on
+        # the m3 macOS class. Run 33734457928, job 100581650873, runner
+        # m3-mcl-003, this job, the step below:
+        #
+        #   warning: failed to remove non-nix-build/CodeTracer.app/Contents/
+        #     MacOS/node_modules/<31,307 paths>: Permission denied
+        #   ##[warning]Unable to clean or reset the repository. The repository
+        #     will be recreated instead.
+        #   ##[error]File was unable to be removed Error: EACCES: permission
+        #     denied, unlink '.../node_modules/abbrev/LICENSE'
+        #
+        # All 31,307 warnings name ONE tree. `dmg-build` stages the desktop
+        # bundle's `node_modules` out of the Nix store, store paths are 0555
+        # directories / 0444 files, `shutil.copytree` preserved the mode, and
+        # `non-nix-build/CodeTracer.app` is gitignored -- so it SURVIVES in the
+        # persistent work directory and lands on whichever job runs there next.
+        # `git clean -ffdx` then cannot unlink one file inside it, because
+        # POSIX unlink needs write on the PARENT DIRECTORY.
+        #
+        # THE SOURCE IS FIXED SEPARATELY, in
+        # scripts/stage-desktop-node-modules.py (which now restores owner-write
+        # over what it stages and prints the counts) and gated on the finished
+        # artefact by ci/test/desktop-bundle-self-contained.sh. This step is the
+        # BACKSTOP, and it is not an alternative to that fix: the poison is
+        # already on m3-mcl-003's disk and no source change removes it.
+        #
+        # WHY THE EXISTING SWEEP DID NOT COVER THIS. The step named "Sweep stale
+        # git lock files from the persistent work directory" does carry a
+        # `chmod -R u+w`, and it missed this for two independent reasons: it
+        # exists in exactly ONE job (`visual-replay-regression-gate`,
+        # `runs-on: [self-hosted, gpu]`), and it is built on `find`, which is
+        # not on PATH on the nix-darwin runners at all.
+        #
+        # The body is PURE BASH -- no grep, sed, awk or find, none of which the
+        # m3 runners have -- and is kept byte-identical to
+        # ci/runner/sweep-readonly-leftovers.sh, where the rationale is written
+        # out at length and where ci/test/readonly-leftovers-sweep-test.sh
+        # executes it against poisoned and clean fixtures under
+        # `env -i PATH=<bash+git only>`. An inline `run:` block has no other way
+        # to be tested, and this campaign has three times been fooled by a
+        # cleanup that silently no-opped.
+        run: |
+          set -uo pipefail
+          shopt -s dotglob nullglob
+          root="${RUNNER_WORKSPACE:-}"
+          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          # Directory-only recursion via a trailing-slash glob, so bash never has to test
+          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
+          # symlinks TO directories; those are skipped, because following them leaves the
+          # work directory (these checkouts link into /nix/store) and a store path is not
+          # ours to chmod.
+          scan() {
+            local d="$1" e p
+            for e in "$d"/*/; do
+              p="${e%/}"
+              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
+              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
+              # a fatal command. Every branch here is a condition, never a bare list.
+              if [ -L "$p" ]; then
+                continue
+              fi
+              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
+                ro_blind=$((ro_blind + 1))
+                continue
+              fi
+              if [ ! -w "$p" ]; then
+                ro_count=$((ro_count + 1))
+                if [ "$ro_shown" -lt 10 ]; then
+                  ro_shown=$((ro_shown + 1))
+                  echo "ro-sweep:   unwritable $p"
+                fi
+              fi
+              scan "$p"
+            done
+            return 0
+          }
+          scan "$root"
+          before="$ro_count"
+          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
+          if [ "$before" -eq 0 ]; then
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          # Prove the tool exists before claiming it worked: a `chmod` that is not on
+          # PATH exits 127, and a `|| true` would turn that into a silent pass.
+          chmod_bin="$(command -v chmod 2>/dev/null || true)"
+          if [ -z "$chmod_bin" ]; then
+            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
+              if [ -x "$candidate" ]; then
+                chmod_bin="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$chmod_bin" ]; then
+            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
+              "$before directory(ies) CANNOT be fixed" >&2
+            exit 1
+          fi
+          echo "ro-sweep: using $chmod_bin"
+          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          scan "$root"
+          after="$ro_count"
+          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
+          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
+          if [ "$after" -ne 0 ]; then
+            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
+              "checkout will still fail to clean them"
+          fi
 
       - name: Evict stale git credentials from this runner's persistent home
         # MODE 1 of the self-hosted checkout outage, and the fix for it.
@@ -3925,6 +4497,96 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+
+      - name: Sweep read-only leftovers from the persistent work directory
+        # MODE 3 of the self-hosted checkout outage: a gitignored
+        # `non-nix-build/CodeTracer.app` staged out of the Nix store leaves 0555
+        # directories in this PERSISTENT work tree, and the next job's
+        # `git clean -ffdx` cannot unlink anything inside them. Full rationale,
+        # the measured run, and why the source fix in
+        # scripts/stage-desktop-node-modules.py does not make this redundant:
+        # see the copy of this step in the `test-non-gui` job, and
+        # ci/runner/sweep-readonly-leftovers.sh, with which this body is kept
+        # byte-identical by ci/test/readonly-leftovers-sweep-test.sh.
+        run: |
+          set -uo pipefail
+          shopt -s dotglob nullglob
+          root="${RUNNER_WORKSPACE:-}"
+          echo "ro-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "ro-sweep: found 0 unwritable directory(ies) (work dir absent - fresh runner)"
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          # Directory-only recursion via a trailing-slash glob, so bash never has to test
+          # the tens of thousands of regular files one at a time. `"$d"/*/` also matches
+          # symlinks TO directories; those are skipped, because following them leaves the
+          # work directory (these checkouts link into /nix/store) and a store path is not
+          # ours to chmod.
+          scan() {
+            local d="$1" e p
+            for e in "$d"/*/; do
+              p="${e%/}"
+              # `[ -L "$p" ] && continue` would be shorter and WRONG: GitHub runs `run:`
+              # blocks under `bash -e`, where a bare `A && B` list that evaluates false is
+              # a fatal command. Every branch here is a condition, never a bare list.
+              if [ -L "$p" ]; then
+                continue
+              fi
+              if [ ! -r "$p" ] || [ ! -x "$p" ]; then
+                ro_blind=$((ro_blind + 1))
+                continue
+              fi
+              if [ ! -w "$p" ]; then
+                ro_count=$((ro_count + 1))
+                if [ "$ro_shown" -lt 10 ]; then
+                  ro_shown=$((ro_shown + 1))
+                  echo "ro-sweep:   unwritable $p"
+                fi
+              fi
+              scan "$p"
+            done
+            return 0
+          }
+          scan "$root"
+          before="$ro_count"
+          echo "ro-sweep: found $before unwritable directory(ies) under $root ($ro_blind unreadable)"
+          if [ "$before" -eq 0 ]; then
+            echo "ro-sweep: NOTHING FOUND - this host was already clean, mode 3 did not apply here"
+            exit 0
+          fi
+          # Prove the tool exists before claiming it worked: a `chmod` that is not on
+          # PATH exits 127, and a `|| true` would turn that into a silent pass.
+          chmod_bin="$(command -v chmod 2>/dev/null || true)"
+          if [ -z "$chmod_bin" ]; then
+            for candidate in /bin/chmod /usr/bin/chmod /run/current-system/sw/bin/chmod; do
+              if [ -x "$candidate" ]; then
+                chmod_bin="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -z "$chmod_bin" ]; then
+            echo "ro-sweep: FATAL no chmod on PATH and none at /bin/chmod;" \
+              "$before directory(ies) CANNOT be fixed" >&2
+            exit 1
+          fi
+          echo "ro-sweep: using $chmod_bin"
+          "$chmod_bin" -R u+w "$root" 2>/dev/null || true
+          ro_count=0
+          ro_shown=0
+          ro_blind=0
+          scan "$root"
+          after="$ro_count"
+          echo "ro-sweep: after chmod -R u+w: $after unwritable directory(ies) remain"
+          echo "ro-sweep: RESTORED owner-write on $((before - after)) directory(ies)"
+          if [ "$after" -ne 0 ]; then
+            echo "ro-sweep: WARNING $after directory(ies) are not owned by the runner user;" \
+              "checkout will still fail to clean them"
+          fi
 
       - name: Evict stale git credentials from this runner's persistent home
         # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
@@ -4526,6 +5188,22 @@ jobs:
         # Only locks older than 60 minutes are swept: a fresh lock could belong
         # to a concurrent job on the same host, and deleting a live lock would
         # manufacture the corruption this step exists to clear.
+        #
+        # AND ONLY GIT'S OWN LOCKS. The first version matched `-name '*.lock'`
+        # anywhere under the work directory, which is a very different thing
+        # from what the prose above describes. Measured on run 33734457928, job
+        # 100581651054, gpu-server-002-mcl-001: of the 42 files it deleted, the
+        # ones it named first were
+        #
+        #   codetracer-trace-format/Cargo.lock
+        #   codetracer-trace-format/flake.lock
+        #   nim-agents/repro.lock
+        #   isonim/src/isonim/layout/yoga/yarn.lock
+        #
+        # — the PINS of the sibling checkouts, not git sentinels. A sweep meant
+        # to unblock checkout was quietly unpinning the build. The find is now
+        # anchored under a `.git` directory, which is the only place git puts
+        # the `*.lock` files this step is about.
         run: |
           set -uo pipefail
           root="${RUNNER_WORKSPACE:-}"
@@ -4545,8 +5223,10 @@ jobs:
             else
               echo "stale-lock-sweep:   FAILED to remove $f"
             fi
-          done < <(find "$root" -type f -name '*.lock' -mmin +60 2>/dev/null)
-          remaining=$(find "$root" -type f -name '*.lock' -mmin +60 2>/dev/null | wc -l | tr -d ' ')
+          done < <(find "$root" -type d -name .git -exec \
+            find {} -type f -name '*.lock' -mmin +60 ';' 2>/dev/null)
+          remaining=$(find "$root" -type d -name .git -exec \
+            find {} -type f -name '*.lock' -mmin +60 ';' 2>/dev/null | wc -l | tr -d ' ')
           echo "stale-lock-sweep: found $found, removed $removed, still present $remaining"
           if [ "$found" -eq 0 ]; then
             echo "stale-lock-sweep: NOTHING WAS STALE - if checkout still fails, mode 2 is not the cause"

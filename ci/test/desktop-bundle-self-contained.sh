@@ -264,6 +264,79 @@ PY
 		fi
 
 		# ---------------------------------------------------------------------
+		# Every directory in the bundle must be owner-writable.
+		#
+		# THE THIRD SELF-HOSTED CHECKOUT FAILURE MODE, gated where it is
+		# created. `non-nix-build/CodeTracer.app` is gitignored, so on the
+		# PERSISTENT m3 runners it survives into whatever job lands there next,
+		# and a 0555 directory is one that `git clean -ffdx` cannot empty —
+		# POSIX unlink needs write on the PARENT DIRECTORY, not on the file.
+		# Run 33734457928 / job 100581650873 / runner m3-mcl-003: 31,307
+		# "failed to remove … Permission denied", every one of them under
+		# `Contents/MacOS/node_modules`, then checkout gave up, tried to delete
+		# the whole checkout, and died with
+		# `EACCES … unlink '…/node_modules/abbrev/LICENSE'`.
+		#
+		# The mode came from the SOURCE: `shutil.copytree` preserves it, and in
+		# a Nix dev shell the source is /nix/store, which is 0555/0444.
+		# `scripts/stage-desktop-node-modules.py` now restores owner-write and
+		# prints its own before/after counts; this is the independent check on
+		# the finished artefact, because the stager is not the only thing that
+		# copies into this bundle (`cp -a` of the build tree and
+		# `scripts/stage-electron-runtime.sh` also do).
+		#
+		# DIRECTORIES, not files: 0444 files are ordinary and harmless — git's
+		# own pack/idx files are 0444 by design — and counting them would bury
+		# the signal. The count is printed either way, so a reader can tell a
+		# clean bundle from an unmeasured one.
+		# ---------------------------------------------------------------------
+		banner "owner-writability of the bundle's directories"
+
+		perm_report="$(python3 - "${ROOT}" <<'PY'
+import os
+import sys
+
+root = sys.argv[1]
+dirs = 0
+unwritable = []
+ro_files = 0
+for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+    dirs += 1
+    try:
+        if not os.lstat(dirpath).st_mode & 0o200:
+            unwritable.append(os.path.relpath(dirpath, root))
+    except OSError:
+        pass
+    for name in filenames:
+        path = os.path.join(dirpath, name)
+        if os.path.islink(path):
+            continue
+        try:
+            if not os.lstat(path).st_mode & 0o200:
+                ro_files += 1
+        except OSError:
+            pass
+
+print(f"directories       : {dirs}")
+print(f"not owner-writable: {len(unwritable)}")
+print(f"read-only files   : {ro_files}  (informational; files do not block unlink)")
+for shown in unwritable[:20]:
+    print(f"    ! [UNWRITABLE DIR] {shown}")
+if len(unwritable) > 20:
+    print(f"    ... and {len(unwritable) - 20} more")
+
+sys.exit(1 if unwritable else 0)
+PY
+)"
+		perm_rc=$?
+		indent "${perm_report}"
+		if [ "${perm_rc}" -eq 0 ]; then
+			report PASSED "every directory in the bundle is owner-writable"
+		else
+			report FAILED "the bundle has directories the owner cannot write (the next checkout on a persistent runner will fail to clean them)"
+		fi
+
+		# ---------------------------------------------------------------------
 		# The Electron launcher must exec something that is here.
 		#
 		# A dereferenced, pruned node_modules removes every dangling SYMLINK and

@@ -143,7 +143,7 @@ def stage(src: str, dest: str) -> int:
     drop = sorted(name for name in present if name not in closure)
 
     if os.path.exists(dest):
-        shutil.rmtree(dest)
+        force_rmtree(dest)
     os.makedirs(dest)
 
     for name in keep:
@@ -179,6 +179,13 @@ def stage(src: str, dest: str) -> int:
         if not os.listdir(dest_bin):
             os.rmdir(dest_bin)
 
+    # BEFORE the measurements below, because the numbers this prints are the
+    # evidence that the source of the CI checkout outage is closed. See
+    # `restore_owner_write` for the run/job/runner this is measured against.
+    ro_dirs_before = unwritable_dirs(dest)
+    dirs_fixed, files_fixed = restore_owner_write(dest)
+    ro_dirs_after = unwritable_dirs(dest)
+
     kept_files, kept_bytes = subtree(dest)
     dropped_files = 0
     dropped_bytes = 0
@@ -194,9 +201,23 @@ def stage(src: str, dest: str) -> int:
     print(f"staged              : {len(keep)} packages, {kept_files} files, {kept_bytes / 1e6:.1f} MB")
     print(f"pruned              : {len(drop)} packages, {dropped_files} files, {dropped_bytes / 1e6:.1f} MB")
     print(f".bin shims          : {bin_kept} kept, {bin_dropped} dropped")
+    print(
+        f"read-only dirs      : {ro_dirs_before} before, {ro_dirs_after} after"
+        f" (owner-write restored on {dirs_fixed} dirs, {files_fixed} files)"
+    )
 
     staged_links = sum(1 for _ in iter_symlinks(dest))
     print(f"symlinks in staged  : {staged_links}")
+
+    if ro_dirs_after:
+        # Not a warning. A directory the owner cannot write is a directory the
+        # next job's `git clean` cannot empty, and that is the whole outage.
+        print(
+            f"UNWRITABLE DIRS     : {ro_dirs_after} directory(ies) in the staged tree"
+            " are still not owner-writable; the next checkout on a persistent"
+            " runner will fail to clean them"
+        )
+        return 1
 
     if unresolved:
         print(f"UNRESOLVED EDGES    : {len(unresolved)} (yarn.lock is out of date with package.json)")
@@ -212,6 +233,104 @@ def stage(src: str, dest: str) -> int:
             print(f"    ~ {os.path.relpath(link, dest)} -> {os.readlink(link)}")
 
     return 0
+
+
+def unwritable_dirs(root: str) -> int:
+    """Directories under (and including) ``root`` without owner-write.
+
+    Directories, not files: a 0444 FILE is unremovable only if its parent is
+    also unwritable, and 0444 files are ordinary — git's own pack and idx files
+    are 0444 by design. Counting them would bury the signal under noise.
+    """
+    count = 0
+    for dirpath, _dirnames, _filenames in os.walk(root, followlinks=False):
+        try:
+            if not os.lstat(dirpath).st_mode & 0o200:
+                count += 1
+        except OSError:
+            pass
+    return count
+
+
+def restore_owner_write(root: str) -> tuple[int, int]:
+    """Give the owner write permission back over a tree copied out of the store.
+
+    ``shutil.copytree`` uses ``copy2``/``copystat``, so the staged tree inherits
+    the SOURCE's mode bits.  In a Nix dev shell the source is
+    ``/nix/store/…-node-modules-derivation/…``, and store paths are 0555
+    directories / 0444 files.  The bundle therefore lands in the build tree with
+    directories nobody can write.
+
+    That is not a cosmetic detail; it broke CI.  ``non-nix-build/CodeTracer.app``
+    is gitignored (non-nix-build/.gitignore), so on a PERSISTENT self-hosted
+    runner it survives into the next job, and the next ``actions/checkout``'s
+    ``git clean -ffdx`` cannot unlink a single file inside those directories —
+    POSIX unlink needs write permission on the PARENT DIRECTORY.  Measured on
+    run 33734457928 / job 100581650873 / runner m3-mcl-003: 31,307
+    ``failed to remove … Permission denied`` warnings, every one of them under
+    ``CodeTracer.app/Contents/MacOS/node_modules``, then checkout gave up,
+    tried to delete the whole checkout, and died on
+    ``EACCES … unlink '…/node_modules/abbrev/LICENSE'``.
+
+    It also breaks a plain second local build: ``stage`` starts by removing
+    ``dest``, and ``rmtree`` over 0555 directories raises ``PermissionError``.
+
+    Directories are what matters, but files get ``u+w`` too so that a rebuild
+    can overwrite in place.  Returns ``(directories_fixed, files_fixed)`` —
+    VALUES, because "made it writable" is not a measurement, and a chmod over a
+    tree that needed nothing is indistinguishable from one that never ran.
+    """
+    def add_owner_write(path: str) -> bool:
+        try:
+            mode = os.lstat(path).st_mode
+        except OSError:
+            return False
+        if mode & 0o200:
+            return False
+        try:
+            os.chmod(path, (mode & 0o7777) | 0o200)
+        except OSError:
+            return False
+        return True
+
+    dirs_fixed = 0
+    files_fixed = 0
+    # topdown, so a directory is chmodded before the walk descends into it.
+    # Store directories are r-x, so descent would work either way, but a tree
+    # copied from somewhere stricter would not.
+    for dirpath, _dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        if add_owner_write(dirpath):
+            dirs_fixed += 1
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            if os.path.islink(path):
+                continue
+            if add_owner_write(path):
+                files_fixed += 1
+    return dirs_fixed, files_fixed
+
+
+def force_rmtree(path: str) -> None:
+    """``shutil.rmtree`` that survives a previously staged read-only tree.
+
+    Without this, the second ``stage`` run on a machine that has already staged
+    once dies in ``rmtree`` with ``PermissionError`` on the first 0555 directory
+    — the local-developer face of the CI defect above.
+    """
+    def on_error(func, failed, _exc):
+        parent = os.path.dirname(failed)
+        for target in (failed, parent):
+            try:
+                mode = os.lstat(target).st_mode
+                os.chmod(target, (mode & 0o7777) | 0o700)
+            except OSError:
+                pass
+        func(failed)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=lambda f, p, e: on_error(f, p, e))
+    else:  # pragma: no cover - the runners are on 3.12+
+        shutil.rmtree(path, onerror=on_error)
 
 
 def iter_symlinks(root: str):

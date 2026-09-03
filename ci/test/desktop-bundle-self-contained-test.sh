@@ -149,7 +149,32 @@ run_guard "${FIX}/CodeTracer.app"
 expect_line "PASSED: every symlink in the bundle resolves inside it" "clean bundle: symlinks accepted"
 expect_line "PASSED: the bundle's node_modules is a real directory" "clean bundle: node_modules accepted"
 expect_line "PASSED: the Electron launcher's exec target exists in the bundle" "clean bundle: launcher accepted"
+expect_line "PASSED: every directory in the bundle is owner-writable" "clean bundle: writability accepted"
 expect_line "PASSED: repro.nim stages node_modules with the contents, not the link" "clean repro.nim accepted despite the comment quoting the old line"
+
+# -----------------------------------------------------------------------------
+echo
+echo "--- arm: a bundle carrying store permissions (0555 directories)"
+# The shape `dmg-build` left on m3-mcl-003: `shutil.copytree` preserved the Nix
+# store's 0555 on the staged `node_modules`, the gitignored `.app` survived into
+# the next job, and that job's checkout could not unlink anything inside it.
+# A 0444 FILE is planted alongside deliberately: it must NOT be counted, because
+# read-only files are ordinary (git's pack files are 0444) and do not block
+# unlink. A guard that counted them would be red on every clean bundle.
+make_fixture
+: >"${FIX}/CodeTracer.app/Contents/MacOS/node_modules/xterm/README"
+chmod 0444 "${FIX}/CodeTracer.app/Contents/MacOS/node_modules/xterm/README"
+chmod 0555 "${FIX}/CodeTracer.app/Contents/MacOS/node_modules/xterm"
+run_guard "${FIX}/CodeTracer.app"
+chmod -R u+w "${FIX}/CodeTracer.app"
+expect_line "[UNWRITABLE DIR] Contents/MacOS/node_modules/xterm" "the unwritable directory is named"
+expect_line "FAILED: the bundle has directories the owner cannot write" "the read-only bundle is refused"
+expect_line "not owner-writable: 1" "exactly the directory is counted, not the 0444 file beside it"
+if [ "${RC}" -ne 0 ]; then
+	pass "read-only bundle: non-zero exit"
+else
+	fail "read-only bundle: non-zero exit" "${OUT}"
+fi
 
 # -----------------------------------------------------------------------------
 echo
@@ -256,7 +281,12 @@ echo
 echo "--- the stager: prunes, dereferences, and keeps what the product loads"
 make_fixture
 SRC="${FIX}/src_node_modules"
-mkdir -p "${SRC}/prod-root" "${SRC}/dev-only" "${SRC}/.bin" "${FIX}/outside/target"
+# `prod-root/lib/inner` is nested rather than flat so the read-only arm further
+# down measures a count, not a boolean: a one-directory fixture cannot tell
+# "chmodded the tree" apart from "chmodded the root and stopped".
+mkdir -p "${SRC}/prod-root/lib/inner" "${SRC}/dev-only" "${SRC}/.bin" \
+	"${FIX}/outside/target"
+: >"${SRC}/prod-root/lib/inner/deep.js"
 cat >"${SRC}/prod-root/package.json" <<'EOF'
 { "name": "prod-root", "version": "1.0.0" }
 EOF
@@ -326,6 +356,115 @@ if [ "${staged_links}" -eq 0 ]; then
 else
 	fail "stager leaves zero symlinks in the staged tree" "${staged_links} link(s)"
 fi
+
+# -----------------------------------------------------------------------------
+echo
+echo "--- the stager: a store-shaped (read-only) source must not produce a"
+echo "    read-only bundle"
+# THE THIRD CHECKOUT FAILURE MODE ON THE SELF-HOSTED RUNNERS.
+#
+# In a Nix dev shell the stager's source IS the store: 0555 directories, 0444
+# files. `shutil.copytree` preserves mode, so the staged `node_modules` inside
+# `non-nix-build/CodeTracer.app` inherited directories nobody could write. The
+# `.app` is gitignored, so on a persistent runner it survived into the next job
+# and `git clean -ffdx` could not unlink one file inside it — unlink needs write
+# on the PARENT DIRECTORY. Run 33734457928, job 100581650873, runner m3-mcl-003:
+# 31,307 "Permission denied" warnings, then checkout gave up and died with
+# EACCES unlinking `.../node_modules/abbrev/LICENSE`.
+#
+# The source arm is here rather than only in the pre-checkout sweep because a
+# sweep cleans a poisoned host; only this stops the host being poisoned.
+chmod -R a-w "${SRC}/prod-root"
+
+STAGE_OUT="$(cd "${FIX}/repo" && python3 scripts/stage-desktop-node-modules.py \
+	stage "${SRC}" "${FIX}/staged-ro" 2>&1)"
+STAGE_RC=$?
+
+if [ "${STAGE_RC}" -eq 0 ]; then
+	pass "stager exits 0 on a read-only (store-shaped) source"
+else
+	fail "stager exits 0 on a read-only (store-shaped) source" "${STAGE_OUT}"
+fi
+
+# THE INSTRUMENT MUST HAVE SEEN SOMETHING. A `chmod` over a tree that needed
+# nothing prints the same "after: 0" as one that never ran, and this campaign
+# has been misled by exactly that three separate times. So the BEFORE count is
+# asserted NON-ZERO: if the fixture stopped being read-only, this arm fails
+# rather than passing vacuously.
+ro_before="$(printf '%s' "${STAGE_OUT}" |
+	sed -n 's/^read-only dirs  *: \([0-9][0-9]*\) before.*/\1/p')"
+if [ -n "${ro_before}" ] && [ "${ro_before}" -gt 0 ]; then
+	pass "stager reports a NON-ZERO read-only directory count before its chmod (${ro_before})"
+else
+	fail "stager reports a NON-ZERO read-only directory count before its chmod" \
+		"parsed '${ro_before:-<nothing>}' from:
+${STAGE_OUT}"
+fi
+
+# Measured independently of what the stager printed: the tree it left behind.
+ro_after="$(find "${FIX}/staged-ro" -type d ! -perm -u+w | wc -l | tr -d ' ')"
+if [ "${ro_after}" -eq 0 ]; then
+	pass "the staged tree contains zero directories the owner cannot write"
+else
+	fail "the staged tree contains zero directories the owner cannot write" \
+		"${ro_after} unwritable directory(ies)
+${STAGE_OUT}"
+fi
+
+# The local-developer face of the same defect: `stage` begins by removing
+# `dest`, and plain `shutil.rmtree` over 0555 directories raises PermissionError.
+# Before the fix, a second build on a machine that had already built once died
+# here.
+STAGE_OUT="$(cd "${FIX}/repo" && python3 scripts/stage-desktop-node-modules.py \
+	stage "${SRC}" "${FIX}/staged-ro" 2>&1)"
+STAGE_RC=$?
+if [ "${STAGE_RC}" -eq 0 ]; then
+	pass "stager restages over its own previous output"
+else
+	fail "stager restages over its own previous output" "${STAGE_OUT}"
+fi
+
+# THE RED PATH. Everything above is green with the fix in place, and would be
+# just as green if `restore_owner_write` had been deleted and the fixture had
+# quietly stopped being read-only. So: neuter the chmod in a COPY of the stager
+# and require the run to go red. A guard whose failing path has never executed
+# is a guard nobody has tested.
+python3 - "${FIX}/repo/scripts/stage-desktop-node-modules.py" \
+	"${FIX}/repo/scripts/stager-no-chmod.py" <<'PY'
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src, encoding="utf-8").read()
+needle = "os.chmod(path, (mode & 0o7777) | 0o200)"
+if needle not in text:
+    sys.exit(f"the arm cannot neuter what it cannot find: {needle!r}")
+open(dst, "w", encoding="utf-8").write(text.replace(needle, "pass"))
+PY
+
+NOCHMOD_OUT="$(cd "${FIX}/repo" && python3 scripts/stager-no-chmod.py \
+	stage "${SRC}" "${FIX}/staged-red" 2>&1)"
+NOCHMOD_RC=$?
+if [ "${NOCHMOD_RC}" -ne 0 ]; then
+	pass "a stager that does not restore owner-write FAILS"
+else
+	fail "a stager that does not restore owner-write FAILS" "${NOCHMOD_OUT}"
+fi
+if printf '%s' "${NOCHMOD_OUT}" | grep -q 'UNWRITABLE DIRS'; then
+	pass "the failing stager names the unwritable directories as the reason"
+else
+	fail "the failing stager names the unwritable directories as the reason" \
+		"${NOCHMOD_OUT}"
+fi
+red_ro="$(find "${FIX}/staged-red" -type d ! -perm -u+w | wc -l | tr -d ' ')"
+if [ "${red_ro}" -gt 0 ]; then
+	pass "the neutered stager really does leave ${red_ro} unwritable directory(ies)"
+else
+	fail "the neutered stager really does leave unwritable directories" \
+		"found 0 -- the fixture is no longer read-only and every arm above is vacuous"
+fi
+chmod -R u+w "${FIX}/staged-red"
+
+chmod -R u+w "${SRC}/prod-root"
 
 # -----------------------------------------------------------------------------
 echo
