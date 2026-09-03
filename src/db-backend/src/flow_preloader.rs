@@ -667,10 +667,94 @@ impl<'a> CallFlowPreloader<'a> {
             }
 
             iter_step_id = step_id;
+            // THIS LOADER IS DELIBERATELY EMPTY, AND THAT COSTS THE WINDOW ITS
+            // EXTENT — see the re-derivation below.
+            //
+            // `load_location` takes `&mut ExprLoader` and is called once per
+            // step of the flow walk; handing it the preloader's own loader
+            // would need a mutable borrow that `CallFlowPreloader` (which holds
+            // `&'a FlowPreloader`) does not have. A throwaway is fine for the
+            // per-step work — `load_location` only needs it to look up variable
+            // names, and the trace-embedded fallback covers that.
+            //
+            // It is NOT fine for the function boundaries, because an empty
+            // `ExprLoader` has an empty `processed_files`, so
+            // `get_first_last_fn_lines` returns `(-1, -1)` and
+            // `use_trace_function_boundaries` (`trace_reader.rs`) always wins.
             let mut expr_loader = ExprLoader::new(CoreTrace::default());
             let new_location = replay.load_location(&mut expr_loader)?;
             if step_count == 0 {
                 self.location = new_location.clone();
+
+                // THE FLOW WINDOW'S DECLARED EXTENT, RE-DERIVED FROM THE
+                // POPULATED LOADER. This is the fix.
+                //
+                // WHAT WAS WRONG. `step_count == 0` is the first step after
+                // `move_to_first_step` widened to the ENCLOSING CALL'S ENTRY,
+                // so this assignment is what sets the extent the frontend
+                // draws. Taken from the throwaway loader above, it always fell
+                // through to the trace-record derivation, which computes:
+                //
+                //   function_first = FunctionRecord.line
+                //   function_last  = max line over the CONTIGUOUS run of steps
+                //                    carrying this call_key, starting here
+                //
+                // Both halves are unsound for this purpose. The trace format
+                // has NO function end line at all
+                // (`codetracer_trace_types::FunctionRecord` is `path_id`,
+                // `line`, `name` — nothing else), so `function_last` is a
+                // heuristic; and the run it scans ENDS AT THE FIRST CALLEE,
+                // because a call's steps are not contiguous once it calls out.
+                //
+                // MEASURED, on `test-programs/noir_space_ship/src/shield.nr`.
+                // `iterate_asteroids` spans lines 1..20 and its flow window
+                // covers lines 1..18, and the extent it declared was `0..6`:
+                // `0` because the Noir recorder emits the declaration line as
+                // 0, and `6` because line 6 calls `calculate_damage`, which
+                // ends the contiguous run five lines into a twenty-line
+                // function. `0..6` describes neither the body nor the covered
+                // set — it is a fact about nothing, which is exactly how it
+                // read as an unfilled field and sent a debugging effort after
+                // the wrong thing.
+                //
+                // `src/db-backend/test-programs/noir_loop/src/main.nr` shows
+                // the other failure of the same heuristic: a 17-line `main`
+                // declared `0..593`, because the recorder emits one trailing
+                // step at line 593 and the max-line scan swallowed it.
+                //
+                // WHY TREE-SITTER IS THE RIGHT SOURCE AND IS AVAILABLE HERE.
+                // `FlowPreloader::load` has already called
+                // `self.expr_loader.load_file(...)` for this path, so the
+                // preloader's loader holds the parsed AST — it is only the
+                // per-step throwaway that does not. `get_first_last_fn_lines`
+                // takes `&self`, so the shared borrow this type already holds
+                // is enough. The AST knows the function's real end line, which
+                // is precisely the thing the trace format cannot store.
+                //
+                // GUARDED, SO NOTHING REGRESSES. The override applies only when
+                // tree-sitter returned a sane range (`first > 0` and
+                // `last >= first`). A language with no grammar, a file that
+                // failed to parse, or a step outside any function all leave
+                // `(-1, -1)` or a degenerate pair and keep TODAY'S values
+                // exactly — so this can improve the extent and cannot empty it.
+                let (ts_first, ts_last) = self.flow_preloader.expr_loader.get_first_last_fn_lines(&self.location);
+                if ts_first > 0 && ts_last >= ts_first {
+                    info!(
+                        "  flow window extent: tree-sitter {}..{} replaces trace-record {}..{}",
+                        ts_first, ts_last, self.location.function_first, self.location.function_last
+                    );
+                    self.location.function_first = ts_first;
+                    self.location.function_last = ts_last;
+                } else {
+                    info!(
+                        "  flow window extent: no tree-sitter range for {}:{} — keeping trace-record {}..{}",
+                        self.location.path,
+                        self.location.line,
+                        self.location.function_first,
+                        self.location.function_last
+                    );
+                }
+
                 tracked_call_key = self.call_key_from(&new_location)?;
                 flow_view_update.location = self.location.clone();
             }

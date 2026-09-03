@@ -56,6 +56,18 @@ import std/[strutils, options]
 
 import ../types
 
+# `std/jsffi` FOR `JsAssoc`'s `[]`, which is where the element accessor lives.
+import std/jsffi
+
+# `lib/jslib` FOR `JsAssoc.hasKey`, and it is that module rather than `jsffi`
+# because `hasKey` is declared there (`jslib.nim:86`) as an `importcpp` over
+# `(#[#] != undefined)` — `std/jsffi` does not supply one.
+# `ShortcutMap.shortcutActions` is `TableLike[langstring, ClientAction]` and
+# `frontend/types.nim` resolves `TableLike` to `JsAssoc`, so this is what makes
+# `hardBindShadowedActions` below able to ask whether the config claims a chord.
+# `renderChord` needs none of it — `actionShortcuts` is a plain `array`.
+import ../lib/jslib
+
 proc renderChord*(action: ClientAction; config: Config): string =
   ## The chord bound to `action`, spelled the way it is shown to a user, or
   ## "" when nothing is bound.
@@ -296,6 +308,114 @@ const MONACO_SHORTCUTS_WHITELIST*: seq[cstring] =
   # the other side: "with the chord removed from the whitelist it fired NOT AT
   # ALL, because Monaco consumed the key before it reached the document."
   #
-  # The entries above predate that override and are left alone: F2/F8/F10-F12
+  # The entries above predate that override and are left alone: F8/F10-F12
   # are chords Monaco itself would otherwise consume, and changing them is a
-  # separate question from this one.
+  # separate question from this one. `F2` is on the list for the same reason and
+  # is now live on BOTH paths — see `hardBoundChords` below for what used to
+  # make it the exception.
+
+# ---------------------------------------------------------------------------
+# THE CHORDS THAT DO NOT COME FROM THE CONFIG, AND THE CONFLICT NOBODY COULD SEE
+# ---------------------------------------------------------------------------
+#
+# `initShortcutMap` (`frontend/config.nim:26`) detects conflicts BETWEEN TWO
+# YAML ENTRIES and reports them in `conflictList`. It cannot see a chord that
+# never passed through the YAML. About two dozen are bound directly with
+# `Mousetrap.bind` in `ui/shortcuts.nim` and `ui_js.nim`, and because
+# `configureShortcuts` registers them AFTER its loop over the config table —
+# and `Mousetrap.bind` REPLACES rather than chains — each one silently
+# overrides whatever the config gave the same chord.
+#
+# THIS IS NOT HYPOTHETICAL; IT IS THE BUG THIS LIST WAS EXTRACTED FOR.
+# `default_config.yaml:67` gives `forwardContinue` two chords, "F8 F2".
+# `ui/shortcuts.nim` then carried `Mousetrap.bind("f2") do (): discard`, so
+# outside the editor F2 did nothing at all while the menu, every toolbar
+# tooltip and the shortcuts dialog went on advertising it — all three RESOLVE
+# the chord through `renderChord` above, and the config still said F2. The
+# swallow is gone; this list is what makes the NEXT one arrive as a warning and
+# a red test instead of as a key that quietly stopped working.
+#
+# `GUI/Keyboard-Shortcuts-System.md` § Requirements states the rule directly:
+# "A chord declared in the config dispatches the action the config gives it. A
+# later hardcoded bind that replaces a config-driven one makes the config a lie
+# and fails silently... Conflicts between bindings must be detected and
+# reported, not resolved by load order."
+#
+# HAND-MAINTAINED, AND GUARDED AGAINST GOING STALE. Deriving it from the source
+# at runtime is not possible, so `shortcut_bindings_test.nim` reads
+# `ui/shortcuts.nim` and `ui_js.nim` with `staticRead`, extracts every
+# `Mousetrap.bind("...")` literal, and requires each to appear here. Adding a
+# hardcoded bind and forgetting this list reddens — which is the whole point,
+# because a stale list would make every check over it vacuous.
+const hardBoundChords*: seq[cstring] =
+  @[
+    # `ui/shortcuts.nim`, `configureShortcuts`.
+    #
+    # `F1` IS THE ONLY DELIBERATE SWALLOW LEFT, and it is harmless precisely
+    # because it collides with nothing: no YAML entry names F1, so the bind
+    # replaces nothing. The spec's "(disabled) Reserved" row
+    # (`GUI/Keyboard-Shortcuts-System.md:33`) named F1 and F2 together; only F1
+    # is still true.
+    cstring"F1",
+    cstring"CTRL+R",
+    # `CTRL+B` IS A REAL, DELIBERATE, DOCUMENTED SHADOW — the one member of
+    # this list that IS also in the config (`build: "CTRL+B"`) and is meant to
+    # be. `ui/shortcuts.nim` records why, and excludes it from the web build
+    # where the shadowed action is the only useful one. It is here so that
+    # `hardBindShadowedActions` REPORTS it rather than so that it is forbidden:
+    # the requirement is that a shadow be visible, not that it never happen.
+    cstring"CTRL+B",
+    cstring"CTRL+PAGEUP",
+    cstring"CTRL+PAGEDOWN",
+    cstring"ALT+E",
+    cstring"ALT+C",
+    cstring"ALT+V",
+    cstring"CTRL+ALT+D",
+    cstring"CTRL+SHIFT+O",
+    cstring"COMMAND+SHIFT+O",
+    # THE SIBLING OF THE F2 DEFECT, and the reason this list is not only about
+    # F2. `ALT+F10` is `stepOverStatement` and `ALT+SHIFT+F10` is
+    # `stepBackStatement`, both bound in code and neither owning a
+    # `ClientAction` — so they are invisible to `conflictList`, absent from the
+    # shortcuts dialog, and unrebindable. `ALT+F10` is also the obvious reverse
+    # of `F10` under the VS Code preset's `ALT` rule; a preset that took it
+    # would have had its binding silently replaced here, with nothing anywhere
+    # reporting why. `shortcut_presets_test.nim` forbids exactly that.
+    cstring"ALT+F10",
+    cstring"ALT+SHIFT+F10",
+    # `ui_js.nim`.
+    cstring"CTRL+F5",
+    cstring"CTRL+E",
+    cstring"CTRL+S",
+    cstring"ALT+1",
+    cstring"CTRL+ENTER",
+    cstring"CTRL+SHIFT+E",
+  ]
+  ## Every chord bound outside the config table, in the spelling
+  ## `ShortcutMap.shortcutActions` is keyed by (the YAML's own, upper-case).
+  ##
+  ## `CTRL+1` .. `CTRL+9` are deliberately absent: they are installed by a loop
+  ## over a range rather than as literals, no YAML entry claims any of them, and
+  ## listing nine chords to state one fact would be the copy this module exists
+  ## to avoid. The staleness guard skips non-literal binds for the same reason.
+
+proc hardBindShadowedActions*(config: Config): seq[(cstring, ClientAction)] =
+  ## Every chord the config declares that a later hardcoded bind will replace.
+  ##
+  ## THE POINT IS THAT THIS IS NORMALLY SHORT, NOT THAT IT IS EMPTY. `CTRL+B`
+  ## is a deliberate, documented shadow on the desktop, so an empty return would
+  ## be wrong there and asserting emptiness would be asserting the wrong thing.
+  ## What must never happen again is a shadow nobody can see — so
+  ## `configureShortcuts` logs whatever this returns, and the tests pin the
+  ## membership rather than the count.
+  ##
+  ## Pure, and takes the resolved `Config` rather than reading globals, so a
+  ## `nim js` suite with no DOM can call it — which is what makes the F2
+  ## regression assertable at all.
+  if config.isNil:
+    return @[]
+  for chord in hardBoundChords:
+    if config.shortcutMap.shortcutActions.hasKey(chord):
+      let shadowed: ClientAction = config.shortcutMap.shortcutActions[chord]
+      let entry: (cstring, ClientAction) = (chord, shadowed)
+      result.add(entry)

@@ -12,6 +12,11 @@ import
   # is gone; this import is what makes the call reach the implementation, and
   # what makes its absence a build error rather than a dead gesture.
   ./debug,
+  # `hardBoundChords` / `hardBindShadowedActions` — the registry of chords bound
+  # in code rather than through the YAML, and the report of which config entries
+  # they kill. Kept in the leaf module beside MONACO_SHORTCUTS_WHITELIST so the
+  # `nim js` suites can assert over it without importing this file.
+  ./shortcut_labels,
   ./shortcut_presets,
   ./shortcut_dialog,
   ./shortcut_preference,
@@ -373,6 +378,31 @@ proc configureShortcuts* =
     for (shortcut, actions) in data.config.shortcutMap.conflictList:
       cwarn "  shortcuts: " & $shortcut & "  " & $actions
 
+  # THE OTHER HALF OF THE CONFLICT REPORT, and the half that was missing.
+  #
+  # `conflictList` above holds collisions between two YAML entries. It is blind
+  # to the chords bound in code further down this proc, which land AFTER the
+  # loop below and therefore REPLACE whatever that loop bound — silently, and
+  # with no `ClientAction` to name them. That blindness is what let
+  # `Mousetrap.bind("f2") do (): discard` swallow one of `forwardContinue`'s two
+  # chords for the entire life of the repository while every surface that
+  # displays a chord went on advertising it.
+  #
+  # `hardBoundChords` is the registry and `ui/shortcut_labels.nim` is where it
+  # lives, beside MONACO_SHORTCUTS_WHITELIST and for the same reason: it is a
+  # claim about the shipped binding table, so a `nim js` suite has to be able to
+  # import it without pulling the Karax/Monaco tree in behind it.
+  #
+  # REPORTED, NOT PREVENTED. `CTRL+B` is a real and deliberate shadow on the
+  # desktop with its reasons recorded below, so refusing to install a shadowing
+  # bind would break a decision this repository has already made on purpose. The
+  # spec's requirement is that a conflict be "detected and reported, not
+  # resolved by load order" — the load order stays, and this makes it audible.
+  for (chord, shadowed) in hardBindShadowedActions(data.config):
+    cwarn "shortcuts: HARD BIND SHADOWS THE CONFIG: " & $chord &
+      " is declared for " & $shadowed &
+      " but is re-bound in code after the config loop; the config entry is dead"
+
   for action, shortcuts in data.config.shortcutMap.actionShortcuts:
     for shortcut in shortcuts:
       bindShortcut(action, shortcut.renderer)
@@ -401,11 +431,59 @@ proc configureShortcuts* =
           .handleHistoryJump(historyDirectionOfMouseButton(mouseButton))
   )
 
+  # `F1` IS RESERVED, AND RESERVING IT COSTS NOTHING BECAUSE NOTHING CLAIMS IT.
+  #
+  # `default_config.yaml` declares no action on `F1`, so this bind replaces
+  # nothing and the spec's "(disabled) Reserved" row
+  # (`GUI/Keyboard-Shortcuts-System.md:33`) is honoured by leaving it here.
+  #
+  # WHAT IT DOES NOT DO, measured rather than assumed, because the comment this
+  # replaces implied otherwise. Mousetrap calls `preventDefault` +
+  # `stopPropagation` ONLY when the callback returns `false`
+  # (`node_modules/mousetrap/mousetrap.js:616` — `if (callback(e, combo) ===
+  # false)`). A Nim `do (): discard` block compiles to a JS function returning
+  # `undefined`, so this bind suppresses NOTHING: it neither holds the key back
+  # from the browser nor hands it to Monaco. A bound-to-empty chord is
+  # behaviourally identical to an UNBOUND one in every respect but one — it
+  # OVERWRITES whatever was bound before it, because `Mousetrap.bind` replaces
+  # rather than chains. That single effect is the whole of what these lines
+  # ever did, and it is what made `f2` below a bug.
   Mousetrap.`bind`("f1") do ():
     discard
 
-  Mousetrap.`bind`("f2") do ():
-    discard
+  # `F2` USED TO BE SWALLOWED HERE, AND THE SWALLOW WAS THE DEFECT.
+  #
+  # `Mousetrap.bind("f2") do (): discard` stood on this line. `F2` is one of
+  # `forwardContinue`'s two chords in the shipped table
+  # (`src/config/default_config.yaml:67`, `forwardContinue: "F8 F2"`), the loop
+  # at the top of this proc had already bound it, and this line then replaced
+  # that binding with an empty body — so pressing F2 outside the editor did
+  # nothing while the menu (`ui_js.nim`'s `element "Continue", forwardContinue`),
+  # every toolbar tooltip and the shortcuts dialog went on advertising it,
+  # because all three RESOLVE the chord from the config and the config still
+  # said F2.
+  #
+  # THE PRODUCT ALSO DISAGREED WITH ITSELF, which is what settles the direction
+  # of the fix. `F2` is in `ui/editor.nim`'s MONACO_SHORTCUTS_WHITELIST, so
+  # `delegateShortcuts` registers it as a Monaco command that dispatches
+  # `forwardContinue` — with the caret IN the editor F2 has always continued.
+  # Only the global layer was dead. So this was not a key the product had
+  # decided against; it was the same key doing two different things depending
+  # on where the caret happened to be.
+  #
+  # `GUI/Keyboard-Shortcuts-System.md` § Requirements states the rule this
+  # violated: "A chord declared in the config dispatches the action the config
+  # gives it. A later hardcoded bind that replaces a config-driven one makes the
+  # config a lie and fails silently." Deleting the line is what makes the config
+  # true; the `hardBoundChords` registry below is what makes the next one of
+  # these visible instead of silent.
+  #
+  # REMOVING IT CANNOT DOUBLE-FIRE. The two delivery paths are mutually
+  # exclusive and measured so: with the caret in Monaco the keydown never
+  # reaches `document`'s bubble phase, so only the Monaco command runs; with the
+  # caret outside, only the Mousetrap bind does.
+  # `ci/test/chord-and-pane-uniqueness.sh` asserts exactly this for F2 in both
+  # focus contexts.
 
   # Mousetrap.`bind`("alt+0") do ():
   #   openNormalEditor()

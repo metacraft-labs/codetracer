@@ -51,7 +51,8 @@ import std/[strutils, unittest, jsffi]
 import ../config
 import ../types
 import ../lib/jslib
-from ../ui/shortcut_labels import MONACO_SHORTCUTS_WHITELIST
+from ../ui/shortcut_labels import
+  MONACO_SHORTCUTS_WHITELIST, hardBoundChords, hardBindShadowedActions
 
 var countedAssertions = 0
 
@@ -59,10 +60,20 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 56
+const ExpectedAssertions = 104
   ## 31 before the two Stop cases below; +5 for the binding pin and +20 for the
   ## Monaco-delegation family (9 non-vacuity checks, 10 membership checks and
-  ## the total).
+  ## the total) — 56.
+  ##
+  ## +41 for the hard-bound registry's staleness guard: 1 sizing check, 19
+  ## source-literal-in-registry checks, 19 registry-entry-in-source checks and
+  ## the 2 discriminating negatives. The two 19s are the count of
+  ## `Mousetrap.bind("...")` literals in `ui/shortcuts.nim` and `ui_js.nim`, so
+  ## adding or removing a hardcoded bind moves this number — deliberately.
+  ##
+  ## +7 for the F2 regression: 3 on F2 itself, 2 on the shadow list (its exact
+  ## membership, and F2's absence from it), 2 on the instrument that proves the
+  ## shadow list can report anything at all.
 
 proc chordsFor(config: Config; action: ClientAction): seq[Shortcut] =
   for shortcut in config.shortcutMap.actionShortcuts[action]:
@@ -248,6 +259,142 @@ suite "shipped shortcut bindings":
     # contribute ten chords. Pinning the total is what stops this passing on a
     # table that parsed only half of itself.
     counted checkedChords == 10
+
+  test "the hard-bound registry is COMPLETE — derived from the source, not copied":
+    ## THE GUARD THAT STOPS `hardBoundChords` GOING STALE, and without which
+    ## every check written over it is vacuous.
+    ##
+    ## `ui/shortcut_labels.nim`'s `hardBoundChords` is a hand-maintained list of
+    ## the chords bound with `Mousetrap.bind` outside the config table. A
+    ## hand-maintained list of what some other file does is exactly the copy
+    ## this area keeps being bitten by: someone adds a bind, nobody adds a row,
+    ## and the "no preset collides with a hard bind" check in
+    ## `shortcut_presets_test.nim` goes on passing over a list that no longer
+    ## describes the product.
+    ##
+    ## So the list is checked against the SOURCE. `staticRead` pulls in the two
+    ## files that bind chords in code, every `Mousetrap.bind("...")` literal is
+    ## extracted, and each must appear in the registry. Adding a hardcoded bind
+    ## and forgetting the registry reddens HERE, one step before it can silently
+    ## kill a config entry.
+    const shortcutsSource = staticRead("../ui/shortcuts.nim")
+    const uiJsSource = staticRead("../ui_js.nim")
+
+    proc literalBinds(source: string): seq[string] =
+      ## Every `Mousetrap.bind("<chord>")` literal, upper-cased to the spelling
+      ## `shortcutActions` is keyed by.
+      ##
+      ## Commented-out binds are skipped — both files carry several, and a
+      ## disabled bind replaces nothing. Non-literal binds are skipped too:
+      ## `Mousetrap.bind("CTRL+" & $i)` is the CTRL+1..9 loop, which no YAML
+      ## entry contests and which cannot be extracted as a string anyway.
+      const marker = "Mousetrap.`bind`(\""
+      for rawLine in source.splitLines():
+        let line = rawLine.strip()
+        if line.startsWith("#"):
+          continue
+        let start = line.find(marker)
+        if start < 0:
+          continue
+        let openQuote = start + marker.len
+        let closeQuote = line.find('"', openQuote)
+        if closeQuote < 0:
+          continue
+        let chord = line[openQuote ..< closeQuote]
+        # `"CTRL+" & $i` — the literal is a prefix, not a chord.
+        if line[closeQuote + 1] != ')':
+          continue
+        result.add(chord.toUpperAscii)
+
+    let found = literalBinds(shortcutsSource) & literalBinds(uiJsSource)
+
+    # NON-VACUITY FIRST. An extractor that matched nothing would satisfy every
+    # membership check below while measuring nothing at all — the empty-haystack
+    # pass this repository's harnesses keep naming. The count is pinned, so a
+    # bind added or removed has to be accounted for deliberately.
+    counted found.len == 19
+
+    for chord in found:
+      checkpoint("hardcoded Mousetrap bind: " & chord)
+      counted cstring(chord) in hardBoundChords
+
+    # THE OTHER DIRECTION: the registry claims nothing the source does not do.
+    # Without this the list could accumulate chords that were removed years ago
+    # and go on forbidding presets from using keys that are actually free.
+    for chord in hardBoundChords:
+      checkpoint("registry entry: " & $chord)
+      counted ($chord) in found
+
+    # THE NEGATIVE, so the two containments above are not both satisfied by an
+    # extractor that returns the registry. `F10` is bound through the YAML and
+    # must NOT appear; `ALT+F10` is bound in code and must.
+    counted "ALT+F10" in found
+    counted "F10" notin found
+
+  test "F2 DISPATCHES — the swallow is gone and the config is no longer a lie":
+    ## THE REGRESSION, pinned at the level this suite can reach.
+    ##
+    ## `default_config.yaml` gives `forwardContinue` two chords, "F8 F2".
+    ## `ui/shortcuts.nim` used to re-bind `f2` to an empty body AFTER the loop
+    ## that installs the config table, so outside the editor F2 did nothing
+    ## while the menu, the toolbar tooltips and the shortcuts dialog all went on
+    ## advertising it.
+    ##
+    ## WHAT THIS TEST CAN AND CANNOT SEE, stated because the distinction is the
+    ## whole trap. That the CONFIG binds F2 was true throughout the defect —
+    ## `chordsFor(config, forwardContinue).len == 2` passed the entire time the
+    ## key was dead. So a config-level assertion is exactly the vacuous one, and
+    ## the real proof is a press in a browser tab:
+    ## `ci/test/chord-and-pane-uniqueness.sh` presses F2 in both focus contexts
+    ## and asserts `forwardContinue` was DISPATCHED once.
+    ##
+    ## What this test contributes instead is the STRUCTURAL fact that made the
+    ## press dead: F2 is claimed by the config AND was in the hard-bound
+    ## registry at the same time. That conjunction is now forbidden for F2, and
+    ## it is checkable here in milliseconds.
+    let config = defaultRendererConfig()
+    counted cstring"F2" notin hardBoundChords
+    counted config.shortcutMap.shortcutActions.hasKey(cstring"F2")
+    counted config.shortcutMap.shortcutActions[cstring"F2"] ==
+      ClientAction.forwardContinue
+
+    # AND THE GENERAL PROPERTY, which is what stops the next one — and which
+    # found two more of these the moment it was written.
+    #
+    # `hardBindShadowedActions` reports every chord the config declares that a
+    # hardcoded bind then overwrites. F2 was one. THE OTHER THREE ARE REAL AND
+    # PRE-EXISTING, pinned here rather than fixed, because each is a separate
+    # decision and none of them is this change's business:
+    #
+    #   CTRL+B  `build` — the DELIBERATE one. `ui/shortcuts.nim` records why it
+    #           shadows the config on the desktop and excludes itself from the
+    #           web build where the shadowed action is the only useful one.
+    #   CTRL+E  `switchEdit` — NOT deliberate as far as anything records.
+    #           `ui_js.nim` binds `ctrl+e` to `data.toggleReadOnly()`, so the
+    #           YAML's Switch-to-Edit chord has never fired. Same shape as F2:
+    #           a config entry that dispatches nothing it claims to.
+    #   ALT+1   `aLowLevel1` — `ui_js.nim` binds `alt+1` to
+    #           `data.openLowLevelCode()`. The INTENT matches, so unlike CTRL+E
+    #           the user sees roughly the right thing happen; but the chord is
+    #           still unrebindable and the config entry still dead.
+    #
+    # Pinned as a LIST rather than a count, so that fixing one of them reddens
+    # here and the pin can shrink, and so that a NEW one cannot hide inside an
+    # unchanged total. F2's absence from this list is the regression assertion.
+    let shadowed = hardBindShadowedActions(config)
+    var shadowedChords: seq[string] = @[]
+    for (chord, _) in shadowed:
+      shadowedChords.add($chord)
+    checkpoint("config entries killed by a hard bind: " & shadowedChords.join(", "))
+    counted shadowedChords == @["CTRL+B", "CTRL+E", "ALT+1"]
+    counted "F2" notin shadowedChords
+
+    # THE INSTRUMENT. `hardBindShadowedActions` must be able to REPORT a shadow,
+    # or "only CTRL+B" above is satisfied by a proc that always returns nothing
+    # — which is precisely what a fix that deleted the registry would produce.
+    counted cstring"CTRL+B" in hardBoundChords
+    counted config.shortcutMap.shortcutActions[cstring"CTRL+B"] ==
+      ClientAction.build
 
   test "shortcut_bindings_assertion_count_is_measured":
     checkpoint("counted assertions: " & $countedAssertions)
