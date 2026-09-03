@@ -391,6 +391,21 @@ proc setupSelectedPanelOutline() =
         return isFinite(v) ? v : 0;
       }
 
+      // The connector radius, in pixels, for the docked outline below.
+      //
+      // A docked panel has no GoldenLayout tab to read a `::before` radius off,
+      // so the value rides on the stroked path's own `border-top-left-radius`
+      // (see golden_layout.styl) instead: that resolves to pixels, where a
+      // custom property would come back as its raw `em`.
+      function connectorRadius() {
+        var probe = document.querySelector('.ct-selected-outline path, .ct-docked-outline path');
+        if (probe !== null) {
+          var v = parseFloat(window.getComputedStyle(probe).borderTopLeftRadius);
+          if (isFinite(v) && v > 0) { return v; }
+        }
+        return 6;
+      }
+
       function clearOutlines(except) {
         var existing = document.querySelectorAll('.' + OUTLINE_CLASS);
         for (var i = 0; i < existing.length; i++) {
@@ -399,6 +414,15 @@ proc setupSelectedPanelOutline() =
       }
 
       function update() {
+        // A selected docked panel is outlined by `updateDockedOutline` below.
+        // It lives outside the GoldenLayout tree, so GL keeps its own
+        // `.lm_focused` while that is so, and drawing the stack outline as well
+        // would put two selection cues on screen at once.
+        if (document.querySelector('.auto-hide-docked.ct-docked-focused') !== null) {
+          clearOutlines(null); updateDockedOutline(); return;
+        }
+        removeDockedOutline();
+
         var stack = document.querySelector('.lm_stack:has(> .lm_header.lm_focused)');
         if (stack === null) { clearOutlines(null); return; }
 
@@ -442,6 +466,256 @@ proc setupSelectedPanelOutline() =
           tab.parentElement !== null && tab.parentElement.firstElementChild === tab));
       }
 
+      // ---------------------------------------------------------------------
+      // The same outline, for a docked auto-hide panel.
+      //
+      // A docked panel is the GoldenLayout case turned on its side: the strip
+      // tab plays the part of the GL tab and juts out of the panel's edge, so
+      // the line has to run around the tab and not stop at the panel.  Same
+      // shape, same concave connectors, same tokens — only the axis differs.
+      //
+      // It is built here rather than in CSS for the same reason the GL outline
+      // is: an inset shadow can only follow the one box it is set on, and the
+      // panel and its tab are two boxes traced as one shape.
+      // ---------------------------------------------------------------------
+      var DOCKED_OUTLINE_CLASS = 'ct-docked-outline';
+
+      function radii(el) {
+        var cs = window.getComputedStyle(el);
+        var f = function (v) { var n = parseFloat(v); return isFinite(n) ? n : 0; };
+        return { tl: f(cs.borderTopLeftRadius), tr: f(cs.borderTopRightRadius),
+                 br: f(cs.borderBottomRightRadius), bl: f(cs.borderBottomLeftRadius) };
+      }
+
+      function removeDockedOutline() {
+        // Document-wide: an outline left behind by an earlier build may still be
+        // parked on the body rather than in `#root-container`.
+        var old = document.querySelectorAll('.' + DOCKED_OUTLINE_CLASS);
+        for (var i = 0; i < old.length; i++) { old[i].remove(); }
+      }
+
+      // The panel alone: a plain rounded rectangle.  Used whenever the tab that
+      // opened the panel cannot be found.
+      function dockedPanelOnlyPath(p, rr, inset) {
+        var l = p.left + inset, r = p.right - inset, t = p.top + inset, b = p.bottom - inset;
+        return ['M', l + rr.tl, t,
+                'L', r - rr.tr, t, 'A', rr.tr, rr.tr, 0, 0, 1, r, t + rr.tr,
+                'L', r, b - rr.br, 'A', rr.br, rr.br, 0, 0, 1, r - rr.br, b,
+                'L', l + rr.bl, b, 'A', rr.bl, rr.bl, 0, 0, 1, l, b - rr.bl,
+                'L', l, t + rr.tl, 'A', rr.tl, rr.tl, 0, 0, 1, l + rr.tl, t, 'Z'].join(' ');
+      }
+
+      // Panel plus the strip tab that juts out of one side of it.
+      //
+      // `side` is the side the tab is on: 'left' for the left strip, 'right'
+      // for the right one.  The traversal is written for the left strip and
+      // mirrored horizontally for the right, so the shape is described once.
+      //
+      // A tab flush with the panel's top or bottom has no room for a connector
+      // on that end — the curve would reach past the panel and the path would
+      // double back on itself.  There the tab and the panel share one straight
+      // edge instead, which is what the GL outline does for a first tab.
+      function dockedWithTabPath(p, tb, rr, tr_, inset, side) {
+        var mirror = (side === 'right');
+        var px = function (x) { return mirror ? (p.left + p.right) - x : x; };
+        var sgn = mirror ? -1 : 1;
+        var CV = mirror ? 0 : 1;   // convex corner sweep
+        var CC = mirror ? 1 : 0;   // concave connector sweep
+
+        var L  = (mirror ? p.right : p.left)  + sgn * inset;   // panel inner edge
+        var R  = (mirror ? p.left  : p.right) - sgn * inset;   // panel outer edge
+        var T  = p.top + inset, B = p.bottom - inset;
+        var TO = (mirror ? tb.right : tb.left) + sgn * inset;  // tab outer edge
+        var tT = tb.top + inset, tB = tb.bottom - inset;
+
+        // Panel corners, and the two tab corners on its outer side.
+        var pTL = mirror ? rr.tr : rr.tl, pTR = mirror ? rr.tl : rr.tr;
+        var pBR = mirror ? rr.bl : rr.br, pBL = mirror ? rr.br : rr.bl;
+        var tTL = mirror ? tr_.tr : tr_.tl, tBL = mirror ? tr_.br : tr_.bl;
+
+        // One radius for every connector, clamped by the room actually there:
+        // along the panel's edge (so the curve cannot run off its end) and
+        // across the tab's edge (so it lands on the flat, not on its corner).
+        var CONN = connectorRadius();
+        var tabRoom = Math.abs(L - TO) - Math.max(tTL, tBL);
+        var flushTop = (tT - T) < 1.5;
+        var flushBot = (B - tB) < 1.5;
+        var cT = flushTop ? 0 : Math.max(0, Math.min(CONN, tT - T, tabRoom));
+        var cB = flushBot ? 0 : Math.max(0, Math.min(CONN, B - tB, tabRoom));
+
+        var d = [];
+        // Top edge — from the tab's outer corner when the two share it.
+        if (flushTop) {
+          d.push('M', px(TO + sgn * tTL), T);
+        } else {
+          d.push('M', px(L + sgn * pTL), T);
+        }
+        d.push('L', px(R - sgn * pTR), T);
+        d.push('A', pTR, pTR, 0, 0, CV, px(R), T + pTR);
+        d.push('L', px(R), B - pBR);
+        d.push('A', pBR, pBR, 0, 0, CV, px(R - sgn * pBR), B);
+
+        // Bottom edge, then up the left-hand profile.
+        if (flushBot) {
+          d.push('L', px(TO + sgn * tBL), B);
+          d.push('A', tBL, tBL, 0, 0, CV, px(TO), B - tBL);
+        } else {
+          d.push('L', px(L + sgn * pBL), B);
+          d.push('A', pBL, pBL, 0, 0, CV, px(L), B - pBL);
+          d.push('L', px(L), tB + cB);
+          if (cB > 0.01) { d.push('A', cB, cB, 0, 0, CC, px(L - sgn * cB), tB); }
+          else { d.push('L', px(L), tB); }
+          d.push('L', px(TO + sgn * tBL), tB);
+          d.push('A', tBL, tBL, 0, 0, CV, px(TO), tB - tBL);
+        }
+
+        // Up the tab's outer edge.
+        d.push('L', px(TO), (flushTop ? T : tT) + tTL);
+        d.push('A', tTL, tTL, 0, 0, CV, px(TO + sgn * tTL), (flushTop ? T : tT));
+
+        if (!flushTop) {
+          d.push('L', px(L - sgn * cT), tT);
+          if (cT > 0.01) { d.push('A', cT, cT, 0, 0, CC, px(L), tT - cT); }
+          else { d.push('L', px(L), tT); }
+          d.push('L', px(L), T + pTL);
+          d.push('A', pTL, pTL, 0, 0, CV, px(L + sgn * pTL), T);
+        }
+        d.push('Z');
+        return d.join(' ');
+      }
+
+      // The bottom edge: the panel sits above its tab rather than beside it, and
+      // the tabs live in the status bar (`#auto-hide-bottom-strip`) instead of a
+      // strip alongside.  Same shape, same connectors, turned a quarter turn.
+      function dockedWithTabPathBottom(p, tb, rr, tr_, inset) {
+        var L = p.left + inset, R = p.right - inset;
+        var T = p.top + inset, B = p.bottom - inset;
+        var tL = tb.left + inset, tR = tb.right - inset, tB = tb.bottom - inset;
+
+        // Same radius as everywhere else, clamped by the room along the panel's
+        // bottom edge and by the height of the tab's own side edge.
+        var CONN = connectorRadius();
+        var tabRoom = (tB - B) - Math.max(tr_.bl, tr_.br);
+        var cL = Math.max(0, Math.min(CONN, tL - L, tabRoom));
+        var cR = Math.max(0, Math.min(CONN, R - tR, tabRoom));
+
+        var d = [];
+        d.push('M', L + rr.tl, T);
+        d.push('L', R - rr.tr, T);
+        d.push('A', rr.tr, rr.tr, 0, 0, 1, R, T + rr.tr);
+        d.push('L', R, B - rr.br);
+        d.push('A', rr.br, rr.br, 0, 0, 1, R - rr.br, B);
+        // Leftward along the panel's bottom, then down and around the tab.
+        d.push('L', tR + cR, B);
+        if (cR > 0.01) { d.push('A', cR, cR, 0, 0, 0, tR, B + cR); }
+        else { d.push('L', tR, B); }
+        d.push('L', tR, tB - tr_.br);
+        d.push('A', tr_.br, tr_.br, 0, 0, 1, tR - tr_.br, tB);
+        d.push('L', tL + tr_.bl, tB);
+        d.push('A', tr_.bl, tr_.bl, 0, 0, 1, tL, tB - tr_.bl);
+        d.push('L', tL, B + cL);
+        if (cL > 0.01) { d.push('A', cL, cL, 0, 0, 0, tL - cL, B); }
+        else { d.push('L', tL, B); }
+        // And on along the panel's bottom to close.
+        d.push('L', L + rr.bl, B);
+        d.push('A', rr.bl, rr.bl, 0, 0, 1, L, B - rr.bl);
+        d.push('L', L, T + rr.tl);
+        d.push('A', rr.tl, rr.tl, 0, 0, 1, L + rr.tl, T);
+        d.push('Z');
+        return d.join(' ');
+      }
+
+      function updateDockedOutline() {
+        removeDockedOutline();
+        var panel = document.querySelector('.auto-hide-docked.docked-open.ct-docked-focused');
+        if (panel === null) { return; }
+
+        var pr = panel.getBoundingClientRect();
+        if (pr.width < 1 || pr.height < 1) { return; }
+
+        // Trim the resize grip off the panel's edge.
+        //
+        // It is the divider between this panel and whatever it is docked
+        // against — GoldenLayout's own `.lm_splitter` in all but name — but it
+        // lives INSIDE the docked container, so the container's rect covers it
+        // and the outline was drawn around the gap as though it were part of
+        // the panel.  A GL panel's outline stops at its own edge and leaves the
+        // splitter beside it alone; this one now does the same.
+        var p = { left: pr.left, top: pr.top, right: pr.right, bottom: pr.bottom };
+        var grip = panel.querySelector('.auto-hide-docked-resize-handle');
+        if (grip !== null) {
+          var g = grip.getBoundingClientRect();
+          if (g.width > 0 && g.height > 0) {
+            if (g.width < g.height) {
+              // Upright grip: it hugs the left or the right edge.
+              if (Math.abs(g.right - p.right) < 1) { p.right = g.left; }
+              else if (Math.abs(g.left - p.left) < 1) { p.left = g.right; }
+            } else {
+              // Lying flat: the top or the bottom edge.
+              if (Math.abs(g.top - p.top) < 1) { p.top = g.bottom; }
+              else if (Math.abs(g.bottom - p.bottom) < 1) { p.bottom = g.top; }
+            }
+          }
+        }
+
+        var side = panel.id.indexOf('right') !== -1 ? 'right'
+                 : panel.id.indexOf('bottom') !== -1 ? 'bottom' : 'left';
+
+        var svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('class', DOCKED_OUTLINE_CLASS);
+        var path = document.createElementNS(SVG_NS, 'path');
+        svg.appendChild(path);
+        // Into `#root-container`, NOT the body.  That element is
+        // `position: fixed; z-index: 0`, so it opens a stacking context, and the
+        // hover overlay lives inside it: parked on the body this outline would
+        // be compared against root-container's own 0 and win every time,
+        // painting across a hovered panel however high the overlay's z-index
+        // was set.  Inside, the two are ordered against each other and the
+        // overlay covers the outline where they meet.  `position: fixed` still
+        // resolves against the viewport here (no transformed ancestor), so the
+        // viewport coordinates below stay correct.
+        var host = document.getElementById('root-container') || document.body;
+        host.appendChild(svg);
+
+        var w = window.innerWidth, h = window.innerHeight;
+        svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+        svg.setAttribute('width', w);
+        svg.setAttribute('height', h);
+
+        var strokeWidth = parseFloat(window.getComputedStyle(path).strokeWidth) || 1;
+        var inset = strokeWidth / 2;
+        var rr = radii(panel);
+
+        // The bottom strip is the status bar, and is named differently from the
+        // two side strips.
+        var stripSel = side === 'bottom' ? '#auto-hide-bottom-strip'
+                                         : '#auto-hide-strip-' + side;
+
+        // Find the tab by the docked panel's own title, not by `.active`.  That
+        // class marks a tab whose panel is docked *or* being previewed in the
+        // hover overlay, so while hovering two tabs carry it and picking the
+        // first drew this border around whichever tab the pointer was over.
+        // The border is for the docked panel alone.
+        var wanted = panel.getAttribute('data-ct-docked-title');
+        var tab = null;
+        var candidates = document.querySelectorAll(stripSel + ' .auto-hide-strip-tab');
+        for (var ti = 0; ti < candidates.length; ti++) {
+          if (candidates[ti].textContent.trim() === wanted) { tab = candidates[ti]; break; }
+        }
+        if (tab === null) {
+          path.setAttribute('d', dockedPanelOnlyPath(p, rr, inset));
+          return;
+        }
+        var tb = tab.getBoundingClientRect();
+        if (tb.width < 1 || tb.height < 1) {
+          path.setAttribute('d', dockedPanelOnlyPath(p, rr, inset));
+          return;
+        }
+        path.setAttribute('d', side === 'bottom'
+          ? dockedWithTabPathBottom(p, tb, rr, radii(tab), inset)
+          : dockedWithTabPath(p, tb, rr, radii(tab), inset, side));
+      }
+
       var pending = false;
       function schedule() {
         if (pending) { return; }
@@ -458,6 +732,15 @@ proc setupSelectedPanelOutline() =
         attributes: true, attributeFilter: ['class'], subtree: true, childList: true
       });
       window.addEventListener('resize', schedule);
+
+      // Dragging a docked panel's resize grip changes its width through inline
+      // style, which the class-filtered observer above never sees.
+      if (typeof ResizeObserver !== 'undefined') {
+        var ro = new ResizeObserver(schedule);
+        var docks = document.querySelectorAll('.auto-hide-docked');
+        for (var di = 0; di < docks.length; di++) { ro.observe(docks[di]); }
+      }
+
       schedule();
     })();
   """.}
@@ -474,15 +757,41 @@ proc setupClickToFocusListeners() =
   ## (it blurs the previously focused item and emits its focus event); setting the
   ## class here would leave the two disagreeing.
   ##
+  ## A docked auto-hide panel counts as a panel here too.  It lives outside the
+  ## GoldenLayout tree, so GL has no way to focus it and no way to know it was
+  ## clicked; `ct-docked-focused` is the equivalent, and the GL outline builder
+  ## stands down while it is set so exactly one panel is ever outlined.
+  ##
   ## Listens in the capture phase and never calls `preventDefault`, so the click
   ## still reaches whatever was clicked — this only runs alongside it.
   {.emit: """
+    function ctClearDockedFocus(except) {
+      var docked = document.querySelectorAll('.auto-hide-docked.ct-docked-focused');
+      for (var i = 0; i < docked.length; i++) {
+        if (docked[i] !== except) { docked[i].classList.remove('ct-docked-focused'); }
+      }
+    }
+
     document.addEventListener('mousedown', function (ev) {
       var target = ev.target;
       if (!target || !target.closest) return;
 
+      var docked = target.closest('.auto-hide-docked');
+      if (docked !== null) {
+        ctClearDockedFocus(docked);
+        // A docked panel that is not open is a zero-size container; only an
+        // open one can be the selected panel.
+        if (docked.classList.contains('docked-open')) {
+          docked.classList.add('ct-docked-focused');
+        }
+        return;
+      }
+
       var stack = target.closest('.lm_stack');
       if (stack === null) return;
+
+      // Clicking back into the layout hands the selection to GoldenLayout.
+      ctClearDockedFocus(null);
 
       // Header clicks are GoldenLayout's own business: tabs, the close and pin
       // buttons and the stack menu all live there and already focus correctly.
