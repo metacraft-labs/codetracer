@@ -2856,9 +2856,20 @@ method refreshTrace*(self: Component) {.base.} =
 method onUploadTraceProgress*(self: Component, uploadProgress: UploadProgress) {.base, async.} =
   discard
 
-method handleHistoryJump*(self: Component, isForward: bool) {.base.} =
-  discard
-
+# `handleHistoryJump` WAS HERE, AS A `{.base.}` METHOD RETURNING `discard`,
+# AND IT ATE A GESTURE.
+#
+# `ui/debug.nim` implements history navigation as a `proc` on
+# `DebugComponent`, not as a `method`, so this base was never overridden.
+# `ui/shortcuts.nim` does not import `ui/debug` — it gets `Component` from
+# `ui_imports`' re-export of this module — so its two mouse side-button
+# handlers bound to THIS declaration, dispatched dynamically, and discarded.
+# The browser Back and Forward mouse buttons did nothing for the whole period,
+# and the call sites read as if they worked.
+#
+# Deleted rather than fixed, so the compiler is the thing that answers. With
+# no base here, `shortcuts.nim` must import `ui/debug` to call it, and a
+# missing implementation is a build error instead of a silent `discard`.
 method redrawForExtension*(self: Component) {.base.} =
   discard
 

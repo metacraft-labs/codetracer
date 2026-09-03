@@ -6,6 +6,12 @@ import
   ../../common/ct_event
 from menu_render_gate import shouldRemountDebugControls
 from shortcut_labels import toolbarChord
+# WHICH WAY IS BACK. `history_cursor` holds the whole answer — the direction
+# enum, the two action ids and the cursor arithmetic — because it is the only
+# part of this that a unit lane can compile. Its header records the two
+# cancelling inversions the enum replaced.
+import history_cursor
+export history_cursor
 from isonim/core/signals import Signal, val, `val=`
 
 # ---------------------------------------------------------------------------
@@ -549,19 +555,21 @@ proc runToEntry*(self: DebugComponent) =
 proc historyJump(self: DebugComponent, location: types.Location) =
   self.api.historyJump(location)
 
-proc handleHistoryJump*(self: DebugComponent, isForward: bool) =
-  if isForward:
-    if self.jumpHistory.len != 0 and self.jumpHistory.len - self.historyIndex > 0:
-      self.historyIndex += 1
-      let location = self.jumpHistory[^self.historyIndex].location
-
-      self.historyJump(location)
-  else:
-    if self.jumpHistory.len != 0 and self.historyIndex >= 2:
-      self.historyIndex -= 1
-      let location = self.jumpHistory[^self.historyIndex].location
-
-      self.historyJump(location)
+proc handleHistoryJump*(self: DebugComponent, direction: HistoryDirection) =
+  ## Move the history cursor one entry and jump to what is there.
+  ##
+  ## Took an `isForward: bool` whose `true` branch moved BACKWARDS; see
+  ## `history_cursor`'s header for that inversion, the second one that
+  ## cancelled it, and why the parameter is now an enum named for the
+  ## sequence rather than for the gesture.
+  let nextIndex = nextHistoryIndex(
+    self.jumpHistory.len, self.historyIndex, direction)
+  if nextIndex == 0:
+    # Refused: the cursor is already on the oldest or the newest entry. Doing
+    # nothing rather than re-jumping to the location already showing.
+    return
+  self.historyIndex = nextIndex
+  self.historyJump(self.jumpHistory[^nextIndex].location)
 
 proc action(self: DebugComponent, id: string) =
   case id:
@@ -596,11 +604,11 @@ proc action(self: DebugComponent, id: string) =
       10000
     )
 
-  of "history-back":
-    self.handleHistoryJump(isForward = true)
-
-  of "history-forward":
-    self.handleHistoryJump(isForward = false)
+  # ONE MAPPING, in `history_cursor`, where a unit lane can state it. This
+  # `case` used to map `"history-back"` to `isForward = true` — the second of
+  # the two cancelling inversions.
+  of HistoryBackActionId, HistoryForwardActionId:
+    self.handleHistoryJump(historyDirectionOfAction(id))
 
   else:
     discard

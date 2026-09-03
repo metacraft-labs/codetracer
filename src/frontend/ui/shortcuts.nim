@@ -3,6 +3,15 @@ import
   std/strutils,
   isonim/core/signals,
   ui_imports, trace,
+  # `debug` FOR `handleHistoryJump`, and the import is the fix.
+  #
+  # Until now this module called that name without importing anything that
+  # declares it for a `DebugComponent`: it bound to a `{.base.}` method on
+  # `Component` in `types.nim` whose body was `discard`, so both mouse
+  # side-button handlers below compiled, dispatched and did nothing. The base
+  # is gone; this import is what makes the call reach the implementation, and
+  # what makes its absence a build error rather than a dead gesture.
+  ./debug,
   ./video_player,
   ../viewmodel/viewmodels/video_player_vm,
   ../../common/ct_event,
@@ -10,8 +19,15 @@ import
 
 const
   NO_CODE: int = -1
-  BROWSER_FORWARD: int = 3
-  BROWSER_BACK: int = 4
+  # `BROWSER_FORWARD = 3` / `BROWSER_BACK = 4` WERE HERE, AND THEY WERE
+  # SWAPPED. `MouseEvent.button` 3 is the fourth button, which every desktop
+  # browser makes BACK, and 4 is the fifth, which is FORWARD. The two branches
+  # below read consistently with those wrong names, so the mouse path carried
+  # its own pair of cancelling inversions on top of `isForward`'s.
+  #
+  # The numbers now live in `history_cursor` as `MouseButtonBack` /
+  # `MouseButtonForward`, beside the proc that turns one into a direction, so
+  # `test_history_cursor` can state which physical button walks which way.
 
 proc shortcut*(shortcut: string): int =
   let tokens = shortcut.split("+", 2)
@@ -291,10 +307,11 @@ proc configureShortcuts* =
         if not data.ui.commandPalette.agent.isNil and not data.ui.commandPalette.agent.shell.isNil:
           data.ui.commandPalette.agent.shell.initialized = false
 
-    if cast[int](e.toJs.button) == BROWSER_FORWARD:
-      cast[DebugComponent](data.ui.componentMapping[Content.Debug][0]).handleHistoryJump(isForward = true)
-    elif cast[int](e.toJs.button) == BROWSER_BACK:
-      cast[DebugComponent](data.ui.componentMapping[Content.Debug][0]).handleHistoryJump(isForward = false)
+    let mouseButton = cast[int](e.toJs.button)
+    if mouseButton == MouseButtonBack or mouseButton == MouseButtonForward:
+      if data.ui.componentMapping[Content.Debug].len > 0:
+        cast[DebugComponent](data.ui.componentMapping[Content.Debug][0])
+          .handleHistoryJump(historyDirectionOfMouseButton(mouseButton))
   )
 
   Mousetrap.`bind`("f1") do ():

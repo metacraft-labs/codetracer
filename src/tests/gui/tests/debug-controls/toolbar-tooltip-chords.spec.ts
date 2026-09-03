@@ -477,9 +477,20 @@ test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest"
     // than left implicit. The other five are not merely inconvenient: pressing
     // `run-tests` opens a second window and starts a recording, `run-to-entry`
     // and `reset-operation` restart the session out from under the loop, and
-    // the two history controls are the subject of a separate, tracked defect
-    // (`ui/debug.nim:417-421` maps `history-back` to `isForward = true`). A
-    // test that drove them would be asserting through a known-wrong mapping.
+    // the two history controls do not dispatch a DAP step at all — they send
+    // `ct/history-jump`, which `recordDapStep` does not log, so the equality
+    // this loop asserts has nothing to compare on either side.
+    //
+    // THAT WAS NOT ALWAYS THE REASON, and the old one is worth keeping in
+    // view: this comment used to read "the subject of a separate, tracked
+    // defect (`ui/debug.nim:417-421` maps `history-back` to
+    // `isForward = true`)". It did, and it was correct anyway, because the
+    // `isForward` parameter named the opposite of what it did — two
+    // inversions that cancelled. Both are gone: the direction is now a
+    // `HistoryDirection` enum in `frontend/ui/history_cursor.nim`, named for
+    // the sequence rather than the gesture, and the landing of each gesture
+    // is asserted by value in
+    // `frontend/viewmodel/tests/unit/test_history_cursor.nim`.
     const STEPPING_CONTROLS = [
       "next-image",
       "step-in-image",
