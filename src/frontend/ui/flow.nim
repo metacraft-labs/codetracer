@@ -1617,20 +1617,20 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
     let viewMore = document.createElement(cstring"span")
     viewMore.setAttribute(cstring"class", cstring(&"ct-omni-name{nameClassSuffix} flow-view-more-button flow-hide-content"))
     viewMore.applyStyle(style)
+    # An event chip carries recorded output, which is a string and has no
+    # type to visualise — so this opens the full text in a popup rather than
+    # the typed tree a variable chip opens. What it does NOT do any more is
+    # set `max-width: none`: that is the same un-capping that let a long
+    # value draw over the source lines beneath it, and the chip is now
+    # clipped unconditionally by `.flow-parallel-value-box`.
+    let eventAnchorId = cstring(&"flow-{flowMode}-value-box-{stepCount}-{i}")
+    let fullText = event.text
     viewMore.addEventListener(cstring"mousedown", proc(e: Event) =
-      let targetId = &"flow-{flowMode}-value-box-{stepCount}-{i}"
-      let target = document.getElementById(targetId)
-      if not target.isNil:
-        if target.style.maxWidth != "none":
-          target.style.maxWidth = "none"
-          e.target.toJs.classList.remove("flow-hide-content")
-          e.target.toJs.classList.add("flow-show-content")
-        else:
-          e.target.toJs.classList.remove("flow-show-content")
-          e.target.toJs.classList.add("flow-hide-content")
-          target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
-        self.maxWidth = 0
-        self.editorUI.adjustEditorWidth()
+      e.stopPropagation()
+      let popup = document.createElement(cstring"div")
+      popup.setAttribute(cstring"class", cstring"flow-event-value-popup")
+      popup.appendChild(document.createTextNode(fullText))
+      self.displayTooltip(eventAnchorId, popup)
     )
     result.appendChild(viewMore)
 
@@ -1674,24 +1674,36 @@ proc flowSimpleValue*(
       .toLowerAscii()
   let flowValueMode = self.getFlowValueMode(beforeValue, afterValue)
 
-  proc renderViewOption(): Node =
+  proc openTypedValuePopup(anchorId: cstring, value: Value) =
+    ## Open the full value in a popup drawn by the TYPED value renderer
+    ## (`ui/value.nim`'s `renderValueDom`, reached through
+    ## `ValueComponent`) rather than by printing a string.
+    ##
+    ## This is the same renderer the chip's hover tooltip already uses, so
+    ## a struct opens as an expandable tree here exactly as it does there.
+    if not self.modalValueComponent.hasKey(anchorId):
+      self.ensureValueComponent(anchorId, name, value)
+    self.openTooltip(anchorId, value)
+
+  proc renderViewOption(value: Value): Node =
     result = document.createElement(cstring"span")
     result.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-name flow-view-more-button flow-hide-content"))
     result.applyStyle(style)
+    # The chip is now clipped unconditionally (see `.flow-parallel-value-box`
+    # in `styles/components/flow.styl`), so this button no longer un-caps its
+    # width. It used to set `max-width: none`, which is what let a long value
+    # draw over the source lines below it; the full value belongs in a popup,
+    # not in a chip that has grown out of its own box.
+    #
+    # Dropping the `getElementById` lookup also retires a latent bug: in
+    # `BeforeAndAfterValueMode` the value boxes are given SPACE-SEPARATED
+    # two-token ids (see `idBefore`/`idAfter` below), which `getElementById`
+    # can never match — so in dual mode the old handler silently did nothing.
+    let anchorId = cstring(&"flow-{flowMode}-value-box-{i}-{stepCount}-{name}")
+    let popupValue = value
     result.addEventListener(cstring"mousedown", proc(e: Event) =
-      let targetId = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
-      let target = document.getElementById(targetId)
-      if not target.isNil:
-        if target.style.maxWidth != "none":
-          target.style.maxWidth = "none"
-          e.target.toJs.classList.remove("flow-hide-content")
-          e.target.toJs.classList.add("flow-show-content")
-        else:
-          e.target.toJs.classList.remove("flow-show-content")
-          e.target.toJs.classList.add("flow-hide-content")
-          target.style.maxWidth = FLOW_VALUE_MAX_WIDTH
-      self.maxWidth = 0
-      self.editorUI.adjustEditorWidth()
+      e.stopPropagation()
+      openTypedValuePopup(anchorId, popupValue)
     )
 
   proc onMouseDown(e: Event, value: Value) =
@@ -1762,13 +1774,15 @@ proc flowSimpleValue*(
   case flowValueMode:
   of BeforeValueMode:
     if beforeValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
-      result.appendChild(renderViewOption())
+      result.appendChild(renderViewOption(beforeValue))
   of AfterValueMode:
     if afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
-      result.appendChild(renderViewOption())
+      result.appendChild(renderViewOption(afterValue))
   of BeforeAndAfterValueMode:
     if beforeValue.textRepr(compact=true).len() + afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
-      result.appendChild(renderViewOption())
+      # The "after" value is the one the step produced, so it is the one
+      # the popup opens on when both halves are drawn.
+      result.appendChild(renderViewOption(afterValue))
 
   if showName:
     let nameSpan = flowValueNameDom(name)

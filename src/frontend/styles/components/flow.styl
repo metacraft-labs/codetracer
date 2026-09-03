@@ -248,6 +248,36 @@
 .code-editor .flow-parallel-value-box
   color: colors-ui-text-primary-body
   font-weight: 600
+  // CLIPPING — the chip must never draw outside its own box.
+  //
+  // These four declarations were live until a69766dd ("New design system
+  // implementation") commented out the whole `.flow-parallel-value-box`
+  // block below, taking `white-space`/`overflow`/`text-overflow` with it.
+  // The inline `max-width: 30ch` that `ui/flow.nim` sets on long values
+  // survived, so the box got NARROW while the text stayed FULL LENGTH:
+  // with the default `white-space: normal` the value wrapped onto extra
+  // lines instead of being cut off, and since a chip is drawn in a Monaco
+  // view zone laid over the source, those extra lines overdrew the code
+  // beneath — "the value overflows visibly into the next line ... a major
+  // overdraw and everything becomes unreadable".
+  //
+  // No `min-width: 0` here, though the chip IS a flex item of
+  // `.ct-omni-value` (`display: flex`) and a flex item's automatic minimum
+  // size normally pins it to its min-content width — which, under `nowrap`,
+  // would be the whole string. It was added on that reasoning and then
+  // measured: identical box (210px wide, 26px tall) with and without it.
+  // The automatic minimum size is clamped by a specified `max-width`, and
+  // `ui/flow.nim` sets `max-width: 30ch` inline on exactly the long values
+  // this rule has to clip. So the declaration was inert, and inert
+  // declarations invite the next reader to preserve them.
+  //
+  // Only the clipping declarations are restored. The rest of the commented
+  // block (padding, radius, font, background) is deliberately NOT revived —
+  // `.ct-omni-value` supplies the chip's appearance now, and re-stating it
+  // here would change how every chip looks.
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: ellipsis
 
 // .flow-parallel-value-box
 //   width: fit-content
@@ -482,6 +512,17 @@
   // max-width: 100%
   overflow: hidden
   text-overflow: ellipsis
+
+// The full-text popup an event chip's eye icon opens. The chip itself is
+// clipped to one line; this is where the whole of a long stdout line is
+// readable. It wraps and scrolls rather than growing without bound — a popup
+// that can be taller than the window is the same overdraw in a new place.
+.flow-event-value-popup
+  white-space: pre-wrap
+  overflow-wrap: anywhere
+  max-width: 60ch
+  max-height: 40vh
+  overflow: auto
 
 
 // TODO
