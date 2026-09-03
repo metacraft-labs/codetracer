@@ -105,7 +105,30 @@ fi
 gates="$(find "${gate_dir}" -maxdepth 1 -type f -name '*.sh' | sed 's#^\./##' | sort)"
 gate_count="$(printf '%s\n' "${gates}" | grep -c . || true)"
 
-in_set() { printf '%s\n' "$2" | grep -Fxq -- "$1"; }
+# A HERE-STRING, NOT A PIPE, AND THIS IS A CORRECTNESS FIX RATHER THAN STYLE.
+#
+# This was `printf '%s\n' "$2" | grep -Fxq -- "$1"`, and under the `set -uo
+# pipefail` on line 58 that construction reports FALSE FOR ITEMS THAT ARE
+# PRESENT. `grep -q` exits the instant it matches; if the haystack is larger
+# than a pipe buffer, `printf` is still writing, takes EPIPE, and fails. With
+# `pipefail` the pipeline adopts printf's failure, so a successful match is
+# returned as "not in set".
+#
+# Measured, not theorised: with a 200k-line haystack and an item that is
+# present by construction, the old form returned false 40 times out of 40. The
+# tell is in the CI log, immediately above each spurious result:
+#
+#     ci/test/shell-gate-coverage.sh: line 108: printf: write error: Broken pipe
+#     [FAILED] ci/test/origin-dap-gate.sh is reachable from NO workflow ...
+#
+# Because it depends on whether printf finishes before grep exits, it is a
+# race: run 33784363822 reported THREE unreachable gates on `dev` while the
+# same tree reported ONE locally. Two of those three were reachable all along.
+# That made `lint-nim` fail, and `lint-nim` gates every build job in the repo.
+#
+# The here-string has no pipe to break, so there is no EPIPE and no pipefail
+# interaction. It is bash 3.2 compatible, which the note above requires.
+in_set() { grep -Fxq -- "$1" <<<"$2"; }
 
 echo "=== shell gate coverage — can CI reach every gate in ci/test/? ==="
 echo

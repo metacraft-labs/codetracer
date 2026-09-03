@@ -81,3 +81,20 @@ low-level-code-browser.sh
 # WORTH SAYING PLAINLY: this gate has never executed in CI. Any confidence in
 # its verdicts comes from runs somebody did by hand.
 verify-deployed-bytes.sh
+
+# Added by 2bf98864, which wired it into nothing. It is modelled on
+# `low-level-code-browser.sh` -- listed above for the same reason -- and like
+# that one it drives a real browser against a built frontend, so it carries a
+# runner cost and a set of preconditions that its author is better placed to
+# judge than a guard is. Two other files already point AT it as the pane's
+# browser gate (`noir-build-in-browser.sh:429`, `noir_build_probe.mjs:119`),
+# which is how prose can describe a gate as covering something while nothing
+# runs it.
+#
+# Registering it here rather than wiring it, per this file's own rule. Note it
+# was NOT the whole of the failure that sent people looking: run 33784363822
+# reported THREE dark gates on `dev`, and the other two -- `origin-dap-gate.sh`
+# and `python-version-alignment-test.sh` -- were reachable all along, reported
+# dark by an EPIPE race in the guard's own `in_set`. See the note at
+# shell-gate-coverage.sh:108. This is the one that was real.
+constraints-listing-browser.sh
