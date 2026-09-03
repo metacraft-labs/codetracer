@@ -35,47 +35,56 @@
 ## contrast treatment, with no second rule and no second asset.
 ##
 ## BlockTracer's control strip was reworked the same way and for the same
-## reason (`client/src/components/icons.nim`, `dev` e8c8f34). The two products
-## share a user who moves between them, so the geometry below is byte-identical
-## to BlockTracer's.
+## reason (`client/src/components/icons.nim`, `dev` e8c8f34). What is shared
+## between the two products is that MECHANISM, and only that.
 ##
-## ## What the marks are
+## ## The geometry is CodeTracer's own, and stays that way
 ##
-## Five are VS Code codicons, `d` verbatim (CC BY 4.0, microsoft/vscode-
-## codicons): `debug-continue`, `debug-reverse-continue`, `debug-step-over`,
-## `debug-step-back` and `debug-restart`. Four are drawn, because no product
-## ships a reverse step in/out — DAP defines only `stepBack` and
-## `reverseContinue`, so the gap propagates everywhere, and CodeTracer has all
-## four controls. They put the arrow on a diagonal so the family's rule ("a
-## reverse mark is its forward partner reflected", microsoft/vscode#85111) has
-## a handedness to act on, and they share `debug-step-over`'s dot — Microsoft's
-## "modifier badge" — so the six step marks have one anchor.
+## For a few hours this module also carried BlockTracer's DRAWINGS. `93be377c`
+## had replaced CodeTracer's eight stepping marks with VS Code codicons to make
+## the two products' toolbars identical, and `a30f10cd` then moved the whole
+## strip in here and brought those replacements with it.
 ##
-## The remaining three — the two history chevrons and the reset arc — keep
-## their existing geometry exactly. They are here because they sit on the same
-## strip and had the same defect, not because their shapes were wrong.
+## That alignment was not wanted. The intent was to change BlockTracer's marks
+## only; CodeTracer's are to be reworked by a designer, from CodeTracer's own
+## set as the starting point. So the eight stepping marks below are the drawings
+## this product had before `93be377c` — traced from the asset files at
+## `1b898556` (`93be377c^`), which is the named revision to start that rework
+## from:
 ##
-## ## `run-to-entry` is a restart, so it wears a restart's mark
+##   src/public/resources/debug/{continue,next,reverse_continue,reverse_next,
+##     step-in,step-out,reverse_step-in,reverse_step-out}_dark.svg
 ##
-## It used to be a play triangle beside a stack of lines: a transport control,
-## and the last one on this bar. That is the same reading a user reported
-## against BlockTracer's Continue — "continue looks like the standard icon of
-## music/video players for 'rewind to the end'". A bar-plus-triangle carries
-## its meaning in the ARRANGEMENT: across VS Code, Chrome DevTools, JetBrains,
-## Visual Studio, Xcode and Eclipse CDT the bar sits BEHIND the direction of
-## travel, marking where execution is stopped, and no product puts it ahead —
-## which is exactly what makes the media glyph mean "skip to the end".
+## They are carried across the way the other four were: coordinates verbatim,
+## `#DDDDDD` dropped, `currentColor` in its place. Two conversions were needed
+## because this module draws `<path>` only, and both are exact rather than
+## approximate:
 ##
-## But `run-to-entry` is not a resume at all. It is DAP `restart` (`ct-dap.md`:
-## "`restart` | none | `{}` | Mapped to `ct/run-to-entry`"), and the mark for a
-## restart is a circular arrow in every product surveyed: VS Code binds Restart
-## to `debug-restart`, which carries no triangle geometry whatsoever; JetBrains'
-## `actions/restart.svg` is a triangle wrapped in a ~270° arc; Visual Studio's
-## Restart is a curved arrow; and the circular arrow in Chrome's chrome is
-## reload. The codicon set keeps the two apart deliberately — `debug-start` is
-## a bare triangle, `debug-restart` is a bare arc — so a bare triangle here
-## would read as "start/continue" and collide with `debug-continue` two buttons
-## away. `debug-restart` it is.
+## * `step-out` and `reverse_step-out` used `<rect rx="1">` under a transform.
+##   The transform is a reflection of an axis-aligned rounded rect, so it is
+##   folded into the corner coordinates and the rect is written out as its
+##   equivalent path.
+## * `step-in` and `reverse_step-in` used Figma's mask trick for an INSIDE
+##   stroke: a 2-wide band centred on each edge, clipped to the rect's interior
+##   by a `<mask>`. A 1-wide inside stroke is identical to a 1-wide centred
+##   stroke on the rect inset by 0.5 with its radius reduced by 0.5, so that is
+##   what they are here — one stroked path each, no mask, same pixels.
+##
+## The other four — the two history chevrons, the reset arc and `run-to-entry`
+## — are unchanged from the asset files they came from and always were.
+##
+## ## What the old set looks like, so the rework is not walking in blind
+##
+## Reading the restored geometry back, two things are worth writing down for
+## whoever picks this up. `continue`/`reverse-continue` and `next`/`reverse-
+## next` are exact 180° rotations of one another about (8, 8) — that pairing is
+## real and `debug_control_marks_test` now asserts it. The four step marks are
+## NOT a comparable family: `step-in` and `reverse-step-out` carry the same
+## arrow (to within the one-unit difference in their viewBoxes) and are told
+## apart only by whether the box beside it is outlined or filled, and so do
+## `step-out` and `reverse-step-in`. That is a property of the drawings, not a
+## transcription error, and it is left exactly as it was found rather than
+## quietly improved on the way past.
 
 import std/strutils
 
@@ -92,9 +101,18 @@ type
     ## (filled), and the drawn ones are strokes, sometimes over a filled dot.
     ## Neither ever names a colour — that is the whole point of this module —
     ## so the channel and the width are the only things that vary.
+    ##
+    ## `linecap`/`linejoin` are carried per-shape because the strip's stroked
+    ## marks were not all drawn with the same ends. The asset files the
+    ## stepping marks come from named neither, i.e. SVG's defaults — `butt`
+    ## ends and `miter` corners — and a chevron given round ends instead is a
+    ## visibly blunter mark at 16px. So the value travels with the shape rather
+    ## than being a house style applied to all of them.
     d*: string
     stroked*: bool
     strokeWidth*: string
+    linecap*: string
+    linejoin*: string
 
   ControlMark* = object
     ## A mark, and the control it belongs on.
@@ -106,9 +124,13 @@ type
     ## correct-looking buttons can still carry a mark on the wrong one, and
     ## that is invisible from the shapes alone.
     ##
-    ## `viewBox` is per-mark because one of them is not square: the reset
-    ## mark was drawn `0 0 16 17` and is carried across verbatim rather than
-    ## redrawn, since this change is about where its COLOUR comes from.
+    ## `viewBox` is per-mark because the strip's marks were not all drawn in
+    ## the same box and are carried across verbatim rather than redrawn: the
+    ## reset mark is `0 0 16 17`, the two step-in marks `0 0 17 17`, the two
+    ## step-out marks `0 0 18 17`. Normalising them to 16 square would mean
+    ## re-cutting the artwork, which is the designer's pass, not this one.
+    ## `components/button.styl` sizes the mark by HEIGHT for the same reason —
+    ## it is what `background-size: auto 1em` did for these files before.
     buttonId*: string
     action*: string
     viewBox*: string
@@ -118,66 +140,86 @@ const DefaultViewBox = "0 0 16 16"
 
 func filled(d: string): ControlShape =
   ControlShape(d: d, stroked: false)
-func stroked(d: string; width = "1.6"): ControlShape =
-  ControlShape(d: d, stroked: true, strokeWidth: width)
+func stroked(d: string; width = "1.6"; cap = "round"; join = "round"):
+    ControlShape =
+  ControlShape(d: d, stroked: true, strokeWidth: width,
+               linecap: cap, linejoin: join)
+func drawn(d: string; width = "1"): ControlShape =
+  ## A stroke from one of the original asset files: SVG's own defaults for the
+  ## ends, which is what those files left unset.
+  stroked(d, width, cap = "butt", join = "miter")
 
 const
-  StepBadgePath = "M10 13C10 14.103 9.103 15 8 15C6.897 15 6 14.103 6 13C6 " &
-    "11.897 6.897 11 8 11C9.103 11 10 11.897 10 13Z"
-    ## The dot the six step marks share — `debug-step-over`'s "modifier
-    ## badge", recentred. It is the family's one anchor: it is what says
-    ## "this control moves by a step" before the arrow says which way.
+  ContinueDotPath = "M8 12C9.10457 12 10 12.8954 10 14C10 15.1046 9.10457 1" &
+    "6 8 16C6.89543 16 6 15.1046 6 14C6 12.8954 6.89543 12 8 12Z"
+  ContinueChevronPath = "M1.4375 1.3125L8 6L11.2812 3.65625L14.5625 1.3125"
+    ## `continue_dark.svg`. A shallow V with its vertex at (8, 6) over a filled
+    ## dot at the bottom of the box.
 
-  ContinuePath = "M14.578 7.149L7.578 2.186C7.397 2.058 7.198 2 7.003 2C6.4" &
-    "84 2 6 2.411 6 3.002V13.003C6 13.594 6.485 14.005 7.004 14.005C7.201 1" &
-    "4.005 7.403 13.946 7.585 13.815L14.585 8.777C15.142 8.376 15.139 7.546" &
-    " 14.579 7.15L14.578 7.149ZM7.5 12.027V3.969L13.14 7.968L7.5 12.027ZM3." &
-    "5 2.75V13.25C3.5 13.664 3.164 14 2.75 14C2.336 14 2 13.664 2 13.25V2.7" &
-    "5C2 2.336 2.336 2 2.75 2C3.164 2 3.5 2.336 3.5 2.75Z"
-    ## `debug-continue`. A triangle with the bar at the TAIL — behind the
-    ## direction of travel, marking where execution is stopped.
+  ReverseContinueDotPath = "M8 4C9.10457 4 10 3.10457 10 2C10 0.89543 9.1045" &
+    "7 -7.8281e-08 8 -1.74846e-07C6.89543 -2.7141e-07 6 0.89543 6 2C6 3.104" &
+    "57 6.89543 4 8 4Z"
+  ReverseContinueChevronPath = "M14.5625 14.6875L8 10L4.71875 12.3437L1.4375" &
+    " 14.6875"
+    ## `reverse_continue_dark.svg`: `continue_dark.svg` turned 180° about
+    ## (8, 8) — dot to the top, vertex to (8, 10).
 
-  ReverseContinuePath = "M8.99688 2C8.80188 2 8.60288 2.058 8.42188 2.186L1." &
-    "42188 7.149C0.861882 7.546 0.858882 8.376 1.41588 8.776L8.41588 13.814" &
-    "C8.59788 13.945 8.79988 14.004 8.99688 14.004C9.51588 14.004 10.0009 1" &
-    "3.593 10.0009 13.002V3.002C10.0009 2.412 9.51688 2 8.99788 2H8.99688ZM" &
-    "8.49988 12.027L2.85988 7.968L8.49988 3.969V12.027ZM13.9999 2.75V13.25C" &
-    "13.9999 13.664 13.6639 14 13.2499 14C12.8359 14 12.4999 13.664 12.4999" &
-    " 13.25V2.75C12.4999 2.336 12.8359 2 13.2499 2C13.6639 2 13.9999 2.336 " &
-    "13.9999 2.75Z"
-    ## `debug-reverse-continue`, the reflection of the above.
+  NextRulePath = "M1.5 14.3438H14.5"
+  NextChevronPath = "M1.4375 1.65619L8 6.34369L11.2812 3.99994L14.5625 1.656" &
+    "19"
+    ## `next_dark.svg`. The same shallow V as `continue`, over a rule instead
+    ## of a dot — that single difference is the whole distinction between the
+    ## two most-used controls on this bar, and is one of the things the rework
+    ## is expected to look at.
+    ##
+    ## The middle point sits on the segment it interrupts; it is redundant and
+    ## is kept because it is in the file.
 
-  NextPath = "M9.99993 13C9.99993 14.103 9.10293 15 7.99993 15C6.89693 15 5." &
-    "99993 14.103 5.99993 13C5.99993 11.897 6.89693 11 7.99993 11C9.10293 1" &
-    "1 9.99993 11.897 9.99993 13ZM13.2499 2C12.8359 2 12.4999 2.336 12.4999" &
-    " 2.75V4.027C11.3829 2.759 9.75993 2 7.99993 2C5.03293 2 2.47993 4.211 " &
-    "2.06093 7.144C2.00193 7.554 2.28793 7.934 2.69793 7.993C2.73393 7.999 " &
-    "2.76993 8.001 2.80493 8.001C3.17193 8.001 3.49293 7.731 3.54693 7.357C" &
-    "3.86093 5.159 5.77593 3.501 8.00093 3.501C9.52993 3.501 10.9199 4.264 " &
-    "11.7439 5.501H9.75093C9.33693 5.501 9.00093 5.837 9.00093 6.251C9.0009" &
-    "3 6.665 9.33693 7.001 9.75093 7.001H13.2509C13.6649 7.001 14.0009 6.66" &
-    "5 14.0009 6.251V2.751C14.0009 2.337 13.6649 2.001 13.2509 2.001L13.249" &
-    "9 2Z"
-    ## `debug-step-over`. The arc hops OVER the dot — the whole-line move.
+  ReverseNextRulePath = "M1.5 1.65625H14.5"
+  ReverseNextChevronPath = "M1.4375 14.3438L8 9.65625L11.2812 12L14.5625 14." &
+    "3437"
+    ## `reverse_next_dark.svg`: `next_dark.svg` turned 180° about (8, 8).
 
-  ReverseNextPath = "M8 11C6.897 11 6 11.897 6 13C6 14.103 6.897 15 8 15C9.1" &
-    "03 15 10 14.103 10 13C10 11.897 9.103 11 8 11ZM13.939 7.144C13.52 4.21" &
-    "1 10.966 2 8 2C6.24 2 4.617 2.758 3.5 4.027V2.75C3.5 2.336 3.164 2 2.7" &
-    "5 2C2.336 2 2 2.336 2 2.75V6.25C2 6.664 2.336 7 2.75 7H6.25C6.664 7 7 " &
-    "6.664 7 6.25C7 5.836 6.664 5.5 6.25 5.5H4.257C5.081 4.263 6.471 3.5 8 " &
-    "3.5C10.225 3.5 12.14 5.158 12.454 7.356C12.508 7.73 12.829 8 13.196 8C" &
-    "13.231 8 13.267 7.998 13.303 7.992C13.713 7.933 13.998 7.554 13.94 7.1" &
-    "43L13.939 7.144Z"
-    ## `debug-step-back`, `debug-step-over` reflected about x=8.
+  StepInArrowPath = "M9.61338 14.4643L14.2933 9.49477L3.29443 9.49477C1.7672" &
+    "4 9.49477 0.500001 8.34078 0.500001 6.92303L0.500001 9.17912e-06"
+  StepInBoxPath = "M4.68835 0.929139H15.5A0.5 0.5 0 0 1 16 1.429139V5.42914" &
+    "A0.5 0.5 0 0 1 15.5 5.92914H4.68835A0.5 0.5 0 0 1 4.18835 5.42914V1.42" &
+    "9139A0.5 0.5 0 0 1 4.68835 0.929139Z"
+    ## `step-in_dark.svg`, which is `0 0 17 17` and not `0 0 16 16`.
+    ##
+    ## The box is the file's masked inside-stroke written as a centred one:
+    ## the mask's rect is x∈[3.68835, 16.5], y∈[0.429139, 6.42914] with r=1,
+    ## and a 1-wide stroke inside that is a 1-wide stroke centred on the same
+    ## rect inset by 0.5 with r=0.5. Outlined, where `step-out`'s is filled.
 
-  StepInArrowPath = "M4.6 3.6L10.4 9.4M10.4 6.2L10.4 9.4L7.2 9.4"
-    ## Drawn. Head DOWN at the dot ("into"), in the RIGHT half (forward).
-  ReverseStepInArrowPath = "M11.4 3.6L5.6 9.4M5.6 6.2L5.6 9.4L8.8 9.4"
-    ## `StepInArrowPath` reflected about x=8.
-  StepOutArrowPath = "M5.6 9.4L11.4 3.6M8.2 3.6L11.4 3.6L11.4 6.8"
-    ## Drawn. Head UP and away from the dot ("out of"), in the RIGHT half.
-  ReverseStepOutArrowPath = "M10.4 9.4L4.6 3.6M7.8 3.6L4.6 3.6L4.6 6.8"
-    ## `StepOutArrowPath` reflected about x=8.
+  ReverseStepInArrowPath = "M6.88662 0.342773L2.20669 5.3123H13.2056C14.7328" &
+    " 5.3123 16 6.46628 16 7.88404V14.8071"
+  ReverseStepInBoxPath = "M1 8.87793H11.8116A0.5 0.5 0 0 1 12.3116 9.37793V1" &
+    "3.3779A0.5 0.5 0 0 1 11.8116 13.8779H1A0.5 0.5 0 0 1 0.5 13.3779V9.377" &
+    "93A0.5 0.5 0 0 1 1 8.87793Z"
+    ## `reverse_step-in_dark.svg`, `0 0 17 17`. Mask's rect x∈[0, 12.8116],
+    ## y∈[8.37793, 14.3779], r=1, inset the same way.
+
+  StepOutArrowPath = "M7.09078 0.349609L2.2299 5.31913H13.654C15.2403 5.3191" &
+    "3 16.5565 6.47312 16.5565 7.89088V14.8139"
+  StepOutBoxPath = "M1 8.24274H12.307A1 1 0 0 1 13.307 9.24274V13.38444A1 1 " &
+    "0 0 1 12.307 14.38444H1A1 1 0 0 1 0 13.38444V9.24274A1 1 0 0 1 1 8.242" &
+    "74Z"
+    ## `step-out_dark.svg`, which is `0 0 18 17` — a third viewBox on this
+    ## strip. Its box is a FILLED `<rect rx="1">` carried under
+    ## `matrix(-1 0 0 1 13.307 8.24274)`; that maps the rect to
+    ## x∈[0, 13.307], y∈[8.24274, 14.38444], and a rounded rect is symmetric
+    ## under the reflection, so the transform folds into those corners exactly.
+
+  ReverseStepOutArrowPath = "M9.96574 14.4643L14.8266 9.49477L3.40248 9.4947" &
+    "7C1.81624 9.49477 0.500001 8.34078 0.500001 6.92303L0.500001 9.17912e-06"
+  ReverseStepOutBoxPath = "M4.74939 0.42947H16.05639A1 1 0 0 1 17.05639 1.42" &
+    "947V5.57117A1 1 0 0 1 16.05639 6.57117H4.74939A1 1 0 0 1 3.74939 5.571" &
+    "17V1.42947A1 1 0 0 1 4.74939 0.42947Z"
+    ## `reverse_step-out_dark.svg`, `0 0 18 17`. Filled rect under
+    ## `matrix(1 ~0 ~0 -1 3.74939 6.57117)` — the off-diagonal 8.74228e-08 is
+    ## Figma's rounding of zero — giving x∈[3.74939, 17.05639],
+    ## y∈[0.42947, 6.57117].
 
   RunToEntryPath = "M14 8C14 8.81 13.842 9.596 13.528 10.336C13.224 11.053 1" &
     "2.791 11.694 12.241 12.243C11.694 12.791 11.053 13.224 10.337 13.528C9" &
@@ -233,30 +275,33 @@ const ControlMarks*: seq[ControlMark] = @[
               shapes: @[stroked(HistoryForwardPath, "1")]),
   ControlMark(buttonId: "reverse-next-image", action: "reverse-next",
               viewBox: DefaultViewBox,
-              shapes: @[filled(ReverseNextPath)]),
+              shapes: @[drawn(ReverseNextRulePath),
+                        drawn(ReverseNextChevronPath)]),
   ControlMark(buttonId: "next-image", action: "next",
               viewBox: DefaultViewBox,
-              shapes: @[filled(NextPath)]),
+              shapes: @[drawn(NextRulePath), drawn(NextChevronPath)]),
   ControlMark(buttonId: "reverse-step-in-image", action: "reverse-step-in",
-              viewBox: DefaultViewBox,
-              shapes: @[filled(StepBadgePath),
-                        stroked(ReverseStepInArrowPath)]),
+              viewBox: "0 0 17 17",
+              shapes: @[drawn(ReverseStepInArrowPath),
+                        drawn(ReverseStepInBoxPath)]),
   ControlMark(buttonId: "step-in-image", action: "step-in",
-              viewBox: DefaultViewBox,
-              shapes: @[filled(StepBadgePath), stroked(StepInArrowPath)]),
+              viewBox: "0 0 17 17",
+              shapes: @[drawn(StepInArrowPath), drawn(StepInBoxPath)]),
   ControlMark(buttonId: "reverse-step-out-image", action: "reverse-step-out",
-              viewBox: DefaultViewBox,
-              shapes: @[filled(StepBadgePath),
-                        stroked(ReverseStepOutArrowPath)]),
+              viewBox: "0 0 18 17",
+              shapes: @[drawn(ReverseStepOutArrowPath),
+                        filled(ReverseStepOutBoxPath)]),
   ControlMark(buttonId: "step-out-image", action: "step-out",
-              viewBox: DefaultViewBox,
-              shapes: @[filled(StepBadgePath), stroked(StepOutArrowPath)]),
+              viewBox: "0 0 18 17",
+              shapes: @[drawn(StepOutArrowPath), filled(StepOutBoxPath)]),
   ControlMark(buttonId: "reverse-continue-image", action: "reverse-continue",
               viewBox: DefaultViewBox,
-              shapes: @[filled(ReverseContinuePath)]),
+              shapes: @[filled(ReverseContinueDotPath),
+                        drawn(ReverseContinueChevronPath)]),
   ControlMark(buttonId: "continue-image", action: "continue",
               viewBox: DefaultViewBox,
-              shapes: @[filled(ContinuePath)]),
+              shapes: @[filled(ContinueDotPath),
+                        drawn(ContinueChevronPath)]),
   ControlMark(buttonId: "run-to-entry-image", action: "run-to-entry",
               viewBox: DefaultViewBox,
               shapes: @[filled(RunToEntryPath)]),
@@ -317,7 +362,9 @@ func svgMarkup*(m: ControlMark): string =
     if s.stroked:
       parts.add "<path d=\"" & s.d & "\" fill=\"none\" " &
         "stroke=\"currentColor\" stroke-width=\"" & s.strokeWidth & "\" " &
-        "stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+        "stroke-linecap=\"" & s.linecap & "\" " &
+        "stroke-linejoin=\"" & s.linejoin & "\"" &
+        (if s.linejoin == "miter": " stroke-miterlimit=\"10\"" else: "") & "/>"
     else:
       parts.add "<path d=\"" & s.d & "\" fill=\"currentColor\"/>"
   parts.add "</svg>"
@@ -373,8 +420,13 @@ when defined(js):
         p.setAttribute(cstring"fill", cstring"none")
         p.setAttribute(cstring"stroke", cstring"currentColor")
         p.setAttribute(cstring"stroke-width", cstring(s.strokeWidth))
-        p.setAttribute(cstring"stroke-linecap", cstring"round")
-        p.setAttribute(cstring"stroke-linejoin", cstring"round")
+        p.setAttribute(cstring"stroke-linecap", cstring(s.linecap))
+        p.setAttribute(cstring"stroke-linejoin", cstring(s.linejoin))
+        # The asset files these come from carried `stroke-miterlimit="10"`.
+        # SVG's default is 4, which is enough to clip a miter on a shallow
+        # enough join, so the file's value travels with the file's corners.
+        if s.linejoin == "miter":
+          p.setAttribute(cstring"stroke-miterlimit", cstring"10")
       else:
         p.setAttribute(cstring"fill", cstring"currentColor")
       svg.appendChild(p)

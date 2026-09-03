@@ -156,9 +156,15 @@ button
 // are `currentColor` on the paths themselves, and a CSS `fill` would override
 // the `fill="none"` that the stroked marks need on their arrow.
 .ct-control-mark
-  // 1em square, which is the height `background-size: auto 1em` gave the
-  // assets this replaces, so the strip's optical weight is unchanged.
-  width: 1em
+  // `background-size: auto 1em` is what sized the assets this replaces: it
+  // fixed the HEIGHT at 1em and let the width follow the artwork's aspect
+  // ratio. So does this. `height` alone is deliberate — an SVG with a
+  // `viewBox` has an intrinsic ratio, so `width: auto` resolves from it, and
+  // the strip's marks are not all square: two are `0 0 18 17` and would be
+  // scaled to fit an 18-unit width inside a 1em box, drawing them ~6% smaller
+  // than the same file used to draw. Sizing by height reproduces the old
+  // rendering exactly, and leaves the square marks unchanged.
+  width: auto
   height: 1em
   flex: 0 0 auto
   // The mark is decoration inside a button that already handles the click;

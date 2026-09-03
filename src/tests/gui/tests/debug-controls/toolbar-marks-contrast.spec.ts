@@ -73,18 +73,27 @@ const EXPECTED_MARK_COUNT = 12;
  * churn this list. They are matched against the mark found on the button
  * that sends the named command, so this table is what makes "the right glyph
  * is on the right control" a measurable claim rather than a hope.
+ *
+ * THIS TABLE IS ABOUT ROUTING, NOT ABOUT DESIGN. It exists to catch a mark
+ * landing on the wrong button, which is invisible from a screenshot of a bar
+ * whose glyphs all look plausible. It is not a record of which drawings the
+ * product ought to have, and it must be updated — not defended — when the
+ * artwork legitimately changes. The eight stepping marks below are the
+ * drawings CodeTracer had before `93be377c`, restored in
+ * `debug_control_marks.nim`; the alignment with BlockTracer's set that
+ * commit made was not wanted here.
  */
 const MARK_SIGNATURES: ReadonlyArray<{ action: string; startsWith: string }> = [
   { action: "history-back", startsWith: "M11.5 15L4.5 8L11.5 1" },
   { action: "history-forward", startsWith: "M4.5 1L11.5 8L4.5 15" },
-  { action: "reverse-next", startsWith: "M8 11C6.897 11 6 11.897 6 13" },
-  { action: "next", startsWith: "M9.99993 13C9.99993 14.103" },
-  { action: "reverse-step-in", startsWith: "M11.4 3.6L5.6 9.4" },
-  { action: "step-in", startsWith: "M4.6 3.6L10.4 9.4" },
-  { action: "reverse-step-out", startsWith: "M10.4 9.4L4.6 3.6" },
-  { action: "step-out", startsWith: "M5.6 9.4L11.4 3.6" },
-  { action: "reverse-continue", startsWith: "M8.99688 2C8.80188 2" },
-  { action: "continue", startsWith: "M14.578 7.149L7.578 2.186" },
+  { action: "reverse-next", startsWith: "M1.5 1.65625H14.5" },
+  { action: "next", startsWith: "M1.5 14.3438H14.5" },
+  { action: "reverse-step-in", startsWith: "M6.88662 0.342773L2.20669 5.3123" },
+  { action: "step-in", startsWith: "M9.61338 14.4643L14.2933 9.49477" },
+  { action: "reverse-step-out", startsWith: "M9.96574 14.4643L14.8266 9.49477" },
+  { action: "step-out", startsWith: "M7.09078 0.349609L2.2299 5.31913" },
+  { action: "reverse-continue", startsWith: "M8 4C9.10457 4 10 3.10457 10 2" },
+  { action: "continue", startsWith: "M8 12C9.10457 12 10 12.8954 10 14" },
   { action: "run-to-entry", startsWith: "M14 8C14 8.81 13.842 9.596" },
   { action: "reset-operation", startsWith: "M9.38451 0.379639" },
 ];
