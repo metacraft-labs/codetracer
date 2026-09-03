@@ -1,0 +1,46 @@
+# Repo-wide cargo configuration.
+#
+# This lives at the repository ROOT rather than next to a crate because cargo
+# resolves `.cargo/config.toml` relative to the INVOCATION directory, not the
+# manifest. The canonical entry points for this repo's Rust — `nix/pre-commit.nix`
+# and the `justfile` — all `cd` to the repo root and pass
+# `--manifest-path src/db-backend/Cargo.toml`, so a config under `src/` would
+# never be read by them. A root config is read from every cwd inside the repo.
+
+# macOS: link through `clang`, never through the default `cc`.
+#
+# rustc's default linker driver on Darwin is `cc`. In this repo's Nix dev
+# shell `cc` resolves to nixpkgs' gcc-wrapper (GCC 14.3.0), and GCC's Darwin
+# driver passes `-no_compact_unwind` to the linker. The resulting Mach-O has
+# no `__TEXT,__unwind_info` section — only `__eh_frame` — and Apple's
+# libunwind cannot locate unwind info without that compact index. Every Rust
+# `panic!` then dies inside `_Unwind_RaiseException`, which returns
+# `_URC_END_OF_STACK` (5):
+#
+#     fatal runtime error: failed to initiate panic, error 5, aborting
+#     (signal: 6, SIGABRT: process abort signal)
+#
+# The abort happens BEFORE libtest prints anything, so a failing assertion
+# reports neither its message nor the values it compared. That defeats both
+# pillars of how this repo tests: mutation testing (break it, watch the check
+# go red, restore) and assertions that report the value they measured. A red
+# carried no information at all.
+#
+# It is not specific to any crate or dependency: a six-line crate whose only
+# test is a single `assert_eq!` reproduces it when built in this dev shell,
+# with no Nim, no FFI and no `db-backend` in the picture.
+#
+# `clang` is in the dev shell (21.1.7, target arm64-apple-darwin) and is
+# always present on a developer macOS box via the Xcode command line tools.
+# It emits `__unwind_info` normally, which restores both the unwind and the
+# panic message.
+#
+# `src/db-backend/tests/panic_message_visibility.rs` is the regression guard:
+# it runs a deliberately failing test in a child process and asserts the
+# assertion's own text and values reach the output. Remove these two entries
+# and that test goes red.
+[target.aarch64-apple-darwin]
+linker = "clang"
+
+[target.x86_64-apple-darwin]
+linker = "clang"
