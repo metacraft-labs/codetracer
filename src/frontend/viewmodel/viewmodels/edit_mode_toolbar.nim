@@ -908,10 +908,39 @@ proc editModeToolbar*(profile: PlatformProfile;
   if editing:
     result.actions.excl tbaDebuggerControls
 
-  # The test buttons are in BOTH modes: recording a test run is one way into
-  # Debug mode, and re-running tests from a session is how you check a fix.
-  result.actions.incl tbaRunTests
-  result.actions.incl tbaRecordTests
+  # THE TEST BUTTONS ARE NOT ON THIS BAR.
+  #
+  # They were, and the report that took them off is *"in the initial edit mode
+  # I see 'Run tests' and 'Record tests' as some kind of boxes next to the
+  # build and run buttons — what are these boxes? I think they should be
+  # removed."* That a user could not identify them as buttons at all is the
+  # part worth keeping: they were the only TEXT buttons on a bar of icons, and
+  # text buttons on this surface have a history of rendering unstyled (see
+  # `edit-toolbar-layout.spec.ts` — the size selectors keyed off
+  # `ct-button-md-` while the view emits `ct-button-text-md-secondary`, so
+  # nothing matched and they kept the user agent's `padding: 1px 6px`).
+  #
+  # Neither removal costs a capability, and both were checked before deleting
+  # rather than after:
+  #
+  #   * RUN TESTS is the same call from a second place. `ui_js.nim` routed
+  #     `#run-tests-image` to `web_noir_build.startNoirTests()`, and the TEST
+  #     RESULTS pane's ▶ (`test_results_vm.startRun`, whose runner `ui_js`
+  #     installs) is that identical proc. The pane's control is the surviving
+  #     path, and the layout work has already established it as the primary
+  #     gesture of the editing screen.
+  #   * RECORD TESTS was never a distinct action in the shipped build.
+  #     `ui_js.nim` routes `#record-tests-image` to
+  #     `saveThenCompile(runAfter = true)` — byte for byte what `#run-image`
+  #     does — because Noir's provider REFUSES test recording (EMT-F6/EMT-A21)
+  #     and §13 therefore reaches a replay session through Run. The button was
+  #     a duplicate of Run wearing a different label.
+  #
+  # `runTests` and `recordTests` are still COMPUTED below. That is deliberate:
+  # they carry the provider's own reasoning about what can run and why it
+  # cannot — which is what a pane control needs in order to disable itself with
+  # a sentence — and deleting the computation to remove two buttons would throw
+  # that away for no gain.
 
   # §8's recognition split. Something recognised OR something declared shows
   # the group; neither hides it. A platform that can spawn nothing at all must
@@ -930,8 +959,10 @@ proc editModeToolbar*(profile: PlatformProfile;
   let tests = testButtons(kinds, testSelection, providers, profile, wasm)
   result.runTests = tests.run
   result.recordTests = tests.record
-  result.buttons = @[result.build, result.run, result.runTests,
-                     result.recordTests]
+  # Build and Run only — see the note above `actions.incl` for why the two test
+  # buttons are computed but not carried. `buttons` is what the bar renders;
+  # the fields above are what a pane control may ask.
+  result.buttons = @[result.build, result.run]
 
   # EMT-D12: Build and Run are **absent** in Debug mode, not deprioritised —
   # rebuilding underneath a live replay invalidates the trace being replayed.

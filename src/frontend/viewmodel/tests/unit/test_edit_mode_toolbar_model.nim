@@ -185,12 +185,27 @@ suite "EMT §7.3 what the toolbar carries in each mode":
         ck tbaBuild notin debugging.actions
         ck tbaRun notin debugging.actions
         ck tbaActionOverflow notin debugging.actions
-        # A3 — the test buttons are in BOTH modes: recording a test run is how
-        # you enter Debug mode, and re-running tests is how you check a fix.
-        ck tbaRunTests in editing.actions
-        ck tbaRunTests in debugging.actions
-        ck tbaRecordTests in editing.actions
-        ck tbaRecordTests in debugging.actions
+        # A3 — INVERTED, and this is the assertion that changed.
+        #
+        # The test buttons used to be in both modes. They are on NEITHER bar
+        # now: reported as *"I see 'Run tests' and 'Record tests' as some kind
+        # of boxes next to the build and run buttons — I think they should be
+        # removed"*, and removed after checking that neither gesture goes with
+        # them. Run Tests is `web_noir_build.startNoirTests()`, which is the
+        # same proc the TEST RESULTS pane's ▶ reaches through
+        # `test_results_vm.startRun`; Record Tests was
+        # `saveThenCompile(runAfter = true)`, which is what Run already does,
+        # because Noir's provider refuses test recording (EMT-F6/EMT-A21).
+        #
+        # Asserted as an ABSENCE from `actions` rather than only from
+        # `buttons`, because `visibleButtons` intersects the two: a model that
+        # kept the actions and dropped the buttons would render the same empty
+        # row today and re-grow the boxes the moment someone put the entries
+        # back in `buttons` without reading this.
+        ck tbaRunTests notin editing.actions
+        ck tbaRunTests notin debugging.actions
+        ck tbaRecordTests notin editing.actions
+        ck tbaRecordTests notin debugging.actions
         # A4 — the positive twin.
         ck tbaOmnibar in editing.actions
         ck tbaOmnibar in debugging.actions

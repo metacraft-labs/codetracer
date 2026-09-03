@@ -104,10 +104,38 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     margin-left: 4px
     white-space: nowrap
 
+  // THE BUILD PANEL'S FONT — `"FiraCode"` WAS A FAMILY NOBODY DECLARES.
+  //
+  // Reported as *"the font used in the build panel is not right"*, with no
+  // further detail. Measured from the compiled theme (byte-identical to the
+  // one noirstudio.dev serves): the whole design system declares exactly four
+  // `@font-face` families — `SpaceGrotesk`, `SpaceMono`, `FiraMono` and
+  // `FontAwesome`. **`FiraCode` is not one of them, and no FiraCode file
+  // exists in the tree.** It is dead text in 21 places, four of them here.
+  //
+  // Elsewhere that mistake is survivable because the rule writes a fallback —
+  // `components/shell.styl` and `components/problems.styl` say
+  // `"FiraCode", monospace`, so the pane degrades to the platform's monospace
+  // and merely looks off-brand. These four rules had NO second entry. An
+  // unresolvable family with no generic fallback drops to the browser's
+  // *default standard font*, which on Chrome is a PROPORTIONAL SERIF — so
+  // column-aligned compiler output was being set in Times beside a terminal
+  // set in SpaceMono. That is the visible difference the report is pointing
+  // at, and the `!important` meant nothing downstream could rescue it.
+  //
+  // `SpaceMono` rather than `FiraMono` — which is declared, and is probably
+  // what the typo was reaching for. The neighbours decide it: TERMINAL OUTPUT
+  // is SpaceMono (`components/terminal.styl`), the EVENT LOG is SpaceMono,
+  // and the editor is `CODE_FONT_FAMILY = "SpaceMono, monospace"`
+  // (`frontend/utils.nim`). Build output is read against those, not against a
+  // font the product uses nowhere.
+  //
+  // The generic fallback is written even though `SpaceMono` IS declared,
+  // because that is the property whose absence turned a typo into a serif.
   .build-output-container
     flex: 1
     overflow: auto
-    font-family: "FiraCode" !important
+    font-family: "SpaceMono", monospace !important
     font-size: 14px
     line-height: 24px
     white-space: pre-wrap
@@ -115,14 +143,16 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     .build-stdout, .build-stderr, .build-output-line
       min-height: 24px
       padding-left: 0.5em
-      font-family: "FiraCode" !important
+      font-family: "SpaceMono", monospace !important
       font-size: 14px
       line-height: 24px
       white-space: pre-wrap
 
+// The legacy Karax build panel. Same four declarations, same fix: the IsoNim
+// panel above did not invent the typo, it copied it down from here.
 #build, #build-errors
   background-color: colors-ui-surface-base-panel
-  font-family: "FiraCode" !important
+  font-family: "SpaceMono", monospace !important
   font-size: 14px
   line-height: 24px
   white-space: pre-wrap
@@ -133,7 +163,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   .build-stdout, .build-stderr, .build-error, .build-output-line
     min-height: 24px
     padding-left: 0.5em
-    font-family: "FiraCode" !important
+    font-family: "SpaceMono", monospace !important
     font-size: 14px
     line-height: 24px
     white-space: pre-wrap

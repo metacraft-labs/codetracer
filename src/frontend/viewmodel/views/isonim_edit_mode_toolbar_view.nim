@@ -134,10 +134,40 @@ func editButtonClass*(buttonId: string): string =
   ## hard-coding the answer — the class the view emits and the class the
   ## stylesheet selects drifting apart is the defect this whole surface
   ## already shipped once.
+  ##
+  ## ## `ct-button-no-border`, and why it was the missing one
+  ##
+  ## Reported as *"the debugging control icons designed by our designer don't
+  ## have rectangular frames; the icons you created for build and run should
+  ## not have either"*. Measured rather than guessed: on the compiled theme —
+  ## the byte-identical one noirstudio.dev serves — a debugger-strip button
+  ## computes `border: 0px none` and a button on this bar computed
+  ## `border: 1px solid rgb(86, 86, 86)`. That 1px IS the frame.
+  ##
+  ## It arrives from `[class*="-button-"][class*="-secondary"]` in
+  ## `components/button.styl`, which every icon button on BOTH surfaces
+  ## carries. The debugger strip cancels it per button with
+  ## `ct-button-no-border` (`border: none !important`) — twelve times, in
+  ## `isonim_debug_controls_view` — and this bar simply never adopted that
+  ## half of the convention. So the frame was not drawn by the marks, and no
+  ## amount of reading `edit_toolbar_marks.nim` could have found it: the SVG
+  ## contains no rectangle and never did.
+  ##
+  ## Cancelled HERE, in the emitted class, rather than with a `border: none`
+  ## in the `.edit-mode-toolbar` block, for the reason the strip already
+  ## demonstrates: the border is applied by a class, so it is cancelled by a
+  ## class, and the two surfaces then say "no frame" in one vocabulary instead
+  ## of two. A stylesheet-side override would also be a rule that the next
+  ## `!important` quietly wins against.
+  ##
+  ## The `-secondary` background (`colors-ui-surface-primary-default`) is left
+  ## alone deliberately: it computed `rgb(27, 27, 27)` on both surfaces, which
+  ## is the bar's own colour, so it paints nothing. Only the border was
+  ## visible, and only the border is removed.
   if hasEditMark(buttonId):
-    "ct-button-image-md-secondary edit-toolbar-button"
+    "ct-button-image-md-secondary ct-button-no-border edit-toolbar-button"
   else:
-    "ct-button-text-md-secondary edit-toolbar-button"
+    "ct-button-text-md-secondary ct-button-no-border edit-toolbar-button"
 
 proc buttonTitle*(candidate: ToolbarButton): string =
   ## What the pointer reveals. A DISABLED button must say why it is off — its

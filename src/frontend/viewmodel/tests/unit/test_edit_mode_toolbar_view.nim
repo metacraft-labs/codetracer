@@ -81,14 +81,19 @@ suite "EMT §7.3 the model becomes elements":
     let model = editModeToolbar(desktopProfile, EditMode,
                                 listing = noirListing())
     let buttons = model.visibleButtons
-    # Build, Run, Run Tests, Record Tests — §7.3's edit-mode row.
-    ck buttons.len == 4
+    # Build and Run — and nothing else. The row was four until the report
+    # *"I see 'Run tests' and 'Record tests' as some kind of boxes next to the
+    # build and run buttons"* took the two text buttons off it.
+    ck buttons.len == 2
     var ids: seq[string] = @[]
     for b in buttons: ids.add b.id
     ck "build-image" in ids
     ck "run-image" in ids
-    ck "run-tests-image" in ids
-    ck "record-tests-image" in ids
+    # The removal, pinned from the other side. Without these two, putting the
+    # entries back into `result.buttons` would leave every assertion in this
+    # test satisfiable by a longer row.
+    ck "run-tests-image" notin ids
+    ck "record-tests-image" notin ids
 
     var rendered: seq[string] = @[]
     let panel = renderEditModeToolbarPanel(
@@ -103,10 +108,13 @@ suite "EMT §7.3 the model becomes elements":
     ck findBySurface(panel) == "edit-commands"
     # The count travels in the markup too, so a browser check can assert it
     # without counting nodes it might mis-select.
-    ck attrOf(panel, "data-button-count") == "4"
-    expectCount(12)
+    ck attrOf(panel, "data-button-count") == "2"
+    expectCount(10)
+    ## COUNT 12 -> 10, and the arithmetic is stated so the next edit can check
+    ## it: two `in ids` assertions became two `notin ids` (no change), and the
+    ## `for id in ids` loop went from four iterations to two (-2).
 
-  test "EMT-V3 Debug mode carries no Build and no Run — EMT-D12":
+  test "EMT-V3 Debug mode carries no command buttons at all — EMT-D12":
     ## Rebuilding underneath a live replay invalidates the trace being
     ## replayed, so these are ABSENT rather than disabled. Asserted through
     ## the renderer, because "the model excludes them" and "the panel does not
@@ -118,9 +126,21 @@ suite "EMT §7.3 the model becomes elements":
     for b in model.visibleButtons: ids.add b.id
     ck "build-image" notin ids
     ck "run-image" notin ids
-    # The test buttons are in BOTH modes — recording a run is a way into Debug.
-    ck "run-tests-image" in ids
-    ck "record-tests-image" in ids
+    # The test buttons used to be the two that survived into Debug mode. They
+    # are on neither bar now — see EMT-A3 in the model suite for why, and for
+    # where each gesture went.
+    ck "run-tests-image" notin ids
+    ck "record-tests-image" notin ids
+    # WHICH MAKES THE DEBUG-MODE ROW EMPTY, and that is stated rather than
+    # left to be inferred from four absences.
+    #
+    # It is not a blank topbar. `topbarSurface` mounts `tsEditCommands` only
+    # when `mode.isEditing`, so in Debug mode this panel is never on screen at
+    # all and the debugger's twelve stepping controls are. The assertion is
+    # here because the model must not start claiming otherwise: if this row
+    # ever became non-empty AND the mount rule changed, the two together are
+    # what would put a stray Build button over a live replay (EMT-D12).
+    ck ids.len == 0
 
     var rendered: seq[string] = @[]
     let panel = renderEditModeToolbarPanel(
@@ -128,7 +148,8 @@ suite "EMT §7.3 the model becomes elements":
     collectIds(panel, rendered)
     ck "build-image" notin rendered
     ck "run-image" notin rendered
-    expectCount(6)
+    ck rendered.len == 0
+    expectCount(8)
 
   test "EMT-V4 a disabled button carries the attribute AND says why":
     ## The browser treats any value of `disabled` as disabled, so the attribute

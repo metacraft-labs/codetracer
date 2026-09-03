@@ -5981,23 +5981,22 @@ when defined(ctWeb) and not defined(ctInExtension):
           case id
           of "build-image": saveThenCompile(runAfter = false)
           of "run-image": saveThenCompile(runAfter = true)
-          # RUN TESTS GOES TO THE TEST RUNNER, not to a second one.
+          # RUN TESTS AND RECORD TESTS ARE NO LONGER ON THIS BAR, so their
+          # branches are gone rather than left unreachable — a `case` arm for
+          # a button that cannot be pressed reads as a control the product
+          # has.
           #
-          # `startNoirTests` and the Test Results pane's ▶ landed while this
-          # toolbar was being written, and they are the same gesture arriving
-          # from a different control. Pointing this button at
-          # `saveThenCompile(runAfter = true)` instead would have been a second
-          # implementation of Run Tests — one that skips the catalog, the row
-          # ingestion and `noirTestRunSettled`, and would therefore leave the
-          # editor's own run-test control spinning over a run it never saw.
-          # Installed above, so by the time a user can press this the hooks
-          # exist.
-          of "run-tests-image": web_noir_build.startNoirTests()
-          # RECORD TESTS still compiles-then-replays. Noir's provider refuses
-          # test RECORDING (§13 reaches a replay session through Run, not
-          # Record Tests), so this is the honest behaviour until the milestone
-          # that gives the two buttons genuinely different answers.
-          of "record-tests-image": saveThenCompile(runAfter = true)
+          # Neither gesture was lost with them, and the reasoning is recorded
+          # where the buttons were dropped (`viewmodels/edit_mode_toolbar`,
+          # above `result.buttons`). In short: Run Tests was
+          # `web_noir_build.startNoirTests()`, which is exactly the proc the
+          # TEST RESULTS pane's ▶ runs through `test_results_vm.startRun` —
+          # the same gesture from a second control, and the pane's is the one
+          # that survives. Record Tests was `saveThenCompile(runAfter = true)`,
+          # character for character what `run-image` above still does, because
+          # Noir's provider refuses test recording (EMT-F6/EMT-A21); it was a
+          # duplicate of Run under a different label, so removing it removes
+          # no behaviour at all.
           else: discard)
         # AND THE WAY BACK. `installEditModeToolbar` holds the `invoke` above
         # so it can recompose without it; this hook is how `onSavedFile` — far
