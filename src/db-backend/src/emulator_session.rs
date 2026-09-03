@@ -28,13 +28,71 @@
 //! `load_step_events`, `load_return_value`, `run_to_entry`, `step` — are
 //! implemented as graceful "empty / Default" returns so the DAP handler
 //! never crashes on them when an emulator-backed session is in play.
-//! Methods that F5 does NOT exercise at all (history pagination, the
-//! various `jump_to`/`event_jump`/`callstack_jump`/`location_jump`/
-//! `tracepoint_jump`/`toggle_breakpoint`/`evaluate_call_expression`)
-//! deliberately stay as `todo!()` macros so they fail loudly if a future
-//! milestone starts depending on them before the underlying machinery
-//! (DWARF unwinding, snapshot-driven rewind, expression evaluator) is
-//! wired up.
+//!
+//! ## Navigation, and why `todo!()` is not an acceptable placeholder here
+//!
+//! This module used to say that the navigation methods "deliberately stay
+//! as `todo!()` macros so they fail loudly if a future milestone starts
+//! depending on them". That was wrong twice over and is recorded here so
+//! the same reasoning does not come back.
+//!
+//! It was wrong about *when*: the future had already arrived. Four of
+//! those methods were reachable from a single click in the shipping
+//! browser UI — `event_jump` from an Event Log row, `callstack_jump` from
+//! a calltrace row, `location_jump` from an origin-chain hop (and from
+//! `run_to_entry`'s `restore_location`, before any click at all), and
+//! `tracepoint_jump` from a tracepoint result row.
+//!
+//! It was wrong about *loudly*: there is no `catch_unwind` on the request
+//! path, so on wasm32 a `todo!()` is a trap that kills the worker. Every
+//! pending request then hangs to its timeout and the user sees a dead
+//! pane with no message — the quietest failure the system can produce.
+//! A `todo!()` is only a loud failure to someone reading a native
+//! backtrace.
+//!
+//! All four now either do the jump or return a typed `Err`, which becomes
+//! a DAP error response and reaches the user through the frontend's
+//! `requestFailureText` notification route (`src/frontend/dap.nim`). The
+//! rule the module follows: **a refusal the user can see beats a panic,
+//! and both beat a wrong position reported as success.** No jump may
+//! fall back to a default destination — that is why a sentinel
+//! `rr_ticks` is refused instead of being clamped to step 0.
+//!
+//! `load_history` was reachable too — the State pane's "toggle value
+//! history" button on any of the 18 register rows `load_locals` projects
+//! — and is now a typed refusal for the same reason.
+//!
+//! ## The `todo!()`s that remain, and what makes each one unreachable
+//!
+//! Two remain. Each is documented at its own definition; the summary,
+//! with the strength of each claim stated rather than implied:
+//!
+//! - `jump_to_call` — **unreachable by construction.** Its only caller in
+//!   the backend is `FlowPreloader::load`, whose only production call
+//!   site is `Handler::load_flow`; that builds a *fresh*
+//!   `RecreatorReplaySession` for every non-`Materialized` trace kind, so
+//!   `self.replay` (this session) is never the receiver. `ct/load-flow`
+//!   *is* issued by the UI and *is* dispatched unguarded — what stops it
+//!   is that a different session object services it.
+//! - `evaluate_call_expression` — **unreachable only by build
+//!   configuration, and there is no runtime guard.** Its sole caller,
+//!   `tracepoint_interpreter::executor`, is behind
+//!   `#[cfg(feature = "syntax-highlight")]`, and the only build that can
+//!   construct an `EmulatorReplaySession` at all (`setup_from_vfs`, which
+//!   is `#[cfg(feature = "browser-transport")]`) is compiled
+//!   `--no-default-features --features browser-transport` and so omits
+//!   that feature. The tracepoint gutter already sends
+//!   `ct/run-tracepoints`, and it already reaches this session's
+//!   `add_breakpoint` / `step` / `load_location` — nothing on the path
+//!   checks `trace_kind`. Adding `syntax-highlight` to the wasm build
+//!   makes this reachable in one step, with no compile error to warn
+//!   anyone.
+//!
+//! These are guard-based and build-based facts about today's code, not
+//! predictions about a milestone. They are exactly the kind of claim that
+//! goes stale: if a guard moves, the reachability moves with it, and the
+//! replacement must be a typed `Err` — never a `todo!()`, and never a
+//! silent default.
 //!
 //! ## Initialisation invariant
 //!
@@ -64,7 +122,7 @@ use crate::replay::ReplaySession;
 use crate::stack_unwinder::{MCR_REG_COUNT, StackUnwinder};
 use crate::task::{
     Action, Breakpoint, Call, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg,
-    Location, NO_ADDRESS, NO_EVENT, NO_POSITION, ProgramEvent, RRTicks, VariableWithRecord,
+    Location, NO_ADDRESS, NO_EVENT, NO_POSITION, NO_STEP_ID, ProgramEvent, RRTicks, VariableWithRecord,
 };
 use crate::value::ValueRecordWithType;
 
@@ -1677,6 +1735,51 @@ impl EmulatorReplaySession {
         let hit = self.step_until(|sess| sess.breakpoint_static_pcs.contains(&sess.current_static_pc()));
         Ok(hit)
     }
+
+    /// Shared destination handling for the three `ReplaySession` jumps that
+    /// name their target by rr tick (`event_jump`, `location_jump`, and
+    /// `tracepoint_jump` through `event_jump`).
+    ///
+    /// ## Why an rr tick is directly a step number here
+    ///
+    /// On a materialised trace an rr tick is an rr-specific counter and
+    /// `MaterializedReplaySession::jump_to` merely records it. On an MCR
+    /// trace the two are the *same number*: every `Location` this session
+    /// emits is built by [`Self::build_location`] /
+    /// [`Self::build_location_for`], both of which set
+    /// `rr_ticks: RRTicks(self.current_step_id.0)`, and `current_step_id`
+    /// is the emulator's own `mcrGetStepCounter` value. So
+    /// `jump_to(StepId(rr_ticks))` is exact rather than approximate, and
+    /// the round trip `jump_to(n)` then `load_location().rr_ticks == n`
+    /// holds by construction.
+    ///
+    /// ## Why a negative tick is refused rather than clamped
+    ///
+    /// [`NO_STEP_ID`] / [`NO_POSITION`] are both `-1`, and a `Location` or
+    /// `ProgramEvent` that names no destination carries that sentinel.
+    /// Clamping it to `0` would silently rewind the session to the CP0
+    /// snapshot and report success — a wrong position dressed as a
+    /// completed jump. `task::location_from_jump_arguments` already
+    /// refuses a payload with no `rrTicks` field for exactly this reason;
+    /// this is the same refusal one layer down, for a payload that has the
+    /// field but leaves it unset.
+    ///
+    /// The error is returned, not panicked: on wasm32 a panic traps the
+    /// worker and every pending request hangs to timeout, whereas an `Err`
+    /// becomes a DAP error response that the frontend surfaces through
+    /// `requestFailureText` (`src/frontend/dap.nim`).
+    fn jump_to_rr_ticks(&mut self, op: &str, rr_ticks: i64) -> Result<(), Box<dyn Error>> {
+        if rr_ticks < 0 {
+            return Err(format!(
+                "EmulatorReplaySession::{op} was asked to jump to rr_ticks {rr_ticks}, which names \
+                 no step ({NO_STEP_ID} is the `unset` sentinel). Refusing rather than jumping to \
+                 step 0 and reporting success."
+            )
+            .into());
+        }
+        self.jump_to(StepId(rr_ticks))?;
+        Ok(())
+    }
 }
 
 impl Default for EmulatorReplaySession {
@@ -1878,7 +1981,27 @@ impl ReplaySession for EmulatorReplaySession {
 
         let mut out = Vec::with_capacity(frames.len());
         for (depth, frame) in frames.iter().enumerate() {
-            let location = self.build_location_for(frame.pc, frame.pc_static);
+            let mut location = self.build_location_for(frame.pc, frame.pc_static);
+            // Stamp the frame's own depth onto its `Location`.
+            //
+            // `build_location_for` hardcodes `callstack_depth: 0` because it
+            // describes "wherever the session is", which is always the
+            // innermost frame. That is right for `load_location` and wrong
+            // here: the calltrace pane sends this exact field back as the
+            // `callstackDepth` of a row click (`calltrace_vm.nim` reads
+            // `line.location.callstackDepth`), and `Handler::calltrace_jump`
+            // forwards it to `callstack_jump`.
+            //
+            // Left at 0, every row of an emulator calltrace would claim to be
+            // the innermost frame, and a click on any outer frame would be
+            // served as "you are already there" — the session would not move
+            // and the UI would redraw as though it had. Populating it is what
+            // makes `callstack_jump` able to tell an outer frame apart from
+            // the current one, and so what makes its refusal reachable.
+            //
+            // The numbering is this loop's own: 0 is the innermost frame, and
+            // it increases outwards towards the caller.
+            location.callstack_depth = depth;
             // Use the DWARF-resolved function name for the call's
             // `raw_name` when available — falling back to the
             // synthesised root name preserves the F5 "non-empty name"
@@ -1906,8 +2029,35 @@ impl ReplaySession for EmulatorReplaySession {
         Ok(out)
     }
 
+    /// Value history for one expression — the State pane's "toggle value
+    /// history" button (`ct/load-history`, `Handler::load_history`).
+    ///
+    /// This was a `todo!()` on the assumption that no UI could reach it.
+    /// It can: `load_locals` projects all 18 x86_64 registers as rows, and
+    /// every row carries the history toggle. The one guard above the call
+    /// (`dap_handler.rs`, `if self.trace_kind == TraceKind::Recreator`)
+    /// swaps in a recreator session for `Recreator` only — `Emulator`
+    /// falls straight through to `self.replay.load_history(..)`.
+    ///
+    /// It is a refusal rather than an implementation because there is
+    /// nothing to build a history *from*: history is a per-line record of
+    /// past values, and this session has no record of the past at all. It
+    /// reaches an earlier step by resetting to the CP0 snapshot and
+    /// re-executing forwards, so producing a history would mean replaying
+    /// the whole program once per candidate step and diffing register
+    /// state — machinery no MCR recorder emits and this session does not
+    /// have.
+    ///
+    /// It is a refusal rather than an empty `Ok(vec![])` because an empty
+    /// history is indistinguishable from "this value never changed",
+    /// which is a factual claim about the program that would be a
+    /// fabrication.
     fn load_history(&mut self, _arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>> {
-        todo!("F5c-3: build per-line history from emulator trace")
+        Err("EmulatorReplaySession::load_history is not available for MCR traces: value history \
+             needs a record of past values, and an MCR replay reaches an earlier step only by \
+             re-executing forwards from the recorded CP0 snapshot. Returning an empty history \
+             would be indistinguishable from `this value never changed`, so this refuses instead."
+            .into())
     }
 
     fn add_breakpoint(
@@ -2092,20 +2242,114 @@ impl ReplaySession for EmulatorReplaySession {
         todo!("F5c-3: jump to enclosing call entry")
     }
 
-    fn event_jump(&mut self, _event: &ProgramEvent) -> Result<bool, Box<dyn Error>> {
-        todo!("F5c-3: replay to the step that produced `event`")
+    /// Replay to the step that produced `event` — the Event Log row click
+    /// (`ct/event-jump`, `dap_handler::Handler::event_jump`).
+    ///
+    /// The oracle is [`MaterializedReplaySession::event_jump`](crate::db)
+    /// (`db.rs`), which is `jump_to(StepId(event.direct_location_rr_ticks))`
+    /// followed by `Ok(true)`. `direct_location_rr_ticks` is the
+    /// load-bearing field there and it is the load-bearing field here;
+    /// [`Self::jump_to_rr_ticks`] documents why that tick is directly an
+    /// emulator step number.
+    ///
+    /// The `bool` in the return type is the trait's "did the jump land"
+    /// flag. Both the materialised and the recreator implementations
+    /// return `true` unconditionally and signal failure through `Err`, so
+    /// this does the same: a `false` here would be a second, silent failure
+    /// channel that no caller inspects.
+    fn event_jump(&mut self, event: &ProgramEvent) -> Result<bool, Box<dyn Error>> {
+        self.jump_to_rr_ticks("event_jump", event.direct_location_rr_ticks)?;
+        Ok(true)
     }
 
-    fn callstack_jump(&mut self, _depth: usize) -> Result<(), Box<dyn Error>> {
-        todo!("F5c-3: pop to caller at `depth`")
+    /// Move to the calltrace frame at `depth` — the calltrace row click
+    /// (`ct/calltrace-jump`, `dap_handler::Handler::calltrace_jump`).
+    ///
+    /// Note that the emulator is one of the *only* session kinds that can
+    /// reach this at all: `calltrace_jump` sends `TraceKind::Materialized`
+    /// down a `jump_to(location.rr_ticks)` branch and everything else —
+    /// including `TraceKind::Emulator` — into `callstack_jump(depth)`.
+    ///
+    /// ## Depth 0 is served exactly; anything else is refused
+    ///
+    /// [`Self::load_callstack`] numbers frames with
+    /// `frames.iter().enumerate()`, so depth 0 *is* the innermost frame —
+    /// the one this session is already positioned at. There is genuinely
+    /// nothing to move, and the `load_location` the handler runs straight
+    /// afterwards returns that same frame. `Ok(())` is the whole correct
+    /// answer for that case, not a default.
+    ///
+    /// An outer frame cannot be served, and is refused rather than guessed.
+    /// Landing on a caller means moving *backwards* to the step at which
+    /// that caller sat at its call site. This session has no reverse
+    /// execution — [`Self::step`] already refuses `forward == false` for
+    /// the same reason — and `jump_to` can only re-run forward from the
+    /// CP0 snapshot to a step number that nothing has computed for an outer
+    /// frame. The CFI unwinder recovers the caller's *PC*, which is not a
+    /// step number, and no MCR recorder emits a call-entry index that would
+    /// map one to the other.
+    ///
+    /// This is a refusal for want of a mapping, not a proof of
+    /// impossibility: a rescan from CP0 watching for the caller's PC could
+    /// in principle recover the step. It is refused rather than guessed
+    /// because a return address is the instruction *after* the call, the
+    /// same PC recurs on every iteration of an enclosing loop, and picking
+    /// the wrong occurrence would put the session somewhere plausible and
+    /// wrong while reporting success. Landing that search — with a test
+    /// that pins which occurrence is correct — is the work this refusal
+    /// stands in for.
+    ///
+    /// Returning `Ok(())` in that case would leave the position on the
+    /// innermost frame while the UI redrew as though it had moved, which is
+    /// the failure this refusal exists to prevent: a wrong position
+    /// reported as success is worse than a refusal the user can read.
+    fn callstack_jump(&mut self, depth: usize) -> Result<(), Box<dyn Error>> {
+        if depth == 0 {
+            return Ok(());
+        }
+        let frame_count = self.load_callstack().map(|frames| frames.len()).unwrap_or(0);
+        Err(format!(
+            "EmulatorReplaySession::callstack_jump cannot move to the caller frame at depth \
+             {depth}: an MCR replay can only re-execute forward from the recorded CP0 snapshot, \
+             and the step at which that caller was at its call site is not recorded. The current \
+             stack has {frame_count} frame(s), but only depth 0 — the innermost frame, where the \
+             session already is — can be served."
+        )
+        .into())
     }
 
-    fn location_jump(&mut self, _location: &Location) -> Result<(), Box<dyn Error>> {
-        todo!("F5c-3: jump to a specific source location")
+    /// Jump to a specific source location — the origin-chain hop and the
+    /// "jump back" button (`ct/history-jump`,
+    /// `dap_handler::Handler::history_jump`), and the `restore_location`
+    /// argument that `dap_server` hands to `run_to_entry` at session start.
+    ///
+    /// The oracle is [`MaterializedReplaySession::location_jump`](crate::db)
+    /// (`db.rs`): `jump_to(StepId(location.rr_ticks.0))`, then reload the
+    /// location and re-derive `step_id` from it. Navigation there is purely
+    /// by tick — `path` and `line` are carried for display, not consulted
+    /// for the move.
+    ///
+    /// The oracle's re-derivation step is an identity for this session and
+    /// is therefore omitted rather than reproduced: `jump_to` has already
+    /// set `current_step_id`, and `build_location` derives `rr_ticks`
+    /// straight back from it, so reloading could only ever return the tick
+    /// we just moved to.
+    fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
+        self.jump_to_rr_ticks("location_jump", location.rr_ticks.0)
     }
 
-    fn tracepoint_jump(&mut self, _event: &ProgramEvent) -> Result<(), Box<dyn Error>> {
-        todo!("F5c-3: jump to a tracepoint event")
+    /// Jump to a tracepoint event — the tracepoint results row click
+    /// (`ct/trace-jump`), and any Event Log row whose kind is
+    /// `EventLogKind::TraceLogEvent`, which `Handler::event_jump` routes
+    /// here instead of to [`Self::event_jump`].
+    ///
+    /// Both the materialised and the recreator sessions treat a tracepoint
+    /// jump as an event jump that discards the landing flag, and so does
+    /// this one. Keeping the delegation (rather than repeating the body)
+    /// means the two can never drift apart.
+    fn tracepoint_jump(&mut self, event: &ProgramEvent) -> Result<(), Box<dyn Error>> {
+        let _ = self.event_jump(event)?;
+        Ok(())
     }
 
     fn evaluate_call_expression(
@@ -3480,6 +3724,28 @@ mod tests {
             f2.raw_name, "main",
             "DWARF should name frame 2 `main` (RA 0x40105a lies in main)",
         );
+
+        // Each frame's `Location` must carry its OWN depth, increasing
+        // outwards from 0 at the innermost frame.
+        //
+        // This is the field the calltrace pane sends back as
+        // `callstackDepth` when a row is clicked, and the only thing that
+        // lets `callstack_jump` tell an outer frame from the current one.
+        // Left at `build_location_for`'s hardcoded 0, every row would claim
+        // to be the innermost frame and a click on `compute` or `main`
+        // would be answered "you are already there" — no move, and a UI
+        // that redraws as though there had been one.
+        let depths: Vec<usize> = frames.iter().map(|f| f.content.call.location.callstack_depth).collect();
+        assert_eq!(
+            &depths[..3],
+            &[0, 1, 2],
+            "each frame's location must carry its own depth (0 = innermost, add; \
+             1 = compute; 2 = main), got {depths:?}",
+        );
+        assert_eq!(
+            f0.location.callstack_depth, 0,
+            "the innermost frame is the one the session is positioned at",
+        );
     }
 
     // ── M-Step-Stress fixtures ──────────────────────────────────────────
@@ -3856,6 +4122,537 @@ mod tests {
                     && event.body["location"]["rrTicks"].as_i64() == Some(TARGET)
             )),
             "ct/goto-ticks must emit a complete-move event for the target tick; got {messages:?}",
+        );
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Navigation jumps: `event_jump`, `location_jump`, `tracepoint_jump`,
+    // `callstack_jump`.
+    //
+    // Two kinds of assertion live below, deliberately.
+    //
+    // The RELATIONAL ones state the emulator agrees with the materialised
+    // oracle's *definition* of each jump (`db.rs`): event/tracepoint jumps
+    // move to `event.direct_location_rr_ticks`, a location jump moves to
+    // `location.rr_ticks`, and a tracepoint jump is an event jump. Those
+    // catch drift if the oracle changes shape — but they share a term with
+    // the thing under test (`jump_to`), so they would stay green if the
+    // emulator and the oracle were wrong together.
+    //
+    // The INDEPENDENT ones therefore pin the landing position against
+    // something outside that relation: the recording itself. A synthetic
+    // MCR container is built in-process, so the true machine state after N
+    // instructions is knowable without consulting either backend — run N
+    // raw `mcrStep`s and look. A jump that claims tick N must produce
+    // exactly that state.
+    // ───────────────────────────────────────────────────────────────────
+
+    /// Ground truth for the tests below: the exact emulator state that the
+    /// recording produces after `steps` raw instructions from CP0, with no
+    /// `ReplaySession` method involved in reaching it.
+    fn recording_state_after(bytes: &[u8], steps: usize) -> EmulatorStateSnapshot {
+        let _fresh = EmulatorReplaySession::new_from_ctfs_bytes(bytes.to_vec()).unwrap();
+        raw_mcr_steps(steps);
+        capture_emulator_state()
+    }
+
+    /// INDEPENDENT. An Event Log row click names its destination with
+    /// `direct_location_rr_ticks`; the session must land on exactly the
+    /// machine state the recording produces at that instruction count.
+    #[test]
+    fn event_jump_lands_on_the_state_the_recording_itself_produces() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 4;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+
+        let expected = recording_state_after(&bytes, TARGET as usize);
+        let cp0 = recording_state_after(&bytes, 0);
+        assert_ne!(
+            expected, cp0,
+            "precondition: step {TARGET} must differ from CP0, else this test cannot tell a \
+             real jump from a silent fallback to step 0",
+        );
+
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        let event = ProgramEvent {
+            direct_location_rr_ticks: TARGET,
+            ..ProgramEvent::default()
+        };
+
+        let landed = session.event_jump(&event).expect("event_jump must succeed");
+        assert!(landed, "event_jump reports the landing flag the oracle reports");
+        assert_eq!(
+            capture_emulator_state(),
+            expected,
+            "event_jump must leave the emulator in exactly the state the recording produces \
+             after {TARGET} instructions",
+        );
+        assert_eq!(session.current_step_id(), StepId(TARGET));
+    }
+
+    /// INDEPENDENT. The same bar for the origin-chain / "jump back" hop,
+    /// which names its destination with `Location::rr_ticks`.
+    ///
+    /// The `path`/`line` fields are deliberately left as nonsense: the
+    /// oracle navigates purely by tick and carries source coordinates for
+    /// display only. If this session ever started consulting them, this
+    /// test would catch it.
+    #[test]
+    fn location_jump_lands_on_the_state_the_recording_itself_produces() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 3;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+
+        let expected = recording_state_after(&bytes, TARGET as usize);
+        assert_ne!(
+            expected,
+            recording_state_after(&bytes, 0),
+            "precondition: step {TARGET} must differ from CP0",
+        );
+
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        let location = Location {
+            path: "definitely/not/a/real/path.c".to_string(),
+            line: 99_999,
+            rr_ticks: RRTicks(TARGET),
+            ..Location::default()
+        };
+
+        session.location_jump(&location).expect("location_jump must succeed");
+        assert_eq!(
+            capture_emulator_state(),
+            expected,
+            "location_jump must navigate by rr_ticks alone and land on the recording's state \
+             after {TARGET} instructions",
+        );
+        assert_eq!(session.current_step_id(), StepId(TARGET));
+    }
+
+    /// INDEPENDENT. A tracepoint result row names its destination the same
+    /// way an Event Log row does.
+    #[test]
+    fn tracepoint_jump_lands_on_the_state_the_recording_itself_produces() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 5;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+
+        let expected = recording_state_after(&bytes, TARGET as usize);
+        assert_ne!(
+            expected,
+            recording_state_after(&bytes, 0),
+            "precondition: step {TARGET} must differ from CP0",
+        );
+
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        let event = ProgramEvent {
+            direct_location_rr_ticks: TARGET,
+            ..ProgramEvent::default()
+        };
+
+        session.tracepoint_jump(&event).expect("tracepoint_jump must succeed");
+        assert_eq!(capture_emulator_state(), expected);
+        assert_eq!(session.current_step_id(), StepId(TARGET));
+    }
+
+    /// INDEPENDENT. The round trip that makes "an rr tick is an emulator
+    /// step number" true rather than merely asserted: after a jump to N,
+    /// the location the session reports must itself carry tick N. This is
+    /// what lets the UI's next click name a destination the session can
+    /// honour.
+    #[test]
+    fn a_jump_reports_back_the_tick_it_was_asked_for() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        let mut expr_loader = ExprLoader::new(crate::task::CoreTrace::default());
+
+        for target in [1_i64, 2, 4] {
+            let event = ProgramEvent {
+                direct_location_rr_ticks: target,
+                ..ProgramEvent::default()
+            };
+            session.event_jump(&event).expect("event_jump must succeed");
+            let reported = session.load_location(&mut expr_loader).expect("load_location");
+            assert_eq!(
+                reported.rr_ticks,
+                RRTicks(target),
+                "after jumping to tick {target} the session must report tick {target}",
+            );
+        }
+    }
+
+    /// RELATIONAL. The materialised oracle defines an event jump as
+    /// `jump_to(StepId(event.direct_location_rr_ticks))`. Assert this
+    /// session agrees with that definition, and — the part that actually
+    /// bites — that it reads the *same field*: an event carrying a
+    /// destination in `direct_location_rr_ticks` and a decoy in the
+    /// neighbouring index fields must follow the destination.
+    #[test]
+    fn event_jump_uses_the_same_field_the_materialized_oracle_uses() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 4;
+        const DECOY: i64 = 1;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+
+        let mut by_jump_to = EmulatorReplaySession::new_from_ctfs_bytes(bytes.clone()).unwrap();
+        by_jump_to.jump_to(StepId(TARGET)).expect("jump_to must succeed");
+        let oracle_state = capture_emulator_state();
+
+        let mut by_event_jump = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        let event = ProgramEvent {
+            direct_location_rr_ticks: TARGET,
+            // Decoys: fields a plausible-but-wrong implementation might
+            // reach for instead.
+            tracepoint_result_index: DECOY,
+            event_index: DECOY as usize,
+            rr_event_id: DECOY as usize,
+            max_rr_ticks: DECOY,
+            ..ProgramEvent::default()
+        };
+        by_event_jump.event_jump(&event).expect("event_jump must succeed");
+
+        assert_eq!(
+            capture_emulator_state(),
+            oracle_state,
+            "event_jump must be `jump_to(direct_location_rr_ticks)`, as `MaterializedReplaySession` \
+             defines it, and must not follow any of the decoy index fields",
+        );
+        assert_eq!(by_event_jump.current_step_id(), StepId(TARGET));
+    }
+
+    /// RELATIONAL. The oracle defines a tracepoint jump as an event jump
+    /// whose landing flag is discarded. Assert the two are the same move
+    /// here, so they cannot drift apart.
+    #[test]
+    fn tracepoint_jump_is_the_same_move_as_event_jump() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 3;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let event = ProgramEvent {
+            direct_location_rr_ticks: TARGET,
+            ..ProgramEvent::default()
+        };
+
+        let mut via_event = EmulatorReplaySession::new_from_ctfs_bytes(bytes.clone()).unwrap();
+        via_event.event_jump(&event).expect("event_jump must succeed");
+        let via_event_state = capture_emulator_state();
+
+        let mut via_tracepoint = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        via_tracepoint.tracepoint_jump(&event).expect("tracepoint_jump must succeed");
+
+        assert_eq!(capture_emulator_state(), via_event_state);
+        assert_eq!(via_tracepoint.current_step_id(), via_event.current_step_id());
+    }
+
+    /// NEGATIVE. An event that names no destination carries the `-1`
+    /// sentinel. Landing on step 0 and reporting success would be a wrong
+    /// position dressed as a completed jump, so this must refuse — and
+    /// must leave the session where it was.
+    #[test]
+    fn event_jump_refuses_an_unset_tick_instead_of_landing_on_step_zero() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        session.jump_to(StepId(3)).expect("setup jump must succeed");
+        let before_state = capture_emulator_state();
+
+        let event = ProgramEvent {
+            direct_location_rr_ticks: NO_STEP_ID,
+            ..ProgramEvent::default()
+        };
+        let err = session
+            .event_jump(&event)
+            .expect_err("an unset destination must be refused, not silently served");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("event_jump") && msg.contains("-1"),
+            "the refusal must name the operation and the sentinel it saw, got `{msg}`",
+        );
+        assert_eq!(
+            session.current_step_id(),
+            StepId(3),
+            "a refused jump must not move the session",
+        );
+        assert_eq!(
+            capture_emulator_state(),
+            before_state,
+            "a refused jump must not touch emulator state",
+        );
+    }
+
+    /// NEGATIVE. The same bar for a `Location` with no destination —
+    /// exactly the shape a defaulted `Location` has, which is the
+    /// fabrication `task::location_from_jump_arguments` refuses one layer
+    /// up.
+    #[test]
+    fn location_jump_refuses_an_unset_tick_instead_of_landing_on_step_zero() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        session.jump_to(StepId(2)).expect("setup jump must succeed");
+        let before_state = capture_emulator_state();
+
+        let location = Location {
+            rr_ticks: RRTicks(NO_STEP_ID),
+            ..Location::default()
+        };
+        let err = session
+            .location_jump(&location)
+            .expect_err("an unset destination must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("location_jump") && msg.contains("-1"),
+            "the refusal must name the operation and the sentinel it saw, got `{msg}`",
+        );
+        assert_eq!(session.current_step_id(), StepId(2));
+        assert_eq!(capture_emulator_state(), before_state);
+    }
+
+    /// Depth 0 is the innermost frame — where the session already is — so
+    /// a calltrace click on it is served exactly, by not moving.
+    #[test]
+    fn callstack_jump_to_depth_zero_serves_the_current_frame_without_moving() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        session.jump_to(StepId(3)).expect("setup jump must succeed");
+        let before_state = capture_emulator_state();
+
+        session
+            .callstack_jump(0)
+            .expect("depth 0 is the current frame and must be served");
+
+        assert_eq!(session.current_step_id(), StepId(3));
+        assert_eq!(
+            capture_emulator_state(),
+            before_state,
+            "depth 0 must be a genuine no-op, not a re-seek",
+        );
+    }
+
+    /// NEGATIVE. An outer frame cannot be reached without reverse
+    /// execution. Refusing is the point: `Ok(())` here would leave the
+    /// session on the innermost frame while the UI redrew as though it had
+    /// moved.
+    #[test]
+    fn callstack_jump_to_an_outer_frame_refuses_rather_than_silently_staying_put() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        session.jump_to(StepId(2)).expect("setup jump must succeed");
+
+        let err = session
+            .callstack_jump(1)
+            .expect_err("an outer frame must be refused, not silently ignored");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("callstack_jump") && msg.contains("depth 1"),
+            "the refusal must name the operation and the depth it could not serve, got `{msg}`",
+        );
+        assert!(
+            msg.contains("forward"),
+            "the refusal must say WHY — forward-only replay — so the reader can act on it, \
+             got `{msg}`",
+        );
+        assert_eq!(
+            session.current_step_id(),
+            StepId(2),
+            "a refused frame move must not disturb the position",
+        );
+    }
+
+    /// NEGATIVE. Value history has nothing to be built from here. An empty
+    /// `Ok` would assert "this value never changed", which is a claim
+    /// about the program nobody measured.
+    #[test]
+    fn load_history_refuses_rather_than_reporting_an_empty_history() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+
+        let err = session
+            .load_history(&LoadHistoryArg::default())
+            .expect_err("value history must be refused, not reported empty");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("load_history"),
+            "the refusal must name the operation, got `{msg}`",
+        );
+    }
+
+    // ── Reachability, demonstrated at the layer the click arrives at ──
+    //
+    // The four jumps are reached through `dap_handler::Handler`, which is
+    // what `dap_server`'s `ct/*` dispatch calls. Driving the real handler
+    // (rather than the session directly) is what makes these regression
+    // guards for "a single click traps the wasm worker": before this
+    // change every one of them hit a `todo!()`, which on wasm32 is a trap
+    // that kills the worker and hangs every pending request.
+
+    /// Build an emulator-backed `Handler` exactly as
+    /// `dap_server::setup_from_vfs` does for a browser MCR trace.
+    fn emulator_handler(bytes: Vec<u8>) -> crate::dap_handler::Handler {
+        let replay = Box::new(EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap());
+        let reader: std::sync::Arc<dyn crate::trace_reader::TraceReader> =
+            std::sync::Arc::new(crate::in_memory_trace_reader::InMemoryTraceReader::new(
+                crate::db::Db::new(&std::path::PathBuf::from("/tmp/emulator-jump-reachability")),
+            ));
+        crate::dap_handler::Handler::construct_with_replay(
+            crate::task::TraceKind::Emulator,
+            crate::recreator_session::RecreatorArgs::default(),
+            reader,
+            replay,
+            false,
+        )
+    }
+
+    fn jump_request(command: &str) -> crate::dap::Request {
+        crate::dap::Request {
+            base: crate::dap::ProtocolMessage {
+                seq: 7,
+                type_: "request".to_string(),
+            },
+            command: command.to_string(),
+            arguments: serde_json::json!({}),
+        }
+    }
+
+    /// REACHABILITY. `ct/event-jump` — an Event Log row click — reaches
+    /// this session with no `trace_kind` guard in the way, and must now
+    /// complete instead of trapping.
+    #[test]
+    fn event_log_row_click_reaches_the_emulator_and_completes() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 4;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let expected = recording_state_after(&bytes, TARGET as usize);
+
+        let mut handler = emulator_handler(bytes);
+        let (sender, receiver) = std::sync::mpsc::channel();
+
+        handler
+            .event_jump(
+                jump_request("ct/event-jump"),
+                ProgramEvent {
+                    direct_location_rr_ticks: TARGET,
+                    ..ProgramEvent::default()
+                },
+                sender,
+            )
+            .expect("an Event Log row click must not fail on an emulator session");
+
+        assert_eq!(handler.step_id, StepId(TARGET));
+        assert_eq!(
+            capture_emulator_state(),
+            expected,
+            "the click must land on the recording's state at tick {TARGET}",
+        );
+        let messages: Vec<_> = receiver.try_iter().collect();
+        assert!(
+            messages.iter().any(|msg| matches!(
+                msg,
+                crate::dap::DapMessage::Event(event) if event.event == "ct/complete-move"
+                    && event.body["location"]["rrTicks"].as_i64() == Some(TARGET)
+            )),
+            "the click must publish a complete-move at the target tick; got {messages:?}",
+        );
+    }
+
+    /// REACHABILITY. `ct/history-jump` — an origin-chain hop — likewise.
+    #[test]
+    fn origin_chain_hop_click_reaches_the_emulator_and_completes() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 3;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let expected = recording_state_after(&bytes, TARGET as usize);
+
+        let mut handler = emulator_handler(bytes);
+        let (sender, _receiver) = std::sync::mpsc::channel();
+
+        handler
+            .history_jump(
+                jump_request("ct/history-jump"),
+                Location {
+                    rr_ticks: RRTicks(TARGET),
+                    ..Location::default()
+                },
+                sender,
+            )
+            .expect("an origin-chain hop must not fail on an emulator session");
+
+        assert_eq!(handler.step_id, StepId(TARGET));
+        assert_eq!(capture_emulator_state(), expected);
+    }
+
+    /// REACHABILITY. `ct/trace-jump` — a tracepoint result row click.
+    #[test]
+    fn tracepoint_result_row_click_reaches_the_emulator_and_completes() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 5;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let expected = recording_state_after(&bytes, TARGET as usize);
+
+        let mut handler = emulator_handler(bytes);
+        let (sender, _receiver) = std::sync::mpsc::channel();
+
+        handler
+            .trace_jump(
+                jump_request("ct/trace-jump"),
+                ProgramEvent {
+                    direct_location_rr_ticks: TARGET,
+                    ..ProgramEvent::default()
+                },
+                sender,
+            )
+            .expect("a tracepoint result row click must not fail on an emulator session");
+
+        assert_eq!(handler.step_id, StepId(TARGET));
+        assert_eq!(capture_emulator_state(), expected);
+    }
+
+    /// REACHABILITY. `ct/calltrace-jump` — a calltrace row click. This is
+    /// the one whose `trace_kind` guard routes the emulator *into* the
+    /// `callstack_jump` branch rather than away from it, so the emulator
+    /// is one of the only session kinds that reaches it at all.
+    ///
+    /// Depth 0 completes; an outer frame comes back as a refusal the
+    /// transport can turn into an error response, not as a trap.
+    #[test]
+    fn calltrace_row_click_completes_at_depth_zero_and_refuses_an_outer_frame() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+
+        let mut handler = emulator_handler(bytes.clone());
+        let (sender, _receiver) = std::sync::mpsc::channel();
+        handler
+            .calltrace_jump(
+                jump_request("ct/calltrace-jump"),
+                Location {
+                    callstack_depth: 0,
+                    ..Location::default()
+                },
+                sender,
+            )
+            .expect("a calltrace click on the innermost frame must be served");
+
+        let mut handler = emulator_handler(bytes);
+        let (sender, _receiver) = std::sync::mpsc::channel();
+        let err = handler
+            .calltrace_jump(
+                jump_request("ct/calltrace-jump"),
+                Location {
+                    callstack_depth: 2,
+                    ..Location::default()
+                },
+                sender,
+            )
+            .expect_err("a calltrace click on an outer frame must surface a refusal");
+        assert!(
+            err.to_string().contains("depth 2"),
+            "the refusal must reach the transport intact, got `{err}`",
         );
     }
 
