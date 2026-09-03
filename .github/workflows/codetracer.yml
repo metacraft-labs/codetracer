@@ -1255,6 +1255,15 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
+      # before the FIRST `nix develop` in this job rather than before the
+      # lint one -- a job whose earlier `nix develop` dies never reaches a
+      # diagnostic placed after it. Three explanations for the
+      # `could not read Username` failure have been proposed and disproven;
+      # this ends the guessing. Unconditional, cannot redden the job, prints
+      # no credential value.
+      - uses: ./.github/actions/dump-git-fetch-env
+
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/bash.sh"
 
   lint-nim:
@@ -1306,6 +1315,15 @@ jobs:
         with:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
+      # before the FIRST `nix develop` in this job rather than before the
+      # lint one -- a job whose earlier `nix develop` dies never reaches a
+      # diagnostic placed after it. Three explanations for the
+      # `could not read Username` failure have been proposed and disproven;
+      # this ends the guessing. Unconditional, cannot redden the job, prints
+      # no credential value.
+      - uses: ./.github/actions/dump-git-fetch-env
+
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh"
 
   lint-nix:
@@ -1343,6 +1361,15 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
+      # before the FIRST `nix develop` in this job rather than before the
+      # lint one -- a job whose earlier `nix develop` dies never reaches a
+      # diagnostic placed after it. Three explanations for the
+      # `could not read Username` failure have been proposed and disproven;
+      # this ends the guessing. Unconditional, cannot redden the job, prints
+      # no credential value.
+      - uses: ./.github/actions/dump-git-fetch-env
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh"
 
@@ -1393,6 +1420,15 @@ jobs:
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
             codetracer-native-recorder=dev
+
+      # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
+      # before the FIRST `nix develop` in this job rather than before the
+      # lint one -- a job whose earlier `nix develop` dies never reaches a
+      # diagnostic placed after it. Three explanations for the
+      # `could not read Username` failure have been proposed and disproven;
+      # this ends the guessing. Unconditional, cannot redden the job, prints
+      # no credential value.
+      - uses: ./.github/actions/dump-git-fetch-env
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # src/db-backend/build.rs invokes ``direnv exec <recorder-root>

@@ -1,0 +1,170 @@
+name: Dump the git fetch environment
+description: >-
+  Print, immediately before a `nix develop`, exactly what git config would be
+  applied to a github.com fetch — and probe one public repo with and without
+  that config, so a failure to fetch it names its own cause.
+
+runs:
+  using: "composite"
+  steps:
+    # -----------------------------------------------------------------------
+    # WHY THIS EXISTS, AND WHY IT IS UNCONDITIONAL
+    #
+    # The whole `lint-*` stage dies inside `nix develop`, before a single lint
+    # runs, on every run for an unknown period:
+    #
+    #   error: Failed to fetch git repository https://github.com/anza-xyz/crossbeam
+    #   fatal: could not read Username for 'https://github.com': No such device or address
+    #
+    # `anza-xyz/crossbeam`, `mystenlabs/tidehunter` and `facebook/yoga` are all
+    # PUBLIC and fetch anonymously at 200 from a workstation. Three explanations
+    # have been proposed and all three were DISPROVEN by measurement:
+    #
+    #   * `actions/checkout`'s global `http.<url>.extraheader`. It redefines
+    #     HOME first ("Temporarily overriding HOME=.../_temp/<uuid>"), so its
+    #     `--global` writes land in a throwaway gitconfig this step never reads.
+    #   * nix's `access-tokens github.com=`. Tested: `builtins.fetchGit` over an
+    #     uncached public repo returns the same rev with and without a foreign
+    #     token set, so nix does not inject it into plain `https://` git fetches.
+    #   * a pinned rev that no longer exists. Tested: that produces
+    #     `Cannot find Git revision …`, a different error entirely.
+    #
+    # So the cause is something about the RUNNER that no log so far records.
+    # Guessing a fourth time is not worth anyone's hour; this measures instead.
+    #
+    # UNCONDITIONAL, and not behind a `if: runner.debug` or a repo variable. A
+    # diagnostic nobody switches on is a diagnostic that reports nothing, which
+    # is the defect shape this whole campaign is about. It costs about a second
+    # and a screen of log.
+    #
+    # IT CANNOT REDDEN A JOB. Every command is `|| true` and the step ends in
+    # `exit 0`. A diagnostic that fails the thing it is diagnosing would be
+    # removed within a day, and then the next person has neither.
+    #
+    # IT CANNOT LEAK A CREDENTIAL. Values are never printed — only key names,
+    # their ORIGIN file, a byte length and a truncated SHA-256. That is enough
+    # to tell "the same header as last run" from "a different one" and enough to
+    # find the file that carries it, and it stays safe if the credential came
+    # from the runner image rather than from a masked secret. GitHub's own
+    # masking cannot help there: it only redacts values it was told about.
+    # -----------------------------------------------------------------------
+    - name: Dump the git fetch environment
+      shell: bash
+      run: |
+        set +e
+
+        probe_repo="https://github.com/anza-xyz/crossbeam"
+
+        echo "=== identity ==================================================="
+        echo "user           : $(id -un 2>/dev/null) (uid $(id -u 2>/dev/null))"
+        echo "HOME           : ${HOME:-<unset>}"
+        echo "git            : $(git --version 2>/dev/null)"
+
+        echo
+        echo "=== git config files that exist ================================"
+        for f in /etc/gitconfig "${HOME}/.gitconfig" "${HOME}/.config/git/config"; do
+          if [ -f "${f}" ]; then
+            echo "present : ${f}  ($(wc -c <"${f}" | tr -d ' ') bytes)"
+          else
+            echo "absent  : ${f}"
+          fi
+        done
+
+        echo
+        echo "=== every http.* key git can see, BY NAME AND ORIGIN ==========="
+        # `--name-only` so no value is ever printed. The origin is the point:
+        # it names the FILE a credential came from, which is what distinguishes
+        # "the image ships one" from "a previous step wrote one".
+        keys="$(git config --list --show-origin --name-only 2>/dev/null \
+          | grep -iE 'http\.|url\.|credential')"
+        if [ -n "${keys}" ]; then
+          printf '%s\n' "${keys}" | sed 's/^/  /'
+        else
+          echo "  (none — git has no http./url./credential keys from any file)"
+        fi
+
+        echo
+        echo "=== what git would ACTUALLY apply to ${probe_repo} ============="
+        # `--get-urlmatch` is the decisive query: it asks git to resolve its
+        # URL-matching rules for this exact URL, rather than us reading config
+        # and reasoning about longest-prefix ourselves. Reasoning about that
+        # instead of asking is how the last explanation went wrong.
+        urlmatch="$(git config --get-urlmatch http "${probe_repo}" 2>/dev/null)"
+        if [ -n "${urlmatch}" ]; then
+          while IFS= read -r line; do
+            [ -z "${line}" ] && continue
+            key="${line%% *}"
+            val="${line#* }"
+            # A truncated digest, never the value: enough to compare two runs
+            # and to tell two different credentials apart, useless to anyone
+            # reading the log. `shasum` is the fallback for images without
+            # `sha256sum`.
+            digest="$(printf '%s' "${val}" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-12)"
+            printf '  %s = <%s bytes, sha256:%s>\n' "${key}" "${#val}" "${digest:-?}"
+          done <<<"${urlmatch}"
+        else
+          echo "  (none — git would send no http.* configuration for this URL)"
+        fi
+
+        echo
+        echo "=== nix's view ================================================="
+        # Redacted after the `=`: `access-tokens` carries the token itself.
+        nix config show 2>/dev/null \
+          | grep -iE 'access-tokens|netrc-file|substituters' \
+          | sed -E 's/(access-tokens = ).*/\1<redacted>/' | sed 's/^/  /' || true
+
+        echo
+        echo "=== THE COMPARISON THAT DECIDES IT ============================="
+        # Two fetches of the same PUBLIC repo, differing only in whether git's
+        # own configuration is in play. This separates the two hypotheses that
+        # survive:
+        #
+        #   config fails, isolated succeeds -> a credential in git config is
+        #                                      the cause; the origin above says
+        #                                      which file carries it.
+        #   BOTH fail                       -> nothing to do with config. The
+        #                                      runner cannot fetch github.com
+        #                                      anonymously at all — an IP-level
+        #                                      block or rate limit — and no
+        #                                      amount of credential scoping will
+        #                                      ever fix it.
+        #   BOTH succeed                    -> git is fine and the fault is
+        #                                      inside nix's own fetcher, so look
+        #                                      there and not at git config.
+        GIT_TERMINAL_PROMPT=0 timeout 60 \
+          git ls-remote "${probe_repo}" HEAD >/dev/null 2>/tmp/gfe-a.txt
+        rc_config=$?
+
+        GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null timeout 60 \
+          git ls-remote "${probe_repo}" HEAD >/dev/null 2>/tmp/gfe-b.txt
+        rc_isolated=$?
+
+        if [ "${rc_config}" -eq 0 ]; then
+          echo "  with this runner's git config : OK"
+        else
+          echo "  with this runner's git config : FAILED ($(head -1 /tmp/gfe-a.txt))"
+        fi
+        if [ "${rc_isolated}" -eq 0 ]; then
+          echo "  with NO git config at all     : OK"
+        else
+          echo "  with NO git config at all     : FAILED ($(head -1 /tmp/gfe-b.txt))"
+        fi
+
+        echo
+        if [ "${rc_config}" -ne 0 ] && [ "${rc_isolated}" -eq 0 ]; then
+          echo "  VERDICT: git configuration is the cause. The origin listing"
+          echo "           above names the file that carries it."
+        elif [ "${rc_config}" -ne 0 ] && [ "${rc_isolated}" -ne 0 ]; then
+          echo "  VERDICT: NOT git configuration. This runner cannot fetch a"
+          echo "           public github.com repo anonymously at all, so no"
+          echo "           credential scoping can fix it. Look at egress:"
+          echo "           IP-level rate limiting or a blocking proxy."
+        elif [ "${rc_config}" -eq 0 ]; then
+          echo "  VERDICT: plain git can fetch this repo from this runner."
+          echo "           If nix still cannot, the fault is inside nix's own"
+          echo "           fetcher, not in git config."
+        fi
+
+        echo
+        echo "(diagnostic only — this step never fails a job)"
+        exit 0
