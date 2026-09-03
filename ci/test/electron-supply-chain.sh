@@ -69,24 +69,52 @@
 #
 # ## The security reading, stated once so it is not restated wrongly
 #
-# SINCE NO CHROMIUM SHIPS IN EITHER PUBLISHED DESKTOP ARTEFACT, THERE IS NO
-# STALE-CHROMIUM EXPOSURE FROM THEM — the exposure is a non-functional GUI. The
-# premise this work started from ("Electron is two majors behind") was
-# INVERTED: 44.0.0 was the newest major at the time the artefact was built.
+# UNTIL 2026-09-03, NO CHROMIUM SHIPPED IN EITHER PUBLISHED DESKTOP ARTEFACT,
+# so there was no stale-Chromium exposure from them — the exposure was a
+# non-functional GUI. The premise this work started from ("Electron is two
+# majors behind") was INVERTED: 44.0.0 was the newest major at the time the
+# AppImage was built, and the macOS dmg's `bin/electron` execed a path that had
+# never existed on any machine (the Nix node_modules derivation it went through
+# holds 880 packages and no `electron`).
 #
-# Where a version gap does exist is the Nix path, which is a different
-# artefact: `pkgs.electron` resolves to 41.3.0, twenty-one patch releases
-# behind its own line's last release (41.10.7), and major 41 left Electron's
-# support window on 2026-08-25 when 44.0.0 shipped. That gap matters more than
-# usual here because both BrowserWindows run `nodeIntegration: true` and
-# `contextIsolation: false` (src/frontend/index/window.nim, index/install.nim)
-# and the wrapper passes `--no-sandbox`, so a renderer-reachable Chromium bug
-# is a direct Node RCE rather than a sandboxed one.
+# THAT CHANGES NOW THAT A REAL RUNTIME SHIPS. Both artefacts carry Electron
+# 44.1.1, from this one pin. Staying current stops being cosmetic because of
+# three properties that are in the tree and measurable: both BrowserWindows run
+# `nodeIntegration: true` and `contextIsolation: false`
+# (src/frontend/index/window.nim:67-71, src/frontend/index/install.nim:32-36),
+# and the Linux wrapper passes `--no-sandbox`. Together they mean a
+# renderer-reachable Chromium bug is a DIRECT Node RCE rather than a sandboxed
+# one. Those three are the argument; they are also the cheapest thing to fix if
+# anyone wants the version to matter less.
+#
+# 44.1.1 IS THE RIGHT TARGET, checked rather than assumed. From
+# releases.electronjs.org on 2026-09-03: 44.1.1 is the newest STABLE release
+# (2026-09-01), and Electron supports the latest three stable majors, so the
+# supported set is 44, 43, 42. Major 41 left the window on 2026-08-25.
+#
+# THE NIX PATH IS STILL OUTSIDE THAT WINDOW, and cannot be brought inside it by
+# a version bump alone. `nix/packages/default.nix` (runtimeDeps, which
+# `nix build .#codetracer` ships) and `nix/shells/ci-base.nix` (the dev shell)
+# both use the bare `pkgs.electron` alias. Measured by `nix eval` over
+# `attrNames`:
+#
+#   this flake's pinned nixpkgs (687f05a9):  electron = 41.3.0, max electron_41
+#   nixpkgs-unstable HEAD (f0e996ff, today): electron = 43.4.1, max electron_43
+#
+# So NIXPKGS DOES NOT PACKAGE ELECTRON 44 AT ALL. A nixpkgs bump gets the Nix
+# path to 43.4.1 — inside the support window, still not the version the
+# artefacts ship — and that pin is shared org-wide through
+# `nix-codetracer-toolchains`, so it is not this repository's to move. Reaching
+# 44 from Nix means an overlay carrying our own per-platform binary hashes,
+# i.e. a hand-maintained hash table of exactly the kind that already bites this
+# repo (node-packages/yarn-project.nix). Neither is free; both are decisions,
+# and they are recorded here so the next reader does not re-derive them.
 #
 # NO CVE IS ENUMERATED HERE, deliberately. A list of identifiers nobody has
 # shown to be reachable in this application's threat model reads as evidence
-# and is not. The measured claims — the version gap, the three absent
-# mitigations, and the absent runtime — carry the argument without it.
+# and is not. The measured claims — the support window, the three absent
+# mitigations, and what each path actually resolves to — carry the argument
+# without it.
 #
 # ## Usage
 #
