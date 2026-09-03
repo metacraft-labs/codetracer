@@ -3408,6 +3408,24 @@ test-noir-demo:
   exec > >(tee test-logs/test-noir-demo.log) 2>&1
   bash ci/test/noir-demo-template.sh
 
+# The `/noir/demo` path as a VISITOR gets it: the page paints, Run opens a
+# replay session, and the calltrace shows exactly three `one_pass` frames.
+#
+# Needs an assembled bundle CARRYING THE REPLAY ENGINE, or it refuses rather
+# than reporting the demo broken for a reason about the bundle:
+#
+#   CT_REPLAY_ENGINE_DIR=browser-replay/dist/pkg \
+#   CT_NOIR_WASM_COMPILER=... CT_NOIR_WASM_TRACER=... \
+#     just test-noir-demo-browser
+#
+# Pass CT_WEB_BUNDLE_DIR to reuse a tree instead of assembling one.
+test-noir-demo-browser:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-demo-browser.log) 2>&1
+  bash ci/test/noir-demo-in-browser.sh
+
 # A wasm-worker SESSION, alive in a real tab over the assembled publish tree.
 #
 # The e2e above drives the node twin and the twin is one-shot: it proves the

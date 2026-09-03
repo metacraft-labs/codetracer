@@ -674,6 +674,40 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/web-renderer-mounts.sh
           '
 
+      - name: Prove the /noir/demo demo path still works for a visitor
+        # THE STEP ABOVE PROVES THE BUNDLE MOUNTS. This proves the worked
+        # example is still worth opening, which is a different claim and is not
+        # implied by any of the checks before it.
+        #
+        # `noir-demo-template.sh` (earlier in this job) covers the demo's
+        # SOURCES: its eight tests pass, its bug is reachable under nargo, and
+        # repairing one line makes the round settle correctly. All of that can
+        # be true while a visitor sees nothing useful, and twice it was:
+        #
+        #   * the theme href was RELATIVE, so at the two-segment `/noir/demo`
+        #     it resolved into the SPA rewrite and the whole application
+        #     painted with zero CSS rules — a correct DOM, unreadable.
+        #   * the trace was accumulated with `.add`, which `nim js` compiles to
+        #     `push.apply`, so the demo's 462 KB trace threw and Run reported
+        #     "the tracer did not produce a trace" over a perfectly good one.
+        #
+        # Neither is visible to a source gate and neither would be caught by a
+        # 200 on the route. So this arm counts CSS rules and reads panes, and
+        # its headline assertion is that the calltrace shows EXACTLY THREE
+        # `one_pass` frames — the demo's thesis, that the pass count is
+        # something the debugger shows rather than a bound a reader evaluates.
+        #
+        # It needs the replay engine, and it REFUSES rather than degrading if
+        # the bundle has none: without it Run falls back to counted rows and
+        # every pane assertion would fail for a reason about the bundle. That
+        # engine is built two steps up and is in `studio-bundle` by now.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_WEB_BUNDLE_DIR="$(pwd)/studio-bundle"
+            direnv exec "$(pwd)" bash ci/test/noir-demo-in-browser.sh
+          '
+
       - name: Upload what the pre-publish browser saw and reported
         # BOTH FORMS. This step shipped sixteen PNGs and no JSON, which made a
         # DOM failure undiagnosable by construction: the run-control check
