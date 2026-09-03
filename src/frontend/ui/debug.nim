@@ -443,9 +443,22 @@ proc rewireDebugControlsBridgeForActiveSession*(data: Data) =
   ## the DebugComponent/Mediator pair is owned by the active ReplaySession.
   ## After switching away to a welcome tab and back, clicks and shortcuts must
   ## emit through the restored session's mediator.
+  # EVERY REFUSAL SAYS SO. This proc installs the callbacks that every
+  # non-step button on the debugger toolbar dispatches through, so a silent
+  # `return` here leaves a fully painted, hit-testable toolbar whose buttons
+  # reach nothing — and leaves no trace of why. That shape cost this campaign
+  # a wrong root cause: `not ...hasKey(0)` was proposed as the reason Stop did
+  # nothing, and a browser measurement showed the opposite
+  # (`debugHasKey0=true`, bridge installed, and the click never produced a
+  # `click` event at all). A refusal that names itself is what makes the next
+  # such guess checkable in one run instead of one rebuild.
   if data.isNil or data.ui.isNil:
+    cwarn "debug-bridge: no session, so the toolbar's non-step buttons stay unwired"
     return
   if not data.ui.componentMapping[Content.Debug].hasKey(0):
+    cwarn "debug-bridge: no Debug component at id 0, so the toolbar's " &
+      "non-step buttons (run-to-entry, reset-operation, run-tests, Stop) " &
+      "stay unwired"
     return
 
   let component = DebugComponent(data.ui.componentMapping[Content.Debug][0])
@@ -460,12 +473,32 @@ proc rewireDebugControlsBridgeForActiveSession*(data: Data) =
   # reset-operation, run-tests, and Stop) for a reason that applies only to the
   # step half.
   #
-  # The visible form: pressing Stop in a Noir Studio replay session did
-  # nothing. Measured in a browser against the assembled bundle — the button
-  # mounted, hit-tested, and took a real pointer click at its own centre, and
-  # the topbar stayed `debugger-controls` through a 20s wait on each of three
-  # trips (`ci/test/noir-mode-roundtrip.sh`).
+  # THE EVIDENCE THIS PARAGRAPH USED TO CITE WAS NOT EVIDENCE OF THIS, and the
+  # correction is left here rather than deleted because the same reading would
+  # otherwise be made again.
+  #
+  # It read: "pressing Stop in a Noir Studio replay session did nothing —
+  # measured in a browser, the button mounted, hit-tested, took a real pointer
+  # click at its own centre, and the topbar stayed `debugger-controls` through
+  # a 20s wait on each of three trips". Every clause is true and the conclusion
+  # does not follow. `ci/test/noir-mode-roundtrip.sh` reported `clicked: true`
+  # for a gesture that produced NO `click` event: its `blurEditor` pressed
+  # `#menu`, `#isonim-debug-controls` is a child of `#menu`, and the resulting
+  # menu-shell rebuild replaced the toolbar between the gesture's `mousedown`
+  # and its `mouseup`, which is a case in which browsers fire no `click` at
+  # all. The button was never pressed.
+  #
+  # Re-measured against the same bundle with the blur removed, the whole return
+  # leg works and this bridge is why: `actionClick fired action=stop
+  # onActionNil=false` -> `DebugComponent.action id=stop` ->
+  # `stopReplaySession entered mode=DebugMode` -> `switchToEdit` ->
+  # `refreshTopbarSurface tsDebuggerControls -> tsEditCommands`, and the panes
+  # and the Run button came back. So the guard below is still correct — a nil
+  # mediator must not cost the non-step half of the toolbar — but it is not
+  # what that measurement showed.
   if component.isNil:
+    cwarn "debug-bridge: the Debug component at id 0 is nil, so the " &
+      "toolbar's non-step buttons stay unwired"
     return
 
   initDebugControlsVM()

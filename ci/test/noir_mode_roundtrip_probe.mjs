@@ -29,6 +29,24 @@
 // .mjs` all say the same thing in their own headers) and its point is that an
 // arm cannot be green because the probe was lenient.
 //
+// THE MUTATION ARM RUNS IN THIS TAB, AFTER THE CONTROL TRIPS, AND THAT IS A
+// MEASUREMENT DECISION RATHER THAN A CONVENIENCE.
+//
+// The arm exists to show that the return assertions CAN go red — a check that
+// has never been observed to fail certifies the defect instead of catching it.
+// It used to be a second bundle on disk with a `<script>` injected into
+// `index.html`, driven by a SECOND browser launch. That arm could not be shown
+// to redden anything, because a fresh tab pays the cold Noir/wasm compile
+// again: its single trip hit the compile wall, the forward leg never arrived,
+// and all three arm checks reported "the arm broke the probe" — which proves
+// nothing about the return assertion in either direction.
+//
+// Driven here, the arm is WARM BY CONSTRUCTION: same tab, same worker, same
+// compiled modules, immediately after a control trip that just succeeded. And
+// it is a strictly smaller mutation — nothing on disk differs between control
+// and arm, so the only variable is the Stop button's click handler, which is
+// exactly the variable the arm is about.
+//
 // Usage:  node noir_mode_roundtrip_probe.mjs <url> [settleMs] [trips] [steps]
 // Output: one JSON document on stdout.
 
@@ -58,6 +76,11 @@ const report = {
   markerReachedModel: false,
   markerPresentPerLeg: [],
   gestureErrors: [],
+  // The mutation arm's own record. `armInstalled` is the "verify the mutation
+  // landed" step: an arm whose instrument never attached would produce a green
+  // return and be indistinguishable from a working product.
+  armInstalled: false,
+  armSwallowedClicks: 0,
   fatal: '',
 };
 
@@ -183,6 +206,33 @@ async function hitTestedClick(page, selector, what) {
     return record;
   }
 
+  // A GESTURE THAT DID NOT PRODUCE A `click` EVENT IS NOT A PRESSED BUTTON,
+  // and until now this probe could not tell the difference.
+  //
+  // `record.clicked` says only that `page.mouse.click` did not throw. It says
+  // nothing about whether the browser produced a `click`, and the browser
+  // produces none when `mousedown` and `mouseup` land on different nodes —
+  // which is exactly what happens while the topbar is being re-mounted. So
+  // this gate reported `clicked: true` for a Stop gesture that reached
+  // nothing, three trips running, and the failure was read as a dead handler.
+  //
+  // The listener goes on `window` in the CAPTURE phase, so it runs before any
+  // document-level listener: the mutation arm's instrument swallows the click
+  // with `stopImmediatePropagation` on `document`, and this must still record
+  // that the EVENT existed. `clickEventFired` is about the browser; whether
+  // the product's own handler ran is what the consequence checks are for.
+  await page.evaluate((sel) => {
+    window.__ctClickSeen = false;
+    const onClick = (e) => {
+      const target = document.querySelector(sel);
+      if (target && (e.target === target || target.contains(e.target))) {
+        window.__ctClickSeen = true;
+      }
+    };
+    window.addEventListener('click', onClick, true);
+    window.__ctClickOff = () => window.removeEventListener('click', onClick, true);
+  }, selector);
+
   try {
     // The real thing: CDP mouse input at a coordinate we hit-tested, not
     // `el.click()`, which dispatches a synthetic event no user could send and
@@ -193,14 +243,73 @@ async function hitTestedClick(page, selector, what) {
     record.error = String((e && e.message) || e).slice(0, 200);
     report.gestureErrors.push(record);
   }
+
+  record.clickEventFired = await page.evaluate(() => {
+    const seen = !!window.__ctClickSeen;
+    if (window.__ctClickOff) window.__ctClickOff();
+    return seen;
+  });
+  if (record.clicked && !record.clickEventFired) {
+    record.error = 'the pointer went down and up on the element and the browser ' +
+      'produced no click event — the node was replaced between them';
+    report.gestureErrors.push(record);
+  }
   return record;
 }
 
 // Blur the editor before anything that must not be swallowed by Monaco.
+//
+// THIS USED TO BE A POINTER CLICK ON `#menu`, AND THAT GESTURE DESTROYED THE
+// VERY NEXT GESTURE — which is what made this gate report a broken product.
+//
+// `#isonim-debug-controls` is a CHILD of `#menu`, so `click('#menu', {x:5,y:5})`
+// lands on the topbar's own background. That rebuilds the menu shell, and
+// `renderMenuShellInto` re-creates the topbar host, so the toolbar is
+// re-mounted and every button in it is a NEW DOM node. A pointer click
+// delivered while that is happening has its `mousedown` and its `mouseup` land
+// on two different nodes, and a browser fires NO `click` event at all when the
+// two disagree.
+//
+// Measured, four arms against the same tab and the same bundle
+// (`data-topbar-surface` read before and after, listeners in the capture
+// phase):
+//
+//   nothing before the Run click      mousedown/mouseup/click, same node -> Run ran
+//   click the TOPBAR background first mousedown+mouseup, DIFFERENT nodes, no
+//                                     click event at all      -> Run did nothing
+//   click inside the EDITOR first     same node               -> Run ran
+//   blur via JS, no pointer gesture   same node               -> Run ran
+//
+// So the old blur destroyed the Run on every trip. With the Run lost, the tab
+// stayed in edit mode for the whole 420-second forward wait, and the gate then
+// attributed that wait to a "cold Noir compile" — a number that does not
+// exist: measured here, `nbpCompile-started` to `nbpCompile-exit` is 343ms on
+// the FIRST compile of a fresh tab, and Run to `debugger-controls` is 633ms.
+// The same lost-click mechanism is why the Stop button appeared dead: the
+// probe reported `clicked: true`, which only says `page.mouse.click` did not
+// throw, and never that a `click` event was produced.
+//
+// A JS blur touches no DOM, rebuilds nothing, and leaves the node the next
+// gesture was hit-tested against exactly where it was.
+//
+// THE UNDERLYING PRODUCT DEFECT IS NOT FIXED BY THIS and is not this file's to
+// fix: a user who clicks the menu bar and then presses Run gets nothing,
+// because the topbar host is re-created by every menu-shell rebuild. What this
+// change buys is that the gate measures the product instead of measuring its
+// own blur.
 async function blurEditor(page) {
   try {
-    await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
-  } catch (e) { /* a missing topbar shows up in the snapshots */ }
+    await page.evaluate(() => {
+      const active = document.activeElement;
+      if (active && typeof active.blur === 'function') active.blur();
+      const ed = window.monaco && window.monaco.editor;
+      for (const e of ((ed && ed.getEditors && ed.getEditors()) || [])) {
+        try {
+          if (e.hasTextFocus && e.hasTextFocus() && e.getDomNode) e.getDomNode().blur();
+        } catch (err) { /* one editor refusing to blur is not a failed blur */ }
+      }
+    });
+  } catch (e) { /* a page that cannot be evaluated shows up in the snapshots */ }
 }
 
 // Wait for a snapshot predicate rather than a fixed sleep, and report how
@@ -280,13 +389,19 @@ try {
     report.gestureErrors.push({ what: 'type marker', error: String(e.message).slice(0, 200) });
   }
 
-  for (let trip = 1; trip <= trips; trip += 1) {
+  // ONE ROUND TRIP, used by both the control trips and the mutation arm.
+  //
+  // Shared deliberately: an arm driven by different code from the control is
+  // an arm that can be green (or red) for a reason the control never sees.
+  // `prefix` names the legs; `stepCount` is 0 for the arm, whose subject is
+  // the return and not the stepping.
+  async function roundTrip(prefix, who, stepCount) {
     // -----------------------------------------------------------------
     // EDIT -> REPLAY, by the Run button on the edit toolbar.
     // -----------------------------------------------------------------
     await blurEditor(page);
-    const runClick = await hitTestedClick(page, '#run-image', `trip ${trip}: Run`);
-    report.legs.push({ leg: `trip-${trip}-run-gesture`, gesture: runClick });
+    const runClick = await hitTestedClick(page, '#run-image', `${who}: Run`);
+    report.legs.push({ leg: `${prefix}-run-gesture`, gesture: runClick });
 
     // 240s, not 60s. THE FIRST COMPILE IS NOT LIKE THE OTHERS: measured on
     // this gate's own runs, trip 1 timed out at 60s and then at 240s while trips 2 and 3
@@ -294,22 +409,24 @@ try {
     // dominates and everything after it is warm. A timeout tuned to the warm
     // case reports the product as broken on the one run a real visitor makes.
     const arrived = await waitForSurface(page, 'debugger-controls', 420000);
-    report.legs.push({ leg: `trip-${trip}-run-wait`, ...arrived });
+    report.legs.push({ leg: `${prefix}-run-wait`, ...arrived });
     await page.waitForTimeout(1500);
-    await snapshot(page, `trip-${trip}-replay`);
+    await snapshot(page, `${prefix}-replay`);
 
     // Step, so the session is demonstrably live rather than merely painted.
-    const tops = new Set();
-    const first = await caretTops(page);
-    if (first >= 0) tops.add(first);
-    for (let i = 0; i < steps; i += 1) {
-      const c = await hitTestedClick(page, '#next-image', `trip ${trip}: step ${i + 1}`);
-      if (!c.clicked) break;
-      await page.waitForTimeout(800);
-      const t = await caretTops(page);
-      if (t >= 0) tops.add(t);
+    if (stepCount > 0) {
+      const tops = new Set();
+      const first = await caretTops(page);
+      if (first >= 0) tops.add(first);
+      for (let i = 0; i < stepCount; i += 1) {
+        const c = await hitTestedClick(page, '#next-image', `${who}: step ${i + 1}`);
+        if (!c.clicked) break;
+        await page.waitForTimeout(800);
+        const t = await caretTops(page);
+        if (t >= 0) tops.add(t);
+      }
+      report.legs.push({ leg: `${prefix}-step`, caretPositions: Array.from(tops) });
     }
-    report.legs.push({ leg: `trip-${trip}-step`, caretPositions: Array.from(tops) });
 
     // -----------------------------------------------------------------
     // REPLAY -> EDIT, by the STOP BUTTON.
@@ -335,20 +452,63 @@ try {
       const panel = host && host.firstElementChild;
       return panel ? panel.getAttribute('data-topbar-surface') : null;
     });
-    const stopClick = await hitTestedClick(page, '#stop-image', `trip ${trip}: Stop`);
+    const stopClick = await hitTestedClick(page, '#stop-image', `${who}: Stop`);
     report.legs.push({
-      leg: `trip-${trip}-stop-gesture`,
+      leg: `${prefix}-stop-gesture`,
       surfaceBefore: surfaceBeforeStop,
       gesture: stopClick,
     });
 
     const back = await waitForSurface(page, 'edit-commands', 20000);
-    report.legs.push({ leg: `trip-${trip}-stop-wait`, ...back });
+    report.legs.push({ leg: `${prefix}-stop-wait`, ...back });
     await page.waitForTimeout(1000);
-    await snapshot(page, `trip-${trip}-edit`);
+    await snapshot(page, `${prefix}-edit`);
+  }
 
+  for (let trip = 1; trip <= trips; trip += 1) {
+    await roundTrip(`trip-${trip}`, `trip ${trip}`, steps);
     const txt = await modelText(page, marker);
     report.markerPresentPerLeg.push({ trip, present: txt.includes(marker), chars: txt.length });
+  }
+
+  // -------------------------------------------------------------------
+  // THE MUTATION ARM — a Stop that is present, hit-testable, and reaches
+  // nothing.
+  //
+  // This is the product as it shipped before this campaign: `renderer
+  // .stopAction` was `discard` from the initial open-source commit, and the
+  // toolbar had no Stop button at all. The instrument reproduces the reachable
+  // half of that — the button stays, the click lands on it, and the handler
+  // behind it never runs — because "the control is missing" and "the control
+  // does nothing" fail this gate's return assertions for different reasons and
+  // only the second one is the defect that survived three other gates.
+  //
+  // Capture phase with `stopImmediatePropagation`, so it runs before whatever
+  // the product bound and the product's own handler never sees the click.
+  // -------------------------------------------------------------------
+  report.armInstalled = await page.evaluate(() => {
+    window.__ctArmSwallowed = 0;
+    document.addEventListener('click', function (e) {
+      let t = e.target;
+      while (t) {
+        if (t.id === 'stop-image') {
+          window.__ctArmSwallowed += 1;
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          return;
+        }
+        t = t.parentElement;
+      }
+    }, true);
+    return true;
+  });
+
+  if (report.armInstalled) {
+    await roundTrip('arm', 'arm', 0);
+    // VERIFY THE MUTATION LANDED. Without this the arm's red return is
+    // ambiguous: a listener that never attached, and a Stop that never
+    // reached its handler, produce the same "the mode did not come back".
+    report.armSwallowedClicks = await page.evaluate(() => window.__ctArmSwallowed || 0);
   }
 } catch (e) {
   report.fatal = String((e && e.message) || e).slice(0, 400);

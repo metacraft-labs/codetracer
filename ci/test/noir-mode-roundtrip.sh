@@ -288,9 +288,11 @@ run_probe() {
 	# Never trust the exit code; the caller reads the JSON, and a run that
 	# produced none is reported as such.
 	# THE CAP HAS TO CLEAR THE WORST CASE THE PROBE CAN LEGITIMATELY TAKE.
-	# Three trips at a 240s cold-compile wait, a 20s return wait and the
-	# settles between them is ~830s, so a 900s cap would kill a healthy run
-	# whose first compile was slow and report it as "produced no JSON" — a
+	# One run now carries the control trips AND the mutation arm, so the cap
+	# covers the 420s cold-compile wait once, plus a warm trip per remaining
+	# control trip, plus the arm's warm trip, plus the 20s return waits and the
+	# settles between them. A cap tuned to the warm case would kill a healthy
+	# run whose first compile was slow and report it as "produced no JSON" — a
 	# could-not-run dressed as a failure.
 	timeout 2400 node ci/test/noir_mode_roundtrip_probe.mjs \
 		"http://127.0.0.1:${port}/noir" 60000 "${trips}" 3 \
@@ -389,7 +391,12 @@ trip=1
 while [ "${trip}" -le "${trips}" ]; do
 	r_reached="$(leg "${control}" "trip-${trip}-run-wait" '.reached')"
 	r_waited="$(leg "${control}" "trip-${trip}-run-wait" '.waitedMs')"
-	r_clicked="$(leg "${control}" "trip-${trip}-run-gesture" '.gesture.clicked')"
+	# `clicked` AND `clickEventFired`, because the first alone is the false
+	# positive that hid this gate's real failure for three runs: it says only
+	# that `page.mouse.click` did not throw. A browser produces NO click event
+	# when `mousedown` and `mouseup` land on different nodes, which is what a
+	# topbar re-mount does to a gesture aimed at it.
+	r_clicked="$(leg "${control}" "trip-${trip}-run-gesture" '(.gesture.clicked and .gesture.clickEventFired)')"
 	r_reaches="$(leg "${control}" "trip-${trip}-run-gesture" '.gesture.reaches')"
 	r_top="$(leg "${control}" "trip-${trip}-run-gesture" '.gesture.topAtPoint')"
 
@@ -403,7 +410,7 @@ while [ "${trip}" -le "${trips}" ]; do
 	d_carets="$(num "$(leg "${control}" "trip-${trip}-step" '.caretPositions | length')")"
 
 	s_before="$(leg "${control}" "trip-${trip}-stop-gesture" '.surfaceBefore')"
-	s_clicked="$(leg "${control}" "trip-${trip}-stop-gesture" '.gesture.clicked')"
+	s_clicked="$(leg "${control}" "trip-${trip}-stop-gesture" '(.gesture.clicked and .gesture.clickEventFired)')"
 	s_reaches="$(leg "${control}" "trip-${trip}-stop-gesture" '.gesture.reaches')"
 	s_top="$(leg "${control}" "trip-${trip}-stop-gesture" '.gesture.topAtPoint')"
 	b_reached="$(leg "${control}" "trip-${trip}-stop-wait" '.reached')"
@@ -425,7 +432,7 @@ while [ "${trip}" -le "${trips}" ]; do
 
 	# FORWARD: edit -> replay.
 	ck "$([ "${r_clicked}" = true ] && echo ok || echo no)" \
-		"trip ${trip}: the Run button took a real pointer click at a hit-tested point"
+		"trip ${trip}: the Run button took a real pointer click at a hit-tested point AND the browser produced a click event"
 	ck "$([ "${r_reached}" = true ] && echo ok || echo no)" \
 		"trip ${trip}: and the topbar became the DEBUGGER surface (${d_surface}) — the mode changed, ${r_waited}ms"
 	ck "$([ "${d_panecount}" -gt 0 ] && echo ok || echo no)" \
@@ -446,7 +453,7 @@ while [ "${trip}" -le "${trips}" ]; do
 
 	# RETURN: replay -> edit, by the button.
 	ck "$([ "${s_clicked}" = true ] && echo ok || echo no)" \
-		"trip ${trip}: Stop took a real pointer click at a hit-tested point"
+		"trip ${trip}: Stop took a real pointer click at a hit-tested point AND the browser produced a click event"
 	# A TRANSITION ASSERTION NAMES THE SURFACE IT CAME FROM.
 	#
 	# `b_reached` alone is a false pass with a convincing shape, and this gate
@@ -478,7 +485,7 @@ if [ "${errors}" -ne 0 ]; then
 	jq -r '.pageErrors[] | "        " + .' <"${control}" | head -8
 fi
 ck "$([ "${errors}" -eq 0 ] && echo ok || echo no)" \
-	"zero uncaught page errors across ${trips} round trips (${errors})"
+	"zero uncaught page errors across ${trips} round trips and the mutation arm (${errors})"
 
 gesture_errors="$(field "${control}" '.gestureErrors | length')"
 if [ "${gesture_errors}" -ne 0 ]; then
@@ -491,91 +498,63 @@ fi
 # MUTATION ARM — prove the transition assertions CAN fail.
 #
 # A check that cannot fail is worse than no check, because it certifies the
-# defect.  The arm re-creates the product as it was before this campaign: it
-# makes `stopAction` a no-op again, from the outside, by removing the Stop
-# button's click handler at the DOM level once the toolbar is mounted.
+# defect.  The arm re-creates the product as it was before this campaign: a
+# Stop that is present, hit-testable, and whose click reaches nothing.
 #
-# THE SHAPE IS THE ONE `noir-replay-in-browser.sh`'s arm C uses: mutate,
-# VERIFY THE MUTATION LANDED, assert the arm broke only its target, then
-# assert the named check went red.
+# THE ARM RUNS IN THE CONTROL'S OWN TAB, and that is the whole reason it can
+# be shown to work.  It used to be a copy of the bundle with a `<script>`
+# injected into `index.html`, driven by a SECOND browser launch — and a second
+# launch pays the cold Noir/wasm compile again.  Measured on this gate's own
+# runs, that arm's single trip never got past the compile wall, so all three
+# of its checks reported "the arm did not complete" and the redness the arm
+# exists to demonstrate was never demonstrated at all.  The proof was owed and
+# unpaid: the return assertions had never been observed to fail.
+#
+# Driven from inside the probe, after the control trips, the arm is WARM by
+# construction — same tab, same worker, same compiled modules — and it is a
+# strictly smaller mutation, because nothing on disk differs between control
+# and arm.  The only variable is the Stop button's click handler.
+#
+# The shape is otherwise unchanged, and it is the one `noir-replay-in-browser
+# .sh`'s arm C uses: mutate, VERIFY THE MUTATION LANDED, assert the arm broke
+# only its target, then assert the named check went red.
 # ---------------------------------------------------------------------------
 echo
 echo "MUTATION ARM — a Stop that does nothing, which is what shipped"
 echo "    Reddens the RETURN assertions and only those. 'Pressing Stop moved"
 echo "    the mode' is a claim about a product that could fail to, and until"
 echo "    this campaign it did: renderer.stopAction was \`discard\`."
-arm="${cache}/arm-dead-stop"
-rm -rf "${arm}"
-cp -RL "${bundle}" "${arm}" 2>/dev/null
-chmod -R u+w "${arm}"
-[ -s "${arm}/index.html" ] || {
-	echo "  arm: no index.html to instrument" >&2
-	exit 2
-}
-python3 - "${arm}/index.html" <<'PY'
-import sys
-path = sys.argv[1]
-html = open(path).read()
-# Capture phase, so it runs before whatever the product bound, and
-# `stopPropagation` so the product's own handler never sees the click. This
-# reproduces a Stop that is present, looks alive, and reaches nothing —
-# exactly the defect, rather than a Stop that is missing.
-inject = """<script>
-/* ARM INSTRUMENT — a Stop button whose click reaches nothing. */
-document.addEventListener('click', function (e) {
-  var t = e.target;
-  while (t) {
-    if (t.id === 'stop-image') {
-      e.stopImmediatePropagation();
-      e.preventDefault();
-      return;
-    }
-    t = t.parentElement;
-  }
-}, true);
-</script>"""
-if '</body>' in html:
-    html = html.replace('</body>', inject + '</body>', 1)
-else:
-    html += inject
-open(path, 'w').write(html)
-PY
-grep -q 'ARM INSTRUMENT' "${arm}/index.html" || {
-	echo "  arm: the instrument was not injected — this arm would grade the control" >&2
-	exit 2
-}
 
-# One trip is enough to show the redness, and it keeps the arm's cost down.
-arm_out="${cache}/arm.json"
-saved_trips="${trips}"
-trips=1
-if run_probe "${arm}" "${arm_out}"; then
-	a_run_reached="$(leg "${arm_out}" 'trip-1-run-wait' '.reached')"
-	a_stop_clicked="$(leg "${arm_out}" 'trip-1-stop-gesture' '.gesture.clicked')"
-	a_back="$(leg "${arm_out}" 'trip-1-stop-wait' '.reached')"
-	a_surface="$(leg "${arm_out}" 'trip-1-edit' '.topbarSurface')"
+arm_installed="$(field "${control}" '.armInstalled')"
+arm_swallowed="$(num "$(field "${control}" '.armSwallowedClicks')")"
+a_run_reached="$(leg "${control}" 'arm-run-wait' '.reached')"
+a_stop_clicked="$(leg "${control}" 'arm-stop-gesture' '.gesture.clicked')"
+a_back="$(leg "${control}" 'arm-stop-wait' '.reached')"
+a_surface="$(leg "${control}" 'arm-edit' '.topbarSurface')"
 
-	# THE ARM BREAKS ONE THING. If the Run leg or the click itself broke too,
-	# the red below would not be evidence that the return assertion works — it
-	# would be evidence that the arm broke the probe.
-	ck "$([ "${a_run_reached}" = true ] && echo ok || echo no)" \
-		"arm: the FORWARD leg still worked (the arm breaks the RETURN, not the Run)"
-	ck "$([ "${a_stop_clicked}" = true ] && echo ok || echo no)" \
-		"arm: the Stop button was still pressed (the arm kills the handler, not the button)"
-	ck "$([ "${a_back}" = false ] && echo ok || echo no)" \
-		"arm: and the mode did NOT return to edit (surface stayed ${a_surface}) — 'pressing Stop moved the mode' can fail"
-else
-	ck no "arm: the probe did not complete"
-	ck no "arm: (forward leg not measured)"
-	ck no "arm: (return leg not measured)"
-fi
-trips="${saved_trips}"
+note "arm instrument installed=${arm_installed}, clicks it swallowed=${arm_swallowed}"
+
+# THE MUTATION LANDED, CHECKED RATHER THAN ASSUMED. An instrument that never
+# attached produces the same red return as a Stop that never reached its
+# handler, and only one of those is evidence about the assertion.
+ck "$([ "${arm_installed}" = true ] && [ "${arm_swallowed}" -ge 1 ] &&
+	echo ok || echo no)" \
+	"arm: the instrument attached and swallowed the Stop click (${arm_swallowed}) — the arm mutated its target"
+# THE ARM BREAKS ONE THING. If the Run leg or the click itself broke too, the
+# red below would not be evidence that the return assertion works — it would be
+# evidence that the arm broke the probe.
+ck "$([ "${a_run_reached}" = true ] && echo ok || echo no)" \
+	"arm: the FORWARD leg still worked (the arm breaks the RETURN, not the Run)"
+ck "$([ "${a_stop_clicked}" = true ] && echo ok || echo no)" \
+	"arm: the Stop button was still pressed (the arm kills the handler, not the button)"
+ck "$([ "${a_back}" = false ] && echo ok || echo no)" \
+	"arm: and the mode did NOT return to edit (surface stayed ${a_surface}) — 'pressing Stop moved the mode' can fail"
 
 # ---------------------------------------------------------------------------
 echo
 echo "${checks} check(s), ${failures} failure(s)"
-# 8 baseline + 14 per trip + 1 page-errors + 3 arm
-expect_count $((8 + 14 * trips + 1 + 3))
+# 8 baseline + 14 per trip + 1 page-errors + 4 arm
+expect_count $((8 + 14 * trips + 1 + 4))
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — Run enters the debugger, Stop comes back, ${trips} times, and the edit survives"
 	exit 0
