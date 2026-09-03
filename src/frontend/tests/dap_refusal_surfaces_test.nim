@@ -95,6 +95,17 @@ var rendered: seq[string] = @[]
   ## `CtNotification` and turns into `StatusShellModel.activeNotifications`
   ## verbatim (`statusNotificationRecord` sets `text: $notification.text`).
 
+var handedToObservers: seq[cstring] = @[]
+  ## Every outcome `sendCtRequest` handed to its observers, INCLUDING any it
+  ## should have filtered out.
+  ##
+  ## Recorded separately from `rendered` because the two pin different lines.
+  ## `rendered` is filtered by `requestFailureText` returning "" for a success
+  ## — the same guard production's `middleware` applies — so asserting only on
+  ## `rendered` cannot tell whether `sendCtRequest`'s own `if outcome.succeeded:
+  ## return` is still there. It was not able to: a mutation deleting that gate
+  ## left this suite entirely green until this list was added.
+
 proc paintStatusBar(): MockNode =
   ## Render the REAL status shell over whatever the hook has produced.
   var records: seq[StatusNotificationRecord] = @[]
@@ -123,6 +134,7 @@ proc makeRecordingIpc(): JsObject =
 proc freshDap(): DapApi =
   sentPackets = @[]
   rendered = @[]
+  handedToObservers = @[]
   DapApi(ipc: makeRecordingIpc(), seq: 0, sessionId: 0)
 
 proc lastSeq(): int =
@@ -168,6 +180,7 @@ const BackendSentence =
 # registering per-test would stack duplicate observers and inflate every count
 # below.
 onCtRequestFailed(proc(outcome: DapRequestOutcome) =
+  handedToObservers.add(outcome.command)
   let text = requestFailureText(outcome)
   if text.len > 0:
     rendered.add($text))
@@ -252,6 +265,11 @@ suite "a refused ct/ request reaches the user as readable text":
     dap.resolvePendingDapResponse(
       successFrame(lastSeq(), cstring"ct/run-tracepoints"))
 
+    # A SUCCESS IS NOT EVEN OFFERED TO THE OBSERVERS. Asserted before the
+    # rendered text because `requestFailureText` returns "" for a success and
+    # would hide an over-firing `sendCtRequest` behind an empty status bar —
+    # which it did, until this line existed.
+    check handedToObservers.len == 0
     check rendered.len == 0
     check notificationText(paintStatusBar()) == ""
 
@@ -269,6 +287,7 @@ suite "a refused ct/ request reaches the user as readable text":
       body: JsObject{}
     })
 
+    check handedToObservers.len == 0
     check rendered.len == 0
     check notificationText(paintStatusBar()) == ""
 
