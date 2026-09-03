@@ -232,4 +232,19 @@ lint_step "contract suite: build siblings are pinned to commits, not branches" \
 lint_step "contract suite: the toolchain that answered is the one this commit declares" \
 	bash ci/test/toolchain-pins-test.sh
 
+# The Electron the desktop artefact bundles, and the dependency set beside it.
+# Run WITHOUT an artefact here, which exercises the half that needs no build:
+# the pin is exact, the lockfile resolves to it, and no build script installs
+# Electron without naming a version. The artefact half runs inside
+# `appimage-scripts/build_appimage.sh`, on the staged AppDir, because that tree
+# is deleted the moment the build script exits.
+lint_step "Electron pin + dev-dependency prune (static half)" \
+	bash ci/test/electron-supply-chain.sh
+
+# Its own arms are the failure paths -- a range where an exact version belongs,
+# a lock that resolves elsewhere, a dev-only package staged into the artefact.
+# A guard whose red path has never executed is a guard nobody has tested.
+lint_step "contract suite: Electron pin + dev-dependency prune" \
+	bash ci/test/electron-supply-chain-test.sh
+
 lint_summary
