@@ -4013,30 +4013,40 @@ jobs:
         # self-contained. `ci/test/nix-provisioning-test.sh` now fails when a
         # job runs nix without provisioning it.
         #
-        # This step (and Install AWS CLI below) used to be gated to `refs/tags/`
-        # while the Download AppImage + Smoke-test steps that DEPEND on them were
-        # not, so on every branch (main/dev) run those two ran without aws/nix
-        # installed and the job died at `aws: command not found` — the AppImage's
-        # off-nix portability went untested. Ungate them so the prerequisites
-        # match their consumers and the 5-distro smoke test actually runs against
-        # the `-<ref>-` AppImage that appimage-build just produced.
+        # This step used to be gated to `refs/tags/` while the Download AppImage
+        # + Smoke-test steps that DEPEND on it were not, so on every branch
+        # (main/dev) run those two ran without nix installed and the job died at
+        # `aws: command not found` — the AppImage's off-nix portability went
+        # untested. Ungated so the prerequisite matches its consumers and the
+        # 5-distro smoke test actually runs against the `-<ref>-` AppImage that
+        # appimage-build just produced. The Download step below now gets `aws`
+        # from `nix shell`, so it depends on this step and nothing else.
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ github.token }}
 
-      - name: Install AWS CLI
-        # nixpkgs' awscli2 into the runner's nix profile (on PATH for the
-        # download step) — snap/apt are unavailable on the NixOS runner.
-        run: nix profile install nixpkgs#awscli2
-
       - name: Download AppImage
+        # `nix shell ... --command`, NOT `nix profile install` + a bare `aws`.
+        #
+        # The profile form put awscli2 in the runner's nix profile and relied on
+        # that profile's bin/ already being on PATH in a LATER step. On these
+        # ephemeral runners it is not, so every leg died at
+        #
+        #     aws: command not found
+        #
+        # in the Download step — before the AppImage was fetched, let alone run.
+        # The whole 5-distro matrix reported failure while testing nothing at
+        # all, which is indistinguishable, at a glance, from the AppImage being
+        # broken. `appimage-lib-check` above already downloads this exact
+        # artefact with `nix shell`, and does not have the problem; this is the
+        # same call.
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
+          nix shell nixpkgs#awscli2 --command aws --endpoint-url=${{ secrets.R2_CODETRACER_BUCKET_S3_ENDPOINT }} s3 cp s3://${{ vars.R2_CODETRACER_BUCKET_NAME }}/CodeTracer-${{ github.ref_name }}-amd64.AppImage ./CodeTracer.AppImage
 
       - name: Smoke-test on ${{ matrix.distro }}
         run: |
