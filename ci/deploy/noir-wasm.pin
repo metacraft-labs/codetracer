@@ -36,6 +36,37 @@
 # these two lines here, rather than leaving a clone whose only remaining effect
 # is to make the build look like it needs one.
 #
+# WHAT THE DISAGREEMENT COST WHILE IT LASTED, kept because the gate that now
+# watches for it only makes sense next to the failure it was written after.
+#
+# The lexer's non-ASCII comment check lived at
+# `compiler/noirc_frontend/src/lexer/lexer.rs` in the old flake pin `5e98f904`
+# and is ABSENT from `codetracer`, because upstream removed it deliberately in
+# `93bb72f8` "feat!: allow UTF-8 in comments (#12699)" on 2026-05-18 — after
+# `5e98f904`'s branch point and before this one. So a `§` or an em dash in a
+# comment compiled in the browser and was refused by the flake's `nargo`:
+#
+#   Invalid comment character: only ASCII is currently supported.
+#
+# That shipped. The hello-world template carried two `§` and an em dash in
+# `src/tests.nr` and did not build under the native pin for about a day while
+# the Test Results pane reported five passing tests. The template was
+# transliterated to ASCII as a stopgap; the PIN GAP was the actual cause.
+#
+# BOTH ARE CLOSED NOW. The native pin is `codetracer`@ca080a58, which contains
+# `93bb72f8`, and the template carries its `§` and em dash again — verified by
+# COMPILING it, not by reading the lexer: `nargo test` from
+# `/nix/store/0yki0k9gzfqg0js2wprmisrfr87sriqi-Noir/bin/nargo` reports
+# `5 tests passed` on the template as shipped.
+#
+# THE GATE STAYS, and it is the reason this paragraph is history rather than a
+# deletion. Arm U of `ci/test/noir-template-toolchain.sh` feeds both engines
+# the template and asserts they agree on VALIDITY — accepted by both, or
+# refused by both. Verdict lists could not express that: a file one engine
+# refuses shows up there as "0 versus 7", which arm V then blames on the
+# healthy component. The two pins agreeing today is not a reason to stop
+# checking; it is what the check is currently observing.
+#
 # WHY PINNED AT ALL, rather than tracking the branch head. A deploy that
 # rebuilds from a moving ref cannot be reproduced, and the provenance string
 # the entry document carries — `noir@codetracer <rev> compiler/wasm` — would

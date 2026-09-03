@@ -128,6 +128,40 @@ proc noirHelloWorld*(): ProjectTemplate =
     language: "noir",
     name: noirTemplateName,
     entryFile: noirEntryFile,
+    # THE `content:` STRINGS BELOW MAY CARRY UTF-8, and this note exists so
+    # nobody transliterates them back out of caution.
+    #
+    # They were ASCII for about a day (`46ac63a1`), and it was not style. Noir's
+    # lexer used to refuse a non-ASCII byte anywhere in a comment --
+    #
+    #     Invalid comment character: only ASCII is currently supported.
+    #
+    # -- and `flake.nix`'s `noir` pin was `5e98f904` (beta.2), which still had
+    # that check, while the wasm module the browser downloads did not. So
+    # `src/tests.nr`'s two section signs and one em dash compiled in a tab and
+    # were refused by `nargo`, and the Test Results pane reported five passing
+    # tests over a template that did not build.
+    #
+    # THE DIRECTION WAS THE OPPOSITE OF THE OBVIOUS ONE: the wasm module was not
+    # missing a check, it was NEWER. Upstream removed the restriction on purpose
+    # in `93bb72f8` "feat!: allow UTF-8 in comments (#12699)", 2026-05-18. The
+    # engine that refused was the stale one, so the repair was to move the
+    # native pin -- not to keep paying for it in prose.
+    #
+    # THAT PIN HAS MOVED, to `codetracer`@ca080a58 (beta.26), which contains
+    # `93bb72f8`. The typography is back, and it was checked by COMPILING the
+    # bytes this file actually ships rather than by reading the lexer: extracted
+    # from these strings and run through
+    # `/nix/store/0yki0k9gzfqg0js2wprmisrfr87sriqi-Noir/bin/nargo`, the crate
+    # compiles, `nargo test` reports `5 tests passed`, and `nargo info` reports
+    # main: 17 opcodes.
+    #
+    # A GREEN LOCAL RUN STILL PROVES LESS THAN IT LOOKS, which is why the
+    # measurement above names a store path. `detect-siblings.sh` puts a sibling
+    # checkout's `nargo` ahead of the flake's on PATH, so "it compiled on my
+    # machine" does not say which compiler agreed. Arm U of
+    # `ci/test/noir-template-toolchain.sh` is the standing check, and it prints
+    # the binary that answered.
     files: @[
       TemplateFile(
         path: "Nargo.toml",
@@ -192,13 +226,13 @@ fn test_equal_inputs_are_rejected() {
         path: "src/tests.nr",
         content: """// Tests are a MODULE of the crate, declared by `mod tests;` in `main.nr`.
 //
-// Not a top-level `tests/` directory beside `src/`, which is what section
-// 1a's mock-up draws: nargo compiles `src/` and nothing else, so a sibling
+// Not a top-level `tests/` directory beside `src/`, which is what §1a's
+// mock-up draws — nargo compiles `src/` and nothing else, so a sibling
 // `tests/` folder would be shown in the file tree and never built. A tree
 // carrying a directory the toolchain ignores is precisely the
-// "misrepresents the language" failure section 1a warns about, one level
-// down from the single-file playground it names. Measured: `nargo test`
-// over the earlier layout ran 3 of 4 tests and said nothing about the fourth.
+// "misrepresents the language" failure §1a warns about, one level down from
+// the single-file playground it names. Measured: `nargo test` over the
+// earlier layout ran 3 of 4 tests and said nothing about the fourth.
 
 use crate::utils;
 
