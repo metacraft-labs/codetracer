@@ -4193,5 +4193,225 @@ mod tests {
                 "the refusal must name the manifest, got: {err}",
             );
         }
+
+        // ── Run-to-line on the browser path ───────────────────────────
+        //
+        // WHAT THESE PIN, AND WHY THEY ARE NOT TESTS OF
+        // `breakpoint_suppression`.
+        //
+        // `MaterializedReplaySession::{disable,enable}_breakpoints` carry a
+        // `breakpoint_suppression` high-water threshold (see `db.rs`) so an
+        // internal run-to-line bracket suppresses the breakpoints that
+        // existed when it opened while its own temporary target still
+        // fires.  That machinery is real and unit-tested in `db.rs`, but it
+        // is NOT reachable from the browser, and these tests do not pretend
+        // otherwise:
+        //
+        //   * the browser opens a legacy `trace.json` as
+        //     `TraceKind::Materialized` — the `nargo trace` shape the web
+        //     product replays (`setup_from_vfs`);
+        //   * `Handler::source_line_jump` answers a Materialized trace with
+        //     a direct index jump, and enters the
+        //     `disable_breakpoints ... enable_breakpoints` bracket only in
+        //     its `else` arm;
+        //   * so `disable_breakpoints` is never called on this path and
+        //     `breakpoint_suppression` stays `None` for the whole session.
+        //
+        // What a browser user gets is therefore a jump that ignores
+        // breakpoints because no Continue ever runs — not because anything
+        // was suppressed.  These tests assert THAT, the observed behaviour,
+        // driven through `handle_message_browser`, which is the exact
+        // function the wasm `onmessage` callback dispatches into.
+        //
+        // The day someone unifies the two arms — the TODO in
+        // `source_line_jump` openly contemplates it — the suppression
+        // threshold becomes load-bearing right here, and these tests are
+        // what will say whether it still behaves.
+
+        /// The source path used by [`trace_json_with_lines`].
+        const RUN_TO_LINE_PATH: &str = "/browser/runtoline/main.nr";
+
+        /// A legacy `trace.json` with one step per line, `1..=line_count`,
+        /// in the shape `nargo trace` emits and the browser path opens as
+        /// `TraceKind::Materialized`.
+        fn trace_json_with_lines(line_count: i64) -> Vec<u8> {
+            let mut events: Vec<TraceLowLevelEvent> = vec![
+                TraceLowLevelEvent::Path(PathBuf::from(RUN_TO_LINE_PATH)),
+                TraceLowLevelEvent::Function(FunctionRecord {
+                    path_id: PathId(0),
+                    line: Line(1),
+                    name: "main".to_string(),
+                }),
+                TraceLowLevelEvent::Call(CallRecord {
+                    function_id: FunctionId(0),
+                    args: vec![],
+                }),
+            ];
+            for line in 1..=line_count {
+                events.push(TraceLowLevelEvent::Step(StepRecord {
+                    path_id: PathId(0),
+                    line: Line(line),
+                }));
+            }
+            serde_json::to_vec(&events).unwrap()
+        }
+
+        /// Like [`drive`], but the caller chooses the trace bytes instead
+        /// of always getting the 3-step handshake fixture.
+        fn drive_against(folder: &str, trace: Vec<u8>, commands: &[(&str, serde_json::Value)]) -> Vec<DapMessage> {
+            crate::vfs::vfs_write(&format!("{folder}/trace.json"), trace);
+            let (sender, receiver) = std::sync::mpsc::channel::<DapMessage>();
+            let mut ctx = Ctx::default();
+            let mut handler: Option<Handler> = None;
+            for (i, (command, arguments)) in commands.iter().enumerate() {
+                let msg = request(i as i64 + 1, command, arguments.clone());
+                handle_message_browser(&msg, sender.clone(), &mut ctx, &mut handler)
+                    .unwrap_or_else(|e| panic!("handle_message_browser({command}) failed: {e}"));
+            }
+            drop(sender);
+            receiver.into_iter().collect()
+        }
+
+        /// The `line` of the topmost stack frame of every `stackTrace`
+        /// response, in order.  Asserting on these is the point: a
+        /// `success: true` response tells you a command was dispatched,
+        /// not where the session actually came to rest.
+        fn stack_trace_lines(received: &[DapMessage]) -> Vec<i64> {
+            received
+                .iter()
+                .filter_map(|m| match m {
+                    DapMessage::Response(r) if r.command == "stackTrace" => Some(r),
+                    _ => None,
+                })
+                .map(|r| {
+                    r.body["stackFrames"][0]["line"]
+                        .as_i64()
+                        .unwrap_or_else(|| panic!("a stackTrace response must carry a top frame line, got: {}", r.body))
+                })
+                .collect()
+        }
+
+        /// The handshake every browser session starts with.
+        fn handshake(folder: &str) -> Vec<(&str, serde_json::Value)> {
+            vec![
+                ("initialize", json!({ "clientID": "test", "adapterID": "codetracer" })),
+                ("launch", json!({ "traceFolder": folder })),
+                ("configurationDone", json!({})),
+            ]
+        }
+
+        /// Set one line breakpoint, exactly as the renderer's
+        /// `dapSetBreakpoints` does.
+        fn set_breakpoint_at(line: i64) -> (&'static str, serde_json::Value) {
+            (
+                "setBreakpoints",
+                json!({
+                    "source": { "path": RUN_TO_LINE_PATH },
+                    "breakpoints": [ { "line": line } ],
+                }),
+            )
+        }
+
+        /// CONTROL ARM — without this the headline test below is vacuous.
+        ///
+        /// A breakpoint that was never registered would trivially "not
+        /// stop" a run-to-line, and the headline assertion would pass
+        /// while proving nothing.  This pins that a breakpoint set over
+        /// the browser transport IS live: a plain `continue` stops the
+        /// session ON it, at the line asked for.
+        #[test]
+        fn a_breakpoint_set_from_the_browser_stops_a_continue() {
+            let folder = "browser-run-to-line-control";
+            let mut commands = handshake(folder);
+            commands.push(set_breakpoint_at(3));
+            commands.push(("continue", json!({ "threadId": 1 })));
+            commands.push(("stackTrace", json!({ "threadId": 1 })));
+
+            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+
+            let verified = received
+                .iter()
+                .find_map(|m| match m {
+                    DapMessage::Response(r) if r.command == "setBreakpoints" => {
+                        Some(r.body["breakpoints"][0]["verified"].as_bool().unwrap_or(false))
+                    }
+                    _ => None,
+                })
+                .expect("setBreakpoints must be answered");
+            assert!(
+                verified,
+                "the breakpoint must be registered, or every later assertion is vacuous"
+            );
+
+            assert_eq!(
+                stack_trace_lines(&received),
+                vec![3],
+                "a Continue must come to rest ON the breakpoint the browser set",
+            );
+        }
+
+        /// THE HEADLINE ASSERTION.
+        ///
+        /// A run-to-line issued from the browser must land on the line the
+        /// user asked for, NOT on a breakpoint that happens to sit between
+        /// here and there.  Line 3 carries a live breakpoint (proved by the
+        /// control arm above); the jump targets line 5 and must reach it.
+        ///
+        /// On this branch that holds because a Materialized trace takes the
+        /// index-jump arm and never runs a Continue at all.  If the arms
+        /// are ever unified, it will hold only because
+        /// `breakpoint_suppression` suppresses the line-3 breakpoint while
+        /// letting the bracket's own temporary target at line 5 fire —
+        /// which is exactly the property `db.rs`'s
+        /// `bracket_temporary_breakpoint_fires_while_others_are_suppressed`
+        /// pins at the unit level.
+        #[test]
+        fn run_to_line_from_the_browser_does_not_stop_at_a_pre_existing_breakpoint() {
+            let folder = "browser-run-to-line-jump";
+            let mut commands = handshake(folder);
+            commands.push(set_breakpoint_at(3));
+            commands.push(("ct/source-line-jump", json!({ "path": RUN_TO_LINE_PATH, "line": 5 })));
+            commands.push(("stackTrace", json!({ "threadId": 1 })));
+
+            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+
+            let lines = stack_trace_lines(&received);
+            assert_eq!(
+                lines,
+                vec![5],
+                "run-to-line must reach the requested line 5; landing on 3 means the \
+                 pre-existing breakpoint hijacked the jump",
+            );
+        }
+
+        /// The jump must not consume the user's breakpoint either.
+        ///
+        /// This is the "restore-all is not restore" half, asserted where a
+        /// user can feel it: after a run-to-line, the breakpoint the user
+        /// set is still there and still stops a later Continue.  A bracket
+        /// that cleared or stomped `enabled` on the way through would
+        /// redden here.
+        #[test]
+        fn a_pre_existing_breakpoint_still_fires_after_a_run_to_line() {
+            let folder = "browser-run-to-line-survives";
+            let mut commands = handshake(folder);
+            commands.push(set_breakpoint_at(3));
+            commands.push(("ct/source-line-jump", json!({ "path": RUN_TO_LINE_PATH, "line": 5 })));
+            commands.push(("stackTrace", json!({ "threadId": 1 })));
+            // Back to the start, then run again: the breakpoint must still
+            // be armed.
+            commands.push(("restart", json!({})));
+            commands.push(("continue", json!({ "threadId": 1 })));
+            commands.push(("stackTrace", json!({ "threadId": 1 })));
+
+            let received = drive_against(folder, trace_json_with_lines(5), &commands);
+
+            assert_eq!(
+                stack_trace_lines(&received),
+                vec![5, 3],
+                "the jump must reach line 5, and the user's line-3 breakpoint must still \
+                 stop the Continue that follows it",
+            );
+        }
     }
 }
