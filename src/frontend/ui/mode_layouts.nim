@@ -346,8 +346,32 @@ proc rememberModeLayout*(data: Data; mode: LayoutMode) =
     # before writing either layout file. The web store gets the same treatment
     # from the same proc, so a browser and a desktop persist the same shape.
     data.ui.modeLayouts[mode] = cast[GoldenLayoutResolvedConfig](snapshot)
-    storeLayoutForMode(mode, sanitizeLayoutConfig(
-      snapshot, ord(Content.EditorView), modeHiddenContentIds(mode)))
+
+    # THE STORE HOLDS THE *UNRESOLVED* FORM, because that is what a loader
+    # takes and the store is read by a loader that has nothing to convert with.
+    #
+    # `saveLayout()` returns a RESOLVED config and `loadLayout` wants an
+    # unresolved one; the Nim type cannot tell them apart, and handing the
+    # wrong one over is the `e.trimStart is not a function` defect
+    # (`ui_js.restoreSavedLayout`'s header). In-session that conversion is
+    # available — `data.ui.layoutConfig.fromResolved` — but at BOOT it is not:
+    # `layoutConfig` is assigned inside `initLayout`, and the boot payload has
+    # to carry a layout before that runs. A store that could only be read after
+    # the layout existed would be a store the boot path could not use, which is
+    # precisely the path a reload takes.
+    #
+    # So the conversion happens on the way IN, once, here. This is also what
+    # the desktop already writes: `renderer.saveConfig` sends
+    # `layoutConfig.fromResolved(...)` to the index process, so both platforms
+    # now persist the same shape as well as the same sanitisation.
+    if data.ui.layoutConfig.isNil or data.ui.layoutConfig.fromResolved.isNil:
+      cwarn "mode-layout: LayoutConfig.fromResolved is unavailable; the " &
+        $mode & " layout was remembered for this session but not stored"
+      return
+    let sanitized = sanitizeLayoutConfig(
+      snapshot, ord(Content.EditorView), modeHiddenContentIds(mode))
+    storeLayoutForMode(mode, cast[js](data.ui.layoutConfig.fromResolved(
+      cast[GoldenLayoutResolvedConfig](sanitized))))
   except CatchableError:
     cwarn "mode-layout: could not remember the " & $mode & " layout: " &
       getCurrentExceptionMsg()

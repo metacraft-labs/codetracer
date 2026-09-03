@@ -5,6 +5,7 @@
         "popoutWholeStack": false,
         "blockedPopoutsThrowError": true,
         "responsiveMode": "always",
+        "tabOverlapAllowance": 2,
         "tabControlOffset": 0
     },
     "dimensions": {

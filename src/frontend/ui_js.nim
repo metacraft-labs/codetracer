@@ -1545,11 +1545,17 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
   # is one of the reasons `resolveLayoutForMode` reports it.
   var applied = false
   case resolution.source
-  of mlsSession, mlsStored:
+  of mlsSession:
+    # The REGISTER holds `saveLayout()` output, which is resolved.
     applied = data.restoreSavedLayout(
       cast[GoldenLayoutResolvedConfig](resolution.config),
       "the " & $entering & " layout")
-  of mlsBundled, mlsBundledAfterFailure:
+  of mlsStored, mlsBundled, mlsBundledAfterFailure:
+    # The STORE and the bundled default are both UNRESOLVED — the store
+    # because `rememberModeLayout` converts on the way in (see its comment),
+    # the default because it is plain JSON. `loadLayout` takes exactly this
+    # shape, and putting either through `fromResolved` is the same mistake
+    # with the arguments swapped.
     try:
       let resolved = cast[GoldenLayoutResolvedConfig](resolution.config)
       data.swapLayout(resolved)

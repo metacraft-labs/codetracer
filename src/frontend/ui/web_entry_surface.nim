@@ -772,7 +772,27 @@ proc enterTemplateEditMode*(tmpl: ProjectTemplate): bool =
     return false
   if data.ipc.isNil or data.ipc.isUndefined:
     return false
-  let layout = noirStudioEditLayout()
+  # THE VISITOR'S OWN EDIT LAYOUT, IF THIS BROWSER HAS ONE.
+  #
+  # This used to be `noirStudioEditLayout()` unconditionally — the bundled
+  # default, every time — which made a reload a first-ever launch no matter how
+  # long the visitor had been arranging their workspace.
+  # `Mode-Transitions.md` §4.1 is explicit that a mode's layout comes from the
+  # mode's store when one exists and "never rebuilds from the bundled default
+  # when a user arrangement exists", and §4.3 exists precisely so a RELOAD
+  # keeps it.
+  #
+  # MEASURED before this line consulted the store: a drag that took the FILES
+  # stack from 304px to 464px came back at 317px after a reload, and the stored
+  # edit layout — which was correct, and 3071 bytes — was overwritten with the
+  # default's 3041 the moment the boot layout was saved back.
+  #
+  # `resolveLayoutForMode` is the same accessor a mode SWITCH uses, so the
+  # layout a reload lands on and the layout a switch lands on cannot drift.
+  # It is total: the worst case is this mode's default, which is what this
+  # line used to be.
+  let resolution = mode_layouts.resolveLayoutForMode(data, EditMode)
+  let layout = cast[JsObject](resolution.config)
   if layout.isNil:
     # The bundled layout did not parse. Refusing is the honest answer: with no
     # layout `onNoTrace` would reach `tryInitLayout` with a nil config, mount
