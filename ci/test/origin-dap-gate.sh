@@ -124,15 +124,49 @@ fi
 # actions/checkout cannot honor recursive submodules through its REST fallback.
 # Keep the self-hosted Windows job's discovery-first Git bootstrap ahead of
 # checkout, while preserving the authenticated recursive checkout contract.
-token_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Generate CI token' | cut -d: -f1)"
-git_bootstrap_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Ensure Git supports recursive checkout' | cut -d: -f1)"
-checkout_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Checkout' | cut -d: -f1)"
-toolchain_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Provision verified origin-DAP toolchain' | cut -d: -f1)"
-recorder_install_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Install and verify locked Rust-backed Python recorder' | cut -d: -f1)"
-required_gate_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - name: Run required materialized Python origin-DAP gate' | cut -d: -f1)"
-[ -n "$token_line" ] && [ -n "$git_bootstrap_line" ] && [ -n "$checkout_line" ] &&
-	[ -n "$toolchain_line" ] && [ -n "$recorder_install_line" ] && [ -n "$required_gate_line" ] ||
-	fail "Windows per-PR job is missing bootstrap, checkout, toolchain, recorder, or gate steps"
+# 1-based line of the step named $1 within $windows_per_pr, empty if absent.
+#
+# The `|| true` is the entire point. These lookups used to inline the grep
+# directly into the assignment, and under `set -e` + `pipefail` a grep that
+# matches NOTHING takes the whole script down with status 1 having printed not
+# one byte -- the empty capture is its only trace. So the guard immediately
+# below, whose whole job is to report a missing step, could never fire: the
+# abort happened one line before it.
+#
+# That is not hypothetical. Commit 57ef307d (2026-08-12) renamed the Windows
+# step `Ensure Git supports recursive checkout` to `Ensure Git and Git Bash are
+# on PATH` and did not update this file. This gate aborted silently on that
+# line from then on, and `just test-origin-dap` reported nothing whatsoever
+# beyond `exit code 1` -- on every platform, because these Windows-YAML
+# assertions gate the macOS and Linux runs too.
+#
+# Deliberately NOT a `trap ... ERR`: this script runs intentional failures
+# inside `set +e` regions (see the required-mode route check above), and an ERR
+# trap fires there as well -- `set +e` suppresses the exit, not the trap.
+step_line() {
+	printf '%s\n' "$windows_per_pr" |
+		{ grep -nFx -- "      - name: $1" || true; } |
+		head -n1 | cut -d: -f1
+}
+
+token_line="$(step_line 'Generate CI token')"
+git_bootstrap_line="$(step_line 'Ensure Git and Git Bash are on PATH')"
+checkout_line="$(step_line 'Checkout')"
+toolchain_line="$(step_line 'Provision verified origin-DAP toolchain')"
+recorder_install_line="$(step_line 'Install and verify locked Rust-backed Python recorder')"
+required_gate_line="$(step_line 'Run required materialized Python origin-DAP gate')"
+
+# Report WHICH step is missing. The old message listed all five categories and
+# left the reader to work out which one, which is most of the diagnosis.
+missing_steps=""
+[ -n "$token_line" ] || missing_steps="$missing_steps 'Generate CI token'"
+[ -n "$git_bootstrap_line" ] || missing_steps="$missing_steps 'Ensure Git and Git Bash are on PATH'"
+[ -n "$checkout_line" ] || missing_steps="$missing_steps 'Checkout'"
+[ -n "$toolchain_line" ] || missing_steps="$missing_steps 'Provision verified origin-DAP toolchain'"
+[ -n "$recorder_install_line" ] || missing_steps="$missing_steps 'Install and verify locked Rust-backed Python recorder'"
+[ -n "$required_gate_line" ] || missing_steps="$missing_steps 'Run required materialized Python origin-DAP gate'"
+[ -z "$missing_steps" ] ||
+	fail "Windows per-PR job is missing these steps (renamed or removed?):$missing_steps"
 [ "$git_bootstrap_line" -lt "$token_line" ] && [ "$token_line" -lt "$checkout_line" ] ||
 	fail "Windows Git bootstrap must run before credentials are minted and checkout begins"
 [ "$checkout_line" -lt "$toolchain_line" ] &&
@@ -140,7 +174,7 @@ required_gate_line="$(printf '%s\n' "$windows_per_pr" | grep -nFx -- '      - na
 	[ "$recorder_install_line" -lt "$required_gate_line" ] ||
 	fail "Windows verified toolchain must precede recorder installation and the strict gate"
 
-git_bootstrap="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Ensure Git supports recursive checkout')"
+git_bootstrap="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Ensure Git and Git Bash are on PATH')"
 checkout_step="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Checkout')"
 toolchain_step="$(
 	printf '%s\n' "$windows_per_pr" |
