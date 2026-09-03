@@ -591,3 +591,74 @@ proc editModeHiddenContentIds*(): seq[int] =
     ord(Content.ShaderDebug),
     ord(Content.VideoPlayer)
   ]
+
+proc modeHiddenContentIds*(mode: LayoutMode): seq[int] =
+  ## Which panes `mode` does not show. One question, asked of the mode.
+  ##
+  ## `editModeHiddenContentIds` above answers it for the editing modes and is
+  ## unchanged; this is the accessor that lets a caller ask WITHOUT already
+  ## knowing which mode it is holding, which is what a switch does. Every
+  ## previous caller spelled the question as a branch on the mode and then
+  ## named edit mode's list directly, so a third mode had nowhere to be
+  ## declared and `DebugMode` was represented by the literal `@[]` at four
+  ## sites.
+  case mode
+  of DebugMode, CalltraceLayoutMode:
+    # A replay session HAS the recording every replay-only pane is about.
+    @[]
+  of EditMode, QuickEditMode, InteractiveEditMode:
+    editModeHiddenContentIds()
+
+proc paneHomesForMode*(mode: LayoutMode): seq[seq[int]] =
+  ## Where a mode puts the panes whose home is not the one the bundled layout
+  ## draws. Each entry is `@[pane, host]` — two `Content` ordinals — read as
+  ## "in this mode, `pane` is a tab of the stack that holds `host`".
+  ##
+  ## ## Why this exists at all
+  ##
+  ## `src/config/default_layout.json` is one tree, and until now a mode could
+  ## only subtract from it (`modeHiddenContentIds` above). That made every
+  ## mode's layout the same ARRANGEMENT with different panes missing, and the
+  ## arrangement it fixed on is the one §1a draws for the Noir studio's editing
+  ## surface: TEST RESULTS and CONSTRAINTS in a top-level column of their own.
+  ## Debug mode hides neither, so a replay inherited that column — a standing
+  ## pane of per-test verdicts and a standing pane of circuit costs, beside a
+  ## running debugger, which is not a debugging surface anyone designed.
+  ##
+  ## Hiding them in debug mode would have been the wrong fix and is worth
+  ## saying so here: both are about the circuit being replayed, and a user who
+  ## wants to know what a failing test cost has to be able to reach them.
+  ## The complaint was never that they are shown — it is that they were given
+  ## COLUMNS. So the mode says where they live, and the answer is "as a tab of
+  ## a pane this mode already has room for".
+  ##
+  ## ## The three rows, and why each host is the one it is
+  ##
+  ## * **TEST RESULTS with FILES, in both modes.** The two are read together —
+  ##   a test names a file, and the file is what you open next — and FILES is
+  ##   the one pane both modes keep in a narrow side column, so the tab costs
+  ##   no width in either. It is `Content.Filesystem` and not `Content.VCS`
+  ##   even though they share a stack: the stack is found through its host, so
+  ##   naming the pane that is always there rather than the one that happens to
+  ##   sit beside it survives a user moving VCS out.
+  ##
+  ## * **CONSTRAINTS with the EVENT LOG, in debug mode only.** The event log's
+  ##   stack is the replay's "what happened" column, which is what a constraint
+  ##   count is a fact about once there is an execution to attribute it to.
+  ##   And it is debug-mode-only for a reason the table itself cannot state but
+  ##   which is checkable: `modeHiddenContentIds(EditMode)` hides
+  ##   `Content.EventLog`, so in edit mode there is no such stack, and
+  ##   `nestPanesIntoHosts` would skip the row. Declaring it only where it can
+  ##   be honoured keeps the table a statement about the mode rather than a
+  ##   wish, and CONSTRAINTS keeps the column §1a gives it on the editing
+  ##   surface, which is where a circuit's cost is a thing you act on.
+  case mode
+  of DebugMode, CalltraceLayoutMode:
+    @[
+      @[ord(Content.TestResults), ord(Content.Filesystem)],
+      @[ord(Content.Constraints), ord(Content.EventLog)]
+    ]
+  of EditMode, QuickEditMode, InteractiveEditMode:
+    @[
+      @[ord(Content.TestResults), ord(Content.Filesystem)]
+    ]

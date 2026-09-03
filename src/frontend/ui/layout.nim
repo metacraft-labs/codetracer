@@ -11,6 +11,10 @@ import
   caption_bar_progress,
   ../[ types, renderer, config, utils ],
   ../index/layout_config_repair,
+  # The per-mode layout register and its stores. `stateChanged` writes the
+  # live arrangement into the current mode's cell; `loadLayoutSafely` degrades
+  # to the current mode's DEFAULT rather than to the raw bundled tree.
+  mode_layouts,
   ../lib/[ logging, misc_lib, jslib ]
 
 # `panel_transfer` moves a pane between APPLICATION WINDOWS over Electron IPC,
@@ -807,12 +811,30 @@ proc loadLayoutSafely(layout: GoldenLayout,
       cwarn "layout: restored the saved layout after repairing it"
       return true
 
+  # THE MODE'S DEFAULT, NOT THE RAW BUNDLED TREE.
+  #
+  # The bundled `default_layout.json` is nobody's layout: it is the input both
+  # modes' defaults are derived from, and handing it over verbatim gives an
+  # edit session the replay-only panels it has no data for, and a debug session
+  # the standing TEST RESULTS and CONSTRAINTS columns that
+  # `paneHomesForMode` exists to re-home. A fallback that lands the user in a
+  # layout neither mode declares is a third arrangement invented at the worst
+  # possible moment.
+  let modeDefault = mode_layouts.bundledLayoutForMode(data.ui.mode)
+  if not modeDefault.isNil and
+      loadLayoutOnce(layout, cast[GoldenLayoutResolvedConfig](modeDefault),
+                     cstring"the mode's default layout"):
+    cerror "layout: the saved layout could not be restored; " &
+      "fell back to the default layout for " & $data.ui.mode
+    return true
+
+  # AND ONLY THEN THE BUNDLED TREE, which is worse but is still a workspace.
   let bundled = tryParseLayoutJson(cstring(bundledDefaultLayoutJson))
   if not bundled.isNil and
       loadLayoutOnce(layout, cast[GoldenLayoutResolvedConfig](bundled),
                      cstring"the bundled default layout"):
-    cerror "layout: the saved layout could not be restored; " &
-      "fell back to the bundled default"
+    cerror "layout: the saved layout could not be restored and neither could " &
+      "the default for " & $data.ui.mode & "; fell back to the bundled tree"
     return true
 
   cerror "layout: no layout config could be applied; " &
@@ -2179,6 +2201,24 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     if not data.ui.layout.isNil and data.ui.saveLayout:
       data.ui.resolvedConfig = data.ui.layout.saveLayout()
       data.saveConfig(data.ui.layoutConfig.fromResolved(data.ui.resolvedConfig))
+      # AND INTO THE CURRENT MODE'S OWN CELL AND STORE.
+      #
+      # `saveConfig` above is the DESKTOP's persistence: it sends the layout to
+      # the index process, which picks the file by mode. A browser has no index
+      # process, so before this line a web user's arrangement reached nothing
+      # that survived the tab — every drag was forgotten by the next reload,
+      # and "saved between sessions" was true of one platform.
+      #
+      # It is also what keeps the register current between switches. Without
+      # it, `applyModeLayout` would snapshot the live layout at the moment of
+      # the switch and that would be enough — but only for a session that
+      # switches. A user who arranges Edit mode and reloads without ever
+      # entering Debug mode has made an arrangement that nothing recorded.
+      #
+      # `data.ui.mode` is the right mode to read HERE, unlike at a transition:
+      # this fires on a user gesture in a settled session, so the layout on
+      # screen is by definition the current mode's.
+      mode_layouts.rememberModeLayout(data, data.ui.mode)
       data.ui.saveLayout = false
 
       # Persist auto-hide panel state alongside the GL layout config.

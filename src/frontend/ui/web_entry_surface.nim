@@ -113,7 +113,8 @@ export templateProjectRoot, templateFilePath, templateFileFor, projectRelative
 # could import the project without importing the surface, so the dependency
 # runs this way and only this way.
 from ./web_noir_build import noirTestRunAbsence
-from ../index/layout_config_repair import sanitizeLayoutConfig
+import ./mode_layouts
+export mode_layouts.layoutComponents
 from ../edit_mode import chooseInitialEditPath
 from ../../ct_test/contracts import TestCatalog
 from ../../ct_test/frameworks/noir_test_syntax import
@@ -323,82 +324,35 @@ proc templateFilenames*(tmpl: ProjectTemplate): seq[string] =
   for file in tmpl.files:
     result.add templateFilePath(tmpl, file.path)
 
-const bundledLayoutJson = staticRead("../../config/default_layout.json")
-  ## The same `src/config/default_layout.json` that `ui/layout.nim:733` and
-  ## `index/config.nim:698` already `staticRead`. A third read of ONE file is
-  ## not a third copy of the layout — deleting the file breaks all three
-  ## builds at compile time, which is the property that matters.
-
-proc parseLayoutJsonOrNil(raw: cstring): JsObject {.importjs:
-  """(function(raw) {
-    try { return JSON.parse(raw); } catch (error) { return null; }
-  })(#)""".}
-  ## `ui/layout.nim:735`'s `tryParseLayoutJson`, which is private to that
-  ## module. A `JSON.parse` that throws at renderer module-init would take the
-  ## whole bundle down before anything mounted — the exact failure mode
-  ## `ui_js.nim`'s web arm was written against.
-
 proc noirStudioEditLayout*(): JsObject =
-  ## The edit-mode layout, produced the way a first-ever desktop launch
-  ## produces it. See the block comment above for why this is the same branch
-  ## and not a web-specific layout.
-  let bundled = parseLayoutJsonOrNil(cstring(bundledLayoutJson))
-  if bundled.isNil:
-    return nil
-  sanitizeLayoutConfig(bundled, ord(Content.EditorView),
-                       editModeHiddenContentIds())
+  ## The edit-mode layout: `mode_layouts.bundledLayoutForMode(EditMode)`.
+  ##
+  ## This proc used to `staticRead` `default_layout.json` itself and sanitise
+  ## it with `editModeHiddenContentIds()`. It no longer decides anything — a
+  ## mode's default layout is one function of the mode now, and it is shared
+  ## with the desktop, which is what `Planned-Features/Noir-Studio.md` §1a.1
+  ## requires: "no pane is invented for the web". A web-only opinion about
+  ## where a pane lives would be exactly such an invention, and the way to not
+  ## have one is to not have a second implementation.
+  ##
+  ## Kept as a name because `ui_js.nim` and the CI probes call it; it is now a
+  ## spelling of the general rule rather than a second statement of it.
+  cast[JsObject](bundledLayoutForMode(EditMode))
 
 proc noirStudioDebugLayout*(): JsObject =
-  ## The DEBUGGING layout, from the same bundled config as the edit one.
+  ## The DEBUGGING layout, the same way — `bundledLayoutForMode(DebugMode)`.
   ##
-  ## "Full surface, returnable" — Run leaves edit mode for the normal
-  ## CodeTracer debugging layout, and an explicit action comes back with the
-  ## project as it was. This is the first half, and it is deliberately the
-  ## same `config/default_layout.json` that `noirStudioEditLayout` starts
-  ## from: the only difference between the two modes is the SUPPRESSION.
-  ##
-  ## `noirStudioEditLayout` sanitizes with `editModeHiddenContentIds()` —
-  ## Trace, State, Calltrace, CalltraceEditor, TraceLog, AgentActivity,
-  ## TerminalOutput — because an edit surface has no recording to show them
-  ## over. A replay session has one, so the same config is sanitized with an
-  ## EMPTY hidden set and the panes come back.
-  ##
-  ## Deriving it from the same bundled JSON rather than writing a second
-  ## layout is the argument this file's own header makes about entering the
-  ## desktop product's edit mode instead of assembling a bespoke surface: two
-  ## layouts written separately are two statements of the product that no test
-  ## can tell apart until they disagree.
-  let bundled = parseLayoutJsonOrNil(cstring(bundledLayoutJson))
-  if bundled.isNil:
-    return nil
-  sanitizeLayoutConfig(bundled, ord(Content.EditorView), @[])
+  ## "Full surface, returnable" still holds, and the difference between the two
+  ## modes is no longer only the SUPPRESSION. Debug mode also declares where
+  ## TEST RESULTS and CONSTRAINTS live (`paneHomesForMode`), because the
+  ## bundled tree gives them a column of their own for the EDITING surface §1a
+  ## draws, and a replay inheriting that column was the defect this replaced.
+  cast[JsObject](bundledLayoutForMode(DebugMode))
 
-proc layoutComponents*(layout: JsObject): seq[tuple[content: int, id: int]] =
-  ## Every `genericUiComponent` a layout config names, as (content id, dom id).
-  ##
-  ## `renderer.createUIComponents` walks `resolvedConfig.root` once at startup;
-  ## a layout installed later has to have its components constructed by hand
-  ## first, or GoldenLayout builds containers with nothing behind them. This is
-  ## that walk, exposed, so the caller does not re-implement the traversal and
-  ## get a different answer from the one the renderer would have given.
-  result = @[]
-  var found = newSeq[tuple[content: int, id: int]]()
-  proc visit(node: JsObject) =
-    if node.isNil or node.isUndefined: return
-    let state = node.componentState
-    if not state.isNil and not state.isUndefined:
-      let content = state.content
-      if not content.isNil and not content.isUndefined:
-        let id = state.id
-        found.add (content: cast[int](content),
-                   id: (if id.isNil or id.isUndefined: 0 else: cast[int](id)))
-    let children = node.content
-    if children.isNil or children.isUndefined: return
-    let count = cast[int](children.length)
-    for i in 0 ..< count:
-      visit(children[i])
-  visit(layout.root)
-  result = found
+# `layoutComponents` MOVED to `ui/mode_layouts.nim` and is re-exported below.
+# The walk is not the web's business: every mode switch that falls back to a
+# mode's default installs a layout after startup and therefore has to construct
+# the components it names, on both platforms.
 
 proc templateFilesystem*(tmpl: ProjectTemplate): CodetracerFile =
   ## The project as the tree `index/files.loadFilesystem` returns.

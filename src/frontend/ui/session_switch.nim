@@ -201,9 +201,7 @@ proc createNewSession*(data: Data) =
     traceMonacoEditors: @[],
     focusHistory: @[],
     editModeHiddenPanels: @[],
-    savedLayoutBeforeEdit: nil,
     editModeLayout: nil,
-    lastUsedEditLayout: nil
   )
   session.ui.menuNode = data.ui.menuNode
   session.ui.launchConfigs = data.ui.launchConfigs

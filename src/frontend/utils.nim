@@ -1001,9 +1001,7 @@ data.ui = Components(
   traceMonacoEditors: @[],
   fontSize: 16,
   editModeHiddenPanels: @[],
-  savedLayoutBeforeEdit: nil,
   editModeLayout: nil,
-  lastUsedEditLayout: nil,
   activeAgentSessionId: cstring"")
   # mode: CalltraceMode)
 

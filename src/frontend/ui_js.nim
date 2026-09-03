@@ -40,6 +40,9 @@ import
   # editor's declared width out of the layout config with it.
   index/layout_config_repair,
   ui/[test_results, constraints],
+  # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
+  # everything about where a mode's arrangement lives is in there.
+  ui/mode_layouts,
   ../ct_test/contracts,
   ../common/noir_constraints,
   viewmodel/viewmodels/[test_results_vm, constraints_vm],
@@ -1145,11 +1148,11 @@ proc closeAuxiliaryPanels(data: Data) =
 
   if data.ui.editModeHiddenPanels.len > 0:
     return
-  if not data.ui.layout.isNil and data.ui.savedLayoutBeforeEdit.isNil:
+  if not data.ui.layout.isNil and data.ui.layoutBeforeAuxiliaryClose.isNil:
     let snapshot = data.ui.layout.saveLayout()
     # Clone the resolved config so later layout mutations don't modify our snapshot.
     let snapshotCopy = cast[GoldenLayoutResolvedConfig](JSON.parse(JSON.stringify(snapshot)))
-    data.ui.savedLayoutBeforeEdit = snapshotCopy
+    data.ui.layoutBeforeAuxiliaryClose = snapshotCopy
   for content in editModeAuxiliaryContents:
     var idsToClose: seq[int] = @[]
     for id, component in data.ui.componentMapping[content]:
@@ -1253,18 +1256,18 @@ proc reopenAuxiliaryPanels(data: Data) =
   ## Re-open panels closed while edit mode was active.
 
   if data.ui.editModeHiddenPanels.len == 0:
-    data.ui.savedLayoutBeforeEdit = nil
+    data.ui.layoutBeforeAuxiliaryClose = nil
     return
 
-  if not data.ui.savedLayoutBeforeEdit.isNil and not data.ui.layout.isNil:
+  if not data.ui.layoutBeforeAuxiliaryClose.isNil and not data.ui.layout.isNil:
     for panel in data.ui.editModeHiddenPanels:
       if not data.ui.componentMapping[panel.content].hasKey(panel.id):
         console.log("Key missing!")
         discard data.makeComponent(panel.content, panel.id)
-    if data.restoreSavedLayout(data.ui.savedLayoutBeforeEdit,
-                               "the layout saved before edit mode"):
+    if data.restoreSavedLayout(data.ui.layoutBeforeAuxiliaryClose,
+                               "the layout saved before the auxiliary panels were closed"):
       data.ui.editModeHiddenPanels.setLen(0)
-      data.ui.savedLayoutBeforeEdit = nil
+      data.ui.layoutBeforeAuxiliaryClose = nil
       return
     # Not a `return`: the per-panel `openLayoutTab` loop below is the fallback,
     # and it is why this site degraded visibly while the two in the mode
@@ -1278,7 +1281,7 @@ proc reopenAuxiliaryPanels(data: Data) =
     except:
       cwarn fmt"edit-mode: failed to reopen {$panel.content} layout tab with id {panel.id}: {getCurrentExceptionMsg()}"
   data.ui.editModeHiddenPanels.setLen(0)
-  data.ui.savedLayoutBeforeEdit = nil
+  data.ui.layoutBeforeAuxiliaryClose = nil
 
 proc applyReadOnlyToEditors(data: Data, readOnly: bool) =
   ## Bring the panels, the shortcuts and every Monaco instance into line with a
@@ -1394,6 +1397,155 @@ proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
   let changed = data.beginReadOnlyTransition(readOnly)
   data.finishReadOnlyTransition(readOnly, changed)
 
+proc reportLayoutDegraded(data: Data; sentence: string) =
+  ## SAY IT ON THE SURFACE THE USER IS LOOKING AT, not only in the console.
+  ##
+  ## Layout persistence has already produced a total failure in this product —
+  ## after Stop the workspace came back empty, because the restore threw and
+  ## the console line about it was the only trace. A user whose arrangement has
+  ## been reset and who is not told concludes the product forgets things at
+  ## random, and the one thing they could do about it (rearrange the panes,
+  ## which saves a new layout) is the thing they do not know to do.
+  ##
+  ## `cerror` as well as the notification: the console line is what a CI probe
+  ## and a bug report read, and the notification is what the user reads. They
+  ## are different audiences and neither substitutes for the other.
+  cerror "mode-layout: " & sentence
+  if data.isNil or data.viewsApi.isNil or data.viewsApi.showNotification.isNil:
+    return
+  try:
+    data.viewsApi.showNotification(
+      newNotification(NotificationError, sentence))
+  except CatchableError:
+    cerror "mode-layout: the degradation notice could not be shown: " &
+      getCurrentExceptionMsg()
+
+proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
+  ## THE LAYOUT MOVES WITH THE MODE, in both directions and every time.
+  ##
+  ## `GUI/Layout-And-Navigation/Mode-Transitions.md` §4, all five obligations,
+  ## in one place so that neither direction can implement four of them:
+  ##
+  ##   1. the entering mode's layout is restored as the user last left it —
+  ##      this session's arrangement first, then the mode's store, and only
+  ##      then the mode's default (§4.1);
+  ##   2. the leaving mode's is preserved, so returning restores it (§4.2);
+  ##   3. it is WRITTEN to the mode's store and not only held in memory, so a
+  ##      reload keeps both arrangements and not whichever was last live
+  ##      (§4.3);
+  ##   4. mode and layout change together — this proc is the only thing that
+  ##      changes either, and it takes both modes as arguments rather than
+  ##      reading `data.ui.mode`, so there is no instant at which the flag and
+  ##      the workspace disagree about which mode is being saved (§4.4);
+  ##   5. panes come from the entering layout, not from the leaving one (§4.5),
+  ##      which is what replacing the layout wholesale gives for free and what
+  ##      an incremental hide-and-show cannot.
+  ##
+  ## ## Why this replaced two single slots
+  ##
+  ## `switchToEdit` wrote `savedLayoutBeforeEdit` and `switchToDebug` wrote
+  ## `lastUsedEditLayout`, and `switchToDebug`'s read arm was disabled with a
+  ## comment recording that enabling it degraded the workspace across three
+  ## round trips. §6 names that shape and predicts exactly that outcome. The
+  ## register is addressed BY MODE, so the nth switch reads the same cell the
+  ## first one wrote.
+  ##
+  ## ## Idempotence
+  ##
+  ## A switch to the mode the session is already in returns immediately, and
+  ## §6 requires it to: without the guard the "leaving" snapshot would file the
+  ## live layout into the mode it is already the layout OF, which is harmless,
+  ## and then the "entering" resolve would hand it straight back — but a
+  ## `Stop` arriving in Edit mode would also overwrite the DEBUG cell with an
+  ## edit layout, which is §6's "must not overwrite the other mode's saved
+  ## arrangement" and is not harmless at all.
+  if leaving == entering:
+    return
+  if data.ui.isNil or data.ui.layout.isNil:
+    return
+
+  # THE LEAVING MODE'S, FIRST AND UNCONDITIONALLY. Reading the live layout
+  # after it has been replaced reads the new one.
+  mode_layouts.rememberModeLayout(data, leaving)
+
+  let resolution = mode_layouts.resolveLayoutForMode(data, entering)
+  if resolution.config.isNil:
+    # NEVER NOTHING. The only way to get here is a bundled `default_layout.json`
+    # that does not parse, i.e. a broken build; there is no layout to apply and
+    # the honest response is to leave the workspace as it is rather than empty
+    # it. An empty workspace is the failure this whole path exists to prevent.
+    cerror "mode-layout: no layout could be produced for " & $entering &
+      "; the workspace was left as it was"
+    return
+
+  # CONSTRUCT WHAT THE LAYOUT NAMES BEFORE HANDING IT OVER. GoldenLayout builds
+  # containers, not components: a layout installed after startup names panes
+  # `renderer.createUIComponents` never made, and they come up empty. Only the
+  # ones that do not exist yet — constructing a component that already exists
+  # makes a SECOND one, and for the menu that is a second render-gate owner.
+  for declared in mode_layouts.layoutComponents(resolution.config):
+    if declared.content == ord(Content.Trace): continue
+    if declared.content < 0 or declared.content > ord(Content.high): continue
+    if data.ui.componentMapping[Content(declared.content)].hasKey(declared.id):
+      continue
+    try:
+      discard data.makeComponent(Content(declared.content), declared.id)
+    except CatchableError as e:
+      cerror "mode-layout: component " & $declared.content & ": " & e.msg
+    except:
+      cerror "mode-layout: component " & $declared.content & " failed"
+
+  # A REGISTER OR STORE ENTRY IS A *RESOLVED* CONFIG; A DEFAULT IS NOT.
+  #
+  # `saveLayout()` returns resolved, `loadLayout` wants unresolved, and the Nim
+  # type cannot tell them apart (`restoreSavedLayout`'s header). Handing a
+  # resolved config straight to `loadLayout` is the `e.trimStart is not a
+  # function` defect; handing the bundled default through `fromResolved` is the
+  # same mistake with the arguments swapped. The SOURCE says which it is, which
+  # is one of the reasons `resolveLayoutForMode` reports it.
+  var applied = false
+  case resolution.source
+  of mlsSession, mlsStored:
+    applied = data.restoreSavedLayout(
+      cast[GoldenLayoutResolvedConfig](resolution.config),
+      "the " & $entering & " layout")
+  of mlsBundled, mlsBundledAfterFailure:
+    try:
+      let resolved = cast[GoldenLayoutResolvedConfig](resolution.config)
+      data.swapLayout(resolved)
+      data.ui.resolvedConfig = resolved
+      applied = true
+    except:
+      cerror "mode-layout: GoldenLayout rejected the default " & $entering &
+        " layout: " & getCurrentExceptionMsg()
+
+  if not applied and resolution.source in {mlsSession, mlsStored}:
+    # WHAT THE USER LEFT COULD NOT BE PUT BACK — degrade to the mode's default
+    # rather than to whatever happens to be on screen, and SAY SO. This is the
+    # arm that produced a total failure before: after Stop the workspace came
+    # back empty because the restore threw and nothing followed it. A layout
+    # that cannot be loaded must land the user in a working workspace.
+    data.ui.modeLayouts[entering] = nil
+    mode_layouts.forgetStoredLayoutForMode(entering)
+    let fallback = mode_layouts.bundledLayoutForMode(entering)
+    if not fallback.isNil:
+      try:
+        let resolved = cast[GoldenLayoutResolvedConfig](fallback)
+        data.swapLayout(resolved)
+        data.ui.resolvedConfig = resolved
+        applied = true
+      except:
+        cerror "mode-layout: the default " & $entering &
+          " layout was also rejected: " & getCurrentExceptionMsg()
+    data.reportLayoutDegraded(
+      "The " & (if mode_layouts.isEditingMode(entering): "edit" else: "debug") &
+      " layout could not be restored and was reset to the default. " &
+      "Rearranging the panes will save a new one.")
+  else:
+    let note = mode_layouts.describeDegradation(resolution, entering)
+    if note.isSome:
+      data.reportLayoutDegraded(note.get)
+
 proc switchToEdit*(data: Data) =
   # THE FLAG BEFORE THE LAYOUT. `restoreSavedLayout` below rebuilds
   # GoldenLayout, and the editors it opens read `data.ui.readOnly` as they are
@@ -1402,17 +1554,13 @@ proc switchToEdit*(data: Data) =
   # later walk could reach the editors that had not been built yet.
   let readOnlyChanged = data.beginReadOnlyTransition(false)
   if data.ui.mode != EditMode:
+    let leaving = data.ui.mode
     data.ui.mode = EditMode
-
-    # Save current debug layout before switching
-    if not data.ui.layout.isNil:
-      let currentLayout = data.ui.layout.saveLayout()
-      data.ui.savedLayoutBeforeEdit = cast[GoldenLayoutResolvedConfig](
-        JSON.parse(JSON.stringify(currentLayout)))
-
-    # Restore edit layout if we have one saved
-    if not data.ui.lastUsedEditLayout.isNil and not data.ui.layout.isNil:
-      data.restoreSavedLayout(data.ui.lastUsedEditLayout, "the edit layout")
+    # ONE CALL FOR BOTH HALVES. The debug layout is preserved and the edit
+    # layout restored by the same proc, which is what makes §4.4's "changed
+    # together or not at all" a property of the code rather than of two call
+    # sites agreeing.
+    data.applyModeLayout(leaving = leaving, entering = EditMode)
 
     for content, map in data.ui.componentMapping:
       for id, component in map:
@@ -1479,57 +1627,43 @@ proc switchToEdit*(data: Data) =
   debug.refreshTopbarSurface()
 
 proc switchToDebug*(data: Data) =
-  # Save current edit layout before switching
-  if data.ui.mode == EditMode and not data.ui.layout.isNil:
-    let currentLayout = data.ui.layout.saveLayout()
-    data.ui.lastUsedEditLayout = cast[GoldenLayoutResolvedConfig](
-      JSON.parse(JSON.stringify(currentLayout)))
-
-  # THE FLAG BEFORE THE LAYOUT, for the reason `beginReadOnlyTransition`
-  # gives — and here it is also what makes the conversion below safe.
+  # THE FLAG BEFORE THE LAYOUT, for the reason `beginReadOnlyTransition` gives:
+  # every editor the restored layout builds reads `data.ui.readOnly` as it is
+  # constructed, and a walk afterwards cannot reach the ones that did not exist
+  # yet. Assigned before `applyModeLayout` below, so a replay session's editors
+  # are built read-only rather than being made so afterwards.
   let readOnlyChanged = data.beginReadOnlyTransition(true)
 
   if data.ui.mode != DebugMode:
+    let leaving = data.ui.mode
     data.ui.mode = DebugMode
-
-    # THIS SITE IS STILL DELIBERATELY UNCONVERTED, AND THE REASON HAS CHANGED.
+    # THE RESTORE ARM IS BACK ON, AND THIS IS WHAT MADE IT SAFE.
     #
-    # It has the same defect as the `restoreSavedLayout` call sites: a resolved
-    # config handed to a `loadLayout` that wants an unresolved one, producing
-    # `debug-mode: failed to restore debug layout: e.trimStart is not a
-    # function` — measured again on this tree's own bundle, at the first Run of
-    # every tab — and swallowed by the bare `except`.
-    #
-    # ONE OF THE TWO REASONS NOT TO CONVERT IS NOW GONE. It used to build a
-    # replay session the user could type into, because `savedLayoutBeforeEdit`
-    # holds the BOOT-TIME EDIT layout on the first Run (`switchToEdit` runs
-    # once at boot: a fresh Noir Studio tab starts in `DebugMode`, see
-    # `debug.nim`'s `mountedTopbarSurface`), and restoring it rebuilt
-    # GoldenLayout while `data.ui.readOnly` was still `false`.
-    # `beginReadOnlyTransition` above assigns the flag first, so anything this
-    # restores would now be built read-only.
-    #
-    # THE OTHER REASON SURVIVES, AND IT WAS MEASURED HERE. With the conversion
-    # applied, three round trips DEGRADE the workspace: trip 1 returned to a
-    # correct edit layout, trip 2's Run restored a `savedLayoutBeforeEdit` that
+    # It used to be `swapLayout(data.ui.savedLayoutBeforeEdit)` and it was
+    # disabled, with a comment recording that enabling it degraded the
+    # workspace across three round trips — trip 2's Run restored a layout that
     # had lost the Files and VCS tabs, and by trip 3 the Run no longer reached
-    # the debugger surface at all — 19 failures against 7 without it, in
-    # `ci/test/noir-mode-roundtrip.sh`. Each transition saves a layout that the
-    # previous transition had already damaged, and applying it feeds the damage
-    # forward instead of discarding it.
+    # the debugger surface at all. The comment's diagnosis was right about the
+    # symptom and named a different cause; the cause was that
+    # `savedLayoutBeforeEdit` had TWO writers. `closeAuxiliaryPanels` wrote it
+    # mid-teardown, on a read-only transition that is not a mode change at all,
+    # and whichever writer ran last won. So each transition really did apply a
+    # layout the previous one had damaged, exactly as measured — but the damage
+    # came from the other writer, not from restoring.
     #
-    # WHAT WOULD MAKE IT SAFE, so this is a unit of work and not a wall: a web
-    # tab must stop booting with `data.ui.mode == DebugMode` while showing an
-    # edit surface, so that the boot `switchToEdit` stops writing an EDIT
-    # layout into a field named for a debug one. That is a change to the entry
-    # surface, and it has to come with its own three-trip measurement.
-    if not data.ui.savedLayoutBeforeEdit.isNil and not data.ui.layout.isNil:
-      try:
-        data.swapLayout(data.ui.savedLayoutBeforeEdit)
-        data.ui.resolvedConfig = data.ui.savedLayoutBeforeEdit
-        data.ui.savedLayoutBeforeEdit = nil
-      except:
-        cerror fmt"debug-mode: failed to restore debug layout: {getCurrentExceptionMsg()}"
+    # That field is now `layoutBeforeAuxiliaryClose` and belongs to the
+    # auxiliary-panel pair alone; the debug arrangement lives in
+    # `data.ui.modeLayouts[DebugMode]`, which only `ui/mode_layouts.nim`
+    # writes and which is addressed by the mode. There is no longer a second
+    # writer to feed damage forward.
+    #
+    # It also no longer restores NOTHING on the first Run of a tab. The old arm
+    # was a plain `if not ... .isNil`, so a session that had never been in
+    # Debug mode simply kept the edit layout and the user got a replay on an
+    # editing surface. `applyModeLayout` falls through to the mode's stored
+    # arrangement and then to the mode's default, so the first Run installs a
+    # debugging layout rather than none.
+    data.applyModeLayout(leaving = leaving, entering = DebugMode)
 
   data.finishReadOnlyTransition(true, readOnlyChanged)
   redrawAfterModeSwitch()
@@ -1547,13 +1681,33 @@ proc toggleMode*(data: Data) =
     data.switchToDebug()
 
 proc toggleReadOnly*(data: Data) =
-  ## Toggle Monaco read-only state and accompanying panels without forcing a full layout toggle.
+  ## Toggle Monaco read-only state and the accompanying panels. NOT a mode
+  ## change, and it no longer pretends to be one.
+  ##
+  ## It used to assign `data.ui.mode` — `DebugMode` when going read-only,
+  ## `EditMode` when coming back — while leaving the layout exactly where it
+  ## was. `Mode-Transitions.md` §4.4 is about precisely this: "a command that
+  ## flips the mode while leaving the layout in place puts the session in a
+  ## state where the *next* switch saves the wrong arrangement into the wrong
+  ## file — it reads the mode to decide which file it is leaving — and the user
+  ## loses an arrangement to a command that appeared to do something else
+  ## entirely. A command that wants to change what the editor allows without
+  ## changing the mode must not touch the mode."
+  ##
+  ## `Ctrl+E` is that command. It is bound as `ClientAction.aToggleReadOnly`
+  ## and its whole purpose is to let a user browse a session's source without
+  ## typing into it; nothing about it is a request to rearrange the workspace.
+  ## With the mode assigned here, a `Ctrl+E` in Edit mode left the session
+  ## claiming Debug, so the next real switch filed the EDIT layout into the
+  ## DEBUG cell and the user's debugging arrangement was gone — and the
+  ## following `switchToDebug` was a no-op, because the mode already agreed
+  ## with it.
+  ##
+  ## `data.ui.readOnly` and `data.ui.mode` are already documented as separate
+  ## in `types.nim` ("not the same: we might want DebugMode layout with
+  ## readonly off"). This makes the code agree with the type.
   let goingReadOnly = not data.ui.readOnly
   data.setEditorsReadOnlyState(goingReadOnly)
-  if goingReadOnly:
-    data.ui.mode = DebugMode
-  else:
-    data.ui.mode = EditMode
   redrawAfterModeSwitch()
   # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
   # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw

@@ -231,6 +231,222 @@ proc unclaimedTopLevelPercent*(config: js): int {.importjs:
   ## function's to complain about.
 
 # ---------------------------------------------------------------------------
+# Per-mode placement
+# ---------------------------------------------------------------------------
+#
+# ## Why suppression alone could not express what a mode's layout is
+#
+# Until now a mode's default layout was `sanitizeLayoutConfig(bundled, ...,
+# hiddenFor(mode))` — ONE bundled tree, read two ways, and the only difference
+# a mode could express was which panes were *removed*. That is a strict subset
+# of "each mode has its own layout", and the gap is visible in the product:
+# `src/config/default_layout.json` gives TEST RESULTS and CONSTRAINTS a
+# top-level column of their own, so debug mode — which hides neither — kept a
+# standing column of them beside a replay, and no hidden set could have said
+# otherwise. A suppression list can delete a pane; it cannot say where a pane
+# belongs *in this mode*.
+#
+# `nestPanesIntoHosts` is the missing half. A mode declares, as data, which
+# panes are tabs of which other pane's stack; everything else about the bundled
+# tree is left exactly as it is. Together with the hidden set that makes a
+# mode's default layout a function of the mode rather than a reading of one
+# tree, which is what `GUI/Layout-And-Navigation/Mode-Transitions.md` §4
+# requires of the layouts a switch moves between.
+#
+# ## Why the rule is data and the engine is one function
+#
+# The placements the request asked for — TEST RESULTS with FILES in both modes,
+# CONSTRAINTS with the EVENT LOG in debug mode — are three rows of a table, and
+# they are stated once, beside the `Content` enum they are about
+# (`common_types/codetracer_features/frontend.paneHomesForMode`). Writing them
+# as three branches HERE would have made each an exception in the layout code
+# and left the next pane with no place to be declared; the whole point of the
+# general rule is that the placements are its output rather than its cases.
+
+proc nestPanesIntoHosts*(config: js; placements: seq[seq[int]]): js {.importjs:
+  """(function(config, placements) {
+    if (!config) return config;
+    const pairs = (Array.isArray(placements) ? placements : [])
+      .filter((p) => Array.isArray(p) && p.length >= 2)
+      .map((p) => ({ pane: Number(p[0]), host: Number(p[1]) }))
+      .filter((p) => Number.isFinite(p.pane) && Number.isFinite(p.host));
+    if (pairs.length === 0) return config;
+
+    let clone;
+    try {
+      clone = JSON.parse(JSON.stringify(config));
+    } catch (error) {
+      // A config that will not round-trip through JSON is one this function
+      // cannot reason about. Handing back the ORIGINAL is the honest answer:
+      // the caller still has a layout, and `repairLayoutConfig` is the module
+      // that is allowed to have an opinion about a malformed one.
+      return config;
+    }
+    const hasRootWrapper = clone.root !== undefined && clone.root !== null;
+    const root = hasRootWrapper ? clone.root : clone;
+    if (!root || typeof root !== 'object') return config;
+
+    const contentOf = (node) => {
+      if (!node || node.type !== 'component') return NaN;
+      const state = node.componentState || {};
+      return Number(state.content);
+    };
+
+    // The first component with this content id, together with the parent that
+    // holds it and its index there. Re-walked per placement rather than
+    // indexed once, because each move rewrites the tree the next one reads.
+    const locate = (target) => {
+      let found = null;
+      const visit = (node, parent, index) => {
+        if (found || !node || typeof node !== 'object') return;
+        if (contentOf(node) === target) {
+          found = { node: node, parent: parent, index: index };
+          return;
+        }
+        const kids = Array.isArray(node.content) ? node.content : null;
+        if (!kids) return;
+        for (let i = 0; i < kids.length; i++) visit(kids[i], node, i);
+      };
+      visit(root, null, -1);
+      return found;
+    };
+
+    // A tab removed from the left of the active one shifts it left by one.
+    // Same rule `sanitizeLayoutConfig` applies, for the same reason: an
+    // `activeItemIndex` past the end makes `Stack.init` throw and the whole
+    // restore aborts (the issue this module's header names).
+    const remapAfterRemoval = (stack, removedIndex) => {
+      if (!stack || stack.type !== 'stack') return;
+      if (stack.activeItemIndex === undefined || stack.activeItemIndex === null) return;
+      const count = Array.isArray(stack.content) ? stack.content.length : 0;
+      if (count <= 0) { stack.activeItemIndex = 0; return; }
+      let active = Number(stack.activeItemIndex);
+      if (!Number.isFinite(active)) active = 0;
+      if (active > removedIndex) active -= 1;
+      if (active < 0) active = 0;
+      if (active > count - 1) active = count - 1;
+      stack.activeItemIndex = active;
+    };
+
+    const remapActiveItemIndex = (previous, survivors, count) => {
+      if (count <= 0) return 0;
+      const old = Number(previous);
+      const base = Number.isFinite(old) ? old : 0;
+      const survivingPosition = survivors.indexOf(base);
+      let mapped = survivingPosition >= 0
+        ? survivingPosition
+        : survivors.filter((index) => index < base).length;
+      if (!Number.isFinite(mapped) || mapped < 0) mapped = 0;
+      if (mapped > count - 1) mapped = count - 1;
+      return mapped;
+    };
+
+    // Containers emptied by the moves above are dropped, bottom up — the same
+    // treatment `sanitizeLayoutConfig` gives a container emptied by hiding.
+    // Without it, nesting the last component of a stack leaves an empty stack,
+    // which GoldenLayout rejects outright.
+    const prune = (node) => {
+      if (!node || typeof node !== 'object') return null;
+      if (node.type === 'component') return node;
+      const kids = Array.isArray(node.content) ? node.content : null;
+      if (!kids) return node;
+      const survivors = [];
+      const kept = [];
+      for (let i = 0; i < kids.length; i++) {
+        const child = prune(kids[i]);
+        if (child) { kept.push(child); survivors.push(i); }
+      }
+      node.content = kept;
+      if (kept.length === 0) return null;
+      if (node.type === 'stack' && node.activeItemIndex !== undefined &&
+          node.activeItemIndex !== null) {
+        node.activeItemIndex =
+          remapActiveItemIndex(node.activeItemIndex, survivors, kept.length);
+      }
+      return node;
+    };
+
+    for (let k = 0; k < pairs.length; k++) {
+      const pane = pairs[k].pane;
+      const host = pairs[k].host;
+      const paneAt = locate(pane);
+      // A PANE THIS MODE DOES NOT HAVE IS NOT AN ERROR. The hidden set has
+      // already run by the time this does, so a placement naming a pane the
+      // mode suppresses simply has nothing to move — and a mode is allowed to
+      // declare a home for a pane it does not show, because the two tables are
+      // independent statements and neither should have to know the other's
+      // contents.
+      if (!paneAt || !paneAt.parent) continue;
+      const hostAt = locate(host);
+      if (!hostAt || !hostAt.parent) continue;
+      if (hostAt.parent.type !== 'stack') continue;
+      // IDEMPOTENCE, and it is a requirement rather than an optimisation.
+      // `Mode-Transitions.md` §6 requires the nth switch to behave as the
+      // first; this function runs on every switch that falls back to a mode's
+      // default, so a second run over its own output has to be a no-op.
+      if (paneAt.parent === hostAt.parent) continue;
+      // Detach, then append. APPENDING is what keeps the host the visible tab:
+      // every existing index in the host stack is unchanged, so its
+      // `activeItemIndex` still names the tab it named before — FILES stays
+      // the front tab of the FILES stack and TEST RESULTS joins behind it.
+      paneAt.parent.content.splice(paneAt.index, 1);
+      remapAfterRemoval(paneAt.parent, paneAt.index);
+      // A size on a stack child is meaningless (stack children fill the
+      // stack), and carrying a column's `25%` onto a tab is how a stale number
+      // survives to confuse the next reader of the file.
+      delete paneAt.node.size;
+      delete paneAt.node.sizeUnit;
+      hostAt.parent.content.push(paneAt.node);
+    }
+
+    const pruned = prune(root);
+    if (!pruned) return config;
+    if (hasRootWrapper) { clone.root = pruned; return clone; }
+    return pruned;
+  })(#, #)""".}
+  ## Re-home panes as tabs of another pane's stack, as `placements` declares.
+  ##
+  ## Each entry of `placements` is a two-element `@[pane, host]` of `Content`
+  ## ordinals: the component whose content is `pane` becomes the last tab of
+  ## the stack that holds the component whose content is `host`. Containers
+  ## left empty by the move are dropped and every affected stack's
+  ## `activeItemIndex` is kept in range.
+  ##
+  ## **Total.** A placement whose pane or host is absent, whose host is not in
+  ## a stack, or which is already satisfied, is skipped; a config that does not
+  ## round-trip through JSON is returned untouched. There is no input for which
+  ## this returns nothing — the caller always still has a layout.
+
+proc modeDefaultLayoutConfig*(config: js; editorContent: int;
+                              hiddenContents: seq[int];
+                              placements: seq[seq[int]]): js =
+  ## A MODE'S DEFAULT LAYOUT, from the bundled tree: what the mode does not
+  ## show, removed; what the mode homes elsewhere, moved.
+  ##
+  ## This is the whole of "each mode has its own layout" on the default side —
+  ## the user side is a saved layout per mode, which is the caller's business
+  ## (`Mode-Transitions.md` §4.1: a switch prefers the user's arrangement and
+  ## falls back to this).
+  ##
+  ## The two tables are PARAMETERS rather than reads of `Content`, which is the
+  ## same convention every other proc in this module follows and the reason the
+  ## module has no imports: the rules stay exercisable headlessly under
+  ## `nim js` + node, and the ordinals keep living in exactly one place
+  ## (`common_types/codetracer_features/frontend.modeHiddenContentIds` and
+  ## `.paneHomesForMode`, which both platforms call).
+  ##
+  ## ORDER IS LOAD-BEARING, and it is the reason this composition is a named
+  ## proc rather than two calls at each site. Suppression runs first, so a
+  ## placement can name a host the mode hides and be skipped rather than
+  ## resurrect it: edit mode declares no CONSTRAINTS-under-EVENT-LOG row for
+  ## exactly this reason, but a mode that did would get the skip and not a
+  ## revived event log. Nesting first would move a pane into a stack that the
+  ## sanitiser then deletes, taking the nested pane with it — the pane would
+  ## vanish from a mode that never hid it.
+  nestPanesIntoHosts(
+    sanitizeLayoutConfig(config, editorContent, hiddenContents), placements)
+
+# ---------------------------------------------------------------------------
 # Load-side repair
 # ---------------------------------------------------------------------------
 

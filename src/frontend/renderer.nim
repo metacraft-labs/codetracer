@@ -485,9 +485,7 @@ proc resetLayoutState*(data: Data) =
     fontSize: fontSize,
     focusHistory: @[],
     editModeHiddenPanels: @[],
-    savedLayoutBeforeEdit: nil,
     editModeLayout: nil,
-    lastUsedEditLayout: nil
   )
   data.ui.pageLoaded = pageLoaded
   data.ui.initEventReceived = initEventReceived

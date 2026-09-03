@@ -522,6 +522,16 @@ type
 
   GoldenLayoutResolvedConfig* = ref object of js
 
+  ModeLayouts* = array[LayoutMode, GoldenLayoutResolvedConfig]
+    ## The session's arrangement for each mode, or `nil` for a mode the user
+    ## has not been in yet.
+    ##
+    ## `nil` is a meaningful value and not a missing one: it is what sends
+    ## `ui/mode_layouts.resolveLayoutForMode` on to the mode's persisted store,
+    ## and from there to the mode's default. A zero-initialised array is
+    ## therefore already correct for a fresh session, which is why nothing
+    ## constructs one.
+
   GoldenLayout* = ref object of js
     loadLayout*:        proc(layoutConfig: GoldenLayoutResolvedConfig)
     saveLayout*:        proc(): GoldenLayoutResolvedConfig
@@ -1927,9 +1937,47 @@ type
       ## `index/layout_config_repair.unclaimedTopLevelPercent` for why it
       ## cannot be read later) and consumed by `utils.openNewLayoutContainer`,
       ## which is the only place an editor container is ever created.
-    savedLayoutBeforeEdit*: GoldenLayoutResolvedConfig
+    modeLayouts*:    ModeLayouts
+      ## ONE ARRANGEMENT PER MODE, addressed by the mode.
+      ##
+      ## This replaces `savedLayoutBeforeEdit` and `lastUsedEditLayout` — two
+      ## single slots, one filled on the way out of each mode and consumed on
+      ## the way back — which is the exact shape
+      ## `GUI/Layout-And-Navigation/Mode-Transitions.md` §6 predicts will be
+      ## "correct for one round trip, and thereafter holding either nothing or
+      ## the wrong mode's arrangement". It was: `switchToDebug`'s restore arm
+      ## had been disabled with a comment recording that enabling it degraded
+      ## the workspace over three round trips.
+      ##
+      ## An ARRAY over `LayoutMode` rather than two fields, so that the mode is
+      ## the address rather than something a call site has to remember to
+      ## match, and so a member added to `LayoutMode` gets a cell rather than
+      ## silently sharing another mode's. `ui/mode_layouts.nim` owns every read
+      ## and write; see its header for the store behind it.
+      ##
+      ## The type CHANGED rather than the field being renamed, deliberately: a
+      ## rename would have preserved every existing binding and left the old
+      ## single-slot reasoning in place at sites that still compiled.
+    layoutBeforeAuxiliaryClose*: GoldenLayoutResolvedConfig
+      ## The layout as it stood before `closeAuxiliaryPanels` removed the
+      ## replay-only panels, so `reopenAuxiliaryPanels` can put them back in
+      ## one restore instead of one `openLayoutTab` per panel.
+      ##
+      ## THIS USED TO BE `savedLayoutBeforeEdit`, WHICH THE MODE SWITCH ALSO
+      ## USED, and the sharing is the defect that disabled the switch's restore
+      ## arm. Two unrelated jobs wrote one field: the auxiliary-panel close
+      ## (a read-only transition, which can happen without a mode change) and
+      ## the Debug → Edit snapshot (a mode transition). Whichever ran last won,
+      ## so `switchToDebug` could be handed a layout that
+      ## `closeAuxiliaryPanels` had saved mid-teardown — which is exactly what
+      ## the comment at that call site recorded when it measured trip 2's Run
+      ## restoring "a `savedLayoutBeforeEdit` that had lost the Files and VCS
+      ## tabs", and trip 3 failing to reach the debugger at all.
+      ##
+      ## The mode's own arrangement now lives in `modeLayouts`, addressed by
+      ## the mode. This field keeps ONLY the auxiliary-close job, which is
+      ## why it is named for it.
     editModeLayout*: GoldenLayoutResolvedConfig         # NEW - persistent edit layout
-    lastUsedEditLayout*: GoldenLayoutResolvedConfig     # NEW - last saved edit layout
     layout*:         GoldenLayout
     mode*:           LayoutMode
     readOnly*:       bool
@@ -2365,9 +2413,7 @@ when defined(ctRenderer):
     session.ui = Components(
       focusHistory: @[],
       editModeHiddenPanels: @[],
-      savedLayoutBeforeEdit: nil,
       editModeLayout: nil,
-      lastUsedEditLayout: nil
     )
     session.connection = ConnectionState(
       connected: true,
