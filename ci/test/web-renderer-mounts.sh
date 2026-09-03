@@ -2523,6 +2523,14 @@ print("yes" if s and s["ownsHitArea"] and not s["overlapsBreakpoint"]
 	g_results="$(json gutter-run gutterRunClick.resultsLine)"
 	g_running="$(json gutter-run gutterRunClick.runningAfterClick)"
 	g_settled="$(json gutter-run gutterRunClick.runningAfterSettle)"
+	g_settlems="$(json gutter-run gutterRunClick.settleWaitMs)"
+	g_budget="$(json gutter-run gutterRunClick.settleBudgetMs)"
+	g_tail="$(python3 -c '
+import json, sys
+g = json.load(open(sys.argv[1])).get("gutterRunClick") or {}
+print(" | ".join(l.replace("log: codetracer-noir-build: ", "")
+                 for l in (g.get("consoleAtSettle") or [])) or "none")
+' "${cache}/gutter-run.json")"
 	g_headbefore="$(json gutter-run gutterRunClick.headlineBefore)"
 	g_headafter="$(json gutter-run gutterRunClick.headlineAfter)"
 
@@ -2554,10 +2562,27 @@ print("yes" if s and s["ownsHitArea"] and not s["overlapsBreakpoint"]
 	# AND IT STOPPED. Both halves, because either alone is consistent with the
 	# defect: a control that never span was never wired, and one that span and
 	# stayed spinning is the bug exactly as reported.
+	#
+	# THE SECOND HALF IS WAITED FOR, NOT SAMPLED ON A TIMER, and the difference
+	# blocked a production deploy. This check used to read the slot count 1.5s
+	# after the `test-results` line and call that "after the run settled". It is
+	# not: for THIS control the verdict is not the end of the run. The intent is
+	# `nriTestRecord`, so `web_noir_build.onExit` goes on to dispatch
+	# `nbpTestRecord` and then `nbpTrace`, and `noirTestRunSettled` — the thing
+	# that stops the slot — is only reached after those. Deploy run 33697961922
+	# caught the arm mid-chain and the last line it recorded said so:
+	# `nbpTestRecord-started starts=2`. The slot was spinning because the run
+	# was running. The product was right and the check was racing it.
+	#
+	# The probe now polls until the slot clears, with a budget under the
+	# product's own two-minute deadline so a genuinely hung run cannot be
+	# cleared by that deadline and pass this check for the wrong reason. The
+	# ELAPSED TIME is printed because a settle that took 200ms and one that took
+	# 45s are different facts and this check should not hide which it saw.
 	if [ "${g_running}" -ge 1 ] 2>/dev/null && [ "${g_settled}" = "0" ]; then
-		ck ok "arm G: the control showed a running state (${g_running} slot) and CLEARED it once the run settled (${g_settled}) — headline '${g_headbefore}' -> '${g_headafter}'"
+		ck ok "arm G: the control showed a running state (${g_running} slot) and CLEARED it when the run actually settled, ${g_settlems}ms after the verdict — headline '${g_headbefore}' -> '${g_headafter}'"
 	else
-		ck fail "arm G: running slots after the click=${g_running}, after the run settled=${g_settled} — expected at least one and then none. A slot left spinning is the reported 'it just hanged in the browser'."
+		ck fail "arm G: running slots at the press=${g_running}, still ${g_settled} after waiting ${g_settlems}ms of a ${g_budget}ms budget — expected at least one and then none. Console tail: ${g_tail}"
 	fi
 fi
 echo
@@ -2586,6 +2611,8 @@ print("yes" if s and s["width"] and s["height"] else "no")
 	q_results="$(json gutter-run-no-worker gutterRunClick.resultsLine)"
 	q_settled="$(json gutter-run-no-worker gutterRunClick.runningAfterSettle)"
 	q_refused="$(json gutter-run-no-worker gutterRunClick.refusedLine)"
+	q_settlems="$(json gutter-run-no-worker gutterRunClick.settleWaitMs)"
+	q_budget="$(json gutter-run-no-worker gutterRunClick.settleBudgetMs)"
 	if [ "${q_present}" = "yes" ] && [ "${q_clicked}" = "true" ]; then
 		ck ok "arm Q: the control is still painted and still takes a real click, so arm G's press check is not what this arm reddens"
 	else
@@ -2613,9 +2640,9 @@ print("yes" if s and s["width"] and s["height"] else "no")
 	# before the fix this read 1, and the only thing that would have cleared it
 	# is a timeout no user waits through.
 	if [ "${q_settled}" = "0" ]; then
-		ck ok "arm Q: and the control did NOT stay spinning over the refusal (${q_settled} running slot(s) ~30s after the press, far inside the two-minute deadline)"
+		ck ok "arm Q: and the control did NOT stay spinning over the refusal — it cleared in ${q_settlems}ms, against a ${q_budget}ms budget that is itself well inside the product's two-minute deadline"
 	else
-		ck fail "arm Q: ${q_settled} slot(s) still spinning ~30s after a run that was refused synchronously ('${q_refused}') — the control is showing a run that is not happening, which is the reported defect"
+		ck fail "arm Q: ${q_settled} slot(s) still spinning after ${q_settlems}ms, over a run refused synchronously ('${q_refused}') — the control is showing a run that is not happening, which is the reported defect"
 	fi
 fi
 echo

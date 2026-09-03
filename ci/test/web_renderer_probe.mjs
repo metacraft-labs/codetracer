@@ -667,8 +667,12 @@ if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
     refusedLine: '',
     exitLine: '',
     resultsLine: '',
-    runningAfterClick: null,
+    runningAfterClick: 0,
     runningAfterSettle: null,
+    settleObserved: null,
+    settleWaitMs: null,
+    settleBudgetMs: null,
+    consoleAtSettle: [],
     headlineBefore: '',
     headlineAfter: '',
     newConsole: [],
@@ -718,8 +722,17 @@ if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
       await page.mouse.click(
         gutterRunClick.slot.centre.x, gutterRunClick.slot.centre.y);
       gutterRunClick.clicked = true;
-      await page.waitForTimeout(500);
-      gutterRunClick.runningAfterClick = await runningCount();
+
+      // THE PEAK OVER THE FIRST HALF-SECOND, not one sample at the end of it.
+      // This field's job is to show the control DID enter a running state, and
+      // a single reading 500ms after the press is a race against a run that
+      // settled inside it — the same mistake, one field over, as the one the
+      // settle wait below exists to correct.
+      for (let i = 0; i < 10; i++) {
+        const n = await runningCount();
+        if (n > gutterRunClick.runningAfterClick) gutterRunClick.runningAfterClick = n;
+        await page.waitForTimeout(50);
+      }
 
       const waitForLine = async (test, budgetMs) => {
         const deadline = Date.now() + budgetMs;
@@ -744,8 +757,60 @@ if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
         gutterRunClick.resultsLine = await waitForLine(
           (l) => l.includes(marker) && l.includes('test-results '), 10000);
       }
-      await page.waitForTimeout(1500);
-      gutterRunClick.runningAfterSettle = await runningCount();
+      // WAIT ON THE SETTLE, NOT ON A DURATION — and this is a correction, made
+      // after the arm this field feeds blocked a production deploy.
+      //
+      // It used to be `waitForTimeout(1500)` after the `test-results` line,
+      // and the check it fed said "after the run settled". Those are not the
+      // same moment and they are not close. `test-results` is published when
+      // the VERDICT lands, and for this control the run is not over there:
+      // `startNoirTestRecording` sets `activeIntent = nriTestRecord`, so
+      // `web_noir_build.onExit` goes on to dispatch `nbpTestRecord` (an
+      // instrumented `force_brillig` compile) and then `nbpTrace`, and
+      // `noirTestRunSettled` — the thing that stops this slot — is only
+      // reached at the END of that chain.
+      //
+      // So the slot is CORRECTLY still spinning 1.5s after the verdict, on any
+      // machine where the recording takes longer than that. Locally it did
+      // not; on the CI runner it did. Deploy run 33697961922 recorded exactly
+      // this, and the last console line it captured says it outright:
+      //
+      //     nbpTest-started    starts=1
+      //     nbpTest-exit       starts=1 verdict=npvSucceeded
+      //     test-results       starts=1 ok=true passed=1 failed=0
+      //     nbpTestRecord-started starts=2 handle=wasm-2   <- still running
+      //
+      // The product was right and the measurement was wrong. Fixed by polling
+      // the thing the assertion is actually about.
+      //
+      // THE BUDGET IS DELIBERATELY UNDER THE PRODUCT'S OWN DEADLINE.
+      // `runTestFromGutter` gives up after `editorTestRunFrames * 300` =
+      // 120000ms and clears the slot itself. A budget at or above that would
+      // let a genuinely hung run be cleared by the deadline and pass this
+      // check for the wrong reason, which is worse than the race it replaces.
+      // 60s leaves a large multiple of the observed record+trace time and
+      // still cannot reach the deadline.
+      //
+      // The ELAPSED TIME is recorded, not just the final count, because a
+      // settle that took 45s and one that took 200ms are different facts about
+      // the product and a boolean cannot tell them apart.
+      gutterRunClick.settleBudgetMs = 60000;
+      {
+        const started = Date.now();
+        const deadline = started + gutterRunClick.settleBudgetMs;
+        let n = await runningCount();
+        while (n > 0 && Date.now() < deadline) {
+          await page.waitForTimeout(250);
+          n = await runningCount();
+        }
+        gutterRunClick.settleWaitMs = Date.now() - started;
+        gutterRunClick.runningAfterSettle = n;
+        gutterRunClick.settleObserved = n === 0;
+        // The console tail AT THE MOMENT OF SAMPLING, so a red run names the
+        // phase it was stuck in instead of only the count.
+        gutterRunClick.consoleAtSettle = consoleLines.slice(linesBefore)
+          .filter((l) => l.includes(marker)).slice(-6);
+      }
       gutterRunClick.headlineAfter = await headlineOf();
     }
   } catch (e) {
