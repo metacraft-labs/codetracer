@@ -319,12 +319,11 @@ print(",".join(bad) if bad else "none")
 ck "$([ "${bothpaths}" = "none" ] && echo ok || echo fail)" \
 	"no press was delivered by BOTH the Monaco command and the Mousetrap bind (both: ${bothpaths})"
 
-# A chord that reaches nothing is the other way this can be wrong, and it is
+# A chord that reaches nothing is the other way this can be wrong, and it was
 # not hypothetical: F2 is bound to `forwardContinue` by the shipped yaml
-# ("F8 F2") and then overwritten by `shortcuts.nim`'s own
-# `Mousetrap.bind("f2") do (): discard`, so outside the editor it delivers 0.
-# Recorded as a named expectation rather than folded into a total, so that the
-# day it is fixed this check says so instead of going quietly green.
+# ("F8 F2") and used to be overwritten by `shortcuts.nim`'s own
+# `Mousetrap.bind("f2") do (): discard`, so outside the editor it delivered 0.
+# That bind is gone and F2 is asserted below like every other chord.
 live="$(jq_py '
 import json,sys
 d=json.load(open(sys.argv[1]))
@@ -346,6 +345,75 @@ print(n)
 ' chords)"
 ck "$([ "${live_out}" = "8" ] && echo ok || echo fail)" \
 	"all 8 stepping chords deliver exactly once with the caret outside the editor, got ${live_out}"
+
+# F2 — CONTINUE'S SECOND CHORD, ASSERTED IN BOTH CONTEXTS.
+#
+# THIS IS THE ASSERTION THE FIX IS FOR, and it is deliberately about the
+# DISPATCHED ACTION after a real press rather than about a binding existing. A
+# binding existing is precisely what was true throughout the defect:
+# `default_config.yaml` said "F8 F2" the whole time, `chordsFor(config,
+# forwardContinue).len == 2` passed the whole time, and the menu, the toolbar
+# tooltips and the shortcuts dialog all advertised F2 the whole time — while
+# the key did nothing. Only a press can tell those apart.
+#
+# MEASURED, both arms, on the assembled bundle:
+#   before  outside/F2 deliveries=0  mousetrap=0  monaco=0   <- dead
+#           editor /F2 deliveries=1  mousetrap=0  monaco=1   <- alive
+#   after   outside/F2 deliveries=1  mousetrap=1  monaco=0
+#           editor /F2 deliveries=1  mousetrap=0  monaco=1
+#
+# BOTH CONTEXTS, because the defect was the DISAGREEMENT between them: the same
+# key continued in the editor and did nothing outside it. Asserting only the
+# outside arm would let a "fix" that killed the working Monaco path pass, and
+# asserting only a total would let one arm's 0 hide inside the other's 2.
+#
+# The per-path counters are asserted too. `deliveries=1` alone cannot tell
+# "Mousetrap delivered once" from "Monaco delivered once", and after removing a
+# bind those are exactly the two outcomes that need distinguishing — the
+# `no press was delivered by BOTH paths` check above covers the double, this
+# covers the swap.
+f2_out="$(jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+r=[x for x in d["results"] if x["focus"]=="outside" and x["key"]=="F2"]
+if len(r) != 1:
+    print("missing")
+else:
+    r=r[0]
+    print("%s/%s/%s" % (r["deliveries"], r["mousetrapPath"], r["monacoPath"]))
+' chords)"
+ck "$([ "${f2_out}" = "1/1/0" ] && echo ok || echo fail)" \
+	"F2 outside the editor dispatches forwardContinue exactly once, through Mousetrap (deliveries/mousetrap/monaco = ${f2_out}, want 1/1/0)"
+
+f2_in="$(jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+r=[x for x in d["results"] if x["focus"]=="editor" and x["key"]=="F2"]
+if len(r) != 1:
+    print("missing")
+else:
+    r=r[0]
+    print("%s/%s/%s" % (r["deliveries"], r["mousetrapPath"], r["monacoPath"]))
+' chords)"
+ck "$([ "${f2_in}" = "1/0/1" ] && echo ok || echo fail)" \
+	"F2 inside the editor still dispatches forwardContinue exactly once, through Monaco (deliveries/mousetrap/monaco = ${f2_in}, want 1/0/1)"
+
+# AND THE COMPARISON: F2 and F8 are the same action, so they must behave
+# identically. This is what makes the two checks above a statement about the
+# product rather than two numbers someone recorded — if a future change kills
+# both chords, the per-chord checks redden AND this does; if it kills only F2,
+# this names the asymmetry directly.
+f2_f8_agree="$(jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+def row(f,k):
+    r=[x for x in d["results"] if x["focus"]==f and x["key"]==k]
+    return (r[0]["deliveries"], r[0]["mousetrapPath"], r[0]["monacoPath"]) if r else None
+bad=[f for f in ("editor","outside") if row(f,"F2") != row(f,"F8")]
+print(",".join(bad) if bad else "agree")
+' chords)"
+ck "$([ "${f2_f8_agree}" = "agree" ] && echo ok || echo fail)" \
+	"F2 and F8 — Continue's two chords — behave identically in both contexts (disagreed in: ${f2_f8_agree})"
 
 # ARM CD — THE INSTRUMENT. The delivery counter must be able to say 2, or
 # every "exactly once" above is satisfied by a counter stuck at 1.
@@ -373,7 +441,7 @@ echo
 # panes, so each is created once by the standalone path and parked offscreen.
 if ! probe panes-control ci/test/pane_mount_probe.mjs /noir; then
 	ck fail "the pane probe produced a report (control)"
-	expect_count 11
+	expect_count 14
 fi
 ck ok "the pane probe produced a report (control)"
 
@@ -408,7 +476,7 @@ export CT_PLANT_GL_CONTAINER=errorsComponent-0
 if ! probe panes-docked ci/test/pane_mount_probe.mjs /noir; then
 	ck fail "the pane probe produced a report (docked)"
 	unset CT_PLANT_GL_CONTAINER
-	expect_count 15
+	expect_count 18
 fi
 unset CT_PLANT_GL_CONTAINER
 ck ok "the pane probe produced a report (docked)"
@@ -452,7 +520,7 @@ export CT_PLANT_DUPLICATE_ID=errorsComponent-0
 if ! probe panes-instrument ci/test/pane_mount_probe.mjs /noir; then
 	ck fail "the pane probe produced a report (instrument)"
 	unset CT_PLANT_DUPLICATE_ID
-	expect_count 19
+	expect_count 22
 fi
 unset CT_PLANT_DUPLICATE_ID
 ck ok "the pane probe produced a report (instrument)"
@@ -469,9 +537,9 @@ ck "$([ "${inst}" = "2" ] && echo ok || echo fail)" \
 echo
 if [ "${failures}" -ne 0 ]; then
 	printf 'RESULT: FAILED — %d of %d check(s)\n' "${failures}" "${checks}"
-	expect_count 20
+	expect_count 23
 	exit 1
 fi
 printf '%d check(s), 0 failure(s)\n' "${checks}"
-expect_count 20
+expect_count 23
 echo "RESULT: OK — one press runs one action, and one pane id names one node"

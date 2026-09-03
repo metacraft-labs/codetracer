@@ -45,7 +45,8 @@ import std/[strutils, unittest, options, sets, jsffi]
 import ../config
 import ../types
 import ../lib/jslib
-from ../ui/shortcut_labels import MONACO_SHORTCUTS_WHITELIST, renderChord
+from ../ui/shortcut_labels import
+  MONACO_SHORTCUTS_WHITELIST, renderChord, hardBoundChords
 
 var countedAssertions = 0
 
@@ -53,7 +54,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 525
+const ExpectedAssertions = 526
+  ## 525 before the F2 fix. The hard-bind case swapped its `"F2" in
+  ## hardSwallowed` pin for `"F2" notin hardBoundChords` (one for one) and
+  ## added `"F1" in hardBoundChords` beside it, so that the absence being
+  ## asserted is an absence from a registry that demonstrably contains things.
 
 const boundPresets = [spCodeTracer, spVsCode, spChorded]
   ## The presets that bind something. `spNone` is the negative and is used as
@@ -213,18 +218,17 @@ suite "shortcut presets":
     ## `ALT+F10` is the live example: it is `stepOverStatement`, and it is the
     ## obvious reverse of `F10` under the VS Code preset's `ALT` rule. That
     ## preset uses `SHIFT+F10` instead because of this test.
-    const hardBound = [
-      # ui/shortcuts.nim `configureShortcuts`
-      "CTRL+R", "CTRL+B", "CTRL+PAGEUP", "CTRL+PAGEDOWN",
-      "ALT+E", "ALT+C", "ALT+V", "CTRL+ALT+D", "CTRL+SHIFT+O",
-      "COMMAND+SHIFT+O", "ALT+F10", "ALT+SHIFT+F10",
-      # ui_js.nim
-      "CTRL+F5", "CTRL+E", "CTRL+S", "ALT+1", "CTRL+ENTER", "CTRL+SHIFT+E",
-    ]
-    const hardSwallowed = ["F1", "F2"]
-      ## `Mousetrap.bind("f1") do (): discard` and the same for `f2`. Bound to
-      ## an EMPTY BODY, which is a swallow rather than a command — the spec's
-      ## default-bindings table calls them "(disabled) Reserved".
+    ## THE LIST IS NO LONGER A COPY. It used to be an 18-entry literal right
+    ## here, restating what `ui/shortcuts.nim` and `ui_js.nim` do — and a
+    ## restatement of another file's behaviour goes stale silently, which is
+    ## how it kept saying `F2` was swallowed after the swallow was removed.
+    ## `ui/shortcut_labels.nim` now owns `hardBoundChords`, and
+    ## `shortcut_bindings_test.nim` derives it from those two files with
+    ## `staticRead` — so this suite reads a list something else is responsible
+    ## for keeping true.
+    var hardBound: seq[string] = @[]
+    for chord in hardBoundChords:
+      hardBound.add($chord)
     var checkedPairs = 0
     for id in boundPresets:
       for b in presetOf(id).bindings:
@@ -239,31 +243,44 @@ suite "shortcut presets":
     counted "ALT+F10" in hardBound
     counted "F10" notin hardBound
 
-    # `F2` IS A PRE-EXISTING DEFECT, PINNED RATHER THAN BLESSED.
+    # `F2` WAS A PRE-EXISTING DEFECT, AND IT IS FIXED. THE PIN IS NOW THE
+    # OPPOSITE ASSERTION.
     #
     # `default_config.yaml` gives `forwardContinue` two chords, "F8 F2", and
-    # `ui/shortcuts.nim` hard-binds `f2` to an empty body AFTER the loop that
-    # registers the config table. `Mousetrap.bind` replaces, so the second
-    # Continue chord is swallowed: pressing F2 does nothing, while the menu and
-    # every tooltip go on advertising it, because `renderChord` reads the
-    # config and the config still says F2.
+    # `ui/shortcuts.nim` used to hard-bind `f2` to an empty body AFTER the loop
+    # that registers the config table. `Mousetrap.bind` replaces, so the second
+    # Continue chord was swallowed: pressing F2 outside the editor did nothing,
+    # while the menu and every tooltip went on advertising it, because
+    # `renderChord` reads the config and the config still said F2.
     #
-    # This is not introduced here — it is what the shipped default already
-    # does, and the default preset reproduces the shipped table byte for byte
-    # deliberately. It is asserted so that it is a KNOWN one rather than a
-    # discovery, and so that the day `f2`'s hard bind is removed or the YAML
-    # drops the chord, this reddens and the pin can go.
-    counted "F2" in hardSwallowed
+    # The previous version of this test pinned that defect as KNOWN, and said
+    # "the day `f2`'s hard bind is removed... this reddens and the pin can go."
+    # It did not redden, because it compared F2 against a `hardSwallowed`
+    # literal declared three lines above it rather than against the source —
+    # a check that could only ever agree with itself. That is why `hardBound`
+    # above is now the shared registry, and why this asserts F2's ABSENCE from
+    # it instead of its presence in a local copy.
+    #
+    # THE BEHAVIOUR ITSELF IS NOT ASSERTABLE HERE, and this test must not
+    # pretend otherwise. That the config binds F2 was true throughout the
+    # defect. The proof is a press in a browser tab:
+    # `ci/test/chord-and-pane-uniqueness.sh` measures F2 in both focus contexts
+    # and requires `forwardContinue` to be DISPATCHED once by each.
+    counted cstring"F2" notin hardBoundChords
+    # `F1` IS STILL RESERVED, and that is what makes the line above a
+    # discriminating check rather than a statement about an empty registry.
+    counted cstring"F1" in hardBoundChords
     var presetsUsingASwallowedChord = 0
     for id in boundPresets:
       for b in presetOf(id).bindings:
         for single in b.chord.splitWhitespace():
-          if single in hardSwallowed:
+          if cstring(single) in hardBoundChords:
             checkpoint("swallowed chord still advertised: " & $id & " " &
               $b.action & " -> " & single)
             inc presetsUsingASwallowedChord
-    # Exactly one: the default preset's `forwardContinue`, through "F8 F2".
-    counted presetsUsingASwallowedChord == 1
+    # ZERO NOW. It was one — the default preset's `forwardContinue`, through
+    # "F8 F2" — and that one was the defect.
+    counted presetsUsingASwallowedChord == 0
     counted presetOf(spCodeTracer).chordFor(
       ClientAction.forwardContinue).get == "F8 F2"
     # And no preset INTRODUCES another one.
