@@ -115,7 +115,7 @@ const EDIT_MARKS_SRC = path.join(
 function buttonClassesFromView(): { icon: string; text: string } {
   const src = fs.readFileSync(EDIT_VIEW_SRC, "utf8");
   const body = src.slice(src.indexOf("func editButtonClass*"));
-  const found = [...body.matchAll(/"((?:ct-button-[a-z-]+)\s+edit-toolbar-button)"/g)]
+  const found = [...body.matchAll(/"((?:ct-button-[a-z-]+\s+)+edit-toolbar-button)"/g)]
     .map((m) => m[1]);
   const icon = found.find((c) => c.includes("ct-button-image-"));
   const text = found.find((c) => c.includes("ct-button-text-"));
@@ -175,12 +175,7 @@ async function measureToolbar(page: any, themeCss: string) {
   const markClass = markClassFromSource();
   const marked = new Set(markedIdsFromSource());
   const panelClass = panelClassFromView();
-  const ids = [
-    EDIT_TOOLBAR_IDS.build,
-    EDIT_TOOLBAR_IDS.run,
-    EDIT_TOOLBAR_IDS.runTests,
-    EDIT_TOOLBAR_IDS.recordTests,
-  ];
+  const ids = [EDIT_TOOLBAR_IDS.build, EDIT_TOOLBAR_IDS.run];
 
   // `#menu` and `#isonim-debug-controls` are reproduced because the rules under
   // test are scoped to them; mounting the panel bare would measure a cascade
@@ -196,15 +191,15 @@ async function measureToolbar(page: any, themeCss: string) {
       const isIcon = marked.has(id);
       const cls = isIcon ? iconClass : textClass;
       const inner = isIcon
-        ? `<svg class="${markClass}" viewBox="0 0 16 16"><path d="M0 0h16v16H0Z"/></svg>`
-        : ["Build", "Run", "Run Tests", "Record Tests"][i];
-      return `<button id="${id}" class="${cls}"${i >= 2 ? " disabled" : ""}>${inner}</button>`;
+        ? `<svg class="${markClass}" viewBox="0 0 16 16"><path d="M0 0h16v16H0Z" fill="currentColor"/></svg>`
+        : ["Build", "Run"][i];
+      return `<button id="${id}" class="${cls}">${inner}</button>`;
     })
     .join("");
   await page.setContent(
     `<div id="menu" class="menu">` +
       `<div id="isonim-debug-controls">` +
-      `<div class="${panelClass}" data-topbar-surface="edit-commands" data-button-count="4">` +
+      `<div class="${panelClass}" data-topbar-surface="edit-commands" data-button-count="2">` +
       `<div class="separate-bar"></div>${buttons}` +
       `</div></div></div>`,
     { waitUntil: "domcontentloaded" },
@@ -232,6 +227,14 @@ async function measureToolbar(page: any, themeCss: string) {
           .slice(1)
           .map((r, i) => Math.round(r.left - rects[i].right)),
         backgroundImages: els.map((e) => getComputedStyle(e).backgroundImage),
+        // The frame, and the colour the marks inherit through `currentColor`.
+        borderWidths: els.map((e) => getComputedStyle(e).borderWidth),
+        borders: els.map((e) => getComputedStyle(e).border),
+        colors: els.map((e) => getComputedStyle(e).color),
+        markFills: els.map((e) => {
+          const p0 = e.querySelector("." + mc + " path");
+          return p0 ? getComputedStyle(p0).fill : null;
+        }),
         backgroundRepeats: els.map((e) => getComputedStyle(e).backgroundRepeat),
         paddings: els.map((e) => getComputedStyle(e).padding),
         radii: els.map((e) => getComputedStyle(e).borderRadius),
@@ -258,11 +261,11 @@ for (const theme of THEMES) {
     // this surface is a TEXT button, so none of them may resolve a
     // background-image at all. `run-tests-image` resolved one and, lacking
     // `no-repeat`, tiled it over the words.
-    expect(m.count).toBe(4);
-    for (let i = 0; i < 4; i++) {
+    expect(m.count).toBe(2);
+    for (let i = 0; i < 2; i++) {
       expect(
         m.backgroundImages[i],
-        `${["build", "run", "run-tests", "record-tests"][i]} must not paint a background image`,
+        `${["build", "run"][i]} must not paint a background image`,
       ).toBe("none");
     }
   });
@@ -274,11 +277,7 @@ for (const theme of THEMES) {
 
     // Pixel gaps, not "are they adjacent". Zero here is the welded segmented
     // control the report was describing.
-    expect(m.gaps).toEqual([
-      EXPECTED_GAP_PX,
-      EXPECTED_GAP_PX,
-      EXPECTED_GAP_PX,
-    ]);
+    expect(m.gaps).toEqual([EXPECTED_GAP_PX]);
 
     // One height for every control in the bar. 24 is what the user-agent
     // padding produced when no size rule matched the emitted class.
@@ -292,12 +291,7 @@ for (const theme of THEMES) {
   }) => {
     const m = await measureToolbar(page, resolveThemeCss(theme.css));
     const marked = new Set(markedIdsFromSource());
-    const ids = [
-      EDIT_TOOLBAR_IDS.build,
-      EDIT_TOOLBAR_IDS.run,
-      EDIT_TOOLBAR_IDS.runTests,
-      EDIT_TOOLBAR_IDS.recordTests,
-    ];
+    const ids = [EDIT_TOOLBAR_IDS.build, EDIT_TOOLBAR_IDS.run];
 
     // The root cause, asserted directly rather than through its symptom: if no
     // `[class*="ct-button-…"]` size rule matches the class the view emits, the
@@ -328,12 +322,7 @@ for (const theme of THEMES) {
   }) => {
     const m = await measureToolbar(page, resolveThemeCss(theme.css));
     const marked = new Set(markedIdsFromSource());
-    const ids = [
-      EDIT_TOOLBAR_IDS.build,
-      EDIT_TOOLBAR_IDS.run,
-      EDIT_TOOLBAR_IDS.runTests,
-      EDIT_TOOLBAR_IDS.recordTests,
-    ];
+    const ids = [EDIT_TOOLBAR_IDS.build, EDIT_TOOLBAR_IDS.run];
 
     // Exactly the buttons the marks table names are icon buttons, and it names
     // as many as `EditMarkCount` says. A literal, so dropping a mark is a
@@ -481,4 +470,151 @@ test("verify the layout checks can fail", async ({ page }) => {
   expect(broken.gap).not.toBe(EXPECTED_GAP_PX);
   expect(broken.height).not.toBe(BAR_CONTROL_HEIGHT_PX);
   expect(broken.padding).toBe("1px 6px");
+});
+
+/**
+ * THE TWO SURFACES DRAW THEIR ICON BUTTONS THE SAME WAY.
+ *
+ * Two more reports, both about the same pair of buttons:
+ *
+ *   * *"The debugging control icons designed by our designer don't have
+ *     rectangular frames. The icons you created for the build and run tests
+ *     operations should not have either."*
+ *   * *"The foreground color of the vector shapes is also slightly different
+ *     I think."*
+ *
+ * WHERE THE FRAME CAME FROM, AND WHY NO AMOUNT OF READING THE MARKS FOUND IT.
+ * `edit_toolbar_marks.nim` emits two paths per mark and no rectangle. The
+ * frame was the BUTTON's border: both surfaces carry
+ * `ct-button-image-md-secondary`, `[class*="-button-"][class*="-secondary"]`
+ * gives that a `border: 0.03125em solid colors-ui-border-primary`, and the
+ * debugger strip cancels it per button with `ct-button-no-border` — twelve
+ * times, in `isonim_debug_controls_view`. This bar never adopted that half of
+ * the convention, so it computed `border: 1px solid rgb(86, 86, 86)` against
+ * the strip's `0px none`.
+ *
+ * WHY THE COLOUR IS ASSERTED AS A PARITY AND NOT AS A VALUE.
+ * The marks paint `currentColor` in both channels, so their colour is
+ * whatever the button's `color` resolves to. Writing the expected rgb here
+ * would pin a design token into a test file and go stale the first time the
+ * palette moves. Comparing the two SURFACES answers the actual question —
+ * "are these the same colour as the designer's?" — and stays true across any
+ * repalette. The reported difference was never a baked colour: there is no
+ * hex literal in the marks module, which the mutation arm above already
+ * guards, and both surfaces computed the identical rgb before this change.
+ *
+ * BOTH BARS ARE MOUNTED IN ONE PAGE, under the `#isonim-debug-controls` host
+ * they really share, because a value read from two separate page loads is two
+ * measurements that were never compared.
+ */
+test.describe("edit toolbar and debugger strip agree", () => {
+  const DEBUG_BUTTON_CLASS = "ct-button-image-md-secondary ct-button-no-border";
+
+  async function mountBoth(page: any, themeCss: string) {
+    const { icon } = buttonClassesFromView();
+    const markClass = markClassFromSource();
+    const mark = `<svg class="${markClass}" viewBox="0 0 16 16">` +
+      `<path d="M2 2L14 14" fill="none" stroke="currentColor" stroke-width="1"/></svg>`;
+
+    await page.setContent(
+      `<div id="menu" class="menu"><div id="isonim-debug-controls">` +
+        `<div class="ct-header isonim-debug-controls" ` +
+        `data-topbar-surface="debugger-controls">` +
+        `<button id="dbg" class="${DEBUG_BUTTON_CLASS}">${mark}</button>` +
+        `</div>` +
+        `<div class="ct-header edit-mode-toolbar" ` +
+        `data-topbar-surface="edit-commands" data-button-count="2">` +
+        `<div class="separate-bar"></div>` +
+        `<button id="edit" class="${icon}">${mark}</button>` +
+        `</div></div></div>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    await page.addStyleTag({ path: themeCss });
+    await page.evaluate(
+      () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+    );
+
+    return page.evaluate(() => {
+      const read = (id: string) => {
+        const el = document.getElementById(id)!;
+        const cs = getComputedStyle(el);
+        const path0 = el.querySelector("svg path")!;
+        return {
+          borderWidth: cs.borderWidth,
+          borderStyle: cs.borderStyle,
+          color: cs.color,
+          stroke: getComputedStyle(path0).stroke,
+        };
+      };
+      return { dbg: read("dbg"), edit: read("edit") };
+    });
+  }
+
+  for (const theme of THEMES) {
+    test(`icon buttons carry no frame (${theme.name})`, async ({ page }) => {
+      const m = await mountBoth(page, resolveThemeCss(theme.css));
+
+      // The designer's bar, stated first so a change there is a failure here
+      // rather than a silently moved goalpost.
+      expect(
+        m.dbg.borderWidth,
+        "the debugger strip is the reference and must draw no frame",
+      ).toBe("0px");
+
+      // The report, as the number that showed it. `1px` is what shipped.
+      expect(
+        m.edit.borderWidth,
+        `the edit toolbar's icon button draws a ${m.edit.borderWidth} ` +
+          `${m.edit.borderStyle} frame; the debugger strip's draws none`,
+      ).toBe(m.dbg.borderWidth);
+      expect(m.edit.borderStyle).toBe(m.dbg.borderStyle);
+    });
+
+    test(`marks inherit the same foreground on both surfaces (${theme.name})`, async ({
+      page,
+    }) => {
+      const m = await mountBoth(page, resolveThemeCss(theme.css));
+
+      // `currentColor` is only as good as the `color` it resolves against, so
+      // both are asserted: the button's colour, and that the mark actually
+      // took it rather than falling back to the initial `black`.
+      expect(
+        m.edit.color,
+        `the edit toolbar's buttons are ${m.edit.color}, the debugger ` +
+          `strip's are ${m.dbg.color}`,
+      ).toBe(m.dbg.color);
+      expect(m.edit.stroke, "the mark did not inherit the button's colour")
+        .toBe(m.edit.color);
+      expect(m.dbg.stroke).toBe(m.dbg.color);
+    });
+  }
+
+  test("verify the frame check can fail", async ({ page }) => {
+    // The class the view emitted before this change: the `-secondary` border
+    // with nothing cancelling it. Reproduced rather than described, so the
+    // assertion above is watched failing against the markup that shipped.
+    const themeCss = resolveThemeCss(THEMES[0].css);
+    await page.setContent(
+      `<div id="menu" class="menu"><div id="isonim-debug-controls">` +
+        `<div class="ct-header edit-mode-toolbar">` +
+        `<button id="shipped" class="ct-button-image-md-secondary edit-toolbar-button">` +
+        `<svg viewBox="0 0 16 16"><path d="M2 2L14 14"/></svg></button>` +
+        `</div></div></div>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    await page.addStyleTag({ path: themeCss });
+    await page.evaluate(
+      () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+    );
+
+    const shipped = await page.evaluate(() => {
+      const cs = getComputedStyle(document.getElementById("shipped")!);
+      return { borderWidth: cs.borderWidth, borderStyle: cs.borderStyle };
+    });
+
+    // The frame the report was pointing at, in numbers.
+    expect(shipped.borderWidth, "the shipped class must draw a frame, or the " +
+      "check above proves nothing").toBe("1px");
+    expect(shipped.borderStyle).toBe("solid");
+  });
 });

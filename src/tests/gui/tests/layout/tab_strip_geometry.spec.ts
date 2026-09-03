@@ -51,6 +51,7 @@
  * sat, 4px everywhere else.
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
@@ -275,5 +276,199 @@ test.describe("Pane tab strip geometry", () => {
       widest.tabs.length,
       "expected a stack with more than one editor tab",
     ).toBeGreaterThan(1);
+  });
+});
+
+/**
+ * THE SELECTED PANEL'S OUTLINE DOES NOT LEAVE THE PANEL.
+ *
+ * A fifth report on the same strip: *"when the last tab in a pane is
+ * selected, there is a bit of discontinuity in the border on the right, just
+ * below the point where the right border of the tabbar label for the tab
+ * begins."*
+ *
+ * WHY THIS IS NOT DRIVEN THROUGH THE APP LIKE THE TESTS ABOVE.
+ * The outline is one stroked SVG path whose `d` is computed from measured
+ * geometry by `buildPath`, inside the `{.emit.}` block of
+ * `setupSelectedPanelOutline` in `frontend/ui/layout.nim`. The defect is
+ * entirely in that arithmetic, and the arithmetic is a pure function of eight
+ * rectangles' worth of numbers — so it can be asserted exactly, at every tab
+ * position, instead of at whatever three positions a launched app happens to
+ * produce. The function is READ OUT OF THE NIM SOURCE rather than
+ * transcribed, for the reason the edit-toolbar spec gives about class names: a
+ * test carrying its own copy of the code under test cannot see the code change
+ * underneath it.
+ *
+ * WHAT THE DEFECT WAS, IN NUMBERS.
+ * On a 400px-wide stack whose last tab is active, the shipped builder emitted
+ *
+ *     … L 399.5 14.5  A 6 6 0 0 0 405.5 20.5  L 399.5 20.5  A 0 0 0 0 1 …
+ *
+ * against a panel whose right edge is at 399.5: down the tab's right edge, out
+ * SIX PIXELS past the panel, and straight back — a spur beginning just under
+ * the tab's top-right corner, which is where the report puts it. The
+ * stylesheet had already handled the case twice (`golden_layout.styl` hides
+ * the last active tab's `::after` connector and squares the panel's top-right
+ * radius, both on `:last-child`); only the path builder had never been told,
+ * which is why it also emitted that degenerate zero-radius arc.
+ */
+
+const LAYOUT_NIM = path.resolve(
+  __dirname,
+  "../../../../frontend/ui/layout.nim",
+);
+
+type BuildPath = (...args: unknown[]) => string;
+
+/**
+ * `buildPath`, lifted out of the `{.emit.}` block it lives in.
+ *
+ * Sliced between its own `function` keyword and the next one so the extraction
+ * fails loudly if the proc is restructured, rather than silently compiling
+ * some other function and asserting about it.
+ */
+function buildPathFromSource(): BuildPath {
+  const src = fs.readFileSync(LAYOUT_NIM, "utf8");
+  const from = src.indexOf("function buildPath(");
+  const to = src.indexOf("function radiusOf(", from);
+  if (from < 0 || to < 0) {
+    throw new Error(
+      `Could not lift buildPath out of ${LAYOUT_NIM}; the emit block has been ` +
+        `restructured and this spec must be updated with it.`,
+    );
+  }
+  // eslint-disable-next-line no-new-func
+  return new Function(`${src.slice(from, to)}\nreturn buildPath;`)() as BuildPath;
+}
+
+/** A 400x300 stack: a 20px tab strip over a panel. */
+const STACK = { w: 400, h: 300, panelTop: 20, panelBottom: 300, inset: 0.5 };
+
+/** `.lm_tab`'s 0.36em and the connector's 0.375em, at the 16px root. */
+const TAB_RADIUS = 5.76;
+const CONNECTOR_RADIUS = 6;
+
+/**
+ * Run the builder for a tab spanning [x0, x1].
+ *
+ * `panelTR` follows the stylesheet: the `:last-child` rule squares the panel's
+ * top-right corner, so passing the rounded value for a last tab would be
+ * testing a cascade the product does not apply.
+ */
+function outlineFor(
+  buildPath: BuildPath,
+  x0: number,
+  x1: number,
+  isFirst: boolean,
+  isLast: boolean,
+): string {
+  return buildPath(
+    STACK.w, STACK.h, x0, x1, 0, STACK.panelTop, STACK.panelBottom,
+    TAB_RADIUS, TAB_RADIUS,
+    isFirst ? 0 : TAB_RADIUS, // panel top-left, squared for a first tab
+    isLast ? 0 : TAB_RADIUS, // panel top-right, squared for a last tab
+    TAB_RADIUS, TAB_RADIUS,
+    CONNECTOR_RADIUS, STACK.inset, isFirst, isLast,
+  );
+}
+
+/** Every x the path visits — the endpoint of each M, L and A. */
+function xsOf(d: string): number[] {
+  const tok = d.trim().split(/\s+/);
+  const xs: number[] = [];
+  for (let i = 0; i < tok.length; ) {
+    if (tok[i] === "M" || tok[i] === "L") { xs.push(Number(tok[i + 1])); i += 3; }
+    else if (tok[i] === "A") { xs.push(Number(tok[i + 6])); i += 8; }
+    else i += 1;
+  }
+  return xs;
+}
+
+/** Concave connector arcs — sweep flag 0 is what makes a curve a connector. */
+function connectorCount(d: string): number {
+  return (d.match(/A [\d.]+ [\d.]+ 0 0 0 /g) ?? []).length;
+}
+
+test.describe("Selected panel outline", () => {
+  test("a last tab's outline stays inside the panel's right edge", () => {
+    const buildPath = buildPathFromSource();
+    const right = STACK.w - STACK.inset;
+
+    // Every last-tab width, not one: the spur is a fixed 6px overshoot, so a
+    // single sample could be dismissed as that tab's arithmetic.
+    for (const x0 of [80, 150, 220, 300, 360]) {
+      const d = outlineFor(buildPath, x0, STACK.w, false, true);
+      const max = Math.max(...xsOf(d));
+      expect(
+        Number((max - right).toFixed(3)),
+        `last tab starting at ${x0}px: the outline reaches x=${max}, ` +
+          `${(max - right).toFixed(2)}px past the panel's right edge at ` +
+          `${right}. That overshoot is the reported seam — the path leaves ` +
+          `the panel and doubles straight back.\n  d = ${d}`,
+      ).toBeLessThanOrEqual(0);
+
+      // And it is a seam, not merely an overshoot: prove the path never turns
+      // back on itself along the right-hand run.
+      expect(
+        d,
+        `last tab starting at ${x0}px: a zero-radius arc means the builder ` +
+          `still drew the corner the stylesheet squared away`,
+      ).not.toContain("A 0 0 ");
+    }
+  });
+
+  test("only the connectors that have room are drawn", () => {
+    const buildPath = buildPathFromSource();
+
+    // A middle tab has panel on both sides and keeps both curves. This is the
+    // regression guard on the fix: suppressing the right connector for every
+    // tab would pass the test above and flatten the product's identity.
+    expect(
+      connectorCount(outlineFor(buildPath, 150, 260, false, false)),
+      "a tab with panel on both sides must keep both concave connectors",
+    ).toBe(2);
+
+    // A first tab has nothing to its left; a last tab nothing to its right.
+    expect(
+      connectorCount(outlineFor(buildPath, 0, 110, true, false)),
+      "a first tab keeps its right connector and loses its left",
+    ).toBe(1);
+    expect(
+      connectorCount(outlineFor(buildPath, 300, 400, false, true)),
+      "a last tab keeps its left connector and loses its right",
+    ).toBe(1);
+
+    // A lone tab spans the whole strip and has room for neither.
+    expect(
+      connectorCount(outlineFor(buildPath, 0, 400, true, true)),
+      "a lone tab is flush on both sides and has room for no connector",
+    ).toBe(0);
+  });
+
+  test("verify the outline check can fail", () => {
+    // The builder as it shipped: no `tabIsLast`, no clamp. Reproduced here
+    // rather than described, so the assertion above is watched failing against
+    // the geometry the report was made about. If this ever stops overshooting,
+    // the check above has stopped measuring the thing it names.
+    const shipped = (x1: number, panelTR: number) => {
+      const l = STACK.inset;
+      const r = STACK.w - STACK.inset;
+      const pt = STACK.panelTop + STACK.inset;
+      const x1i = x1 - STACK.inset;
+      void l;
+      return [
+        "L", x1i, pt - CONNECTOR_RADIUS,
+        "A", CONNECTOR_RADIUS, CONNECTOR_RADIUS, 0, 0, 0, x1i + CONNECTOR_RADIUS, pt,
+        "L", r - panelTR, pt,
+      ].join(" ");
+    };
+
+    const d = shipped(STACK.w, 0);
+    const right = STACK.w - STACK.inset;
+    const max = Math.max(...xsOf(`M 0 0 ${d}`));
+
+    expect(max, "the shipped builder must overshoot, or this arm proves nothing")
+      .toBeGreaterThan(right);
+    expect(Number((max - right).toFixed(3))).toBe(CONNECTOR_RADIUS);
   });
 });

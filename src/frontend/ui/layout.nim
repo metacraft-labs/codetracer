@@ -348,7 +348,7 @@ proc setupSelectedPanelOutline() =
       // corner for all four drew a square outline over a rounded panel.
       function buildPath(w, h, tabX0, tabX1, tabTop, panelTop, panelBottom,
                          tabTL, tabTR, panelTL, panelTR, panelBR, panelBL,
-                         connR, inset, tabIsFirst) {
+                         connR, inset, tabIsFirst, tabIsLast) {
         // Inset by half the stroke so the line sits INSIDE the shape: SVG
         // centres a stroke on its path.
         var l = inset, r = w - inset, b = panelBottom - inset, t = tabTop + inset;
@@ -361,10 +361,46 @@ proc setupSelectedPanelOutline() =
         d.push('M', x0 + tabTL, t);
         d.push('L', x1 - tabTR, t);
         d.push('A', tabTR, tabTR, 0, 0, 1, x1, t + tabTR);
-        d.push('L', x1, pt - connR);
-        d.push('A', connR, connR, 0, 0, 0, x1 + connR, pt);
-        d.push('L', r - panelTR, pt);
-        d.push('A', panelTR, panelTR, 0, 0, 1, r, pt + panelTR);
+
+        // THE RIGHT CONNECTOR NEEDS ROOM, AND A LAST TAB HAS NONE.
+        //
+        // Reported as *"when the last tab in a pane is selected, there is a
+        // bit of discontinuity in the border on the right, just below the
+        // point where the right border of the tabbar label for the tab
+        // begins."*  Measured, on a 400-wide stack whose last tab is active:
+        // the path ran `L 399.5 14.5`, arced to `405.5 20.5` — SIX PIXELS PAST
+        // the panel's right edge at 399.5 — and then went `L 399.5 20.5`
+        // straight back.  A spur out and back, starting just under the tab's
+        // top-right corner.  That is the report, in the place the report puts
+        // it.
+        //
+        // The stylesheet already knew: `golden_layout.styl` switches the last
+        // active tab's `::after` connector off and squares the panel's
+        // top-right radius, both keyed on `:last-child`.  Only the path
+        // builder was never told, so it drew a connector into space that the
+        // paint had already given up, and then a degenerate `A 0 0` where the
+        // squared corner used to be.
+        //
+        // This is the mirror of the `tabIsFirst` branch below, which has
+        // always been here.  It was written once already — on the branch this
+        // outline came from — and lost in the same merge that dropped the
+        // docked outline; grafted back with it.
+        //
+        // The `Math.min` is the general form rather than a special case for
+        // the last tab: any tab whose right edge is within `connR` of the
+        // panel's corner has less room than the curve needs, and the clamp is
+        // what stops the path doubling back for all of them.
+        var cRight = tabIsLast ? 0 : Math.max(0, Math.min(connR, r - panelTR - x1));
+        if (cRight > 0.01) {
+          d.push('L', x1, pt - cRight);
+          d.push('A', cRight, cRight, 0, 0, 0, x1 + cRight, pt);
+          d.push('L', r - panelTR, pt);
+          d.push('A', panelTR, panelTR, 0, 0, 1, r, pt + panelTR);
+        } else {
+          // Flush: the tab's right edge and the panel's are one line, so run
+          // straight down it.
+          d.push('L', r, pt);
+        }
         d.push('L', r, b - panelBR);
         d.push('A', panelBR, panelBR, 0, 0, 1, r - panelBR, b);
         d.push('L', l + panelBL, b);
@@ -377,8 +413,16 @@ proc setupSelectedPanelOutline() =
         } else {
           d.push('L', l, pt + panelTL);
           d.push('A', panelTL, panelTL, 0, 0, 1, l + panelTL, pt);
-          d.push('L', x0 - connR, pt);
-          d.push('A', connR, connR, 0, 0, 0, x0, pt - connR);
+          // The same clamp on the left, for the same reason: a tab that starts
+          // within `connR` of the panel's top-left corner has no room for the
+          // curve either, and an unclamped one doubles back past `l`.
+          var cLeft = Math.max(0, Math.min(connR, x0 - panelTL - l));
+          if (cLeft > 0.01) {
+            d.push('L', x0 - cLeft, pt);
+            d.push('A', cLeft, cLeft, 0, 0, 0, x0, pt - cLeft);
+          } else {
+            d.push('L', x0, pt);
+          }
           d.push('L', x0, t + tabTL);
         }
         d.push('A', tabTL, tabTL, 0, 0, 1, x0 + tabTL, t);
@@ -463,7 +507,8 @@ proc setupSelectedPanelOutline() =
           radiusOf(items, null, 'borderBottomLeftRadius'),
           radiusOf(tab, '::before', 'borderBottomRightRadius') || 10,
           strokeWidth / 2,
-          tab.parentElement !== null && tab.parentElement.firstElementChild === tab));
+          tab.parentElement !== null && tab.parentElement.firstElementChild === tab,
+          tab.parentElement !== null && tab.parentElement.lastElementChild === tab));
       }
 
       // ---------------------------------------------------------------------
