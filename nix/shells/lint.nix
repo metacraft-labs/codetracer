@@ -16,13 +16,23 @@
 #
 # ## WHY IT IS THE RIGHT FIX EVEN THOUGH THE CAUSE IS NOT SETTLED
 #
-# Five explanations were proposed for that failure and four are dead by
+# Five explanations were proposed for that failure and THREE are dead by
 # measurement (checkout's global extraheader — written under a temporary HOME;
 # nix `access-tokens` — not applied to plain https git fetches; a rev that no
-# longer exists — different error; GitHub metering anonymous git universally —
-# a git-shaped anonymous probe returns 200). What survives is a THRESHOLD: the
-# failure is intermittent, and the repository it dies on MOVES between runs, so
-# it is not attached to any repository.
+# longer exists — different error).
+#
+# A fourth — GitHub metering anonymous git — was listed here as dead on the
+# strength of "a git-shaped anonymous probe returns 200". That probe, and every
+# other one in `.github/actions/dump-git-fetch-env`, sent only the GET half of
+# a fetch (`info/refs`). A fetch is that GET plus a POST to `/git-upload-pack`;
+# git prompts for a username on an HTTP 401 and nothing else; and the GET is
+# recorded at 200 in the same trace where git is challenged. So the 401 is on
+# the POST, which nothing measured until probes F/G were added to that action.
+# Treat metering as OPEN, not dead.
+#
+# What also survives is a THRESHOLD: the failure is intermittent, and the
+# repository it dies on MOVES between runs, so it is not attached to any
+# repository.
 #
 # A shell that does not fetch dozens of third-party repositories is immune to a
 # threshold if one exists, and is faster, more reproducible and not exposed to

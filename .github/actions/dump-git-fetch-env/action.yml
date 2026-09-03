@@ -275,6 +275,92 @@ runs:
         fi
 
         echo
+        echo "=== THE REQUEST NOBODY HAS MEASURED: THE UPLOAD-PACK POST ======"
+        # EVERY PROBE ABOVE ASKS THE WRONG QUESTION, AND THE TRACE BELOW SAYS SO.
+        #
+        # A smart-HTTP fetch is TWO requests, not one:
+        #
+        #   1. GET  /<repo>/info/refs?service=git-upload-pack   (ref advertisement)
+        #   2. POST /<repo>/git-upload-pack                     (the negotiation)
+        #
+        # Probes A-E, and the `probe_repo` URL at the top of this action, all
+        # exercise ONLY request 1. The `GIT_TRACE_CURL` slice below records
+        # `<= Recv header: HTTP/2 200` for request 1 and then shows git sending
+        # request 2 -- and the `head` cap on that slice has been cutting the
+        # response to request 2 off the end of the dump every single time.
+        #
+        # So the sentence "five HTTPS requests to this exact info/refs succeed
+        # while git is challenged" was never a paradox. Nothing had asked GitHub
+        # about the POST. `git` prompts for a username on exactly one trigger --
+        # an HTTP 401 -- and since request 1 demonstrably returns 200, the 401
+        # can only be on request 2.
+        #
+        # These two probes send a real protocol-v2 `ls-refs` body, so GitHub
+        # answers them the way it answers git rather than rejecting them as
+        # malformed. (A wrong packet-line length gets a 400 and means nothing;
+        # the lengths below are the byte counts of the lines that follow them.)
+        #
+        # READINGS FIXED IN ADVANCE:
+        #
+        #   F 401/403/429 while D is 200
+        #       -> CONFIRMED: the refusal is on the negotiation POST, which is
+        #          the expensive half and the half a rate limiter would meter.
+        #          The headers here name which limit. If G (the same POST with
+        #          credentials) is 200, authenticating is the remedy and this
+        #          job's own token is enough to implement it.
+        #
+        #   F 200 as well
+        #       -> the POST is NOT refused when curl makes it, so the difference
+        #          is between curl and git rather than between GET and POST, and
+        #          the next measurement belongs inside git. Say that instead of
+        #          reaching for the rate-limit story a second time.
+        #
+        #   F 200 AND the `git ls-remote` above succeeded
+        #       -> nothing was reproduced on this VM at all. Report that; a
+        #          green run cannot speak about the red one.
+        upload_pack_post() {
+          # $1 = label, $2 = repo base url, $3 = 1 to authenticate
+          local label="$1" base="$2" auth="$3" out body
+          # protocol-v2 `ls-refs`. Each 4-hex prefix counts itself plus the
+          # line: 0014 = 20 = 4 + len("command=ls-refs\n").
+          body="$(printf '0014command=ls-refs\n0015agent=git/2.39.5\n00010009peel\n0000')"
+          if [ "${auth}" = "1" ]; then
+            if [ -z "${DGFE_GH_TOKEN}" ]; then
+              printf '  %-34s SKIPPED (no token supplied to this action)\n' "${label}"
+              return 0
+            fi
+            out="$(printf 'header = "Authorization: Basic %s"\n' \
+              "$(printf 'x-access-token:%s' "${DGFE_GH_TOKEN}" | base64 | tr -d '\n')" \
+              | curl -sS -K - -o /dev/null -D - -w 'resolved-ip: %{remote_ip}\n' \
+                  --max-time 30 -A 'git/2.39.5' \
+                  -H 'Git-Protocol: version=2' \
+                  -H 'Content-Type: application/x-git-upload-pack-request' \
+                  --data-binary "${body}" \
+                  "${base}/git-upload-pack" 2>&1)"
+          else
+            out="$(curl -sS -o /dev/null -D - -w 'resolved-ip: %{remote_ip}\n' \
+              --max-time 30 -A 'git/2.39.5' \
+              -H 'Git-Protocol: version=2' \
+              -H 'Content-Type: application/x-git-upload-pack-request' \
+              --data-binary "${body}" \
+              "${base}/git-upload-pack" 2>&1)"
+          fi
+          printf '  %s\n' "${label}"
+          printf '%s\n' "${out}" \
+            | grep -iE '^HTTP/|^x-ratelimit|^retry-after|^x-github-request-id|^resolved-ip' \
+            | tr -d '\r' | sed 's/^/      /'
+        }
+
+        if command -v curl >/dev/null 2>&1; then
+          upload_pack_post "F  anon,  POST upload-pack -> anza-xyz/crossbeam" \
+            "https://github.com/anza-xyz/crossbeam" 0
+          upload_pack_post "G  auth,  POST upload-pack -> anza-xyz/crossbeam" \
+            "https://github.com/anza-xyz/crossbeam" 1
+        else
+          echo "  SKIPPED — no curl on this runner."
+        fi
+
+        echo
         echo "=== WHAT EACH OUTCOME MEANS, SAID IN ADVANCE ==================="
         # Written before the run, so the reading cannot be fitted to whatever
         # comes back. D is the discriminator: it is the ONLY probe that differs
@@ -308,13 +394,26 @@ runs:
         # THE FIRST MEASUREMENT THAT LOOKS INSIDE GIT RATHER THAN AROUND IT.
         #
         # Four explanations have been proposed for the `could not read
-        # Username` failure and all four were disproven by measurement:
-        # checkout's global extraheader (written under a temporary HOME), nix's
-        # `access-tokens` (not applied to plain https git fetches), a rev that
-        # no longer exists (different error), and GitHub metering
-        # unauthenticated git (probe D returns 200 presenting as git). Five
-        # HTTPS requests to this exact `info/refs` succeed while `git ls-remote`
-        # of the same URL on the same host in the same second is challenged.
+        # Username` failure. THREE are disproven by measurement: checkout's
+        # global extraheader (written under a temporary HOME), nix's
+        # `access-tokens` (not applied to plain https git fetches), and a rev
+        # that no longer exists (a different error entirely).
+        #
+        # THE FOURTH -- GitHub metering unauthenticated git -- WAS NOT
+        # DISPROVEN, AND THIS COMMENT USED TO CLAIM IT WAS. The claim rested on
+        # probe D returning 200 "presenting as git", and on the observation that
+        # five HTTPS requests to this exact `info/refs` succeed while
+        # `git ls-remote` of the same URL on the same host in the same second is
+        # challenged. Every one of those requests is the GET half of a fetch.
+        # A fetch is a GET *and* a POST to `/git-upload-pack`, git prompts for a
+        # username on an HTTP 401 and on nothing else, and the GET is recorded
+        # at 200 right here -- so the 401 was always on the POST, which nothing
+        # in this action measured until probes F and G above were added.
+        #
+        # The lesson is the one this file already preaches and then broke: the
+        # arm that says "your model is fine" gets the least scrutiny. An
+        # instrument that probes the wrong request will keep returning 200
+        # forever, and each 200 makes the wrong conclusion feel better supported.
         #
         # So: stop reasoning about what git might be doing and read what it
         # does. `GIT_TRACE_CURL` prints the request line, every request and
@@ -366,6 +465,17 @@ runs:
         echo "  --- what git SENT (Authorization/Cookie removed) ---"
         grep -a '=> Send header' /tmp/gfe-trace.txt | head -25 | trace_strip
         echo "  --- what git RECEIVED ---"
+        # NOT `head -25`. That cap was the reason this trace never answered the
+        # question it was added for: a fetch is a GET followed by a POST, the
+        # GET's 200 plus its response headers alone exceed 25 lines, and so the
+        # POST's status -- the only line that could explain the credential
+        # prompt -- was cut off the end of every dump this action has ever
+        # produced. Filter to the status lines and keep ALL of them, so both
+        # halves of the exchange are always visible.
+        echo "      (status lines from every response, both the GET and the POST)"
+        grep -a '<= Recv header' /tmp/gfe-trace.txt \
+          | grep -aiE 'HTTP/' | trace_strip
+        echo "      --- full headers, first response ---"
         grep -a '<= Recv header' /tmp/gfe-trace.txt | head -25 | trace_strip
         echo "  --- git's own error ---"
         grep -av 'trace:' /tmp/gfe-trace.txt | grep -aiE 'fatal|error|warning' \
