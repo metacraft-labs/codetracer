@@ -39,7 +39,14 @@ mkShell {
     gcc
     binutils
 
-    electron_33
+    # NOTE: `electron_33` used to sit here. The pinned nixpkgs
+    # (687f05a9184cad4eaf905c48b63649e3a86f5433) exposes `electron_37` through
+    # `electron_41` and no `electron_33`, so this line could not evaluate — it
+    # survived only because nothing imports this file (see the header note
+    # above; `nix/shells/default.nix` does not reference it). Removed rather
+    # than renumbered: this shell should not carry a *fourth* opinion about
+    # which Electron CodeTracer uses. The shipped runtime is pinned once, in
+    # `appimage-scripts/electron/package.json`.
 
     # node and build tools
     nodejs-18_x

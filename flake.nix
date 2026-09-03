@@ -382,9 +382,22 @@
               # TODO: this is already fixed in nixpkgs/unstable, so it may become
               #       unnecessary after a future `flake update`
               allowBroken = true;
-              permittedInsecurePackages = [
-                "electron-24.8.6"
-              ];
+              # NOTE: `permittedInsecurePackages = [ "electron-24.8.6" ]` used to
+              # sit here (and in the `nixpkgs-unstable` import below). It was
+              # dead: this flake's pinned nixpkgs
+              # (687f05a9184cad4eaf905c48b63649e3a86f5433) exposes electron
+              # attributes 37 through 41 and `electron` = 41.3.0 — there is no
+              # `electron_24` for the permit to apply to, so nothing in any
+              # evaluation was ever unblocked by it. Measured, not assumed:
+              #
+              #   nix eval --raw ... (attrNames matching ^electron)
+              #   -> electron = 41.3.0, electron_37..electron_41, no electron_24.
+              #
+              # A standing permit for an insecure package is worse than useless
+              # when the package is absent: it reads as "we knowingly ship a
+              # 2023 Chromium" to anyone auditing the flake, and it would
+              # silently start applying if a future nixpkgs bump reintroduced
+              # the attribute.
             };
             overlays = [
               # crates.io's API host now answers 403 to every `curl/*`
@@ -430,11 +443,10 @@
 
           _module.args.unstablePkgs = import nixpkgs-unstable {
             inherit system;
-            config = {
-              permittedInsecurePackages = [
-                "electron-24.8.6"
-              ];
-            };
+            # No `config` opinion: the `permittedInsecurePackages` entry that
+            # used to live here named `electron-24.8.6`, which this revision of
+            # nixpkgs does not contain. See the note on the `nixpkgs` import
+            # above.
             # `nixpkgs-unstable` `follows` `nixpkgs`, so this set is the same
             # revision and carries the same 403 on every crate download. It gets
             # the same overlay rather than being left as the one package set in
