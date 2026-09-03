@@ -21,9 +21,36 @@
 ##
 ## The numbers asserted below were cross-checked three ways on that same
 ## compiler — `nargo info` total, `--print-acir` rows, and `acir_locations`
-## entries — and all three said 17. The same three said 15 under the flake pin's
-## older compiler. The IDENTITY is what this suite pins; the VALUE moves with
-## the pin and is deliberately not asserted anywhere outside this file.
+## entries — and all three said 17. The same three said 15 under the compiler
+## the FLAKE pin carried at the time, `metacraft-labs/noir` `codetracer-temp`
+## (`v1.0.0-beta.2`, 2025-02-18). The IDENTITY is what this suite pins; the
+## VALUE moves with the pin and is deliberately not asserted anywhere outside
+## this file.
+##
+## THE TWO ENGINES NO LONGER DISAGREE, and that was MEASURED. On 2026-09-03 the
+## flake pin moved off `codetracer-temp` — the branch it sat on because it was
+## the only current one carrying a `flake.nix`, not because anyone wanted its
+## compiler — onto `codetracer`, the same lineage the wasm module is built
+## from. The native `nargo` at the new pin now answers::
+##
+##     $ nargo info --json
+##     {"programs":[{"package_name":"hello_noir",
+##       "functions":[{"name":"main","opcodes":17}],
+##       "unconstrained_functions":[
+##         {"name":"directive_invert","opcodes":9},
+##         {"name":"directive_integer_quotient","opcodes":8}]}]}
+##
+## — the same 17, and the same 9 + 8, this file asserts against the browser's
+## compiler. Run from
+## `/nix/store/0yki0k9gzfqg0js2wprmisrfr87sriqi-Noir/bin/nargo`
+## (`nargo version = 1.0.0-beta.26`), by absolute path and NOT from a dev
+## shell, because `detect-siblings.sh` prepends `../noir/target/release` to PATH
+## and a number from a sibling working copy is attributable to no revision any
+## commit names.
+##
+## Two engines answering different numbers for one circuit was a defect, and
+## the 15 was its symptom. It is recorded here as history rather than deleted,
+## because "the number changed" is only readable next to what it changed from.
 
 import std/[json, strutils]
 import std/unittest
@@ -199,8 +226,37 @@ suite "Live constraints — the pane computes what it compiled":
     check readSparse.reason.contains("7")
 
   test "live_the_legacy_locations_spelling_is_still_counted":
-    # Compilers before the call-stack tree emit `locations`. The flake pin's
-    # own `nargo` still does, and it was measured dense at 15 on this template.
+    # Compilers before the call-stack tree emit `locations`.
+    #
+    # NO SHIPPING COMPILER EMITS IT ANY MORE, and that is why this comment
+    # changed rather than this test being deleted. The claim that used to stand
+    # here — "the flake pin's own `nargo` still does" — was true of the pin the
+    # flake carried until 2026-09-03, `metacraft-labs/noir` `codetracer-temp`,
+    # whose `DebugInfo` is
+    #
+    #     pub locations: BTreeMap<OpcodeLocation, Vec<Location>>
+    #
+    # (`compiler/noirc_errors/src/debug_info.rs`). The pin now names branch
+    # `codetracer`, whose `DebugInfo` has `location_tree` and
+    # `pub acir_locations: BTreeMap<AcirOpcodeLocation, CallStackId>` and no
+    # `locations` at all (`tooling/noirc_artifacts/src/debug.rs`). So BOTH
+    # engines this product drives — the native `nargo` and the wasm module —
+    # now speak the same spelling, which is the convergence the pin move was
+    # for. Read at those two revisions in the source, not inferred from an
+    # artefact.
+    #
+    # The test stays because the reader it protects is not a compiler: it is an
+    # ARTEFACT ON DISK. A `.json` produced before the call-stack tree still
+    # spells it `locations`, and a pane that silently reported "no counts" for
+    # one would be the same class of error as the constant this whole suite
+    # exists to prevent. Delete this test when nothing can still be holding
+    # such an artefact — not when nothing still produces one.
+    #
+    # 15 IS A FIXTURE SIZE, NOT A MEASUREMENT. `denseLocations(15)` is
+    # synthesised right here; no compiler produced it. It happens to be the
+    # count the old pin gave for the bundled template, which is why it was
+    # chosen, but nothing about this test depends on that — it asserts that the
+    # legacy spelling is read at whatever size it has.
     let legacy = %*{"debug_infos": [{"locations": denseLocations(15)}]}
     let read = acirCountFromDebugInfo(legacy)
     check read.ok

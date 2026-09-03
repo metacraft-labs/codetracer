@@ -2,13 +2,39 @@
 #
 # WHY A PIN FILE AND NOT `flake.nix`'s `noir` INPUT
 #
-# `flake.nix` already pins a `noir` (ref `codetracer-temp`, rev 5e98f904) and
-# that pin is NOT this one. It supplies the NATIVE `nargo` the recorder builds
-# against; these are `wasm32-unknown-unknown` builds of two different crates
-# from the `codetracer` branch, consumed by a browser and by nothing else.
-# Sharing one pin between them would couple a desktop toolchain bump to a web
-# deploy in both directions, which is worse than two pins that each say what
-# they are for.
+# `flake.nix` already pins a `noir` (ref `codetracer`, rev ca080a58) and that
+# pin is NOT this one. It supplies the NATIVE `nargo` the recorder builds
+# against; these are `wasm32-unknown-unknown` builds of two different crates,
+# consumed by a browser and by nothing else. Sharing one pin between them would
+# couple a desktop toolchain bump to a web deploy in both directions, which is
+# worse than two pins that each say what they are for.
+#
+# THE TWO PINS NOW SIT ON THE SAME BRANCH, which they did not before. The flake
+# pin was on `codetracer-temp` — a branch whose last upstream sync is
+# `v1.0.0-beta.2` (2025-02-18) and whose tracer writes the retired trace.json
+# sidecar triplet — for the structural reason that it was the only branch
+# carrying a `flake.nix` that anyone would ship. Measured: 50 of
+# `metacraft-labs/noir`'s 63 refs carry one, and all 50 are the 2023-24 legacy
+# lineage (`master`, `plonky2`, the traits and closures branches,
+# `codetracer-temp`); the modern `codetracer` line has none. That requirement
+# is gone — the input is `flake = false` and `nix/packages/default.nix` builds
+# nargo itself — so the desktop and the browser now compile with engines from
+# one lineage instead of two that were eighteen months and 3,699 commits
+# apart.
+#
+# They are still two pins, and should stay two: this one moves on a web deploy,
+# that one moves on a toolchain bump, and neither should drag the other.
+#
+# WHY THE SIBLING CLONE BELOW IS STILL HERE, and when it can go. `NOIR_REV`
+# fd96a7d4 is on `ns11/nargo-test-in-wasm`, which branched BEFORE the workspace
+# stopped reaching `codetracer-trace-format` by path, so at that revision the
+# clone is still load-bearing. On `codetracer` it no longer is: the two crates
+# are git dependencies pinned at exactly the `TRACE_FORMAT_REV` below, which is
+# where that revision came from. The next `NOIR_REV` bump onto a descendant of
+# `codetracer`@ca080a58 makes the `clone_at "${TRACE_FORMAT_REPO}" ...` step in
+# `ci/deploy/build-noir-wasm.sh` redundant — at which point delete it there and
+# these two lines here, rather than leaving a clone whose only remaining effect
+# is to make the build look like it needs one.
 #
 # WHY PINNED AT ALL, rather than tracking the branch head. A deploy that
 # rebuilds from a moving ref cannot be reproduced, and the provenance string
@@ -86,11 +112,14 @@ NOIR_REF=ns11/nargo-test-in-wasm
 # `Call` before the `Step`.
 NOIR_REV=fd96a7d4a09fc91337c1df9c1ff8ba3b42ec9654
 
-# The noir workspace resolves `codetracer_trace_types` and
-# `codetracer_trace_writer_nim` through PATH dependencies on a sibling checkout
-# (`../codetracer-trace-format`). Without it `cargo build` fails before
-# compiling anything, with an error naming a missing Cargo.toml rather than a
-# missing repository — so the sibling is pinned here too.
+# AT `NOIR_REV` ABOVE, and no longer on `codetracer` — see the note at the top
+# of this file. The noir workspace at `ns11/nargo-test-in-wasm` still resolves
+# `codetracer_trace_types` and `codetracer_trace_writer_nim` through PATH
+# dependencies on a sibling checkout (`../codetracer-trace-format`). Without it
+# `cargo build` fails before compiling anything, with an error naming a missing
+# Cargo.toml rather than a missing repository — so the sibling is pinned here
+# too. On `codetracer` those are git dependencies at exactly this revision, so
+# a `NOIR_REV` descended from `codetracer`@ca080a58 will not need it.
 TRACE_FORMAT_REPO=https://github.com/metacraft-labs/codetracer-trace-format
 TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 

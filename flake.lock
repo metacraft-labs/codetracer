@@ -1276,32 +1276,10 @@
     "fenix_8": {
       "inputs": {
         "nixpkgs": [
-          "noir",
-          "nixpkgs"
-        ],
-        "rust-analyzer-src": "rust-analyzer-src_8"
-      },
-      "locked": {
-        "lastModified": 1727159616,
-        "narHash": "sha256-1VjZ+khJwZphRJZy2HvbMSCgi3OV7mu8RjVzqCxVi2k=",
-        "owner": "nix-community",
-        "repo": "fenix",
-        "rev": "4306d494985e00719573bbdeb863c27c6d83dc9c",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-community",
-        "repo": "fenix",
-        "type": "github"
-      }
-    },
-    "fenix_9": {
-      "inputs": {
-        "nixpkgs": [
           "wazero",
           "nixpkgs"
         ],
-        "rust-analyzer-src": "rust-analyzer-src_9"
+        "rust-analyzer-src": "rust-analyzer-src_8"
       },
       "locked": {
         "lastModified": 1759387261,
@@ -1676,24 +1654,6 @@
     "flake-parts_7": {
       "inputs": {
         "nixpkgs-lib": "nixpkgs-lib"
-      },
-      "locked": {
-        "lastModified": 1726153070,
-        "narHash": "sha256-HO4zgY0ekfwO5bX0QH/3kJ/h4KvUDFZg8YpkNwIbg1U=",
-        "owner": "hercules-ci",
-        "repo": "flake-parts",
-        "rev": "bcef6817a8b2aa20a5a6dbb19b43e63c5bf8619a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "hercules-ci",
-        "repo": "flake-parts",
-        "type": "github"
-      }
-    },
-    "flake-parts_8": {
-      "inputs": {
-        "nixpkgs-lib": "nixpkgs-lib_2"
       },
       "locked": {
         "lastModified": 1759362264,
@@ -4577,18 +4537,6 @@
     },
     "nixpkgs-lib": {
       "locked": {
-        "lastModified": 1725233747,
-        "narHash": "sha256-Ss8QWLXdr2JCBPcYChJhz4xJm+h/xjl4G0c0XlP6a74=",
-        "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/356624c12086a18f2ea2825fed34523d60ccc4e3.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/356624c12086a18f2ea2825fed34523d60ccc4e3.tar.gz"
-      }
-    },
-    "nixpkgs-lib_2": {
-      "locked": {
         "lastModified": 1754788789,
         "narHash": "sha256-x2rJ+Ovzq0sCMpgfgGaaqgBSwY+LST+WbZ6TytnT9Rk=",
         "owner": "nix-community",
@@ -4885,25 +4833,19 @@
       }
     },
     "noir": {
-      "inputs": {
-        "fenix": "fenix_8",
-        "flake-parts": "flake-parts_7",
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
+      "flake": false,
       "locked": {
-        "lastModified": 1780959564,
-        "narHash": "sha256-gkp/0/sMp0ZjPc+5ZievuG5Bmb/naUhVwv8W4g6f4Jo=",
-        "ref": "codetracer-temp",
-        "rev": "5e98f904cde508d574ba559da692a312476ff032",
-        "revCount": 5487,
+        "lastModified": 1788414311,
+        "narHash": "sha256-7Us3JiCD6UuhpK83ceeeFr4WafYocfwaPBT6VMhCfYc=",
+        "ref": "codetracer",
+        "rev": "ca080a58b05106e37a7b5178a11a8f4503951a2b",
+        "revCount": 8631,
         "type": "git",
         "url": "https://github.com/metacraft-labs/noir.git"
       },
       "original": {
-        "ref": "codetracer-temp",
-        "rev": "5e98f904cde508d574ba559da692a312476ff032",
+        "ref": "codetracer",
+        "rev": "ca080a58b05106e37a7b5178a11a8f4503951a2b",
         "type": "git",
         "url": "https://github.com/metacraft-labs/noir.git"
       }
@@ -5355,23 +5297,6 @@
       }
     },
     "rust-analyzer-src_8": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1727104575,
-        "narHash": "sha256-lB/ZS0SnHyE8Z3G8DIL/QJPg6w6x5ZhgVO2pBqnz89g=",
-        "owner": "rust-lang",
-        "repo": "rust-analyzer",
-        "rev": "3d0343251fe084b335b55c17a52bb4a3527b1bd0",
-        "type": "github"
-      },
-      "original": {
-        "owner": "rust-lang",
-        "ref": "nightly",
-        "repo": "rust-analyzer",
-        "type": "github"
-      }
-    },
-    "rust-analyzer-src_9": {
       "flake": false,
       "locked": {
         "lastModified": 1759301569,
@@ -5922,8 +5847,8 @@
     },
     "wazero": {
       "inputs": {
-        "fenix": "fenix_9",
-        "flake-parts": "flake-parts_8",
+        "fenix": "fenix_8",
+        "flake-parts": "flake-parts_7",
         "nixpkgs": [
           "nixpkgs"
         ],

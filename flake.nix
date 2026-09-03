@@ -42,15 +42,33 @@
     # narinfo entirely; ``git+https`` content-addresses the repository
     # snapshot from the actual ``git`` history rather than GitHub's
     # archive endpoint.
+    #
+    # A SOURCE INPUT, NOT A FLAKE — and that is the whole point of this
+    # declaration.  ``nix/packages/default.nix`` builds ``nargo`` from this
+    # source itself; see the ``noir`` attribute there for why.
+    #
+    # The short version: this input used to be ``flake = true``, and every
+    # branch of ``metacraft-labs/noir`` that carries a ``flake.nix`` is legacy.
+    # Measured: 50 of 63 refs have one, and all 50 are the 2023-24 lineage —
+    # ``master`` (a dead 2023 mirror), ``plonky2``, three dozen traits and
+    # closures branches, and ``codetracer-temp``, the newest of them, whose
+    # last upstream sync is ``v1.0.0-beta.2`` (2025-02-18).  Being a flake and
+    # being current were mutually exclusive, so the Nix packaging pinned the
+    # product to an eighteen-month-old compiler.  That was STRUCTURAL, not an
+    # oversight: the modern ``codetracer`` branch — the one whose tracer
+    # emits the ``.ct`` CTFS container this product's db-backend accepts as its
+    # only materialized-trace bundle — has no ``flake.nix`` and never had one.
+    #
+    # ``codetracer-temp``'s tracer writes the retired
+    # ``trace.json`` + ``trace_metadata.json`` + ``trace_paths.json`` sidecar
+    # triplet (``tooling/tracer/src/tracer_glue.rs::store_trace``), which
+    # ``db_backend_record.nim`` and ``print_trace.nim`` no longer read at all.
+    # Noir recording through ``ct record`` was therefore broken FOR AS LONG AS
+    # THIS INPUT WAS A FLAKE.  Dropping ``flake = true`` is what let the pin
+    # move to a branch that produces a trace this product can open.
     noir = {
-      # Bumped from 334c1ee9 to 5e98f904 (empty commit) to side-step
-      # the stale narinfo in the legacy binary cache +
-      # the per-runner fetcher-cache-v2.sqlite which both pin
-      # 334c1ee9 to a NAR hash that no longer matches the actual
-      # git content.  See CI-stabilization §4.
-      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer-temp&rev=5e98f904cde508d574ba559da692a312476ff032";
-      inputs.nixpkgs.follows = "nixpkgs";
-      flake = true;
+      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer&rev=ca080a58b05106e37a7b5178a11a8f4503951a2b";
+      flake = false;
     };
 
     wazero = {

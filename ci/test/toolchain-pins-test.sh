@@ -145,9 +145,16 @@ nodes = {
             "reprobuild": "reprobuild",
         }
     },
+    # THE NEXT THREE REVS ARE NOT FREE FIXTURE VALUES. `make_fixture` copies
+    # the REAL `ci/toolchain.pin` into the fixture repository, so a rev here
+    # that disagrees with the corresponding `LOCK_*` line in that file makes
+    # the baseline "a matching pin passes" arm fail for a reason that has
+    # nothing to do with the arm — the guard would be correctly reporting a
+    # declaration that lags its lock, in a fixture that meant to say neither.
+    # They move together with `ci/toolchain.pin` or not at all.
     "codetracer-toolchains_7": {"locked": {"rev": "942c995a36469853351af605da90025314ffc58e"}},
     "fenix_4": {"locked": {"rev": "dd2c80d0b88463ccc0402c86e9e72dbb354ac091"}},
-    "noir": {"locked": {"rev": "5e98f904cde508d574ba559da692a312476ff032"}},
+    "noir": {"locked": {"rev": "ca080a58b05106e37a7b5178a11a8f4503951a2b"}},
     "reprobuild": {"inputs": {"nim-fork-src": "nim-fork-src"}, "locked": {"rev": "2f124aebbc8a9e61e87de1aa13e15298a83f88c6"}},
     "nim-fork-src": {"locked": {"rev": "0b5b5ec507d2d9c731d222184c625851377a02c8"}},
     # The decoys: same NAME as a root input, different rev. Reading these

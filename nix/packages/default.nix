@@ -119,7 +119,170 @@
         # Keep backward compat alias for anything that still references this
         upstream-nim-codetracer = nim-codetracer;
 
-        noir = inputs.noir.packages.${system}.default;
+        # `nargo` and friends, built HERE from the `noir` source input rather
+        # than taken from a `packages.default` that input exports.
+        #
+        # WHY THIS IS PACKAGED LOCALLY.  The `noir` input used to be
+        # `flake = true` and this line used to read
+        # `inputs.noir.packages.${system}.default`. That was not an
+        # implementation detail: 50 of the 63 refs on `metacraft-labs/noir`
+        # carry a `flake.nix` and all 50 are the 2023-24 legacy lineage that
+        # `codetracer-temp` is the newest of, while the modern `codetracer`
+        # line — the one whose tracer emits the `.ct` CTFS container
+        # `db_backend_record.nim` accepts as its only materialized-trace
+        # bundle — has none. So "the input must be a flake" and "the input
+        # must be a branch that produces a usable trace" were in direct
+        # contradiction, and the flake requirement was winning: `ct record` on
+        # Noir was pinned to a tracer writing the retired trace.json sidecar
+        # triplet.
+        #
+        # The two ways out were to port `flake.nix`/`noir.nix`/`shell.nix`
+        # forward onto `codetracer`, or to stop needing a flake. This is the
+        # second. It was chosen on cost, and the cost is asymmetric:
+        #
+        #   * Forward-porting is not a copy. `codetracer-temp`'s `noir.nix` is
+        #     a `buildRustPackage` whose `cargoLock.outputHashes` name
+        #     `plonky2`, `plonky2_u32` and `runtime_tracing` — a dependency set
+        #     that does not exist on `codetracer`, which uses
+        #     `codetracer_trace_types` instead. Every line of it would be
+        #     rewritten. It would also have to grow, inside the noir fork, the
+        #     Nim-FFI provisioning that `codetracer_trace_writer_nim`'s
+        #     build.rs needs (`CODETRACER_TRACE_FORMAT_NIM_DIR`, the nimble
+        #     skip, the `stew`/`results` paths) — machinery THIS repository
+        #     already has, for its own `db-backend` derivation further down
+        #     this file. And it would add permanent Nix carry to a fork whose
+        #     stated strategy (`tooling/tracer/CARRY-VS-UPSTREAM.md`) is to
+        #     shrink its delta against upstream toward zero.
+        #
+        #   * Packaging locally costs this attribute and nothing else. It is
+        #     the house pattern: sixteen inputs in `flake.nix` are already
+        #     `flake = false`, and `trace-writer-ffi` below already builds a
+        #     Rust package from one of them the same way.
+        #
+        # The trade is real and is stated rather than hidden: this repository
+        # now owns noir's build recipe, so a change to noir's build (a new
+        # native dependency, a new required env var) lands here as a break
+        # instead of arriving pre-solved from the fork. That is the price of
+        # the fork not carrying Nix, and it is a price this repository is
+        # already paying sixteen times over.
+        #
+        # ## MEASURED, and every figure names the binary that produced it
+        #
+        # `nix build .#packages.aarch64-darwin.noir` on 2026-09-03 produced
+        # `/nix/store/0yki0k9gzfqg0js2wprmisrfr87sriqi-Noir`, whose `bin/nargo`
+        # self-reports `nargo version = 1.0.0-beta.26` (against the previous
+        # pin's `beta.2`). Six binaries: `nargo`, `acvm`, `noir-inspector`,
+        # `noir-profiler` — the four the flake-supplied package installed — plus
+        # `noir-execute` and `noir-ssa`. Everything below was run from that
+        # absolute path, NOT from a dev shell, because `detect-siblings.sh`
+        # prepends `../noir/target/release` to PATH and a figure from a sibling
+        # working copy is attributable to no revision this commit names.
+        #
+        #   * `nargo trace --out-dir` on the bundled template writes ONE file,
+        #     `hello_noir.ct`. That is the whole point of the move: the
+        #     previous pin's `store_trace` wrote `trace.json` +
+        #     `trace_metadata.json` + `trace_paths.json`, and
+        #     `db_backend_record.nim` reads none of the three. Noir recording
+        #     through `ct record` was broken and is not any more.
+        #
+        #   * `nargo info --json` on the same template reports
+        #     `main: 17 opcodes`, `directive_invert: 9`,
+        #     `directive_integer_quotient: 8`. Those are exactly the numbers
+        #     `src/common/noir_constraints.nim` records for the WASM module and
+        #     that `test_noir_live_constraints.nim` asserts. The two engines
+        #     said 15 and 17 before this move; they now both say 17. Two
+        #     engines disagreeing about one circuit was a defect, and it is the
+        #     one this move closes.
+        #
+        #   * The template compiles and its five tests pass with `§` and an em
+        #     dash in a comment. `codetracer-temp` refused that
+        #     ("Invalid comment character: only ASCII is currently supported",
+        #     `noirc_frontend/src/lexer/errors.rs`); upstream removed the check
+        #     in `93bb72f8` "feat!: allow UTF-8 in comments (#12699)", which
+        #     `codetracer` contains and `codetracer-temp` does not. The
+        #     ASCII-only restriction on the bundled template is retirable.
+        noir = pkgs.rustPlatform.buildRustPackage {
+          pname = "noir";
+          # Kept as `Noir` so the store path keeps the name the previous
+          # (flake-supplied) package produced; nothing should be matching on
+          # it, but a rename is a change nobody asked for.
+          name = "Noir";
+          version = "unstable";
+
+          src = inputs.noir;
+
+          cargoLock = {
+            lockFile = "${inputs.noir}/Cargo.lock";
+            # One entry per git-sourced package in noir's `Cargo.lock`.
+            # Packages that share a repository share a hash, because the hash
+            # is of the fetched tree, not of the package.
+            #
+            # `codetracer_trace_types` and `codetracer_trace_writer_nim` are
+            # git dependencies in noir's workspace (they used to be
+            # `../codetracer-trace-format` PATH dependencies, which a flake
+            # input cannot supply at all — that conversion is what made this
+            # package possible). `clap-markdown` and `sancov` are upstream
+            # noir's own git dependencies and have nothing to do with
+            # CodeTracer.
+            outputHashes = {
+              "codetracer_trace_types-0.19.0" = "sha256-wyP96ovIqARw1uFlc0m8i4tJR8121pI0nxqclGnVERU=";
+              "codetracer_trace_writer_nim-0.1.0" = "sha256-wyP96ovIqARw1uFlc0m8i4tJR8121pI0nxqclGnVERU=";
+              "clap-markdown-0.1.3" = "sha256-2vG7x+7T7FrymDvbsR35l4pVzgixxq9paXYNeKenrkQ=";
+              "sancov-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";
+              "sancov-sys-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";
+            };
+          };
+
+          nativeBuildInputs = [
+            # `codetracer_trace_writer_nim`'s build.rs compiles a Nim static
+            # library and links it. `nargo_cli` turns that crate on via
+            # `noir_tracer/nim-writer`, so nim is a BUILD input here, not an
+            # optional extra.
+            nim-codetracer
+            pkgs.gcc
+          ];
+
+          # RUSTC_BOOTSTRAP: noir's crates use nightly-only features under a
+          # stable toolchain; upstream's own packaging sets this too.
+          RUSTC_BOOTSTRAP = 1;
+          # nargo stamps these into `nargo --version`. The source arrives here
+          # as a Nix store path with no `.git`, so there is nothing truthful to
+          # read; say so rather than let the build script guess.
+          GIT_COMMIT = "false";
+          GIT_DIRTY = "false";
+
+          # `codetracer_trace_writer_nim`'s build.rs defaults to looking for
+          # the `codetracer-trace-format-nim` repository as a SIBLING of the
+          # trace-format checkout. Inside a cargo *git* checkout there is no
+          # such sibling, and inside the Nix sandbox there is no sibling of
+          # anything — so point it at the flake input explicitly. This is the
+          # one consumer obligation noir's path-to-git conversion created, and
+          # it is discharged here.
+          CODETRACER_TRACE_FORMAT_NIM_DIR = inputs.codetracer-trace-format-nim;
+          # ...and the same two knobs db-backend uses below: `nimble install`
+          # needs network access the sandbox does not have, and
+          # `requires "results" / "stew"` has to resolve without a nimble
+          # package store.
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1";
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS = "${inputs.nim-stew}/stew:${inputs.nim-stew}";
+
+          # WHAT GETS BUILT is noir's workspace `default-members` — the six CLI
+          # crates `nargo_cli`, `acvm_cli`, `artifact_cli`, `ssa_cli`,
+          # `profiler`, `inspector` — because that is what a bare
+          # `cargo build --release` at the workspace root selects, and there is
+          # deliberately no `cargoBuildFlags` narrowing it. The previous
+          # (flake-supplied) package installed four binaries — `nargo`, `acvm`,
+          # `noir-inspector`, `noir-profiler` — and this is a superset of them,
+          # so nothing that resolved before stops resolving. Everything else in
+          # the workspace (`compiler/wasm`, `tooling/tracer_wasm`, the fuzzers)
+          # stays unbuilt: `ci/deploy/noir-wasm.pin` builds the wasm halves from
+          # a different revision for a different consumer.
+
+          # noir's test suite drives `nargo` against `test_programs/` and wants
+          # a writable cargo home and a network; it is not what this
+          # derivation is for.
+          doCheck = false;
+        };
 
         wazero = inputs.wazero.packages.${system}.default;
 

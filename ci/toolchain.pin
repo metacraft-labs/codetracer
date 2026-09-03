@@ -116,4 +116,38 @@ EXPECT_RUSTC_COMMIT=ac68faa20
 # editing them without re-measuring makes that claim false.
 LOCK_CODETRACER_TOOLCHAINS=942c995a36469853351af605da90025314ffc58e
 LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
-LOCK_NOIR=5e98f904cde508d574ba559da692a312476ff032
+# Moved from 5e98f904 (ref `codetracer-temp`) to ca080a58 (ref `codetracer`).
+#
+# WHY THE EXPECT_* LINES ABOVE WERE NOT RE-MEASURED FOR THIS ONE, stated rather
+# than left for a reader to infer from an unchanged date. The rule at the top
+# of this section — a LOCK_* line is a claim that the EXPECT_* values were
+# observed at that revision — binds the inputs that DETERMINE those values.
+# `noir` determines neither: `EXPECT_NIM_*` comes from `codetracer-toolchains`
+# and `EXPECT_RUSTC_*` from `fenix`, and this input never contributed to
+# either. It followed the same `nixpkgs`, and while it did carry a `fenix` of
+# its OWN — node `fenix_8`, pinned at rev 4306d494 from 2024-09-24, two years
+# behind the `fenix` this file records — that node built noir's dev shell and
+# nothing else: the package codetracer consumed was `rustPlatform`-based and
+# never touched it. It has now stopped existing rather than stopped mattering.
+#
+# The `flake.lock` diff for this move is 11 lines added against 86 removed, and
+# all 86 are noir's own INPUT GRAPH disappearing. The `noir` node itself
+# remains — it still has to say which source revision is locked — but it is now
+# a leaf with `"flake": false`, so it has no outputs and no transitive inputs,
+# and there is no longer any path from it to a compiler at all.
+#
+# There IS a number this move changes, and it is deliberately not in this file:
+# the ACIR opcode count of the bundled Noir template, 15 at the old pin and 17
+# at this one — which is what the WASM engine already said, so the move makes
+# the two agree rather than making one of them move away. See
+# `src/frontend/viewmodel/tests/unit/test_noir_live_constraints.nim`, whose
+# header carries the measurement and says outright that the value moves with
+# the pin and is asserted nowhere else.
+#
+# AND ONE THAT IS NOT A NUMBER: `nargo trace` at this pin writes a single
+# `<package>.ct` CTFS container. At 5e98f904 it wrote the
+# trace.json + trace_metadata.json + trace_paths.json triplet that
+# `db_backend_record.nim` stopped reading in the 2026-05 convention pass, so
+# Noir recording through `ct record` did not work under the pin this line
+# replaces. This is a repair, not a version bump.
+LOCK_NOIR=ca080a58b05106e37a7b5178a11a8f4503951a2b
