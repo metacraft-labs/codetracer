@@ -4,6 +4,15 @@ description: >-
   applied to a github.com fetch — and probe one public repo with and without
   that config, so a failure to fetch it names its own cause.
 
+inputs:
+  gh-token:
+    description: >-
+      Installation token, used ONLY to send two authenticated probes as paired
+      controls against the anonymous one. Never printed. Optional: without it
+      the anonymous probe still runs and the controls say they were skipped.
+    required: false
+    default: ""
+
 runs:
   using: "composite"
   steps:
@@ -50,6 +59,9 @@ runs:
     # -----------------------------------------------------------------------
     - name: Dump the git fetch environment
       shell: bash
+      env:
+        # Through the environment, never a command line, and never echoed.
+        DGFE_GH_TOKEN: ${{ inputs.gh-token }}
       run: |
         set +e
 
@@ -163,6 +175,67 @@ runs:
           echo "  VERDICT: plain git can fetch this repo from this runner."
           echo "           If nix still cannot, the fault is inside nix's own"
           echo "           fetcher, not in git config."
+        fi
+
+        echo
+        echo "=== WHAT GITHUB ACTUALLY SAYS, AND WHY ========================="
+        # `git` reports every refusal as "could not read Username", which is
+        # what it does with any 401 — it cannot tell you WHY it was challenged.
+        # GitHub says why in the response headers, and git throws them away.
+        #
+        # 401 vs 403 vs 429 are three different causes with three different
+        # remedies (credentials, abuse blocking, per-IP rate limiting), and
+        # `x-ratelimit-remaining` / `retry-after` separate the last two.
+        # `x-github-request-id` is the value GitHub Support cannot proceed
+        # without, so it is captured now rather than after a round trip.
+        #
+        # THREE PROBES, SAME RUNNER, SAME SECOND. The anonymous one alone
+        # cannot distinguish "GitHub refuses us" from "github.com is
+        # unreachable from this host", so it is paired with two authenticated
+        # controls:
+        #
+        #   A  anonymous     -> a PUBLIC third-party repo   (the failing case)
+        #   B  authenticated -> the SAME public repo         (does an
+        #                       authenticated path fix third-party fetches?
+        #                       that is one of the two candidate remedies)
+        #   C  authenticated -> a metacraft-labs repo        (proves the host
+        #                       can reach github.com and the token is good)
+        #
+        # If A is 401/403/429 while C is 200, github.com is plainly reachable
+        # and it is ANONYMOUS access that is being refused. If B is also 200,
+        # authenticating third-party fetches is a remedy that would work.
+        gh_headers() {
+          # $1 = label, $2 = url, $3 = 1 to authenticate
+          local label="$1" url="$2" auth="$3" out
+          if [ "${auth}" = "1" ]; then
+            if [ -z "${DGFE_GH_TOKEN}" ]; then
+              printf '  %-34s SKIPPED (no token supplied to this action)\n' "${label}"
+              return 0
+            fi
+            # `-K -` reads the header from stdin, so the credential never
+            # appears in argv where anything reading /proc could see it.
+            out="$(printf 'header = "Authorization: Basic %s"\n' \
+              "$(printf 'x-access-token:%s' "${DGFE_GH_TOKEN}" | base64 | tr -d '\n')" \
+              | curl -sS -K - -o /dev/null -D - --max-time 30 "${url}" 2>&1)"
+          else
+            out="$(curl -sS -o /dev/null -D - --max-time 30 "${url}" 2>&1)"
+          fi
+          printf '  %s\n' "${label}"
+          printf '%s\n' "${out}" \
+            | grep -iE '^HTTP/|^x-ratelimit|^retry-after|^x-github-request-id' \
+            | tr -d '\r' | sed 's/^/      /'
+        }
+
+        refs_path=".git/info/refs?service=git-upload-pack"
+        if command -v curl >/dev/null 2>&1; then
+          gh_headers "A  anonymous     -> anza-xyz/crossbeam (public)" \
+            "https://github.com/anza-xyz/crossbeam${refs_path}" 0
+          gh_headers "B  authenticated -> anza-xyz/crossbeam (public)" \
+            "https://github.com/anza-xyz/crossbeam${refs_path}" 1
+          gh_headers "C  authenticated -> metacraft-labs/codetracer (control)" \
+            "https://github.com/metacraft-labs/codetracer${refs_path}" 1
+        else
+          echo "  SKIPPED — no curl on this runner."
         fi
 
         echo

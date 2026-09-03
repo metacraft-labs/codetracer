@@ -1263,6 +1263,10 @@ jobs:
       # this ends the guessing. Unconditional, cannot redden the job, prints
       # no credential value.
       - uses: ./.github/actions/dump-git-fetch-env
+        with:
+          # Two authenticated probes as paired controls against the
+          # anonymous one. Never printed; see the action.
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/bash.sh"
 
@@ -1323,6 +1327,10 @@ jobs:
       # this ends the guessing. Unconditional, cannot redden the job, prints
       # no credential value.
       - uses: ./.github/actions/dump-git-fetch-env
+        with:
+          # Two authenticated probes as paired controls against the
+          # anonymous one. Never printed; see the action.
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh"
 
@@ -1370,6 +1378,10 @@ jobs:
       # this ends the guessing. Unconditional, cannot redden the job, prints
       # no credential value.
       - uses: ./.github/actions/dump-git-fetch-env
+        with:
+          # Two authenticated probes as paired controls against the
+          # anonymous one. Never printed; see the action.
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nix.sh"
 
@@ -1429,6 +1441,10 @@ jobs:
       # this ends the guessing. Unconditional, cannot redden the job, prints
       # no credential value.
       - uses: ./.github/actions/dump-git-fetch-env
+        with:
+          # Two authenticated probes as paired controls against the
+          # anonymous one. Never printed; see the action.
+          gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # src/db-backend/build.rs invokes ``direnv exec <recorder-root>
