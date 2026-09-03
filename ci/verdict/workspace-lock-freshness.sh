@@ -13,8 +13,8 @@
 # `siblings:` entries now name their refs explicitly so it cannot happen again.
 #
 # But that coupling was also the ONLY thing anyone was watching. Removing it
-# fixes the pipeline and silences the alarm in the same stroke, and the
-# underlying condition is not small:
+# fixes the pipeline and silences the alarm in the same stroke, and at the time
+# this was written the underlying condition was not small:
 #
 #   Nothing has been committed to metacraft-labs/metacraft-manifests, for ANY
 #   repo, since 2026-08-02 (`b3b0ac6 Publish 1 workspace lock entry`).
@@ -23,13 +23,42 @@
 # A stall means no reproducible snapshot of the workspace exists for any commit
 # in that window — a fact about the whole workspace, not about CI.
 #
-# The failure is quieter than "the tooling broke". `repro`'s post-commit hook
-# still WRITES the lock, into a workspace-local checkout of the manifests repo,
-# and logs `ok wrote <path>` and exits 0. It is the commit-and-push that stopped:
-# the files sit untracked in that checkout. On 2026-08-13 a developer's checkout
-# held twenty untracked codetracer locks, including one for the exact commit CI
-# was reporting as unlocked. The tooling's success message was true and useless
-# — the artefact existed on one disk and nowhere else.
+# THAT OUTAGE IS OVER, and the sentence above is left standing only because the
+# rest of this comment is a record of why the alarm exists. Measured 2026-09-03:
+# the manifests repo has taken 609 commits since 2026-08-02, and since
+# 2026-08-27 the publisher has been the `metacraft-ci` account rather than a
+# developer's hook — 26 commits on 08-30, 23 on 09-02, 43 on 09-03. What closed
+# it is `.github/workflows/publish-workspace-lock.yml`: a push to a locked
+# mainline re-anchors the previous HEAD's lock onto the new one, server-side.
+# Publication is automatic and prolific. An alarm that fires here today is
+# reporting something else, and should not be read as this outage returning.
+#
+# TWO STALE EXPLANATIONS TO NOT REACH FOR, both checked on 2026-09-03:
+#
+#   * "The post-commit hook refuses while sibling worktrees are dirty." That
+#     refusal is REAL and reproducible locally — `repro` declines with "NO lock
+#     written: dirty sibling(s): ..." — but it is a DIFFERENT CODE PATH and does
+#     not operate here. The CI publisher is two steps, mint-a-token and call
+#     `publish-workspace-lock@dev`; it checks out no sibling and runs `git
+#     status` on nothing, because it copies lock metadata rather than resolving
+#     a workspace. A dirty local worktree cannot stall CI publication.
+#
+#   * "The lock was written but never pushed." That was the 2026-08-13 story —
+#     `repro`'s post-commit hook WROTE the lock into a workspace-local checkout,
+#     logged `ok wrote <path>` and exited 0, while the commit-and-push never
+#     happened, so twenty untracked codetracer locks sat on one developer's
+#     disk. True then; not the mechanism now, because the publisher is no longer
+#     a developer's disk.
+#
+# THE LIVE FAILURE MODE IS NEITHER, and it is silent: the re-anchor copies the
+# previous lock's repo SET verbatim, so a repository newly declared in a
+# project manifest NEVER enters a lineage already in flight. A lock keeps
+# publishing, on time, for every commit — and simply does not mention the new
+# repo. Nothing is red. `isonim` and `runquota` sat in exactly that state:
+# declared, and absent from every lock published afterwards, until the lineage
+# head was seeded by hand (metacraft-manifests@8ddec34f). A freshness alarm
+# cannot see this, because the lock is fresh. It is the lock's CONTENTS that
+# were stale.
 #
 # So this job exists to say that out loud, on every run, in its own name.
 #

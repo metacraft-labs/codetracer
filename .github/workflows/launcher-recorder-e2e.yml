@@ -460,7 +460,7 @@ jobs:
         # fixture check two steps below passed.  The workspace was just three
         # repos where the build needs eleven.
         #
-        # SIX OF THE EIGHT ARE ADDED HERE, BARE, and bare is not a shortcut: the
+        # ALL EIGHT ARE ADDED HERE, BARE, and bare is not a shortcut: the
         # workspace lock published for this commit pins every one of them, so
         # `clone-siblings` resolves each through NEED_LOCK=1 exactly as it does
         # the planner's three.  `codetracer-trace-format-nim` is repeated from
@@ -470,28 +470,30 @@ jobs:
         # per BLOCK, and a block naming one half only is the defect it names).
         # The repeat costs one extra clone of an already-pinned revision.
         #
-        # THE REMAINING TWO ARE NOT IN THIS REPO'S GIFT.  `isonim` and
-        # `runquota` are absent from the `codetracer` project in
-        # metacraft-labs/metacraft-manifests, so the lock has no revision for
-        # them and a bare entry would fail this step outright with
+        # THE LAST TWO WERE NOT IN THIS REPO'S GIFT UNTIL NOW.  `isonim` and
+        # `runquota` were absent from the `codetracer` project in
+        # metacraft-labs/metacraft-manifests, so the lock had no revision for
+        # them and a bare entry failed this step outright with
         #
         #   The workspace lock for codetracer@<sha> pins no revision for these
         #   sibling(s): isonim runquota
         #
         # -- verified against the published lock for d05e45f97e449c03, which
-        # names 96 repos and neither of those.  The two escape hatches are both
-        # closed on purpose and must stay closed: a `<name>=<ref>` entry is
-        # refused by the planner's own guard above (revisions come from the
-        # lock), and it would also push this repo past the shrink-only
-        # branch-tip ceiling in ci/test/sibling-provisioning-test.sh.
+        # names 96 repos and neither of those.  Both escape hatches were closed
+        # on purpose and stay closed: a `<name>=<ref>` entry is refused by the
+        # planner's own guard above (revisions come from the lock), and it would
+        # also push this repo past the shrink-only branch-tip ceiling in
+        # ci/test/sibling-provisioning-test.sh.
         #
-        # So this gate cannot go green from this repository alone.  The remedy
-        # is to declare `isonim` and `runquota` in codetracer's project manifest
-        # and publish a new lock -- `repro workspace lock --trigger-repo=
-        # codetracer` in a workspace whose `.repro/manifests` is a real git
-        # checkout -- and then add the two names to the block below.
-        # ci/test/launcher-recorder-e2e-workflow-test.sh holds that gap as a
-        # named, shrink-only exception so it cannot be forgotten or widened.
+        # metacraft-manifests@8ddec34f closed the gap at its source: it declares
+        # both repos in codetracer's project AND seeds the lock for dev HEAD
+        # 79275598 with them.  The second half mattered on its own -- an earlier
+        # commit there had already declared them, with no effect, because
+        # `publish-workspace-lock.yml` re-anchors each lock from its PARENT and
+        # copies the repo SET verbatim, so a newly declared repo never enters
+        # the lineage on its own.  With the lock seeded, the carry propagates
+        # both forward and the two names below resolve like every other bare
+        # entry.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
@@ -510,6 +512,8 @@ jobs:
             codetracer-trace-format
             codetracer-trace-format-nim
             codetracer-native-recorder
+            isonim
+            runquota
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot

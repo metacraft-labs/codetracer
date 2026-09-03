@@ -95,23 +95,23 @@ readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
 # real gap, so closing one forces its deletion; adding one is a deliberate,
 # reviewed act. There is no ceiling and no wildcard: an unlisted gap fails.
 #
-# Both entries below are the SAME cause, and it is not in this repository.
+# CLOSED, 2026-09-03: the `launcher-recorder-e2e` pair that used to head this
+# list is gone, and the shrink-only rule above is what forced its deletion.
 # `clone-siblings` resolves a bare entry from the workspace lock published for
 # the commit under test, and the `codetracer` project in
-# metacraft-labs/metacraft-manifests does not declare `isonim` or `runquota` --
-# the lock for d05e45f97e449c03 names 96 repos and neither of those. A bare
-# entry for either fails `Setup dev env` outright with "the workspace lock for
-# codetracer@<sha> pins no revision for these sibling(s)". The two ways to
-# spell around that are both closed on purpose: `launcher-recorder-e2e.yml`'s
-# planner refuses any `<name>=<ref>` entry, and a new branch-tip pin would
-# break the shrink-only ceiling in ci/test/sibling-provisioning-test.sh.
+# metacraft-labs/metacraft-manifests declared neither `isonim` nor `runquota`,
+# so a bare entry for either failed `Setup dev env` outright with "the
+# workspace lock for codetracer@<sha> pins no revision for these sibling(s)".
 #
-# REMEDY, and it is a change in another repository: declare `isonim` and
-# `runquota` in codetracer's project manifest, publish a lock
-# (`repro workspace lock --trigger-repo=codetracer`, in a workspace whose
-# `.repro/manifests` is a real git checkout -- where it is a plain directory
-# the lock is generated and then silently dropped), then add the two names to
-# the `siblings:` block in launcher-recorder-e2e.yml and delete these lines.
+# The remedy was in another repository and took TWO steps, not one. Declaring
+# the repos was necessary and by itself did nothing observable:
+# `publish-workspace-lock.yml` re-anchors each mainline lock from its PARENT
+# and copies the repo SET verbatim, so a repo declared after a lineage started
+# never enters it -- the lock published for dev HEAD 79275598, after the
+# declaration landed, still named neither. metacraft-manifests@8ddec34f did
+# both: it completed the declaration and seeded that lock with the six repos
+# the IsoNim provisioning needs. The two names are now in
+# launcher-recorder-e2e.yml's `siblings:` block, bare, like the other six.
 #
 # THE OTHER TWO JOBS ARE A DIFFERENT CASE and are recorded as FOUND, not as
 # accepted. This suite's first run reported them, they are static facts about
@@ -122,10 +122,6 @@ readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
 # listed rather than fixed because fixing them means editing jobs this change
 # cannot exercise; each line says what is missing and what would close it.
 KNOWN_GAPS=(
-	# The lock cannot answer for these two -- see the paragraph above.
-	"launcher-recorder-e2e.yml|launcher-recorder-e2e|isonim"
-	"launcher-recorder-e2e.yml|launcher-recorder-e2e|runquota"
-
 	# viewmodel-tests provisions the IsoNim family through
 	# .github/actions/setup-isonim-siblings and adds codetracer-trace-format-nim,
 	# codetracer-js-recorder and runquota as clone-repo steps -- but not

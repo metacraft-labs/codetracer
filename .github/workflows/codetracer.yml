@@ -4722,7 +4722,10 @@ jobs:
             nim-stackable-hooks=dev
             codetracer-visual-replay=dev
             codetracer-native-backend=dev
-            runquota=dev
+            # Bare since metacraft-manifests@8ddec34f: runquota is a member of
+            # codetracer's project there and the lock pins it, so the revision
+            # comes from the lock rather than from whatever `dev` points at.
+            runquota
 
       - name: Stage codetracer-trace-format into libs/
         # The nix flake build below overrides the codetracer-trace-format input
@@ -5416,7 +5419,15 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           siblings: |
-            isonim=dev
+            # `isonim` and `runquota` are BARE since metacraft-manifests@8ddec34f
+            # declared both in codetracer's project and seeded the dev-HEAD lock
+            # with them: their revision now comes from the per-commit workspace
+            # lock instead of whatever `dev` pointed at when the job ran. The
+            # remaining `=dev` entries below are the lock-outage tourniquet that
+            # ci/test/sibling-provisioning-test.sh caps and is converting; every
+            # one of them names a repo the lock ALREADY pins, so they are
+            # convertible the same way whenever that work is picked up.
+            isonim
             nim-everywhere=dev
             nim-acp=dev
             nim-agent-harbor=dev
@@ -5432,7 +5443,7 @@ jobs:
             codetracer-native-recorder=dev
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
-            runquota=dev
+            runquota
 
       - name: Run visual replay regression gate
         env:
