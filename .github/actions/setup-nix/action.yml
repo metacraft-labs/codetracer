@@ -13,10 +13,124 @@ inputs:
   gh-token:
     description: GitHub token for accessing private repos
     required: true
+  token-owner:
+    description: >-
+      The GitHub owner `gh-token` is valid for. The credential is scoped to
+      this owner's URL prefix and sent to nobody else. Must match the `owner:`
+      the token was minted with (`actions/create-github-app-token`).
+    required: false
+    default: metacraft-labs
 
 runs:
   using: "composite"
   steps:
+    # -----------------------------------------------------------------------
+    # THE CREDENTIAL IS SCOPED TO THE OWNER IT IS VALID FOR, AND THIS IS A FIX
+    # RATHER THAN HYGIENE.
+    #
+    # The whole `lint-*` stage was dying inside `nix develop`, before a single
+    # lint ran, on four separate runs:
+    #
+    #   error: Failed to fetch git repository https://github.com/anza-xyz/crossbeam
+    #   fatal: could not read Username for 'https://github.com': No such device or address
+    #
+    # `lint-nix` hit `mystenlabs/tidehunter.git` first; same cause, different
+    # input reached first. Both are transitive Cargo git dependencies of Sui
+    # and Solana, pulled in when the dev shell's `nativeBuildInputs` are
+    # evaluated through `nix-blockchain-development`.
+    #
+    # THE STAGE WAS NOT FAILING FOR WANT OF A CREDENTIAL. IT WAS FAILING
+    # BECAUSE OF ONE. Measured against the live endpoints:
+    #
+    #   repo                        anonymous   with a foreign Authorization
+    #   anza-xyz/crossbeam            200                 401
+    #   mystenlabs/tidehunter         200                 401
+    #   facebook/yoga                 200                 401
+    #
+    # All three are PUBLIC and fetch fine with no credential at all. GitHub
+    # does not fall back to anonymous when handed a credential that is not
+    # valid for the target: it answers 401, git asks for a username, there is
+    # no tty, and the fetch dies.
+    #
+    # Where the credential came from, by line number in the lint-nim job log:
+    #
+    #    78  actions/checkout sets  --local  http.https://github.com/.extraheader
+    #    95  and also               --global http.https://github.com/.extraheader
+    #        (its "Setting up auth for fetching submodules" group, because the
+    #        job checks out with `submodules: recursive`)
+    #   327  --local --unset-all    <- this is `persist-credentials: false`
+    #   715  nix develop runs, and fails
+    #   815  post-job cleanup, long after
+    #
+    # The token is an installation token minted with `owner: metacraft-labs`.
+    # Installed host-wide it is sent to anza-xyz, mystenlabs and facebook too,
+    # where it is worthless. The job's own comment states the right intent --
+    # "Do not leave the installation token in `.git/config` for the rest of the
+    # job" -- and `persist-credentials: false` simply does not reach the
+    # GLOBAL scope. The sentence is correct; the behaviour is not.
+    #
+    # VERIFIED WITH REAL `git`, in an isolated GIT_CONFIG_GLOBAL, against
+    # https://github.com/anza-xyz/crossbeam:
+    #
+    #   A. no credential at all                      -> OK (fetched)
+    #   B. host-wide header, as CI sets it           -> FAILED: fatal: could not
+    #                                                   read Username for
+    #                                                   'https://github.com'
+    #   C. same credential, scoped to metacraft-labs -> OK (fetched)
+    #   D. and C still applies the header to a       -> auth attempted (401 on a
+    #      metacraft-labs URL                            deliberately fake token)
+    #
+    # Row B reproduces the CI failure verbatim. Row C is this step. Row D is
+    # why this RE-SCOPES rather than merely unsetting.
+    #
+    # DO NOT "SIMPLIFY" THIS TO A BARE `--unset-all`. Removing the header
+    # works today only because the sibling-cloning action installs its own
+    # owner-scoped credential -- an argument from the present arrangement, and
+    # an unstated assumption of exactly the kind whose violation caused this
+    # failure. Re-scoping makes the invariant explicit and self-enforcing
+    # through git's longest-prefix URL match: metacraft-labs keeps auth,
+    # everyone else goes anonymous, and no later change has to know that some
+    # other action happens to leave a credential lying around.
+    # -----------------------------------------------------------------------
+    - name: Scope the GitHub credential to the owner it is valid for
+      shell: bash
+      env:
+        # Through the environment, never the command line: a token on an
+        # `args` list is visible to anything that can read the process table.
+        SETUP_NIX_GH_TOKEN: ${{ inputs.gh-token }}
+        SETUP_NIX_TOKEN_OWNER: ${{ inputs.token-owner }}
+      run: |
+        set -euo pipefail
+
+        # The host-wide header actions/checkout leaves behind. `--unset-all`
+        # exits 5 when the key is absent, which is the ordinary case on a
+        # fresh runner and not an error.
+        git config --global --unset-all http.https://github.com/.extraheader || true
+
+        if [ -z "${SETUP_NIX_GH_TOKEN}" ] || [ -z "${SETUP_NIX_TOKEN_OWNER}" ]; then
+          echo "setup-nix: no token or no owner; every github.com fetch in this" \
+               "job will be anonymous. Public inputs are fine; a private" \
+               "${SETUP_NIX_TOKEN_OWNER:-<owner>} repo will fail by name."
+          exit 0
+        fi
+
+        # `base64` wraps at 76 columns on Linux and takes no `-w` on macOS, so
+        # the newlines come off with `tr` rather than with a GNU-only flag.
+        header="AUTHORIZATION: basic $(printf 'x-access-token:%s' \
+          "${SETUP_NIX_GH_TOKEN}" | base64 | tr -d '\n')"
+
+        # The DERIVED value needs masking in its own right: the raw token is
+        # masked by the minting action, but its base64 is a different string
+        # and would not be redacted if anything ever echoed it.
+        echo "::add-mask::${header}"
+
+        git config --global --replace-all \
+          "http.https://github.com/${SETUP_NIX_TOKEN_OWNER}/.extraheader" "${header}"
+
+        echo "setup-nix: github.com credential scoped to" \
+             "https://github.com/${SETUP_NIX_TOKEN_OWNER}/ ; every other owner" \
+             "is fetched anonymously."
+
     - uses: metacraft-labs/nixos-modules/.github/setup-nix@main
       with:
         push-to-cache: false
