@@ -1572,14 +1572,29 @@ jobs:
             git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
             removed=$((removed + 1))
           done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
-                 | grep -ciE 'extraheader|x-access-token' || true)
+          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
+          # `run:` step on these nix-darwin runners -- the first version of
+          # this step used `grep -ciE` here, grep exited 127, `|| true`
+          # swallowed it, and the step printed "removed 1 key(s);  still
+          # present" with an EMPTY count. That is precisely the failure this
+          # step is supposed to be immune to: a verification that silently
+          # verifies nothing and still reads like a pass. No external
+          # commands in the check.
+          left=0
+          while IFS= read -r k; do
+            case "$k" in
+              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
+            esac
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
           echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
           if [ "$removed" -eq 0 ]; then
             echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
           fi
+          if [ "$left" -ne 0 ]; then
+            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
+          fi
           echo "cred-evict: keys remaining in $cfg:"
-          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -1699,14 +1714,29 @@ jobs:
             git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
             removed=$((removed + 1))
           done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
-                 | grep -ciE 'extraheader|x-access-token' || true)
+          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
+          # `run:` step on these nix-darwin runners -- the first version of
+          # this step used `grep -ciE` here, grep exited 127, `|| true`
+          # swallowed it, and the step printed "removed 1 key(s);  still
+          # present" with an EMPTY count. That is precisely the failure this
+          # step is supposed to be immune to: a verification that silently
+          # verifies nothing and still reads like a pass. No external
+          # commands in the check.
+          left=0
+          while IFS= read -r k; do
+            case "$k" in
+              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
+            esac
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
           echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
           if [ "$removed" -eq 0 ]; then
             echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
           fi
+          if [ "$left" -ne 0 ]; then
+            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
+          fi
           echo "cred-evict: keys remaining in $cfg:"
-          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -1796,14 +1826,29 @@ jobs:
             git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
             removed=$((removed + 1))
           done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
-                 | grep -ciE 'extraheader|x-access-token' || true)
+          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
+          # `run:` step on these nix-darwin runners -- the first version of
+          # this step used `grep -ciE` here, grep exited 127, `|| true`
+          # swallowed it, and the step printed "removed 1 key(s);  still
+          # present" with an EMPTY count. That is precisely the failure this
+          # step is supposed to be immune to: a verification that silently
+          # verifies nothing and still reads like a pass. No external
+          # commands in the check.
+          left=0
+          while IFS= read -r k; do
+            case "$k" in
+              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
+            esac
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
           echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
           if [ "$removed" -eq 0 ]; then
             echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
           fi
+          if [ "$left" -ne 0 ]; then
+            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
+          fi
           echo "cred-evict: keys remaining in $cfg:"
-          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -2766,14 +2811,29 @@ jobs:
             git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
             removed=$((removed + 1))
           done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
-                 | grep -ciE 'extraheader|x-access-token' || true)
+          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
+          # `run:` step on these nix-darwin runners -- the first version of
+          # this step used `grep -ciE` here, grep exited 127, `|| true`
+          # swallowed it, and the step printed "removed 1 key(s);  still
+          # present" with an EMPTY count. That is precisely the failure this
+          # step is supposed to be immune to: a verification that silently
+          # verifies nothing and still reads like a pass. No external
+          # commands in the check.
+          left=0
+          while IFS= read -r k; do
+            case "$k" in
+              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
+            esac
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
           echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
           if [ "$removed" -eq 0 ]; then
             echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
           fi
+          if [ "$left" -ne 0 ]; then
+            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
+          fi
           echo "cred-evict: keys remaining in $cfg:"
-          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -3164,14 +3224,29 @@ jobs:
             git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
             removed=$((removed + 1))
           done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
-                 | grep -ciE 'extraheader|x-access-token' || true)
+          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
+          # `run:` step on these nix-darwin runners -- the first version of
+          # this step used `grep -ciE` here, grep exited 127, `|| true`
+          # swallowed it, and the step printed "removed 1 key(s);  still
+          # present" with an EMPTY count. That is precisely the failure this
+          # step is supposed to be immune to: a verification that silently
+          # verifies nothing and still reads like a pass. No external
+          # commands in the check.
+          left=0
+          while IFS= read -r k; do
+            case "$k" in
+              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
+            esac
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
           echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
           if [ "$removed" -eq 0 ]; then
             echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
           fi
+          if [ "$left" -ne 0 ]; then
+            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
+          fi
           echo "cred-evict: keys remaining in $cfg:"
-          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
         # Only so that `uses: ./.github/actions/setup-nix` below resolves; no
@@ -3497,6 +3572,25 @@ jobs:
         # `--global --unset` can report success while leaving the actual
         # offending file untouched.
         #
+        # CONFIRMED ON THE HOSTS, not merely reproduced. A six-leg diagnostic
+        # (run 33729089916) dumped `git config --list --show-origin` from the
+        # m3 pool before checkout. m3-mcl-004 and m3-mcl-005 -- the two that
+        # failed -- carried, in `/private/var/lib/github-runners/mcl-00N/.gitconfig`:
+        #     http.https://github.com/metacraft-labs/.extraheader  (553 bytes)
+        # m3-mcl-001 -- which succeeded -- had the SAME seven other keys and
+        # NOT that one (243-byte file vs 856-byte file). One variable, and it
+        # is this key. This step then removed it on m3-mcl-004 and the very
+        # next `Checkout` on that host went green.
+        #
+        # STILL UNKNOWN: WHO WRITES IT. `configure-git-auth.sh` in
+        # metacraft-labs/metacraft-github-actions installs exactly this key but
+        # deliberately passes it through `$GITHUB_ENV`, which is job-scoped, so
+        # on its documented path nothing should reach this file. Something on
+        # these runners writes it anyway (mcl-004's copy was stamped 08:15 on
+        # the day of the outage). Until that writer is found this step is a
+        # mitigation, not a cure -- it runs before every checkout precisely
+        # because the poison can come back.
+        #
         # WHY IT IS NEVER LEGITIMATE. An `http.*.extraHeader` in a home
         # directory that is reused across jobs is a minted installation token
         # outliving the job that minted it: dead within the hour, and a live
@@ -3536,14 +3630,29 @@ jobs:
             git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
             removed=$((removed + 1))
           done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
-                 | grep -ciE 'extraheader|x-access-token' || true)
+          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
+          # `run:` step on these nix-darwin runners -- the first version of
+          # this step used `grep -ciE` here, grep exited 127, `|| true`
+          # swallowed it, and the step printed "removed 1 key(s);  still
+          # present" with an EMPTY count. That is precisely the failure this
+          # step is supposed to be immune to: a verification that silently
+          # verifies nothing and still reads like a pass. No external
+          # commands in the check.
+          left=0
+          while IFS= read -r k; do
+            case "$k" in
+              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
+            esac
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
           echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
           if [ "$removed" -eq 0 ]; then
             echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
           fi
+          if [ "$left" -ne 0 ]; then
+            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
+          fi
           echo "cred-evict: keys remaining in $cfg:"
-          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -3850,14 +3959,29 @@ jobs:
             git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
             removed=$((removed + 1))
           done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
-                 | grep -ciE 'extraheader|x-access-token' || true)
+          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
+          # `run:` step on these nix-darwin runners -- the first version of
+          # this step used `grep -ciE` here, grep exited 127, `|| true`
+          # swallowed it, and the step printed "removed 1 key(s);  still
+          # present" with an EMPTY count. That is precisely the failure this
+          # step is supposed to be immune to: a verification that silently
+          # verifies nothing and still reads like a pass. No external
+          # commands in the check.
+          left=0
+          while IFS= read -r k; do
+            case "$k" in
+              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
+            esac
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
           echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
           if [ "$removed" -eq 0 ]; then
             echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
           fi
+          if [ "$left" -ne 0 ]; then
+            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
+          fi
           echo "cred-evict: keys remaining in $cfg:"
-          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -4424,14 +4548,29 @@ jobs:
             git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
             removed=$((removed + 1))
           done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
-                 | grep -ciE 'extraheader|x-access-token' || true)
+          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
+          # `run:` step on these nix-darwin runners -- the first version of
+          # this step used `grep -ciE` here, grep exited 127, `|| true`
+          # swallowed it, and the step printed "removed 1 key(s);  still
+          # present" with an EMPTY count. That is precisely the failure this
+          # step is supposed to be immune to: a verification that silently
+          # verifies nothing and still reads like a pass. No external
+          # commands in the check.
+          left=0
+          while IFS= read -r k; do
+            case "$k" in
+              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
+            esac
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
           echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
           if [ "$removed" -eq 0 ]; then
             echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
           fi
+          if [ "$left" -ne 0 ]; then
+            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
+          fi
           echo "cred-evict: keys remaining in $cfg:"
-          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
 
       - name: Checkout CodeTracer
         uses: actions/checkout@v5
@@ -5478,190 +5617,6 @@ jobs:
         run: |
           bash ci/verdict/queue-watchdog.sh --poll \
             --deadline-minutes 30 --interval-seconds 30
-
-  runner-git-auth-probe:
-    # TEMPORARY DIAGNOSTIC. Delete once the verdict below is read.
-    #
-    # THE OBSERVATION. On run 33725620003 (dev, c87e6424) `actions/checkout`
-    # died on two of the four m3 darwin runners and succeeded on the other two,
-    # in the same run, with tokens minted the same way seconds apart:
-    #
-    #   m3-mcl-004  test-non-gui (macos)      Checkout FAILED
-    #   m3-mcl-005  origin-DAP (macOS)        Checkout FAILED
-    #   m3-mcl-001  test-ui-tests (macos)     Checkout SUCCEEDED
-    #   m3-mcl-006  reprobuild-macos-smoke    Checkout SUCCEEDED
-    #
-    # The failures are three identical retries of
-    #   fatal: could not read Username for 'https://github.com':
-    #   terminal prompts disabled
-    # emitted one line after checkout installs
-    # `http.https://github.com/.extraheader`. That message is what git prints
-    # when a credential it DID send was REFUSED and the fallback prompt is
-    # disabled -- it is the symptom of a 401, not evidence that no credential
-    # existed.
-    #
-    # WHY A PROBE AND NOT A PATCH. The identical string was diagnosed once
-    # before as host-wide git config; a fix landed and the job failed
-    # identically, because `actions/checkout` copies the runner's
-    # `$HOME/.gitconfig` into a throwaway `_temp/<uuid>/` and overrides HOME,
-    # so the earlier fix had been written to a file the failing step never
-    # read. Proving a mechanism CAN produce the message is not proving it is
-    # the one present. This job reads VALUES out of the failing hosts instead
-    # of asserting a verdict, and it enumerates its outcomes in advance:
-    #
-    #   PROBE-1 != 200                 -> the minted App token cannot see this
-    #                                     repo (token-scope). Fix is the App
-    #                                     installation, not this workflow.
-    #   PROBE-3 ok and PROBE-4 fails   -> the runner's own git configuration
-    #                                     defeats the checkout credential.
-    #                                     PROBE-0/PROBE-7 name the exact file
-    #                                     and key. Fix is on that host.
-    #   PROBE-3 and PROBE-4 both ok    -> neither the token nor host config is
-    #                                     at fault; the difference lives inside
-    #                                     checkout's own process. PROBE-8's
-    #                                     env dump (GIT_*, proxies) is the
-    #                                     "none of the above" arm.
-    #   PROBE-5 fails                  -> even anonymous access is broken from
-    #                                     this host: network / TLS / proxy.
-    #                                     Note metacraft-labs/codetracer is
-    #                                     PUBLIC, so a BAD credential is
-    #                                     strictly worse than none -- it turns
-    #                                     a working anonymous fetch into a 401.
-    #
-    # Six legs on the same label so the matrix fans out across the whole m3
-    # pool and we get a dump from the bad hosts, whichever they are. Each leg
-    # is seconds long and never fails the run.
-    strategy:
-      fail-fast: false
-      matrix:
-        leg: [1, 2, 3, 4, 5, 6]
-    runs-on: aarch64-darwin
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - name: Mint installation token
-        id: ci_token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          owner: metacraft-labs
-
-      - name: Dump host git configuration and probe the minted token
-        env:
-          CI_APP_TOKEN: ${{ steps.ci_token.outputs.token }}
-        run: |
-          set -uo pipefail
-          export GIT_TERMINAL_PROMPT=0
-          URL=https://github.com/metacraft-labs/codetracer
-
-          sha12() {
-            if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | cut -c1-12
-          }
-
-          # Print `key=value` lines with anything secret-shaped replaced by its
-          # length and a hash, so two hosts can be compared and a stale token
-          # spotted without any token reaching the log.
-          redact() {
-            while IFS= read -r line; do
-              [ -n "$line" ] || continue
-              key="${line%%=*}"
-              if [ "$key" = "$line" ]; then printf '%s\n' "$line"; continue; fi
-              val="${line#*=}"
-              case "$val" in
-                *ghs_*|*ghp_*|*gho_*|*github_pat_*|*x-access-token*|*AUTHORIZATION*|*Authorization*|*authorization*)
-                  printf '%s=<REDACTED len=%s sha256=%s>\n' \
-                    "$key" "${#val}" "$(printf '%s' "$val" | sha12)" ;;
-                *)
-                  if [ "${#val}" -ge 40 ]; then
-                    printf '%s=<REDACTED-long len=%s sha256=%s>\n' \
-                      "$key" "${#val}" "$(printf '%s' "$val" | sha12)"
-                  else
-                    printf '%s=%s\n' "$key" "$val"
-                  fi ;;
-              esac
-            done
-          }
-
-          echo "=============================================================="
-          echo "RUNNER_NAME=${RUNNER_NAME:-<unset>}  leg=${{ matrix.leg }}"
-          echo "HOME=$HOME"
-          echo "git=$(command -v git)  $(git --version)"
-          echo "=============================================================="
-
-          echo "--- PROBE-0: every git setting, with the file it came from ---"
-          git config --list --show-origin --show-scope 2>&1 | redact
-          echo "--- PROBE-0b: ls -la \$HOME ---"
-          ls -la "$HOME" 2>&1 | head -40
-          echo "--- PROBE-0c: does \$HOME/.gitconfig exist, and what keys? ---"
-          if [ -f "$HOME/.gitconfig" ]; then
-            echo "present: $(ls -la "$HOME/.gitconfig")"
-            echo "keys:"
-            git config --file "$HOME/.gitconfig" --list --name-only 2>&1 | sed 's/^/  /'
-          else
-            echo "absent"
-          fi
-          echo "--- PROBE-0d: /etc/gitconfig ---"
-          if [ -f /etc/gitconfig ]; then git config --file /etc/gitconfig --list 2>&1 | redact; else echo "absent"; fi
-
-          echo "--- PROBE-7: settings git would APPLY to $URL ---"
-          echo "http.*:"
-          git config --get-urlmatch http "$URL" 2>&1 | redact | sed 's/^/  /'
-          echo "credential.*:"
-          git config --get-urlmatch credential "$URL" 2>&1 | redact | sed 's/^/  /'
-
-          echo "--- PROBE-8: environment that can steer git (names + lengths) ---"
-          for v in $(env | sed -n 's/^\(GIT[A-Z_0-9]*\)=.*/\1/p'; \
-                     env | sed -n 's/^\([Hh][Tt][Tt][Pp][Ss]*_[Pp][Rr][Oo][Xx][Yy]\)=.*/\1/p'; \
-                     env | sed -n 's/^\([Nn][Oo]_[Pp][Rr][Oo][Xz][Yy]\)=.*/\1/p'; \
-                     env | sed -n 's/^\(ALL_PROXY\|all_proxy\)=.*/\1/p'); do
-            eval "vv=\${$v-}"
-            echo "  $v (len=${#vv})"
-          done
-
-          # The Authorization blob checkout would install. Masked before use.
-          AUTH="$(printf 'x-access-token:%s' "$CI_APP_TOKEN" | base64 | tr -d '\n')"
-          echo "::add-mask::$AUTH"
-
-          echo "--- PROBE-1: token against the REST API (expect 200) ---"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $CI_APP_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            "https://api.github.com/repos/metacraft-labs/codetracer" 2>&1 || echo curl-failed)
-          echo "  GET /repos/metacraft-labs/codetracer -> $code"
-
-          echo "--- PROBE-2: how many repos is this installation scoped to? ---"
-          curl -sS -H "Authorization: Bearer $CI_APP_TOKEN" \
-            -H 'Accept: application/vnd.github+json' \
-            "https://api.github.com/installation/repositories?per_page=1" 2>&1 \
-            | tr ',' '\n' | grep -i 'total_count' | head -1 | sed 's/^/  /'
-
-          PRISTINE="$RUNNER_TEMP/probe-pristine-home"
-          mkdir -p "$PRISTINE"
-
-          echo "--- PROBE-3: header auth, PRISTINE home (host config excluded) ---"
-          env HOME="$PRISTINE" \
-              GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-              GIT_CONFIG_COUNT=1 \
-              GIT_CONFIG_KEY_0='http.https://github.com/.extraheader' \
-              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH" \
-              git ls-remote "$URL" HEAD 2>&1 | head -3 | sed 's/^/  /'
-
-          echo "--- PROBE-4: header auth, REAL runner home (host config ACTIVE) ---"
-          env GIT_CONFIG_COUNT=1 \
-              GIT_CONFIG_KEY_0='http.https://github.com/.extraheader' \
-              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH" \
-              git ls-remote "$URL" HEAD 2>&1 | head -3 | sed 's/^/  /'
-
-          echo "--- PROBE-5: anonymous, REAL runner home (repo is public) ---"
-          git ls-remote "$URL" HEAD 2>&1 | head -3 | sed 's/^/  /'
-
-          echo "--- PROBE-6: anonymous, PRISTINE home ---"
-          env HOME="$PRISTINE" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-              git ls-remote "$URL" HEAD 2>&1 | head -3 | sed 's/^/  /'
-
-          rm -rf "$PRISTINE"
-          echo "=============== probe complete on ${RUNNER_NAME:-?} ==============="
 
   ci-verdict:
     # Final gate: assert that CI actually RAN the jobs it gates on.
