@@ -312,10 +312,21 @@ run_scenario() {
 	local build_trace="$WORK_ROOT/$label.build.trace"
 	local once_status build_status
 
+	# `${a[@]+"${a[@]}"}`, not `"${a[@]}"`. Under `set -u` bash 3.2 -- which is
+	# the ONLY bash on a stock macOS, at /bin/bash -- treats the expansion of an
+	# EMPTY array as an unbound variable and aborts. The scenarios that pass no
+	# trailing `K=V` overrides (linux-legacy-debug, darwin, windows) therefore
+	# died here with `scenario_env[@]: unbound variable` before either script
+	# ran, and reported `FAIL build-once.sh exits 0` with an EMPTY exit status --
+	# a message that points at the code under test rather than at this harness.
+	# The scenarios that do pass an override survived, so the harness looked
+	# merely half-broken. scripts/build.sh:110 already uses this exact idiom.
 	once_status="$(run_script build-once.sh "$once_trace" \
-		"$WORK_ROOT/$label-once" "$uname_s" "$port" "${scenario_env[@]}")"
+		"$WORK_ROOT/$label-once" "$uname_s" "$port" \
+		${scenario_env[@]+"${scenario_env[@]}"})"
 	build_status="$(run_script build.sh "$build_trace" \
-		"$WORK_ROOT/$label-build" "$uname_s" "$port" "${scenario_env[@]}")"
+		"$WORK_ROOT/$label-build" "$uname_s" "$port" \
+		${scenario_env[@]+"${scenario_env[@]}"})"
 
 	if [ "$once_status" != "0" ]; then
 		fail "build-once.sh exits 0" "exit status $once_status
@@ -423,7 +434,30 @@ $(normalized "$build_trace" | sed 's/^/    /')"
 	local livereload_argv
 	livereload_argv="$(argv_of "$build_trace" livereload)"
 	if [ -z "$livereload_argv" ]; then
-		fail "(F) build.sh starts livereload" "no livereload record"
+		# `no livereload record` on its own is not enough to act on, and this
+		# check has failed on the macOS CI runner in all three REPRO scenarios
+		# while passing in both TUP scenarios -- deterministic by branch, not
+		# flaky. It has NOT been reproduced on an idle developer m4: bash 5.3,
+		# 3x-oversubscribed CPU load, and a util-linux-shaped `setsid` on PATH
+		# were each tried and all pass there, so the trigger is something about
+		# the CI host that is not yet identified.
+		#
+		# build.sh backgrounds livereload (scripts/build.sh:239) and, on the
+		# repro branch ONLY, then calls build-once.sh and exits WITHOUT `wait`
+		# -- the tup branch ends in `wait`, which is why that branch is immune.
+		# The EXIT trap's cleanup then signals the watcher pids. So the two
+		# things worth seeing are which watchers DID record, and whether
+		# build.sh printed an exec failure.
+		#
+		# The captured output is otherwise unreachable: run_script sends it to
+		# "$trace.out" and the harness only prints that when the exit status is
+		# NON-ZERO -- and here build.sh exits 0. That is precisely why this
+		# failure has been a single unactionable line.
+		fail "(F) build.sh starts livereload" "no livereload record.
+commands recorded by build.sh (name<TAB>argv):
+$(cut -f1,3 <"$build_trace" | sed 's/^/    /')
+build.sh stdout+stderr:
+$(sed 's/^/    /' "$build_trace.out" 2>/dev/null | tail -n 25)"
 	elif printf '%s' "$livereload_argv" | grep -qF -- "$expected_out_root"; then
 		pass "(F) livereload watches $expected_out_root"
 	else
