@@ -423,7 +423,58 @@ try {
         return {
           filesystem: pct('.filesystem-container'),
           editor: pct('.monaco-editor'),
+          // TESTS IS A TAB NOW, so its pane box is 0 whenever it is not the
+          // active tab of the FILES stack. That is not a defect and it is no
+          // longer what the proportion check reads — see `constraints`, which
+          // is the third COLUMN §1a draws. Kept because a reader of this JSON
+          // still wants to know which state the pane was in, and because the
+          // tab's own reachability is asserted separately (`testsTab`).
           testResults: pct('.test-results'),
+          // THE THIRD COLUMN. §1a's right-hand column is CONSTRAINTS once TESTS
+          // moves into the FILES stack, so this is the pane whose width the
+          // 20/55/25 declaration is now about.
+          constraints: pct('.constraints'),
+        };
+      })(),
+      // IS THE TESTS TAB REACHABLE? Present is not reachable, and the two are
+      // different questions once a pane is nested. A tab GoldenLayout has
+      // parked in `ul.lm_tabdropdown_list` is in the DOM, answers a
+      // `querySelector`, and is `display: none` behind an opener this product
+      // removes from the control bar. So the tab is measured — its own box,
+      // and the strip it is in — rather than counted.
+      testsTab: (() => {
+        const tabs = Array.from(document.querySelectorAll('.lm_tab'));
+        const titleOf = (t) => {
+          const el = t.querySelector('.lm_title');
+          return ((el ? el.textContent : t.textContent) || '').trim();
+        };
+        const tab = tabs.find((t) => titleOf(t) === 'TESTS');
+        if (!tab) {
+          return {
+            present: false,
+            // Named so a failure says WHICH title was there instead, which is
+            // the whole difficulty of a rename.
+            titlesSeen: tabs.map(titleOf),
+          };
+        }
+        const r = tab.getBoundingClientRect();
+        const stack = tab.closest('.lm_stack');
+        const header = stack ? stack.querySelector('.lm_header') : null;
+        const strip = header ? header.querySelector('.lm_tabs') : null;
+        const dropdown = stack ? stack.querySelector('.lm_tabdropdown_list') : null;
+        return {
+          present: true,
+          box: { w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 },
+          // Who it shares a strip with — the request was phrased as "the same
+          // pane that holds the FILES", which is a question about this list.
+          siblings: strip
+            ? Array.from(strip.querySelectorAll('.lm_tab')).map(titleOf)
+            : [],
+          exiled: dropdown
+            ? Array.from(dropdown.querySelectorAll('.lm_title'))
+                .map((t) => (t.textContent || '').trim())
+            : [],
+          active: tab.classList.contains('lm_active'),
         };
       })(),
       // What a person reads off the screen. `innerText` is defined over the
@@ -574,6 +625,11 @@ if (process.env.CT_PROBE_CLICK_RUN) {
   runClick = {
     attempted: true,
     clicked: false,
+    // How many pointer actions it took to get from the mounted workspace to a
+    // started run. 1 when the pane is already on screen; 2 when TESTS has to
+    // be brought to the front first.
+    gesturesToRun: 0,
+    tabActivated: 0,
     clickError: '',
     headlineBefore: '',
     headlineAfter: '',
@@ -588,8 +644,45 @@ if (process.env.CT_PROBE_CLICK_RUN) {
       page.evaluate(() =>
         ((document.querySelector('.test-results-headline') || {}).textContent ||
           '').trim());
+
+    // REACH THE PANE THE WAY A USER HAS TO, AND COUNT THE GESTURES.
+    //
+    // TESTS is a tab of the FILES stack, so on a cold workspace its pane is
+    // `display: none` and its ▶ takes no click until the tab is activated.
+    // That is the arrangement the product now declares, so this probe takes
+    // the same path rather than reaching past it — a probe that clicked a
+    // hidden control through JavaScript would report a path no user has.
+    //
+    // `gesturesToRun` is the measurement, not a detail of the harness. It is
+    // the number of pointer actions between a cold edit-mode workspace and a
+    // running test suite, and it is reported so the cost of nesting is a
+    // number somebody can decide about rather than an argument.
+    let gestures = 0;
+    const testsTabHandle = await page.evaluateHandle(() => {
+      const tabs = Array.from(document.querySelectorAll('.lm_tab'));
+      return tabs.find((t) => {
+        const el = t.querySelector('.lm_title');
+        return ((el ? el.textContent : t.textContent) || '').trim() === 'TESTS';
+      }) || null;
+    });
+    const testsTabEl = testsTabHandle.asElement();
+    if (testsTabEl) {
+      const alreadyActive = await testsTabEl.evaluate(
+        (el) => el.classList.contains('lm_active'));
+      if (!alreadyActive) {
+        // A REAL POINTER CLICK at the tab's own hit point, not `el.click()`:
+        // the whole question is whether a user can get there.
+        await testsTabEl.click({ timeout: 15000 });
+        gestures += 1;
+        await page.waitForTimeout(400);
+      }
+    }
+    runClick.tabActivated = gestures;
+
     runClick.headlineBefore = await headlineOf();
     await page.click('.test-results-run-btn', { timeout: 15000 });
+    gestures += 1;
+    runClick.gesturesToRun = gestures;
     runClick.clicked = true;
 
     // The dispatch is synchronous with the click, but the worker has ~16 MB of

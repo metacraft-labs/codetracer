@@ -130,8 +130,17 @@ const measureScript = () => {
     };
   };
 
-  const subjects = ['FILES', 'VCS', 'TEST RESULTS', 'CONSTRAINTS', 'EVENT LOG',
-                    'STATE', 'CALL TRACE'];
+  // THE CAPTION IS `TESTS`. `ui/layout.convertTabTitle` special-cases it the
+  // way it special-cases `Filesystem` -> `FILES`, because the pane now shares
+  // the FILES strip three ways and two words would be truncated there.
+  //
+  // A stale title here does not fail — `stripOf` simply reports
+  // `present: false`, which reads as "the pane is not in the layout" and is
+  // indistinguishable from the pane genuinely being gone. So the old spelling
+  // is kept as a subject too: if it ever comes back, this probe SAYS the wrong
+  // caption is on screen instead of silently reporting an absence.
+  const subjects = ['FILES', 'VCS', 'TESTS', 'TEST RESULTS', 'CONSTRAINTS',
+                    'EVENT LOG', 'STATE', 'CALL TRACE'];
   const strips = {};
   for (const title of subjects) strips[title] = stripOf(title);
 

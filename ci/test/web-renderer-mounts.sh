@@ -1404,6 +1404,7 @@ if ! run_arm route "" "/noir"; then
 	ck fail "arm R could not be measured (the gutter's four bands)"
 	ck fail "arm R could not be measured (the VCS band's height)"
 	ck fail "arm R could not be measured (the gutter bands' disjointness)"
+	ck fail "arm R could not be measured (TESTS is a reachable tab of the FILES panel)"
 else
 	# Reset in BOTH branches: every arm after this one measures a pane nobody
 	# touched, and a leaked `1` would silently start running tests in them.
@@ -1642,16 +1643,24 @@ print(", ".join((d.get("dom", {}).get("statusBar") or {}).get("coveredBy") or []
 	fi
 
 	# -----------------------------------------------------------------------
-	# NS9's OTHER TWO PANES. §1a: "Filesystem, Editor, Test Results,
-	# Constraints — not a landing page". The first two were asserted above;
-	# these two did not exist on any platform until this campaign, and the
-	# whole point of building them as `Content` members is that a desktop user
-	# running Noir tests gets them too. What a browser can check is that they
-	# are here, that their data is the producer's own, and that the four sit
-	# where the picture puts them.
+	# NS9's OTHER TWO PANES. §1a: "Filesystem, Editor, Tests, Constraints —
+	# not a landing page". The first two were asserted above; these two did not
+	# exist on any platform until this campaign, and the whole point of building
+	# them as `Content` members is that a desktop user running Noir tests gets
+	# them too. What a browser can check is that they are here, that their data
+	# is the producer's own, and that the four sit where the picture puts them.
+	#
+	# THE CAPTION IS `TESTS`, NOT "TEST RESULTS". The pane moved into the FILES
+	# stack, where the strip is shared three ways and two words would be
+	# truncated, and `ui/layout.convertTabTitle` gives it the shorter caption
+	# the same way it gives `Filesystem` the caption `FILES`. Matched as a whole
+	# word. `r_tabtext` is the titles joined by a SPACE, so the subject is
+	# padded and the pattern carries its own spaces — otherwise a future tab
+	# whose caption merely CONTAINS the letters would satisfy this, which is
+	# how a pane-presence check quietly stops being one.
 	# -----------------------------------------------------------------------
-	case "${r_tabtext}" in
-	*"TEST RESULTS"*)
+	case " ${r_tabtext} " in
+	*" TESTS "*)
 		case "${r_tabtext}" in
 		*"CONSTRAINTS"*)
 			ck ok "arm R: all four of §1a's panes are on the first screen — ${r_tabtext}"
@@ -1662,7 +1671,7 @@ print(", ".join((d.get("dom", {}).get("statusBar") or {}).get("coveredBy") or []
 		esac
 		;;
 	*)
-		ck fail "arm R: no TEST RESULTS pane in the layout (tabs: '${r_tabtext}')"
+		ck fail "arm R: no TESTS pane in the layout (tabs: '${r_tabtext}')"
 		;;
 	esac
 
@@ -1926,21 +1935,71 @@ print(" ".join(r["name"] + "=" + r["count"] + "(" + r["kind"] + ")" for r in row
 	# different product from the one the picture draws. The tolerance is ±4
 	# points, which is wider than sub-pixel noise and far narrower than the
 	# even split this exists to catch.
+	#
+	# THE THIRD COLUMN IS NOW CONSTRAINTS, AND THIS WAS RESTATED DELIBERATELY.
+	# §1a used to draw TEST RESULTS as the right-hand column; TESTS is now a tab
+	# of the FILES stack, so a nested pane's box is 0 whenever it is not the
+	# active tab and reading it here would assert nothing about the layout. The
+	# check did not become weaker: it still reads three measured boxes against
+	# three declared numbers with the same tolerance, and the pane that left the
+	# row is asserted separately and more strictly below — a tab has to be in
+	# the strip AND have a box, which "present" never required.
+	#
+	# What must NOT happen to this check is that it stops naming three
+	# proportions. A gate that measures two is one an even split passes.
 	r_wfs="$(python3 -c '
 import json, sys
 w = json.load(open(sys.argv[1]))["dom"].get("paneWidths") or {}
-print(w.get("filesystem", -1), w.get("editor", -1), w.get("testResults", -1))
+print(w.get("filesystem", -1), w.get("editor", -1), w.get("constraints", -1))
 ' "${cache}/route.json")"
 	if python3 -c '
 import sys
-fs, ed, tr = (float(x) for x in sys.argv[1].split())
-ok = abs(fs - 20) <= 4 and abs(ed - 55) <= 4 and abs(tr - 25) <= 4
+fs, ed, cs = (float(x) for x in sys.argv[1].split())
+ok = abs(fs - 20) <= 4 and abs(ed - 55) <= 4 and abs(cs - 25) <= 4
 sys.exit(0 if ok else 1)
 ' "${r_wfs}"; then
-		ck ok "arm R: the four panes sit at §1a's proportions — filesystem/editor/test-results ${r_wfs} against 20/55/25"
+		ck ok "arm R: the panes sit at §1a's proportions — filesystem/editor/constraints ${r_wfs} against 20/55/25"
 	else
-		ck fail "arm R: the panes are at ${r_wfs} and §1a draws 20/55/25 — GoldenLayout split the row evenly instead of honouring the layout's declaration"
+		ck fail "arm R: the panes are at ${r_wfs} and §1a draws 20/55/25 for filesystem/editor/constraints — GoldenLayout split the row evenly instead of honouring the layout's declaration"
 	fi
+
+	# AND THE PANE THAT LEFT THE ROW IS STILL REACHABLE.
+	#
+	# §1a draws TESTS as a tab of the panel that holds FILES and VCS. "Nested"
+	# is a claim about a tab STRIP, so it is read off one: the tab must be in
+	# the FILES strip, must have a box of its own, and must not be in the
+	# overflow dropdown — which is `display: none` here, behind an opener
+	# `stackCreated` removes, so a tab in it is present to every element count
+	# and reachable by nobody. That last clause is why this is not a
+	# `querySelector` check.
+	r_tests_ok="$(python3 -c '
+import json, sys
+t = json.load(open(sys.argv[1]))["dom"].get("testsTab") or {}
+if not t.get("present"):
+    print("absent titles=" + ",".join(t.get("titlesSeen") or []))
+    raise SystemExit(1)
+box = t.get("box") or {}
+sibs = t.get("siblings") or []
+exiled = t.get("exiled") or []
+print("box=%sx%s strip=%s exiled=%s" % (box.get("w"), box.get("h"), "|".join(sibs), ",".join(exiled) or "none"))
+ok = (box.get("w") or 0) > 0 and (box.get("h") or 0) > 0 \
+     and "FILES" in sibs and "TESTS" not in exiled
+raise SystemExit(0 if ok else 1)
+' "${cache}/route.json")" && r_tests_rc=0 || r_tests_rc=$?
+	if [ "${r_tests_rc}" = "0" ]; then
+		ck ok "arm R: TESTS is a reachable tab of the panel that holds FILES — ${r_tests_ok}"
+	else
+		ck fail "arm R: TESTS is not a reachable tab of the FILES panel (${r_tests_ok}) — §1a draws it there, and a tab with no box or one in the hidden overflow list is present rather than reachable"
+	fi
+
+	# AND WHAT IT COSTS TO RUN THE TESTS, recorded as a number.
+	#
+	# Not an assertion — the arrangement is a product decision and this gate is
+	# not the place to relitigate it. But the cost of nesting a pane that
+	# carries a control is exactly one extra gesture, and a number in the gate's
+	# output is how that stays visible to whoever next changes either.
+	r_gestures="$(json route runClick.gesturesToRun)"
+	note "arm R: reaching a started test run from the mounted workspace took ${r_gestures} pointer action(s)"
 
 	if [ "${r_errs}" = "0" ]; then
 		ck ok "arm R: no uncaught page errors on the template route"
@@ -2721,7 +2780,7 @@ echo
 #     confirming an absence: a dispatch refused SYNCHRONOUSLY left the slot
 #     spinning for the full two-minute deadline, because `runTestFromGutter`
 #     armed the spinner on the line after the hook that had already settled.
-expect_count 85
+expect_count 86
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

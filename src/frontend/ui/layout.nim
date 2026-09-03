@@ -124,6 +124,20 @@ proc convertTabTitle(content: cstring): cstring =
     return cstring"VCS"
   if content == cstring"Filesystem":
     return cstring"FILES"
+  # TESTS, NOT "TEST RESULTS", and the shorter name is what the pane became
+  # rather than a tidy-up. It now sits in the FILES stack beside FILES and VCS
+  # (`paneHomesForMode`), where the tab strip is narrow and shared: two words
+  # take a third of the strip from the two panes it is nested with, and a title
+  # that has to be truncated is a title nobody reads. "TESTS" also says what the
+  # pane IS — every test in the project, listed, whether or not a run has
+  # happened — where "TEST RESULTS" describes only the state it is in after one.
+  #
+  # An override here rather than a rename of `Content.TestResults`: the enum
+  # name is the wire identity, persisted inside every saved layout's
+  # `componentState.content`, and this proc is exactly the seam that exists so a
+  # caption can differ from it. `Filesystem` -> `FILES` above is the same move.
+  if content == cstring"TestResults":
+    return cstring"TESTS"
 
   var title: cstring = ""
   var label = content

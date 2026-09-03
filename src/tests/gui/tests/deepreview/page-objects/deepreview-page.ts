@@ -237,8 +237,12 @@ export class DeepReviewPage {
    * do belong.
    *
    * Titles come from ``convertTabTitle`` (``src/frontend/ui/layout.nim``),
-   * which upper-cases and splits the ``Content`` enum name, with "FILES" and
-   * "VCS" special-cased.
+   * which upper-cases and splits the ``Content`` enum name. The special cases
+   * are the ones whose enum name is not the caption: ``Filesystem`` ->
+   * "FILES", ``BuildErrors`` -> "PROBLEMS", ``TestResults`` -> "TESTS", and
+   * "VCS" (which the splitter would otherwise turn into "V C S"). Read the
+   * proc rather than this list before relying on it — a caption that differs
+   * from its enum name is exactly the kind of fact that goes stale here.
    */
   async layoutTabTitles(): Promise<string[]> {
     const titles = await this.page.locator(".lm_tab .lm_title").allTextContents();
