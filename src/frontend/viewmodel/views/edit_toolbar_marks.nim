@@ -44,13 +44,14 @@
 ##
 ## ## What the two marks say
 ##
-## **Run** is a plain filled triangle. `93be377c` established that a bare
-## triangle is the wrong mark for *continue*, because the media reading —
-## "skip to the end" — is not what continuing does. Nothing of that applies
+## **Run** is a play triangle, drawn as an outline. `93be377c` established that
+## a bare triangle is the wrong mark for *continue*, because the media reading
+## — "skip to the end" — is not what continuing does. Nothing of that applies
 ## here: this button starts a program that is not running, which is what the
 ## media triangle has always meant, and it is what Visual Studio, JetBrains
 ## and VS Code all put on Run. The debugger's own `continue` stays a chevron
 ## over a dot, so the two cannot be confused on a bar that never shows both.
+## Why it is stroked rather than filled is argued at `RunTrianglePath`.
 ##
 ## **Build** is a hammer: a filled head with a 1-wide stroked handle. Hammer
 ## is the settled convention for Build across the IDEs a CodeTracer user
@@ -100,6 +101,20 @@ const
     ## it carries the same optical width as `continue`'s chevron. The centroid
     ## sits at x=7.17 rather than 8: a play triangle centred on its bounding
     ## box reads as sitting too far right, and every icon set nudges it left.
+    ##
+    ## STROKED, not filled, and that was the one judgement call in this change.
+    ## A play triangle is conventionally solid, and the first version drew it
+    ## that way — but rendered beside the restored set at 16px and 44px it was
+    ## a solid mass, and a solid mass is the single thing no member of that set
+    ## is. Ten of the twelve are hairline outline; `step-out`'s block and
+    ## `continue`'s dot are ACCENTS inside a mark whose other element is a
+    ## line, and `run-to-entry`'s solid triangle is one sub-element among six.
+    ## None of them is a filled shape on its own.
+    ##
+    ## Outlined, it is the same hand as `next` and `history-forward` and still
+    ## unmistakably a play triangle. The instruction was to emulate the style
+    ## of these icons, so where the convention and the family disagreed, the
+    ## family won.
 
   BuildHeadPath = "M7.48 1.12L1.12 7.48L3.52 9.88L9.88 3.52Z"
     ## The head: a 9.0 x 3.39 rectangle rotated 45 degrees, so its long axis is
@@ -117,7 +132,7 @@ const EditToolbarMarks*: seq[EditMark] = @[
   EditMark(buttonId: "build-image", action: "build", viewBox: "0 0 16 16",
            shapes: @[filled(BuildHeadPath), drawn(BuildHandlePath)]),
   EditMark(buttonId: "run-image", action: "run", viewBox: "0 0 16 16",
-           shapes: @[filled(RunTrianglePath)]),
+           shapes: @[drawn(RunTrianglePath)]),
 ]
 
 func editMarkFor*(action: string): EditMark =
