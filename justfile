@@ -1293,7 +1293,8 @@ test-frontend-js:
   stop_command_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-stop-command-test.XXXXXX.js")"
   run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe"' EXIT
+  dap_refusal_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-dap-refusal-test.XXXXXX.js")"
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe" "$dap_refusal_test"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1389,6 +1390,23 @@ test-frontend-js:
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$run_to_cursor_test" js src/frontend/tests/run_to_cursor_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$run_to_cursor_test"
+  echo ""
+  # A REQUEST THE BACKEND REFUSES MUST BECOME TEXT THE USER CAN READ, and it
+  # must not read like a timeout. Asserted on the RENDERED TEXT of the real
+  # status shell, driving the real `sendCtRequest` and
+  # `resolvePendingDapResponse` over the frame `handle_message_browser`
+  # builds.
+  #
+  # NOTE THE ABSENT `-d:ctInExtension`, which every other suite in this recipe
+  # passes. The code under test is dap.nim's `when not defined(ctInExtension)`
+  # arm: the continuation table that correlates a response to the request that
+  # is waiting on it. Under `-d:ctInExtension` that table does not exist —
+  # VS Code's debug client does the correlation — so compiling this with the
+  # flag would silently test the wrong arm.
+  echo "Running DAP refusal surfacing tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer \
+    --out:"$dap_refusal_test" js src/frontend/tests/dap_refusal_surfaces_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$dap_refusal_test"
   echo ""
   echo "Running IPC registry rebind tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \

@@ -576,8 +576,17 @@ test_lane_files() {
 		# representation — on the C backend the question does not arise. Its
 		# Rust half is `the_wire_form_of_jump_behaviour_is_the_nim_ordinal` in
 		# `src/db-backend/src/dap_handler.rs`.
+		# `dap_refusal_surfaces_test.nim` asserts that a request the backend
+		# REFUSES becomes text in the status bar, and that the text differs
+		# from the one a timeout produces. JS-only twice over: the code under
+		# test is dap.nim's `when not defined(ctInExtension)` arm — the
+		# extension arm correlates responses through VS Code's own client and
+		# has no `pendingResponses` table — and `types.nim`'s `Data` is
+		# `std/jsffi`-based. It is also the ONLY suite in this lane compiled
+		# WITHOUT `-d:ctInExtension`, for that first reason.
 		printf '%s\n' \
 			src/frontend/tests/component_registry_binding_test.nim \
+			src/frontend/tests/dap_refusal_surfaces_test.nim \
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
