@@ -147,12 +147,56 @@ const measureScript = () => {
         .map((c) => rect(c))
     : [];
 
+  // THE PANE'S OWN CONTENT BOX, which is a different question from its tab's.
+  //
+  // THIS MEASUREMENT EXISTS BECAUSE ITS ABSENCE SHIPPED A BROKEN DEPLOY. The
+  // strips above answer "is this pane nested with that one", which is what the
+  // request was phrased in, and every leg of this probe was green while the
+  // pre-publish mount gate refused to publish: it measures the PANE elements,
+  // and a nested pane is a background tab, so its content box is 0 and its
+  // controls take no click. `19.8 54.4 0` where the layout declares 20/55/25.
+  //
+  // A tab in the strip is reachable in one gesture; a pane behind it is not
+  // RENDERED. Both facts are true at once and only one of them was measured.
+  const contentBoxes = (() => {
+    const w = window.innerWidth || 1;
+    const pct = (sel) => {
+      const e = document.querySelector(sel);
+      // `null` means NOT FOUND and `{w: 0}` means found-and-not-rendered, and
+      // conflating them is how this measurement would fail the way the strips
+      // did. Zero is the defect; absent is a selector that does not resolve on
+      // this leg, which several do not once a mode switch has remounted the
+      // IsoNim panels. Only the routes that mount from scratch — boot and
+      // reload, which are the routes the pre-publish gate covers — are
+      // expected to answer for every pane.
+      if (!e) return null;
+      const r = e.getBoundingClientRect();
+      return {
+        w: Math.round(r.width * 10) / 10,
+        h: Math.round(r.height * 10) / 10,
+        // The share of the window, which is the unit the mount gate's §1a
+        // proportion check is written in, so the two are comparable.
+        pct: Math.round((r.width / w) * 1000) / 10,
+      };
+    };
+    return {
+      // The same selectors `ci/test/web_renderer_probe.mjs` reads, deliberately
+      // — a second spelling of "the Test Results pane" is a second thing to
+      // keep in step, and the point is to fail where that gate fails.
+      filesystem: pct('.filesystem-container'),
+      editor: pct('.monaco-editor'),
+      testResults: pct('.test-results'),
+      constraints: pct('.constraints-container, [class*="constraints"]'),
+    };
+  })();
+
   const panelRoot = document.querySelector('[data-topbar-surface]');
 
   return {
     goldenLayoutPresent: !!root,
     goldenLayoutBox: rect(root),
     topLevelChildren,
+    contentBoxes,
     stackCount: document.querySelectorAll('.lm_stack').length,
     topbarSurface: panelRoot ? panelRoot.getAttribute('data-topbar-surface') : null,
     mode: (window.data && window.data.ui) ? String(window.data.ui.mode) : null,

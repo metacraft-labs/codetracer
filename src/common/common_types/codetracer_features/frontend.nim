@@ -634,13 +634,41 @@ proc paneHomesForMode*(mode: LayoutMode): seq[seq[int]] =
   ##
   ## ## The three rows, and why each host is the one it is
   ##
-  ## * **TEST RESULTS with FILES, in both modes.** The two are read together —
+  ## * **TEST RESULTS with FILES, in DEBUG mode.** The two are read together —
   ##   a test names a file, and the file is what you open next — and FILES is
-  ##   the one pane both modes keep in a narrow side column, so the tab costs
-  ##   no width in either. It is `Content.Filesystem` and not `Content.VCS`
-  ##   even though they share a stack: the stack is found through its host, so
-  ##   naming the pane that is always there rather than the one that happens to
-  ##   sit beside it survives a user moving VCS out.
+  ##   the pane debug mode keeps in a narrow side column, so the tab costs no
+  ##   width. It is `Content.Filesystem` and not `Content.VCS` even though they
+  ##   share a stack: the stack is found through its host, so naming the pane
+  ##   that is always there rather than the one that happens to sit beside it
+  ##   survives a user moving VCS out.
+  ##
+  ##   **AND NOT IN EDIT MODE, WHICH IS A DEVIATION FROM THE REQUEST AND IS
+  ##   RECORDED AS ONE.** The request said "nest TEST RESULTS under the same
+  ##   pane that holds the FILES in both modes". In edit mode that is the wrong
+  ##   trade, and the reason is not a matter of taste:
+  ##
+  ##   A pane nested behind FILES is a BACKGROUND TAB, and a background tab is
+  ##   `display: none`. Its content is not laid out and its controls are not
+  ##   hit-testable until the user clicks the tab. For most panes that is the
+  ##   ordinary cost of tabbing and it is fine. For TEST RESULTS on the EDITING
+  ##   surface it is not: that pane carries the ▶ Run Tests control, and
+  ##   running the tests is the primary gesture of the screen
+  ##   (`Planned-Features/Noir-Studio.md` §1a draws TEST RESULTS as a standing
+  ##   column of the first screen for exactly that reason). Nesting it there
+  ##   puts the screen's main action behind a tab click and takes the verdicts
+  ##   off the screen while the user edits the code they are about.
+  ##
+  ##   MEASURED, by `ci/test/web-renderer-mounts.sh` against the assembled
+  ##   publish bundle, when this row applied to edit mode as well: the panes
+  ##   rendered at 19.8 / 54.4 / **0** where §1a declares 20/55/25 (arm R), and
+  ##   the ▶ was painted but took no click (arm P). That gate refuses to
+  ##   publish over it, correctly.
+  ##
+  ##   The request's ACTUAL complaint is satisfied without this row. It was
+  ##   about what a mode SWITCH leaves behind — "the panes holding the
+  ##   CONSTRAINTS and TEST RESULTS panels will be hidden" — and that is the
+  ##   debug surface, where both are now tabs of panes the mode already has and
+  ##   neither stands in a column of its own.
   ##
   ## * **CONSTRAINTS with the EVENT LOG, in debug mode only.** The event log's
   ##   stack is the replay's "what happened" column, which is what a constraint
@@ -659,6 +687,8 @@ proc paneHomesForMode*(mode: LayoutMode): seq[seq[int]] =
       @[ord(Content.Constraints), ord(Content.EventLog)]
     ]
   of EditMode, QuickEditMode, InteractiveEditMode:
-    @[
-      @[ord(Content.TestResults), ord(Content.Filesystem)]
-    ]
+    # NO RE-HOMING ON THE EDITING SURFACE. Both panes keep the columns §1a
+    # draws for the first screen: TEST RESULTS because its ▶ is that screen's
+    # primary gesture (see above), CONSTRAINTS because a circuit's cost is
+    # something you act on while editing the circuit.
+    @[]

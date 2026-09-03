@@ -244,12 +244,39 @@ when defined(js):
       check componentCount(debugLayout, ord(Content.TestResults)) == 1
       check componentCount(debugLayout, ord(Content.Constraints)) == 1
 
-    test "EDIT mode nests TEST RESULTS with FILES":
-      ## "in both modes", from the request. Edit mode's FILES stack already
-      ## holds VCS, so this is the case where the host stack is not a singleton.
+    test "EDIT mode keeps TEST RESULTS in a column of its own":
+      ## THE DEVIATION FROM THE REQUEST, ASSERTED SO IT CANNOT DRIFT BACK.
+      ##
+      ## The request asked for TEST RESULTS nested with FILES "in both modes".
+      ## In edit mode that puts the ▶ Run Tests control — the primary gesture
+      ## of `Noir-Studio.md` §1a's first screen — behind a tab click, because a
+      ## background tab is `display: none` and neither laid out nor
+      ## hit-testable. `paneHomesForMode`'s own comment carries the full
+      ## reasoning and the measurement that settled it.
+      ##
+      ## This test is the guard on the trade, not a restatement of it: if a
+      ## later change re-adds the edit-mode row, this fails HERE — in a
+      ## sub-second headless run — instead of in the pre-publish gate, which is
+      ## where it failed the first time.
       let editLayout = modeLayout(EditMode)
-      check ord(Content.TestResults) in
+      check ord(Content.TestResults) notin
         stackContentsHolding(editLayout, ord(Content.Filesystem))
+      check stackContentsHolding(editLayout, ord(Content.TestResults)) ==
+        @[ord(Content.TestResults)]
+
+    test "EDIT mode is the bundled arrangement, minus what it hides":
+      ## §1a's first screen is three top-level columns — FILES, the editor's
+      ## room, and the NS9 panes — and the pre-publish mount gate measures them
+      ## at 20/55/25 against the assembled bundle. Nothing edit mode does may
+      ## take a column away, because the third column IS the two panes the gate
+      ## reads its proportions from.
+      let editLayout = modeLayout(EditMode)
+      check paneHomesForMode(EditMode).len == 0
+      check topLevelColumnCount(editLayout) == 2
+      # Two, not three, because the EDITOR's own column is created at runtime
+      # by `utils.openNewLayoutContainer` and is never declared in the config.
+      # Its width is the shortfall this config leaves, which is the next check.
+      check unclaimedTopLevelPercent(editLayout) == 55
 
     test "EDIT mode keeps CONSTRAINTS in a pane of its own":
       ## And this is the tension worth stating rather than smoothing over. The
@@ -275,6 +302,27 @@ when defined(js):
       check modeHiddenContentIds(DebugMode).len == 0
       check componentCount(debugLayout, ord(Content.EventLog)) == 1
       check componentCount(debugLayout, ord(Content.State)) == 1
+
+    test "no mode nests a pane whose own primary control the mode leads with":
+      ## THE RULE BEHIND THE DEVIATION, stated once so the next placement row
+      ## is judged by it rather than by precedent.
+      ##
+      ## A nested pane is a background tab, so its controls are unreachable
+      ## until the tab is clicked. That is acceptable for a pane a user goes
+      ## TO, and not for a pane a user acts FROM. TEST RESULTS on the editing
+      ## surface is the second kind; on the replay surface it is the first,
+      ## because a replay is driven from the debugger controls and the pane is
+      ## somewhere you look up which test you are in.
+      ##
+      ## Checked here as: a mode that hides the EVENT LOG is an editing mode,
+      ## and an editing mode leads with the test runner, so it may not nest
+      ## TEST RESULTS.
+      for mode in LayoutMode:
+        let leadsWithTheRunner =
+          ord(Content.EventLog) in modeHiddenContentIds(mode)
+        if leadsWithTheRunner:
+          for placement in paneHomesForMode(mode):
+            check placement[0] != ord(Content.TestResults)
 
     test "the two modes produce different layouts":
       ## The whole requirement in one line. Before this change both modes were
@@ -314,13 +362,20 @@ when defined(js):
       check modeHiddenContentIds(InteractiveEditMode) ==
         modeHiddenContentIds(EditMode)
 
-    test "every mode declares a home for TEST RESULTS":
-      ## "in both modes", asserted over every member of `LayoutMode` rather
-      ## than the two the request named, so a mode added later cannot silently
-      ## opt out.
+    test "the replay modes home TEST RESULTS with FILES and the editing modes do not":
+      ## Asserted over every member of `LayoutMode` rather than the two the
+      ## request named, so a mode added later cannot silently pick either
+      ## answer by accident.
+      ##
+      ## The split is not "edit versus debug" as a matter of naming: it is that
+      ## a mode which SHOWS the ▶ as its primary gesture must not put it behind
+      ## a tab, and the editing modes are the ones that do.
+      let home = @[ord(Content.TestResults), ord(Content.Filesystem)]
       for mode in LayoutMode:
-        check @[ord(Content.TestResults), ord(Content.Filesystem)] in
-          paneHomesForMode(mode)
+        if mode in {EditMode, QuickEditMode, InteractiveEditMode}:
+          check home notin paneHomesForMode(mode)
+        else:
+          check home in paneHomesForMode(mode)
 
     test "a placement never names a pane its own mode hides":
       ## A row whose PANE the mode suppresses is dead: the pane is gone before
