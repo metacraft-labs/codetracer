@@ -1411,7 +1411,12 @@ proc reportLayoutDegraded(data: Data; sentence: string) =
   ## and a bug report read, and the notification is what the user reads. They
   ## are different audiences and neither substitutes for the other.
   cerror "mode-layout: " & sentence
-  if data.isNil or data.viewsApi.isNil or data.viewsApi.showNotification.isNil:
+  # `showNotification` is a PROC over the mediator, not a field on it, so the
+  # mediator itself is the only thing there is to check. A session whose views
+  # api has not been built yet — the boot window before `createUIComponents` —
+  # still gets the `cerror` above, which is the audience that exists at that
+  # point anyway.
+  if data.isNil or data.viewsApi.isNil:
     return
   try:
     data.viewsApi.showNotification(
