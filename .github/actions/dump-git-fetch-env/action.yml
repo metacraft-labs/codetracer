@@ -127,19 +127,21 @@ runs:
 
         echo
         echo "=== THE COMPARISON THAT DECIDES IT ============================="
-        # Two fetches of the same PUBLIC repo, differing only in whether git's
-        # own configuration is in play. This separates the two hypotheses that
-        # survive:
+        # Two fetches of the same PUBLIC repo, differing ONLY in whether git's
+        # own configuration is in play. That is the only variable, so that is
+        # the only thing these two can speak about:
         #
-        #   config fails, isolated succeeds -> a credential in git config is
-        #                                      the cause; the origin above says
-        #                                      which file carries it.
-        #   BOTH fail                       -> nothing to do with config. The
-        #                                      runner cannot fetch github.com
-        #                                      anonymously at all — an IP-level
-        #                                      block or rate limit — and no
-        #                                      amount of credential scoping will
-        #                                      ever fix it.
+        #   config fails, isolated succeeds -> git configuration is sufficient
+        #                                      to break it; the origin listing
+        #                                      names the candidate files.
+        #   BOTH fail                       -> git configuration is NOT what
+        #                                      breaks it. Nothing more. In
+        #                                      particular this says nothing
+        #                                      about whether the host can reach
+        #                                      github.com — probes A-E do that,
+        #                                      and probe A once returned 200 in
+        #                                      the same log where this arm had
+        #                                      concluded "egress".
         #   BOTH succeed                    -> git is fine and the fault is
         #                                      inside nix's own fetcher, so look
         #                                      there and not at git config.
@@ -163,18 +165,40 @@ runs:
         fi
 
         echo
+        # AN INSTRUMENT MAY REPORT WHAT IT SAW. THE MOMENT IT REPORTS WHAT THAT
+        # IMPLIES, IT CAN BE WRONG IN A WAY A VERDICT LINE MAKES INVISIBLE.
+        #
+        # This block used to end its `both failed` arm with "This runner cannot
+        # fetch a public github.com repo anonymously at all … look at egress:
+        # IP-level rate limiting or a blocking proxy." It printed that, in a log
+        # that ALSO contained probe A below returning `HTTP/2 200` anonymously
+        # for the very same repository, seconds apart on the same host. The
+        # observation was right and the inference was wrong: two failing `git`
+        # invocations say something about git, and nothing whatever about
+        # whether this host can reach github.com. That is what probe A measures,
+        # and it disagreed.
+        #
+        # So these arms now state the OBSERVATION and hand the question on. The
+        # temptation is specifically in the arm you expect not to take — it gets
+        # the least scrutiny and is the one that fires when your model is
+        # already wrong.
         if [ "${rc_config}" -ne 0 ] && [ "${rc_isolated}" -eq 0 ]; then
-          echo "  VERDICT: git configuration is the cause. The origin listing"
-          echo "           above names the file that carries it."
+          echo "  OBSERVED: git fails WITH this runner's config and succeeds"
+          echo "            WITHOUT it, so something in git configuration is"
+          echo "            sufficient to break it. The origin listing above"
+          echo "            names the files it could have come from."
         elif [ "${rc_config}" -ne 0 ] && [ "${rc_isolated}" -ne 0 ]; then
-          echo "  VERDICT: NOT git configuration. This runner cannot fetch a"
-          echo "           public github.com repo anonymously at all, so no"
-          echo "           credential scoping can fix it. Look at egress:"
-          echo "           IP-level rate limiting or a blocking proxy."
+          echo "  OBSERVED: git is refused either way, so git CONFIGURATION is"
+          echo "            not what breaks it."
+          echo "            Whether this host can reach github.com at all is a"
+          echo "            SEPARATE question that these two probes cannot"
+          echo "            answer. Probes A-E below answer it. Do not conclude"
+          echo "            'egress' from this line; that inference was made"
+          echo "            here once and probe A refuted it in the same log."
         elif [ "${rc_config}" -eq 0 ]; then
-          echo "  VERDICT: plain git can fetch this repo from this runner."
-          echo "           If nix still cannot, the fault is inside nix's own"
-          echo "           fetcher, not in git config."
+          echo "  OBSERVED: plain git can fetch this repo from this runner."
+          echo "            If nix still cannot, look at nix's own fetcher"
+          echo "            rather than at git configuration."
         fi
 
         echo
@@ -205,8 +229,17 @@ runs:
         # and it is ANONYMOUS access that is being refused. If B is also 200,
         # authenticating third-party fetches is a remedy that would work.
         gh_headers() {
-          # $1 = label, $2 = url, $3 = 1 to authenticate
-          local label="$1" url="$2" auth="$3" out
+          # $1 = label, $2 = url, $3 = 1 to authenticate, $4 = 1 to present as git
+          local label="$1" url="$2" auth="$3" as_git="${4:-0}" out
+          local -a ua=()
+          if [ "${as_git}" = "1" ]; then
+            # PRESENT AS GIT, not as a browser. GitHub can distinguish an
+            # ordinary HTTPS GET from a git-protocol operation, and the two do
+            # not share a rate-limit budget. `curl` defaulting to its own
+            # User-Agent is why probes A-C say nothing about what `git` is
+            # subjected to on the same host.
+            ua=(-A "git/2.39.5" -H "Git-Protocol: version=2")
+          fi
           if [ "${auth}" = "1" ]; then
             if [ -z "${DGFE_GH_TOKEN}" ]; then
               printf '  %-34s SKIPPED (no token supplied to this action)\n' "${label}"
@@ -216,9 +249,9 @@ runs:
             # appears in argv where anything reading /proc could see it.
             out="$(printf 'header = "Authorization: Basic %s"\n' \
               "$(printf 'x-access-token:%s' "${DGFE_GH_TOKEN}" | base64 | tr -d '\n')" \
-              | curl -sS -K - -o /dev/null -D - --max-time 30 "${url}" 2>&1)"
+              | curl -sS -K - -o /dev/null -D - --max-time 30 ${ua[@]+"${ua[@]}"} "${url}" 2>&1)"
           else
-            out="$(curl -sS -o /dev/null -D - --max-time 30 "${url}" 2>&1)"
+            out="$(curl -sS -o /dev/null -D - --max-time 30 ${ua[@]+"${ua[@]}"} "${url}" 2>&1)"
           fi
           printf '  %s\n' "${label}"
           printf '%s\n' "${out}" \
@@ -227,16 +260,46 @@ runs:
         }
 
         refs_path=".git/info/refs?service=git-upload-pack"
+        pub="https://github.com/anza-xyz/crossbeam${refs_path}"
+        own="https://github.com/metacraft-labs/codetracer${refs_path}"
         if command -v curl >/dev/null 2>&1; then
-          gh_headers "A  anonymous     -> anza-xyz/crossbeam (public)" \
-            "https://github.com/anza-xyz/crossbeam${refs_path}" 0
-          gh_headers "B  authenticated -> anza-xyz/crossbeam (public)" \
-            "https://github.com/anza-xyz/crossbeam${refs_path}" 1
-          gh_headers "C  authenticated -> metacraft-labs/codetracer (control)" \
-            "https://github.com/metacraft-labs/codetracer${refs_path}" 1
+          gh_headers "A  anon,  browser-UA -> anza-xyz/crossbeam (public)" "${pub}" 0 0
+          gh_headers "B  auth,  browser-UA -> anza-xyz/crossbeam (public)" "${pub}" 1 0
+          gh_headers "C  auth,  browser-UA -> metacraft-labs/codetracer     " "${own}" 1 0
+          gh_headers "D  anon,  GIT-UA     -> anza-xyz/crossbeam (public)" "${pub}" 0 1
+          gh_headers "E  auth,  GIT-UA     -> anza-xyz/crossbeam (public)" "${pub}" 1 1
         else
           echo "  SKIPPED — no curl on this runner."
         fi
+
+        echo
+        echo "=== WHAT EACH OUTCOME MEANS, SAID IN ADVANCE ==================="
+        # Written before the run, so the reading cannot be fitted to whatever
+        # comes back. D is the discriminator: it is the ONLY probe that differs
+        # from A in nothing but presenting as git.
+        #
+        #   D 401/403/429 while A is 200
+        #       -> GitHub is refusing UNAUTHENTICATED GIT specifically. It meters
+        #          git-protocol operations separately from ordinary HTTPS GETs
+        #          and answers an exhausted budget with a challenge. A saturated
+        #          shared-NAT CI pool is exactly the shape that hits it. Then E
+        #          decides the remedy: if E is 200, authenticating third-party
+        #          fetches works ON GIT'S OWN PATH and is implementable here.
+        #
+        #   D 200, same as A
+        #       -> The difference is NOT what GitHub does with a git-shaped
+        #          request, so it is inside this runner's git binary or how it
+        #          is invoked. Next step is `GIT_TRACE_CURL=1` on the failing
+        #          `git ls-remote`, with `Authorization` filtered out of the
+        #          dump, to see the request git actually sends and the response
+        #          it actually gets.
+        #
+        #   D 200 AND the `git ls-remote` above succeeded
+        #       -> The failure is intermittent, and every conclusion drawn from
+        #          a single observation of it is unsafe. Say so rather than
+        #          picking whichever run agrees with you.
+        echo "  (see the comment block in this action; the readings were fixed"
+        echo "   before the probes ran, so they cannot be fitted afterwards)"
 
         echo
         echo "(diagnostic only — this step never fails a job)"
