@@ -39,13 +39,30 @@ button
     cursor: not-allowed
 
 // Sizes
+//
+// Each size matches TWO spellings, because the class the markup emits carries a
+// variant segment: an icon button is `ct-button-image-md-secondary` and a text
+// button is `ct-button-text-md-secondary`.  Neither contains the substring
+// `ct-button-md-`, so a bare `[class*="ct-button-md-"]` matches NEITHER — and
+// the text buttons went unstyled for their whole existence, falling back to the
+// user-agent's `padding: 1px 6px`.  That 1px is why the edit-mode toolbar's
+// labels sat crammed against their borders.
+//
+// Only the `-text-` spellings are added.  Icon buttons miss these rules too,
+// but they set their own `width`/`height` and centre their glyph, so padding
+// has nothing to push there — adding it would move glyphs that are correct
+// today, which is a different change from fixing a selector that matches
+// nothing.
 [class*="ct-button-lg-"]
+[class*="ct-button-text-lg-"]
   padding: 0.75em 0.875em 0.75em 0.875em
 
 [class*="ct-button-md-"]
+[class*="ct-button-text-md-"]
   padding: 0.5em 0.75em 0.5em 0.75em
 
 [class*="ct-button-sm-"]
+[class*="ct-button-text-sm-"]
   padding: 0.25em 0.625em 0.25em 0.625em
 
 // TODO: For now restrict to button class -
@@ -160,7 +177,23 @@ button
 #jump-after-image
   background-image: ct-images-jump-after
 
-#run-tests-image
+// `run-tests-image` is the ONE id the two topbar surfaces share, and the
+// page-object contract says so out loud (`EDIT_TOOLBAR_IDS.runTests` in
+// `src/tests/gui/page-objects/debug-toolbar-ids.ts`).  On the debugger strip it
+// is an ICON button; on the edit-mode strip it is the TEXT button labelled
+// "Run Tests".  Keyed on the id alone, this rule reached both.
+//
+// On a text button the damage is not a stray icon, it is an unreadable control.
+// The declarations that tame a background image — `no-repeat`, `auto 1em`,
+// `center` — all live on `[class*="ct-button-image-"]`, which a text button
+// does not carry, so the 21x16 asset fell back to the initial values and TILED
+// across the button: four columns by two rows of `</  />` chevrons printed on
+// top of the words. That is what "the toolbar looks broken" was pointing at.
+//
+// Requiring the image-button class is therefore not a specificity tweak but the
+// actual precondition: this declaration is only meaningful on an element that
+// also gets the sizing rules above.
+#run-tests-image[class*="ct-button-image-"]
 #jump-to-live-debug
   background-image: ct-images-run-tests
 

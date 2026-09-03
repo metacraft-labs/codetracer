@@ -24,7 +24,6 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
   flex-direction: row
   top: 0
   padding: 0.25em
-  padding-right: 6em
   box-sizing: border-box
   -webkit-app-region: drag
   user-select: none
@@ -88,6 +87,26 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
 
   .debug-finished-background
     background-color: colors-ui-surface-base-panel
+
+// The 6em on the right reserves room for OUR minimise/maximise/close buttons —
+// the `.window-menu` block `isonim_menu_shell_view` renders only when
+// `model.showWindowMenu` is true, which is Windows and Linux.  It used to be
+// unconditional, so on every other target the bar carried 96px of empty gutter
+// against 4px on the left.
+//
+// The cost is the one the `menu-shell--reserved-window-controls` rule below
+// already names for macOS — asymmetric padding "pulled the prompt off-centre" —
+// except that nothing was correcting it for the web, where `showWindowMenu` is
+// also false.  Measured on noirstudio.dev at a 1600px viewport: the command
+// prompt's centre sat at 776px against a window centre of 800px, and the
+// session tab strip stopped 96px short of the right edge.
+//
+// Tying the reserve to the element it reserves for means the three targets stop
+// needing to agree about it separately: Windows and Linux match `:has()` and
+// keep the 6em, macOS falls through to the traffic-light inset below, and the
+// web keeps the same 0.25em it has on the left.
+#menu:has(> .window-menu)
+  padding-right: 6em
 
 // Keep the bar's own controls clear of the OS-drawn window buttons.  The class is
 // set by the menu view when the platform paints its own controls over the bar
@@ -196,6 +215,13 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
     -webkit-app-region: no-drag
     order: 1
     flex: 0 0 auto
+    // `#menu` stretches this to the bar's full 26px content box, but the logo
+    // inside it is an inline-level `button`, so it sat on a line box's baseline
+    // — 23.33px tall, hard against the top, its centre 1.34px above the centre
+    // line every other control in the bar shares.  Enough to read as "the row
+    // is not quite straight" without being obviously wrong on its own.
+    display: flex
+    align-items: center
 
     &:focus
       outline: 0 !important

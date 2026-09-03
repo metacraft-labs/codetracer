@@ -58,3 +58,49 @@
       padding: 0 0.35em
       font-size: 0.78em
       line-height: 1
+
+  // The EDIT-mode surface, mounted into this same host whenever the session is
+  // not replaying (`currentTopbarSurface` in ui/debug.nim).  A sibling of the
+  // block above, not a child of it — the two panels never coexist.
+  //
+  // `views/isonim_edit_mode_toolbar_view` gives it `.ct-header` and a leading
+  // `.separate-bar` on purpose, "so the topbar keeps one look across a mode
+  // switch" — but the look it was matching lives in `.isonim-debug-controls`,
+  // and this panel does not carry that class.  It therefore inherited half the
+  // shared appearance and none of the spacing: `.ct-header` sets no `gap`, so
+  // four bordered pills rendered edge to edge with each button's 1px border
+  // touching its neighbour's, drawing a 2px seam between them.  A row of buttons
+  // welded into a broken segmented control is the shape the report was pointing
+  // at.
+  //
+  // `height` is the caption bar's own control height rather than the debugger
+  // strip's 2.1em.  `#menu` (components/menu_bar.styl) is 2.125em/34px with
+  // 0.25em of padding, and its comment fixes 1.625rem/26px as the size that
+  // leaves "4px above and 4px below, both whole pixels" — which is what the
+  // command prompt and the session tabs already use.  Matching it means every
+  // control in the bar shares one height and one centre line; 2.1em (33.6px)
+  // would not fit the 26px content box at all.
+  //
+  // In `rem` for the same reason `#menu`'s `gap` is: these buttons inherit the
+  // user agent's 13.33px button font-size, not the bar's 16px, so an `em` here
+  // would resolve against a different number than the one the bar was measured
+  // in and land at 21px.
+  .edit-mode-toolbar
+    height: 1.625rem
+    gap: 0.5em
+    padding: 0
+    // `.ct-header` centres its children; the buttons are meant to FILL the row
+    // so their borders describe the bar's control height rather than a second,
+    // smaller one floating inside it.
+    align-items: stretch
+
+    .edit-toolbar-button
+      height: 100%
+      // `button` sets `flex: 0 0 1.75em !important` for the icon buttons that
+      // rule was written for.  On a text button that is a 1.75em flex-basis in
+      // the MAIN axis — a width — and the only reason the labels are not all
+      // clipped to 23px is the automatic minimum size floor that `min-width:
+      // auto` puts under a flex item.  A width that depends on a floor rather
+      // than on the declared basis is a width nobody can predict from reading
+      // the rule, so state the intent: size to the label.
+      flex: 0 0 auto !important
