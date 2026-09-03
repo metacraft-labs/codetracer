@@ -332,10 +332,29 @@ proc saveConfig*(data: Data, layoutConfig: GoldenLayoutConfig) =
     layout: JSON.stringify(layoutConfig.toJs),
     isEditMode: isEditMode}
 
+var persistModeLayoutHook*: proc(data: Data) {.closure.}
+  ## How the shutdown snapshot reaches the per-mode store.
+  ##
+  ## `ui/mode_layouts.nim` cannot be imported here — it imports `ui_imports`,
+  ## which imports this module — so this is the seam, assigned by
+  ## `ui/layout.nim`, which already imports both. Nil until the layout is
+  ## initialised, and a no-op then: a window that never built a layout has no
+  ## arrangement to save.
+
 proc saveCurrentLayoutConfig*(data: Data) =
-  ## Persist the latest GoldenLayout geometry at shutdown. Splitter drags do
-  ## not reliably toggle `saveLayout`, so the close path must snapshot the live
-  ## layout instead of relying only on prior stateChanged saves.
+  ## Persist the latest GoldenLayout geometry at shutdown.
+  ##
+  ## SPLITTER DRAGS DO NOT TOGGLE `saveLayout`, which is why this exists at all
+  ## and why it does more than the `stateChanged` handler does. `saveLayout` is
+  ## set by the tab callbacks and by `stackCreated` / `columnCreated` /
+  ## `rowCreated` / `itemDestroyed` — every way of changing the layout EXCEPT
+  ## resizing it. A user who widens the file tree and reloads has made a change
+  ## that no other path records.
+  ##
+  ## MEASURED: with only the `stateChanged` path, a drag that took the FILES
+  ## stack from 304px to 464px left the stored layout at its previous 3071
+  ## bytes, and the reload came back at 317px. The drag was the arrangement,
+  ## and it was the arrangement that was lost.
   if data.ui.isNil or data.ui.layout.isNil or data.ui.layoutConfig.isNil:
     return
   try:
@@ -343,11 +362,24 @@ proc saveCurrentLayoutConfig*(data: Data) =
     data.saveConfig(data.ui.layoutConfig.fromResolved(data.ui.resolvedConfig))
   except:
     cerror "saveCurrentLayoutConfig: failed to save active layout"
+  # AND INTO THE CURRENT MODE'S OWN STORE, which is the half `saveConfig`
+  # cannot do: it sends an IPC message, and a browser has no index process to
+  # receive it.
+  if not persistModeLayoutHook.isNil:
+    try:
+      persistModeLayoutHook(data)
+    except:
+      cerror "saveCurrentLayoutConfig: failed to store the mode layout"
 
 when defined(js):
-  if inElectron:
-    window.addEventListener(cstring"beforeunload", proc(e: Event) =
-      data.saveCurrentLayoutConfig())
+  # NOT `if inElectron` ANY MORE, and the gate was the web's whole persistence
+  # story. `beforeunload` is a browser event before it is an Electron one, and
+  # restricting the shutdown snapshot to the desktop meant a tab that was
+  # reloaded — the ordinary way a web user returns to their work — took the
+  # last `stateChanged` save and lost everything after it, which is every
+  # resize they had made.
+  window.addEventListener(cstring"beforeunload", proc(e: Event) =
+    data.saveCurrentLayoutConfig())
 
 proc redrawAll* =
   if not sharedDirectRedraw.isNil:

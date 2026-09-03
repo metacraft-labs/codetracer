@@ -1283,13 +1283,40 @@ proc reopenAuxiliaryPanels(data: Data) =
   data.ui.editModeHiddenPanels.setLen(0)
   data.ui.layoutBeforeAuxiliaryClose = nil
 
-proc applyReadOnlyToEditors(data: Data, readOnly: bool) =
+proc applyReadOnlyToEditors(data: Data, readOnly: bool;
+                            rearrangePanels: bool = true) =
   ## Bring the panels, the shortcuts and every Monaco instance into line with a
   ## `data.ui.readOnly` that has ALREADY been assigned.
   ##
   ## Split out from `setEditorsReadOnlyState` so a mode transition can assign
   ## the flag before it rearranges GoldenLayout and still do this work after —
   ## see `beginReadOnlyTransition` for why the order matters.
+  ##
+  ## ## `rearrangePanels = false`, and why a mode transition passes it
+  ##
+  ## The auxiliary pair below is an INCREMENTAL hide-and-show: it removes the
+  ## replay-only panels from the live tree on the way into edit mode and puts
+  ## them back from its own snapshot on the way out. That is the job a mode's
+  ## layout now does DECLARATIVELY — `modeHiddenContentIds` says which panes a
+  ## mode has and `applyModeLayout` installs the whole arrangement — and
+  ## `Mode-Transitions.md` §4.5 says only one of them may: "panels are not
+  ## created or destroyed by a transition beyond what each mode's layout
+  ## declares".
+  ##
+  ## Running both is not redundant, it is destructive, and it was MEASURED. On
+  ## the second round trip `reopenAuxiliaryPanels` ran AFTER `applyModeLayout`
+  ## and restored `layoutBeforeAuxiliaryClose` — the edit layout as it stood
+  ## before the panels were closed — straight over the debug layout that had
+  ## just been installed. In a browser, on the assembled bundle: trips 2 and 3
+  ## reached `data.ui.mode == DebugMode` with `data-topbar-surface` reading
+  ## `debugger-controls`, while the workspace was the EDIT arrangement tab for
+  ## tab (`FILES, VCS, TEST RESULTS, src/main.nr, CONSTRAINTS`, three columns,
+  ## no EVENT LOG), and the register's debug cell had been overwritten with the
+  ## edit layout — 3071 bytes where the debug layout is 4901.
+  ##
+  ## So the transition owns the panels and says so, and `Ctrl+E` — which
+  ## changes editability WITHOUT changing the mode or the layout — keeps the
+  ## incremental path, which is the only caller that still needs it.
   # THE PANEL WORK MUST NOT BE ABLE TO EAT THE EDITOR WORK.
   #
   # `data.ui.readOnly` has already been assigned by the caller, and everything
@@ -1305,7 +1332,12 @@ proc applyReadOnlyToEditors(data: Data, readOnly: bool) =
   # `{.base.}` methods and a nil dispatcher raises `NilAccessDefect`, which a
   # bare `except:` does not stop.
   try:
-    if readOnly:
+    if not rearrangePanels:
+      # The caller has already installed the entering mode's whole layout. The
+      # panels it declares are on screen; the ones it does not are absent
+      # rather than emptied, which is what §4.5 asks for.
+      discard
+    elif readOnly:
       data.reopenAuxiliaryPanels()
     else:
       data.closeAuxiliaryPanels()
@@ -1374,7 +1406,8 @@ proc beginReadOnlyTransition(data: Data, readOnly: bool): bool
   if result:
     data.setEditorsEditable(not readOnly)
 
-proc finishReadOnlyTransition(data: Data, readOnly: bool, changed: bool) =
+proc finishReadOnlyTransition(data: Data, readOnly: bool, changed: bool;
+                              rearrangePanels: bool = true) =
   ## The other half of `beginReadOnlyTransition`, run once the caller has
   ## finished rearranging the layout.
   ##
@@ -1384,11 +1417,13 @@ proc finishReadOnlyTransition(data: Data, readOnly: bool, changed: bool) =
   if not changed:
     # The no-change arm `setEditorsReadOnlyState` has always had: entering Edit
     # mode still closes the debugger's auxiliary panels even when the flag was
-    # already `false`.
-    if data.ui.mode == EditMode and not readOnly:
+    # already `false`. Not when the caller has swapped the layout, for the
+    # reason `applyReadOnlyToEditors` gives at length — a mode's layout already
+    # states which panels the mode has.
+    if rearrangePanels and data.ui.mode == EditMode and not readOnly:
       data.closeAuxiliaryPanels()
     return
-  data.applyReadOnlyToEditors(readOnly)
+  data.applyReadOnlyToEditors(readOnly, rearrangePanels)
 
 proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
   ## Keep Monaco editor options and context keys aligned with the requested
@@ -1551,6 +1586,21 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
     if note.isSome:
       data.reportLayoutDegraded(note.get)
 
+  # THE AUXILIARY-PANEL BOOKKEEPING DESCRIBES PANELS THAT NO LONGER EXIST.
+  #
+  # `closeAuxiliaryPanels` records a `parent` GoldenLayout item and an index
+  # per closed panel, so it can put each one back where it was. A wholesale
+  # layout swap destroys every one of those parents. Left in place, the records
+  # are a set of instructions to re-insert panels into a tree that has been
+  # replaced — which is exactly the clobbering this transition just stopped
+  # happening, waiting for the next `Ctrl+E` to trigger it instead.
+  #
+  # Cleared on any applied swap, and only then: a transition that could not
+  # apply a layout has not invalidated anything.
+  if applied:
+    data.ui.editModeHiddenPanels.setLen(0)
+    data.ui.layoutBeforeAuxiliaryClose = nil
+
 proc switchToEdit*(data: Data) =
   # THE FLAG BEFORE THE LAYOUT. `restoreSavedLayout` below rebuilds
   # GoldenLayout, and the editors it opens read `data.ui.readOnly` as they are
@@ -1558,6 +1608,7 @@ proc switchToEdit*(data: Data) =
   # the foot of the proc, so a returning session came back read-only and no
   # later walk could reach the editors that had not been built yet.
   let readOnlyChanged = data.beginReadOnlyTransition(false)
+  var switched = false
   if data.ui.mode != EditMode:
     let leaving = data.ui.mode
     data.ui.mode = EditMode
@@ -1566,6 +1617,7 @@ proc switchToEdit*(data: Data) =
     # together or not at all" a property of the code rather than of two call
     # sites agreeing.
     data.applyModeLayout(leaving = leaving, entering = EditMode)
+    switched = true
 
     for content, map in data.ui.componentMapping:
       for id, component in map:
@@ -1622,7 +1674,8 @@ proc switchToEdit*(data: Data) =
           # correct.
           cerror "layout: component clear " & $content & "/" & $id &
             " raised a Defect and was skipped"
-  data.finishReadOnlyTransition(false, readOnlyChanged)
+  data.finishReadOnlyTransition(false, readOnlyChanged,
+                                rearrangePanels = not switched)
   redrawAfterModeSwitch()
   # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
   # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw
@@ -1639,6 +1692,7 @@ proc switchToDebug*(data: Data) =
   # are built read-only rather than being made so afterwards.
   let readOnlyChanged = data.beginReadOnlyTransition(true)
 
+  var switched = false
   if data.ui.mode != DebugMode:
     let leaving = data.ui.mode
     data.ui.mode = DebugMode
@@ -1669,8 +1723,10 @@ proc switchToDebug*(data: Data) =
     # arrangement and then to the mode's default, so the first Run installs a
     # debugging layout rather than none.
     data.applyModeLayout(leaving = leaving, entering = DebugMode)
+    switched = true
 
-  data.finishReadOnlyTransition(true, readOnlyChanged)
+  data.finishReadOnlyTransition(true, readOnlyChanged,
+                                rearrangePanels = not switched)
   redrawAfterModeSwitch()
   # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
   # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw

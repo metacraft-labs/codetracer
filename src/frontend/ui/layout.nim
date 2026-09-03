@@ -2181,6 +2181,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     });
   """.}
 
+  # THE SHUTDOWN SEAM. `renderer.saveCurrentLayoutConfig` runs on
+  # `beforeunload` and cannot reach `mode_layouts` (the import runs the other
+  # way), so it calls this. Assigned here, beside the layout it is about, and
+  # only once a layout exists to snapshot.
+  persistModeLayoutHook = proc(d: Data) =
+    mode_layouts.rememberModeLayout(d, d.ui.mode)
+
   layout.on(cstring"stateChanged") do (event: js):
     cdebug "layout event: stateChanged"
     enforceMinStackWidth(layout)

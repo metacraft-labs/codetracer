@@ -289,6 +289,35 @@ proc rememberModeLayout*(data: Data; mode: LayoutMode) =
   ## the wrong file"; naming the mode makes the ordering irrelevant.
   if data.isNil or data.ui.isNil or data.ui.layout.isNil:
     return
+  # NOT WHILE A LAYOUT IS BEING LOADED, and this is the guard the whole design
+  # turns on rather than a defensive extra.
+  #
+  # MEASURED IN A BROWSER, on three round trips against the assembled bundle.
+  # Trips 2 and 3 reached Debug mode — `data-topbar-surface` said
+  # `debugger-controls` and `data.ui.mode` said `0` — while the workspace was
+  # still the EDIT arrangement, tab for tab: `FILES, VCS, TEST RESULTS,
+  # src/main.nr, CONSTRAINTS`, three top-level columns, and no EVENT LOG. The
+  # stored debug layout had gone from 4901 bytes to 3071, byte-for-byte the
+  # size of the stored EDIT layout.
+  #
+  # The path: `applyModeLayout` sets `data.ui.mode` to the entering mode and
+  # then swaps the layout. `loadLayout` tears the old tree down as it builds
+  # the new one and GoldenLayout emits `stateChanged` DURING that, so
+  # `ui/layout.nim`'s handler fired with the new mode already assigned and the
+  # old (or half-built) layout still live — and filed it under the entering
+  # mode. The next switch then restored that, which is how the edit
+  # arrangement came back with the debugger's toolbar over it.
+  #
+  # This is the SAME defect the previous implementation had and the reason its
+  # restore arm was disabled: an unrelated writer recording a layout mid-swap,
+  # so "each transition saves a layout that the previous transition had already
+  # damaged, and applying it feeds the damage forward". Moving the mode's
+  # arrangement into a per-mode register removed one such writer; this removes
+  # the other. `data.ui.isLoadingLayout` is set for exactly the duration of
+  # `loadLayout` (`ui/layout.swapLayout`) and is what `itemDestroyed` already
+  # uses to tell a wholesale swap from a user closing a tab.
+  if data.ui.isLoadingLayout:
+    return
   # NEVER PERSIST A REVIEW'S LAYOUT, for the reason `renderer.saveConfig` gives
   # at its own guard: a review runs on a layout that deliberately omits panels,
   # and storing it as the user's would leave the next ordinary launch missing
