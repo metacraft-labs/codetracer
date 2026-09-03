@@ -404,6 +404,51 @@ PATCHELF_BINARIES=(
 	"${APP_DIR}"/ruby/bin/ruby
 	"${APP_DIR}"/bin/ct-remote
 )
+
+# Bundle the FULL transitive closure, not a hand-maintained subset.
+#
+# Until the loader was bundled, anything missing from ${APP_DIR}/lib was quietly
+# supplied by the host: the host's ld.so reads /etc/ld.so.cache and searches
+# /lib:/usr/lib, so a dependency nobody had bundled still resolved, and the
+# AppImage looked self-contained while it was not. nixpkgs' loader is patched to
+# do NEITHER -- no ld.so.cache, no default search path, by design -- so the
+# moment we start binaries through the bundled loader, every one of those
+# accidental host dependencies becomes a hard failure:
+#
+#     ct_unwrapped: error while loading shared libraries: liblzma.so.5:
+#         cannot open shared object file: No such file or directory
+#
+# That is liblzma via elfutils, on ARCH -- the one distro that passed before.
+# It was never bundled; the host had always been covering for us.
+#
+# So take the closure from `lddtree` rather than listing libraries by hand.
+# `grep -v glibc` keeps glibc out: it is bundled above from ct_unwrapped's own
+# PT_INTERP, so that the loader and libc stay the matched pair, and a second
+# copy arriving here from some other package's closure would be a different
+# build of it. Iterate to a fixpoint because the libs copied in (libbpf, libelf)
+# bring their own NEEDED entries that the first pass has not seen yet.
+bundle_closure_of() {
+	local target="$1" libs
+	[ -e "${target}" ] || return 0
+	libs=$(lddtree -l "${target}" 2>/dev/null | grep -v glibc | grep '^/nix' || true)
+	[ -n "${libs}" ] || return 0
+	# shellcheck disable=SC2086
+	cp -n -L ${libs} "${APP_DIR}"/lib 2>/dev/null || true
+}
+
+for pass in 1 2 3 4; do
+	before=$(find "${APP_DIR}/lib" -maxdepth 1 -type f | wc -l | tr -d ' ')
+	for binary in "${PATCHELF_BINARIES[@]}"; do
+		bundle_closure_of "${binary}"
+	done
+	for lib in "${APP_DIR}"/lib/*.so*; do
+		bundle_closure_of "${lib}"
+	done
+	after=$(find "${APP_DIR}/lib" -maxdepth 1 -type f | wc -l | tr -d ' ')
+	echo "closure pass ${pass}: ${before} -> ${after} libs in ${APP_DIR}/lib"
+	[ "${before}" = "${after}" ] && break
+done
+
 for binary in "${PATCHELF_BINARIES[@]}"; do
 	try_patchelf "$binary" --set-interpreter "${INTERPRETER_PATH}"
 done
@@ -412,12 +457,29 @@ done
 # own NEEDED libs (libbpf needs libelf, etc.) get the same treatment so
 # the loader falls back to ct_unwrapped's $ORIGIN/../lib instead of
 # searching the Nix-store paths baked in at build time.
+# EVERY bundled library, not four of them by name. The closure pass above brings
+# in libraries nobody listed here, and each carries a /nix/store RPATH that does
+# not exist on the target machine. glibc's own files are excluded: they are the
+# matched loader/libc pair taken from ct_unwrapped's PT_INTERP, they are found
+# through --library-path, and rewriting libc.so.6's dynamic section is a risk
+# with no upside.
+BUNDLED_LIBS=()
+for lib in "${APP_DIR}"/lib/*.so*; do
+	[ -e "${lib}" ] || continue
+	case "$(basename "${lib}")" in
+	ld-linux* | libc.so.6 | libm.so.6 | libdl.so.2 | libpthread.so.0 | librt.so.1 | \
+		libutil.so.1 | libresolv.so.2 | libanl.so.1 | libnsl.so.1 | \
+		libBrokenLocale.so.1 | libthread_db.so.1 | libnss_*)
+		continue
+		;;
+	esac
+	BUNDLED_LIBS+=("${lib}")
+done
+echo "rpath-rewriting ${#BUNDLED_LIBS[@]} bundled libraries"
+
 REMOVE_RPATH_TARGETS=(
 	"${PATCHELF_BINARIES[@]}"
-	"${APP_DIR}"/lib/libicui18n.so.76
-	"${APP_DIR}"/lib/libgssapi_krb5.so.2
-	"${APP_DIR}"/lib/libbpf.so.1
-	"${APP_DIR}"/lib/libelf.so.1
+	"${BUNDLED_LIBS[@]}"
 )
 for binary in "${REMOVE_RPATH_TARGETS[@]}"; do
 	try_patchelf "$binary" --remove-rpath
@@ -427,10 +489,7 @@ done
 # Note: $ORIGIN is an ELF rpath token, not a shell variable - it should NOT be expanded
 RPATH_BINARIES=(
 	"${PATCHELF_BINARIES[@]}"
-	"${APP_DIR}"/lib/libicui18n.so.76
-	"${APP_DIR}"/lib/libgssapi_krb5.so.2
-	"${APP_DIR}"/lib/libbpf.so.1
-	"${APP_DIR}"/lib/libelf.so.1
+	"${BUNDLED_LIBS[@]}"
 )
 for binary in "${RPATH_BINARIES[@]}"; do
 	# shellcheck disable=SC2016
