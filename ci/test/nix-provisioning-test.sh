@@ -93,8 +93,26 @@ is_provisioning_step() { # $1 = a stripped YAML line
 	*'nixos-modules/.github/install-nix'*) return 0 ;;
 	*'metacraft-github-actions/setup-dev-env'*) return 0 ;;
 	*'.github/actions/setup-db-backend-siblings'*) return 0 ;;
-	*'.github/actions/setup-isonim-siblings'*) return 0 ;;
 	*'DeterminateSystems/nix-installer-action'*) return 0 ;;
+	esac
+	return 1
+}
+
+# The other direction: a composite action of this repo's that CONSUMES Nix
+# without any `run: nix ...` line a workflow scanner can see.
+#
+# `.github/actions/provision-repro-lock-siblings` is the case that matters.
+# It clones the lock-pinned dependency siblings by running `repro develop
+# --all` inside `nix develop .#ci`, because `repro` comes from this repo's own
+# dev shell (nix/shells/ci-base.nix). Its predecessor, `setup-isonim-siblings`,
+# was listed as a PROVISIONER above, which was wrong in both directions: it
+# installed no Nix, and after the switch the successor needs Nix installed
+# BEFORE it rather than after. Naming it here is what makes "provision Nix
+# first" cover the step, so a future edit that hoists it back above `Install
+# Nix` fails this suite instead of failing in CI with "nix: command not found".
+is_nix_consuming_step() { # $1 = a stripped YAML line
+	case "$1" in
+	*'.github/actions/provision-repro-lock-siblings'*) return 0 ;;
 	esac
 	return 1
 }
@@ -138,6 +156,21 @@ for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
 			continue
 		fi
 
+		# A step that reaches Nix through a composite action of this repo's
+		# rather than through a `run:` line. Recorded exactly like a `nix
+		# develop` invocation below, which is what it performs.
+		if is_nix_consuming_step "$stripped"; then
+			case " ${nix_jobs[*]-} " in
+			*" $wf_name:$job "*) ;;
+			*) nix_jobs+=("$wf_name:$job") ;;
+			esac
+			if [ "$provisioned" -eq 0 ] && [ "$job_reported" != "$job" ]; then
+				job_reported="$job"
+				unprovisioned+=("$wf_name:$line_no: job '$job' reaches nix through a composite action with no Nix-provisioning step before it")
+			fi
+			continue
+		fi
+
 		# A `nix` invocation: `nix` as the first word, either as the whole of
 		# a `run:` value or as a line of a `run: |` block.
 		case "$stripped" in
@@ -169,7 +202,22 @@ done
 # a single-line quoted `- run: "nix develop ..."`, which this scanner does not
 # match, so dev-build only now classifies as nix-using. It provisions Nix
 # (Install Nix + setup-db-backend-siblings), so the "provisions first" rule holds.
-readonly EXPECTED_NIX_JOBS=31
+#
+# 31 -> 32: `is_nix_consuming_step` adds `lint-nim`, and it is worth saying why
+# rather than just bumping the number. Like dev-build's, lint-nim's only nix
+# invocation is the quoted one-line form
+#
+#     - run: "nix develop .#devShells.x86_64-linux.default -c ./ci/lint/nim.sh"
+#
+# which the `run: nix ` / `nix ` prefix match below does not see: the stripped
+# line starts with `- run: "nix`. So the job ran nix and this suite had never
+# classified it. `is_nix_consuming_step` reaches it through the composite
+# action it now calls, which is how the omission surfaced at all -- the same
+# way it reached dev-build, which the direnv step above has since caught by
+# its multi-line spelling. The scanner's blind spot to `- run: "..."` is real
+# and unfixed; converting it is separate work, and this count is the record
+# that it exists.
+readonly EXPECTED_NIX_JOBS=32
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

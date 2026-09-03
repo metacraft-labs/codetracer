@@ -82,19 +82,19 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup isonim siblings
-        # `test-no-sidecar-manifests` depends on `vm-test-prereqs`, which runs
-        # scripts/build-tailwind.sh against isonim's style extractor.
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # `test-no-sidecar-manifests` depends on `vm-test-prereqs`, which runs
+        # scripts/build-tailwind.sh against isonim's style extractor. After
+        # `Install Nix`, because the action reaches `repro` through this repo's
+        # dev shell.
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       # The six recorder siblings, cloned into the workspace-sibling layout
       # `workspaceRoot() / lang.recorderRepo` resolves (see

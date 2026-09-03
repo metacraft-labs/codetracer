@@ -211,7 +211,8 @@ mkShell {
     # detect-siblings.sh only exports CODETRACER_TRACE_FORMAT_NIM_SRC when an
     # adjacent `codetracer-trace-format-nim/src` sibling checkout exists. CI
     # lanes that enter this devShell without cloning that sibling (e.g.
-    # appimage-build, which uses setup-isonim-siblings and does NOT clone it)
+    # appimage-build, which uses provision-repro-lock-siblings and does NOT
+    # clone it)
     # then have no way to resolve `import codetracer_trace_writer/span_stream`
     # (config.nims:67), so the nim compile of src/ct/cli/print_trace.nim fails
     # with `cannot open file: codetracer_trace_writer/span_stream`.

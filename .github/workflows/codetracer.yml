@@ -218,8 +218,16 @@ jobs:
   # has received nothing since). Until it is restored, siblings are pinned to
   # the branch the lock itself recorded for every one of them (`upstream="dev"`
   # in 784c9bda's lock), which is also what the lock-free paths in this file
-  # already do — `.github/actions/setup-isonim-siblings` and the `clone-repo`
-  # steps in `viewmodel-tests` / `test-non-gui` all clone `ref: dev`.
+  # already do — the `clone-repo` steps in `viewmodel-tests` / `test-non-gui`
+  # all clone `ref: dev`.
+  #
+  # ONE FAMILY OF SIBLINGS NO LONGER PARTICIPATES IN ANY OF THIS. codetracer's
+  # from-source dependencies — isonim and the four nim-* libraries — are
+  # provisioned by `.github/actions/provision-repro-lock-siblings` from the
+  # `repro.lock` COMMITTED IN THIS REPO, at exact SHAs, with no manifest repo
+  # in the path at all. That is the shape the rest of this list is waiting on:
+  # a lock that lives next to the source it describes cannot lapse, and does
+  # not have to be told which repos a developer happened to have checked out.
   #
   # This changes WHERE a revision comes from, not WHICH repos are provisioned
   # or what any job asserts. When locks are published again, dropping the
@@ -1436,12 +1444,13 @@ jobs:
       # and fails `graph-walks-siblings` if it cannot resolve them. That commit
       # added the sibling requirement to the guard but not to this job, so
       # lint-nim went red with `cannot locate sibling package: isonim /
-      # nim-everywhere`. Provision the IsoNim-family siblings next to this
-      # checkout through the shared action, the same way the build/test jobs do.
-      - name: Setup isonim siblings
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+      # nim-everywhere`. Provision the lock-pinned siblings next to this
+      # checkout through the shared action, the same way the build/test jobs
+      # do -- `repro.lock`'s `depends` names both of the ones the guard walks
+      # into. After ``Install Nix`` above, because the action reaches ``repro``
+      # through this repo's own dev shell.
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -2292,10 +2301,11 @@ jobs:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup isonim siblings
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+      - name: Provision dependency siblings from repro.lock
+        # `Setup db-backend siblings` above carries `env-flavor: nix`, so Nix
+        # is already installed when this runs -- which it must be, because the
+        # action reaches `repro` through this repo's own dev shell.
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       - name: Clone runquota sibling
         # `just build-once` below compiles `ct`, and src/ct/codetracer.nim ->
@@ -2362,11 +2372,6 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup isonim siblings
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
       - name: Clone codetracer-trace-format-nim sibling
         # Nine ViewModel suites -- the eight request-panel ones plus
         # request_span_conformance_test -- ``import codetracer_ctfs/container``
@@ -2401,6 +2406,13 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # The ViewModel suites compile against ``../isonim/src`` et al. via
+        # codetracer's top-level ``config.nims``. After ``Install Nix``, not
+        # before it: the action reaches ``repro`` through this repo's dev
+        # shell, which is also where the suites below run.
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       - name: Assert the JS ViewModel lane can observe its own failures (full suite)
         # The same contract suite `ci-verdict` runs, but here it runs INSIDE the
@@ -2499,7 +2511,7 @@ jobs:
         # `-d:nodejs`, compile-only) and then the property gate, which proves
         # the arms are genuinely different builds and that the web one links no
         # Electron. It needs the isonim tailwind placeholder this job's
-        # `setup-isonim-siblings` step already seeds.
+        # `provision-repro-lock-siblings` step already seeds.
         #
         # Before `test-vm` for the same reason the two steps above are: it
         # answers "does the product's front end build at all", which nobody
@@ -2932,11 +2944,6 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup isonim siblings
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
@@ -2949,6 +2956,11 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # After ``Install Nix``: the action reaches ``repro`` through this
+        # repo's dev shell, which the build step below uses anyway.
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # ci/build/dev.sh builds src/db-backend, whose build.rs invokes
@@ -3050,15 +3062,6 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup isonim siblings
-        # appimage-build runs nim *outside* the Nix sandbox via
-        # ``./ci/build/appimage.sh``; clone the isonim siblings next
-        # to the codetracer checkout so codetracer's ``nim.cfg``
-        # ``path:"../isonim/src"`` directives resolve.
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
       - name: Setup db-backend siblings
         # ``./ci/build/appimage.sh`` -> ``build_db_backend.sh`` runs
         # ``cargo build`` in src/db-backend, whose build.rs needs the
@@ -3076,6 +3079,15 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # appimage-build runs nim *outside* the Nix sandbox via
+        # ``./ci/build/appimage.sh``; the lock-pinned siblings have to sit
+        # next to the codetracer checkout so ``config.nims``'
+        # ``addPathIfDir(workspaceRoot / "isonim/src")`` resolves. After
+        # ``Install Nix`` because the action reaches ``repro`` through this
+        # repo's dev shell.
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       - name: Allow direnv in cloned codetracer-native-recorder
         # db-backend's build.rs invokes ``direnv exec <recorder-root> bash
@@ -4349,15 +4361,6 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Setup isonim siblings
-        # ``just test`` -> ``test-nimsuggest`` needs the codetracer
-        # source to build, which pulls in ``../isonim/src`` siblings.
-        # Both legs now build inside the nix dev shell, so both need the
-        # isonim siblings adjacent to this checkout.
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
       - name: Install Nix
         # Both legs drive the tests through ``nix develop`` now. On the
         # self-hosted eph-linux-x64 / aarch64-darwin runners nix is already
@@ -4368,6 +4371,14 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # ``just test`` -> ``test-nimsuggest`` needs the codetracer source to
+        # build, which pulls in ``../isonim/src`` et al. Both legs build inside
+        # the nix dev shell, so both need the siblings adjacent to this
+        # checkout -- and both have Nix by the step above, which this action
+        # requires to reach ``repro``.
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       # --- macOS setup ---
       # No open-coded just / Python / Rust / cargo-nextest toolchain steps and
@@ -4858,16 +4869,16 @@ jobs:
       # ``./ci/test/ui-tests-db.sh`` below). just / nim / cargo / node /
       # Playwright all come from ``nix develop .``; the former open-coded brew
       # install just / setup-python / dtolnay rust-toolchain steps are gone.
-      - name: Setup isonim siblings (macOS)
+      - name: Provision dependency siblings from repro.lock (macOS)
         if: matrix.platform == 'macos'
-        # codetracer's nim.cfg ``--path:``s into ``../isonim/src`` and
-        # five other isonim sibling repos.  Without them the
+        # codetracer's ``config.nims`` adds ``../isonim/src`` and the four
+        # nim-* sibling sources to the Nim search path.  Without them the
         # frontend build aborts with ``cannot open file:
         # isonim/core/async_compat``.  Reuse the composite action
-        # the Linux jobs already use.
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
+        # the Linux jobs already use.  ``Setup dev env`` above carries
+        # ``env-flavor: nix``, so the dev shell this action reaches ``repro``
+        # through is available by now.
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, nim-stackable-hooks, codetracer-visual-replay and
@@ -5693,20 +5704,20 @@ jobs:
           # as the visual-replay gate; the long form is in that job.
           persist-credentials: false
 
-      - name: Setup isonim siblings
-        # The gate's last two suites are ViewModel tests under
-        # src/frontend/viewmodel/, which build against ../isonim/src et al. via
-        # codetracer's top-level nim.cfg. Same prerequisite as `viewmodel-tests`.
-        uses: ./.github/actions/setup-isonim-siblings
-        with:
-          gh-token: ${{ steps.ci_token.outputs.token }}
-
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # The gate's last two suites are ViewModel tests under
+        # src/frontend/viewmodel/, which build against ../isonim/src et al. via
+        # codetracer's top-level config.nims. Same prerequisite as
+        # `viewmodel-tests`, and like it this runs after ``Install Nix``
+        # because the action reaches ``repro`` through this repo's dev shell.
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       - name: Run the M16 ct-test release gate
         # The ct_test sources import runquota_process; the dev shell exports
