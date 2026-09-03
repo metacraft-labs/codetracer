@@ -111,11 +111,34 @@ proc `$`*(c: CallCount): string =
   of Less:
     &"< {c.i}"
 
+# A CALLTRACE COMPONENT OUTLIVES ITS PANE. It keeps its `CtCompleteMove`
+# subscription whether or not the pane is in the current layout, and a mode
+# transition removes the pane without removing the component. `jq` is
+# `document.querySelector`, so the two measurements below used to read a
+# geometry property off `null` and throw from inside a move handler — the shape
+# `ui/step_list.nim`'s `panelHeight` was measured doing, nine times over three
+# round trips, with the rest of each move's handling lost behind it.
+#
+# The defaults are the same "one screen-ish" numbers the measurements produce
+# on a normal pane, and they keep the load requests non-degenerate: a zero
+# depth or a zero height asks the backend for nothing.
+const
+  DEFAULT_CALLTRACE_PANEL_DEPTH = 10
+  DEFAULT_CALLTRACE_PANEL_HEIGHT = 16
+
 proc panelDepth*(self: CalltraceComponent): int =
-  cast[int](jq("#calltraceComponent-" & $self.id).offsetWidth) div CALL_OFFSET_WIDTH_PX
+  let host = jq("#calltraceComponent-" & $self.id)
+  if host.isNil:
+    return DEFAULT_CALLTRACE_PANEL_DEPTH
+  let depth = cast[int](host.offsetWidth) div CALL_OFFSET_WIDTH_PX
+  if depth <= 0: DEFAULT_CALLTRACE_PANEL_DEPTH else: depth
 
 proc panelHeight*(self: CalltraceComponent): int =
-  cast[int](jq("#calltraceComponent-" & $self.id).offsetHeight) div CALL_HEIGHT_PX
+  let host = jq("#calltraceComponent-" & $self.id)
+  if host.isNil:
+    return DEFAULT_CALLTRACE_PANEL_HEIGHT
+  let rows = cast[int](host.offsetHeight) div CALL_HEIGHT_PX
+  if rows <= 0: DEFAULT_CALLTRACE_PANEL_HEIGHT else: rows
 
 proc scrollRawPosition*(self: CalltraceComponent): int =
   cast[int](jq("#calltraceScroll-" & $self.id).toJs.scrollTop)

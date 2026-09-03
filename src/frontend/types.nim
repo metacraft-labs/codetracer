@@ -1951,6 +1951,10 @@ type
     openComponentIds*:        array[Content, seq[int]]
     saveLayout*:     bool
     isReparenting*:  bool
+    isLoadingLayout*: bool
+      ## Set while GoldenLayout is being handed a WHOLE new layout, so the
+      ## `itemDestroyed` handler can tell a wholesale swap from the user
+      ## closing a tab. See `ui/layout.swapLayout`.
     menuNode*: MenuNode
     launchConfigs*: seq[FrontendLaunchConfig]
     pageLoaded*: bool

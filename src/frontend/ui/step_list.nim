@@ -25,7 +25,7 @@ from ../viewmodel/viewmodels/step_list_vm import
   StepListVM, createStepListVM,
   setLineSteps, appendLineSteps, clearLineSteps,
   setCurrentLocation, setPanelHeight,
-  loadStepLinesFor, jumpToStepLine
+  loadStepLinesFor, jumpToStepLine, DEFAULT_STEP_LIST_PANEL_HEIGHT
 when defined(js):
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_step_list_view import mountIsoNimStepList
@@ -105,7 +105,24 @@ proc lineStepsToVm(lines: seq[LineStep]): seq[StepLine] =
 # ---------------------------------------------------------------------------
 
 proc panelHeight*(self: StepListComponent): int =
-  cast[int](jq("#stepListComponent").offsetHeight) div STEP_LINE_HEIGHT_PX
+  ## Rows the panel can show — measured off the live GL container, or the
+  ## ViewModel's documented default when there is no container to measure.
+  ##
+  ## A PANEL THAT IS NOT IN THE LAYOUT IS AN ORDINARY STATE, NOT A FAILURE.
+  ## The component keeps its `CtCompleteMove` subscription whether or not its
+  ## pane is open, and the debugging layout a web replay loads does not carry
+  ## a Step List pane at all. `jq` is `document.querySelector`, so this used to
+  ## read `.offsetHeight` off `null` and THROW — once per step, from inside
+  ## `onCompleteMove`, taking the rest of that move's handling with it.
+  ##
+  ## Measured on the assembled bundle: nine steps over three round trips
+  ## produced nine uncaught `Cannot read properties of null (reading
+  ## 'offsetHeight')`, and the debugger's painted caret never moved.
+  let host = jq("#stepListComponent")
+  if host.isNil:
+    return DEFAULT_STEP_LIST_PANEL_HEIGHT
+  let rows = cast[int](host.offsetHeight) div STEP_LINE_HEIGHT_PX
+  if rows <= 0: DEFAULT_STEP_LIST_PANEL_HEIGHT else: rows
 
 # ---------------------------------------------------------------------------
 # Legacy event-bus handlers — kept so the existing IPC + mediator wiring

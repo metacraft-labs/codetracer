@@ -229,13 +229,45 @@ proc openLocation*(data: Data, path: cstring, line: int, col: int = utils.NO_COL
 
 
 proc viewerPanel*(data: Data): GoldenContentItem =
-  # TODO store it based on content
-  if not data.ui.layout.isNil and data.ui.openComponentIds[Content.EditorView].len > 0:
-    let lastViewerComponentIndex = data.ui.openComponentIds[Content.EditorView][^1]
-    cast[GoldenContentItem](
-      data.ui.componentMapping[Content.EditorView][lastViewerComponentIndex].layoutItem.parent)
-  else:
-    nil
+  ## The GoldenLayout panel the most recent editor tab lives in, or nil.
+  ##
+  ## THE ID REGISTER AND THE COMPONENT TABLE ROUTINELY DISAGREE, and this used
+  ## to read straight through the disagreement:
+  ## `componentMapping[EditorView][openComponentIds[EditorView][^1]].layoutItem`.
+  ## `openComponentIds` is appended to by GoldenLayout's own `tab` callback for
+  ## every tab it creates, while `componentMapping` is populated by
+  ## `createUIComponents`, which walks `resolvedConfig` ONCE at startup. A
+  ## layout loaded later therefore names tabs with no Nim component behind
+  ## them — on the web that is the ordinary case, not an edge one — and the
+  ## lookup then answers `undefined`, whose `.layoutItem` THROWS.
+  ##
+  ## Measured on the assembled bundle, pressing Stop after a Run: the editor
+  ## registration's `tab` handler calls this proc, it threw
+  ## `Cannot read properties of undefined (reading 'layoutItem')` from inside
+  ## GoldenLayout's `loadLayout`, and `restoreSavedLayout` reported
+  ## `layout: GoldenLayout rejected the edit layout`. The restore had already
+  ## torn the debug layout down, so the return left the workspace EMPTY — no
+  ## editor, no Files, no VCS, no tabs at all.
+  ##
+  ## So this walks BACK from the most recent id to the first one that has a
+  ## component with a layout item, and answers nil when none does. Nil is a
+  ## state every caller already handles (`if not editorPanel.isNil`), and it is
+  ## the truth: there is no editor panel to hand back.
+  if data.ui.layout.isNil:
+    return nil
+  let openIds = data.ui.openComponentIds[Content.EditorView]
+  let mapping = data.ui.componentMapping[Content.EditorView]
+  if openIds.len == 0 or mapping.isNil:
+    return nil
+  for index in countdown(openIds.high, 0):
+    let id = openIds[index]
+    if not mapping.hasKey(id):
+      continue
+    let component = mapping[id]
+    if component.isNil or component.layoutItem.isNil:
+      continue
+    return cast[GoldenContentItem](component.layoutItem.parent)
+  nil
 
 
 proc editorPanel*(data: Data, editorView: EditorView): GoldenContentItem =

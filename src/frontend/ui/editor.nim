@@ -3040,6 +3040,79 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
   if not self.api.isNil:
     self.api.emit(InternalLastCompleteMove, EmptyArg())
 
+proc monacoEditorIsAttached(editor: MonacoEditor): bool {.importjs:
+  "(function(e){ var n = e && e.getDomNode && e.getDomNode(); " &
+  "return !!(n && n.isConnected); })(#)".}
+  ## Whether this Monaco instance's DOM node is still in the document.
+
+proc monacoEditorAdoptInto(editor: MonacoEditor; host: js) {.importjs:
+  "(function(e,h){ var n = e && e.getDomNode && e.getDomNode(); " &
+  "if (!n || !h) return; h.appendChild(n); " &
+  "var relayout = function(){ try { e.layout({ width: h.clientWidth, " &
+  "height: h.clientHeight }); } catch (x) {} }; relayout(); " &
+  "if (typeof requestAnimationFrame === 'function') " &
+  "requestAnimationFrame(relayout); })(#, #)".}
+  ## Move an existing Monaco instance into `host` and re-measure it.
+  ##
+  ## THE SIZE HAS TO COME FROM THE HOST, not from the editor. Monaco writes an
+  ## explicit width and height onto its own DOM node, so a bare `layout()`
+  ## re-measures the node it just sized and keeps whatever geometry it had
+  ## while detached — measured as a 5x5 editor showing two lines inside an
+  ## 880x902 pane. Once more on the next frame because the pane a layout swap
+  ## has just created has not been through a browser layout pass yet.
+
+proc monacoEditorSetReadOnly(editor: MonacoEditor; readOnly: bool) {.importjs:
+  "#.updateOptions({ readOnly: # })".}
+  ## Change ONLY the read-only flag.
+  ##
+  ## Not `updateOptions(MonacoEditorOptions(readOnly: ...))`: a Nim object
+  ## literal carries every other field as well, at its zero value, and Monaco
+  ## reads them. Measured — `minimap` arrives as `null` and Monaco's option
+  ## reader throws `Cannot read properties of null (reading 'autohide')`, once
+  ## per transition, from inside `updateOptions`.
+
+proc reattachMonacoIfDetached*(self: EditorViewComponent; selector: cstring) =
+  ## Carry a live Monaco instance into the container a layout rebuild just
+  ## made for it.
+  ##
+  ## A MONACO INSTANCE OUTLIVES ITS CONTAINER, and until this existed nothing
+  ## noticed. `initMonacoForEditor` returns early when `tabInfo.monacoEditor`
+  ## is already set, and the mount site only calls it when that field is nil —
+  ## so after a mode transition destroyed the editor's GoldenLayout pane and
+  ## another rebuilt it, the field still pointed at the OLD instance, whose DOM
+  ## node had gone with the old pane. The fresh container was left empty and
+  ## the old instance floated detached.
+  ##
+  ## Measured on the assembled bundle, Run then Stop: the edit layout came back
+  ## with its `src/main.nr` tab and an `editorComponent-0` host 880x902 — and
+  ## `document.querySelectorAll(".view-line").length` was 0, with the single
+  ## `monaco.editor.getEditors()` entry reporting `isConnected: false` and the
+  ## replay session's `readOnly: true`. An Edit mode with an empty editor pane,
+  ## which `ci/test/noir-mode-roundtrip.sh` sees as "the editors are writable
+  ## again" failing.
+  ##
+  ## MOVED, NOT RE-CREATED. Re-creating would build the editor from
+  ## `tabInfo.source` — the file as it was LOADED — and silently discard
+  ## everything the user has typed since; disposing the old one would take its
+  ## model with it. Moving the existing DOM node keeps the model, the
+  ## selection, the scroll position and the undo history, and is the same
+  ## reparenting `ui/layout.nim` already does for auto-hidden panels.
+  if self.tabInfo.isNil or self.tabInfo.monacoEditor.isNil:
+    return
+  if monacoEditorIsAttached(self.tabInfo.monacoEditor):
+    return
+  let host = jq(selector)
+  if host.isNil:
+    return
+  monacoEditorAdoptInto(self.tabInfo.monacoEditor, host.toJs)
+  self.monacoEditor = self.tabInfo.monacoEditor
+  # The transition that destroyed the pane may also have changed the mode, and
+  # this instance was constructed for the previous one.
+  monacoEditorSetReadOnly(
+    self.monacoEditor,
+    self.data.ui.readOnly or self.data.isReviewDatasetSession())
+  cdebug "editor: re-attached monaco for " & $self.name & " into " & $selector
+
 proc editorAfterRedraw(self: EditorViewComponent) =
   ## Per-redraw work for the editor: flow rendering, line styles, test
   ## actions, inline values, trace/expansion redraws.
@@ -3308,6 +3381,11 @@ when defined(js):
       let selector = cstring("#editorComponent-" & $componentId)
       if self.tabInfo.monacoEditor.isNil:
         self.initMonacoForEditor(selector)
+      else:
+        # The instance exists but the container is new: a layout rebuild
+        # replaced the pane under it. `initMonacoForEditor` would decline, so
+        # the editor is carried across instead of being left detached.
+        self.reattachMonacoIfDetached(selector)
 
       if not self.tabInfo.monacoEditor.isNil:
         self.tryMountIsoNimEditorPanel()

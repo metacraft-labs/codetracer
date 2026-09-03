@@ -636,9 +636,70 @@ proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
   appendDropdownItem(cstring"Pin to Right"):
     pinActiveContentItem(layout, stackCreatedEvent.toJs.target, AutoHideEdge.Right)
 
+proc swapLayout*(data: Data, config: GoldenLayoutResolvedConfig) =
+  ## Hand GoldenLayout a WHOLE new layout, and say so while it happens.
+  ##
+  ## `loadLayout` destroys the current tree before it builds the new one, and
+  ## GoldenLayout announces each destruction with `itemDestroyed`. That handler
+  ## cannot tell the two situations apart on its own, and they could not be
+  ## more different:
+  ##
+  ##   * THE USER CLOSED A TAB — the file is finished with, so
+  ##     `closeEditorTab` drops it from `data.ui.editors`, drops its entry from
+  ##     `EditorService.open`, and adds it to the closed-tabs list.
+  ##   * A MODE TRANSITION SWAPPED THE LAYOUT — the same file is coming back,
+  ##     often in the very next layout, and everything the user has typed into
+  ##     it is in that editor's buffer.
+  ##
+  ## Treating the second as the first is why a Run and a Stop left an editor
+  ## PANE with no editor in it. Measured on the assembled bundle: after Stop the
+  ## edit layout came back with its `src/main.nr` tab and an 880x902
+  ## `editorComponent-0` host, `document.querySelectorAll(".view-line").length`
+  ## was 0, and the single `monaco.editor.getEditors()` entry was detached and
+  ## still carried the replay's `readOnly: true`. `closeEditorTab` had run
+  ## during the swap and taken the tab out of `data.ui.editors`, so the mount
+  ## that followed built a SECOND, empty component instead of finding the one
+  ## that owned the file — and `ci/test/noir-mode-roundtrip.sh` read the result
+  ## as "the editors are writable again" failing on every trip.
+  ##
+  ## `isReparenting` is the same idea one case earlier: auto-hide moves a panel
+  ## between two places in the tree, and the destruction it causes is not a
+  ## close either. This adds the second such case rather than inventing a
+  ## mechanism.
+  if data.ui.layout.isNil:
+    return
+  data.ui.isLoadingLayout = true
+  try:
+    data.ui.layout.loadLayout(config)
+  finally:
+    data.ui.isLoadingLayout = false
+
 proc closeLayoutTab*(data: Data, content: Content, id: int) =
-  if not data.ui.componentMapping[content].hasKey(id):
-    raise newException(Exception, "There is not any component with the given id.")
+  ## A TAB WITH NO COMPONENT BEHIND IT IS CLOSED, NOT AN ERROR.
+  ##
+  ## This used to `raise` when `componentMapping[content]` had no entry for
+  ## `id`, and its only caller is the `itemDestroyed` layout event — which
+  ## GoldenLayout fires from INSIDE `loadLayout`, while it tears the previous
+  ## layout down. So the raise did not report a closed tab that could not be
+  ## found; it ABORTED THE LOAD, half-way through, leaving whatever GoldenLayout
+  ## had built so far on screen.
+  ##
+  ## Measured on the assembled bundle, three round trips: trip 3's Run reported
+  ## `replay: could not load the debugging layout: There is not any component
+  ## with the given id.` and the tab sat on the debugger topbar with ZERO
+  ## debugger panes; the Stop that followed reported the same message about the
+  ## edit layout. The state that produced it is ordinary on the web, where
+  ## `createUIComponents` walks `resolvedConfig` once at startup and every pane
+  ## a later layout names — Files, VCS, the source tab — therefore has a
+  ## GoldenLayout container and no Nim component.
+  ##
+  ## What remains to do for such a tab is the bookkeeping that is not about the
+  ## component: the legacy renderer instance and the open-id register. Both run
+  ## below.
+  let hasComponent = data.ui.componentMapping[content].hasKey(id)
+  if not hasComponent:
+    cwarn "layout: closing " & $content & "/" & $id &
+      " which has no component; unregistering nothing"
 
   # Detach the component from the event bus BEFORE it leaves the registry.
   # Dropping the reference alone is not enough: the component's handlers live
@@ -649,9 +710,10 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   # what made "Add to Scratchpad" append the same value once per generation
   # (#612).  `itemDestroyed` suppresses this path while auto-hide is
   # reparenting a panel, so a pinned panel is never unregistered here.
-  let closedComponent = data.ui.componentMapping[content][id]
-  if not closedComponent.isNil:
-    closedComponent.unregister()
+  if hasComponent:
+    let closedComponent = data.ui.componentMapping[content][id]
+    if not closedComponent.isNil:
+      closedComponent.unregister()
 
   # A closed diff tab drops its ViewModel and its source-text cache with it, so
   # a re-opened tab starts with no hunk selection, no context expansion and no
@@ -1142,12 +1204,37 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       var containerId: cstring
       containerId = cstring(fmt"editorComponent-{state.id}")
 
-      discard windowSetTimeout((proc =
-        if not data.ui.componentMapping[state.content].hasKey(state.id):
-          discard data.makeComponent(state.content, state.id)
-        if not data.ui.componentMapping[state.content][state.id].isNil:
-          let component = data.ui.componentMapping[state.content][state.id]
+      let editorPathForMount = state.label
 
+      discard windowSetTimeout((proc =
+        # THE EDITOR THAT ALREADY OWNS THIS PATH, IF THERE IS ONE.
+        #
+        # `state.label` is the tab's full path, and `data.ui.editors` is keyed
+        # by exactly that. When a mode transition destroys the editor pane and
+        # a later one rebuilds it, the component holding the loaded source, the
+        # tab info and the live Monaco instance is STILL in `data.ui.editors`
+        # — it is only its GoldenLayout container that went. Reaching for
+        # `componentMapping` first and calling `makeComponent` on a miss builds
+        # a SECOND, empty `EditorViewComponent` with no path and no tab info,
+        # whose `renderTopLevelEditorDirect` then retries 1200 times waiting for
+        # a source that will never arrive, and gives up.
+        #
+        # Measured on the assembled bundle: after Stop the edit layout came
+        # back with its `src/main.nr` tab and an 880x902 `editorComponent-0`
+        # host, and `document.querySelectorAll(".view-line").length` was 0 —
+        # an editor pane with no editor in it. The real instance was still
+        # alive and detached, reporting the replay's `readOnly: true`.
+        # `ci/test/noir-mode-roundtrip.sh` reads that as "the editors are
+        # writable again" failing on every trip.
+        var component: Component
+        if data.ui.editors.hasKey(editorPathForMount):
+          component = data.ui.editors[editorPathForMount]
+        else:
+          if not data.ui.componentMapping[state.content].hasKey(state.id):
+            discard data.makeComponent(state.content, state.id)
+          component = data.ui.componentMapping[state.content][state.id]
+
+        if not component.isNil:
           EditorViewComponent(component).renderTopLevelEditorDirect(containerId)
 
         ), 200)
@@ -2143,6 +2230,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     cdebug "layout event: itemDestroyed"
     if not data.ui.isNil and data.ui.isReparenting:
       cdebug "layout event: itemDestroyed - suppressed during reparenting"
+      return
+    if not data.ui.isNil and data.ui.isLoadingLayout:
+      # A wholesale layout swap is not the user closing tabs — see `swapLayout`.
+      cdebug "layout event: itemDestroyed - suppressed during a layout swap"
       return
 
     let eventTarget = cast[GoldenContentItem](event.target)

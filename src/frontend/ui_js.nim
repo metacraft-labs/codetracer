@@ -1212,7 +1212,7 @@ proc restoreSavedLayout(data: Data, saved: GoldenLayoutResolvedConfig,
     cerror fmt"layout: cannot convert {what} out of its resolved form: {getCurrentExceptionMsg()}"
     return false
   try:
-    data.ui.layout.loadLayout(unresolved)
+    data.swapLayout(unresolved)
   except:
     cerror fmt"layout: GoldenLayout rejected {what}: {getCurrentExceptionMsg()}"
     return false
@@ -1262,8 +1262,8 @@ proc applyReadOnlyToEditors(data: Data, readOnly: bool) =
   ## see `beginReadOnlyTransition` for why the order matters.
   # THE PANEL WORK MUST NOT BE ABLE TO EAT THE EDITOR WORK.
   #
-  # `data.ui.readOnly` has already been assigned above, and everything BELOW
-  # this point is what makes the editors agree with it. Both helpers rearrange
+  # `data.ui.readOnly` has already been assigned by the caller, and everything
+  # in this proc is what makes the editors agree with it. Both helpers rearrange
   # GoldenLayout — `reopenAuxiliaryPanels` restores a saved layout and
   # `closeAuxiliaryPanels` removes layout items — so both can raise out of
   # GoldenLayout, and an exception here used to leave the flag saying one thing
@@ -1328,8 +1328,21 @@ proc beginReadOnlyTransition(data: Data, readOnly: bool): bool
   ##
   ## Shared with the desktop: `switchToEdit` and `switchToDebug` are this
   ## renderer's, not the web's.
+  ##
+  ## THE EDITORS THAT ALREADY EXIST ARE BROUGHT INTO LINE HERE TOO, and that is
+  ## not a duplicate of `finishReadOnlyTransition`'s walk. A layout the caller
+  ## is about to restore DETACHES the current editors: their `monacoEditor`
+  ## goes nil (or their entry leaves `data.ui.editors` outright) while the
+  ## Monaco instance itself stays alive in the document. The later walk skips
+  ## exactly those, so an instance detached mid-transition keeps whatever
+  ## editability it had when it was detached. Measured: with the flag moved
+  ## ahead of the restore but this walk absent, the one surviving Monaco read
+  ## `readOnly == false` through every replay leg of three round trips — a
+  ## replay whose source claimed to be editable.
   result = data.ui.readOnly != readOnly
   data.ui.readOnly = readOnly
+  if result:
+    data.setEditorsEditable(not readOnly)
 
 proc finishReadOnlyTransition(data: Data, readOnly: bool, changed: bool) =
   ## The other half of `beginReadOnlyTransition`, run once the caller has
@@ -1452,41 +1465,44 @@ proc switchToDebug*(data: Data) =
   if data.ui.mode != DebugMode:
     data.ui.mode = DebugMode
 
-    # THIS SITE USED TO BE LEFT UNCONVERTED ON PURPOSE, and what unblocked it
-    # is the `beginReadOnlyTransition` two lines above rather than anything
-    # here.
+    # THIS SITE IS STILL DELIBERATELY UNCONVERTED, AND THE REASON HAS CHANGED.
     #
-    # It had the same defect as the two `restoreSavedLayout` fixes: a resolved
+    # It has the same defect as the `restoreSavedLayout` call sites: a resolved
     # config handed to a `loadLayout` that wants an unresolved one, producing
     # `debug-mode: failed to restore debug layout: e.trimStart is not a
     # function` — measured again on this tree's own bundle, at the first Run of
     # every tab — and swallowed by the bare `except`.
     #
-    # Converting it USED to be worse than the failure, and the reason was the
-    # ordering: `savedLayoutBeforeEdit` is written by `switchToEdit`, and
-    # `switchToEdit` runs once at BOOT because a fresh Noir Studio tab starts
-    # in `DebugMode` (`debug.nim`'s `mountedTopbarSurface` defaults to
-    # `tsDebuggerControls`). So on the FIRST Run the field holds the boot-time
-    # EDIT layout, and restoring it rebuilt GoldenLayout while
-    # `data.ui.readOnly` was still `false` — every Monaco the rebuild opened
-    # read `false` at construction (`ui/editor.nim:2762`) and the
-    # `setEditorsEditable(false)` further down could not reach an editor the
-    # Karax redraw had not created yet. Measured then, three trips: three
-    # debugger panes, `data-topbar-surface=debugger-controls`, and
-    # `getRawOptions().readOnly == false` — a replay session the user could
-    # type into.
+    # ONE OF THE TWO REASONS NOT TO CONVERT IS NOW GONE. It used to build a
+    # replay session the user could type into, because `savedLayoutBeforeEdit`
+    # holds the BOOT-TIME EDIT layout on the first Run (`switchToEdit` runs
+    # once at boot: a fresh Noir Studio tab starts in `DebugMode`, see
+    # `debug.nim`'s `mountedTopbarSurface`), and restoring it rebuilt
+    # GoldenLayout while `data.ui.readOnly` was still `false`.
+    # `beginReadOnlyTransition` above assigns the flag first, so anything this
+    # restores would now be built read-only.
     #
-    # With the flag assigned first, that outcome is gone: whatever this
-    # restores is built read-only. What remains is churn rather than a defect —
-    # on the FIRST Run of a web tab this re-applies an edit layout that
-    # `web_replay_host.installDebugSurfaceEntry` immediately loads the real
-    # debugging layout over. The honest fix for THAT is for a web tab to stop
-    # booting with `data.ui.mode == DebugMode` while showing an edit surface,
-    # which is a change to the entry surface and not to this transition.
+    # THE OTHER REASON SURVIVES, AND IT WAS MEASURED HERE. With the conversion
+    # applied, three round trips DEGRADE the workspace: trip 1 returned to a
+    # correct edit layout, trip 2's Run restored a `savedLayoutBeforeEdit` that
+    # had lost the Files and VCS tabs, and by trip 3 the Run no longer reached
+    # the debugger surface at all — 19 failures against 7 without it, in
+    # `ci/test/noir-mode-roundtrip.sh`. Each transition saves a layout that the
+    # previous transition had already damaged, and applying it feeds the damage
+    # forward instead of discarding it.
+    #
+    # WHAT WOULD MAKE IT SAFE, so this is a unit of work and not a wall: a web
+    # tab must stop booting with `data.ui.mode == DebugMode` while showing an
+    # edit surface, so that the boot `switchToEdit` stops writing an EDIT
+    # layout into a field named for a debug one. That is a change to the entry
+    # surface, and it has to come with its own three-trip measurement.
     if not data.ui.savedLayoutBeforeEdit.isNil and not data.ui.layout.isNil:
-      if data.restoreSavedLayout(data.ui.savedLayoutBeforeEdit,
-                                 "the debug layout"):
+      try:
+        data.swapLayout(data.ui.savedLayoutBeforeEdit)
+        data.ui.resolvedConfig = data.ui.savedLayoutBeforeEdit
         data.ui.savedLayoutBeforeEdit = nil
+      except:
+        cerror fmt"debug-mode: failed to restore debug layout: {getCurrentExceptionMsg()}"
 
   data.finishReadOnlyTransition(true, readOnlyChanged)
   redrawAfterModeSwitch()
@@ -1897,7 +1913,7 @@ proc applyVisualReplayTabsToResolvedConfig*(data: Data) =
 
   if layoutLive:
     try:
-      data.ui.layout.loadLayout(newConfig)
+      data.swapLayout(newConfig)
     except CatchableError:
       cerror "applyVisualReplayTabsToResolvedConfig: loadLayout failed: " &
         getCurrentExceptionMsg()
@@ -3305,7 +3321,7 @@ proc onNoTrace(
   # If layout already exists (e.g., from welcome screen), reload it with the new config
   if wasFromWelcomeScreen:
     try:
-      data.ui.layout.loadLayout(data.ui.resolvedConfig)
+      data.swapLayout(data.ui.resolvedConfig)
     except:
       cerror "onNoTrace: failed to reload layout: " & getCurrentExceptionMsg()
   else:
@@ -5713,10 +5729,16 @@ when defined(ctWeb) and not defined(ctInExtension):
               except:
                 cerror "replay: component " & $declared.content & " failed"
             try:
-              data.ui.layout.loadLayout(resolved)
+              data.swapLayout(resolved)
               data.ui.resolvedConfig = resolved
             except:
-              cerror "replay: could not load the debugging layout"
+              # NAME THE EXCEPTION. This arm fired on the third round trip of
+              # `ci/test/noir-mode-roundtrip.sh` and said only that something
+              # had gone wrong, so the run that reported "the debugger panes
+              # are mounted (0)" carried no evidence about WHY — a swallowed
+              # message is the shape this whole area kept failing in.
+              cerror "replay: could not load the debugging layout: " &
+                getCurrentExceptionMsg()
             # THE EDITORS THE NEW LAYOUT JUST BUILT ARE NOT READ-ONLY, and
             # `switchToDebug` cannot have made them so — it ran BEFORE this
             # `loadLayout`, and `setEditorsEditable` walks `data.ui.editors` as

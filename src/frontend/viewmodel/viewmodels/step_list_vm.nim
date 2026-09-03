@@ -79,12 +79,17 @@ import isonim/viewmodel
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
 
-const DEFAULT_STEP_LIST_PANEL_HEIGHT = 16
+const DEFAULT_STEP_LIST_PANEL_HEIGHT* = 16
   ## Conservative default for the row capacity used by
   ## ``loadStepLinesFor`` when the host has not yet measured the GL
   ## container.  The legacy code defaulted to ``offsetHeight / 26``;
   ## ~16 rows roughly matches a half-screen panel and avoids issuing a
   ## zero-row request.
+  ##
+  ## Exported because the HOST needs the same number: `ui/step_list.nim`
+  ## measures the GL container's `offsetHeight`, and when the panel is not in
+  ## the layout at all there is nothing to measure and this is the answer. Two
+  ## copies of "the default row capacity" would be free to disagree.
 
 type
   StepListVM* = ref object of ViewModel
