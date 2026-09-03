@@ -926,6 +926,31 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # TODO dynamic name
           # element "Pause (currently using stop shortcut?)", stop, false
           --sub
+          # KEYBOARD SHORTCUTS — the affordance that opens the preset dialog.
+          #
+          # IN THE MENU, NOT ON THE TOPBAR. `Planned-Features/Noir-Studio.md`
+          # §1a.2 settles the topbar's one addition — a Share icon beside the
+          # identity avatar — and counts "the debugger controls, the omnibar,
+          # the tabs" as already part of it. The session tab bar is therefore
+          # topbar, so a gear beside its `+` would be a second addition to the
+          # surface that section closed. §1a.2 names the alternative itself,
+          # about `Deploy`: "the command palette and a project-level menu are
+          # both better candidates" for something rare and consequential.
+          #
+          # This node is all three routes at once — `ui/menu.nim`'s
+          # `generateNameMap` feeds the command palette from it and
+          # `index/menu.nim` builds the native macOS menu from it — so one
+          # entry makes the dialog reachable by menu, by palette and, through
+          # `default_config.yaml`'s `aKeyboardShortcuts`, by chord. The chord
+          # prints beside it because `loadShortcut` reads the same resolved map
+          # the dialog lists.
+          #
+          # In the debugger folder rather than a Preferences one because the
+          # presets govern the stepping commands; `ClientAction.preferences`
+          # exists and is commented out elsewhere, and claiming it here would
+          # promise a settings surface this does not build.
+          element "Keyboard Shortcuts", aKeyboardShortcuts
+          --sub
           element "Add a Breakpoint", aBreakpoint
           element "Delete Breakpoint", aDeleteBreakpoint
           element "Delete All Breakpoints", aDeleteAllBreakpoints
@@ -5005,6 +5030,8 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     debug.invokeDebugToolbarAction("reset-operation"),
   proc(actionData: JsObject) = # aRunTests
     debug.invokeDebugToolbarAction("run-tests"),
+  proc(actionData: JsObject) = # aKeyboardShortcuts
+    openShortcutsDialog(),
 ]
 
 data.actions = actions

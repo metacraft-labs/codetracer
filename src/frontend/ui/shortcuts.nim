@@ -13,6 +13,8 @@ import
   # what makes its absence a build error rather than a dead gesture.
   ./debug,
   ./shortcut_presets,
+  ./shortcut_dialog,
+  ./shortcut_preference,
   ./video_player,
   ../viewmodel/viewmodels/video_player_vm,
   ../../common/ct_event,
@@ -293,6 +295,77 @@ proc configureVideoPlayerShortcuts() =
     bindVideoPlayerOverlay(entry.renderer, entry.action)
   bindVideoPlayerCancelOverlay(
     videoPlayerCancelBinding.renderer, videoPlayerCancelBinding.action)
+
+const ShortcutDialogHostId = "keyboard-shortcuts-dialog"
+
+proc configureShortcuts*()
+  ## Forward-declared because `applyShortcutPresetChoice` below re-runs it: a
+  ## preset change has to re-register the whole table, and the proc that does
+  ## that is defined after the dialog it is called from.
+
+proc closeShortcutsDialog*() =
+  ## Remove the dialog if it is open. Idempotent, because both the close button
+  ## and a second press of the opening chord land here.
+  let existing = getElementById(ShortcutDialogHostId)
+  if not existing.isNil and not existing.parentNode.isNil:
+    existing.parentNode.removeChild(existing)
+
+proc applyShortcutPresetChoice(id: ShortcutPresetId) =
+  ## Remember a choice and put it into effect.
+  ##
+  ## REBUILDING THE CONFIG IS NOT ENOUGH ON ITS OWN. `configureShortcuts` calls
+  ## `Mousetrap.bind` once per chord, and Mousetrap keeps a binding until
+  ## something replaces it — so a preset that moved Step Over from `F10` to
+  ## `CTRL+ALT+O` would leave `F10` still bound to Step Over unless the old
+  ## table is cleared first. `Mousetrap.reset()` is what clears it, and it is
+  ## safe here precisely because `configureShortcuts` re-registers EVERYTHING
+  ## it is responsible for: the config table, the hardcoded chords below, and
+  ## the Video Player overlay through `configureVideoPlayerShortcuts`.
+  ##
+  ## The editor is the other half and is deliberately NOT re-run here. Monaco
+  ## commands are registered per editor instance in `delegateShortcuts` when
+  ## the instance is created, and there is no removal API for them — calling it
+  ## again would add a second command for every chord rather than replace the
+  ## first. So an open editor keeps the chords it was built with until it is
+  ## recreated, which the dialog says.
+  storePreset(id)
+  data.config = defaultRendererConfig(id)
+  Mousetrap.reset()
+  configureShortcuts()
+
+proc openShortcutsDialog*() =
+  ## Show what is bound, and offer the presets.
+  ##
+  ## WHY THIS IS NOT ON THE TOPBAR. `Planned-Features/Noir-Studio.md` §1a.2
+  ## settles the topbar's one addition — a Share icon beside the identity
+  ## avatar — and counts "the debugger controls, the omnibar, the tabs" as
+  ## already on it. The session tab bar is therefore part of the topbar, so a
+  ## gear beside its `+` would be a second addition to the surface that section
+  ## closed. §1a.2 also names the alternative in its own words, about `Deploy`:
+  ## "the command palette and a project-level menu are both better candidates"
+  ## for something "rare" and "consequential". A keymap is chosen rarely and
+  ## never mid-gesture, so it goes in the menu and answers a chord.
+  closeShortcutsDialog()
+  let mac = isMacPlatform()
+  let active = activePreset()
+  let tree = buildShortcutDialog(data.config, active, mac)
+  let host = mountShortcutDialog(tree)
+  host.setAttribute("id", ShortcutDialogHostId)
+
+  # The preset buttons and the close button, wired by the attribute the builder
+  # stamped rather than by position — so reordering the picker cannot silently
+  # rewire it.
+  for node in host.querySelectorAll("[data-kb-preset]"):
+    let button = cast[Element](node)
+    let chosen = parsePresetId($button.getAttribute("data-kb-preset"))
+    button.addEventListener("click", proc(ev: Event) =
+      applyShortcutPresetChoice(chosen)
+      openShortcutsDialog())
+  for node in host.querySelectorAll("[data-kb-close]"):
+    cast[Element](node).addEventListener("click", proc(ev: Event) =
+      closeShortcutsDialog())
+
+  kdom.document.body.appendChild(host)
 
 proc configureShortcuts* =
   if data.config.shortcutMap.conflictList.len > 0:

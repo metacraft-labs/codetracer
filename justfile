@@ -1286,11 +1286,13 @@ test-frontend-js:
   target_axes_js_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-target-axes-js-test.XXXXXX.js")"
   ipc_registry_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-ipc-registry-test.XXXXXX.js")"
   shortcut_bindings_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-bindings-test.XXXXXX.js")"
+  shortcut_presets_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-presets-test.XXXXXX.js")"
+  shortcut_dialog_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-shortcut-dialog-test.XXXXXX.js")"
   debug_toolbar_tooltips_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-debug-toolbar-tooltips-test.XXXXXX.js")"
   component_registry_binding_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-component-registry-binding-test.XXXXXX.js")"
   stop_command_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-stop-command-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$html_sinks_probe"' EXIT
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$html_sinks_probe"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1329,6 +1331,18 @@ test-frontend-js:
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$shortcut_bindings_test" js src/frontend/tests/shortcut_bindings_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$shortcut_bindings_test"
+
+  # The preset tables, and the dialog that lists what they resolved to. Same
+  # lane and same invocation as the suite above: all three read the SHIPPED
+  # `default_config.yaml` through `defaultRendererConfig`, which is a `nim js`
+  # target only.
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$shortcut_presets_test" js src/frontend/tests/shortcut_presets_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$shortcut_presets_test"
+
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$shortcut_dialog_test" js src/frontend/tests/shortcut_dialog_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$shortcut_dialog_test"
   echo ""
   # The same property one level up, for the debug toolbar: its tooltips must
   # NAME the bound chord rather than restate it.  They used to carry it as a

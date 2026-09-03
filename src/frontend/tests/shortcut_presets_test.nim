@@ -53,7 +53,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 514
+const ExpectedAssertions = 525
 
 const boundPresets = [spCodeTracer, spVsCode, spChorded]
   ## The presets that bind something. `spNone` is the negative and is used as
@@ -540,6 +540,34 @@ suite "shortcut presets":
     for b in presetOf(spChorded).bindings:
       if chordTokens(b.chord).len == 4: inc fourTokenChords
     counted fourTokenChords == 4
+
+  test "the dialog's own chord is bound, reachable, and not a preset's":
+    ## The affordance has to obey the rules the presets do. It is a real
+    ## binding in the YAML rather than a hardcoded `Mousetrap.bind`, because a
+    ## hardcoded one is invisible to `renderChord` — and the menu item that
+    ## opens the shortcuts dialog would then be the one menu item in the
+    ## product with no chord printed beside it.
+    let config = defaultRendererConfig()
+    let opener = chordsFor(config, ClientAction.aKeyboardShortcuts)
+    counted opener.len == 1
+    counted $opener[0].editor == "CTRL+ALT+K"
+    counted $opener[0].renderer == "ctrl+alt+k"
+    counted renderChord(ClientAction.aKeyboardShortcuts, config) == "CTRL+ALT+K"
+    counted config.shortcutMap.shortcutActions[cstring"CTRL+ALT+K"] ==
+      ClientAction.aKeyboardShortcuts
+    # NOT delegated into Monaco, by the same rule the browser-safe preset
+    # follows: Monaco binds nothing in the CTRL+ALT family, so the global bind
+    # already reaches the editor and a Monaco command would be a second
+    # delivery.
+    counted cstring"CTRL+ALT+K" notin MONACO_SHORTCUTS_WHITELIST
+    # And it survives EVERY preset, because it is not preset-governed — a user
+    # who chooses "None" must still be able to reopen the dialog and choose
+    # again.
+    for id in ShortcutPresetId:
+      checkpoint("opener under " & $id)
+      counted renderChord(ClientAction.aKeyboardShortcuts,
+                          defaultRendererConfig(id)) == "CTRL+ALT+K"
+    counted ClientAction.aKeyboardShortcuts notin PresetActions
 
   test "shortcut_presets_assertion_count_is_measured":
     checkpoint("counted assertions: " & $countedAssertions)

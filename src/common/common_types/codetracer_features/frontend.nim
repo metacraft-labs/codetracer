@@ -236,7 +236,16 @@ type
     aHistoryForward,              # CTRL+ALT+F — toolbar `history-forward`
     aRunToEntry,                  # CTRL+ALT+E — toolbar `run-to-entry`
     aResetOperation,              # CTRL+ALT+R — toolbar `reset-operation`
-    aRunTests                     # ALT+L      — toolbar `run-tests`
+    aRunTests,                    # ALT+L      — toolbar `run-tests`
+    # OPENS THE KEYBOARD-SHORTCUTS DIALOG, and it is an action rather than a
+    # hardcoded `Mousetrap.bind` for the same reason everything above it is:
+    # a chord bound in code is one `renderChord` cannot see, so the menu item
+    # that opens the shortcuts dialog would be the one menu item in the product
+    # with no chord printed beside it.
+    #
+    # Appended, per the note above — `actions` in `ui_js.nim` is a positional
+    # literal and an insertion anywhere else re-points every handler after it.
+    aKeyboardShortcuts            # CTRL+ALT+K — menu `Keyboard Shortcuts`
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

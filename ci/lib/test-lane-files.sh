@@ -575,6 +575,8 @@ test_lane_files() {
 			src/frontend/tests/ipc_registry_test.nim \
 			src/frontend/tests/scratchpad_add_dispatch_test.nim \
 			src/frontend/tests/shortcut_bindings_test.nim \
+			src/frontend/tests/shortcut_dialog_test.nim \
+			src/frontend/tests/shortcut_presets_test.nim \
 			src/frontend/tests/stop_command_test.nim \
 			src/frontend/tests/target_axes_js_test.nim
 		;;

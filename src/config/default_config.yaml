@@ -205,6 +205,17 @@ bindings:
   aRunToEntry: "CTRL+ALT+E"
   # CTRL+R is hard-bound to re-record; CTRL+ALT+R is free.
   aResetOperation: "CTRL+ALT+R"
+  # Opens the keyboard-shortcuts dialog. CTRL+ALT+K is free in this file and is
+  # not hard-bound anywhere; K for keyboard. VS Code's CTRL+K CTRL+S is a chord
+  # SEQUENCE, which `initShortcutMap` cannot express -- one action per key, and
+  # no sequence syntax -- so it is not available until Planned Changes' "key
+  # chord support" lands.
+  #
+  # NOT in MONACO_SHORTCUTS_WHITELIST, deliberately, like every other
+  # CTRL+ALT+<letter> chord here: Monaco binds nothing in that family, so the
+  # global bind already reaches the editor, and delegating it as well is what
+  # made ALT+F8 fire twice.
+  aKeyboardShortcuts: "CTRL+ALT+K"
   # MOVED HERE OUT OF `ui/shortcuts.nim`, where it was `Mousetrap.bind("alt+l")`
   # with no `ClientAction` behind it. The chord is unchanged, so no user's
   # muscle memory moves; what changes is that it is now readable — a hard-bound
