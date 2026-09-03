@@ -106,8 +106,93 @@ const report = {
   runButtonPresent: false,
   stopButtonEnabled: false,
   headerText: '',
+  constraints: {},
   pageErrors: [],
   consoleLines: [],
+};
+
+// The CONSTRAINTS pane, after the same Build. Its DOM contract is written out
+// at the top of `viewmodel/views/isonim_constraints_view.nim`.
+//
+// ## Why this lives in the BUILD gate
+//
+// The pane's own browser gate — `ci/test/constraints-listing-browser.sh` —
+// paints it from a listing compiled into the probe as a constant. That proves
+// the pane can render a listing. It cannot prove a listing ever REACHES it,
+// because no compiler runs in it. This gate is the only one where a real
+// `noir_wasm.wasm` is fetched over HTTP and compiles a real project, so it is
+// the only place the question "does the deployed module produce a listing"
+// can be asked at all.
+//
+// It was worth asking. `ci/deploy/noir-wasm.pin` sat on a revision predating
+// `VfsResponse.acir_listing` while the pane rendered listings correctly in
+// every headless suite over it, and the live site showed a visitor the
+// `noteListingUnavailable` caption on every Build. Nothing was red. The pane
+// was right, the module was old, and no gate joined the two.
+//
+// ## The string that says which path painted the pane
+//
+// `.constraints-name` reads `main` when the report came from the compile-time
+// `noirTemplateNargoInfoJson` constant — `nargo info` names the function —
+// and `func 0` when it came from `reportFromAcirListing`, because that is how
+// `--print-acir` heads its constrained block. One string, and it distinguishes
+// the two sources completely. Asserting on the row COUNT alone would not: both
+// paths report 17.
+const constraintsScript = () => {
+  const pane = document.querySelector('.component-container.constraints');
+  if (!pane) return { mounted: false };
+  const text = (el) => el ? (el.innerText || el.textContent || '')
+    .replace(/\s+/g, ' ').trim() : '';
+  // LAID OUT AND HIT-TESTED, for the reason this file's header gives about
+  // the build pane: a row with a zero-height box, or one under another
+  // element, is not a row a user reads. An inactive GoldenLayout tab is
+  // exactly that case, and it is the likeliest way this arm could report
+  // "no rows" about a pane that is perfectly fine.
+  const laidOut = (el) => {
+    const b = el.getBoundingClientRect();
+    if (b.width === 0 || b.height === 0) return false;
+    const top = document.elementFromPoint(
+      b.x + Math.min(20, b.width / 2), b.y + b.height / 2);
+    return !!top && (top === el || el.contains(top) || top.contains(el));
+  };
+  const opcodes = Array.from(pane.querySelectorAll('.constraints-opcode'));
+  const rows = Array.from(pane.querySelectorAll('.constraints-row'));
+  const notice = pane.querySelector('.constraints-listing-notice');
+  const paneBox = pane.getBoundingClientRect();
+  return {
+    mounted: true,
+    // WHY IT IS NOT VISIBLE, when it is not. A bare `false` here sends the
+    // reader to the product; usually the answer is that the pane is behind
+    // another tab, which is the harness. These three say which.
+    paneRect: [Math.round(paneBox.x), Math.round(paneBox.y),
+               Math.round(paneBox.width), Math.round(paneBox.height)],
+    tabTitles: Array.from(document.querySelectorAll('.lm_tab'))
+      .map((t) => ((t.innerText || t.textContent || '').trim() +
+                   (t.className.includes('lm_active') ? ' [active]' : ''))),
+    paneCovering: (() => {
+      if (paneBox.width === 0 || paneBox.height === 0) return 'zero-size';
+      const top = document.elementFromPoint(
+        paneBox.x + Math.min(20, paneBox.width / 2),
+        paneBox.y + paneBox.height / 2);
+      if (!top) return 'nothing-at-point';
+      if (top === pane || pane.contains(top) || top.contains(pane)) return '';
+      return top.tagName + '.' + String(top.className || '').slice(0, 60);
+    })(),
+    paneVisible: laidOut(pane),
+    headline: text(pane.querySelector('.constraints-headline')),
+    // `hidden` is the class the view sets when a listing DID arrive, so the
+    // notice being visible is the old module's signature, not a fault.
+    noticeVisible: !!notice && !notice.className.includes('hidden'),
+    noticeText: notice ? text(notice) : '',
+    functionNames: rows.map(
+      (r) => text(r.querySelector('.constraints-name'))).filter((s) => s),
+    rowTexts: rows.map(text),
+    opcodeRows: opcodes.length,
+    opcodeRowsLaidOut: opcodes.filter(laidOut).length,
+    firstOpcode: opcodes.length ? text(opcodes[0]) : '',
+    lastOpcode: opcodes.length ? text(opcodes[opcodes.length - 1]) : '',
+    provenance: text(pane.querySelector('.constraints-provenance')),
+  };
 };
 
 // The rows of the BUILD pane, hit-tested. `#build` is the output container's
@@ -288,6 +373,29 @@ try {
   report.runButtonPresent = painted.run;
   report.stopButtonEnabled = painted.stopEnabled;
   report.problemRowsPainted = painted.problems || [];
+
+  // THE CONSTRAINTS PANE, AFTER DISMISSING THE BUILD OVERLAY. The pane's tab
+  // is already `lm_active` — `default_layout.json` puts it in the right-hand
+  // column and nothing deactivates it — so this is NOT a tab switch. The
+  // BUILD pane that Ctrl+B just opened is an auto-hide overlay drawn ON TOP
+  // of that column, and it is what the hit test finds: measured,
+  // `elementFromPoint` over the pane's centre returns
+  // `DIV.build-output-container` while all 34 opcode rows sit in the DOM
+  // underneath it.
+  //
+  // Escape is the gesture, and it is the user's: a reader who has just
+  // watched a build finish dismisses the output and looks at the pane behind
+  // it. Clicking the CONSTRAINTS tab does NOT work and the reason is worth
+  // recording — the tab is itself under the overlay, so the click fails
+  // Playwright's actionability check rather than switching anything.
+  //
+  // ORDER MATTERS: the BUILD pane is read above, before this dismisses it.
+  try {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(750);
+  } catch (e) { /* reported by constraints.paneVisible below */ }
+  report.constraints = await page.evaluate(constraintsScript);
+
   report.workerMessages = await page.evaluate(
     () => (window.__ctWorkerMessages || []).slice());
 } catch (e) {

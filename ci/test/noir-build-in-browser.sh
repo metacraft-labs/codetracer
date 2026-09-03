@@ -421,6 +421,76 @@ else
 	ck fail "the page raised ${c_errors} uncaught error(s) during the build"
 fi
 
+# ---------------------------------------------------------------------------
+# ARM 1c — THE CONSTRAINTS PANE, fed by the module that was just fetched.
+#
+# This is the only gate where a real `noir_wasm.wasm` arrives over HTTP and
+# compiles a real project, so it is the only place that can ask whether the
+# DEPLOYED module produces an ACIR listing. `constraints-listing-browser.sh`
+# paints the pane from a listing compiled into its probe, which proves the
+# pane renders one and says nothing about whether one ever reaches it.
+#
+# THE GAP THOSE TWO LEFT was a shipped defect, not a hypothetical.
+# `ci/deploy/noir-wasm.pin` pointed at a Noir revision predating
+# `VfsResponse.acir_listing` for the whole first life of this pane. Every
+# headless suite was green, the pane was correct, and a visitor pressing BUILD
+# got the `noteListingUnavailable` caption every time. Nothing was red because
+# nothing joined "the module answers" to "the pane paints".
+#
+# `func 0` IS THE WHOLE ASSERTION. `reportFromAcirListing` takes the function
+# name from the listing, which heads its constrained block `func 0`; the
+# compile-time `noirTemplateNargoInfoJson` constant calls the same function
+# `main`, because that is `nargo info`'s name for it. So the name in
+# `.constraints-name` says which of the two produced what is on screen — and
+# the COUNT does not, since both say 17. An assertion on the count would have
+# been green throughout the outage this arm exists to prevent.
+c_cmounted="$(json control constraints.mounted)"
+c_cvisible="$(json control constraints.paneVisible)"
+c_copcodes="$(json control constraints.opcodeRowsLaidOut)"
+c_cnotice="$(json control constraints.noticeVisible)"
+c_cfuncs="$(count_matching control constraints.functionNames 'func 0')"
+c_cmain="$(count_matching control constraints.functionNames 'main')"
+
+if [ "${c_cmounted}" = "True" ] || [ "${c_cmounted}" = "true" ]; then
+	ck ok "the CONSTRAINTS pane is mounted, so the assertions below have a subject"
+else
+	ck fail "no CONSTRAINTS pane in the DOM; default_layout.json puts one in the right-hand column"
+fi
+
+if [ "${c_cvisible}" = "True" ] || [ "${c_cvisible}" = "true" ]; then
+	ck ok "and it is laid out and on top once the BUILD overlay is dismissed"
+else
+	ck fail "the CONSTRAINTS pane is in the DOM but not visible; the rows below are not ones a user reads"
+	note "rect: $(json control constraints.paneRect)  covered by: $(json control constraints.paneCovering)"
+	note "tabs: $(json control constraints.tabTitles)"
+fi
+
+# THE NEGATIVE FIRST, because it is the state that actually shipped and it is
+# the one a reader of this gate should see named.
+if [ "${c_cnotice}" = "False" ] || [ "${c_cnotice}" = "false" ]; then
+	ck ok "the 'this build's compiler does not print a listing' caption is NOT shown"
+else
+	ck fail "the pane shows the listing-unavailable caption: the deployed module answered without acir_listing (this is a PIN problem, not a pane problem)"
+	note "caption: $(json control constraints.noticeText)"
+fi
+
+if [ "${c_copcodes:-0}" -ge 1 ]; then
+	ck ok "${c_copcodes} opcode row(s) painted and hit-tested — the pane shows generated code, not a summary"
+else
+	ck fail "the CONSTRAINTS pane painted NO opcode rows"
+	note "headline: $(json control constraints.headline)"
+fi
+
+if [ "${c_cfuncs:-0}" -ge 1 ]; then
+	ck ok "a function row reads 'func 0', so the listing came from THIS compile (reportFromAcirListing)"
+else
+	ck fail "no function row reads 'func 0'"
+	note "rows: $(json control constraints.functionNames)"
+	if [ "${c_cmain:-0}" -ge 1 ]; then
+		note "a row reads 'main', which is the compile-time nargo-info constant — the pane is showing the shipped number, not the module's listing"
+	fi
+fi
+
 dump control
 echo
 
@@ -767,6 +837,88 @@ echo
 # ---------------------------------------------------------------------------
 # WHAT THIS GATE DOES NOT ASSERT, said here rather than left to be inferred.
 #
+# ---------------------------------------------------------------------------
+# ARM 7 — MUTATION for arm 1c: a compiler that answers WITHOUT `acir_listing`.
+#
+# This is not an invented fault. It is the state this deployment was ACTUALLY
+# IN until `ci/deploy/noir-wasm.pin` moved onto `ns12`: the pinned module
+# predated `VfsResponse.acir_listing`, so every Build on the live site
+# answered without one and the Constraints pane captioned its counts instead
+# of listing opcodes. Arm 1c exists to stop that recurring, and this arm is
+# what says arm 1c can see it.
+#
+# THE MUTATION IS ONE LINE IN THE WORKER, and it is at the boundary rather
+# than inside the pane, so everything downstream — the parse in
+# `noir_build.nim`, `noirConstraintsSink`'s empty-listing branch,
+# `noteListingUnavailable`, the view — runs exactly as it did in production.
+# Deleting the field where the worker has just received it from the module is
+# indistinguishable, to every line below it, from a module that never emitted
+# it.
+#
+# EXPECT: arm 1c's three listing assertions RED, and arm 1's build assertions
+# GREEN. The second half is the point. The failure this reproduces is one
+# where the build succeeds, the pane is populated, the counts are correct, and
+# only the listing is missing — so an arm that reddened everything would not
+# be reproducing it.
+# ---------------------------------------------------------------------------
+echo "Arm 7: MUTATION — a compiler module that answers without acir_listing"
+echo "    Expect the three CONSTRAINTS listing assertions RED, the build GREEN."
+nolisting="${cache}/nolisting"
+copy_tree "${bundle}" "${nolisting}"
+nolisting_worker="$(published_asset "${nolisting}" assets/wasm-worker.js || true)"
+if [ -z "${nolisting_worker}" ] || [ ! -f "${nolisting_worker}" ]; then
+	ck fail "arm 7 could not find the worker asset, so its premise does not hold"
+elif ! grep -q 'const response = await compileVfs' "${nolisting_worker}"; then
+	ck fail "arm 7's patch site is gone from the worker: the mutation would change NOTHING and the arm would measure an unmutated tree"
+else
+	python3 - "${nolisting_worker}" <<'PY'
+import sys
+p = sys.argv[1]
+src = open(p).read()
+site = "      const response = await compileVfs(JSON.parse(request.stdin));"
+assert src.count(site) == 1, f"expected one patch site, found {src.count(site)}"
+open(p, "w").write(src.replace(
+    site, site + "\n      delete response.acir_listing;"))
+PY
+	if ! grep -q 'delete response.acir_listing' "${nolisting_worker}"; then
+		ck fail "arm 7's patch did not apply"
+	elif ! probe nolisting "${nolisting}" /noir shortcut; then
+		ck fail "arm 7 could not be measured"
+	else
+		n_compiled="$(count_matching nolisting buildPanePainted 'compiled hello_noir')"
+		n_notice="$(json nolisting constraints.noticeVisible)"
+		n_opcodes="$(json nolisting constraints.opcodeRowsLaidOut)"
+		n_func="$(count_matching nolisting constraints.functionNames 'func 0')"
+		n_main="$(count_matching nolisting constraints.functionNames 'main')"
+
+		# THE CONTROL HALF FIRST: if the build broke, the three below are red
+		# for the wrong reason and this arm has stopped being a mutation of
+		# arm 1c.
+		if [ "${n_compiled:-0}" -ge 1 ]; then
+			ck ok "arm 7: the build still succeeds — only the listing is gone, which is the shipped failure exactly"
+		else
+			ck fail "arm 7 broke the BUILD as well as the listing; it is not a mutation of arm 1c"
+		fi
+		if [ "${n_notice}" = "True" ] || [ "${n_notice}" = "true" ]; then
+			ck ok "arm 7: the listing-unavailable caption APPEARS, so arm 1c's caption check can fail"
+		else
+			ck fail "arm 7: no caption over a module answering without acir_listing — arm 1c's caption check is vacuous"
+		fi
+		if [ "${n_opcodes:-0}" -eq 0 ] && [ "${n_func:-0}" -eq 0 ]; then
+			ck ok "arm 7: no opcode rows and no 'func 0', so both listing assertions can fail"
+		else
+			ck fail "arm 7: the pane still shows a listing (${n_opcodes} row(s), ${n_func} 'func 0') — arm 1c is not reading what it claims"
+		fi
+		if [ "${n_main:-0}" -ge 1 ]; then
+			ck ok "arm 7: and the pane falls back to 'main' from the compile-time constant — the two names really are the discriminator"
+		else
+			ck fail "arm 7: the pane names no function at all; 'func 0' vs 'main' is then not the distinction arm 1c rests on"
+		fi
+		dump nolisting
+	fi
+fi
+echo
+
 # THE ■ IS NOT EXERCISED IN A BROWSER, and there is no arm for it, because
 # there is no state to synchronise on and no window to aim at.
 #
@@ -800,7 +952,7 @@ echo "checks: ${checks}   failures: ${failures}"
 
 # THE COUNT ITSELF. A guard that returned early, an arm that was skipped, or a
 # `probe` that failed silently would otherwise reduce this gate to whatever ran.
-expected_checks=32
+expected_checks=41
 if [ "${checks}" -ne "${expected_checks}" ]; then
 	echo "  ${checks} assertion(s) ran; this gate declares ${expected_checks}." >&2
 	echo "  An arm was skipped, or one was added without moving the number." >&2
