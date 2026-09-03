@@ -218,9 +218,19 @@ case "$resolved" in
 	;;
 esac
 
-# (b) Reality: the same claim about the process that actually runs. LD_DEBUG
+# (b) Reality: the same claim about a process that actually runs. LD_DEBUG
 #     reports what the loader really mapped, not what it would have chosen.
-LD_DEBUG=libs "$APPDIR/bin/ct_unwrapped" --version >/dev/null 2>/tmp/lddbg.txt || true
+#
+#     Invoke the LOADER the way the wrapper does, rather than running
+#     $APPDIR/bin/ct_unwrapped. That path is now a bash wrapper, so LD_DEBUG
+#     would attach to bash first and the first "calling init:" line reported
+#     would be BASH's libc -- the host's -- which says nothing about the
+#     program. This check failed on debian:12 and ubuntu:22.04 for exactly that
+#     reason, on an AppImage that was in fact running correctly: `--version`
+#     printed the version on both, which glibc 2.35/2.36 could not have done
+#     had the host libc been the one in use.
+LD_DEBUG=libs "$LOADER" --library-path "$APPDIR/lib" "$TARGET" --version \
+	>/dev/null 2>/tmp/lddbg.txt || true
 initpath=$(grep -oE "calling init: [^ ]*libc\.so\.6" /tmp/lddbg.txt | head -1 | sed 's/calling init: //')
 echo "LD_DEBUG=libs : libc.so.6 => ${initpath:-<not reported>}"
 case "$initpath" in
