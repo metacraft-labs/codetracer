@@ -757,9 +757,8 @@ proc onAddBreakpoint*(sender: js, response: jsobject(path=cstring, line=int)) =
   data.services.debugger.addBreakpoint(response.path, response.line)
   data.ui.editors[response.path].refreshEditorLine(response.line)
 
-proc onRunTo*(sender: js, response: jsobject(path=cstring, line=int, reverse=bool)) =
-  # TODO
-  data.services.debugger.runTo(response.path, response.line, reverse=response.reverse)
+# `onRunTo` USED TO BE HERE — the receiver half of the dead `CODETRACER::run-to`
+# loop described in `services/debugger_service.nim`. Deleted with its sender.
 
 # UI HANDLERS
 
@@ -858,17 +857,20 @@ template reverseStepOut*(fromShortcut: bool) =
 #     continueTo(data.breakpoints)
 
 proc stopAction* {.locks: 0.}=
-  ## *Stop* — leave Debug mode and return the workspace to Edit mode.
+  ## *Stop* — end the debugging session and return the workspace to Edit mode.
   ##
   ## This body was `discard` from commit `3fc21a75` (the initial open-source
   ## release) until now, while `src/config/default_config.yaml:75` bound
   ## `SHIFT+F5` to it and `ui_js.nim`'s action table dispatched to it: a
   ## command that was bound, reachable and inert.
   ##
-  ## The behaviour, the spec citations that settle it and the one thing the
-  ## spec leaves open are all in `ui/stop_command.nim`, which is a leaf a node
-  ## suite can import — `renderer.nim` is not, which is how an empty body
-  ## survived here for the life of the repository.
+  ## Stop ENDS the session: the replay backend is terminated and the tab
+  ## becomes an edit tab a new debugging session can be started in. It is NOT
+  ## a pause — *Pause* is a separate, resumable operation that does not exist
+  ## yet. The behaviour and the spec citations that settle it are all in
+  ## `ui/stop_command.nim`, which is a leaf a node suite can import —
+  ## `renderer.nim` is not, which is how an empty body survived here for the
+  ## life of the repository.
   discard stopReplaySession(data)
 
 

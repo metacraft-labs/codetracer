@@ -567,8 +567,19 @@ proc sourceCallJump*(self: DebuggerService, path: cstring, line: int, targetToke
     behaviour: behaviour
   )
 
-proc runTo*(self: DebuggerService, path: cstring, line: int, reverse: bool = false) =
-  self.data.ipc.send "CODETRACER::run-to", js{path: path, line: line, reverse: reverse}
+# `runTo` USED TO BE HERE, and it was a closed loop: it sent
+# `CODETRACER::run-to`, which no main-process handler ever listened for, and its
+# only caller was `renderer.onRunTo` — the RECEIVER for that same channel, which
+# called straight back into it. Nothing ever sent the message, so neither proc
+# ever ran; nothing had a keybinding, menu item, palette entry or button.
+#
+# It is deleted rather than wired up because *Run to Cursor*, the command it was
+# named for, is a BEHAVIOUR OF THE LINE JUMP and not a second command beside it
+# (`codetracer-specs` `GUI/Debugging-Features/Debugger-Controls.md` § "Running to
+# a line"). The forward direction of `ct/source-line-jump` is that command; see
+# `sourceLineJump` above and `ui/editor.nim`'s `CTRL+F10`. Leaving a dead
+# `runTo` beside it is how a reader concludes the product has two of something
+# it has one of.
 
 proc runToEntry*(self: DebuggerService) =
   self.data.ipc.send "CODETRACER::run-to-entry", js{}

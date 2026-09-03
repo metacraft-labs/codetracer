@@ -5092,10 +5092,16 @@ mod jump_destination_tests {
         // and "did not move" are the same observation and the assertion is
         // free.
         session.jump_to(StepId(parked_at)).expect("park");
-        assert_eq!(session.current_step_id(), StepId(parked_at), "the session parked where asked");
+        assert_eq!(
+            session.current_step_id(),
+            StepId(parked_at),
+            "the session parked where asked"
+        );
         let defaulted: Location =
             serde_json::from_value(arguments.clone()).expect("Location deserialises from ANY object — that is the bug");
-        session.location_jump(&defaulted).expect("the pre-fix jump reported success");
+        session
+            .location_jump(&defaulted)
+            .expect("the pre-fix jump reported success");
         session.current_step_id()
     }
 
@@ -5278,10 +5284,7 @@ mod jump_destination_tests {
         for arguments in [json!(null), json!(5), json!("ct/history-jump"), json!([1, 2])] {
             let refusal = task::location_from_jump_arguments("ct/history-jump", &arguments)
                 .expect_err("a non-object `arguments` names no destination either");
-            assert!(
-                refusal.contains("Location object"),
-                "got: {refusal} for {arguments}"
-            );
+            assert!(refusal.contains("Location object"), "got: {refusal} for {arguments}");
         }
     }
 }

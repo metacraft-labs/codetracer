@@ -568,11 +568,20 @@ test_lane_files() {
 		# that forwarding only exists on the JS side (`std/jsffi`'s `JsAssoc`,
 		# and the `{.emit.}`ed getters in `types.nim`). It is also the only
 		# lane that RUNS `registerComponent` rather than compile-checking it.
+		# `run_to_cursor_test.nim` is the Nim half of a cross-language
+		# coupling: *Run to Cursor* is `ct/source-line-jump` with
+		# `behaviour = ForwardJump`, and that enum crosses as its ORDINAL, so
+		# the number leaving Nim has to equal the discriminant Rust decodes.
+		# JS-only because the ordinal is a property of the JS backend's enum
+		# representation — on the C backend the question does not arise. Its
+		# Rust half is `the_wire_form_of_jump_behaviour_is_the_nim_ordinal` in
+		# `src/db-backend/src/dap_handler.rs`.
 		printf '%s\n' \
 			src/frontend/tests/component_registry_binding_test.nim \
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
+			src/frontend/tests/run_to_cursor_test.nim \
 			src/frontend/tests/scratchpad_add_dispatch_test.nim \
 			src/frontend/tests/shortcut_bindings_test.nim \
 			src/frontend/tests/shortcut_dialog_test.nim \

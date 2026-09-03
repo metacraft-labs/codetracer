@@ -233,15 +233,28 @@ var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewCompone
     if not data.functions.toggleMode.isNil:
       data.functions.toggleMode(data),
 
-  # TODO: support concurrent when add later on
-  # cstring"CTRL+F10": proc(editor: MonacoEditor, e: EditorViewComponent) =
-  #   let taskId = genTaskId(Step)
-  #   data.step("co-next", CoNext, reverse=false, taskId=taskId),
-
   cstring"CTRL+F8": proc(editor: MonacoEditor, e: EditorViewComponent) =
     if editor.hasTextFocus():
       let line = editor.getLine()
       e.editorLineJump(line, SmartJump),
+
+  # RUN TO CURSOR. `CTRL+F10` is Visual Studio's binding for it, and the whole
+  # F10 family is already the Step Over family here — `F10` step over,
+  # `SHIFT+F10` its reverse, `ALT+F10` step over statement — so the chord sits
+  # where a user looks for it and where nothing else is.
+  #
+  # THIS TABLE IS NOT THE YAML PATH. `commands` is delegated into Monaco
+  # directly by `delegateShortcuts` below, so entries here need no
+  # `MONACO_SHORTCUTS_WHITELIST` membership — that list gates the SECOND loop,
+  # the one that mirrors config-declared chords. `CTRL+F8`, the Smart jump,
+  # has always been bound this way; this is its forward sibling.
+  #
+  # The slot previously held a commented-out `co-next` (concurrent step over)
+  # sketch that had been dead since it was written.
+  cstring"CTRL+F10": proc(editor: MonacoEditor, e: EditorViewComponent) =
+    if editor.hasTextFocus():
+      let line = editor.getLine()
+      e.editorLineJump(line, ForwardJump),
 
   cstring"CTRL+F11": proc(editor: MonacoEditor, e: EditorViewComponent) =
     if editor.hasTextFocus():
@@ -1231,9 +1244,18 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
       handler: proc(e: Event) =
         self.editorLineJump(line, SmartJump)
     )
+    # RUN TO CURSOR IS THIS ENTRY, and it is why it is named after the command
+    # rather than after the mechanism. `codetracer-specs`
+    # `GUI/Debugging-Features/Debugger-Controls.md` § "Running to a line"
+    # settles that Run to Cursor is a *behaviour of the line jump*, not a
+    # second command beside it — "naming the same capability twice, once per
+    # surface, is how a reader ends up searching for a command that was never
+    # built". `ForwardJump` is that behaviour, and until it was honoured by
+    # `Handler::find_step_for_jump` this entry did exactly what "Jump to line"
+    # did, which is how the capability came to look present and be absent.
     let sourceLineForward = ContextMenuItem(
-      name: "Jump forward to line",
-      hint: "",
+      name: "Run to Cursor",
+      hint: "CTRL+F10",
       handler: proc(e: Event) =
         self.editorLineJump(line, ForwardJump)
     )

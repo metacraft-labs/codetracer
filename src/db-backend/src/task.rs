@@ -681,9 +681,9 @@ pub const JUMP_DESTINATION_FIELD: &str = "rrTicks";
 /// mode is a payload written against a different struct: the reader needs to
 /// see which struct it was written against.
 pub fn location_from_jump_arguments(command: &str, arguments: &serde_json::Value) -> Result<Location, String> {
-    let object = arguments.as_object().ok_or_else(|| {
-        format!("{command} expects a Location object in `arguments`; got {arguments}")
-    })?;
+    let object = arguments
+        .as_object()
+        .ok_or_else(|| format!("{command} expects a Location object in `arguments`; got {arguments}"))?;
     if !object.contains_key(JUMP_DESTINATION_FIELD) {
         let present: Vec<&str> = object.keys().map(String::as_str).collect();
         return Err(format!(
@@ -1166,6 +1166,37 @@ pub struct FunctionLocation {
     pub force_reload: bool,
 }
 
+/// Which direction a source-line jump is allowed to search in.
+///
+/// THE WIRE FORM IS AN INTEGER, and that is not a choice made here.  The
+/// frontend enum is `JumpBehaviour` in
+/// `src/common/common_types/debugger_features/jumps.nim:12-15`; Nim's JS
+/// backend represents enums as their ordinals, and the value crosses as
+/// part of `SourceLineJumpTarget.toJs` (`src/frontend/middleware.nim:307`).
+/// So `Smart = 0`, `Forward = 1`, `Backward = 2` must stay in that order
+/// and keep those discriminants — `Serialize_repr`/`Deserialize_repr` is
+/// what makes the numbers, rather than the variant names, the format.
+///
+/// `Smart` is the default in both languages and is what every caller that
+/// omits the field gets, so an old frontend against a new backend behaves
+/// exactly as it did.
+#[derive(Debug, Default, Copy, Clone, Serialize_repr, Deserialize_repr, PartialEq, Eq)]
+#[repr(u8)]
+pub enum JumpBehaviour {
+    /// Prefer the next occurrence after the current step; if the line has
+    /// none, settle for its last occurrence — which may be behind.  This
+    /// is "jump to line": get me to that line, whichever way that is.
+    #[default]
+    Smart = 0,
+    /// Only occurrences strictly after the current step.  This is **run to
+    /// cursor**: running to a point you have already passed for the last
+    /// time is not a run, it is a rewind, and the two must not be the same
+    /// command.
+    Forward = 1,
+    /// Only occurrences strictly before the current step.
+    Backward = 2,
+}
+
 /// Arguments of `ct/source-line-jump` (`dap_server.rs`), and a helper
 /// shape constructed in Rust elsewhere.
 ///
@@ -1173,29 +1204,35 @@ pub struct FunctionLocation {
 /// `SourceLineJumpTarget` — `{path, line, behaviour}`
 /// (`src/common/common_types/debugger_features/jumps.nim:17-20`, sent by
 /// `src/frontend/ui/editor.nim:1090` and
-/// `src/frontend/event_helpers.nim:18`).  `behaviour` is not declared
-/// below, so denying unknown fields would fail EVERY source-line jump —
-/// the most-used navigation command there is.  `LaunchRequestArguments`
-/// already taught us what that costs: see the `trace_source` field in
+/// `src/frontend/event_helpers.nim:18`).  `LaunchRequestArguments`
+/// already taught us what denying costs: see the `trace_source` field in
 /// `dap.rs`, where a denied unknown field produced no launch response at
 /// all and the client simply hung.
 ///
-/// `behaviour` is discarded today, which is its own defect — the menu
-/// offers a jump direction the backend throws away.  The two are the
-/// same field: this struct can only start denying unknown fields once
-/// `behaviour` is either honoured or deliberately declared-and-ignored.
-/// Denying first would convert a silent wrong-direction jump into a
-/// dead command.
+/// `behaviour` USED TO BE DISCARDED, and the doc that stood here called
+/// that "its own defect — the menu offers a jump direction the backend
+/// throws away".  It is now declared and honoured
+/// (`Handler::find_step_for_jump`), which is what makes *Run to Cursor* a
+/// real command rather than a second name for the line jump.  The three
+/// context-menu entries `ui/editor.nim` has offered since it was written
+/// — "Jump to line", "Jump forward to line", "Jump backward to line" —
+/// now do three different things.
 ///
-/// The missing `rename_all` is harmless, incidentally: the only keys the
-/// frontend actually sends are `path` and `line`, single lowercase words
-/// that are identical in snake_case and camelCase.  `column`,
-/// `condition` and `log_message` are populated by Rust callers, never by
-/// the wire.
+/// The missing `rename_all` is harmless, incidentally: the keys the
+/// frontend actually sends are `path`, `line` and `behaviour`, single
+/// lowercase words that are identical in snake_case and camelCase.
+/// `column`, `condition` and `log_message` are populated by Rust callers,
+/// never by the wire.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SourceLocation {
     pub path: String,
     pub line: usize,
+    /// Direction constraint for `ct/source-line-jump`.  Defaulted, so the
+    /// Rust callers that build a `SourceLocation` for breakpoints and
+    /// tracepoints (where direction is meaningless) get `Smart` without
+    /// naming it.
+    #[serde(default)]
+    pub behaviour: JumpBehaviour,
     /// Optional 1-indexed column for column-aware breakpoints (M1).
     /// `None` preserves the legacy line-only semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]

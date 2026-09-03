@@ -37,8 +37,8 @@ use crate::task::{
     Action, Call, CallArgsUpdateResults, CallLine, CallLineContentKind, CallSearchArg, CallSearchResponseBody,
     CalltraceLoadArgs, CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DapTracepoint,
     DbEventKind, FlowMode, FlowUpdate, FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction,
-    Instructions, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location, MoveState,
-    NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent,
+    Instructions, JumpBehaviour, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location,
+    MoveState, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent,
     RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg,
     Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, TracepointResultsAggregate, UpdateTableArgs,
     Variable,
@@ -3933,26 +3933,60 @@ impl Handler {
         self.reader.fuzzy_path_id_for(path)
     }
 
-    fn find_next_step(&self, path_id: PathId, line: usize) -> Option<StepId> {
-        // M26 — resolve the line's step ids via `step_ids_on_line`, which on the
-        // CTFS reader PREFERS the prepopulated `step-map.ns` index (O(unique
-        // lines), no whole-table build) and falls back to the whole-table build
-        // when no index is present. The ids are ascending, so the first one past
-        // the current step is the next hit; otherwise the line's last step is the
-        // closest preceding one (preserving the original behaviour exactly).
+    /// The step on `line` that a jump with `behaviour` should land on.
+    ///
+    /// M26 — resolve the line's step ids via `step_ids_on_line`, which on the
+    /// CTFS reader PREFERS the prepopulated `step-map.ns` index (O(unique
+    /// lines), no whole-table build) and falls back to the whole-table build
+    /// when no index is present. The ids are ascending.
+    ///
+    /// THE DIRECTION IS HONOURED HERE, and this is the whole of *Run to
+    /// Cursor*. `Smart` is the behaviour this function has always had: prefer
+    /// the next hit after the current step, and if the line has none, settle
+    /// for its last hit — which is BEHIND. That fallback is right for "jump to
+    /// line" and wrong for "run to cursor": pointing at a loop body you have
+    /// already finished iterating would silently rewind the session instead of
+    /// reporting that there is nothing left to run to. `Forward` therefore
+    /// refuses rather than falling back, and `Backward` is its mirror.
+    ///
+    /// `behaviour` reached this engine on every source-line jump since the
+    /// frontend was written and was dropped on the floor by the deserializer;
+    /// see the doc on `task::SourceLocation`.
+    fn find_step_for_jump(&self, path_id: PathId, line: usize, behaviour: JumpBehaviour) -> Option<StepId> {
         let step_ids = self.reader.step_ids_on_line(path_id, line)?;
-        for step_id in &step_ids {
-            if *step_id > self.step_id {
-                return Some(*step_id);
+        match behaviour {
+            JumpBehaviour::Forward => step_ids.iter().find(|s| **s > self.step_id).copied(),
+            JumpBehaviour::Backward => step_ids.iter().rev().find(|s| **s < self.step_id).copied(),
+            JumpBehaviour::Smart => {
+                for step_id in &step_ids {
+                    if *step_id > self.step_id {
+                        return Some(*step_id);
+                    }
+                }
+                step_ids.last().copied()
             }
         }
-        step_ids.last().copied()
+    }
+
+    fn find_next_step(&self, path_id: PathId, line: usize) -> Option<StepId> {
+        self.find_step_for_jump(path_id, line, JumpBehaviour::Smart)
     }
 
     fn get_closest_step_id(&self, loc: &SourceLocation) -> Option<StepId> {
+        self.get_step_id_for_jump(loc, JumpBehaviour::Smart)
+    }
+
+    /// `get_closest_step_id`, with the direction constraint applied at both
+    /// places a step is resolved: the requested line, and the nearest line
+    /// that has any steps when the requested one has none (a cursor parked on
+    /// a brace or a blank line). Only the fallback's LINE choice is
+    /// direction-blind — it still prefers the closest preceding source line,
+    /// exactly as before — because that is a question about the source text,
+    /// not about execution order.
+    fn get_step_id_for_jump(&self, loc: &SourceLocation, behaviour: JumpBehaviour) -> Option<StepId> {
         // Check if there is a step on the line.
         let path_id = self.load_path_id(&loc.path)?;
-        if let Some(step_id) = self.find_next_step(path_id, loc.line) {
+        if let Some(step_id) = self.find_step_for_jump(path_id, loc.line, behaviour) {
             return Some(step_id);
         }
 
@@ -3981,7 +4015,7 @@ impl Handler {
             }
         }
 
-        if let Some(step_id) = self.find_next_step(path_id, closest_line?) {
+        if let Some(step_id) = self.find_step_for_jump(path_id, closest_line?, behaviour) {
             return Some(step_id);
         }
 
@@ -3995,8 +4029,9 @@ impl Handler {
         source_location: SourceLocation,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
+        let behaviour = source_location.behaviour;
         if self.trace_kind == TraceKind::Materialized {
-            if let Some(step_id) = self.get_closest_step_id(&source_location) {
+            if let Some(step_id) = self.get_step_id_for_jump(&source_location, behaviour) {
                 self.replay.jump_to(step_id)?;
                 self.step_id = self.replay.current_step_id();
                 self.complete_move(false, sender.clone())?;
@@ -4005,6 +4040,31 @@ impl Handler {
                 // Without this respond_dap, headless DAP clients (the
                 // bench, IDE adapters speaking strict DAP) block
                 // indefinitely waiting for the response.
+                self.respond_dap(req, 0, sender)?;
+                Ok(())
+            } else if behaviour != JumpBehaviour::Smart {
+                // "NOTHING LEFT TO RUN TO" IS NOT AN ERROR, AND MUST NOT HANG.
+                //
+                // A directional jump that finds no hit in its direction is an
+                // ordinary outcome of *Run to Cursor* — the user pointed at a
+                // line the program will not reach again. `Smart` keeps the
+                // historical `Err`, because for it a miss really does mean the
+                // location is unknown.
+                //
+                // Returning `Err` here would be the worse of two bugs, not the
+                // safer one: `dap_server.rs`'s dispatcher does not respond on
+                // the error path, so the request never settles and a strict
+                // DAP client waits forever. That is the same failure the
+                // `respond_dap` above exists to prevent, and the failure
+                // `local_step_jump` still has.
+                let direction = if behaviour == JumpBehaviour::Forward {
+                    "forward"
+                } else {
+                    "backward"
+                };
+                let msg = format!("no {direction} step on {}", &source_location);
+                warn!("  source line jump: {msg}");
+                self.send_notification(NotificationKind::Warning, &msg, false, sender.clone())?;
                 self.respond_dap(req, 0, sender)?;
                 Ok(())
             } else {
@@ -4053,11 +4113,31 @@ impl Handler {
     fn source_line_jump_moves_for_rr(&mut self, source_location: &SourceLocation) -> Result<(), Box<dyn Error>> {
         // easier to handle errors from here in one place where we call it, so we can cleanup/restore breakpoints after it
 
-        // forward-continue
-        self.replay.step(Action::Continue, true)?;
-        // self.source_line_jump_in_direction(source_location, Direction::Forward)?;
-        let location = self.replay.load_location(&mut self.expr_loader)?;
-        if location.path != source_location.path || location.line != source_location.line as i64 {
+        // THE DIRECTION IS HONOURED ON THIS ARM TOO. The caller has bracketed
+        // these moves with a temporary breakpoint on the target line and
+        // `disable_breakpoints()`, so a Continue in either direction stops at
+        // the target and nowhere else. What `behaviour` decides is which
+        // Continues are allowed to run at all:
+        //
+        // * `Smart` — the historical two-step probe: forward, and if that did
+        //   not land on the line, backward. "Get me there, either way."
+        // * `Forward` (*Run to Cursor*) — forward only. A miss stays put, and
+        //   the caller reports it, rather than rewinding past where the user
+        //   was.
+        // * `Backward` — backward only, its mirror.
+        let forward_allowed = source_location.behaviour != JumpBehaviour::Backward;
+        let backward_allowed = source_location.behaviour != JumpBehaviour::Forward;
+
+        if forward_allowed {
+            // forward-continue
+            self.replay.step(Action::Continue, true)?;
+            // self.source_line_jump_in_direction(source_location, Direction::Forward)?;
+            let location = self.replay.load_location(&mut self.expr_loader)?;
+            if location.path == source_location.path && location.line == source_location.line as i64 {
+                return Ok(());
+            }
+        }
+        if backward_allowed {
             // reverse-continue
             self.replay.step(Action::Continue, false)?;
         }
@@ -4097,6 +4177,9 @@ impl Handler {
             column: None,
             condition: None,
             log_message: None,
+            // Call jumps carry their own `behaviour` field and do not route it
+            // here; `Smart` keeps this helper doing exactly what it did.
+            behaviour: JumpBehaviour::Smart,
         }) {
             return Some(step_id);
         }
@@ -4116,6 +4199,7 @@ impl Handler {
             column: None,
             condition: None,
             log_message: None,
+            behaviour: JumpBehaviour::Smart,
         }) {
             self.replay.jump_to(line_step_id)?;
             self.step_id = self.replay.current_step_id();
@@ -4254,6 +4338,9 @@ impl Handler {
                         column,
                         condition: condition.clone(),
                         log_message: Some(message_text),
+                        // A tracepoint is a place, not a move: direction is
+                        // meaningless and unread here.
+                        behaviour: JumpBehaviour::default(),
                     }) {
                         Ok(tracepoint) => {
                             results.push(dap_types::Breakpoint {
@@ -4299,6 +4386,8 @@ impl Handler {
                     column,
                     condition: condition.clone(),
                     log_message: None,
+                    // As above: a breakpoint has no direction.
+                    behaviour: JumpBehaviour::default(),
                 }) {
                     Ok(breakpoint) => {
                         results.push(dap_types::Breakpoint {
@@ -6736,6 +6825,7 @@ mod tests {
             column: None,
             condition: None,
             log_message: None,
+            behaviour: JumpBehaviour::Smart,
         };
         handler.source_line_jump(dap::Request::default(), source_location, sender.clone())?;
         assert_eq!(handler.step_id, StepId(2));
@@ -6747,6 +6837,7 @@ mod tests {
                 column: None,
                 condition: None,
                 log_message: None,
+                behaviour: JumpBehaviour::Smart,
             },
             sender.clone(),
         )?;
@@ -6761,6 +6852,7 @@ mod tests {
                 column: None,
                 condition: None,
                 log_message: None,
+                behaviour: JumpBehaviour::Smart,
             },
             sender.clone(),
         )?;
@@ -6776,6 +6868,240 @@ mod tests {
             sender,
         )?;
         assert_eq!(handler.step_id, StepId(0));
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Run to Cursor — `JumpBehaviour` on the materialized (browser) engine.
+    //
+    // WHY A LOOP FIXTURE. On a straight-line trace every line has exactly one
+    // step, so Forward, Backward and Smart all resolve to the same id and a
+    // suite over `setup_db` would pass for a backend that still threw the
+    // field away — which is precisely what it did until this change. The
+    // difference between "run to cursor" and "jump to line" is only visible
+    // where a line is executed MORE THAN ONCE, so these cases are stated as
+    // the step actually landed on, from a named starting step.
+    // ------------------------------------------------------------------
+
+    /// Lines `1, 2, 3, 2, 3, 2, 3, 4` in registration order, so:
+    ///
+    /// | step | line |        | step | line |
+    /// |------|------|        |------|------|
+    /// |  0   |  1   |        |  4   |  3   |
+    /// |  1   |  2   |        |  5   |  2   |
+    /// |  2   |  3   |        |  6   |  3   |
+    /// |  3   |  2   |        |  7   |  4   |
+    ///
+    /// Line 2 is the loop head: steps 1, 3 and 5. Line 4 runs once, after the
+    /// loop, at step 7.
+    fn setup_db_three_iteration_loop() -> Db {
+        let none_type = TypeRecord {
+            kind: TypeKind::None,
+            lang_type: "None".to_string(),
+            specific_info: TypeSpecificInfo::None,
+        };
+        let mut trace: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(PathBuf::from("/test/workdir")),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<top-level>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Type(none_type),
+        ];
+        for line in [1, 2, 3, 2, 3, 2, 3, 4] {
+            trace.push(TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(line),
+            }));
+        }
+        let trace_metadata = TraceMetadata {
+            recording_id: "01949fcc-7d92-7e9c-cccc-dddddddddddd".to_string(),
+            workdir: PathBuf::from("/test/workdir"),
+            program: "test".to_string(),
+            args: vec![],
+        };
+        let mut db = Db::new(&trace_metadata.workdir);
+        let mut trace_processor = TraceProcessor::new(&mut db);
+        trace_processor.postprocess(&trace).unwrap();
+        db
+    }
+
+    fn loop_handler() -> Handler {
+        Handler::new(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            Box::new(setup_db_three_iteration_loop()),
+        )
+    }
+
+    /// Move the session to `step` the way a real move would, so `self.step_id`
+    /// and the replay agree — `find_step_for_jump` reads the former and
+    /// `jump_to` moves the latter.
+    fn seek_to(handler: &mut Handler, step: i64) -> Result<(), Box<dyn Error>> {
+        handler.replay.jump_to(StepId(step))?;
+        handler.step_id = handler.replay.current_step_id();
+        assert_eq!(handler.step_id, StepId(step), "fixture seek did not land");
+        Ok(())
+    }
+
+    fn jump_to_line(
+        handler: &mut Handler,
+        line: usize,
+        behaviour: JumpBehaviour,
+        sender: &Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        handler.source_line_jump(
+            dap::Request::default(),
+            SourceLocation {
+                path: "/test/workdir".to_string(),
+                line,
+                column: None,
+                condition: None,
+                log_message: None,
+                behaviour,
+            },
+            sender.clone(),
+        )
+    }
+
+    #[test]
+    fn run_to_cursor_lands_on_the_next_iteration_not_a_past_one() -> Result<(), Box<dyn Error>> {
+        // Standing inside the second iteration (step 3 is line 2's second hit),
+        // Run to Cursor on the loop head must go FORWARD to the third hit.
+        let (sender, _r) = mpsc::channel();
+        let mut handler = loop_handler();
+        seek_to(&mut handler, 3)?;
+
+        jump_to_line(&mut handler, 2, JumpBehaviour::Forward, &sender)?;
+
+        eprintln!("forward from step 3 to line 2 landed on {:?}", handler.step_id);
+        assert_eq!(handler.step_id, StepId(5));
+        Ok(())
+    }
+
+    #[test]
+    fn run_to_cursor_refuses_to_rewind_when_the_line_will_not_run_again() -> Result<(), Box<dyn Error>> {
+        // THE CASE THAT SEPARATES THE TWO COMMANDS. From step 6 the loop head
+        // (line 2) has no hit left. `Smart` falls back to the line's LAST hit
+        // and rewinds to step 5; `Forward` must stay put, because running to a
+        // point you have already passed for the last time is a rewind, not a
+        // run.
+        let (sender, _r) = mpsc::channel();
+
+        let mut smart = loop_handler();
+        seek_to(&mut smart, 6)?;
+        jump_to_line(&mut smart, 2, JumpBehaviour::Smart, &sender)?;
+        eprintln!("smart from step 6 to line 2 landed on {:?}", smart.step_id);
+        // The control arm: this is the pre-existing behaviour, and it is also
+        // what proves the fixture actually has a backward hit to be tempted by.
+        assert_eq!(smart.step_id, StepId(5));
+
+        let mut forward = loop_handler();
+        seek_to(&mut forward, 6)?;
+        jump_to_line(&mut forward, 2, JumpBehaviour::Forward, &sender)?;
+        eprintln!("forward from step 6 to line 2 landed on {:?}", forward.step_id);
+        assert_eq!(forward.step_id, StepId(6), "run to cursor rewound the session");
+        Ok(())
+    }
+
+    #[test]
+    fn backward_jump_lands_behind_where_smart_lands_ahead() -> Result<(), Box<dyn Error>> {
+        // The mirror, and the other half of the non-vacuity: from step 5 the
+        // loop head has hits both behind (1, 3) and none ahead, so `Backward`
+        // must take the nearest one behind — 3 — while `Smart` settles for the
+        // last hit, which is where it already is.
+        let (sender, _r) = mpsc::channel();
+
+        let mut smart = loop_handler();
+        seek_to(&mut smart, 5)?;
+        jump_to_line(&mut smart, 2, JumpBehaviour::Smart, &sender)?;
+        eprintln!("smart from step 5 to line 2 landed on {:?}", smart.step_id);
+        assert_eq!(smart.step_id, StepId(5));
+
+        let mut backward = loop_handler();
+        seek_to(&mut backward, 5)?;
+        jump_to_line(&mut backward, 2, JumpBehaviour::Backward, &sender)?;
+        eprintln!("backward from step 5 to line 2 landed on {:?}", backward.step_id);
+        assert_eq!(backward.step_id, StepId(3));
+        Ok(())
+    }
+
+    #[test]
+    fn run_to_cursor_past_the_loop_reaches_the_line_after_it() -> Result<(), Box<dyn Error>> {
+        // Non-vacuity for the refusal above: Forward is not simply "never
+        // moves". From inside the loop, Run to Cursor on line 4 — which runs
+        // once, after it — must arrive at step 7.
+        let (sender, _r) = mpsc::channel();
+        let mut handler = loop_handler();
+        seek_to(&mut handler, 1)?;
+
+        jump_to_line(&mut handler, 4, JumpBehaviour::Forward, &sender)?;
+
+        eprintln!("forward from step 1 to line 4 landed on {:?}", handler.step_id);
+        assert_eq!(handler.step_id, StepId(7));
+        Ok(())
+    }
+
+    #[test]
+    fn the_wire_form_of_jump_behaviour_is_the_nim_ordinal() -> Result<(), Box<dyn Error>> {
+        // THE CROSS-LANGUAGE COUPLING, DECODED FROM THE LITERAL JSON.
+        //
+        // The frontend does not send the name "Forward". Nim's JS backend
+        // represents an enum as its ordinal, and `SourceLineJumpTarget` crosses
+        // as `value.toJs` (`frontend/middleware.nim:307`), so what arrives is
+        // `"behaviour": 1`. Nothing relates the two declarations but this test
+        // and its Nim half, `src/frontend/tests/run_to_cursor_test.nim`, which
+        // asserts the same three integers leave the other side.
+        //
+        // Written against raw JSON rather than by serialising a Rust value,
+        // because a round trip through `serde` would agree with itself
+        // whatever the discriminants were.
+        let forward: SourceLocation = serde_json::from_str(r#"{"path":"/test/workdir","line":2,"behaviour":1}"#)?;
+        let backward: SourceLocation = serde_json::from_str(r#"{"path":"/test/workdir","line":2,"behaviour":2}"#)?;
+        let smart: SourceLocation = serde_json::from_str(r#"{"path":"/test/workdir","line":2,"behaviour":0}"#)?;
+        // And the field the Rust callers omit: breakpoints and tracepoints
+        // build a `SourceLocation` with no direction at all, and an older
+        // frontend sends none either. Both must mean `Smart`, or every
+        // breakpoint would become a directional jump.
+        let omitted: SourceLocation = serde_json::from_str(r#"{"path":"/test/workdir","line":2}"#)?;
+
+        eprintln!(
+            "decoded behaviours — 1: {:?}, 2: {:?}, 0: {:?}, omitted: {:?}",
+            forward.behaviour, backward.behaviour, smart.behaviour, omitted.behaviour
+        );
+        assert_eq!(forward.behaviour, JumpBehaviour::Forward);
+        assert_eq!(backward.behaviour, JumpBehaviour::Backward);
+        assert_eq!(smart.behaviour, JumpBehaviour::Smart);
+        assert_eq!(omitted.behaviour, JumpBehaviour::Smart);
+        Ok(())
+    }
+
+    #[test]
+    fn a_directional_jump_with_nowhere_to_go_still_answers_the_request() -> Result<(), Box<dyn Error>> {
+        // A miss must not be an `Err`: `dap_server.rs`'s dispatcher does not
+        // respond on the error path, so a strict DAP client would wait for a
+        // response that never comes. `Smart` keeps the historical `Err` for a
+        // genuinely unknown location, which is the contrast that makes this
+        // assertion mean something.
+        let (sender, receiver) = mpsc::channel();
+        let mut handler = loop_handler();
+        seek_to(&mut handler, 6)?;
+
+        jump_to_line(&mut handler, 2, JumpBehaviour::Forward, &sender)?;
+
+        let mut responses = 0;
+        while let Ok(message) = receiver.try_recv() {
+            if let DapMessage::Response(_) = message {
+                responses += 1;
+            }
+        }
+        eprintln!("responses to a forward jump with no forward step: {responses}");
+        assert_eq!(responses, 1);
         Ok(())
     }
 

@@ -1291,8 +1291,9 @@ test-frontend-js:
   debug_toolbar_tooltips_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-debug-toolbar-tooltips-test.XXXXXX.js")"
   component_registry_binding_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-component-registry-binding-test.XXXXXX.js")"
   stop_command_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-stop-command-test.XXXXXX.js")"
+  run_to_cursor_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-run-to-cursor-test.XXXXXX.js")"
   html_sinks_probe="$(mktemp "${TMPDIR:-/tmp}/codetracer-html-sinks-probe.XXXXXX.js")"
-  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$html_sinks_probe"' EXIT
+  trap 'rm -f "$frontend_lang_test" "$scratchpad_dispatch_test" "$target_axes_js_test" "$ipc_registry_test" "$shortcut_bindings_test" "$shortcut_presets_test" "$shortcut_dialog_test" "$debug_toolbar_tooltips_test" "$component_registry_binding_test" "$stop_command_test" "$run_to_cursor_test" "$html_sinks_probe"' EXIT
   echo "Running frontend language mapping tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$frontend_lang_test" js src/frontend/tests/frontend_lang_test.nim
@@ -1379,6 +1380,15 @@ test-frontend-js:
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$stop_command_test" js src/frontend/tests/stop_command_test.nim
   node -e 'globalThis.window = globalThis; require(process.argv[1])' "$stop_command_test"
+  echo ""
+  # *Run to Cursor* is `ct/source-line-jump` with `behaviour = ForwardJump`,
+  # and the enum crosses the wire as its ORDINAL. This is the Nim half of that
+  # coupling; the Rust half is
+  # `the_wire_form_of_jump_behaviour_is_the_nim_ordinal` in `dap_handler.rs`.
+  echo "Running Run to Cursor wire tests..."
+  nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
+    --out:"$run_to_cursor_test" js src/frontend/tests/run_to_cursor_test.nim
+  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$run_to_cursor_test"
   echo ""
   echo "Running IPC registry rebind tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \

@@ -4015,7 +4015,6 @@ proc configureIPC(data: Data) =
     "close"
     "open-location"
     "add-breakpoint"
-    "run-to"
     "collapse-expansion"
     "collapse-all-expansion"
     "add-break-response": BreakpointInfo => debugger
