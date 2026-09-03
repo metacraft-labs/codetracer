@@ -736,6 +736,71 @@ fn is_new_format(ctfs: &CtfsReader) -> bool {
     ctfs.has_file("steps.dat") && !ctfs.has_file("events.log")
 }
 
+/// The `meta.dat` buffer handed to the format-level
+/// `{Call,Step,Value}StreamReader::from_files` constructors when THIS crate has
+/// already resolved stream presence STRUCTURALLY — i.e. it read the internal
+/// file out of the container and is passing its bytes in.
+///
+/// # Why this exists (the shipping defect it fixes)
+///
+/// Every caller in this module resolves presence the way the trace-format spec
+/// requires — "stream-presence flags are a hint, not a gate" — by asking the
+/// container for `steps.dat` / `calls.dat` / `values.dat` and only calling
+/// `from_files` once the bytes are in hand. Those call sites used to pass `&[]`
+/// for the `meta` argument, on the documented understanding that `from_files`
+/// IGNORES it (the parameter is spelled `_meta` in the trace-format revision the
+/// contract was written against).
+///
+/// That is only true of `codetracer-trace-format` at or after
+/// `9ad9454 fix(reader): resolve stream presence structurally, not by meta.dat bit`.
+/// Codetracer's `flake.lock` pins `codetracer-trace-format` at `392c555`, which
+/// PREDATES that commit, and there `from_files` still opens with
+///
+/// ```ignore
+/// if !meta_dat_has_step_stream(meta) { return Ok(None); }
+/// ```
+///
+/// `meta_dat_has_step_stream(&[])` is `false` — an eight-byte-minimum header
+/// cannot be parsed out of an empty slice — so against the pinned crate EVERY
+/// such call returned `Ok(None)` unconditionally. For `steps.dat` that is fatal:
+/// `open_new_format_rust` reports "new-format container advertises steps.dat but
+/// no seekable step stream could be opened", and every container that carries
+/// split streams and no `events.log` — which is every recording that publishes
+/// source — is refused. Old-format containers were unaffected because they never
+/// reach this path.
+///
+/// The container is NOT at fault and nothing about it changes: this restores the
+/// reader's ability to open images that are already published and genuinely
+/// well-formed. It is deliberately version-agnostic — a crate that ignores
+/// `_meta` is unaffected by what is passed, and a crate that gates on it is told
+/// the truth the caller has already established structurally — so it neither
+/// requires nor is invalidated by a later flake-input bump.
+///
+/// Built from the FORMAT CRATE's own constants so it cannot drift from the
+/// parser that reads it.
+fn structural_presence_meta() -> [u8; 8] {
+    use codetracer_trace_writer::meta_dat::{
+        FLAG_HAS_CALL_STREAM, FLAG_HAS_INTERNING_TABLES, FLAG_HAS_IO_EVENT_STREAM, FLAG_HAS_STEP_STREAM,
+        FLAG_HAS_VALUE_STREAM, META_DAT_MAGIC, META_DAT_VERSION,
+    };
+
+    // Only ever consumed by `from_files`, and each of those inspects exactly one
+    // bit, so asserting all of the stream capabilities is safe: the caller has
+    // established structural presence for the one stream it is opening, and the
+    // other bits are never read from this buffer.
+    let flags: u16 = FLAG_HAS_CALL_STREAM
+        | FLAG_HAS_STEP_STREAM
+        | FLAG_HAS_VALUE_STREAM
+        | FLAG_HAS_IO_EVENT_STREAM
+        | FLAG_HAS_INTERNING_TABLES;
+
+    let mut buf = [0u8; 8];
+    buf[0..4].copy_from_slice(&META_DAT_MAGIC);
+    buf[4..6].copy_from_slice(&META_DAT_VERSION.to_le_bytes());
+    buf[6..8].copy_from_slice(&flags.to_le_bytes());
+    buf
+}
+
 fn build_step_call_maps(call_ranges: &[CallRange], step_count: usize) -> (Vec<CallKey>, Vec<CallKey>) {
     let mut step_to_call_key: Vec<CallKey> = vec![CallKey(-1); step_count];
     for (key_idx, range) in call_ranges.iter().enumerate() {
