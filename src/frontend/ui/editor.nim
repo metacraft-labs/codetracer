@@ -3105,6 +3105,34 @@ proc monacoEditorSetReadOnly(editor: MonacoEditor; readOnly: bool) {.importjs:
   ## reader throws `Cannot read properties of null (reading 'autohide')`, once
   ## per transition, from inside `updateOptions`.
 
+proc monacoEditorSetEditable*(editor: MonacoEditor;
+                              readOnly: bool;
+                              minimapEnabled: bool) {.importjs:
+  "#.updateOptions({ readOnly: #, minimap: { enabled: # } })".}
+  ## Change ONLY the editability pair, for the same reason as
+  ## `monacoEditorSetReadOnly` above.
+  ##
+  ## `setEditorsEditable` used to hand `updateOptions` a
+  ## `MonacoEditorOptions(readOnly: ..., minimap: ...)` object literal. A Nim
+  ## object literal carries EVERY other field too, at its zero value, and
+  ## Monaco reads them — so the call that meant "make these editors
+  ## read-only" also said `fontSize: 0` and `fontFamily: ""`, and Monaco fell
+  ## back to its own defaults for both.
+  ##
+  ## Measured against the shipped build (`1a427e3e`, noirstudio.dev), the
+  ## editor's `.view-line` across one Run:
+  ##
+  ##   before Run   fontFamily `SpaceMono, monospace, Menlo, ...`   16px
+  ##   after  Run   fontFamily `Menlo, Monaco, "Courier New", ...`  12px
+  ##   after  Stop  unchanged from the line above
+  ##
+  ## `monaco.editor.getEditors()[0].getOption(fontFamily)` agrees:
+  ## `"SpaceMono, monospace"` at 16 before, Monaco's default at 12 after. The
+  ## editor is most of the window, which is why this read as "the font
+  ## rendering changes across the board when I enter the debug mode", and
+  ## leaving debug mode calls `setEditorsEditable` again — with the same
+  ## zero-valued fields — which is why it "never recovers".
+
 proc reattachMonacoIfDetached*(self: EditorViewComponent; selector: cstring) =
   ## Carry a live Monaco instance into the container a layout rebuild just
   ## made for it.

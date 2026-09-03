@@ -1121,11 +1121,13 @@ proc setEditorsEditable*(data: Data, editable: bool) =
     let minimapEnabled =
       if reallyEditable: data.config.showMinimap
       else: false
-    let options = MonacoEditorOptions(
-      readOnly: not reallyEditable,
-      minimap: js{ enabled: minimapEnabled }
-    )
-    editor.monacoEditor.updateOptions(options)
+    # Set the two options this proc is about, and nothing else. A
+    # `MonacoEditorOptions` object literal would carry every other field at its
+    # zero value — including `fontSize: 0` and `fontFamily: ""` — and Monaco
+    # reads them, so this call silently reset the editor font to Monaco's own
+    # defaults on every mode switch. See `monacoEditorSetEditable`.
+    editor.monacoEditor.monacoEditorSetEditable(
+      not reallyEditable, minimapEnabled)
     editor.updateLineNumbersOnly()
 
 const editModeAuxiliaryContents = [
