@@ -3104,7 +3104,8 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
         "reorderEnabled": true,
         "popoutWholeStack": false,
         "blockedPopoutsThrowError": true,
-        "responsiveMode": "always"
+        "responsiveMode": "always",
+        "tabControlOffset": 0
       },
       "dimensions": {
         "borderWidth": 4,

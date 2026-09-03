@@ -227,15 +227,6 @@ proc createContextMenuFromOptions(
     actions: actions
   )
 
-proc pinActiveContentItem(layout: js, stack: js, edge: AutoHideEdge) =
-  ## Pin the currently active tab in `stack` to the given auto-hide edge.
-  ## Uses `getActiveContentItem` to find what to detach.
-  let activeItem = stack.getActiveContentItem()
-  if activeItem.isNil or activeItem.isUndefined:
-    cwarn "auto_hide: no active content item in stack"
-    return
-  pinPanel(cast[GoldenLayout](layout), cast[GoldenContentItem](activeItem), edge)
-
 proc injectPinButton(tabElement: JsObject, onPin: proc()) =
   ## Insert a pin button to the left of the GL close button inside a tab element.
   ## Clicking it calls `onPin`, which sends the panel to the auto-hide sidebar.
@@ -288,9 +279,6 @@ proc setupDropdownDismissListeners() =
         { container: '.vcs-branch-picker',
           open: '.vcs-branch-current-open',
           trigger: '.vcs-branch-current-open' },
-        { container: '.layout-buttons-container',
-          open: '.layout-buttons-container.active',
-          trigger: '.layout-buttons-container.active' },
         { container: '.session-tab-bar',
           open: '.session-tab-bar.overflow-open',
           trigger: '.session-tab-bar.overflow-open .session-tab-overflow' },
@@ -599,42 +587,6 @@ proc mountComponentContainer*(host: Element, componentId: cstring) =
   inner.setAttribute(cstring"class", cstring"component-container")
   host.appendChild(inner)
 
-
-proc createLayoutDropdown(layout: js, stackCreatedEvent: Event): kdom.Element =
-  ## Build the GoldenLayout stack-header dropdown directly.
-  ##
-  ## This intentionally preserves the legacy class names and labels used by
-  ## the auto-hide GUI specs while keeping the dropdown on the direct-DOM path.
-  result = kdom.document.createElement("div")
-  result.class = cstring"layout-dropdown menu-node-container hidden"
-  result.id = cstring"layout-dropdown-toggle"
-
-  template appendDropdownItem(label: cstring, body: untyped) =
-    let item = kdom.document.createElement("div")
-    item.class = cstring"layout-dropdown-node ct-menu-item"
-    item.textContent = label
-    item.addEventListener(cstring"click", proc(e {.inject.}: Event) =
-      body
-    )
-    result.appendChild(item)
-
-  appendDropdownItem(cstring"Close all"):
-    stackCreatedEvent.toJs.target.parent.removeChild(stackCreatedEvent.target)
-
-  appendDropdownItem(cstring"Maximise container"):
-    if cast[bool](stackCreatedEvent.toJs.target.isMaximised):
-      stackCreatedEvent.toJs.target.minimise()
-      e.toJs.target.textContent = cstring"Maximise container"
-    else:
-      stackCreatedEvent.toJs.target.maximise()
-      e.toJs.target.textContent = cstring"Minimise container"
-
-  appendDropdownItem(cstring"Pin to Bottom"):
-    pinActiveContentItem(layout, stackCreatedEvent.toJs.target, AutoHideEdge.Bottom)
-  appendDropdownItem(cstring"Pin to Left"):
-    pinActiveContentItem(layout, stackCreatedEvent.toJs.target, AutoHideEdge.Left)
-  appendDropdownItem(cstring"Pin to Right"):
-    pinActiveContentItem(layout, stackCreatedEvent.toJs.target, AutoHideEdge.Right)
 
 proc swapLayout*(data: Data, config: GoldenLayoutResolvedConfig) =
   ## Hand GoldenLayout a WHOLE new layout, and say so while it happens.
@@ -1038,38 +990,69 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     proc() = (cdebug "layout: component unbinded")
   )
 
-  # Create nested buttons in header
+  # EMPTY THE STACK HEADER'S CONTROL BAR, AND STOP RESERVING WIDTH FOR IT.
+  #
+  # `b31dbcc0` removed the stack-header three-dots dropdown — every command it
+  # carried is on the tab's right-click menu (`addPanelTransferContextMenu`),
+  # and it cost 1.7em of header width per stack. It deleted BOTH halves: the
+  # Nim that built it and the `.layout-buttons-container` rule in
+  # `shared_widgets.styl`. The merge `69e881ca` then resurrected the Nim half
+  # alone — both its parents have zero occurrences of
+  # `layout-buttons-container` in this file, the merge result has four — so an
+  # empty, unstyled `div.layout-buttons-container` was still being appended
+  # into `section.lm_tabs` on every stack. Measured on the shipped build
+  # (`1a427e3e`, noirstudio.dev): it is a 0x0 flex child of a strip whose
+  # `gap` is 0.25em, so it still bought a full gap. With one tab that gap sat
+  # at the end of the strip — the 4px of "awkward empty space" — and once
+  # GoldenLayout re-appended the tabs around it, it landed between the first
+  # and second tab, which is why exactly one inter-tab gap measured 8px while
+  # every other measured 4px.
+  #
+  # It also defeated `golden_layout.styl`'s `.lm_tab.lm_active:last-child`
+  # rules: the stray div, not the last tab, was `:last-child`, so the
+  # connector curve that is meant to be switched off at the panel's edge was
+  # drawn anyway.
+  #
+  # This finishes the removal. The control bar is still emptied — GL's own
+  # maximise/popout/close buttons are not part of this design — but the width
+  # GL reserves for controls is now zeroed to match. `tabControlOffset`
+  # defaults to 10px and is subtracted in `Header._updateTabSizes`:
+  #
+  #     availableWidth = header.offsetWidth - controls.offsetWidth - tabControlOffset
+  #
+  # while `golden_layout.styl` gives `.lm_tab` `flex: 1`, so the tabs always
+  # expand to fill the whole strip. The measured total therefore always
+  # exceeded `availableWidth` by that reserved 10px, and `tabOverlapAllowance`
+  # defaults to 0, which makes the guard `overlap < tabOverlapAllowance`
+  # unsatisfiable — so EVERY non-active tab was moved to
+  # `ul.lm_tabdropdown_list`. That list is `display: none`, and the
+  # `.lm_tabdropdown` button that opens it lives in the control bar this
+  # handler empties, so an exiled tab was invisible AND unreachable.
+  #
+  # That is the whole of "the VCS panel is not drawn in the tab bar next to
+  # FILES": `default_layout.json` puts Filesystem and VCS in one stack, and
+  # VCS — the non-active one — was exiled at layout load. Measured on the
+  # shipped build it was present in the DOM at 0x0 inside the hidden list. It
+  # "shows up when I unpin FILES" because pinning removes FILES from the
+  # stack, leaving VCS as the sole and therefore active tab, and an active tab
+  # is never exiled. The same exile is why a panel dropped onto an existing
+  # tab bar does not appear.
+  #
+  # The offset is zeroed per stack rather than only in the bundled layout
+  # settings because a user's SAVED layout file carries its own `settings`
+  # block, written before `tabControlOffset` was set there, and would
+  # otherwise keep GoldenLayout's 10px default forever.
   layout.on(cstring"stackCreated") do (ev: Event):
-    let newElement = kdom.document.createElement("div")
-    let hiddenDropdown = createLayoutDropdown(layout, ev)
-    newElement.classList.add("layout-buttons-container")
-    newElement.setAttribute("tabindex", "0")
-    newElement.onclick = proc(e: Event) {.nimcall.} =
-      let currentElement = cast[kdom.Element](e.toJs.currentTarget)
-      let element = cast[kdom.Element](currentElement.children[0])
+    let controlsContainer = ev.toJs.target.element.childNodes[0].childNodes[1]
 
-      if element.classList.contains("hidden"):
-        element.classList.remove("hidden")
-        currentElement.classList.add("active")
-      else:
-        element.classList.add("hidden")
-        currentElement.classList.remove("active")
+    while cast[kdom.Element](controlsContainer).childNodes.len() > 0:
+      controlsContainer.removeChild(controlsContainer.childNodes[0])
 
-      cast[kdom.Element](e.target).focus()
-
-    newElement.onblur = proc(e: Event) {.nimcall.} =
-      let currentElement = cast[kdom.Element](e.toJs.currentTarget)
-      e.toJs.target.children[0].classList.add("hidden")
-      currentElement.classList.remove("active")
-
-    let container = ev.toJs.target.element.childNodes[0].childNodes[1]
-    let tabContainer = ev.toJs.target.element.childNodes[0].childNodes[0]
-
-    while cast[kdom.Element](container).childNodes.len() > 0:
-      container.removeChild(container.childNodes[0])
-
-    newElement.appendChild(hiddenDropdown)
-    tabContainer.appendChild(newElement)
+    # Bracket access, not dot access: `_tabControlOffset` begins with an
+    # underscore and Nim's lexer rejects that as an identifier.
+    let header = ev.toJs.target.header
+    if not header.isNil and not header.isUndefined:
+      header[cstring"_tabControlOffset"] = toJs(0)
 
   data.ui.layout = layout
   data.ui.layoutConfig = cast[GoldenLayoutConfigClass](window.toJs.LayoutConfig)

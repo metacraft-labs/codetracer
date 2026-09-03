@@ -66,7 +66,8 @@ const bundledDefaultLayoutJson = """{
     "reorderEnabled": true,
     "popoutWholeStack": false,
     "blockedPopoutsThrowError": true,
-    "responsiveMode": "always"
+    "responsiveMode": "always",
+    "tabControlOffset": 0
   },
   "dimensions": {
     "borderWidth": 4,
