@@ -458,11 +458,42 @@ proc onOutput*(producer: NoirBuildProducer; chunk: ProcessOutputChunk) =
   ## worker-level failure — including the three module-load faults
   ## (`not-delivered` / `not-served` / `broken`), whose whole value is the
   ## sentence they carry.
+  ## ## `&` AND NOT `.add`, AND THE DIFFERENCE IS A CRASH
+  ##
+  ## `nim js` represents a Nim string as a JS array, and compiles
+  ## `dest.add(src)` — string into string — to
+  ##
+  ##     dest.push.apply(dest, src);
+  ##
+  ## which passes every byte of `src` as a separate ARGUMENT. V8's argument
+  ## limit is a few tens of thousands of entries, so this throws
+  ## `RangeError: Maximum call stack size exceeded` once a chunk gets large.
+  ## `a = a & b` compiles to `a.concat(b)` instead and has no such limit;
+  ## measured on this compiler, `.add` dies at 500,000 bytes and `&` carries a
+  ## million.
+  ##
+  ## WHAT IT COST, because "a crash" undersells it. This proc receives the
+  ## tracer's whole `MemoryTrace` document. A hello-world trace is ~38 KB and
+  ## went through; the demo project's is ~462 KB and did not. The throw
+  ## unwound out of the worker's `onmessage`, so `stdoutText` stayed EMPTY,
+  ## `summariseNoirTrace("")` reported zero bytes, the phase faulted, and the
+  ## Build pane painted
+  ##
+  ##     the tracer did not produce a trace.
+  ##
+  ## The tracer had produced a perfectly good trace. `requestReplaySession`
+  ## was never reached and the replay engine was never even fetched, so Run
+  ## appeared to be broken for every Noir program above a size threshold
+  ## nothing named — and it reported a false cause, which is the part that
+  ## would have cost the most to diagnose from the message alone.
+  ##
+  ## The same hazard applied to `stderrText`, which is smaller in practice and
+  ## is fixed here too rather than left as the next instance.
   case chunk.stream
   of psStdout:
-    producer.stdoutText.add chunk.text
+    producer.stdoutText = producer.stdoutText & chunk.text
   of psStderr:
-    producer.stderrText.add chunk.text
+    producer.stderrText = producer.stderrText & chunk.text
     if chunk.text.len > 0:
       producer.emit(chunk.text, isStdout = false, severity = blsError)
 
