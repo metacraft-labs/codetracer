@@ -48,6 +48,13 @@
 #      through a `siblings:` block, through one of this repo's
 #      `.github/actions/setup-*-siblings` composites, or through a `clone-repo`
 #      step -- except for pairs recorded in KNOWN_GAPS below.
+#      SCOPE, stated rather than implied: the scanner matches the literal
+#      command in a non-comment line, so a job that reaches build-once through
+#      a wrapper script is out of its reach. `visual-replay-regression-gate` is
+#      the one such job today -- it names `just build-once` only in prose and
+#      drives it from ci/, and it happens to provision all nine anyway. A
+#      wrapper is therefore a way to escape this check; adding the wrapper's
+#      name to the pattern is how to close that.
 #   3. KNOWN_GAPS is shrink-only: a recorded gap that has been fixed must be
 #      deleted from the list rather than left to rot, so the exception list
 #      cannot quietly become the specification.
@@ -277,7 +284,20 @@ for wf in "$WORKFLOW_DIR"/*.yml; do
 			injob { print }
 		' "$wf")"
 
-		printf '%s\n' "$job_body" | grep -qE 'just build-once|scripts/build-once\.sh' || continue
+		# Match the COMMAND, never the prose. Both `#` YAML comments and `#`
+		# shell comments inside a `run: |` block are dropped first: this suite's
+		# own wiring step in codetracer.yml describes the defect in a comment
+		# that says "just build-once", and a scanner that reads comments
+		# promptly reported the `ci-verdict` job -- a bash-only lane that builds
+		# nothing -- as an under-provisioned build job.
+		# WHOLE comment lines only. Truncating each line at its first `#` looks
+		# equivalent and is not: the real invocation is
+		# `nix develop .#devShells.x86_64-linux.default --command just build-once`,
+		# and cutting at the `#` of `.#devShells` deletes the very command being
+		# looked for -- which silently dropped three of the six build-once jobs
+		# from this scan.
+		job_code="$(printf '%s\n' "$job_body" | grep -vE '^[[:space:]]*#')"
+		printf '%s\n' "$job_code" | grep -qE 'just build-once|scripts/build-once\.sh' || continue
 		build_once_jobs=$((build_once_jobs + 1))
 
 		# What this job provisions: its own inline blocks, plus the blocks of
@@ -383,12 +403,21 @@ else
 	mkdir -p "$repo/scripts"
 	cp "$PREFLIGHT" "$repo/scripts/require-siblings.sh"
 	cp "$REPO_ROOT/scripts/toolchain-pins.sh" "$repo/scripts/toolchain-pins.sh" 2>/dev/null || true
+	# `.envrc` is what makes the dev-shell delegate FAIL: `toolchain-pins.sh
+	# --devshell-init` only looks for the generated `.pre-commit-config.yaml`
+	# when a `.envrc` is present, and without a failing delegate the branch
+	# holding the defect is never entered at all. Leaving this out made an
+	# earlier version of this assertion a vacuous pass -- it reported success
+	# against a mutant with the fix removed.
+	printf 'use flake\n' >"$repo/.envrc"
 	git -C "$repo" init -q 2>/dev/null
 	git -C "$repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>/dev/null
 
 	# The condition that mattered: no submodules at all, so `grep -c '^-'`
 	# counts zero and exits 1.
 	uninit="$(git -C "$repo" submodule status 2>/dev/null | grep -c '^-')" || uninit=0
+	delegate_rc=0
+	bash "$repo/scripts/toolchain-pins.sh" --devshell-init >/dev/null 2>&1 || delegate_rc=$?
 	out="$(cd "$repo" && bash scripts/require-siblings.sh 2>&1)"
 	rc=$?
 
@@ -396,6 +425,12 @@ else
 		fail "the fixture reproduces the CI condition" \
 			"the throwaway repo reports $uninit uninitialised submodule(s); it was built to" \
 			"have none, which is the whole point -- the silent path needs a ZERO count."
+	elif [ "$delegate_rc" -eq 0 ]; then
+		fail "the fixture reproduces the CI condition" \
+			"toolchain-pins.sh --devshell-init PASSED in the throwaway repo, so" \
+			"require-siblings.sh never enters the branch that holds the defect and this" \
+			"assertion proves nothing. The fixture must present a checkout the dev shell" \
+			"has demonstrably not initialised."
 	elif [ "$rc" -eq 0 ]; then
 		fail "the preflight refuses an empty workspace" \
 			"it exited 0 with no siblings present, so assertion 4 proves nothing about" \
