@@ -123,6 +123,31 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Collapse superseded runs. This block did not exist until now, and its absence
+# -- not a mis-keyed group, an outright missing group -- made this caller the
+# SECOND-largest contributor to the CI backlog: 13 of 46 queued runs, behind
+# only `codetracer.yml`. It triggers on every push to `main`/`dev`/`stable` and
+# on every pull request with NO path filter, so it fires on all of them, and
+# with no `concurrency` key every single run got its own implicit group and
+# queued forever behind the others.
+#
+# Keyed and paired exactly as `codetracer.yml` is, for the same reasons spelled
+# out at length there: group by `head_ref` on pull requests (so PR runs collapse
+# per source branch) falling through to `github.ref_name` on pushes (so a burst
+# of landings on `dev` leaves one running plus one pending, rather than a run
+# per commit). `cancel-in-progress` is an expression rather than a constant so
+# that superseded PR runs are still killed outright, while a mainline run that
+# has already STARTED is protected -- GitHub allows only one pending run per
+# group regardless, so the drainage does not depend on cancelling in-progress
+# work, and cancelling a run that holds a self-hosted runner strands it offline
+# for ~5 minutes while it is reaped.
+#
+# This gate has never yet executed in CI (see the header), so there is no
+# in-flight result here that collapsing could destroy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 

@@ -44,35 +44,67 @@ on:
       - cloud
   pull_request:
 
-# Collapse superseded pull-request runs -- and superseded `cloud` runs.
+# Collapse superseded runs -- on pull requests AND on the mainline branches.
 #
 # This is the widest workflow in the repository -- Windows, Linux and macOS
-# legs across three runner classes -- so a superseded pull-request run is the
-# single most expensive thing the fleet can be doing.
+# legs across three runner classes -- so a superseded run is the single most
+# expensive thing the fleet can be doing.
 #
-# `github.head_ref` is set on `pull_request` and empty everywhere else, so PR
-# runs group per source branch and a new push cancels the run it superseded.
-# Pushes to `main`/`dev`/`stable` fall through to `github.run_id`, which is
-# unique per run: every mainline commit keeps a group of its own and is never
-# cancelled. That is deliberate -- `dev` is the integration branch and each
-# commit's build result is independently meaningful for bisecting, so
-# collapsing mainline pushes would destroy history rather than save capacity.
+# WHAT THIS REPLACED, AND WHY THE OLD REASONING STOPPED HOLDING. Until now
+# pushes to `main`/`dev`/`stable` fell through to `github.run_id`, which is
+# unique per run, so every mainline commit got a group of its own and nothing
+# ever superseded anything. The stated reason was bisect fidelity: `dev` is the
+# integration branch, each commit's build result is independently meaningful,
+# and collapsing mainline pushes would "destroy history rather than save
+# capacity".
 #
-# `cloud` is grouped by NAME instead, so its pushes DO cancel each other. The
-# distinction is what the branch is for. `dev` is bisected; the per-commit
-# result is the product. `cloud` is a deploy branch -- what matters is whether
-# the tip is good, because the tip is what is serving ide.codetracer.com, and
-# `deploy-web-codetracer.yml` already groups it exactly this way for exactly
-# this reason. Cancelling a superseded `cloud` run therefore discards a result
-# nobody would have read, which is what keeps a per-push test lane on a
-# per-push deploy branch affordable.
+# That argument assumes the per-commit results actually get produced. They had
+# stopped being produced. With several agents landing on `dev` continuously the
+# queue reached 46 runs deep against a runner pool that drains far slower, with
+# in-progress runs roughly EIGHT HOURS old -- so by the time any given commit's
+# run started, the tip had moved on by twenty-odd commits and the result landed
+# too late to gate anything. Ungrouped mainline pushes do not preserve history
+# under saturation; they guarantee the queue grows without bound and NO commit
+# gets a timely result. The bisect signal was already lost. What the old
+# configuration actually bought was latency, not history.
 #
-# The expression: `head_ref` is empty on push, so it falls through; on a `cloud`
-# push `(github.ref_name == 'cloud' && 'cloud')` yields the string `cloud`; on
-# any other push it yields `false` and falls through to `run_id`.
+# THE GROUP. `github.head_ref` is set on `pull_request` and empty everywhere
+# else, so PR runs still group per source branch -- byte-identical group
+# strings to before, since `||` short-circuits on the non-empty `head_ref`.
+# Pushes now fall through to `github.ref_name`, the branch name, so all pushes
+# to one branch share a group. Note this SUBSUMES the previous special case:
+# `(github.ref_name == 'cloud' && 'cloud')` was only ever spelling out
+# `github.ref_name` for one branch, so `cloud` keeps exactly the grouping it
+# had, for exactly the reason it had it -- it is a deploy branch, what matters
+# is whether the tip is good, and `deploy-web-codetracer.yml` groups it the
+# same way.
+#
+# WHY `cancel-in-progress` IS AN EXPRESSION AND NOT A CONSTANT. This is the
+# subtle half, and a flat `true` or a flat `false` is wrong in a different
+# direction each.
+#
+# GitHub permits only ONE PENDING run per concurrency group regardless of this
+# setting: queueing a newer run cancels the older PENDING one on its own. So
+# for mainline pushes `false` already delivers all the drainage -- a burst of
+# twenty pushes to `dev` leaves one running plus one pending -- WITHOUT killing
+# a run that has already started. Killing those is actively harmful here: an
+# eight-hour in-progress run is the one thing in the queue about to yield a
+# result, and cancelling a run that holds a self-hosted runner strands that
+# runner offline for ~5 minutes while it is reaped, manufacturing the very
+# starvation this block exists to relieve. Hence `false` on push.
+#
+# But `true` must be KEPT for pull requests, and that is a change from what a
+# naive flat `false` would do. A PR run superseded by a new push to the same PR
+# is worthless the instant it is superseded -- nobody reads it, the merge
+# button does not wait on it -- and per the note above it is the most expensive
+# thing the fleet can be doing. Dropping PR cancellation to `false` would hand
+# back a large slice of the capacity this change is trying to reclaim. So the
+# PR path is preserved EXACTLY as it was today: same group, same cancellation.
+#
+# `cancel-in-progress` accepts an expression, so both live in one block.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || (github.ref_name == 'cloud' && 'cloud') || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
