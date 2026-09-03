@@ -3854,11 +3854,71 @@ jobs:
           nix shell nixpkgs#gnupg --command gpg --verify ./CodeTracer.dmg.asc ./CodeTracer.dmg
 
       - name: Extract dmg
+        # WHY `hdiutil` AND NOT `7z x`.
+        #
+        # This step used to run `nix shell nixpkgs#p7zip --command 7z x
+        # ./CodeTracer.dmg`, and the "Check if ct starts" step below then died:
+        #
+        #     .../<step>.sh: line 1: ./CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct: Permission denied
+        #     ##[error]Process completed with exit code 126.
+        #
+        # Run 33742876598, job 100624879771, on m3-mcl-005. Exit 126 is
+        # "found but not executable", not "not found" and not a crash of `ct`:
+        # 7z reported `Everything is Ok` and unpacked all 32177 files first.
+        #
+        # 7z reads the DMG's HFS+ image as an archive and does not restore
+        # POSIX mode bits, so every extracted file lands non-executable. That
+        # makes the check unable to pass no matter what the DMG contains, which
+        # is why this is an instrument defect and not a packaging one.
+        #
+        # It went unseen because it was unreachable: `dmg-lib-check` needs
+        # `dmg-build`, and 33742876598 is the first run in ~30 where dmg-build
+        # reached a runner at all. The step is as old as the job; the exposure
+        # is new.
+        #
+        # `hdiutil attach` mounts the real HFS+ volume with its permissions
+        # intact, so the executable bit is the one the DMG actually ships. That
+        # matters beyond making the check pass: `chmod +x` after 7z would also
+        # turn the job green, but it would forge the very property this job
+        # exists to assert, and a genuinely non-executable `ct` in a shipped
+        # DMG would then pass unnoticed. This way the check still fails if the
+        # artifact is really broken.
+        #
+        # `-nobrowse` keeps the volume out of Finder; `-readonly` avoids any
+        # write-back to the artifact we just gpg-verified. The contents are
+        # copied out to ./CodeTracer so the paths every later step uses are
+        # unchanged, and the volume is detached before those steps run so
+        # nothing holds a mount on this persistent runner.
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
-          nix shell nixpkgs#p7zip --command 7z x ./CodeTracer.dmg
+          set -euo pipefail
+          # THIRD confirmed instance of one root cause: this step's shell is the
+          # devShell's bash, and on a nix-darwin self-hosted runner its PATH has
+          # no /usr/bin. `hdiutil` exists ONLY at /usr/bin/hdiutil -- no nixpkgs
+          # input provides it -- so the first version of this step died with
+          #
+          #     .../<step>.sh: line 6: hdiutil: command not found
+          #     ##[error]Process completed with exit code 127.
+          #
+          # (run 33750724496, job 100642345443, on m3-mcl-004), which is the
+          # same 127 that `codesign` and then `sw_vers` produced earlier today
+          # in the ct-mcr and build-once steps. APPEND, never prepend, so the
+          # devShell toolchain keeps winning for git/python/clang.
+          export PATH="$PATH:/usr/bin"
+          mountpoint="$(mktemp -d "${RUNNER_TEMP:-/tmp}/codetracer-dmg-XXXXXX")"
+          # Detach on every exit path: a leaked mount outlives the job on these
+          # persistent macOS runners and the next run's attach then fails.
+          trap 'hdiutil detach "$mountpoint" -force >/dev/null 2>&1 || true' EXIT
+          hdiutil attach ./CodeTracer.dmg -mountpoint "$mountpoint" -nobrowse -readonly
+          rm -rf ./CodeTracer
+          mkdir -p ./CodeTracer
+          # -R preserves the mode bits; -p would also preserve them but drags in
+          # ownership, which cannot be reproduced off the image.
+          cp -R "$mountpoint"/*.app ./CodeTracer/
+          test -x ./CodeTracer/CodeTracer.app/Contents/MacOS/bin/ct \
+            || { echo "::error::the DMG ships bin/ct without an executable bit"; exit 1; }
 
       - name: Check if ct starts
         env:
@@ -4013,14 +4073,15 @@ jobs:
         # self-contained. `ci/test/nix-provisioning-test.sh` now fails when a
         # job runs nix without provisioning it.
         #
-        # This step used to be gated to `refs/tags/` while the Download AppImage
-        # + Smoke-test steps that DEPEND on it were not, so on every branch
-        # (main/dev) run those two ran without nix installed and the job died at
+        # This step (and a since-removed "Install AWS CLI" step) used to be
+        # gated to `refs/tags/` while the Download AppImage + Smoke-test steps
+        # that DEPEND on them were not, so on every branch (main/dev) run those
+        # two ran without aws/nix installed and the job died at
         # `aws: command not found` — the AppImage's off-nix portability went
-        # untested. Ungated so the prerequisite matches its consumers and the
-        # 5-distro smoke test actually runs against the `-<ref>-` AppImage that
-        # appimage-build just produced. The Download step below now gets `aws`
-        # from `nix shell`, so it depends on this step and nothing else.
+        # untested. Ungating them was necessary but NOT sufficient: the job
+        # kept dying at the identical `aws: command not found` afterwards, for
+        # a second and unrelated reason. See the note on "Download AppImage"
+        # below, which is where the aws binary is now obtained.
         uses: ./.github/actions/setup-nix
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
@@ -4028,20 +4089,40 @@ jobs:
           gh-token: ${{ github.token }}
 
       - name: Download AppImage
-        # `nix shell ... --command`, NOT `nix profile install` + a bare `aws`.
+        # WHY `nix shell --command` AND NOT A SEPARATE `nix profile install`.
         #
-        # The profile form put awscli2 in the runner's nix profile and relied on
-        # that profile's bin/ already being on PATH in a LATER step. On these
-        # ephemeral runners it is not, so every leg died at
+        # This step used to be preceded by an "Install AWS CLI" step running
+        # `nix profile install nixpkgs#awscli2`, and it STILL died with
         #
-        #     aws: command not found
+        #     .../<step>.sh: line 1: aws: command not found
+        #     ##[error]Process completed with exit code 127.
         #
-        # in the Download step — before the AppImage was fetched, let alone run.
-        # The whole 5-distro matrix reported failure while testing nothing at
-        # all, which is indistinguishable, at a glance, from the AppImage being
-        # broken. `appimage-lib-check` above already downloads this exact
-        # artefact with `nix shell`, and does not have the problem; this is the
-        # same call.
+        # in all five distro legs -- run 33742876598, jobs 100625123843
+        # (debian:12), 100625123865 (fedora:40), 100625123866 (ubuntu:22.04),
+        # 100625123986 (ubuntu:24.04), 100625124039 (archlinux:latest). The
+        # install step itself SUCCEEDED in every one of them; only nix's
+        # "'install' is a deprecated alias for 'add'" warning and the usual
+        # restricted-setting warnings appear, and no error follows it.
+        #
+        # `nix profile install` writes into `$HOME/.nix-profile`, and
+        # `$HOME/.nix-profile/bin` reaches PATH only via nix's profile shell
+        # snippet. Each `run:` step is a fresh NON-login, NON-interactive shell
+        # (`shell: /usr/bin/bash -e {0}`), which sources no profile, so the
+        # binary exists on disk and is unreachable by name. Installing into a
+        # profile and then invoking the tool bare in a later step cannot work
+        # here regardless of whether the install succeeds -- which is why the
+        # previous fix in this area (ungating the install step so it actually
+        # ran; see the note in "Install Nix" above) did not change the symptom.
+        # It addressed why the step was skipped, not why the name does not
+        # resolve, and `aws: command not found` survived it unchanged.
+        #
+        # `nix shell nixpkgs#awscli2 --command aws ...` puts the binary on PATH
+        # for exactly the process that needs it and does not depend on any
+        # profile being sourced. This is the form the two sibling jobs that
+        # download from the same bucket already use and that demonstrably
+        # works: `appimage-lib-check` (line ~3860) and `dmg-lib-check`
+        # (line ~3774) both got past their download in the same run -- far
+        # enough to gpg-verify and then run the artifact.
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
