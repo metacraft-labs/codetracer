@@ -305,6 +305,44 @@ proc setSessionMode*(store: ReplayDataStore; mode: DebugSessionMode) =
     session.lastLiveDebugSessionMode = mode
   store.session.val = session
 
+proc enterCompletedReplayMode*(store: ReplayDataStore) =
+  ## Declare that this session is now an ordinary completed replay.
+  ##
+  ## THE SYMMETRIC PARTNER OF `setSessionMode(liveMcr)`, and it was missing.
+  ## `ui_js.handleDapLiveSessionSelected` announces a live session to the store;
+  ## `handleDapReplaySelected` announced nothing, and pure replay was correct
+  ## only because `completedReplay` is the enum's zero value and a fresh store
+  ## therefore starts there.
+  ##
+  ## A REUSED TAB IS NOT A FRESH STORE. *Stop* now ends a debugging session and
+  ## leaves the tab open precisely so a new one can be started in it
+  ## (`ui/stop_command.nim`), so "this tab last held a live MCR session and now
+  ## holds a replay" went from unlikely to the specified flow. Without this,
+  ## `debugSessionMode` stayed `liveMcr` over the new replay, and two things
+  ## broke that have nothing to do with liveness:
+  ##
+  ## * `backwardNavigationAvailable` (`debug_controls_vm.nim`) excludes
+  ##   `{liveMcr, liveMaterialized}`, so reverse step over / in / out and
+  ##   reverse continue were all greyed out on a replay that fully supports
+  ##   them;
+  ## * `invokeToolbarStep` routes `liveMcr` through `requestLiveToolbarAction`,
+  ##   whose `liveToolbarActionAllowed` admits only `next`, `step-in`,
+  ##   `step-out` and `continue` — so the reverse controls were dead as well as
+  ##   grey, and the forward ones went to `ct/mcr-live-step` instead of the DAP
+  ##   step path.
+  ##
+  ## `lastLiveDebugSessionMode` is cleared too, and that is not tidiness.
+  ## It is what `rememberedLiveMode` returns to on *Jump to live*; carrying a
+  ## previous session's live mode into a new replay would offer a jump back to
+  ## a recording head that belongs to a program that is no longer running.
+  ## Clearing it is safe because `completedReplay` cannot reach
+  ## `historicalFromLive`: `enterHistoricalModeForNavigation` refuses unless
+  ## the session is already live.
+  var session = store.session.val
+  session.debugSessionMode = completedReplay
+  session.lastLiveDebugSessionMode = completedReplay
+  store.session.val = session
+
 proc setSupportsStepBack*(store: ReplayDataStore; supports: bool) =
   ## Update the supportsStepBack capability in the session state.
   var session = store.session.val

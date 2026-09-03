@@ -153,6 +153,72 @@ suite "AppViewModel live/replay mode transitions":
       app.dispose()
       teardown()
 
+  test "a replay selected into a tab that held a live session is a replay again":
+    # THE DEFECT THIS PINS. `ui_js.handleDapLiveSessionSelected` announces
+    # `liveMcr` to the store; `handleDapReplaySelected` announced nothing and
+    # relied on `completedReplay` being the enum's zero value. That holds for a
+    # fresh store and fails for a REUSED TAB — and *Stop* makes reusing a tab
+    # the specified flow: it ends the debugging session and leaves the tab open
+    # so a new one can be started in it.
+    #
+    # Left at `liveMcr`, an ordinary replay loses its whole reverse half, and
+    # for two independent reasons. Both are asserted below, because fixing one
+    # would leave the controls grey-but-live or live-but-enabled.
+    createRoot proc(teardown: proc()) =
+      let (app, mock) = makeAppWithMock()
+      app.configureMode(liveMcr)
+
+      # The premise: while the tab holds a live MCR session, backward
+      # navigation is genuinely unavailable and the toolbar routes to the live
+      # command. If this stopped being true the recovery below would prove
+      # nothing.
+      echo "live: canStepBackward=", app.session.debugControlsVM.canStepBackward.val,
+        " canReverseContinue=", app.session.debugControlsVM.canReverseContinue.val
+      check not app.session.debugControlsVM.canStepBackward.val
+      check not app.session.debugControlsVM.canReverseContinue.val
+
+      mock.clearReceivedCommands()
+      app.session.debugControlsVM.invokeToolbarStep("next")
+      drain()
+      let liveSteps = mock.commandsNamed(LiveMcrStepCommand).len
+      echo "live: ct/mcr-live-step commands=", liveSteps
+      check liveSteps == 1
+
+      # The transition the replay-selected path must announce.
+      app.session.store.enterCompletedReplayMode()
+      drain()
+
+      echo "after: debugSessionMode=", app.session.store.session.val.debugSessionMode,
+        " lastLive=", app.session.store.session.val.lastLiveDebugSessionMode,
+        " canStepBackward=", app.session.debugControlsVM.canStepBackward.val,
+        " canReverseContinue=", app.session.debugControlsVM.canReverseContinue.val
+      check app.session.store.session.val.debugSessionMode == completedReplay
+      # The reverse controls come back. This is the user-visible half: without
+      # it, reverse step over / in / out and reverse continue are all greyed
+      # out on a replay that fully supports them.
+      check app.session.debugControlsVM.canStepBackward.val
+      check app.session.debugControlsVM.canReverseContinue.val
+
+      # And the toolbar stops routing to the live command. Enablement alone is
+      # not enough: `liveToolbarActionAllowed` admits only the four forward
+      # actions, so a mode left live makes the reverse buttons dead as well as
+      # grey.
+      mock.clearReceivedCommands()
+      app.session.debugControlsVM.invokeToolbarStep("next")
+      drain()
+      let stillLive = mock.commandsNamed(LiveMcrStepCommand).len
+      echo "after: ct/mcr-live-step commands=", stillLive
+      check stillLive == 0
+
+      # No live head is remembered, so nothing offers a jump back to a
+      # recording head belonging to a program that is no longer running.
+      check app.session.store.session.val.lastLiveDebugSessionMode ==
+        completedReplay
+      check not app.session.debugControlsVM.showJumpToLive.val
+      check not app.session.debugControlsVM.showRecordingHead.val
+      app.dispose()
+      teardown()
+
   test "jump-to-live restores the original live materialized mode":
     createRoot proc(teardown: proc()) =
       let (app, mock) = makeAppWithMock()

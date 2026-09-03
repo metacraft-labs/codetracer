@@ -2697,6 +2697,15 @@ proc handleDapReplaySelected(response: JsObject; sendInitialize: bool) =
   let trace = response["trace"].to(Trace)
   data.activeSession.replayId = response["replayId"].to(int)
   data.activeSession.liveDebugSession = false
+  # AND TELL THE VIEWMODEL, which is a separate statement from the line above
+  # and was the missing half of the pair. `handleDapLiveSessionSelected` below
+  # announces `liveMcr` to the store; this path announced nothing and relied on
+  # `completedReplay` being the enum's zero value — true for a fresh store, and
+  # false for a tab that has already held a live session. `Stop` makes reusing a
+  # tab the specified flow, so this is now a routine transition rather than an
+  # exotic one. `enterCompletedReplayMode` documents what breaks without it.
+  if not activeSessionVM.isNil:
+    activeSessionVM.store.enterCompletedReplayMode()
   infoPrint "ui: reinitializing dap for trace ", $trace.recordingId
   if sendInitialize:
     data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
