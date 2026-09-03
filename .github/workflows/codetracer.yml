@@ -4191,7 +4191,31 @@ jobs:
           # from a reused ~/.gitconfig at the start of the job; re-adding it
           # here put it straight back.
           export CARGO_NET_GIT_FETCH_WITH_CLI=true
-          nix develop --no-write-lock-file --command just build-ct-mcr
+          # ``just build-ct-mcr`` ad-hoc-signs ct_cli with its record/debug
+          # entitlements, and the ONLY ``codesign`` on a macOS host is the
+          # system one at /usr/bin/codesign -- no nixpkgs input in the
+          # recorder's devShell provides that command.
+          #
+          # ``nix develop`` does not replace PATH, it PREPENDS the devShell's
+          # store paths and keeps the ambient PATH as the tail.  MEASURED on an
+          # aarch64-darwin host: inside the recorder's own ``nix develop``,
+          # ``command -v codesign`` resolves to /usr/bin/codesign purely via
+          # that inherited tail, while ``otool``/``install_name_tool`` resolve
+          # into the nix store (cctools).  So codesign's availability is a
+          # property of the AMBIENT PATH, not of the flake.
+          #
+          # On these nix-darwin self-hosted runners the PATH a raw ``run:``
+          # step inherits does NOT contain /usr/bin, so the tail is deficient
+          # and the recipe died with ``codesign: command not found`` (exit
+          # 127).  It is not a compile error -- the Nim build above it
+          # succeeds; everything printed before it is warnings.  Appending
+          # /usr/bin restores exactly the tail a developer's shell supplies.
+          #
+          # APPEND, never prepend: the devShell's toolchain must keep winning
+          # for git/python/clang etc.  This only has to make reachable the one
+          # command that exists nowhere else.
+          PATH="$PATH:/usr/bin" \
+            nix develop --no-write-lock-file --command just build-ct-mcr
 
       - name: Build ct_gfx_player via codetracer-visual-replay nix develop (macOS)
         if: matrix.platform == 'macos'
