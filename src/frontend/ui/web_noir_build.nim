@@ -622,17 +622,48 @@ proc startNoirBuild*(saved: seq[string] = @[]) =
 proc startNoirRun*(saved: seq[string] = @[]) =
   ## RUN — compile for debugging, then trace.
   ##
-  ## WHAT A USER SEES AT THE END OF THIS, stated plainly because it is easy to
-  ## overclaim: the BUILD pane paints the compile's result and then the
-  ## trace's shape — how many events, steps and calls it contains and which
-  ## source files it covers, each as a clickable row. **It does not open a
-  ## replay session.** There is no replay engine in this deployment — the
-  ## db-backend wasm is absent from `webRuntimeAssets()` and every ViewModel
-  ## logs `(stub backend)` — and the tracer emits a `MemoryTrace` document
-  ## rather than a `.ct` container, so whether that engine would even accept
-  ## it is an open question and not one this path answers. Painting a session
-  ## that is not there would be the chain-of-agreements failure this campaign
-  ## keeps finding, one layer up.
+  ## WHAT A USER SEES AT THE END OF THIS: the BUILD pane paints the compile's
+  ## result and then the trace's shape — how many events, steps and calls it
+  ## contains and which source files it covers, each as a clickable row — and
+  ## then **the tab leaves edit mode for the debugging surface**, with a live
+  ## replay session over that trace.
+  ##
+  ## THIS PARAGRAPH SAID THE OPPOSITE FOR ONE DAY, and the way it went wrong is
+  ## worth more than the correction. It read: "**It does not open a replay
+  ## session.** There is no replay engine in this deployment — the db-backend
+  ## wasm is absent from `webRuntimeAssets()` and every ViewModel logs `(stub
+  ## backend)`". Every clause of that was true when it was written and false
+  ## three commits later, on the same day:
+  ##
+  ## * `web_deployment.nim` now declares `replayEngineModuleId`,
+  ##   `replayEngineGlueId` and `replayWorkerModuleId`, and `webRuntimeAssets()`
+  ##   emits all three, so the db-backend wasm is IN the manifest.
+  ## * `ui/web_replay_host.installReplayHost` answers
+  ##   `CODETRACER::dap-raw-message` — the id `newWebIpc` used to log "no host
+  ##   for this surface" against — and boots the engine in a worker.
+  ## * `enterTemplateEditMode` calls it, so it is installed for every template
+  ##   route including `/noir/demo`.
+  ## * The `MemoryTrace`/`.ct` question it left open is answered:
+  ##   `platform/replay_engine_vfs.replayVfsPayload` writes the trace and its
+  ##   recorded `source_views` into the engine's VFS.
+  ##
+  ## THE COST OF LEAVING IT was not a broken feature, it was a false map. This
+  ## is the most authoritative-looking prose in the file, and it told anyone
+  ## reading it that the browser is a build-only surface — so work that
+  ## depended on browser replay looked blocked when it was shipping. Read
+  ## `web_replay_host.nim` and `web_deployment.webRuntimeAssets()` for what is
+  ## true now, and do not restate their contents here; that is exactly the
+  ## duplication that rotted.
+  ##
+  ## `noirTestRunAbsence` below opens with the same sentence about its own
+  ## field, for the same reason, twenty lines down. When a paragraph here says
+  ## a capability is impossible, suspect it.
+  ##
+  ## WHAT REMAINS TRUE is the fallback, and it is still reachable: a deployment
+  ## that ships no worker or no engine cannot replay, and
+  ## `noir_build_producer`'s trace arm says so by name and leaves the counted
+  ## rows as the answer. That is a deployment property, asked of the descriptor
+  ## — not a property of this product.
   if activeInFlight:
     report("run-ignored", "reason=already-running")
     return
