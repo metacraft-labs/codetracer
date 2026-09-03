@@ -135,3 +135,68 @@ suite "flowStyleLines over a well-formed window":
     check flowLineStyleClass(flskUnknown) == "line-flow-unknown"
     for kind in FlowLineStyleKind:
       check "//" notin flowLineStyleClass(kind)
+
+suite "dimming means the run declined a branch":
+  ## The rule, from the user and now from
+  ## `codetracer-specs/GUI/Debugging-Features/Omniscience-Flow.md`
+  ## § *Dimming means "the run did not take this branch"*:
+  ##
+  ##   > A source line is dimmed when, and only when, it belongs to a branch of
+  ##   > a conditional that the recorded run did not enter. Not having executed
+  ##   > is not, by itself, a reason to dim a line.
+  ##
+  ## Reported as: "I jump into a function and all of its lines before the
+  ## current line get dimmed."
+  ##
+  ## THE WINDOW BELOW IS `test-programs/noir_space_ship/src/shield.nr`'s
+  ## `calculate_damage`, lines 22-38, on a pass that takes the `else` arm —
+  ## the fixture the GUI-level assertion in
+  ## `dimming_marks_only_untaken_branches.spec.ts` drives. Modelling a real
+  ## function rather than an abstract range matters here: the failing line is a
+  ## continuation line, and only a real function has one.
+  ##
+  ## WHY BOTH HALVES ARE ASSERTED. A test that only forbids dimming is
+  ## satisfied by never dimming anything, which would delete the feature rather
+  ## than correct it. The pair says what dimming IS, not merely what it is not.
+
+  proc calculateDamageWindow(): ct.FlowViewUpdate =
+    ## `shield_pct != 100`, so the `else` at 31 ran and the `if` at 28 did not.
+    ##
+    ## Line 26 is `let shield_pct = calculate_remaining_shield_pct(` and line 27
+    ## its continuation — one statement over two lines, which is why only 26
+    ## carries a step. Line 27 is not a conditional, is not an arm of one, and
+    ## is not inside one.
+    var table = initTable[int, ct.BranchState]()
+    table[28] = ct.NotTaken   # the `if` arm's header — its body did not run
+    table[31] = ct.Taken      # the `else` arm's header — its body did
+    windowOver(22, 38,
+               visited = [26, 28, 31, 32, 34, 37],
+               branchesTaken = @[@[ct.BranchesTaken(table: table)]])
+
+  proc kindAt(styled: seq[FlowStyledLine], position: int): FlowLineStyleKind =
+    for s in styled:
+      if s.position == position:
+        return s.kind
+    raise newException(ValueError, "no style computed for line " & $position)
+
+  proc isDimmed(kind: FlowLineStyleKind): bool =
+    ## `line-flow-skip` and `line-flow-unknown` are both `opacity: 0.5`
+    ## (`styles/components/flow.styl:659-671`), so the reader sees one state.
+    ## Treating them as two here would let a fix that only renames the class
+    ## pass.
+    kind in {flskSkip, flskUnknown}
+
+  test "a line that is in no conditional is not dimmed for lacking a step":
+    let styled = flowStyledLines(calculateDamageWindow(), finished = true)
+    # Line 27 continues the statement begun on line 26. That statement ran —
+    # every path into `calculate_damage` runs it — so nothing about line 27
+    # was declined. It carries no step of its own only because a step is
+    # recorded per statement, not per line.
+    check not isDimmed(kindAt(styled, 27))
+
+  test "a line inside the arm the run did not enter IS dimmed":
+    # The other half. Line 29 is the body of the `if` at 28, and 28 is
+    # `NotTaken`, so 29 belongs to a branch the run declined. This is the case
+    # dimming exists for, and it must survive the fix for the case above.
+    let styled = flowStyledLines(calculateDamageWindow(), finished = true)
+    check isDimmed(kindAt(styled, 29))
