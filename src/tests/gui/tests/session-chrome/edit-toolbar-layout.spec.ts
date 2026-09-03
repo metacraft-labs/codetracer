@@ -28,6 +28,17 @@
  *      Nothing matched, so the buttons kept the user agent's `padding: 1px 6px`
  *      and stood 2px shorter than every other control in the bar.
  *
+ * THE BAR IS TWO BUTTONS NOW, and the three defects above are history rather
+ * than description. `Run Tests` and `Record Tests` were removed — *"I see
+ * 'Run tests' and 'Record tests' as some kind of boxes next to the build and
+ * run buttons; I think they should be removed"* — so there is no text button
+ * on this surface at all today, and `data-button-count` reads 2. Defects 1
+ * and 3 were both text-button defects; they are kept in this header because
+ * they are the reason the assertions below are shaped the way they are, and
+ * because the next text button someone adds to this bar will meet defect 3
+ * again if the size selectors are ever narrowed back. What the checks
+ * measure has moved with the bar, not stayed pointed at four controls.
+ *
  * WHAT IT REFUSES TO DO.
  * Every one of those defects is invisible to a markup assertion. The buttons
  * were present, had the right ids, were enabled and disabled correctly, and
@@ -36,6 +47,12 @@
  * the height in pixels, and what `background-image` resolves to on a text
  * button. A panel that regressed any of the three cannot be made to pass here
  * by adding an element or an attribute.
+ *
+ * TWO MORE REPORTS ARE ANSWERED AT THE FOOT OF THIS FILE — the rectangular
+ * frames around Build and Run, and whether their marks are a different
+ * colour from the designer's. See the `edit toolbar and debugger strip
+ * agree` block; the short of it is that the frame was the button's `border`
+ * and the colour was never different at all.
  *
  * WHAT IT TRUSTS, AND WHAT IT REFUSES TO TRANSCRIBE.
  * The built theme CSS, and the class/id strings READ OUT OF THE NIM VIEW at
