@@ -5511,7 +5511,11 @@ when defined(ctWeb) and not defined(ctInExtension):
       # deployment serves.
       let entry = web_entry_surface.currentRendererEntry()
       let hostLanguage = web_entry_surface.currentRendererHostLanguage()
-      let tmpl = templateFor(entry.languageEntry)
+      # `entry.form` and not a path test: which template an address serves is
+      # `templateFor`'s decision, and re-deriving "is this the demo" here would
+      # be the second `classifyPath` `web_entry.nim`'s header forbids. It must
+      # be the same pair `prepareProject` was given below — see `templateFor`.
+      let tmpl = templateFor(entry.languageEntry, entry.form)
 
       # Rule 5's third row, and it must happen BEFORE the mount rather than
       # after: the surface is what a user then interacts with, and a Back press
@@ -6238,7 +6242,7 @@ when defined(ctWeb) and not defined(ctInExtension):
           newNotification(NotificationKind.NotificationSuccess, message)))
 
     await web_project_persistence.prepareProject(
-      booted, templateFor(booted.entry.languageEntry))
+      booted, templateFor(booted.entry.languageEntry, booted.entry.form))
     startWebRenderer()
     awaitStatusBarThenRaise(durabilityNoticeMountAttempts)
 

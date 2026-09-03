@@ -532,6 +532,36 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/noir-template-toolchain.sh
           '
 
+      - name: Prove /noir/demo serves the demo, and that its bug is still there
+        # THE CHECK THIS ONE REFUSES TO BE is "the route responds". `/noir/demo`
+        # served the STARTER template until `templateFor` learned to read the
+        # entry form, and a status-code check, a mounts check and a
+        # does-it-compile check are all satisfied by exactly that. So every arm
+        # here is a difference between the two templates or a property of the
+        # demo's own round.
+        #
+        # Its arms F and S are the two that make the rest mean something. F
+        # repairs the one line the demo is about and requires the SAME round to
+        # settle correctly afterwards — without it, "Run refuses" is satisfied
+        # by a template broken in any way at all. S then requires all eight
+        # tests to pass over the REPAIRED circuit as well, which is the demo's
+        # thesis stated as an assertion: the suite cannot tell the two circuits
+        # apart, so the debugger is what finds the difference.
+        #
+        # It needs both modules, not just the compiler: arm W traces. Same job
+        # as the step above for the same reason — this is where they exist.
+        #
+        # NOT `continue-on-error`. A deploy that published `/noir/demo` serving
+        # the hello-world would be a documented address that quietly shows the
+        # wrong project.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_NOIR_WASM_COMPILER="$(pwd)/noir-wasm-out/noir_wasm.wasm"
+            export CT_NOIR_WASM_TRACER="$(pwd)/noir-wasm-out/noir_tracer_wasm.wasm"
+            direnv exec "$(pwd)" bash ci/test/noir-demo-template.sh
+          '
+
       - name: Seed isonim's tailwind-styles.json
         # `src/frontend/ui_js.nim` reaches `isonim/dsl/tailwind`, which
         # `staticRead`s this file at COMPILE time. Nim cannot catch a failing

@@ -3391,6 +3391,23 @@ test-noir-template:
   exec > >(tee test-logs/test-noir-template.log) 2>&1
   bash ci/test/noir-template-toolchain.sh
 
+# The `/noir/demo` template: that it is NOT the starter, that its eight tests
+# pass, and that the bug it exists to demonstrate is still reachable.
+#
+# Arms D/T/R/F/S need only `nargo` and `nim`. Arms A and W additionally need
+# the wasm modules and skip loudly without them, moving the expected assertion
+# count with them so a skip cannot read as a pass:
+#
+#   CT_NOIR_WASM_COMPILER=/tmp/noir-wasm-out/noir_wasm.wasm \
+#   CT_NOIR_WASM_TRACER=/tmp/noir-wasm-out/noir_tracer_wasm.wasm \
+#     just test-noir-demo
+test-noir-demo:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-noir-demo.log) 2>&1
+  bash ci/test/noir-demo-template.sh
+
 # A wasm-worker SESSION, alive in a real tab over the assembled publish tree.
 #
 # The e2e above drives the node twin and the twin is one-shot: it proves the

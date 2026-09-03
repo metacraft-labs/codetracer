@@ -659,10 +659,18 @@ proc templateConstraintReport*(tmpl: ProjectTemplate): ConstraintReport =
   ## answer. The unconstrained counts are NOT covered by that comparison; see
   ## `noirTemplateNargoInfoJson`'s docstring for what the gate does and does not
   ## establish.
+  ## THE COUNTS COME OFF `tmpl`, not off a module constant, and that changed
+  ## because a second template arrived. This proc took a `tmpl`, checked it for
+  ## files and then reported `noirTemplateNargoInfoJson` — the hello-world's
+  ## numbers — whatever project was open. With one template that is
+  ## indistinguishable from correct; with two it is a pane reporting 17 ACIR
+  ## opcodes over `/noir/demo`'s circuit, under a provenance string promising
+  ## the figure was measured. See `ProjectTemplate.nargoInfoJson`.
   if not tmpl.hasFiles:
     return absentReport("No project is open.")
-  parseNargoInfoJson(noirTemplateNargoInfoJson,
-                     noirTemplateConstraintProvenance)
+  if tmpl.nargoInfoJson.len == 0:
+    return absentReport("This project does not ship a measured constraint count.")
+  parseNargoInfoJson(tmpl.nargoInfoJson, tmpl.constraintProvenance)
 
 proc installTemplatePaneHost*() =
   ## Answer `CODETRACER::ns9-panes` for the bundled template.
@@ -706,10 +714,16 @@ proc installTemplatePaneHost*() =
         # did not — see `noirTestRunAbsence`.
         absence: cstring(noirTestRunAbsence())
       })
-      let report = templateConstraintReport(currentProject())
+      # ALL THREE FIELDS NOW COME FROM ONE PROJECT. Two of them used to be
+      # module constants while `absence` was derived from `currentProject()`,
+      # so a template without counts produced an absence string sitting beside
+      # another project's numbers. Reading the open project once removes the
+      # question of which of the three is about which template.
+      let openProject = currentProject()
+      let report = templateConstraintReport(openProject)
       data.ipc.deliver(cstring"CODETRACER::ns9-panes-constraints", js{
-        info: cstring(noirTemplateNargoInfoJson),
-        provenance: cstring(noirTemplateConstraintProvenance),
+        info: cstring(openProject.nargoInfoJson),
+        provenance: cstring(openProject.constraintProvenance),
         absence: cstring(report.absence)
       }))
 

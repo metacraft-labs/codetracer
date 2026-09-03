@@ -38,6 +38,21 @@ type
       ## `/noir`, `/noir/` — the language entry point.
     efNew
       ## `/noir/new`.
+    efDemo
+      ## `/noir/demo` — the worked example, not the starting point.
+      ##
+      ## A SECOND TEMPLATE AND NOT A SECOND LANGUAGE, which is why this is a
+      ## form rather than another `knownLanguageEntries` row. Rule 0's array
+      ## answers "which languages does this product have an entry point for";
+      ## `/noir/demo` is still Noir, so widening that array to hold it would
+      ## make "language" mean "template" and `languagesWithoutTemplate()` —
+      ## rule 0's agreement check — would start reporting on something that is
+      ## not a language.
+      ##
+      ## It is `efBare`'s sibling in every other respect: it writes nothing on
+      ## arrival, mints no identifier, and serves the same bytes to every
+      ## visitor, because it is a template in the bundle exactly as the
+      ## hello-world is. See `noir_template.noirOracleDemo`.
     efInline
       ## `#p=<encoded>`. The fragment never leaves the browser.
     efSnapshot
@@ -281,6 +296,15 @@ proc classifyPath*(path: string; hostLanguage = ""
     # meaning until a host could supply the language.
     return (efNew, hostLanguage, "")
 
+  if hostLanguage.len > 0 and segments.len == 1 and segments[0] == "demo":
+    # `/demo` on a language host, for the same reason `/new` is here: on
+    # `noirstudio.dev` the language is already the origin, so the demo's
+    # address is one segment rather than two. Without this row the path falls
+    # through to the host-independent block below and returns an EMPTY
+    # language, which selects `emptyTemplate()` and mounts the welcome screen
+    # — the silently-wrong arrival this file's header is about.
+    return (efDemo, hostLanguage, "")
+
   if isLanguageEntry(segments[0]):
     # `/noir` KEEPS WORKING ON A LANGUAGE HOST, deliberately, rather than
     # 404ing or being treated as a nested `/noir/noir`.
@@ -296,6 +320,8 @@ proc classifyPath*(path: string; hostLanguage = ""
       return (efBare, segments[0], "")
     if segments.len == 2 and segments[1] == "new":
       return (efNew, segments[0], "")
+    if segments.len == 2 and segments[1] == "demo":
+      return (efDemo, segments[0], "")
     return (efUnknown, segments[0], "")
 
   # EVERYTHING BELOW IS HOST-INDEPENDENT, and that is rule 0's other half.
@@ -394,6 +420,23 @@ proc resolveEntry*(request: EntryRequest; local: LocalState;
     result.verdict = evTemplate
     result.replacesHistoryEntry = true
     result.opensAsNewProject = true
+  of efDemo:
+    # Rule 5's first row again, over a different template. The verdict is the
+    # same `evTemplate`; WHICH template it is comes from the form, and
+    # `noir_template.templateFor` is the one place that mapping lives.
+    result.verdict = evTemplate
+
+    # IT DOES NOT REWRITE THE ADDRESS, unlike `efNew`. `/noir/new` replaces its
+    # history entry because a clean start is an action whose result is `/noir`;
+    # the demo is a PLACE, and a visitor who found it must be able to send
+    # somebody the address bar. Rewriting to `/noir` would silently turn a link
+    # to the worked example into a link to the starting point.
+
+    # AND IT DOES NOT OPEN AS A NEW PROJECT, so a visitor who edited the demo
+    # last week comes back to their edits rather than to a reset. That is not a
+    # special case: `prepareProject` keys the store on `tmpl.name`, so the demo
+    # is restored the same way the hello-world is, and the two cannot collide
+    # because their names differ.
   of efBare, efInline, efUnknown:
     let payload = inlinePayload(request.fragment)
     if payload.len > 0:
