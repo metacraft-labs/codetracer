@@ -3894,6 +3894,19 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_CODETRACER_BUCKET_ACCESS_KEY }}
         run: |
           set -euo pipefail
+          # THIRD confirmed instance of one root cause: this step's shell is the
+          # devShell's bash, and on a nix-darwin self-hosted runner its PATH has
+          # no /usr/bin. `hdiutil` exists ONLY at /usr/bin/hdiutil -- no nixpkgs
+          # input provides it -- so the first version of this step died with
+          #
+          #     .../<step>.sh: line 6: hdiutil: command not found
+          #     ##[error]Process completed with exit code 127.
+          #
+          # (run 33750724496, job 100642345443, on m3-mcl-004), which is the
+          # same 127 that `codesign` and then `sw_vers` produced earlier today
+          # in the ct-mcr and build-once steps. APPEND, never prepend, so the
+          # devShell toolchain keeps winning for git/python/clang.
+          export PATH="$PATH:/usr/bin"
           mountpoint="$(mktemp -d "${RUNNER_TEMP:-/tmp}/codetracer-dmg-XXXXXX")"
           # Detach on every exit path: a leaked mount outlives the job on these
           # persistent macOS runners and the next run's attach then fails.
