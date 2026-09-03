@@ -1158,6 +1158,70 @@ proc closeAuxiliaryPanels(data: Data) =
         cwarn fmt"edit-mode: failed to close {$content} layout tab {id}: {getCurrentExceptionMsg()}"
       component.layoutItem = nil
 
+proc restoreSavedLayout(data: Data, saved: GoldenLayoutResolvedConfig,
+                        what: string): bool {.discardable.} =
+  ## Hand GoldenLayout a config it can actually read, and say so when it cannot.
+  ##
+  ## `saveLayout()` returns a **resolved** config and `loadLayout` takes an
+  ## **unresolved** one. GoldenLayout's own conversion between the two is
+  ## `LayoutConfig.fromResolved`, and two call sites in this repository already
+  ## use it — `renderer.saveConfig` (`renderer.nim:311`) and
+  ## `session_switch.createNewSession` (`session_switch.nim:266`). The three
+  ## mode-transition sites below did not: they read a layout back out of
+  ## `saveLayout()` and passed it straight to `loadLayout`.
+  ##
+  ## What that produced, measured in a browser against the assembled bundle:
+  ##
+  ##     debug-mode: failed to restore debug layout:
+  ##     e.trimStart is not a function
+  ##
+  ## on every Edit -> Debug and Debug -> Edit transition. GoldenLayout reaches
+  ## `trimStart` while parsing a component's `type` field, which a resolved
+  ## config states differently from an unresolved one, so the very first item
+  ## it walks throws. The exception was caught by a bare `except:` and
+  ## discarded, so the mode flag flipped, the toolbar swapped, `resolvedConfig`
+  ## was updated to a layout that had NOT been applied — and the panes on
+  ## screen stayed exactly as they were. A transition that changed the chrome
+  ## and not the workspace.
+  ##
+  ## The Nim type is not the authority on which of the two this is:
+  ## `GoldenLayout.loadLayout` is declared `proc(layoutConfig:
+  ## GoldenLayoutResolvedConfig)` in `types.nim:526` and `GoldenLayout
+  ## ResolvedConfig` is `ref object of js` with no fields, so both shapes cast
+  ## to it and the compiler cannot tell them apart. That is why this has to be
+  ## a runtime conversion at the call site and not a signature change.
+  ##
+  ## RETURNS whether the layout was applied, so a caller can tell "restored"
+  ## from "logged and carried on" — the whole reason this defect was invisible
+  ## is that its three call sites could not.
+  if data.ui.layout.isNil or saved.isNil:
+    return false
+  if data.ui.layoutConfig.isNil or data.ui.layoutConfig.fromResolved.isNil:
+    # `ui/layout.initLayout` assigns this from `window.LayoutConfig`, which
+    # `frontend/frontend_imports.js` exports on both hosts. Nil means the
+    # layout was never initialised, and there is nothing honest to do but say
+    # so — converting is not optional, and skipping the conversion is what
+    # this proc exists to stop.
+    cerror fmt"layout: cannot restore {what}: LayoutConfig.fromResolved is unavailable"
+    return false
+  var unresolved: GoldenLayoutResolvedConfig
+  try:
+    unresolved = cast[GoldenLayoutResolvedConfig](
+      data.ui.layoutConfig.fromResolved(saved))
+  except:
+    cerror fmt"layout: cannot convert {what} out of its resolved form: {getCurrentExceptionMsg()}"
+    return false
+  try:
+    data.ui.layout.loadLayout(unresolved)
+  except:
+    cerror fmt"layout: GoldenLayout rejected {what}: {getCurrentExceptionMsg()}"
+    return false
+  # ONLY ON SUCCESS. `resolvedConfig` is what `renderer.saveConfig` persists
+  # and what `ui_js`'s reload path re-applies, so recording a layout that was
+  # never applied writes the failure to disk.
+  data.ui.resolvedConfig = saved
+  true
+
 proc reopenAuxiliaryPanels(data: Data) =
   ## Re-open panels closed while edit mode was active.
 
@@ -1170,14 +1234,14 @@ proc reopenAuxiliaryPanels(data: Data) =
       if not data.ui.componentMapping[panel.content].hasKey(panel.id):
         console.log("Key missing!")
         discard data.makeComponent(panel.content, panel.id)
-    try:
-      data.ui.layout.loadLayout(data.ui.savedLayoutBeforeEdit)
-      data.ui.resolvedConfig = data.ui.savedLayoutBeforeEdit
+    if data.restoreSavedLayout(data.ui.savedLayoutBeforeEdit,
+                               "the layout saved before edit mode"):
       data.ui.editModeHiddenPanels.setLen(0)
       data.ui.savedLayoutBeforeEdit = nil
       return
-    except:
-      cerror fmt"edit-mode: failed to reload saved layout: {getCurrentExceptionMsg()}"
+    # Not a `return`: the per-panel `openLayoutTab` loop below is the fallback,
+    # and it is why this site degraded visibly while the two in the mode
+    # switches did not.
 
   for panel in data.ui.editModeHiddenPanels:
     if not data.ui.componentMapping[panel.content].hasKey(panel.id):
@@ -1196,10 +1260,31 @@ proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
       data.closeAuxiliaryPanels()
     return
   data.ui.readOnly = readOnly
-  if readOnly:
-    data.reopenAuxiliaryPanels()
-  else:
-    data.closeAuxiliaryPanels()
+  # THE PANEL WORK MUST NOT BE ABLE TO EAT THE EDITOR WORK.
+  #
+  # `data.ui.readOnly` has already been assigned above, and everything BELOW
+  # this point is what makes the editors agree with it. Both helpers rearrange
+  # GoldenLayout — `reopenAuxiliaryPanels` restores a saved layout and
+  # `closeAuxiliaryPanels` removes layout items — so both can raise out of
+  # GoldenLayout, and an exception here used to leave the flag saying one thing
+  # and every Monaco instance doing the other: a replay session whose source
+  # the user can type into, with `data.ui.readOnly == true`.
+  #
+  # A `Defect` arm as well as `CatchableError`, for the reason the component
+  # loop in `switchToEdit` documents at length: `clear` and friends are
+  # `{.base.}` methods and a nil dispatcher raises `NilAccessDefect`, which a
+  # bare `except:` does not stop.
+  try:
+    if readOnly:
+      data.reopenAuxiliaryPanels()
+    else:
+      data.closeAuxiliaryPanels()
+  except CatchableError:
+    cerror "layout: auxiliary panels while going readOnly=" & $readOnly &
+      ": " & getCurrentExceptionMsg()
+  except Defect:
+    cerror "layout: auxiliary panels while going readOnly=" & $readOnly &
+      " raised a Defect; the editors are still brought into line below"
   for _, editor in data.ui.editors:
     if editor.isNil:
       continue
@@ -1208,6 +1293,29 @@ proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
     else:
       editor.disableDebugShortcuts()
   data.setEditorsEditable(not readOnly)
+  # THE EDITORS A TRANSITION IS STILL BUILDING ARE NOT REACHED BY THIS WALK,
+  # and that is a known, measured gap rather than an oversight.
+  #
+  # `setEditorsEditable` skips any entry whose `monacoEditor` is nil, which is
+  # correct — but a mode transition rearranges GoldenLayout on its way here and
+  # the Monaco instance behind a tab the rearrangement opened is created by a
+  # Karax redraw that nothing in this call awaits. Such an editor is
+  # constructed reading `data.ui.readOnly` (`ui/editor.nim:2724`) as it stood
+  # BEFORE this proc assigned it, so it comes up with the previous mode's
+  # answer and nothing revisits it.
+  #
+  # Measured on `cloud` and on this tree, three round trips: after Stop the
+  # topbar was `edit-commands` and the debugger panes were gone, and
+  # `getRawOptions().readOnly` was still `true` — Edit mode you cannot type in
+  # (`ci/test/noir-mode-roundtrip.sh`, "the editors are writable again", red on
+  # both). A deferred re-application by one macrotask was tried here and
+  # measured to change nothing, so it is not left behind pretending to.
+  #
+  # THE FIX IS AN ORDERING CHANGE, not a retry: `data.ui.readOnly` has to be
+  # assigned before any layout the transition restores is applied, so the
+  # editors that layout builds are constructed with the right answer. That
+  # reorders `switchToEdit`/`switchToDebug`, which the desktop shares, so it
+  # needs its own change and its own verification.
 
 proc switchToEdit*(data: Data) =
   if data.ui.mode != EditMode:
@@ -1221,11 +1329,7 @@ proc switchToEdit*(data: Data) =
 
     # Restore edit layout if we have one saved
     if not data.ui.lastUsedEditLayout.isNil and not data.ui.layout.isNil:
-      try:
-        data.ui.layout.loadLayout(data.ui.lastUsedEditLayout)
-        data.ui.resolvedConfig = data.ui.lastUsedEditLayout
-      except:
-        cerror fmt"edit-mode: failed to restore edit layout: {getCurrentExceptionMsg()}"
+      data.restoreSavedLayout(data.ui.lastUsedEditLayout, "the edit layout")
 
     for content, map in data.ui.componentMapping:
       for id, component in map:
@@ -1301,7 +1405,42 @@ proc switchToDebug*(data: Data) =
   if data.ui.mode != DebugMode:
     data.ui.mode = DebugMode
 
-    # Restore debug layout if we saved it before
+    # THIS SITE IS DELIBERATELY LEFT UNCONVERTED, AND THAT IS A MEASUREMENT,
+    # NOT AN OVERSIGHT.
+    #
+    # It has the same defect as the two `restoreSavedLayout` now fixes: a
+    # resolved config handed to a `loadLayout` that wants an unresolved one,
+    # producing `debug-mode: failed to restore debug layout: e.trimStart is not
+    # a function` (measured on the assembled bundle, `ui_js.nim:1311`) and
+    # swallowed. Converting it here makes the restore SUCCEED — and that turns
+    # out to be worse than the failure, because what it restores is wrong.
+    #
+    # `savedLayoutBeforeEdit` is written by `switchToEdit`, and `switchToEdit`
+    # runs once at BOOT: a fresh Noir Studio tab starts in `DebugMode` (see
+    # `debug.nim`'s `mountedTopbarSurface`, which defaults to
+    # `tsDebuggerControls`, and the `refreshTopbarSurface ... wanted=
+    # tsEditCommands` this produces at ~1.3s). So on the FIRST Run the field
+    # holds the boot-time EDIT layout, not a debug layout, and restoring it
+    # rebuilds GoldenLayout — while `data.ui.readOnly` is still `false`,
+    # because it is not set until `setEditorsReadOnlyState(true)` four lines
+    # below. The editor Monaco builds during that rebuild reads `readOnly` at
+    # construction (`ui/editor.nim:2724`) and is therefore WRITABLE, and the
+    # later `setEditorsEditable(false)` cannot reach it because the Karax
+    # redraw that creates it has not run yet.
+    #
+    # Measured, three trips, with the conversion applied here: every leg
+    # reported `data-topbar-surface=debugger-controls` with three debugger
+    # panes and `getRawOptions().readOnly == false` — a replay session the user
+    # can type into. Without it, `readOnly` is `true` on every trip and the
+    # return leg still works, because the return leg is `switchToEdit`'s
+    # restore of `lastUsedEditLayout` and not this one.
+    #
+    # WHAT WOULD MAKE THIS SAFE TO CONVERT, so it is a unit of work and not a
+    # wall: `savedLayoutBeforeEdit` must stop being written by a `switchToEdit`
+    # that is not leaving a real debug session, and `data.ui.readOnly` must be
+    # assigned before any layout the transition restores is applied rather than
+    # after. Both are changes to the transition's ORDER, which is shared with
+    # the desktop, so neither belongs in the same change as the conversion.
     if not data.ui.savedLayoutBeforeEdit.isNil and not data.ui.layout.isNil:
       try:
         data.ui.layout.loadLayout(data.ui.savedLayoutBeforeEdit)
@@ -5539,6 +5678,40 @@ when defined(ctWeb) and not defined(ctInExtension):
               data.ui.resolvedConfig = resolved
             except:
               cerror "replay: could not load the debugging layout"
+            # THE EDITORS THE NEW LAYOUT JUST BUILT ARE NOT READ-ONLY, and
+            # `switchToDebug` cannot have made them so — it ran BEFORE this
+            # `loadLayout`, and `setEditorsEditable` walks `data.ui.editors` as
+            # it stands at the time. Every editor GoldenLayout constructs for
+            # the debugging layout is therefore a fresh Monaco instance with
+            # Monaco's own default, which is writable.
+            #
+            # Measured in a browser against the assembled bundle: after the
+            # first Run, `data-topbar-surface` was `debugger-controls`, three
+            # debugger panes were mounted, and `getRawOptions().readOnly` was
+            # `false` — a replay session whose source the user could type into.
+            # `Mode-Transitions.md` §7 makes the panes the primary signal of
+            # which mode a window is in, and the panes said Debug.
+            #
+            # `setEditorsEditable` and not `setEditorsReadOnlyState`, because
+            # the latter begins `if data.ui.readOnly == readOnly: return` and
+            # `switchToDebug` has already set that flag to `true`. The flag is
+            # right; it is the EDITORS that have to be caught up with it.
+            #
+            # DEFERRED BY ONE MACROTASK, because this line runs INSIDE the same
+            # tick as the `loadLayout` above. GoldenLayout's component factories
+            # bind their containers during that call, but the Monaco instance
+            # behind an editor tab is created by a Karax redraw that nothing
+            # here awaits — so a synchronous call walks `data.ui.editors` while
+            # `monacoEditor` is still nil for the tab the debug layout just
+            # opened, hits `setEditorsEditable`'s `continue`, and changes
+            # nothing. Measured that way first: the flag said read-only and
+            # `getRawOptions().readOnly` stayed `false` for the whole session.
+            # `not data.ui.readOnly` rather than a literal `false`, and read
+            # when the timer fires, for the reason `setEditorsReadOnlyState`'s
+            # own deferral gives: a Stop pressed immediately after a Run must
+            # not be undone by a timer this Run queued.
+            discard windowSetTimeout(
+              proc() = data.setEditorsEditable(not data.ui.readOnly), 0)
           requestInitialPanelData(data)
           # The toolbar's own mount gave up during boot, against a document
           # that had not drawn the menu shell yet. Now that the surface exists
