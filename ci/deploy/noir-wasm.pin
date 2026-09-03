@@ -77,8 +77,81 @@
 # and check the two sizes in the log against the ones recorded here.
 
 NOIR_REPO=https://github.com/metacraft-labs/noir
-NOIR_REF=ns11/nargo-test-in-wasm
-# WHAT THIS BUMP BUYS: `nargo test` in the browser.
+NOIR_REF=ns12/acir-listing-and-nargo-test
+# WHAT THIS BUMP BUYS: the CONSTRAINTS pane, for a live visitor.
+#
+# `src/frontend/ui_js.nim`'s `noirConstraintsSink` has a branch for an empty
+# listing whose comment reads "a compiler module older than
+# `VfsResponse.acir_listing` answers without one — which is every build on the
+# current deploy pin." That was this pin. The pane rendered a real opcode
+# listing in a browser at 2bf98864 and no visitor could see one, because the
+# module this file names has no such field: the deploy took the
+# `noteListingUnavailable` branch every time and captioned the counts instead.
+#
+# `VfsResponse.acir_listing` is `nargo compile --print-acir`'s text, emitted
+# through the compiler's own `Display`, so what a user reads in the tab is
+# byte-for-byte what the toolchain prints locally. `reportFromAcirListing`
+# builds the whole report from it — rows AND counts from one reading of one
+# compile — which is why the pane's headline and its listing can no longer
+# disagree.
+#
+# THIS BUMP IS NOT A FAST-FORWARD, and that is the only interesting thing
+# about it. Every previous entry below could say "THIS REVISION CONTAINS THE
+# ONE IT REPLACES". This one cannot. `acir_listing` lived on
+# `ns4/acir-listing`, which branched from `9d4e40a6` — the same commit
+# `ns11/nargo-test-in-wasm` branched from. The two lines diverged there:
+#
+#   9d4e40a6 ── 082333c3 ── 6c1af2c9        ns4/acir-listing
+#            └─ df2d2f2e ── 9c2dfc24 ── fd96a7d4   ns11/nargo-test-in-wasm
+#
+# So moving the pin to `6c1af2c9` — the one-line change this needed to be, and
+# the change it looked like — would have SILENTLY REVERTED the three commits
+# the line already carried: `nv_test_vfs` (the browser's test runner), its
+# `record` path, and df2d2f2e's tracer frame fix. Every note below describing
+# those would have stayed in this file, describing a module that no longer had
+# them.
+#
+# `ns12/acir-listing-and-nargo-test` is the merge, and its merge commit
+# (8124a763) records the one conflict — `Cargo.lock`, one dependency added by
+# each side — and why `compiler/wasm/src/compile_vfs.rs` auto-merging was
+# checked rather than trusted.
+#
+# VERIFIED BY WHAT IT PRESERVES, not by building. A build proves neither of
+# the two things a naive bump would have lost, so both were exercised through
+# the ABI on the module built from this revision, not read off the source:
+#
+#   * `nv_test_vfs` is exported (`nv_alloc, nv_compile_vfs, nv_free,
+#     nv_result_len, nv_test_vfs`) and ANSWERS: driven over the real
+#     `(ptr, len)` protocol on the bundled template it returns five verdicts,
+#     all `pass`, and they are the same five selectors
+#     `ci/test/noir_template_fixture.nim` reports the shared parser finding.
+#
+#   * The tracer frame fix is still in `MemorySink::start`: the `<toplevel>`
+#     `Call` is pushed before the entry `Step`, and
+#     `tests/trace_artifact.rs::the_entry_call_precedes_the_entry_step` — the
+#     test written to hold it there — is present and green.
+#
+#   * The opcode agreement is unmoved at 17. `noirTemplateNargoInfoJson` ships
+#     `"opcodes":17`; `ci/test/noir-template-acir-count.mjs` measures 17 from
+#     this module's `acir_locations`; and the new `acir_listing` prints 17
+#     constrained rows. Three readings, three code paths, one number.
+#
+#   * `acir_listing` itself is PRESENT and is the listing, not an empty
+#     string: 1546 characters over 42 lines, opening `func 0`, then
+#     `private parameters: [w0]`, and carrying
+#     `unconstrained func 0: directive_invert` and
+#     `unconstrained func 1: directive_integer_quotient` — the two names, and
+#     the two counts, `nargo info` reports for this template.
+#
+# THE STRING THAT SAYS WHICH PATH PAINTED THE PANE is `func 0`. The listing
+# heads its constrained block that way; the compile-time `nargo info` constant
+# names the same function `main`. So a Constraints pane showing `main` is
+# reading the shipped constant and a pane showing `func 0` is reading a
+# listing this compile produced — which makes one DOM string the whole answer
+# to "did the pin bump reach the user".
+#
+# WHAT THE PREVIOUS BUMP BOUGHT, kept because this file is the only place the
+# line's history is written down: `nargo test` in the browser.
 #
 # `compiler/wasm` could compile a virtual filesystem and could not test one, so
 # the Test Results pane listed the tests `nargo test` would run beside a
@@ -97,20 +170,27 @@ NOIR_REF=ns11/nargo-test-in-wasm
 # test traces to 8 events, 2 steps and 2 calls, against the one event and zero
 # steps an uninstrumented compile produces while every module reports ok.
 #
-# THIS REVISION CONTAINS THE ONE IT REPLACES. It is a direct child of
-# df2d2f2e, the entry-call-order bump this line carried, so it is a
-# fast-forward of the same line rather than a second pin racing it.
-#
 # PUSHED, AND CHECKED THE WAY THE BUILDER RESOLVES IT. `build-noir-wasm.sh`
 # runs `git fetch --depth 1 origin <rev>` into a directory it created, so the
 # check is the same operation, and it was run into an empty clone that had
 # never seen this machine:
 #
 #   git init && git remote add origin https://github.com/metacraft-labs/noir
-#   git fetch --depth=1 origin fd96a7d4a09fc91337c1df9c1ff8ba3b42ec9654
-#   git cat-file -p FETCH_HEAD:compiler/wasm/src/test_vfs.rs
+#   git fetch --depth=1 origin 6eb7d0242ba34d184aba64ab33b8e11a3a2ce406
 #
-# resolves, and the third command prints the module.
+# resolves, and at the fetched commit `compiler/wasm/src/compile_vfs.rs` names
+# `acir_listing` in eleven places, `compiler/wasm/src/test_vfs.rs` is its full
+# 970 lines, and `tooling/tracer_wasm/src/memory_sink.rs` pushes the `Call`
+# before the `Step` — the merge's two survivors and its one addition, checked
+# in the tree the builder will actually compile rather than in a worktree.
+#
+# THAT CLONE IS NOW 24 MB, and it was about 900 MB. `fd96a7d4` carried
+# `target-wasm/` — 3,134 files of cargo build cache, including a stale
+# `noir_wasm.wasm` with exactly the name of the artifact this script produces
+# — because `.gitignore` matched `/target` and `**/target` and nothing else.
+# `--depth 1` pays for the whole tree at one commit, so every deploy on this
+# line was downloading it. The noir-side commit 6eb7d024 untracks it and adds
+# `/target-wasm` beside `/target`.
 #
 # The previous bump's note, kept because its claim still holds:
 # a browser-produced trace opens on `main` instead of on
@@ -141,16 +221,26 @@ NOIR_REF=ns11/nargo-test-in-wasm
 # resolves in an empty clone that had never seen this machine, and
 # `tooling/tracer_wasm/src/memory_sink.rs` at the fetched commit pushes the
 # `Call` before the `Step`.
-NOIR_REV=fd96a7d4a09fc91337c1df9c1ff8ba3b42ec9654
+NOIR_REV=6eb7d0242ba34d184aba64ab33b8e11a3a2ce406
 
 # AT `NOIR_REV` ABOVE, and no longer on `codetracer` — see the note at the top
-# of this file. The noir workspace at `ns11/nargo-test-in-wasm` still resolves
-# `codetracer_trace_types` and `codetracer_trace_writer_nim` through PATH
-# dependencies on a sibling checkout (`../codetracer-trace-format`). Without it
-# `cargo build` fails before compiling anything, with an error naming a missing
-# Cargo.toml rather than a missing repository — so the sibling is pinned here
-# too. On `codetracer` those are git dependencies at exactly this revision, so
-# a `NOIR_REV` descended from `codetracer`@ca080a58 will not need it.
+# of this file. The noir workspace at `ns12/acir-listing-and-nargo-test` still
+# resolves `codetracer_trace_types` and `codetracer_trace_writer_nim` through
+# PATH dependencies on a sibling checkout (`../codetracer-trace-format`).
+# Without it `cargo build` fails before compiling anything, with an error
+# naming a missing Cargo.toml rather than a missing repository — so the sibling
+# is pinned here too. On `codetracer` those are git dependencies at exactly
+# this revision, so a `NOIR_REV` descended from `codetracer`@ca080a58 will not
+# need it.
+#
+# STILL LOAD-BEARING AT THIS BUMP, and that was checked rather than assumed:
+# `git merge-base --is-ancestor ca080a58 6eb7d024` says NO. Both parents of
+# the merge branch from `9d4e40a6`, which predates the switch to git
+# dependencies, so merging them cannot have crossed it. `Cargo.toml:173` at
+# this revision still reads `path = "../codetracer-trace-format/..."`. The
+# `clone_at "${TRACE_FORMAT_REPO}"` step in `ci/deploy/build-noir-wasm.sh`
+# therefore stays; the note at the top of this file says when it can go, and
+# this is not that bump.
 TRACE_FORMAT_REPO=https://github.com/metacraft-labs/codetracer-trace-format
 TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 
@@ -180,37 +270,64 @@ TRACE_FORMAT_REV=235e377ec66b7d140e9c75828e805d53945824e3
 # against the file in the publish directory, and both come from the same
 # assembly run — so it catches a stale document over fresh bytes, which is the
 # failure that reached production in the sibling campaign.
-# MEASURED at the revision above (2026-09-02, aarch64-darwin), both of them
-# this time: the compiler grew by the test runner and its blackbox solver, and
-# the tracer was rebuilt from the same tree to check it had not.
+# MEASURED at the revision above (2026-09-03, aarch64-darwin), both of them,
+# by `bash ci/deploy/build-noir-wasm.sh` inside the dev shell — so these two
+# are the first figures in this file that carry the TOOLCHAIN line below
+# rather than a guess about which compiler produced them.
 #
-#   noir_wasm.wasm         16454689  (+596360 against the figure it replaces)
-#   noir_tracer_wasm.wasm   4613157  (-10708, and this crate is UNCHANGED —
-#                                     see the reproducibility note above; a
-#                                     different build DIRECTORY moves it)
+#   noir_wasm.wasm         15362193  (-1092496 against the figure it replaces)
+#   noir_tracer_wasm.wasm   4359466  (-253691, and this crate is UNCHANGED by
+#                                     the merge — nothing on `ns4` touches
+#                                     `tooling/tracer_wasm`)
 #
-# The compiler's growth is 3.7%, which is what `bn254_blackbox_solver` plus
-# `nargo::ops::run_test` and its foreign-call layers cost. It is not free and
-# it is not hidden: the module is fetched at run time and cached `immutable`,
-# so it is paid once per pin by the sessions that compile anything.
-EXPECT_COMPILER_BYTES=16454689
-EXPECT_TRACER_BYTES=4613157
+# BOTH WENT DOWN, AND THE COMPILER WENT DOWN WHILE GAINING CODE. That reads
+# like a truncated build, so it was run down rather than recorded: it is the
+# RUSTC BUMP this file predicted. The note above says "a rustc bump moves them
+# further", and this is the first bump measured across one.
+#
+# The evidence is a controlled pair, not an inference from the direction of a
+# number. `tooling/tracer_wasm` is byte-identical in source between the
+# revision this replaces and this one, so it is a control: built from THIS
+# tree at rustc 1.89.0 it comes out 4614241 — within 1084 bytes of the 4613157
+# recorded above, which is the build-directory noise this file already
+# documents — and at the dev shell's rustc 1.96.0 it comes out 4359466. Same
+# source, same machine, same day; the -5.5% is the compiler and nothing else.
+#
+# SO `MEASURED_TOOLCHAIN=unknown-predates-the-stamp` IS NOW ANSWERABLE, and
+# the answer is worth writing down because the field below is about to stop
+# saying it. Whatever produced 4613157 behaved like rustc 1.89.0 — the version
+# `rust-toolchain.toml` in the noir tree pins, which is what an ambient
+# `rustup` honours and what a build run outside the dev shell would therefore
+# have used. That is evidence, not a record, and it is stated as evidence.
+#
+# The compiler's -6.6% is the same bump, working against the ACIR listing code
+# this revision adds. The listing's own cost is visible only in the other
+# direction: built at 1.89.0 from this tree the compiler is 16487480 against
+# the 16454689 recorded above, so `acir_listing` costs about 32 KB — 0.2%, and
+# nothing like the 1.1 MB the headline delta shows.
+EXPECT_COMPILER_BYTES=15362193
+EXPECT_TRACER_BYTES=4359466
 
-# WHICH COMPILER PRODUCED THE TWO FIGURES ABOVE: NOT RECORDED, and that is
-# written down rather than guessed.
+# WHICH COMPILER PRODUCED THE TWO FIGURES ABOVE. Recorded, for the first time,
+# and copied verbatim from the run that produced them rather than assembled by
+# hand afterwards.
 #
-# The note above says "a rustc bump moves them further", so the toolchain is
-# already known to reach these numbers — but no run that produced them ever
-# printed which rustc it was, so the honest value here is unknown. Filling it in
-# from the rustc that happens to be in a dev shell today would be inventing a
-# provenance for a measurement taken by a different run, which is the same shape
-# of error as the constant this whole guard was written after.
-MEASURED_TOOLCHAIN=unknown-predates-the-stamp
+# The line below is `ci/deploy/build-noir-wasm.sh`'s own output. It printed it
+# beside each byte count and again at the end of its log, having first refused
+# to build at all until `scripts/toolchain-pins.sh --require rustc cargo`
+# passed — so there is no path to these numbers that skips the attribution.
+# The previous value of this field was `unknown-predates-the-stamp`, and the
+# note that replaced it is directly above: the figures it described behaved
+# like rustc 1.89.0, which is one version short of what the dev shell now
+# supplies, and that one version is most of the movement in both numbers.
 #
-# THE NEXT BUMP MUST FILL IT IN, and does not have to remember to:
-# `ci/deploy/build-noir-wasm.sh` now runs
-# `scripts/toolchain-pins.sh --require rustc cargo` before it builds anything,
-# refuses if the toolchain cannot be attributed to this commit, and prints the
-# resulting `TOOLCHAIN: …` line beside each byte count and again at the end of
-# its log. Copy that line here alongside the new figures — it is the sentence
-# that makes "the number moved" answerable.
+# WHAT IT DOES AND DOES NOT VOUCH FOR. Two tools, `rustc` and `cargo`, which
+# are the only ones a `wasm32-unknown-unknown` cargo build invokes. `nim` and
+# `nargo` appear under `not-verified:` because this run never ran them; the
+# stamp keeps them visible rather than dropping them, so the scope of the
+# claim is legible from the claim itself.
+MEASURED_TOOLCHAIN='rustc=1.96.0[sih46ajs0xm4bch0r0gdiymfa79gi9ri-rust-mixed] cargo=1.96.0[sih46ajs0xm4bch0r0gdiymfa79gi9ri-rust-mixed] | lock: toolchains=942c995a fenix=dd2c80d0 noir=ca080a58 | host arm64-darwin | not-verified: nim=2.2.8[cwcwjh77y174bwqzbffl6bd7y42c6588-nim-2.2.8] nargo=1.0.0-beta.26@906af2f4[worktree noir@61960c8e]'
+#
+# THE NEXT BUMP KEEPS DOING THIS. Copy the `TOOLCHAIN: …` line the build script
+# prints, alongside the new figures — it is the sentence that makes "the number
+# moved" answerable, and this bump is the first one that could answer it.
