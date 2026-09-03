@@ -2622,12 +2622,47 @@ Shape worth keeping if you extend it:
   drive every §14 row headlessly. Unrecognised wire spellings deliberately
   leave the signal alone rather than falling back to the healthy default.
 
-## `ci/test/sdk-facade-boundary.sh` needs bash >= 4
+## `ci/test/sdk-facade-boundary.sh` needs bash >= 4 — it now handles this itself
 
-It uses `mapfile`, which macOS's /bin/bash 3.2 does not have. Run outside the
-dev shell it prints `mapfile: command not found` plus `unbound variable`
-noise, and `sdk-facade-boundary-test.sh` reports 20 spurious failures. Run
-both through `direnv exec <repo> bash -c '...'`, which supplies bash 5.
+It uses `mapfile`, which macOS's /bin/bash 3.2 does not have. The script now
+re-execs into the first bash >= 4 on PATH, so no caller has to arrange it, and
+if there is genuinely none it prints `NOT RUN   bash-version: ...` and exits
+**2** — reserved for "could not run", as against 1 for "found something".
+
+The old advice here was "run through `direnv exec <repo> bash -c '...'`, which
+supplies bash 5", and it was **half wrong in a way that cost real time**. Being
+inside the dev shell is not sufficient: `bash -lc` re-sources the profile and
+puts /bin ahead of the nix store, so on this machine `direnv exec … bash -lc`
+got **3.2** and `direnv exec … bash -c` got **5.3**, same shell, same moment.
+The login flag was the variable, not the dev shell.
+
+What it cost: `test_sdk_facade_boundary.nim` shells out and reads the exit
+status, so under 3.2 it reported FOUR content failures — including
+`VIOLATION consumer-facade-only`, its own negative control — for a checker
+that had not run. That was both of `ci/lint/nim.sh`'s FAILEDs and the only red
+in `just test-vm-unit` on a clean `cloud`, i.e. a gate that was red everywhere
+locally and therefore read by nobody.
+
+## The whole `lint-*` stage has been dying before it runs anything in CI
+
+Measured on runs 33712110539, 33707534189, 33706050468 and 33689490588
+(2026-09-02/03): `lint-nim`, `lint-bash`, `lint-rust` and `lint-nix` all fail
+inside `nix develop`, before a single lint executes:
+
+    error: Failed to fetch git repository https://github.com/anza-xyz/crossbeam
+    fatal: could not read Username for 'https://github.com': No such device or address
+
+`lint-nix` hits `https://github.com/mystenlabs/tidehunter.git` first; same
+cause, different input reached first. The dev shell cannot be evaluated
+without credentials for these flake git inputs, and the job's token is
+installed as an owner-scoped `http.<url>.extraHeader` that authenticates only
+`metacraft-labs`.
+
+So: **the SDK facade gate has no CI verdict at all** — it is not "green in CI
+and red locally", it has not run in either place. Do not cite `ci/lint/nim.sh`
+as coverage until this is fixed. (The isonim submodule `##[error]` earlier in
+the same job is a red herring: it is downgraded to a warning and the step
+continues.)
 
 ## The ViewModels and the wasm32 replay engine speak different DAP dialects
 

@@ -81,6 +81,75 @@
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
+# BASH >= 4 IS A HARD REQUIREMENT, AND ITS ABSENCE IS NOW REPORTED AS ABSENCE
+# ---------------------------------------------------------------------------
+#
+# This script uses `mapfile`, a bash-4 builtin. macOS ships /bin/bash 3.2 and
+# does not have it.
+#
+# WHAT THAT LOOKED LIKE, AND WHY IT IS WORSE THAN A RED. This script runs every
+# check and decides its status at the end — `set -uo pipefail`, deliberately no
+# `-e`, for the reason written up in ci/lib/lint-steps.sh. So a missing builtin
+# did not stop it. Under bash 3.2 it printed `OK  facade-present`, then
+# `mapfile: command not found` four times, then `unbound variable` for every
+# array those four calls were supposed to fill, and exited non-zero having
+# checked almost nothing.
+#
+# `src/frontend/viewmodel/tests/unit/test_sdk_facade_boundary.nim` shells out to
+# this script and reads its exit status, so that became FOUR FAILED CONTENT
+# ASSERTIONS — including `VIOLATION consumer-facade-only`, which is that
+# suite's own NEGATIVE CONTROL, the case that exists to prove this guard can say
+# no. A reader saw four findings. The truth was that the checker had not run.
+#
+# A gate that is red on every workstation and green only in CI is exactly as
+# informative as one that is always green, and it costs more: it trains people
+# to ignore the lane it sits in. Measured on `cloud` at ecee3b1d, this was both
+# of `ci/lint/nim.sh`'s two FAILEDs and the only red in `just test-vm-unit`.
+#
+# So, in order:
+#   1. RUN ANYWAY if a bash >= 4 is reachable. The nix dev shell supplies 5.3;
+#      what hid it is a LOGIN shell, which re-sources the profile and puts /bin
+#      ahead of the store paths. `bash -lc` gets 3.2, `bash -c` gets 5.3, on the
+#      same machine, in the same dev shell. Re-execing means the caller does not
+#      have to know that.
+#   2. If there is genuinely no bash >= 4 on PATH, SAY SO BY NAME and exit 2.
+#      Exit 2 is already this script's "could not run" code — see the unknown
+#      argument arm and `cd "${root}" || exit 2` below. 1 is reserved for
+#      findings. A caller can therefore tell "I could not run" from "I found
+#      something", which is the distinction that was missing.
+#
+# `CT_SDK_FACADE_MIN_BASH` exists so the not-runnable path can be driven with
+# this same code rather than with a fake: set it above any bash that exists and
+# the search finds nothing, exactly as it would on a 3.2-only machine.
+sdk_facade_min_bash="${CT_SDK_FACADE_MIN_BASH:-4}"
+if [ "${BASH_VERSINFO[0]}" -lt "${sdk_facade_min_bash}" ]; then
+	if [ "${CT_SDK_FACADE_REEXECED:-0}" != "1" ]; then
+		for sdk_facade_candidate in $(type -aP bash 2>/dev/null); do
+			# SC2016 is the point: the single quotes are what stop THIS
+			# shell expanding `BASH_VERSINFO`. It has to be the candidate
+			# that expands it — its version is the question.
+			# shellcheck disable=SC2016
+			sdk_facade_major="$("${sdk_facade_candidate}" -c \
+				'echo ${BASH_VERSINFO[0]}' 2>/dev/null)"
+			case "${sdk_facade_major}" in
+			'' | *[!0-9]*) continue ;;
+			esac
+			if [ "${sdk_facade_major}" -ge "${sdk_facade_min_bash}" ]; then
+				export CT_SDK_FACADE_REEXECED=1
+				exec "${sdk_facade_candidate}" "${BASH_SOURCE[0]}" "$@"
+			fi
+		done
+	fi
+	# NOT RUN, said in one line with a stable token, because the Nim suite over
+	# this script keys on it to report absence instead of inventing findings.
+	echo "NOT RUN   bash-version: this checker needs bash >= ${sdk_facade_min_bash}" \
+		"and is running under ${BASH_VERSION}; \`mapfile\` is a bash-4 builtin." \
+		"No bash >= ${sdk_facade_min_bash} was found on PATH." \
+		"Nothing about the SDK boundary has been established." >&2
+	exit 2
+fi
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
