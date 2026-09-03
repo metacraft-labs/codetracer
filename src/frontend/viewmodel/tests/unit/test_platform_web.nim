@@ -508,6 +508,12 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     check classifyPath("/noir").form == efBare
     check classifyPath("/noir/").form == efBare
     check classifyPath("/noir/new").form == efNew
+    # `/noir/demo` is a SECOND TEMPLATE and not a sixth row of §1b.0's table:
+    # it is still Noir, so it is a form beside `efBare` rather than another
+    # `knownLanguageEntries` entry. Listed here because "and nothing else
+    # does" is a claim about the whole classifier, and a form the classifier
+    # can produce that this case does not name is a form nothing enumerates.
+    check classifyPath("/noir/demo").form == efDemo
     check classifyPath("/s/abc123").form == efSnapshot
     check classifyPath("/p/hello-world-3f9a2c").form == efProject
     check classifyPath("/projects").form == efProjectList
@@ -520,8 +526,14 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     ## a form the application handles that the CDN 404s.
     let prefixes = rewritePrefixes()
     let addresses = @[
-      "/noir", "/noir/", "/noir/new", "/s/abc123",
+      "/noir", "/noir/", "/noir/new", "/noir/demo", "/s/abc123",
       "/p/hello-world-3f9a2c", "/projects", "/collab/join/tok"]
+      # `/noir/demo` needs NO new prefix — `/noir/*` already covers it, and
+      # that is the point of listing it: the agreement this case is about is
+      # "every address a form produces reaches the application", so a second
+      # address under an existing prefix has to be checked and must not grow
+      # the table. A prefix added for it would be a rule the CDN evaluates for
+      # nothing.
     for address in addresses:
       var covered = false
       for prefix in prefixes:
@@ -962,6 +974,7 @@ suite "test_arrival_writes_nothing_and_mints_no_address — §1b.0 rules 1, 2, 4
         case form
         of efBare: "/noir"
         of efNew: "/noir/new"
+        of efDemo: "/noir/demo"
         of efInline: "/noir"
         of efSnapshot: "/s/abc"
         of efProject: "/p/hello-3f9a"
@@ -1584,7 +1597,11 @@ suite "the bundled template a language entry selects":
     # NON-VACUITY: the check above is also true of an empty language list.
     check knownLanguageEntries.len > 0
     for language in knownLanguageEntries:
-      check templateFor(language).hasFiles
+      # `efBare` because rule 0 asks about the INITIAL template — the one the
+      # bare entry point serves. A language whose `/demo` existed and whose
+      # `/noir` did not would still be the gap this rule is about, which is
+      # why `languagesWithoutTemplate` passes the same form.
+      check templateFor(language, efBare).hasFiles
 
   test "the language-neutral root selects NO template, and that is rule 0":
     ## `/` classifies as `efBare` with an EMPTY `languageEntry`, and rule 0 —
@@ -1594,16 +1611,16 @@ suite "the bundled template a language entry selects":
     ## and it is also what would have made the fix for `/noir` silently change
     ## what `/` does.
     check classifyPath("/").language.len == 0
-    check not templateFor("").hasFiles
-    check not templateFor("cairo").hasFiles
-    check templateFor("noir").hasFiles
+    check not templateFor("", efBare).hasFiles
+    check not templateFor("cairo", efBare).hasFiles
+    check templateFor("noir", efBare).hasFiles
 
   test "the template is a directory tree, not a single file":
     ## §1a: "Noir projects are directory trees — `src/`, `tests/`,
     ## `Nargo.toml`, multiple modules ... A single-file playground would
     ## misrepresent the language." Asserted as a count and a shape rather than
     ## trusted to whoever edits `noir_template.nim` next.
-    let tmpl = templateFor("noir")
+    let tmpl = templateFor("noir", efBare)
     # FIVE, not four: three sources, a `Nargo.toml` and a `Prover.toml`.
     #
     # The inputs file was added when Run became reachable — a `bin` package
@@ -1636,7 +1653,7 @@ suite "the bundled template a language entry selects":
     ## `src/` that no `mod` statement names is dead: it appears in the file
     ## tree, contributes nothing, and its tests never run — silently, which is
     ## the whole problem.
-    let tmpl = templateFor("noir")
+    let tmpl = templateFor("noir", efBare)
     let root = tmpl.fileContent("src/main.nr")
     # THE SUBJECT IS THE SOURCES, and it has to be selected rather than
     # assumed. This loop used to skip two named files and require everything
@@ -1667,7 +1684,7 @@ suite "the bundled template a language entry selects":
   test "a file the template does not carry degrades rather than raising":
     ## §1b.3 step 5: each part of a link degrades independently. A fragment
     ## naming a file this template has no copy of opens the project at rest.
-    check templateFor("noir").fileContent("src/nope.nr") == ""
+    check templateFor("noir", efBare).fileContent("src/nope.nr") == ""
 
   test "directories are DERIVED from the files, so none can be a phantom":
     ## A folder list written beside `files` is a second statement of the same
@@ -1683,8 +1700,8 @@ suite "the bundled template a language entry selects":
     ## Rule 1 held before the template existed and must still hold now that
     ## `/noir` opens a project. `noirHelloWorld()` is a pure value: the same
     ## bytes for a first-time visitor, a returning one and a crawler.
-    let first = templateFor("noir")
-    let second = templateFor("noir")
+    let first = templateFor("noir", efBare)
+    let second = templateFor("noir", efBare)
     check first.templateFileCount == second.templateFileCount
     check first.fileContent("src/main.nr") == second.fileContent("src/main.nr")
     let resolved = resolveEntry(EntryRequest(path: "/noir"), LocalState())
@@ -1692,6 +1709,189 @@ suite "the bundled template a language entry selects":
     check resolved.languageEntry == "noir"
     check not resolved.writesOnArrival
     check not resolved.mintsServerIdentifier
+
+# ---------------------------------------------------------------------------
+# `/noir/demo` — a SECOND TEMPLATE, and the ways it can respond while being
+# wrong
+# ---------------------------------------------------------------------------
+#
+# A route test that asserts "the demo address resolves" is satisfied by a
+# `/noir/demo` that mounts the hello-world: the verdict is `evTemplate` either
+# way, the surface opens either way, and a visitor sent to the worked example
+# is shown the starting point with nothing anywhere saying so. That is the
+# shape of failure this whole area keeps producing — a route that responds,
+# mounts a project and is wrong — so every case below asserts the CONTENT the
+# address serves rather than the fact that it served something.
+#
+# The starter is asserted BESIDE the demo throughout, because most of the ways
+# this can break leave one of the two intact: a `templateFor` that ignored its
+# `form` would serve the hello-world at both addresses and pass any check that
+# only looked at one.
+
+suite "the demo entry serves the demo and not the starter":
+  const neutral = ""
+  const noirHost = "noir"
+    ## The same two hosts `a host can be the language entry point` tables, and
+    ## the same strings: the classifier takes the answer as a parameter, so
+    ## both hosts are decidable here from two strings and no origin.
+
+  test "`/noir/demo` is its own form, and the addresses beside it are unchanged":
+    ## The demo's address must be a new FORM rather than a new language or a
+    ## new spelling of the bare entry, and the neighbours are asserted in the
+    ## same case because the cheapest way to break them is to widen the
+    ## classifier's `/noir/…` arm: a `segments.len == 2` branch that answered
+    ## `efDemo` for anything would take `/noir/nonsense` with it, and §1b.3
+    ## step 6's "never an error page" would quietly become "always the demo".
+    check classifyPath("/noir/demo").form == efDemo
+    check classifyPath("/noir/demo").language == "noir"
+    check classifyPath("/noir").form == efBare
+    check classifyPath("/noir/nonsense").form == efUnknown
+
+    # ON A LANGUAGE HOST the demo's address is ONE segment, for the reason
+    # `/new` is: on `noirstudio.dev` the language is already the origin. The
+    # neutral host must NOT take it — there `/demo` names no language, and a
+    # form with an empty `languageEntry` selects `emptyTemplate()` and mounts
+    # the welcome screen, which is arrival at an address that answered and
+    # showed the wrong product.
+    check classifyPath("/demo", noirHost).form == efDemo
+    check classifyPath("/demo", noirHost).language == "noir"
+    check classifyPath("/demo", neutral).form == efUnknown
+    check classifyPath("/demo", neutral).language == ""
+
+  test "the demo resolves to a template, and keeps the address it was linked at":
+    ## Rule 5's first row over a different template, plus rules 1 and 4 — which
+    ## are the two the demo is most likely to break, because it is the first
+    ## form that is neither a clean start nor a link to somebody's project.
+    ##
+    ## `replacesHistoryEntry` is the one that would be invisible: rewriting to
+    ## `/noir` turns a link to the worked example into a link to the starting
+    ## point, and the visitor whose address bar was rewritten has no way to
+    ## notice before pasting it to somebody else.
+    let resolved = resolveEntry(EntryRequest(path: "/noir/demo"), LocalState())
+    check resolved.verdict == evTemplate
+    check resolved.form == efDemo
+    check resolved.languageEntry == "noir"
+    check not resolved.replacesHistoryEntry
+    check not resolved.opensAsNewProject
+    check not resolved.writesOnArrival
+    check not resolved.mintsServerIdentifier
+
+  test "THE DEMO ROUTE SERVES THE DEMO, asserted on the bytes":
+    ## The case the whole route exists for, and the one a resolution test
+    ## cannot make: both addresses resolve to `evTemplate`, so which project is
+    ## mounted is decided entirely by `templateFor`'s `form` argument and is
+    ## visible nowhere else. A `templateFor` that dropped that argument would
+    ## keep every other case in this file green.
+    let demo = templateFor("noir", efDemo)
+    let starter = templateFor("noir", efBare)
+    check demo.name == noirDemoName
+    check starter.name == noirTemplateName
+    check demo.name != starter.name
+
+    # Eight files: two manifests and six modules. A count, because "the demo
+    # has files" is true of the starter too.
+    check demo.templateFileCount == 8
+
+    # THE SOURCES THEMSELVES, in both directions. `mod sort;` and
+    # `mod aggregate;` are the demo's own modules — the bubble-pass circuit and
+    # the aggregation the bug lives between — and the starter carries neither,
+    # so this pair separates the two templates on content rather than on a
+    # name a rename could carry across.
+    let root = demo.fileContent("src/main.nr")
+    check "mod sort;" in root
+    check "mod aggregate;" in root
+    check "fn main(" in root
+    check "mod sort;" notin starter.fileContent("src/main.nr")
+
+    # A `bin` package with no `Prover.toml` compiles and cannot be RUN, and
+    # being run is this template's entire purpose: the settled price the
+    # circuit computes and the `published_price` it is given are the two
+    # numbers the visitor is meant to find disagreeing.
+    let inputs = demo.fileContent("Prover.toml")
+    check "published_price" in inputs
+    check "243180" in inputs
+
+    # The bug is a false claim in a comment attached to this constant. A demo
+    # that shipped without it is a demo with nothing to debug.
+    check "SETTLE_PASSES" in demo.fileContent("src/sort.nr")
+
+    # `src` and nothing beside it — nargo compiles `src/` only, so a second
+    # top-level directory would be shown in the file tree and never built.
+    check demo.templateDirectories == @["src"]
+
+  test "the two templates cannot share a stored project":
+    ## `prepareProject` keys the browser's project store on `tmpl.name`, so two
+    ## templates with one name are one stored project: a visitor who edited the
+    ## hello-world would find those edits inside the demo, and the demo's own
+    ## edits would come back under `/noir`. The names ARE the keys, which is
+    ## why this is asserted here and not left to the store's suite.
+    check noirDemoName != noirTemplateName
+    check noirDemoName.len > 0
+    check noirTemplateName.len > 0
+
+  test "arriving at the demo twice serves the same bytes":
+    ## Rule 1 for the second template. `noirOracleDemo()` is a pure value — the
+    ## same project for a first-time visitor, a returning one and a crawler —
+    ## and the demo is the template most likely to lose that, because it is the
+    ## one whose sources anybody would be tempted to generate.
+    let first = templateFor("noir", efDemo)
+    let second = templateFor("noir", efDemo)
+    check first.templateFileCount == second.templateFileCount
+    check first.fileContent("src/main.nr") == second.fileContent("src/main.nr")
+    check first.fileContent("src/main.nr").len > 0
+
+  test "every module the DEMO ships is DECLARED, so nargo compiles it":
+    ## The same check the starter has, over the template that actually has
+    ## modules to lose: a `.nr` file under `src/` that no `mod` statement names
+    ## is dead — it appears in the file tree, contributes nothing, and its
+    ## tests never run. On a five-module crate that is a whole feature of the
+    ## demo silently absent from the pane it is meant to demonstrate.
+    let tmpl = templateFor("noir", efDemo)
+    let root = tmpl.fileContent("src/main.nr")
+    # COUNTED on both arms, because a selection that matched nothing would make
+    # the case pass over an empty template — and the counts differ from the
+    # starter's, so a `templateFor` serving the wrong project fails here too.
+    var modules = 0
+    var manifests = 0
+    for file in tmpl.files:
+      if not file.path.endsWith(".nr"):
+        # `Nargo.toml` and `Prover.toml`: package metadata, not crate sources.
+        check not file.path.contains("/")
+        inc manifests
+        continue
+      check file.path[0 ..< 4] == "src/"
+      if file.path == "src/main.nr": continue
+      let module = file.path[4 ..< file.path.len - 3]
+      check ("mod " & module & ";") in root
+      inc modules
+    check modules == 5
+    check manifests == 2
+
+  test "every template declares what its circuit costs, and the two disagree":
+    ## The half-wiring one layer along from rule 0's: a template nobody
+    ## measured makes the Constraints pane open and say nothing, which reads as
+    ## a pane that is still loading.
+    ##
+    ## THE SECOND HALF IS THE LOAD-BEARING ONE. Before the counts travelled
+    ## with the sources, `installTemplatePaneHost` sent the hello-world's
+    ## numbers unconditionally — 17 ACIR opcodes over a circuit with hundreds,
+    ## under a provenance string promising the figure was measured. A wrong
+    ## measurement presented as a measurement is worse than an absent one, and
+    ## it is indistinguishable from correct until a second template exists. So
+    ## the two are asserted to be about their own packages by name.
+    check templatesWithoutConstraintCounts().len == 0
+    # NON-VACUITY: the check above is also true of a product with no templates.
+    check templateFor("noir", efDemo).nargoInfoJson.len > 0
+    check templateFor("noir", efBare).nargoInfoJson.len > 0
+    check "oracle_settlement" in templateFor("noir", efDemo).nargoInfoJson
+    check "hello_noir" in templateFor("noir", efBare).nargoInfoJson
+    check templateFor("noir", efDemo).nargoInfoJson !=
+      templateFor("noir", efBare).nargoInfoJson
+    # And each names the compiler that answered, because the two figures come
+    # from different engines and a visitor comparing the panes must be able to
+    # see that.
+    check templateFor("noir", efDemo).constraintProvenance.len > 0
+    check templateFor("noir", efBare).constraintProvenance.len > 0
 
 suite "the rewrite target a static host is actually given":
   test "no rewrite targets a path the host normalises into a redirect":
@@ -1775,8 +1975,8 @@ suite "a host can be the language entry point":
     # that selected the template, so the host changes one string and no branch.
     check resolveEntry(EntryRequest(path: "/"), LocalState(),
                        hostLanguage = noirHost).verdict == evTemplate
-    check templateFor(classifyPath("/", noirHost).language).hasFiles
-    check not templateFor(classifyPath("/", neutral).language).hasFiles
+    check templateFor(classifyPath("/", noirHost).language, efBare).hasFiles
+    check not templateFor(classifyPath("/", neutral).language, efBare).hasFiles
 
   test "/noir keeps working on the language host rather than 404ing":
     ## Decided rather than fallen into. `/noir` is a SPELLING of an entry point
@@ -1877,7 +2077,8 @@ suite "which hosts are language entry points is deployment configuration":
     check parsed.languageOrigins.len == 1
     check parsed.languageOrigins[0].origin == "https://y.test"
     check languageForOrigin(parsed, "https://x.test") == ""
-    check templateFor(languageForOrigin(parsed, "https://y.test")).hasFiles
+    check templateFor(languageForOrigin(parsed, "https://y.test"),
+                      efBare).hasFiles
 
   test "the rewrite table covers the language host's clean-start address":
     ## `/new` is reachable only on a language host, but there is ONE rewrite
