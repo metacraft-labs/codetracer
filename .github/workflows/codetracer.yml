@@ -2451,7 +2451,7 @@ jobs:
     # outage cannot turn PR runs red. This job is NOT in push-tag's `needs`, so
     # while GARM is down it can hang/fail without ever blocking a release —
     # create-release simply skips the (absent) win artifact (see below).
-    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    runs-on: eph-win-x64-release  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64-release (dedicated release scale set)
     if: ${{ github.ref == 'refs/heads/main' }}
     steps:
       # See the eph-win-x64 note at the top of this file: actions/checkout needs
