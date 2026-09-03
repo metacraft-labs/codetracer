@@ -401,9 +401,19 @@ proc renderMenuShell*(
 #   discarded press — the control is painted, hit-testable and dead.
 #
 # The fix is structural: the shell is rebuilt AROUND the existing host rather
-# than over it.  The host is detached before the clear, and swapped back in
-# place of the fresh placeholder the view emits, so its node identity — and
-# with it every button the toolbar mounted inside — survives a rebuild.
+# than over it.  Everything else in the caption bar is removed, the host stays
+# exactly where it is, and the new siblings are inserted before and after it —
+# so its node identity, and every button the toolbar mounted inside it,
+# survives a rebuild.
+#
+# A DETACH THAT IS IMMEDIATELY UNDONE IS NOT GOOD ENOUGH, and that is a
+# measurement rather than a precaution.  The first version of this preserved
+# the node but took it out of the container while the shell was rebuilt and put
+# it back after; in a browser, `mousedown` and `mouseup` then BOTH landed on
+# `#next-image` — the same node, tags intact all the way up the ancestor chain
+# — and the browser still produced no `click`.  Removing an element from the
+# document cancels the click sequence its press had started, whether or not the
+# element comes back.  So the host is never removed at all.
 #
 # NOT a synthetic re-dispatch of the lost click.  Node identity is the actual
 # problem; re-dispatching would paper over the one gesture a test happens to
@@ -431,12 +441,11 @@ proc menuShellFindChild(r: MockRenderer; parent: MockNode; id: string): MockNode
 
 proc menuShellIsNilNode(node: MockNode): bool = node.isNil
 
-proc menuShellDetach(r: MockRenderer; parent, child: MockNode) =
-  r.removeChild(parent, child)
-
-proc menuShellSwap(r: MockRenderer; parent, incoming, outgoing: MockNode) =
-  r.insertBefore(parent, incoming, outgoing)
-  r.removeChild(parent, outgoing)
+proc menuShellClearExcept(r: MockRenderer; container, keep: MockNode) =
+  let existing = container.children
+  for child in existing:
+    if child != keep:
+      r.removeChild(container, child)
 
 proc menuShellMoveChildren(r: MockRenderer; destination, source: MockNode) =
   ## Over a COPY of the child list: `appendChild` detaches first, so iterating
@@ -444,6 +453,21 @@ proc menuShellMoveChildren(r: MockRenderer; destination, source: MockNode) =
   let moving = source.children
   for child in moving:
     r.appendChild(destination, child)
+
+proc menuShellMoveChildrenAround(
+    r: MockRenderer; destination, source, anchor: MockNode) =
+  var seenPlaceholder = false
+  let moving = source.children
+  for child in moving:
+    if child.kind == mnkElement and
+        child.attributes.getOrDefault("id", "") == DebugControlsHostId:
+      seenPlaceholder = true
+      r.removeChild(source, child)
+      continue
+    if seenPlaceholder:
+      r.appendChild(destination, child)
+    else:
+      r.insertBefore(destination, child, anchor)
 
 when defined(js):
   proc renderMenuShell*(
@@ -470,16 +494,25 @@ when defined(js):
   proc menuShellIsNilNode(node: isonim_dom.Element): bool =
     isonim_dom.isNodeNil(isonim_dom.Node(node))
 
-  proc menuShellDetach(r: WebRenderer; parent, child: isonim_dom.Element) =
-    discard isonim_dom.removeChild(
-      isonim_dom.Node(parent), isonim_dom.Node(child))
+  proc menuShellSameNode(a, b: isonim_dom.Node): bool {.importjs: "(# === #)".}
 
-  proc menuShellSwap(r: WebRenderer;
-                     parent, incoming, outgoing: isonim_dom.Element) =
-    discard isonim_dom.replaceChild(
-      isonim_dom.Node(parent),
-      isonim_dom.Node(incoming),
-      isonim_dom.Node(outgoing))
+  proc menuShellIsHostPlaceholder(node: isonim_dom.Node): bool =
+    if node.nodeType != 1:
+      return false
+    let raw = isonim_dom.getAttribute(
+      cast[isonim_dom.Element](node), cstring"id")
+    not raw.isNil and $raw == DebugControlsHostId
+
+  proc menuShellClearExcept(r: WebRenderer;
+                            container, keep: isonim_dom.Element) =
+    let containerNode = isonim_dom.Node(container)
+    let keepNode = isonim_dom.Node(keep)
+    var child = containerNode.firstChild
+    while not isonim_dom.isNodeNil(child):
+      let next = child.nextSibling
+      if not menuShellSameNode(child, keepNode):
+        discard isonim_dom.removeChild(containerNode, child)
+      child = next
 
   proc menuShellMoveChildren(r: WebRenderer;
                              destination, source: isonim_dom.Element) =
@@ -487,6 +520,23 @@ when defined(js):
     let sourceNode = isonim_dom.Node(source)
     while not isonim_dom.isNodeNil(sourceNode.firstChild):
       discard isonim_dom.appendChild(destinationNode, sourceNode.firstChild)
+
+  proc menuShellMoveChildrenAround(
+      r: WebRenderer; destination, source, anchor: isonim_dom.Element) =
+    let destinationNode = isonim_dom.Node(destination)
+    let sourceNode = isonim_dom.Node(source)
+    let anchorNode = isonim_dom.Node(anchor)
+    var seenPlaceholder = false
+    while not isonim_dom.isNodeNil(sourceNode.firstChild):
+      let child = sourceNode.firstChild
+      if menuShellIsHostPlaceholder(child):
+        seenPlaceholder = true
+        discard isonim_dom.removeChild(sourceNode, child)
+        continue
+      if seenPlaceholder:
+        discard isonim_dom.appendChild(destinationNode, child)
+      else:
+        discard isonim_dom.insertBefore(destinationNode, child, anchorNode)
 
 # BELOW THE BACKEND HELPERS ON PURPOSE. A template binds the overloads it can
 # already see at its definition site, so a template declared above the
@@ -499,21 +549,23 @@ template renderMenuShellIntoImpl(
     callbacks: MenuShellCallbacks): untyped =
   let preservedHost = menuShellFindChild(r, container, DebugControlsHostId)
   let hasPreserved = not menuShellIsNilNode(preservedHost)
+  # NB: only the shell's *children* reach the caller's host; the wrapper the
+  # render produced is discarded.  A class set on it never reaches the
+  # document, so the caption-bar host classes are owned by `ui/menu.nim`
+  # instead — it also has to track fullscreen, which no render pass knows
+  # about.
   if hasPreserved:
-    # Out of the host BEFORE the clear, or the clear takes it with everything
-    # else.
-    menuShellDetach(r, container, preservedHost)
-  r.clearChildren(container)
-  let shell = renderMenuShell(r, model, callbacks)
-  if hasPreserved:
-    let placeholder = menuShellFindChild(r, shell, DebugControlsHostId)
-    if not menuShellIsNilNode(placeholder):
-      menuShellSwap(r, shell, preservedHost, placeholder)
-  # NB: only the shell's *children* are moved into the caller's host; this
-  # wrapper is discarded.  A class set on it never reaches the document, so
-  # the caption-bar host classes are owned by `ui/menu.nim` instead — it also
-  # has to track fullscreen, which no render pass knows about.
-  menuShellMoveChildren(r, container, shell)
+    # THE HOST NEVER LEAVES THE DOCUMENT. Everything around it is removed and
+    # the new siblings are inserted before and after it, rather than the host
+    # being detached and put back — see the header for why a detach that is
+    # immediately undone is still enough to lose a press.
+    menuShellClearExcept(r, container, preservedHost)
+    let shell = renderMenuShell(r, model, callbacks)
+    menuShellMoveChildrenAround(r, container, shell, preservedHost)
+  else:
+    r.clearChildren(container)
+    let shell = renderMenuShell(r, model, callbacks)
+    menuShellMoveChildren(r, container, shell)
 
 proc renderMenuShellInto*(
     r: MockRenderer;

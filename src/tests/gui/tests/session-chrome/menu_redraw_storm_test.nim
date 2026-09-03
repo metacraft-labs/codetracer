@@ -114,12 +114,16 @@ type
     controlsMounted: bool     ## `ui/debug.nim`'s `isoNimDebugMounted`
     useGate: bool             ## false reproduces the pre-#555 behaviour
     preserveHost: bool        ## false reproduces the pre-fix `renderMenuShellInto`
+    detachAndRestore: bool    ## reproduces the FIRST attempt at preserving the
+                              ## host: same node, but taken out of the container
+                              ## while the shell is rebuilt and put back after
     owner: string             ## stands in for the per-session `MenuComponent`
     shellRenders: int
     controlMounts: int
     redraws: int
 
-proc newMenuChromeSim(useGate = true; preserveHost = true): MenuChromeSim =
+proc newMenuChromeSim(useGate = true; preserveHost = true;
+                      detachAndRestore = false): MenuChromeSim =
   let r = MockRenderer()
   let host = r.createElement("div")
   r.setAttribute(host, "id", "menu")
@@ -127,7 +131,8 @@ proc newMenuChromeSim(useGate = true; preserveHost = true): MenuChromeSim =
     gate: MenuRenderGate(),
     shell: host,
     useGate: useGate,
-    preserveHost: preserveHost,
+    preserveHost: preserveHost and not detachAndRestore,
+    detachAndRestore: detachAndRestore,
     owner: "session-0")
 
 proc hostIntact(sim: MenuChromeSim): bool =
@@ -165,6 +170,25 @@ proc redraw(sim: MenuChromeSim; model: MenuShellModel;
     let r = MockRenderer()
     if sim.preserveHost:
       renderMenuShellInto(r, sim.shell, model)
+    elif sim.detachAndRestore:
+      # THE FIRST ATTEMPT AT THE FIX, kept because it is the arm for "never
+      # detached": the same node is carried across, but it is taken OUT of the
+      # container while the shell is rebuilt and swapped back in afterwards.
+      # In a browser that still lost the press — `mousedown` and `mouseup`
+      # landed on the same button and no `click` followed, because removing an
+      # element from the document cancels the click sequence its press started.
+      let carried = findById(sim.shell, "isonim-debug-controls")
+      if not carried.isNil:
+        r.removeChild(sim.shell, carried)
+      r.clearChildren(sim.shell)
+      let fresh = renderMenuShell(r, model)
+      let moving = fresh.children
+      for child in moving:
+        if not carried.isNil and
+            child.attributes.getOrDefault("id", "") == "isonim-debug-controls":
+          r.appendChild(sim.shell, carried)
+        else:
+          r.appendChild(sim.shell, child)
     else:
       # THE PRE-FIX REBUILD, kept so the arms below can still observe the
       # storm: clear the host and re-create the whole subtree, which is what
@@ -364,6 +388,44 @@ suite "a menu-shell rebuild must not replace the topbar host":
     check not after.isNil
     check after.id != host.id             # a different node: the gesture is lost
     check sim.controlMounts == 2
+
+  test "the host is never detached, not even for an instant":
+    # WHY THIS IS A SEPARATE TEST FROM IDENTITY. Preserving the node is not
+    # enough: measured in a browser, a host that was removed from the container
+    # and put back still lost the press — `mousedown` and `mouseup` landed on
+    # the SAME button, tags intact all the way up the chain, and the browser
+    # produced no `click`, because removing an element from the document
+    # cancels the click sequence its press had started.
+    #
+    # `MockRenderer` gives a way to see that headlessly: `focus` records an
+    # active element and `removeChild` clears it when the focused node is
+    # detached. So focusing the host and finding it still focused after a
+    # rebuild is exactly "it was never removed".
+    let sim = newMenuChromeSim()
+    sim.redraw(traceMenuModel("hello"))
+    let host = sim.controlsHost
+    let r = MockRenderer()
+    r.focus(host)
+    check r.activeElement == host
+
+    sim.redraw(traceMenuModel("hello", launchConfigs = 1))
+    check sim.shellRenders == 2
+    check r.activeElement == host
+
+  test "carrying the node across but detaching it — the arm for the check above":
+    let sim = newMenuChromeSim(detachAndRestore = true)
+    sim.redraw(traceMenuModel("hello"))
+    let host = sim.controlsHost
+    let r = MockRenderer()
+    r.focus(host)
+    check r.activeElement == host
+
+    sim.redraw(traceMenuModel("hello", launchConfigs = 1))
+    check sim.shellRenders == 2
+    # The SAME node is back in the tree — identity is preserved — and it was
+    # still detached on the way, which is the part that costs the press.
+    check sim.controlsHost.id == host.id
+    check r.activeElement != host
 
   test "the host keeps its place among the shell's children":
     # Swapped back in, not appended: the caption bar's order is `#menu`'s

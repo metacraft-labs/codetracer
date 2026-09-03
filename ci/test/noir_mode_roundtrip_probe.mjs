@@ -293,10 +293,11 @@ async function hitTestedClick(page, selector, what) {
 // gesture was hit-tested against exactly where it was.
 //
 // THE UNDERLYING PRODUCT DEFECT IS NOT FIXED BY THIS and is not this file's to
-// fix: a user who clicks the menu bar and then presses Run gets nothing,
-// because the topbar host is re-created by every menu-shell rebuild. What this
-// change buys is that the gate measures the product instead of measuring its
-// own blur.
+// fix. It is fixed in the product — `renderMenuShellInto` now rebuilds the
+// shell AROUND the topbar host instead of over it — and it is asserted by
+// `menuGestureLeg` below, which makes exactly this gesture on purpose and
+// then presses a debugger control. What the JS blur buys is that every OTHER
+// leg here measures the product instead of measuring its own blur.
 async function blurEditor(page) {
   try {
     await page.evaluate(() => {
@@ -310,6 +311,105 @@ async function blurEditor(page) {
       }
     });
   } catch (e) { /* a page that cannot be evaluated shows up in the snapshots */ }
+}
+
+// Poll for a DOM fact rather than sleeping for a duration.
+//
+// `budgetMs` is an upper bound on WAITING, not a claim about how long the
+// product may take: the answer is read again after every poll and returned as
+// soon as it is what was asked for. A fixed sleep in its place is the defect
+// class that passes on a fast machine and reports a healthy product as broken
+// on a loaded runner.
+async function waitForElement(page, id, wanted, budgetMs) {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    let present = false;
+    try {
+      present = await page.evaluate((elementId) => !!document.getElementById(elementId), id);
+    } catch (e) { /* a page mid-navigation answers on the next poll */ }
+    if (present === wanted) return true;
+    if (Date.now() >= deadline) return false;
+    await page.waitForTimeout(50);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// THE MENU GESTURE — the press a menu interaction used to swallow
+// ---------------------------------------------------------------------------
+//
+// `#isonim-debug-controls` is a CHILD of `#menu`, and a menu-shell rebuild
+// re-created that host. A pointer press is `mousedown` then `mouseup`, and per
+// the DOM spec the browser fires a `click` ONLY when both landed on the same
+// node — so a rebuild between them produced NO click event at all, and the
+// press was silently discarded. Every control in the toolbar was affected:
+// Run, Step, Stop.
+//
+// THE GESTURE HAS TO CAUSE A REBUILD, or it asserts nothing. `ui/menu.nim`'s
+// render gate (issue #555) skips a rebuild whose signature has not changed, so
+// merely clicking the caption bar's background is a no-op and a check written
+// over it PASSES ON THE UNFIXED PRODUCT — measured, against a bundle built from
+// `cloud`: all three of these checks were green there when the gesture was a
+// bare background click.
+//
+// Opening the menu changes `MenuShellModel.active`, which IS in the signature,
+// so the shell is genuinely rebuilt. And the press that follows is the sharpest
+// case there is: `ui/menu.nim`'s dismiss handler runs on `mousedown` in the
+// CAPTURE phase, so it rebuilds the shell BETWEEN the `mousedown` and the
+// `mouseup` of the very press the user is making.
+//
+// TWO FACTS, RECORDED SEPARATELY, because they fail for different reasons.
+// `survived` is about the NODES — tags written onto the topbar host and one of
+// its buttons before the gesture and read back after it, so "the same node" is
+// a property of the node and not of the markup it happens to produce again.
+// `control` is the user-visible consequence, asserted through
+// `clickEventFired` and not through `clicked`, which only ever meant
+// `page.mouse.click` did not throw.
+async function menuGestureLeg(page, prefix, who) {
+  const leg = { leg: `${prefix}-menu-gesture` };
+
+  leg.tagged = await page.evaluate(() => {
+    const host = document.getElementById('isonim-debug-controls');
+    if (!host) return { ok: false, why: 'no #isonim-debug-controls' };
+    host.__ctHostTag = 'ct-host';
+    const button = host.querySelector('button');
+    if (!button) return { ok: false, why: 'the topbar carries no button' };
+    button.__ctButtonTag = 'ct-button';
+    return { ok: true, buttons: host.querySelectorAll('button').length };
+  });
+
+  // Open the menu, by its own button, at a hit-tested point.
+  leg.open = await hitTestedClick(page, '#menu-root', `${who}: open the menu`);
+  // WAIT ON THE EVENT, NOT ON A CLOCK. `#menu-main` is emitted only while
+  // `MenuShellModel.active` is true, so its appearance IS the shell having
+  // been re-rendered with a different signature. A fixed sleep here would
+  // pass on a fast machine and report a product defect on a loaded runner.
+  leg.menuOpen = await waitForElement(page, 'menu-main', true, 5000);
+
+  leg.survived = await page.evaluate(() => {
+    const host = document.getElementById('isonim-debug-controls');
+    const button = host && host.querySelector('button');
+    return {
+      hostPresent: !!host,
+      host: !!(host && host.__ctHostTag === 'ct-host'),
+      button: !!(button && button.__ctButtonTag === 'ct-button'),
+      buttons: host ? host.querySelectorAll('button').length : 0,
+    };
+  });
+
+  // The press. Its own `mousedown` dismisses the open menu, so the shell is
+  // rebuilt in the middle of it — which is the case that produced no `click`.
+  leg.control = await hitTestedClick(
+    page, '#next-image', `${who}: a debugger control pressed with the menu open`);
+  // The press dismisses the menu; wait for THAT rather than for a duration.
+  leg.menuDismissed = await waitForElement(page, 'menu-main', false, 5000);
+  // Leave the menu closed whatever happened, so no later leg inherits it.
+  leg.menuStillOpen = await page.evaluate(() => {
+    const main = document.getElementById('menu-main');
+    if (!main) return false;
+    document.body.click();
+    return true;
+  });
+  report.legs.push(leg);
 }
 
 // Wait for a snapshot predicate rather than a fixed sleep, and report how
@@ -395,7 +495,7 @@ try {
   // an arm that can be green (or red) for a reason the control never sees.
   // `prefix` names the legs; `stepCount` is 0 for the arm, whose subject is
   // the return and not the stepping.
-  async function roundTrip(prefix, who, stepCount) {
+  async function roundTrip(prefix, who, stepCount, menuGesture = false) {
     // -----------------------------------------------------------------
     // EDIT -> REPLAY, by the Run button on the edit toolbar.
     // -----------------------------------------------------------------
@@ -412,6 +512,12 @@ try {
     report.legs.push({ leg: `${prefix}-run-wait`, ...arrived });
     await page.waitForTimeout(1500);
     await snapshot(page, `${prefix}-replay`);
+
+    // The menu-bar gesture, driven here because this is where the debugger
+    // controls exist and pressing one is harmless — a step in a replay.
+    if (menuGesture) {
+      await menuGestureLeg(page, prefix, who);
+    }
 
     // Step, so the session is demonstrably live rather than merely painted.
     if (stepCount > 0) {
@@ -466,7 +572,10 @@ try {
   }
 
   for (let trip = 1; trip <= trips; trip += 1) {
-    await roundTrip(`trip-${trip}`, `trip ${trip}`, steps);
+    // The menu-bar gesture is driven ONCE, on the first trip: its subject is a
+    // structural property of the topbar host, not something that could hold on
+    // one trip and fail on the next.
+    await roundTrip(`trip-${trip}`, `trip ${trip}`, steps, trip === 1);
     const txt = await modelText(page, marker);
     report.markerPresentPerLeg.push({ trip, present: txt.includes(marker), chars: txt.length });
   }

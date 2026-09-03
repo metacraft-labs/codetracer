@@ -40,6 +40,14 @@
 # sibling gate drives, and why the defect survived it.  This gate presses the
 # control a user can SEE.
 #
+# WHY IT ALSO OPENS THE MENU ONCE.  `#isonim-debug-controls` is a CHILD of
+# `#menu`, and a menu-shell rebuild used to re-create it — so a press whose
+# `mousedown` and `mouseup` straddled a rebuild landed on different nodes and
+# the browser produced no `click` at all.  Every other leg here avoids touching
+# the menu (the blur is done in JS for exactly this reason), so one leg opens it
+# deliberately and then presses a debugger control, whose own `mousedown`
+# dismisses the menu and rebuilds the shell mid-press.
+#
 # WHY THREE ROUND TRIPS.  `Mode-Transitions.md` §6: "Edit -> Debug -> Edit ->
 # Debug -> ... is unbounded, and the nth transition behaves exactly as the
 # first", and "the check needs at least three, because the failure mode is a
@@ -478,6 +486,46 @@ while [ "${trip}" -le "${trips}" ]; do
 	trip=$((trip + 1))
 done
 
+# ---------------------------------------------------------------------------
+# THE MENU-BAR GESTURE — a press after touching the caption bar
+#
+# `#isonim-debug-controls` is a CHILD of `#menu`, and a menu-shell rebuild used
+# to re-create that host. The browser fires a `click` only when `mousedown` and
+# `mouseup` land on the SAME node, so a rebuild between them produced no click
+# at all and the press was silently discarded — every control in the toolbar,
+# not only the one a test happens to drive.
+#
+# This is the one gesture the rest of this gate deliberately does NOT make:
+# `blurEditor` used to click `#menu` and destroyed the very press it was
+# clearing the way for, which is why it blurs through JS now. So the defect is
+# asserted here, on purpose, in the one place that presses a control
+# immediately after touching the bar.
+# ---------------------------------------------------------------------------
+echo
+echo "THE MENU GESTURE — a debugger control pressed while the menu is open"
+g_tagged="$(leg "${control}" 'trip-1-menu-gesture' '.tagged.ok')"
+g_opened="$(leg "${control}" 'trip-1-menu-gesture' '(.open.clicked and .open.clickEventFired)')"
+g_menu="$(leg "${control}" 'trip-1-menu-gesture' '.menuOpen')"
+g_host="$(leg "${control}" 'trip-1-menu-gesture' '.survived.host')"
+g_button="$(leg "${control}" 'trip-1-menu-gesture' '.survived.button')"
+g_buttons="$(num "$(leg "${control}" 'trip-1-menu-gesture' '.survived.buttons')")"
+g_press="$(leg "${control}" 'trip-1-menu-gesture' '(.control.clicked and .control.clickEventFired)')"
+note "topbar host node survived=${g_host}, its button survived=${g_button}, buttons now=${g_buttons}"
+
+# THE REBUILD FIRST. Without it, "the host survived" is satisfied by a run in
+# which the shell was never rebuilt — and that is not hypothetical: the render
+# gate skips a rebuild whose signature has not changed, so a bare click on the
+# caption bar's background asserts nothing at all. Measured against a bundle
+# built from `cloud`, with that weaker gesture: all three of these checks were
+# green on the product that has the defect.
+ck "$([ "${g_tagged}" = true ] && [ "${g_opened}" = true ] && [ "${g_menu}" = true ] &&
+	echo ok || echo no)" \
+	"the menu was opened by its own button and is on screen (tagged=${g_tagged} press=${g_opened} open=${g_menu}) — the shell really was rebuilt"
+ck "$([ "${g_host}" = true ] && [ "${g_button}" = true ] && echo ok || echo no)" \
+	"and the topbar host and its buttons are the SAME DOM nodes afterwards — the shell was rebuilt around them, not over them"
+ck "$([ "${g_press}" = true ] && echo ok || echo no)" \
+	"and a debugger control pressed with the menu open produced a click event — the dismiss rebuild did not eat the press"
+
 echo
 errors="$(field "${control}" '.pageErrors | length')"
 if [ "${errors}" -ne 0 ]; then
@@ -523,7 +571,7 @@ echo
 echo "MUTATION ARM — a Stop that does nothing, which is what shipped"
 echo "    Reddens the RETURN assertions and only those. 'Pressing Stop moved"
 echo "    the mode' is a claim about a product that could fail to, and until"
-echo "    this campaign it did: renderer.stopAction was \`discard\`."
+echo "    this campaign it did: renderer.stopAction was a bare discard."
 
 arm_installed="$(field "${control}" '.armInstalled')"
 arm_swallowed="$(num "$(field "${control}" '.armSwallowedClicks')")"
@@ -553,8 +601,8 @@ ck "$([ "${a_back}" = false ] && echo ok || echo no)" \
 # ---------------------------------------------------------------------------
 echo
 echo "${checks} check(s), ${failures} failure(s)"
-# 8 baseline + 14 per trip + 1 page-errors + 4 arm
-expect_count $((8 + 14 * trips + 1 + 4))
+# 8 baseline + 14 per trip + 3 menu-bar gesture + 1 page-errors + 4 arm
+expect_count $((8 + 14 * trips + 3 + 1 + 4))
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — Run enters the debugger, Stop comes back, ${trips} times, and the edit survives"
 	exit 0
