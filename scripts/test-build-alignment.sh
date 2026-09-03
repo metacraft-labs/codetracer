@@ -142,6 +142,41 @@ echo "runquotad listening"
 exec sleep 60
 EOF
 	chmod +x "$sandbox/bin/runquotad"
+
+	# `repro watch` BLOCKS in production -- it is the incremental rebuilder
+	# that keeps a dev session alive, and build.sh's repro branch calls it as
+	# its final act specifically so the script does not exit. The plain
+	# recording stub returns instantly, which no real `repro watch` ever does,
+	# and that unfaithfulness is what broke check (F).
+	#
+	# build.sh backgrounds webpack and then livereload (scripts/build.sh:234
+	# and :239) and, on the repro branch only, then runs build-once.sh and
+	# exits -- the tup branch ends in `wait`, which is why it was never
+	# affected. On exit the EXIT trap kills the watcher pids. With `repro
+	# watch` returning immediately there is almost no window for those two
+	# backgrounded stubs to be scheduled, so they were killed before they could
+	# append their record.
+	#
+	# MEASURED on the macOS CI runner, which is where this failed: the trace
+	# showed `webpack` recorded but arriving LATE -- after the second
+	# build-once.sh's runquotad, not next to its own invocation -- and
+	# `livereload`, started microseconds later, never landing at all. Both
+	# watchers were racing the exit; the first won and the second lost, in all
+	# three repro scenarios and neither tup scenario. It passes on an idle
+	# developer machine, which is why "no livereload record" looked like a
+	# missing call rather than a lost one.
+	#
+	# Blocking here restores the production shape and closes the window. Keep
+	# it well under run_script's `timeout 120`.
+	cat >"$sandbox/bin/repro" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\t%s\t%s\n' 'repro' "$PWD" "$*" >>"$CT_ALIGN_TRACE"
+if [ "${1:-}" = "watch" ]; then
+	sleep 3
+fi
+exit 0
+EOF
+	chmod +x "$sandbox/bin/repro"
 }
 
 # Environment variables that leak in from the developer's dev shell and would
