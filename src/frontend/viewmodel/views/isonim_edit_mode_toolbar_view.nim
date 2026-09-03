@@ -71,6 +71,8 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/edit_mode_toolbar
+import ./edit_toolbar_marks
+export edit_toolbar_marks
 
 const
   EditToolbarSurfaceAttr* = "data-topbar-surface"
@@ -112,6 +114,31 @@ proc invoker(invoke: proc(id: string); id: string): proc() =
   ## invocations with the wrong ids in them.
   result = proc() = invoke(id)
 
+func editButtonClass*(buttonId: string): string =
+  ## Which button variant this id is drawn as.
+  ##
+  ## The distinction is NOT cosmetic and the two spellings are not
+  ## interchangeable. `[class*="ct-button-image-"]` is what carries
+  ## `background-position`, `background-size`, `background-repeat` and the
+  ## centring that an icon button needs; `[class*="ct-button-text-md-"]` is
+  ## what carries the padding a label needs. A button that takes the wrong one
+  ## does not merely look off — a text button with the image rules is how
+  ## `#run-tests-image` came to tile a 21x16 asset across the words "Run
+  ## Tests" on the shipped bar.
+  ##
+  ## Keyed on whether a mark EXISTS for the id, so the class and the glyph can
+  ## never disagree: adding a mark to `EditToolbarMarks` is the single edit
+  ## that turns a button into an icon button.
+  ##
+  ## Exported so a test can ask the same question the view asks rather than
+  ## hard-coding the answer — the class the view emits and the class the
+  ## stylesheet selects drifting apart is the defect this whole surface
+  ## already shipped once.
+  if hasEditMark(buttonId):
+    "ct-button-image-md-secondary edit-toolbar-button"
+  else:
+    "ct-button-text-md-secondary edit-toolbar-button"
+
 proc buttonTitle*(candidate: ToolbarButton): string =
   ## What the pointer reveals. A DISABLED button must say why it is off — its
   ## `reason` is never empty when `not enabled` (EMT-D14/EMT-A28) — and an
@@ -132,6 +159,12 @@ proc renderEditModeToolbarPanel*(r: MockRenderer;
   ## Structure:
   ##   div.edit-mode-toolbar[data-topbar-surface=edit-commands]
   ##     button#<id>.edit-toolbar-button[disabled when not enabled]  <label>
+  ##
+  ## A button that carries a mark has NO label child here either. The mock is a
+  ## structural double for the shipped panel, so a label it renders and the web
+  ## panel does not is a structure the tests would be asserting and the product
+  ## would not have. The glyph itself is a DOM operation and stays out of the
+  ## mock; what both share is which buttons are icons and which carry text.
   let buttons = model.visibleButtons
 
   ui(r):
@@ -150,11 +183,13 @@ proc renderEditModeToolbarPanel*(r: MockRenderer;
         if candidate.enabled:
           button(class = "edit-toolbar-button", id = id, title = title,
                  onclick = invoker(invoke, id)):
-            text label
+            if not hasEditMark(id):
+              text label
         else:
           button(class = "edit-toolbar-button", id = id, title = title,
                  disabled = "true"):
-            text label
+            if not hasEditMark(id):
+              text label
 
 # ---------------------------------------------------------------------------
 # WebRenderer panel — the shipped one
@@ -172,7 +207,7 @@ when defined(js):
     ## different-shaped bar.
     let buttons = model.visibleButtons
 
-    ui(r):
+    let panel = ui(r):
       tdiv(class = "ct-header edit-mode-toolbar",
            `data-topbar-surface` = EditToolbarSurfaceValue,
            `data-button-count` = $buttons.len):
@@ -182,18 +217,28 @@ when defined(js):
           let id = candidate.id
           let label = candidate.label
           let title = candidate.buttonTitle
+          let cls = editButtonClass(id)
           if candidate.enabled:
-            button(id = id,
-                   class = "ct-button-text-md-secondary edit-toolbar-button",
-                   title = title,
+            button(id = id, class = cls, title = title,
                    onclick = invoker(invoke, id)):
-              text label
+              if not hasEditMark(id):
+                text label
           else:
-            button(id = id,
-                   class = "ct-button-text-md-secondary edit-toolbar-button",
-                   title = title,
-                   disabled = "true"):
-              text label
+            button(id = id, class = cls, title = title, disabled = "true"):
+              if not hasEditMark(id):
+                text label
+
+    # The marks, attached from the `EditToolbarMarks` table rather than written
+    # into the button calls above — the same arrangement `attachControlMarks`
+    # uses on the debugger strip, and for the same reason: the `ui()` block is
+    # the one place this bar's structure is readable at a glance.
+    #
+    # A short count logs itself in `attachEditToolbarMarks`: a bar whose marks
+    # failed to attach still renders its buttons and they still click, so
+    # nothing else would notice.
+    discard attachEditToolbarMarks(panel)
+
+    panel
 
   proc mountIsoNimEditModeToolbar*(container: isonim_dom.Element;
                                    model: EditToolbarModel;

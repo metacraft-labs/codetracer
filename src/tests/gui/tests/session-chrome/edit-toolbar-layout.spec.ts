@@ -99,26 +99,56 @@ function resolveThemeCss(file: string): string {
   );
 }
 
+const EDIT_MARKS_SRC = path.join(
+  REPO_ROOT,
+  "src/frontend/viewmodel/views/edit_toolbar_marks.nim",
+);
+
 /**
- * The class string the shipped panel puts on its buttons, read from the view.
+ * The two class strings `editButtonClass` hands out, read from the view.
  *
- * Deliberately parsed rather than transcribed — see the header. If the view
- * stops emitting a single consistent class this throws instead of quietly
- * measuring markup that no longer exists.
+ * Deliberately parsed rather than transcribed — see the header. Build and Run
+ * are icon buttons and the other two are text buttons, and which rules each
+ * one picks up follows entirely from that string, so a spec carrying its own
+ * copy would keep asserting against the old spelling after the view moved on.
  */
-function buttonClassFromView(): string {
+function buttonClassesFromView(): { icon: string; text: string } {
   const src = fs.readFileSync(EDIT_VIEW_SRC, "utf8");
-  const matches = [...src.matchAll(/class = "([^"]*edit-toolbar-button)"/g)].map(
-    (m) => m[1],
-  );
-  const webVariants = [...new Set(matches.filter((c) => c.includes("ct-button")))];
-  if (webVariants.length !== 1) {
+  const body = src.slice(src.indexOf("func editButtonClass*"));
+  const found = [...body.matchAll(/"((?:ct-button-[a-z-]+)\s+edit-toolbar-button)"/g)]
+    .map((m) => m[1]);
+  const icon = found.find((c) => c.includes("ct-button-image-"));
+  const text = found.find((c) => c.includes("ct-button-text-"));
+  if (!icon || !text) {
     throw new Error(
-      `Expected exactly one web button class in ${path.basename(EDIT_VIEW_SRC)}, ` +
-        `found ${JSON.stringify(webVariants)}. Update this spec deliberately.`,
+      `Could not read both button classes from editButtonClass in ` +
+        `${path.basename(EDIT_VIEW_SRC)}; found ${JSON.stringify(found)}.`,
     );
   }
-  return webVariants[0];
+  return { icon, text };
+}
+
+/** The mark's class, read from the marks module. */
+function markClassFromSource(): string {
+  const src = fs.readFileSync(EDIT_MARKS_SRC, "utf8");
+  const m = src.match(/EditMarkClass\*\s*=\s*"([^"]+)"/);
+  if (!m) throw new Error("EditMarkClass not found in edit_toolbar_marks.nim");
+  return m[1];
+}
+
+/** Which button ids carry a mark, read from the `EditToolbarMarks` table. */
+function markedIdsFromSource(): string[] {
+  const src = fs.readFileSync(EDIT_MARKS_SRC, "utf8");
+  const table = src.slice(src.indexOf("const EditToolbarMarks*"));
+  return [...table.matchAll(/buttonId:\s*"([^"]+)"/g)].map((m) => m[1]);
+}
+
+/** `EditMarkCount`, the literal the marks module states independently. */
+function markCountFromSource(): number {
+  const src = fs.readFileSync(EDIT_MARKS_SRC, "utf8");
+  const m = src.match(/EditMarkCount\*\s*=\s*(\d+)/);
+  if (!m) throw new Error("EditMarkCount not found in edit_toolbar_marks.nim");
+  return Number(m[1]);
 }
 
 /** The panel root's class, likewise read from the view. */
@@ -141,7 +171,9 @@ function panelClassFromView(): string {
  * longer has.
  */
 async function measureToolbar(page: any, themeCss: string) {
-  const buttonClass = buttonClassFromView();
+  const { icon: iconClass, text: textClass } = buttonClassesFromView();
+  const markClass = markClassFromSource();
+  const marked = new Set(markedIdsFromSource());
   const panelClass = panelClassFromView();
   const ids = [
     EDIT_TOOLBAR_IDS.build,
@@ -153,12 +185,21 @@ async function measureToolbar(page: any, themeCss: string) {
   // `#menu` and `#isonim-debug-controls` are reproduced because the rules under
   // test are scoped to them; mounting the panel bare would measure a cascade
   // the product never applies.
+  //
+  // A marked button gets an empty `<svg>` carrying the real mark class rather
+  // than the real path data. What is under test here is the CSS box the mark
+  // is given — its size comes from the stylesheet, not from its `d` — and the
+  // artwork's own invariants are asserted separately, from the source, in
+  // `the marks are drawn in the restored family's manner`.
   const buttons = ids
-    .map(
-      (id, i) =>
-        `<button id="${id}" class="${buttonClass}"${i >= 2 ? " disabled" : ""}>` +
-        `${["Build", "Run", "Run Tests", "Record Tests"][i]}</button>`,
-    )
+    .map((id, i) => {
+      const isIcon = marked.has(id);
+      const cls = isIcon ? iconClass : textClass;
+      const inner = isIcon
+        ? `<svg class="${markClass}" viewBox="0 0 16 16"><path d="M0 0h16v16H0Z"/></svg>`
+        : ["Build", "Run", "Run Tests", "Record Tests"][i];
+      return `<button id="${id}" class="${cls}"${i >= 2 ? " disabled" : ""}>${inner}</button>`;
+    })
     .join("");
   await page.setContent(
     `<div id="menu" class="menu">` +
@@ -179,20 +220,32 @@ async function measureToolbar(page: any, themeCss: string) {
     () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
   );
 
-  return await page.evaluate((selectors: string[]) => {
-    const els = selectors.map((s) => document.getElementById(s)!);
-    const rects = els.map((e) => e.getBoundingClientRect());
-    return {
-      count: els.filter(Boolean).length,
-      heights: rects.map((r) => Math.round(r.height)),
-      gaps: rects
-        .slice(1)
-        .map((r, i) => Math.round(r.left - rects[i].right)),
-      backgroundImages: els.map((e) => getComputedStyle(e).backgroundImage),
-      paddings: els.map((e) => getComputedStyle(e).padding),
-      widths: rects.map((r) => r.width),
-    };
-  }, ids);
+  return await page.evaluate(
+    ([selectors, mc]: [string[], string]) => {
+      const els = selectors.map((s) => document.getElementById(s)!);
+      const rects = els.map((e) => e.getBoundingClientRect());
+      return {
+        count: els.filter(Boolean).length,
+        heights: rects.map((r) => Math.round(r.height)),
+        widths: rects.map((r) => r.width),
+        gaps: rects
+          .slice(1)
+          .map((r, i) => Math.round(r.left - rects[i].right)),
+        backgroundImages: els.map((e) => getComputedStyle(e).backgroundImage),
+        backgroundRepeats: els.map((e) => getComputedStyle(e).backgroundRepeat),
+        paddings: els.map((e) => getComputedStyle(e).padding),
+        radii: els.map((e) => getComputedStyle(e).borderRadius),
+        // The mark's PAINTED box, per button — null where there is no mark.
+        marks: els.map((e) => {
+          const m = e.querySelector("." + mc);
+          if (!m) return null;
+          const r = m.getBoundingClientRect();
+          return { w: Math.round(r.width), h: Math.round(r.height) };
+        }),
+      };
+    },
+    [ids, markClass] as [string[], string],
+  );
 }
 
 for (const theme of THEMES) {
@@ -238,19 +291,146 @@ for (const theme of THEMES) {
     page,
   }) => {
     const m = await measureToolbar(page, resolveThemeCss(theme.css));
+    const marked = new Set(markedIdsFromSource());
+    const ids = [
+      EDIT_TOOLBAR_IDS.build,
+      EDIT_TOOLBAR_IDS.run,
+      EDIT_TOOLBAR_IDS.runTests,
+      EDIT_TOOLBAR_IDS.recordTests,
+    ];
 
     // The root cause, asserted directly rather than through its symptom: if no
     // `[class*="ct-button-…"]` size rule matches the class the view emits, the
     // buttons keep the user agent's `1px 6px`. Any value other than that means
-    // a rule matched; asserting the exact horizontal padding pins WHICH one.
-    for (const p of m.paddings) {
-      expect(p, "user-agent fallback padding means no size rule matched").not.toBe(
-        "1px 6px",
-      );
-      expect(p).toBe("6.66667px 10px");
-    }
+    // a rule matched; asserting the exact value pins WHICH one.
+    //
+    // The two kinds take different rules and so different values — a text
+    // button is padded to fit its label, an icon button is sized square and
+    // centres its glyph — which is why this is per-id rather than one value
+    // for the row.
+    ids.forEach((id, i) => {
+      expect(
+        m.paddings[i],
+        `${id}: user-agent fallback padding means no size rule matched`,
+      ).not.toBe("1px 6px");
+      expect(m.paddings[i]).toBe(marked.has(id) ? "0px" : "6.66667px 10px");
+    });
+
+    // One radius for the row. The text variant inherits 0.5em and the icon
+    // variant 0.375em, both `!important` and both resolved against the user
+    // agent's 13.33px, so without an override the row would round its two
+    // kinds of button differently by 1.7px.
+    for (const r of m.radii) expect(r).toBe("6px");
+  });
+
+  test(`edit toolbar: icon buttons are square, marked, and take the image rules (${theme.name})`, async ({
+    page,
+  }) => {
+    const m = await measureToolbar(page, resolveThemeCss(theme.css));
+    const marked = new Set(markedIdsFromSource());
+    const ids = [
+      EDIT_TOOLBAR_IDS.build,
+      EDIT_TOOLBAR_IDS.run,
+      EDIT_TOOLBAR_IDS.runTests,
+      EDIT_TOOLBAR_IDS.recordTests,
+    ];
+
+    // Exactly the buttons the marks table names are icon buttons, and it names
+    // as many as `EditMarkCount` says. A literal, so dropping a mark is a
+    // failure rather than a smaller number compared against itself.
+    expect(markedIdsFromSource().length).toBe(markCountFromSource());
+    expect(markedIdsFromSource().sort()).toEqual(
+      [EDIT_TOOLBAR_IDS.build, EDIT_TOOLBAR_IDS.run].sort(),
+    );
+
+    ids.forEach((id, i) => {
+      if (!marked.has(id)) {
+        expect(m.marks[i], `${id} is a text button and must carry no mark`).toBeNull();
+        return;
+      }
+      // A PAINTED box, not `present: true`. A mark that failed to attach, or
+      // one collapsed to zero by a missing size rule, leaves a button that
+      // still renders and still clicks — which is exactly how a bare toolbar
+      // passed three earlier probes.
+      expect(m.marks[i], `${id} must carry a mark`).not.toBeNull();
+      expect(m.marks[i]!.w, `${id} mark width`).toBe(16);
+      expect(m.marks[i]!.h, `${id} mark height`).toBe(16);
+
+      // Square at the bar's control height. `[class*="ct-button-image-md-"]`
+      // would make these 23.33px and its `max-height` would clamp the row's
+      // `height: 100%`, putting the icons 2.67px below the text buttons.
+      expect(m.widths[i], `${id} width`).toBe(BAR_CONTROL_HEIGHT_PX);
+      expect(m.heights[i], `${id} height`).toBe(BAR_CONTROL_HEIGHT_PX);
+
+      // Proof that the icon variant really does pick up the image rules: the
+      // user agent's initial `background-repeat` is `repeat`, and only
+      // `[class*="ct-button-image-"]` sets `no-repeat`. This is the same
+      // property whose ABSENCE tiled an asset across "Run Tests" — asserted
+      // here from the other side.
+      expect(
+        m.backgroundRepeats[i],
+        `${id}: the image-button rules did not match this class`,
+      ).toBe("no-repeat");
+    });
   });
 }
+
+/**
+ * The artwork's own invariants, read from the source it is drawn in.
+ *
+ * These are not geometry, so they are not measured in a browser — they are the
+ * properties that make the marks members of the family they are meant to
+ * emulate, and each one corresponds to a defect this toolbar has already had.
+ */
+test("the marks are drawn in the restored family's manner", () => {
+  const src = fs.readFileSync(EDIT_MARKS_SRC, "utf8");
+
+  // Just `svgMarkup`'s body, and then only the strings it BUILDS. Slicing to
+  // end-of-file swept in the prose that explains which properties are being
+  // avoided and why, so the check reported its own documentation as the
+  // violation.
+  const from = src.indexOf("func svgMarkup*");
+  const rest = src.slice(from + 1);
+  const next = rest.search(/\n(?:func|proc|when|const|type)\b/);
+  const emitterSrc = next === -1 ? rest : rest.slice(0, next);
+  const emitter = [...emitterSrc.matchAll(/"((?:[^"\\]|\\.)*)"/g)]
+    .map((m) => m[1])
+    .join(" ");
+
+  // No colour literal reaches the output. Baking `#DDDDDD` into the asset
+  // files is why the debugger strip rendered twelve blank buttons on the white
+  // theme; restoring the DRAWINGS is not a reason to restore that.
+  //
+  // Scanned over the file's STRING LITERALS rather than its text: the header
+  // discusses `#DDDDDD` by name, and a check that cannot tell a colour being
+  // emitted from a colour being explained is a check that forces the next
+  // person to stop writing the explanation.
+  const literals = [...src.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
+  const hex = literals.filter((s) => /#[0-9a-fA-F]{3,8}\b/.test(s));
+  expect(hex, `colour literals found: ${JSON.stringify(hex)}`).toEqual([]);
+  expect(emitter).toContain("currentColor");
+
+  // Butt caps and mitre joins — SVG's initial values, which the original
+  // assets got by not saying anything. The codicon set that replaced them is
+  // round/round, and `debug_control_marks.svgMarkup` hard-codes those, so
+  // emitting either property here would put these marks in the wrong family.
+  expect(
+    emitter,
+    "a linecap would put these marks in the codicon family, not the restored one",
+  ).not.toContain("stroke-linecap");
+  expect(emitter).not.toContain("stroke-linejoin");
+  expect(emitter).toContain("stroke-miterlimit");
+
+  // Drawn on the same 16-unit grid as the marks they sit beside.
+  const table = src.slice(src.indexOf("const EditToolbarMarks*"));
+  const boxes = [...table.matchAll(/viewBox:\s*"([^"]+)"/g)].map((m) => m[1]);
+  expect(boxes.length).toBe(markCountFromSource());
+  for (const b of boxes) expect(b).toBe("0 0 16 16");
+
+  // Stroke widths are the originals' 1, not the codicons' 1.6.
+  const widths = [...src.matchAll(/drawn\([^)]*?,\s*"([\d.]+)"\)/g)].map((m) => m[1]);
+  for (const w of widths) expect(w).toBe("1");
+});
 
 /**
  * Proof that the geometry checks above can fail.
@@ -263,7 +443,7 @@ for (const theme of THEMES) {
  */
 test("verify the layout checks can fail", async ({ page }) => {
   const themeCss = resolveThemeCss(THEMES[0].css);
-  const buttonClass = buttonClassFromView();
+  const buttonClass = buttonClassesFromView().text;
   const panelClass = panelClassFromView();
 
   await page.setContent(

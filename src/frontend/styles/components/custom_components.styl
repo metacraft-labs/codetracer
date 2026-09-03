@@ -104,3 +104,47 @@
       // than on the declared basis is a width nobody can predict from reading
       // the rule, so state the intent: size to the label.
       flex: 0 0 auto !important
+      // One radius for the row.  The text variant inherits 0.5em from `button`
+      // and the icon variant 0.375em from `[class*="ct-button-image-"]`, both
+      // `!important` and both resolved against the user agent's 13.33px — so a
+      // bar carrying each would round its two kinds of button differently, by
+      // 1.7px, for no reason a reader could name.  In `rem` so it is 6px flat.
+      border-radius: 0.375rem !important
+
+    // Build and Run are ICON buttons (`editButtonClass`), so they carry
+    // `ct-button-image-md-secondary`, whose `width`/`height` and matching
+    // `max-*` are 1.75em.  On a button that `em` resolves against the user
+    // agent's 13.33px rather than the bar's 16px, making them 23.33px — and
+    // its `max-height` would CLAMP the `height: 100%` above, so the icons
+    // would sit 2.67px shorter than the text buttons beside them.  That is the
+    // same height mismatch this block exists to remove, arriving by a
+    // different route.
+    //
+    // Square, at the caption bar's control height, so every button on the row
+    // is 26px tall whichever kind it is.
+    .edit-toolbar-button[class*="ct-button-image-"]
+      width: 1.625rem
+      max-width: 1.625rem
+      height: 1.625rem
+      max-height: 1.625rem
+      padding: 0
+
+    .edit-toolbar-mark
+      // Drawn on a 16-unit grid and rendered at 16px, so one unit is one
+      // pixel and the 1-wide strokes land ON pixels instead of straddling two
+      // at half coverage each.  A hairline is exactly what blurring ruins, and
+      // these are hairlines: the restored artwork's 1-wide strokes, not the
+      // 1.6-wide codicon set.
+      //
+      // Sized by HEIGHT with the width left to follow, which is what
+      // `.ct-control-mark` does and for the reason given there — an SVG with a
+      // `viewBox` has an intrinsic ratio, so a non-square mark added later is
+      // drawn at its own proportions instead of being squashed into a square.
+      // Both marks here are 16x16 today, so the two spellings agree; this one
+      // keeps agreeing.
+      width: auto
+      height: 1rem
+      flex: 0 0 auto
+      // The mark is decoration inside a button that already handles the click;
+      // without this, `:hover` flickers as the pointer crosses the glyph edge.
+      pointer-events: none
