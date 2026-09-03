@@ -1539,6 +1539,48 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      - name: Evict stale git credentials from this runner's persistent home
+        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
+        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
+        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
+        # actions/checkout installs (git matches `http.<url>.*` by longest URL
+        # prefix), so checkout authenticates with a dead token, GitHub answers
+        # 401, and git dies on `could not read Username`. checkout COPIES
+        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
+        # failing fetch. Full rationale, the reproduction, and why this targets
+        # the file by path rather than via `--global`: see the copy of this step
+        # in the `test-non-gui` job.
+        run: |
+          set -uo pipefail
+          cfg="$HOME/.gitconfig"
+          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
+          if [ ! -f "$cfg" ]; then
+            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
+            exit 0
+          fi
+          echo "cred-evict: inspecting $cfg"
+          removed=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              http.*.extraheader|http.*.extraHeader) ;;
+              url.*x-access-token*) ;;
+              *) continue ;;
+            esac
+            echo "cred-evict:   removing '$key' (value withheld)"
+            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
+            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
+            removed=$((removed + 1))
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
+                 | grep -ciE 'extraheader|x-access-token' || true)
+          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
+          if [ "$removed" -eq 0 ]; then
+            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
+          fi
+          echo "cred-evict: keys remaining in $cfg:"
+          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -1624,6 +1666,48 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      - name: Evict stale git credentials from this runner's persistent home
+        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
+        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
+        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
+        # actions/checkout installs (git matches `http.<url>.*` by longest URL
+        # prefix), so checkout authenticates with a dead token, GitHub answers
+        # 401, and git dies on `could not read Username`. checkout COPIES
+        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
+        # failing fetch. Full rationale, the reproduction, and why this targets
+        # the file by path rather than via `--global`: see the copy of this step
+        # in the `test-non-gui` job.
+        run: |
+          set -uo pipefail
+          cfg="$HOME/.gitconfig"
+          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
+          if [ ! -f "$cfg" ]; then
+            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
+            exit 0
+          fi
+          echo "cred-evict: inspecting $cfg"
+          removed=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              http.*.extraheader|http.*.extraHeader) ;;
+              url.*x-access-token*) ;;
+              *) continue ;;
+            esac
+            echo "cred-evict:   removing '$key' (value withheld)"
+            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
+            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
+            removed=$((removed + 1))
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
+                 | grep -ciE 'extraheader|x-access-token' || true)
+          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
+          if [ "$removed" -eq 0 ]; then
+            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
+          fi
+          echo "cred-evict: keys remaining in $cfg:"
+          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -1678,6 +1762,48 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+
+      - name: Evict stale git credentials from this runner's persistent home
+        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
+        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
+        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
+        # actions/checkout installs (git matches `http.<url>.*` by longest URL
+        # prefix), so checkout authenticates with a dead token, GitHub answers
+        # 401, and git dies on `could not read Username`. checkout COPIES
+        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
+        # failing fetch. Full rationale, the reproduction, and why this targets
+        # the file by path rather than via `--global`: see the copy of this step
+        # in the `test-non-gui` job.
+        run: |
+          set -uo pipefail
+          cfg="$HOME/.gitconfig"
+          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
+          if [ ! -f "$cfg" ]; then
+            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
+            exit 0
+          fi
+          echo "cred-evict: inspecting $cfg"
+          removed=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              http.*.extraheader|http.*.extraHeader) ;;
+              url.*x-access-token*) ;;
+              *) continue ;;
+            esac
+            echo "cred-evict:   removing '$key' (value withheld)"
+            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
+            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
+            removed=$((removed + 1))
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
+                 | grep -ciE 'extraheader|x-access-token' || true)
+          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
+          if [ "$removed" -eq 0 ]; then
+            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
+          fi
+          echo "cred-evict: keys remaining in $cfg:"
+          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -2607,6 +2733,48 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      - name: Evict stale git credentials from this runner's persistent home
+        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
+        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
+        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
+        # actions/checkout installs (git matches `http.<url>.*` by longest URL
+        # prefix), so checkout authenticates with a dead token, GitHub answers
+        # 401, and git dies on `could not read Username`. checkout COPIES
+        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
+        # failing fetch. Full rationale, the reproduction, and why this targets
+        # the file by path rather than via `--global`: see the copy of this step
+        # in the `test-non-gui` job.
+        run: |
+          set -uo pipefail
+          cfg="$HOME/.gitconfig"
+          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
+          if [ ! -f "$cfg" ]; then
+            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
+            exit 0
+          fi
+          echo "cred-evict: inspecting $cfg"
+          removed=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              http.*.extraheader|http.*.extraHeader) ;;
+              url.*x-access-token*) ;;
+              *) continue ;;
+            esac
+            echo "cred-evict:   removing '$key' (value withheld)"
+            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
+            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
+            removed=$((removed + 1))
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
+                 | grep -ciE 'extraheader|x-access-token' || true)
+          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
+          if [ "$removed" -eq 0 ]; then
+            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
+          fi
+          echo "cred-evict: keys remaining in $cfg:"
+          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -2963,6 +3131,48 @@ jobs:
     needs:
       - dmg-build
     steps:
+      - name: Evict stale git credentials from this runner's persistent home
+        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
+        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
+        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
+        # actions/checkout installs (git matches `http.<url>.*` by longest URL
+        # prefix), so checkout authenticates with a dead token, GitHub answers
+        # 401, and git dies on `could not read Username`. checkout COPIES
+        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
+        # failing fetch. Full rationale, the reproduction, and why this targets
+        # the file by path rather than via `--global`: see the copy of this step
+        # in the `test-non-gui` job.
+        run: |
+          set -uo pipefail
+          cfg="$HOME/.gitconfig"
+          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
+          if [ ! -f "$cfg" ]; then
+            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
+            exit 0
+          fi
+          echo "cred-evict: inspecting $cfg"
+          removed=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              http.*.extraheader|http.*.extraHeader) ;;
+              url.*x-access-token*) ;;
+              *) continue ;;
+            esac
+            echo "cred-evict:   removing '$key' (value withheld)"
+            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
+            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
+            removed=$((removed + 1))
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
+                 | grep -ciE 'extraheader|x-access-token' || true)
+          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
+          if [ "$removed" -eq 0 ]; then
+            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
+          fi
+          echo "cred-evict: keys remaining in $cfg:"
+          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+
       - name: Checkout
         # Only so that `uses: ./.github/actions/setup-nix` below resolves; no
         # other step in this job reads the tree. No submodules and no token:
@@ -3250,6 +3460,91 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      - name: Evict stale git credentials from this runner's persistent home
+        # MODE 1 of the self-hosted checkout outage, and the fix for it.
+        #
+        # SYMPTOM. On m3-mcl-004 and m3-mcl-005, `actions/checkout` died three
+        # times 20s apart with
+        #   fatal: could not read Username for 'https://github.com':
+        #   terminal prompts disabled
+        # one line after it installed a freshly minted App token as
+        # `http.https://github.com/.extraheader`. m3-mcl-001 and m3-mcl-006 ran
+        # the identical step in the same run and succeeded. The variable is the
+        # HOST, not the token.
+        #
+        # MECHANISM (reproduced exactly, against the real github.com):
+        #   git config --local  http.https://github.com/.extraheader  <FRESH>
+        #   git config --global http.https://github.com/metacraft-labs/.extraHeader <STALE>
+        #   git ls-remote https://github.com/metacraft-labs/codetracer
+        #   -> fatal: could not read Username for 'https://github.com'
+        # Git resolves `http.<url>.*` by LONGEST matching URL prefix, so the
+        # owner-scoped `.../metacraft-labs/` key WINS over checkout's broader
+        # `https://github.com/` key. `git config --get-urlmatch http <url>`
+        # confirms only one header is applied -- this is not a duplicate-header
+        # 400, it is checkout's fresh credential being silently replaced by a
+        # dead one. GitHub answers 401, git falls back to a credential prompt,
+        # prompts are disabled, and you get the message above. The message is
+        # the SYMPTOM OF A 401; it is not evidence that no credential existed.
+        #
+        # WHY IT SURVIVES. actions/checkout COPIES `$HOME/.gitconfig` into
+        # `_temp/<uuid>/.gitconfig` and overrides HOME before its own `--global`
+        # writes. So the runner's persistent `~/.gitconfig` IS in effect during
+        # the failing fetch -- an earlier fix for this same message was written
+        # to `--global` and landed in the throwaway temp copy that the failing
+        # step never read. That is why this step targets `$HOME/.gitconfig` BY
+        # PATH rather than via `--global`: `--global` follows XDG and can
+        # resolve to `~/.config/git/config`, which checkout does NOT copy, so a
+        # `--global --unset` can report success while leaving the actual
+        # offending file untouched.
+        #
+        # WHY IT IS NEVER LEGITIMATE. An `http.*.extraHeader` in a home
+        # directory that is reused across jobs is a minted installation token
+        # outliving the job that minted it: dead within the hour, and a live
+        # secret readable by whatever runs next until then. Nothing should carry
+        # one across jobs -- `configure-git-auth.sh` deliberately passes its
+        # credential through `$GITHUB_ENV`, which is job-scoped, precisely so
+        # this file stays clean. Anything found here is residue.
+        #
+        # COUNT WHAT IS REMOVED. `--unset` on a key that is not there exits
+        # cleanly and reads exactly like a fix that worked, so this step reports
+        # how many keys it removed and prints what is left. "removed 0" is a
+        # real, reportable result: it means this host was clean and mode 1 is
+        # not what broke this job.
+        #
+        # Credential-FREE `url.https://github.com/.insteadOf` rewrites are
+        # deliberately preserved: they carry no secret, they are inert, and
+        # `.gitmodules` resolution depends on them.
+        run: |
+          set -uo pipefail
+          cfg="$HOME/.gitconfig"
+          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
+          if [ ! -f "$cfg" ]; then
+            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
+            exit 0
+          fi
+          echo "cred-evict: inspecting $cfg"
+          removed=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              http.*.extraheader|http.*.extraHeader) ;;
+              url.*x-access-token*) ;;
+              *) continue ;;
+            esac
+            echo "cred-evict:   removing '$key' (value withheld)"
+            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
+            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
+            removed=$((removed + 1))
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
+                 | grep -ciE 'extraheader|x-access-token' || true)
+          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
+          if [ "$removed" -eq 0 ]; then
+            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
+          fi
+          echo "cred-evict: keys remaining in $cfg:"
+          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -3322,7 +3617,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-python-recorder
-          ref: main
+          ref: stable
           path: ${{ github.workspace }}/../codetracer-python-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3331,7 +3626,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-ruby-recorder
-          ref: main
+          ref: dev
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3447,7 +3742,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-beam-recorder
-          ref: main
+          ref: dev
           path: ${{ github.workspace }}/../codetracer-beam-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3521,6 +3816,48 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
+
+      - name: Evict stale git credentials from this runner's persistent home
+        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
+        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
+        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
+        # actions/checkout installs (git matches `http.<url>.*` by longest URL
+        # prefix), so checkout authenticates with a dead token, GitHub answers
+        # 401, and git dies on `could not read Username`. checkout COPIES
+        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
+        # failing fetch. Full rationale, the reproduction, and why this targets
+        # the file by path rather than via `--global`: see the copy of this step
+        # in the `test-non-gui` job.
+        run: |
+          set -uo pipefail
+          cfg="$HOME/.gitconfig"
+          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
+          if [ ! -f "$cfg" ]; then
+            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
+            exit 0
+          fi
+          echo "cred-evict: inspecting $cfg"
+          removed=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              http.*.extraheader|http.*.extraHeader) ;;
+              url.*x-access-token*) ;;
+              *) continue ;;
+            esac
+            echo "cred-evict:   removing '$key' (value withheld)"
+            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
+            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
+            removed=$((removed + 1))
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
+                 | grep -ciE 'extraheader|x-access-token' || true)
+          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
+          if [ "$removed" -eq 0 ]; then
+            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
+          fi
+          echo "cred-evict: keys remaining in $cfg:"
+          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -3649,7 +3986,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-snapshot-codecs
-          ref: main
+          ref: dev
           path: ${{ github.workspace }}/../codetracer-snapshot-codecs
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
@@ -3662,7 +3999,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-image-diff
-          ref: main
+          ref: dev
           path: ${{ github.workspace }}/../codetracer-image-diff
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
@@ -3764,7 +4101,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-python-recorder
-          ref: main
+          ref: stable
           path: ${{ github.workspace }}/../codetracer-python-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3773,7 +4110,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-ruby-recorder
-          ref: main
+          ref: dev
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -3967,6 +4304,134 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
           skip-token-revoke: false
+
+      - name: Sweep stale git lock files from the persistent work directory
+        # MODE 2 of the self-hosted checkout outage. gpu-server-001-mcl-002 is
+        # a PERSISTENT runner: $RUNNER_WORKSPACE and the repo inside it survive
+        # between jobs. A job killed mid-fetch leaves git's `*.lock` sentinels
+        # behind, and the NEXT job's checkout dies before any product code runs:
+        #
+        #   fatal: Unable to create
+        #   '.../codetracer/.git/modules/libs/nim-faststreams/shallow.lock':
+        #   File exists.
+        #   fatal: Fetched in submodule path 'libs/nim-faststreams', but it did
+        #   not contain 37a18315... Direct fetching of that commit failed.
+        #
+        # `clean: true` on actions/checkout does not help: `git clean -ffdx`
+        # removes untracked files in the WORKTREE and never touches `.git`.
+        #
+        # COUNT WHAT IS REMOVED. `rm -f` on a path that no longer exists exits
+        # 0 and reads exactly like a sweep that worked; this campaign has been
+        # misled by silent no-op cleanups more than once. So this step prints
+        # how many locks it found, names each one, and re-counts afterwards. A
+        # run where the sweep found 0 is a run where this was NOT the cause,
+        # and the log says so plainly instead of implying success.
+        #
+        # Only locks older than 60 minutes are swept: a fresh lock could belong
+        # to a concurrent job on the same host, and deleting a live lock would
+        # manufacture the corruption this step exists to clear.
+        run: |
+          set -uo pipefail
+          root="${RUNNER_WORKSPACE:-}"
+          echo "stale-lock-sweep: runner=${RUNNER_NAME:-?} root=${root:-<unset>}"
+          if [ -z "$root" ] || [ ! -d "$root" ]; then
+            echo "stale-lock-sweep: found 0 stale lock file(s) (work dir absent - fresh runner)"
+            exit 0
+          fi
+          found=0
+          removed=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            found=$((found + 1))
+            echo "stale-lock-sweep:   found $f"
+            if rm -f "$f"; then
+              removed=$((removed + 1))
+            else
+              echo "stale-lock-sweep:   FAILED to remove $f"
+            fi
+          done < <(find "$root" -type f -name '*.lock' -mmin +60 2>/dev/null)
+          remaining=$(find "$root" -type f -name '*.lock' -mmin +60 2>/dev/null | wc -l | tr -d ' ')
+          echo "stale-lock-sweep: found $found, removed $removed, still present $remaining"
+          if [ "$found" -eq 0 ]; then
+            echo "stale-lock-sweep: NOTHING WAS STALE - if checkout still fails, mode 2 is not the cause"
+          fi
+          # ------------------------------------------------------------------
+          # The OTHER, and far more frequent, way this persistent work
+          # directory breaks checkout. Over 54 sampled `dev` runs the gpu class
+          # failed checkout in 51 of 54 jobs, on every slot of BOTH gpu
+          # machines, while all six m3 Macs checked out 244/244 times. It is
+          # not one bad box and it is not the token -- it is this directory.
+          # The failure is `git clean -ffdx` unable to delete read-only files
+          # left behind by a Nix-derived build output (storybook-static and
+          # friends are copied out of the store with store permissions, 0444):
+          #
+          #   rm: cannot remove '.../storybook/storybook-static/public/...':
+          #   Permission denied
+          #   fatal: --local can only be used inside a git repository
+          #   fatal: not a git repository (or any parent up to mount point /var)
+          #
+          # checkout removes the repo when it cannot clean it, and then every
+          # subsequent git call in the step is running outside a repository.
+          # Restoring owner-write on the tree is what lets `git clean` finish.
+          # Again: COUNT, do not assume. `chmod -R` succeeds on a tree that
+          # needed nothing.
+          notwritable=$(find "$root" ! -writable 2>/dev/null | wc -l | tr -d ' ')
+          echo "stale-lock-sweep: $notwritable path(s) under $root are not owner-writable"
+          if [ "$notwritable" -ne 0 ]; then
+            chmod -R u+w "$root" 2>/dev/null || true
+            still=$(find "$root" ! -writable 2>/dev/null | wc -l | tr -d ' ')
+            echo "stale-lock-sweep: after chmod -R u+w, $still path(s) still not writable"
+            if [ "$still" -ne 0 ]; then
+              echo "stale-lock-sweep: WARNING these are not owned by the runner user; checkout will still fail to clean"
+            fi
+          else
+            echo "stale-lock-sweep: nothing was read-only - the storybook-static mode is not present on this run"
+          fi
+          if [ "$remaining" -ne 0 ]; then
+            echo "stale-lock-sweep: WARNING sweep did not clear everything it found"
+          fi
+
+      - name: Evict stale git credentials from this runner's persistent home
+        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
+        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
+        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
+        # actions/checkout installs (git matches `http.<url>.*` by longest URL
+        # prefix), so checkout authenticates with a dead token, GitHub answers
+        # 401, and git dies on `could not read Username`. checkout COPIES
+        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
+        # failing fetch. Full rationale, the reproduction, and why this targets
+        # the file by path rather than via `--global`: see the copy of this step
+        # in the `test-non-gui` job.
+        run: |
+          set -uo pipefail
+          cfg="$HOME/.gitconfig"
+          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
+          if [ ! -f "$cfg" ]; then
+            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
+            exit 0
+          fi
+          echo "cred-evict: inspecting $cfg"
+          removed=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              http.*.extraheader|http.*.extraHeader) ;;
+              url.*x-access-token*) ;;
+              *) continue ;;
+            esac
+            echo "cred-evict:   removing '$key' (value withheld)"
+            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
+            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
+            removed=$((removed + 1))
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+          left=$(git config --file "$cfg" --list --name-only 2>/dev/null \
+                 | grep -ciE 'extraheader|x-access-token' || true)
+          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
+          if [ "$removed" -eq 0 ]; then
+            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
+          fi
+          echo "cred-evict: keys remaining in $cfg:"
+          git config --file "$cfg" --list --name-only 2>/dev/null | sed 's/^/  /' || echo "  (none)"
 
       - name: Checkout CodeTracer
         uses: actions/checkout@v5
@@ -5013,6 +5478,190 @@ jobs:
         run: |
           bash ci/verdict/queue-watchdog.sh --poll \
             --deadline-minutes 30 --interval-seconds 30
+
+  runner-git-auth-probe:
+    # TEMPORARY DIAGNOSTIC. Delete once the verdict below is read.
+    #
+    # THE OBSERVATION. On run 33725620003 (dev, c87e6424) `actions/checkout`
+    # died on two of the four m3 darwin runners and succeeded on the other two,
+    # in the same run, with tokens minted the same way seconds apart:
+    #
+    #   m3-mcl-004  test-non-gui (macos)      Checkout FAILED
+    #   m3-mcl-005  origin-DAP (macOS)        Checkout FAILED
+    #   m3-mcl-001  test-ui-tests (macos)     Checkout SUCCEEDED
+    #   m3-mcl-006  reprobuild-macos-smoke    Checkout SUCCEEDED
+    #
+    # The failures are three identical retries of
+    #   fatal: could not read Username for 'https://github.com':
+    #   terminal prompts disabled
+    # emitted one line after checkout installs
+    # `http.https://github.com/.extraheader`. That message is what git prints
+    # when a credential it DID send was REFUSED and the fallback prompt is
+    # disabled -- it is the symptom of a 401, not evidence that no credential
+    # existed.
+    #
+    # WHY A PROBE AND NOT A PATCH. The identical string was diagnosed once
+    # before as host-wide git config; a fix landed and the job failed
+    # identically, because `actions/checkout` copies the runner's
+    # `$HOME/.gitconfig` into a throwaway `_temp/<uuid>/` and overrides HOME,
+    # so the earlier fix had been written to a file the failing step never
+    # read. Proving a mechanism CAN produce the message is not proving it is
+    # the one present. This job reads VALUES out of the failing hosts instead
+    # of asserting a verdict, and it enumerates its outcomes in advance:
+    #
+    #   PROBE-1 != 200                 -> the minted App token cannot see this
+    #                                     repo (token-scope). Fix is the App
+    #                                     installation, not this workflow.
+    #   PROBE-3 ok and PROBE-4 fails   -> the runner's own git configuration
+    #                                     defeats the checkout credential.
+    #                                     PROBE-0/PROBE-7 name the exact file
+    #                                     and key. Fix is on that host.
+    #   PROBE-3 and PROBE-4 both ok    -> neither the token nor host config is
+    #                                     at fault; the difference lives inside
+    #                                     checkout's own process. PROBE-8's
+    #                                     env dump (GIT_*, proxies) is the
+    #                                     "none of the above" arm.
+    #   PROBE-5 fails                  -> even anonymous access is broken from
+    #                                     this host: network / TLS / proxy.
+    #                                     Note metacraft-labs/codetracer is
+    #                                     PUBLIC, so a BAD credential is
+    #                                     strictly worse than none -- it turns
+    #                                     a working anonymous fetch into a 401.
+    #
+    # Six legs on the same label so the matrix fans out across the whole m3
+    # pool and we get a dump from the bad hosts, whichever they are. Each leg
+    # is seconds long and never fails the run.
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [1, 2, 3, 4, 5, 6]
+    runs-on: aarch64-darwin
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - name: Mint installation token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Dump host git configuration and probe the minted token
+        env:
+          CI_APP_TOKEN: ${{ steps.ci_token.outputs.token }}
+        run: |
+          set -uo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          URL=https://github.com/metacraft-labs/codetracer
+
+          sha12() {
+            if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | cut -c1-12
+          }
+
+          # Print `key=value` lines with anything secret-shaped replaced by its
+          # length and a hash, so two hosts can be compared and a stale token
+          # spotted without any token reaching the log.
+          redact() {
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              key="${line%%=*}"
+              if [ "$key" = "$line" ]; then printf '%s\n' "$line"; continue; fi
+              val="${line#*=}"
+              case "$val" in
+                *ghs_*|*ghp_*|*gho_*|*github_pat_*|*x-access-token*|*AUTHORIZATION*|*Authorization*|*authorization*)
+                  printf '%s=<REDACTED len=%s sha256=%s>\n' \
+                    "$key" "${#val}" "$(printf '%s' "$val" | sha12)" ;;
+                *)
+                  if [ "${#val}" -ge 40 ]; then
+                    printf '%s=<REDACTED-long len=%s sha256=%s>\n' \
+                      "$key" "${#val}" "$(printf '%s' "$val" | sha12)"
+                  else
+                    printf '%s=%s\n' "$key" "$val"
+                  fi ;;
+              esac
+            done
+          }
+
+          echo "=============================================================="
+          echo "RUNNER_NAME=${RUNNER_NAME:-<unset>}  leg=${{ matrix.leg }}"
+          echo "HOME=$HOME"
+          echo "git=$(command -v git)  $(git --version)"
+          echo "=============================================================="
+
+          echo "--- PROBE-0: every git setting, with the file it came from ---"
+          git config --list --show-origin --show-scope 2>&1 | redact
+          echo "--- PROBE-0b: ls -la \$HOME ---"
+          ls -la "$HOME" 2>&1 | head -40
+          echo "--- PROBE-0c: does \$HOME/.gitconfig exist, and what keys? ---"
+          if [ -f "$HOME/.gitconfig" ]; then
+            echo "present: $(ls -la "$HOME/.gitconfig")"
+            echo "keys:"
+            git config --file "$HOME/.gitconfig" --list --name-only 2>&1 | sed 's/^/  /'
+          else
+            echo "absent"
+          fi
+          echo "--- PROBE-0d: /etc/gitconfig ---"
+          if [ -f /etc/gitconfig ]; then git config --file /etc/gitconfig --list 2>&1 | redact; else echo "absent"; fi
+
+          echo "--- PROBE-7: settings git would APPLY to $URL ---"
+          echo "http.*:"
+          git config --get-urlmatch http "$URL" 2>&1 | redact | sed 's/^/  /'
+          echo "credential.*:"
+          git config --get-urlmatch credential "$URL" 2>&1 | redact | sed 's/^/  /'
+
+          echo "--- PROBE-8: environment that can steer git (names + lengths) ---"
+          for v in $(env | sed -n 's/^\(GIT[A-Z_0-9]*\)=.*/\1/p'; \
+                     env | sed -n 's/^\([Hh][Tt][Tt][Pp][Ss]*_[Pp][Rr][Oo][Xx][Yy]\)=.*/\1/p'; \
+                     env | sed -n 's/^\([Nn][Oo]_[Pp][Rr][Oo][Xz][Yy]\)=.*/\1/p'; \
+                     env | sed -n 's/^\(ALL_PROXY\|all_proxy\)=.*/\1/p'); do
+            eval "vv=\${$v-}"
+            echo "  $v (len=${#vv})"
+          done
+
+          # The Authorization blob checkout would install. Masked before use.
+          AUTH="$(printf 'x-access-token:%s' "$CI_APP_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$AUTH"
+
+          echo "--- PROBE-1: token against the REST API (expect 200) ---"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $CI_APP_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/metacraft-labs/codetracer" 2>&1 || echo curl-failed)
+          echo "  GET /repos/metacraft-labs/codetracer -> $code"
+
+          echo "--- PROBE-2: how many repos is this installation scoped to? ---"
+          curl -sS -H "Authorization: Bearer $CI_APP_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/installation/repositories?per_page=1" 2>&1 \
+            | tr ',' '\n' | grep -i 'total_count' | head -1 | sed 's/^/  /'
+
+          PRISTINE="$RUNNER_TEMP/probe-pristine-home"
+          mkdir -p "$PRISTINE"
+
+          echo "--- PROBE-3: header auth, PRISTINE home (host config excluded) ---"
+          env HOME="$PRISTINE" \
+              GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+              GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0='http.https://github.com/.extraheader' \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH" \
+              git ls-remote "$URL" HEAD 2>&1 | head -3 | sed 's/^/  /'
+
+          echo "--- PROBE-4: header auth, REAL runner home (host config ACTIVE) ---"
+          env GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0='http.https://github.com/.extraheader' \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH" \
+              git ls-remote "$URL" HEAD 2>&1 | head -3 | sed 's/^/  /'
+
+          echo "--- PROBE-5: anonymous, REAL runner home (repo is public) ---"
+          git ls-remote "$URL" HEAD 2>&1 | head -3 | sed 's/^/  /'
+
+          echo "--- PROBE-6: anonymous, PRISTINE home ---"
+          env HOME="$PRISTINE" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+              git ls-remote "$URL" HEAD 2>&1 | head -3 | sed 's/^/  /'
+
+          rm -rf "$PRISTINE"
+          echo "=============== probe complete on ${RUNNER_NAME:-?} ==============="
 
   ci-verdict:
     # Final gate: assert that CI actually RAN the jobs it gates on.
