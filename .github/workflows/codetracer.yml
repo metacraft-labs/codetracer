@@ -819,6 +819,53 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Provision MSVC build environment
+        # The eph-win-x64 DIY runner does not auto-configure the MSVC / Windows
+        # SDK environment the way the GitHub-hosted windows-latest image did, so
+        # a bare `cargo test` links with rust-lld against an EMPTY `LIB` and dies
+        # with `rust-lld: error: could not open 'kernel32.lib'`. The other
+        # Windows jobs get this env because their `Setup dev env` step sources
+        # env.ps1, which in turn runs non-nix-build/windows/export-msvc-env.ps1
+        # against the runner's system Visual Studio and points cargo at link.exe.
+        # This lightweight job skips the full DIY bootstrap, so provision just
+        # the MSVC env the same way, in-workflow, via that same repo script --
+        # no ad-hoc, out-of-band runner state.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $blob = & pwsh -NoProfile -ExecutionPolicy Bypass -File `
+            "non-nix-build/windows/export-msvc-env.ps1"
+          $captured = @{}
+          foreach ($line in $blob) {
+            if ($line -match "^(?<key>[^=]+)=(?<value>.*)$") {
+              $captured[$matches.key] = $matches.value
+            }
+          }
+          if (-not $captured.ContainsKey("LIB")) {
+            throw ("export-msvc-env.ps1 did not emit LIB: no system Visual " +
+                   "Studio with the VC tools was found on this runner. The " +
+                   "MSVC toolchain is part of the eph-win-x64 base image and " +
+                   "must be present for the named-pipe transport link step.")
+          }
+          # Persist the compiler/linker search paths for the cargo test below.
+          foreach ($key in @("LIB", "INCLUDE", "LIBPATH")) {
+            if ($captured.ContainsKey($key)) {
+              Add-Content -Path $env:GITHUB_ENV -Value "$key=$($captured[$key])"
+            }
+          }
+          # Put link.exe / the MSVC bin dir on PATH (delta only, so we never
+          # clobber the existing PATH) and use link.exe rather than rust-lld,
+          # exactly as env.ps1 does for the other Windows jobs.
+          if ($captured.ContainsKey("MSVC_PATH_ADDITIONS")) {
+            foreach ($entry in ($captured["MSVC_PATH_ADDITIONS"] -split ";")) {
+              if (-not [string]::IsNullOrWhiteSpace($entry)) {
+                Add-Content -Path $env:GITHUB_PATH -Value $entry
+              }
+            }
+          }
+          Add-Content -Path $env:GITHUB_ENV `
+            -Value "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=link.exe"
+
       - name: Run Windows named-pipe transport tests
         working-directory: src/tui
         shell: pwsh
@@ -2577,7 +2624,7 @@ jobs:
     # outage cannot turn PR runs red. This job is NOT in push-tag's `needs`, so
     # while GARM is down it can hang/fail without ever blocking a release —
     # create-release simply skips the (absent) win artifact (see below).
-    runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    runs-on: eph-win-x64-release  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64-release (dedicated release scale set)
     if: ${{ github.ref == 'refs/heads/main' }}
     steps:
       # See the eph-win-x64 note at the top of this file: actions/checkout needs
@@ -4966,6 +5013,28 @@ jobs:
         # which one a step used; and an unresolved `steps.*.outputs.token`
         # silently becomes an empty token rather than an error.
         run: bash ci/test/sibling-provisioning-test.sh
+
+      - name: Check every build-once job provisions the workspace the build needs
+        # The other end of the sibling contract. The suite above asks whether a
+        # `siblings:` entry is PINNED reproducibly; this one asks whether the
+        # list is COMPLETE for a job that compiles the desktop core.
+        #
+        # `just build-once` runs `scripts/require-siblings.sh` before anything
+        # else and refuses a workspace missing any of nine repos. A workflow can
+        # therefore be perfectly pinned and still unable to start a build --
+        # which is what `launcher-recorder-e2e` was from the day it was written:
+        # it provisions the three repos the GATE spans, asks for a core that
+        # needs eleven, and failed on all three matrix arms identically, 0.45
+        # seconds in, with no compiler ever started. Nothing there was
+        # language-specific and nothing was wrong with the lock.
+        #
+        # It is a static property of the workflow file, so it belongs in this
+        # bash-only lane rather than in a forty-minute queue on a self-hosted
+        # runner. The suite also EXECUTES the preflight against a throwaway repo
+        # built to reproduce the CI condition, because the same gate's refusal
+        # was invisible for a day: a `grep -c` counting zero exits 1, and under
+        # `set -euo pipefail` that killed the script before it printed a word.
+        run: bash ci/test/build-once-workspace-test.sh
 
       - name: Check the launcher<->recorder gate's cross-repo workflow wiring
         # The other half of the same class of defect, reached from the

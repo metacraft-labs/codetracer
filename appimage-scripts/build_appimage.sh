@@ -344,6 +344,13 @@ for binary in "${RPATH_BINARIES[@]}"; do
 	try_patchelf "$binary" --set-rpath '$ORIGIN/../lib'
 done
 
+# Measure the staged tree before it is sealed. This is the only moment the
+# artefact's contents are readable without unpacking a squashfs: `cleanup` on
+# EXIT deletes ${APP_DIR}. The guard reports the RESOLVED Electron version and
+# every package outside the production dependency closure, by name, and fails
+# the build rather than publishing a signed artefact nobody has looked inside.
+bash "${ROOT_PATH}"/ci/test/electron-supply-chain.sh "${APP_DIR}"
+
 APPIMAGE_ARCH=$CURRENT_ARCH
 if [[ $APPIMAGE_ARCH == "aarch64" ]]; then
 	# The appimagetool has its own convention for specifying the ARM64 arch

@@ -8,14 +8,14 @@ function Ensure-Nextest {
   )
 
   $version = $Toolchain["CARGO_NEXTEST_VERSION"]
-  $cargoHome = Join-Path $Root "cargo"
-  $nextestExe = Join-Path $cargoHome "bin/cargo-nextest.exe"
-  $cargoExe = Join-Path $cargoHome "bin/cargo.exe"
-
-  if (-not (Test-Path -LiteralPath $cargoExe -PathType Leaf)) {
-    Write-Warning "Ensure-Nextest: cargo not found at '$cargoExe'. Skipping (install Rust first)."
-    return
+  $expectedSha = $Toolchain["CARGO_NEXTEST_WIN_X64_SHA256"]
+  if ([string]::IsNullOrWhiteSpace($expectedSha) -or $expectedSha -notmatch '^[A-Fa-f0-9]{64}$') {
+    throw "Missing or invalid CARGO_NEXTEST_WIN_X64_SHA256 in toolchain-versions.env."
   }
+
+  $cargoHome = Join-Path $Root "cargo"
+  $binDir = Join-Path $cargoHome "bin"
+  $nextestExe = Join-Path $binDir "cargo-nextest.exe"
 
   if (Test-Path -LiteralPath $nextestExe -PathType Leaf) {
     $currentVersion = ""
@@ -32,15 +32,37 @@ function Ensure-Nextest {
     }
   }
 
-  Write-Host "Installing cargo-nextest $version via cargo..."
-  $env:CARGO_HOME = $cargoHome
-  & $cargoExe install cargo-nextest --version $version --locked
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to install cargo-nextest $version via cargo."
+  # Install the official prebuilt Windows binary rather than building from
+  # source. `cargo install cargo-nextest` needs the MSVC linker (link.exe),
+  # which env.ps1 does not put on PATH until AFTER this toolchain-bootstrap
+  # phase, so a source build fails here with "linker `link.exe` not found".
+  # The prebuilt archive is SHA-pinned by CARGO_NEXTEST_WIN_X64_SHA256; this
+  # mirrors the Ensure-Just / Ensure-Gcc direct-download pattern and removes
+  # the MSVC dependency from this phase entirely.
+  New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+  $asset = "cargo-nextest-$version-x86_64-pc-windows-msvc.zip"
+  $downloadUrl = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$version/$asset"
+  $tempZip = Join-Path $env:TEMP "codetracer-$asset"
+  $extractDir = Join-Path $env:TEMP ("codetracer-nextest-" + [Guid]::NewGuid().ToString('N'))
+
+  Write-Host "Downloading cargo-nextest $version from $downloadUrl ..."
+  Download-File -Url $downloadUrl -OutFile $tempZip
+  try {
+    Assert-FileSha256 -Path $tempZip -Expected $expectedSha
+    Ensure-CleanDirectory -Path $extractDir
+    Expand-Archive -LiteralPath $tempZip -DestinationPath $extractDir -Force
+    $extractedExe = Join-Path $extractDir "cargo-nextest.exe"
+    if (-not (Test-Path -LiteralPath $extractedExe -PathType Leaf)) {
+      throw "cargo-nextest archive '$asset' did not contain cargo-nextest.exe."
+    }
+    Copy-Item -LiteralPath $extractedExe -Destination $nextestExe -Force
+  } finally {
+    Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
   }
 
   if (-not (Test-Path -LiteralPath $nextestExe -PathType Leaf)) {
-    throw "cargo install cargo-nextest did not produce '$nextestExe'."
+    throw "cargo-nextest installation did not produce '$nextestExe'."
   }
 
   Write-Host "Installed cargo-nextest $version to $nextestExe"

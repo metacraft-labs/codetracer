@@ -6,13 +6,27 @@
 # `src/frontend/viewmodel/identity/token.nim` decides whether a signed identity
 # token is accepted, which band of its life it is in, and whether a subject is
 # revoked. A suite that reports ten green cases over it is worth exactly what
-# the evidence says it is, so this file supplies the evidence: one mutation per
+# the evidence says it is, so this file supplies the evidence: a mutation per
 # assertion family, each verified to redden THE CASE WRITTEN FOR IT.
 #
 # A mutation caught by some other case is a MISS, not a kill. Every arm below
 # names the case it expects to go red, and several additionally name the cases
 # that must stay GREEN — because an arm that reddens everything proves only
 # that the suite noticed a change, not that the assertion in question can fail.
+#
+# WHAT THIS FILE DOES NOT DO, and the PASSED line now says so too: it never
+# reads the suites' case NAMES. The arms are a hand-written list, each matched
+# against one name, so "every declared arm killed the case it names" is the only
+# universal this gate can support. A case that no arm targets is simply absent
+# from the run, and several cases in the three suites are in that position today.
+#
+# The one thing that IS pinned is the case COUNT: each control arm requires
+# exactly `active_cases` `[OK]` lines, so adding a case makes the control arm
+# MISS until someone bumps that number. That is a prompt, not a guard — bumping
+# the counter is enough to go green again, and nothing requires the new case to
+# acquire an arm. Closing the gap properly would mean enumerating the suites'
+# `test "..."` names here and failing on any without a corresponding arm, which
+# is not implemented.
 #
 # ## The arm that justifies the JS lane
 #
@@ -572,4 +586,12 @@ if [ "${misses}" -gt 0 ]; then
 	echo "RESULT: FAILED — ${misses} arm(s) did not kill on their own case"
 	exit 1
 fi
-echo "RESULT: OK — every assertion family in the identity layer (${MODULE}, ${MODULE2}, ${MODULE3}) has a mutation that reddens it"
+echo "RESULT: OK — ${arms} mutation arm(s) over the identity layer (${MODULE}, ${MODULE2}, ${MODULE3}); each reddened the case it names"
+echo "  SCOPE, because this line used to claim more than it checks: this is NOT"
+echo '  "every assertion family has a mutation". The arms are a hand-written list'
+echo "  and nothing here reads the suites' case names, so a case that no arm"
+echo "  targets is invisible to this gate — and several are in that position."
+echo "  The control arms do pin the case COUNT, so a NEW case makes them miss"
+echo "  until the counter is bumped; bumping it is enough, no arm is required."
+echo '  Diff the arms against the suites test "..." names by hand before'
+echo "  reading this line as coverage."

@@ -210,6 +210,32 @@ impl Request {
     pub fn load_args<T: DeserializeOwned>(&self) -> DapResult<T> {
         Ok(serde_json::from_value::<T>(self.arguments.clone())?)
     }
+
+    /// Like `load_args`, but for commands whose arguments are entirely
+    /// optional, so that a request carrying no `arguments` member at
+    /// all is legitimate ("give me everything", "give me the first
+    /// page").
+    ///
+    /// `Request::arguments` is `#[serde(default)]`, so an absent
+    /// `arguments` member arrives as `Value::Null`, and
+    /// `from_value::<T>(Null)` fails for a struct however optional its
+    /// fields are.  Only that ONE case yields `T::default()` here.
+    ///
+    /// Do NOT write `load_args::<T>().unwrap_or_default()` instead: it
+    /// cannot tell "no arguments were sent" from "arguments were sent
+    /// and are malformed", so a client typo, a wrong type, or (once
+    /// `deny_unknown_fields` is on) an unknown field is silently
+    /// downgraded into the default request.  For the request-span
+    /// commands that default means "no filters, no paging" — the
+    /// caller asks for one page of failed requests, gets the entire
+    /// recording, and is told nothing went wrong.  A parse failure is
+    /// reported as a parse failure.
+    pub fn load_args_or_default<T: DeserializeOwned + Default>(&self) -> DapResult<T> {
+        if self.arguments.is_null() {
+            return Ok(T::default());
+        }
+        Ok(serde_json::from_value::<T>(self.arguments.clone())?)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -758,4 +784,98 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
     t.set_onmessage(Some(&callback));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod load_args_tests {
+    use super::*;
+
+    /// Stand-in for the request-span argument types: every field
+    /// optional, so "no arguments at all" is a legitimate request.
+    #[derive(Debug, Default, Deserialize, PartialEq)]
+    #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+    struct OptionalArgs {
+        limit: Option<i64>,
+        method: Option<String>,
+    }
+
+    fn request_with(arguments: Value) -> Request {
+        Request {
+            base: ProtocolMessage {
+                seq: 1,
+                type_: "request".to_string(),
+            },
+            command: "ct/load-request-spans".to_string(),
+            arguments,
+        }
+    }
+
+    #[test]
+    fn absent_arguments_yield_the_default_request() {
+        // `Request::arguments` is `#[serde(default)]`, so a request with
+        // no `arguments` member at all arrives as `Value::Null`.  This is
+        // the ONE case that may fall back to the default.
+        let req = request_with(Value::Null);
+        assert_eq!(
+            req.load_args_or_default::<OptionalArgs>().map_err(|e| e.to_string()),
+            Ok(OptionalArgs::default())
+        );
+    }
+
+    #[test]
+    fn well_formed_arguments_are_parsed() {
+        let req = request_with(serde_json::json!({ "limit": 5, "method": "GET" }));
+        assert_eq!(
+            req.load_args_or_default::<OptionalArgs>().map_err(|e| e.to_string()),
+            Ok(OptionalArgs {
+                limit: Some(5),
+                method: Some("GET".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn malformed_arguments_are_an_error_not_the_default_request() {
+        // The defect this replaces: `load_args().unwrap_or_default()`
+        // could not tell "nothing was sent" from "something broken was
+        // sent", so a wrong-typed filter became the default request —
+        // for `ct/load-request-spans` that default is "no filters, no
+        // paging", i.e. the entire recording, reported as success.
+        let req = request_with(serde_json::json!({ "limit": "not a number" }));
+        assert!(
+            req.load_args_or_default::<OptionalArgs>().is_err(),
+            "a malformed argument must surface as a parse error, not silently widen the query"
+        );
+    }
+
+    #[test]
+    fn unknown_field_is_an_error_not_the_default_request() {
+        // Guards the interaction with `deny_unknown_fields`: once the
+        // argument types deny unknown fields, `unwrap_or_default` would
+        // have converted every client typo into a full-recording scan.
+        let req = request_with(serde_json::json!({ "limitt": 5 }));
+        assert!(
+            req.load_args_or_default::<OptionalArgs>().is_err(),
+            "a misspelled argument must not be downgraded into the default request"
+        );
+    }
+
+    #[test]
+    fn real_load_request_spans_arguments_reject_a_malformed_filter() {
+        // Binds the fix to the actual type behind `ct/load-request-spans`,
+        // not just the stand-in above.
+        let req = request_with(serde_json::json!({ "limit": "twenty" }));
+        assert!(
+            req.load_args_or_default::<crate::request_spans::LoadRequestSpansArguments>()
+                .is_err(),
+            "a malformed `limit` must not be answered with the whole span stream"
+        );
+        // ...while a genuinely empty request still works.
+        assert!(
+            request_with(Value::Null)
+                .load_args_or_default::<crate::request_spans::LoadRequestSpansArguments>()
+                .is_ok(),
+            "a request with no arguments at all is a valid 'give me everything'"
+        );
+    }
 }

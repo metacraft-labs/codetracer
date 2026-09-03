@@ -246,7 +246,7 @@ function Get-WindowsTarExe {
   throw "Unable to find tar.exe. Required to extract ct-remote archives."
 }
 
-function Get-SevenZipExe {
+function Find-SystemSevenZipExe {
   $commands = @("7z", "7za", "7zr")
   foreach ($commandName in $commands) {
     $command = Get-Command $commandName -ErrorAction SilentlyContinue
@@ -267,7 +267,62 @@ function Get-SevenZipExe {
     }
   }
 
-  throw "Unable to find 7-Zip (7z.exe/7za/7zr). Required to extract .7z toolchain archives."
+  return $null
+}
+
+function Get-SevenZipExe {
+  param(
+    [string]$Root,
+    [hashtable]$Toolchain
+  )
+
+  # Prefer any 7-Zip already present (fast path for dev machines that have it
+  # installed), but the GHA/self-hosted DIY runners do NOT ship 7-Zip, so fall
+  # back to provisioning the pinned standalone 7zr.exe into the DIY cache. This
+  # mirrors the Ensure-Gcc WinLibs direct-download fallback and keeps toolchain
+  # provisioning in-repo rather than relying on ad-hoc runner state.
+  $existing = Find-SystemSevenZipExe
+  if ($null -ne $existing) {
+    return $existing
+  }
+
+  if ([string]::IsNullOrWhiteSpace($Root) -or $null -eq $Toolchain) {
+    throw "Unable to find 7-Zip (7z.exe/7za/7zr). Required to extract .7z toolchain archives."
+  }
+
+  $version = $Toolchain["SEVENZIP_VERSION"]
+  if ([string]::IsNullOrWhiteSpace($version)) {
+    throw "Missing SEVENZIP_VERSION in toolchain-versions.env; cannot provision 7zr.exe."
+  }
+  $expectedSha = $Toolchain["SEVENZIP_WIN_X64_SHA256"]
+  if ([string]::IsNullOrWhiteSpace($expectedSha) -or $expectedSha -notmatch '^[A-Fa-f0-9]{64}$') {
+    throw "Missing or invalid SEVENZIP_WIN_X64_SHA256 in toolchain-versions.env."
+  }
+
+  $sevenZipDir = Join-Path $Root "7zip/$version"
+  $sevenZipExe = Join-Path $sevenZipDir "7zr.exe"
+
+  if (Test-Path -LiteralPath $sevenZipExe -PathType Leaf) {
+    try {
+      Assert-FileSha256 -Path $sevenZipExe -Expected $expectedSha
+      return $sevenZipExe
+    } catch {
+      Remove-Item -LiteralPath $sevenZipExe -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  New-Item -ItemType Directory -Force -Path $sevenZipDir | Out-Null
+  $downloadUrl = "https://github.com/ip7z/7zip/releases/download/$version/7zr.exe"
+  Write-Host "Downloading 7-Zip standalone (7zr.exe $version) from $downloadUrl ..."
+  Download-File -Url $downloadUrl -OutFile $sevenZipExe
+  Assert-FileSha256 -Path $sevenZipExe -Expected $expectedSha
+
+  if (-not (Test-Path -LiteralPath $sevenZipExe -PathType Leaf)) {
+    throw "7-Zip provisioning did not produce '$sevenZipExe'."
+  }
+
+  Write-Host "Provisioned 7-Zip $version (7zr.exe) at $sevenZipExe"
+  return $sevenZipExe
 }
 
 function Get-BashExe {

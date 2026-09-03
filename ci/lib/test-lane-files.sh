@@ -356,16 +356,26 @@ test_lane_files() {
 		;;
 
 	host-instantiations)
-		# NOT test files. The platform facade's two host instantiations —
-		# production modules — compiled on the backend they actually ship on.
+		# NOT test files. Production modules of the platform facade, compiled
+		# on the backend they actually ship on. Four are echoed at the bottom
+		# of this arm; read that list, not a count written here.
 		#
-		# WHY THIS LANE EXISTS, and it is not a hypothetical. Both of these
-		# modules are `{.error.}` on the C backend by design, so `vm-unit`
-		# cannot see them; and neither is imported by any suite in `vm-unit-js`,
-		# because the whole point of `platform/web_platform.nim` is that it
-		# reaches no browser API and can therefore be tested without these.
-		# The result was a hole exactly the shape of these two files: NOTHING
-		# IN CI COMPILED THEM AT ALL.
+		# WHY THIS LANE EXISTS, and it is not a hypothetical. The argument is
+		# about the two host INSTANTIATIONS — `desktop_electron.nim` and
+		# `web_browser.nim`. Both are `{.error.}` on the C backend by design,
+		# so `vm-unit` cannot see them; and neither is imported by any suite in
+		# `vm-unit-js`, because the whole point of
+		# `platform/web_platform.nim` is that it reaches no browser API and can
+		# therefore be tested without these. The result was a hole exactly the
+		# shape of those two files: NOTHING IN CI COMPILED THEM AT ALL.
+		#
+		# The other two in the list are here for their own reasons, not this
+		# one. `platform_host.nim` is here for its Electron arm (spelled out
+		# below). `opfs_volume.nim` is the web instantiation's OPFS volume: it
+		# is also `{.error.}` on C, but unlike the two above it IS driven by a
+		# suite — `test_opfs_volume.nim`, added to `vm-unit-js` against a fake
+		# `navigator.storage` — so for it this lane is a second compile rather
+		# than the only one.
 		#
 		# It was not theoretical for long. `web_browser.nim` reached `dev` at
 		# ed9d6021 with a doc comment after the closing paren of an object

@@ -1,8 +1,17 @@
 // File containing style for widgets that are shared across all other widgets
+
+// The app-wide scrollbar — every panel that scrolls.  8px at the 16px root, and
+// in `rem` on purpose: this is an unscoped `::-webkit-scrollbar`, so `em` here
+// resolved against whatever element the bar happened to appear on and the
+// thickness changed from panel to panel — measured 6px on a 12px container,
+// 7px at 14px, 12px at 24px.  A 12px panel landed on 6px, the same as a menu,
+// collapsing the distinction DROPDOWN_SCROLLBAR_SIZE exists to draw.
+PANEL_SCROLLBAR_SIZE = 0.5rem
+
 if !IS_EXTENSION
   ::-webkit-scrollbar
-    width: 0.5em
-    height: 0.5em
+    width: PANEL_SCROLLBAR_SIZE
+    height: PANEL_SCROLLBAR_SIZE
     background-color: transparent
 
   ::-webkit-scrollbar-corner
@@ -125,9 +134,9 @@ DROPDOWN_RADIUS = 0.375rem
 
 // Scrollbars inside a menu.
 //
-// The app-wide scrollbar (top of this file) is 0.5em, which is right for a
-// panel but heavy inside a menu a few rows tall — it takes a visible bite out
-// of a 12em-wide dropdown.  Its own constant rather than a reuse of
+// PANEL_SCROLLBAR_SIZE (top of this file) is 8px, which is right for a panel
+// but heavy inside a menu a few rows tall — it takes a visible bite out of a
+// 12em-wide dropdown.  Its own constant rather than a reuse of
 // DROPDOWN_TRIGGER_GAP: the two happen to be the same 6px, but a scrollbar's
 // thickness and a menu's offset answer to different things and should be free
 // to move apart.
@@ -654,61 +663,6 @@ input:checked ~ .checkmark:after
 
 .hamburger-dropdown + .dropdown-list.active
   width: fit-content
-
-// .layout-buttons-container-wrapper
-//   outline: 4px solid colors-ui-surface-primary-tertiary
-
-.layout-buttons-container
-  // Always render last in the .lm_tabs flex container, pinned to the right.
-  // GL2's tryUpdateTabSizes re-appends tab elements via appendChild (moving
-  // them after our button in the DOM); the CSS order overrides DOM order so
-  // the button stays visually at the far right after collapse/expand.
-  order: 9999
-  margin-left: auto
-  width: 1.7em !important
-  height: 1.7em !important
-  background-color: colors-ui-surface-base-panel
-  border-radius: 0.36em
-  background-image: ct-images-layout-tab
-  background-size:  1em
-  background-repeat: no-repeat
-  background-position: center
-  cursor: pointer
-  border: 0.0625em solid colors-ui-surface-base-panel
-
-  &:focus
-    outline: none !important
-    box-shadow: none !important
-
-  &:focus-visible
-    outline: none !important
-    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
-
-  &:hover
-    background-color: colors-ui-surface-input-default
-
-  &.active
-    // background-image: ct-images-layout-tab-active
-    background-color: colors-ui-surface-input-default
-    border: 0.0625em solid colors-ui-surface-action-primary !important
-
-  .layout-dropdown
-    dropdown-surface()
-    width: fit-content;
-    z-index: 100
-    position: absolute;
-    // Opened flush against the button; now the shared 6px, like every other
-    // menu.
-    top: DROPDOWN_TRIGGER_OFFSET
-    right: 0 !important
-
-    .layout-dropdown-node
-      dropdown-surface-row()
-
-      &:hover
-        background-color: colors-ui-surface-primary-default-hover
-
-
 
 .run-trace-button
   .custom-tooltip

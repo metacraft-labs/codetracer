@@ -439,13 +439,77 @@ jobs:
         # one recorder per matrix row and because the triggering repo cannot be
         # its own sibling.  See "SIBLING PINNING" in this file's header, and
         # metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2.
+        #
+        # TWO LISTS, AND THEY ANSWER DIFFERENT QUESTIONS.  The planner's three
+        # are the REPOS UNDER TEST -- the other corners of the edge this gate
+        # asserts.  The literal block after it is the WORKSPACE THE CORE BUILD
+        # NEEDS, which is a different set and was simply absent: `Build the
+        # codetracer-desktop core` runs `just build-once`, whose very first act
+        # is `scripts/require-siblings.sh`, and that refused every run of this
+        # gate that ever reached it -- all three matrix arms, identically,
+        # 0.45s in, before a compiler was ever started:
+        #
+        #   Cannot start the CodeTracer build: 8 required sibling repo(s) are
+        #   missing.
+        #     * isonim ... * nim-agents ... * nim-agent-harbor ... * nim-acp
+        #     * nim-everywhere ... * codetracer-trace-format
+        #     * codetracer-native-recorder ... * runquota
+        #
+        # Nothing about the lock or the recorder pins was wrong when that
+        # happened: the three planner siblings resolved, and the contract
+        # fixture check two steps below passed.  The workspace was just three
+        # repos where the build needs eleven.
+        #
+        # SIX OF THE EIGHT ARE ADDED HERE, BARE, and bare is not a shortcut: the
+        # workspace lock published for this commit pins every one of them, so
+        # `clone-siblings` resolves each through NEED_LOCK=1 exactly as it does
+        # the planner's three.  `codetracer-trace-format-nim` is repeated from
+        # the planner's list deliberately -- it is the other half of
+        # `codetracer-trace-format`'s FFI boundary and the two are only ever
+        # correct together (ci/test/sibling-provisioning-test.sh asserts that
+        # per BLOCK, and a block naming one half only is the defect it names).
+        # The repeat costs one extra clone of an already-pinned revision.
+        #
+        # THE REMAINING TWO ARE NOT IN THIS REPO'S GIFT.  `isonim` and
+        # `runquota` are absent from the `codetracer` project in
+        # metacraft-labs/metacraft-manifests, so the lock has no revision for
+        # them and a bare entry would fail this step outright with
+        #
+        #   The workspace lock for codetracer@<sha> pins no revision for these
+        #   sibling(s): isonim runquota
+        #
+        # -- verified against the published lock for d05e45f97e449c03, which
+        # names 96 repos and neither of those.  The two escape hatches are both
+        # closed on purpose and must stay closed: a `<name>=<ref>` entry is
+        # refused by the planner's own guard above (revisions come from the
+        # lock), and it would also push this repo past the shrink-only
+        # branch-tip ceiling in ci/test/sibling-provisioning-test.sh.
+        #
+        # So this gate cannot go green from this repository alone.  The remedy
+        # is to declare `isonim` and `runquota` in codetracer's project manifest
+        # and publish a new lock -- `repro workspace lock --trigger-repo=
+        # codetracer` in a workspace whose `.repro/manifests` is a real git
+        # checkout -- and then add the two names to the block below.
+        # ci/test/launcher-recorder-e2e-workflow-test.sh holds that gap as a
+        # named, shrink-only exception so it cannot be forgotten or widened.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
-          siblings: ${{ steps.plan.outputs.siblings }}
+          # `clone-siblings` tokenises this value on whitespace after stripping
+          # `#` comments, so the expression's three names and the literal names
+          # below arrive as one flat list.
+          siblings: |
+            ${{ steps.plan.outputs.siblings }}
+            nim-everywhere
+            nim-acp
+            nim-agent-harbor
+            nim-agents
+            codetracer-trace-format
+            codetracer-trace-format-nim
+            codetracer-native-recorder
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot

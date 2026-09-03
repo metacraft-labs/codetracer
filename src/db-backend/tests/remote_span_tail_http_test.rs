@@ -812,30 +812,33 @@ fn a_truncated_upload_serves_its_committed_prefix_over_http() {
     assert_eq!(server.full_body_responses(), 0);
 }
 
-/// **A finding, pinned.**
+/// **A finding, pinned — updated for structural stream presence.**
 ///
-/// A container that `trace_writer_close()` finalized carries `meta.dat` in its
-/// LAST data block, because that is the terminal metadata the writer emits
-/// last. So the very first thing a truncated upload of a finalized `.ct` loses
-/// is the feature-bit word that declares the span stream — long before it loses
-/// any span bytes.
+/// Stream presence is now resolved STRUCTURALLY (the container's `spans.dat`
+/// directory entry + a committed `spans.idx`), not from the `meta.dat` bit-13
+/// declaration (trace-format spec: "Stream presence is structural, not
+/// flag-gated"). That amendment retires the ORIGINAL form of this finding, which
+/// asserted `partial == 0` for a finalized (`meta.dat`-last) container on the
+/// premise that losing `meta.dat` first must suppress the whole stream. Once the
+/// reader no longer consults bit 13, a finalized container and a
+/// declaration-first ([`repacked_stage`]) container are INDISTINGUISHABLE at a
+/// cut where `spans.idx` is intact and `spans.dat` is only partially resident —
+/// and both must serve the committed prefix. The old `partial == 0` was an
+/// artifact of the meta-bit gate, not an integrity property.
 ///
-/// The append-only record format is still a valid prefix in the sense the spec
-/// means; what is not recoverable is the *declaration* that the prefix is a
-/// span stream at all. The reader must therefore refuse, and this test asserts
-/// it refuses rather than guessing bit 13 from the presence of a `spans.dat`
-/// entry — which would be the tempting and wrong repair, since a container may
-/// carry a stream whose feature bits this build does not understand.
-///
-/// The consequence for anyone shipping this: to make a partially-uploaded
-/// recording readable, publish the declaration BEFORE the payload (which is
-/// what [`repacked_stage`] does and what a streaming publisher should do).
-/// Until then, "a truncated upload is a valid prefix" holds for the span stream
-/// and not for the container that wraps it.
+/// What the anti-guessing invariant becomes: the refusal is anchored on
+/// **committed-index validity**, not on the meta bit. A cut that loses or tears
+/// `spans.idx` (its header, or any declared byte) is refused — the reader will
+/// not invent a span list from raw `spans.dat` bytes without a valid index. A
+/// cut that keeps `spans.idx` intact over partial `spans.dat` serves a genuine
+/// committed prefix (every row a record the intact stream carries), which is
+/// streaming-correct, not a guess. This test pins both halves.
 #[test]
 fn truncating_a_finalized_container_refuses_rather_than_guessing() {
     let image = stage_image(4);
-    let full_rows = distinct_ids(&all_raw_records(&image)).len();
+    let full = all_raw_records(&image);
+    let full_ids = distinct_ids(&full);
+    let full_rows = full_ids.len();
 
     let mut refused = 0usize;
     let mut complete = 0usize;
@@ -843,37 +846,63 @@ fn truncating_a_finalized_container_refuses_rather_than_guessing() {
     for cut in (16..image.len()).step_by(101) {
         let truncated = image[..cut].to_vec();
         match RemoteRequestSpanTail::open_source(Box::new(InMemoryBlockSource::new(truncated))) {
+            // A cut that loses the container header/directory, or that tears the
+            // committed `spans.idx`, refuses — fail-closed, never a guess.
             Err(_) => refused += 1,
             Ok(mut tail) => match tail.poll(0) {
                 Err(_) => refused += 1,
-                Ok(d) if d.spans.is_empty() => {
-                    // "This container declares no span stream" — also a refusal
-                    // to invent, just a quieter one. This is the answer for
-                    // every cut that lost `meta.dat`.
-                    refused += 1;
-                }
+                // No `spans.dat` entry survived the cut ⇒ nothing to serve. A
+                // quiet refusal to invent.
+                Ok(d) if d.spans.is_empty() => refused += 1,
                 Ok(d) if d.spans.len() == full_rows => complete += 1,
-                Ok(_) => partial += 1,
+                // A partial list is now a LEGITIMATE committed prefix: `spans.idx`
+                // is intact, `spans.dat` is partially resident. Assert it is a
+                // true prefix that invents nothing.
+                Ok(d) => {
+                    let ids: Vec<u64> = d.spans.iter().map(|r| r.id).collect();
+                    assert_eq!(
+                        ids,
+                        full_ids[..ids.len()].to_vec(),
+                        "cut at {cut}: partial span list {ids:?} is not a prefix of {full_ids:?}"
+                    );
+                    for row in &d.spans {
+                        assert!(
+                            full.contains(row),
+                            "cut at {cut}: partial upload produced a row the intact stream does \
+                             not contain: {row:?} — that would be a guess, not a committed prefix"
+                        );
+                    }
+                    partial += 1;
+                }
             },
         }
     }
 
-    assert!(refused > 0, "most cuts of a finalized container must be refused");
+    assert!(
+        refused > 0,
+        "cuts that lose the header/directory or tear the committed spans.idx must be refused"
+    );
     assert!(
         complete > 0,
         "cuts that only remove the container's trailing block padding lose nothing and must \
          still read completely"
     );
-    // THE finding: it is all or nothing. `meta.dat` sits in the last data block,
-    // so by the time a cut reaches any span byte it has already taken the bit-13
-    // declaration with it — there is no cut of a finalized container that yields
-    // a partial span list.
-    assert_eq!(
-        partial, 0,
-        "a truncated FINALIZED container yielded a PARTIAL span list. That is only possible \
-         if the reader inferred bit 13 from the presence of a spans.dat entry instead of \
-         reading meta.dat, which would also silently accept a container carrying feature \
-         bits this build does not understand"
+    // Under structural presence + index-validity, a finalized container CAN yield
+    // partial lists (intact spans.idx over partial spans.dat) — and each is a
+    // valid committed prefix, asserted row-for-row above. This is the corrected
+    // property; the retired `partial == 0` clause was an artifact of the meta-bit
+    // gate the amendment removed.
+    //
+    // Retiring that clause left `partial` counted but never read. Asserting it is
+    // reached is what keeps the paragraph above honest: without this, a regression
+    // that made every torn-`spans.dat` cut refuse would still pass this test while
+    // the comment went on claiming the prefix path was exercised. It is reached 17
+    // times for `stage_image(4)` over the deterministic `(16..len).step_by(101)`
+    // cuts, so this pins a property the test already relies on rather than a count.
+    assert!(
+        partial > 0,
+        "no cut produced a partial list, so the committed-prefix path above never ran and its \
+         row-for-row assertions proved nothing"
     );
 }
 

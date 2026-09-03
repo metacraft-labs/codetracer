@@ -46,7 +46,6 @@ use num_traits::FromPrimitive;
 
 use codetracer_trace_reader::call_stream_reader::decode_chunk_records;
 use codetracer_trace_writer::event_stream::IoEventRecord;
-use codetracer_trace_writer::meta_dat::meta_dat_has_io_event_stream;
 
 use crate::db::DbRecordEvent;
 
@@ -154,24 +153,22 @@ impl SeekableEventStream {
     /// (a file, an overlay, or the browser's in-memory VFS) rather than from a
     /// reopened filesystem path.
     ///
-    /// Returns `Ok(None)` when the container does not advertise
-    /// `has_io_event_stream` or carries no `events.dat` — the caller then keeps
-    /// whatever materialised events it already has.
+    /// Returns `Ok(None)` when the container carries no `events.dat` (decided by
+    /// structural presence, not the `has_io_event_stream` hint bit) — the caller
+    /// then keeps whatever materialised events it already has.
     pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<SeekableEventStream>, String> {
-        let meta = match ctfs.read_file("meta.dat") {
-            Ok(meta) => meta,
-            Err(_) => return Ok(None),
-        };
-        if !meta_dat_has_io_event_stream(&meta) {
-            return Ok(None);
-        }
+        // Existence is answered by STRUCTURAL PRESENCE of `events.dat`, never by
+        // `meta.dat`'s `has_io_event_stream` hint bit — a writer may stamp that
+        // bit only at close, so gating on it would refuse an I/O-event stream that
+        // structurally exists in a still-recording trace (trace-format spec:
+        // "Stream-presence flags are a hint, not a gate").
         let dat = match ctfs.read_file("events.dat") {
             Ok(dat) => dat,
             Err(_) => return Ok(None),
         };
         let idx = ctfs
             .read_file("events.idx")
-            .map_err(|e| format!("events.idx missing despite has_io_event_stream flag: {e}"))?;
+            .map_err(|e| format!("events.idx missing despite events.dat presence: {e}"))?;
 
         let index = EventsIndex::parse(&idx)?;
         let chunk_size = index.chunk_size;

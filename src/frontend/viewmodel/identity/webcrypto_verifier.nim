@@ -9,14 +9,19 @@
 ##
 ## The obvious way to ship a browser crypto binding is to write it, assert it
 ## appears in the bundle, and hope. That is the shape this campaign keeps
-## calling a vacuous pass. It is avoidable here because **`vm-unit-js` runs
-## under Node, and Node's `globalThis.crypto.subtle` implements Ed25519 with
-## the same API a browser exposes** — measured on the toolchain's Node 22:
-## a generated key exports 32 raw bytes, a signature is 64, verification of a
-## good signature is `true` and of a one-bit-flipped signature is `false`.
+## calling a vacuous pass. It is avoidable here because **Node's
+## `globalThis.crypto.subtle` implements Ed25519 with the same API a browser
+## exposes**, so this code can be run for real rather than inspected.
 ##
-## So `test_webcrypto_verifier.nim` generates a real key pair, signs a real
-## container, and verifies it through this exact code. The JS lane runs real
+## It is *not* a `vm-unit-js` suite that does this: `crypto.subtle.verify`
+## resolves on V8's microtask queue, which `drainPlatformCallbacks` does not
+## drain. The gate is `ci/test/identity-webcrypto.sh`, which compiles
+## `ci/test/identity_webcrypto_probe.nim` against this module and runs it
+## under Node. The probe generates a real Ed25519 key pair, signs a real
+## container, and verifies it through this exact code — a good signature
+## verifies, a one-bit-flipped signature and a one-bit-flipped message do not,
+## and unusable key material comes back as an error rather than a bad-signature
+## verdict. It is wired into `just test-identity`. The JS lane runs real
 ## Ed25519; the C lane runs the refusal below. Both are the shipped path for
 ## their backend.
 ##

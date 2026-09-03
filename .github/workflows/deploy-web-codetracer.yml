@@ -75,6 +75,34 @@ name: Deploy ide.codetracer.com
 #   matching rule, so the two are concatenated rather than one replacing the
 #   other — see the staging step.
 #
+# THE MOUNT GATE AND ITS FONTS TRAVELLED TOGETHER IN THE cloud<->dev MERGE
+#
+# `dev` carried a note here warning that the product's mount gate lived on
+# `cloud` and that three things had to be taken together or none, because each
+# of the first two is useless without the third and FAILS SILENTLY:
+#
+#   1. ci/test/web-renderer-mounts.sh   the gate: the deployed page mounts the
+#                                       IDE, not a boot diagnostic.
+#   2. ci/test/web_renderer_probe.mjs   the browser driver it runs. Also
+#                                       ci/test/web_deploy_guard.nim and
+#                                       ci/test/web_deployment_render.nim.
+#   3. nix/shells/ci-base.nix's fonts   `fontPackages` + `fontsConf` +
+#                                       FONTCONFIG_FILE.
+#
+# ALL THREE ARE NOW PRESENT IN THIS TREE, verified file-by-file at merge time,
+# so the warning is kept as the RECORD OF WHY the third one matters rather than
+# as an outstanding action. `playwright-driver.browsers` ships Chromium and
+# nothing that tells it where a font lives. On a nix runner there is no
+# /etc/fonts, so fontconfig matches nothing, Chromium lays out every string with
+# zero glyphs, and `innerText` -- defined over the RENDERED text, not the DOM --
+# comes back empty for markup that is perfectly correct. The gate then reports a
+# byte-identical, working page as blank: it measured 2337 bytes of markup, 46
+# elements, `.welcome-screen-root`, five start options, both panels, and `only 0
+# characters of text are on screen`. It blocked a deploy over a page that was
+# fine. `ci-base.nix` carries the full reasoning; this note exists because
+# nobody reading a merge diff of a gate would think to look in a shell
+# definition for its dependency.
+#
 # WHY THE BUILD NEEDS SIBLINGS (the crux — see the deploy recon report)
 #   build-dist.sh wraps src/db-backend/build_wasm.sh, which HARD-ERRORS unless
 #   the PRIVATE sibling codetracer-native-recorder/ct_emulator/build_wasm_api.sh

@@ -923,9 +923,12 @@ const
     #   * the hand-written JS ordinal map in `src/frontend/trace_metadata.nim`.
     #
     # A copy that falls behind does not fail loudly — it decodes an integer as a
-    # different language.  That has already happened here: `src/tui/src/lang.rs`
-    # stopped at `Solana` (37 of 40) and `libs/ct-dap-client` diverged from
-    # ordinal 6 onwards, both silently.  `lang_enum_contract_test` is what pins
+    # different language.  That has already happened here, and the examples are
+    # HISTORY, not the current tree: the TUI once kept its own copy in
+    # `src/tui/src/lang.rs`, which had stopped short at `Solana` and was missing
+    # everything after it — the file is gone, deleted in 84a8b633 when the TUI
+    # was pointed at `libs/ct-lang` — and `libs/ct-dap-client` diverged from
+    # ordinal 6 onwards.  Both were silent.  `lang_enum_contract_test` is what pins
     # the three copies together, and it fails rather than silently comparing
     # nothing if it cannot locate either list.
     #

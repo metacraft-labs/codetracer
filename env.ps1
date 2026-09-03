@@ -250,33 +250,104 @@ function Resolve-DotnetRoot {
 # probe degrades gracefully to "package unavailable" instead of hard
 # failing during `. .\env.ps1`. All other exceptions propagate.
 function Invoke-AppxPackageQuery {
-  param([Parameter(Mandatory = $true)][string]$Name)
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [int]$MaxAttempts = 5,
+    [int]$RetryDelaySeconds = 3
+  )
 
-  try {
-    return Get-AppxPackage -Name $Name -ErrorAction Stop
-  } catch {
-    $err = $_
-    $msg = ""
-    if ($null -ne $err.Exception) { $msg = [string]$err.Exception.Message }
-    $isPlatformUnsupported =
-      ($msg -match "0x80131539") -or
-      ($msg -match "not supported on this platform") -or
-      ($msg -match "Appx") -or
-      ($msg -match "PackageManager") -or
-      # Windows Server 2022 / nested Windows guests sometimes ship with
-      # a broken AppX repository (SQLite database that never got the
-      # initial schema populated because no per-user App Installer ran).
-      # Get-AppxPackage then throws "The database disk image is
-      # malformed" (SQLite error 11).  Treat that the same way as the
-      # 0x80131539 platform-unsupported error: the box has no working
-      # AppX, degrade gracefully to "package unavailable" instead of
-      # blowing up env.ps1.
-      ($msg -match "database disk image is malformed")
-    if ($isPlatformUnsupported) {
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    try {
+      return Get-AppxPackage -Name $Name -ErrorAction Stop
+    } catch {
+      $err = $_
+      $msg = ""
+      if ($null -ne $err.Exception) { $msg = [string]$err.Exception.Message }
+
+      # Transient AppX/RPC faults: the AppX deployment service (AppXSvc)
+      # and the StateRepository service expose their query surface over
+      # RPC.  On hosted Windows Server 2022 GitHub Actions runners those
+      # services are frequently still spinning up (or briefly recycle
+      # under load) when env.ps1 is sourced, so Get-AppxPackage throws
+      # "The remote procedure call failed." (HRESULT 0x800706BE) or one
+      # of its siblings ("The RPC server is unavailable." 0x800706BA,
+      # "The service ... could not be started").  These are terminating
+      # errors, so -ErrorAction does NOT suppress them and they abort the
+      # whole `. .\env.ps1`.  Retry a few times with a short backoff; the
+      # service is usually ready within a couple of seconds.
+      $isTransientRpc =
+        ($msg -match "remote procedure call failed") -or
+        ($msg -match "RPC server is unavailable") -or
+        ($msg -match "0x800706BE") -or
+        ($msg -match "0x800706BA") -or
+        ($msg -match "server process could not be started") -or
+        ($msg -match "service .* could not be started") -or
+        ($msg -match "class not registered") -or
+        # "Server execution failed" (0x80080005 CO_E_SERVER_EXEC_FAILURE): the
+        # AppX COM server (AppXSvc / StateRepository) failed to LAUNCH rather
+        # than failing mid-call. On loaded self-hosted runners this appears
+        # interchangeably with "remote procedure call failed" and is just as
+        # transient -- observed aborting env.ps1 on attempt 3 after two RPC
+        # retries. Include the two classic "COM server busy / rejecting calls"
+        # DCOM faults, which likewise mean "retry shortly".
+        ($msg -match "Server execution failed") -or
+        ($msg -match "0x80080005") -or
+        ($msg -match "call was rejected by callee") -or
+        ($msg -match "0x80010001") -or
+        ($msg -match "server is busy") -or
+        ($msg -match "0x8001010A")
+      if ($isTransientRpc -and $attempt -lt $MaxAttempts) {
+        Write-Warning ("Get-AppxPackage -Name '$Name' hit a transient AppX/RPC fault " +
+          "(attempt $attempt/$MaxAttempts): $msg. Retrying in ${RetryDelaySeconds}s...")
+        Start-Sleep -Seconds $RetryDelaySeconds
+        continue
+      }
+
+      $isPlatformUnsupported =
+        ($msg -match "0x80131539") -or
+        ($msg -match "not supported on this platform") -or
+        ($msg -match "Appx") -or
+        ($msg -match "PackageManager") -or
+        # Windows Server 2022 / nested Windows guests sometimes ship with
+        # a broken AppX repository (SQLite database that never got the
+        # initial schema populated because no per-user App Installer ran).
+        # Get-AppxPackage then throws "The database disk image is
+        # malformed" (SQLite error 11).  Treat that the same way as the
+        # 0x80131539 platform-unsupported error: the box has no working
+        # AppX, degrade gracefully to "package unavailable" instead of
+        # blowing up env.ps1.
+        ($msg -match "database disk image is malformed")
+      if ($isPlatformUnsupported) {
+        return $null
+      }
+
+      # Transient RPC fault that survived every retry: the AppX service is
+      # simply not answering on this box.  The TTD/WinDbg consumers treat
+      # a $null result as "not installed via AppX" and fall back to the
+      # DIY cache (WINDOWS_DIY_INSTALL_ROOT\ttd, whose meta file carries
+      # the authoritative version), so degrade gracefully rather than
+      # aborting the entire environment bootstrap.
+      if ($isTransientRpc) {
+        Write-Warning ("Get-AppxPackage -Name '$Name' still failing after $MaxAttempts attempts " +
+          "with a transient AppX/RPC fault: $msg. Treating the package as unavailable via AppX.")
+        return $null
+      }
+
+      # Any OTHER Get-AppxPackage failure: the AppX probe is best-effort. TTD/
+      # WinDbg detection is optional -- when it yields nothing, Ensure-Ttd falls
+      # back to the pinned msixbundle download (Step 3), so a failed probe must
+      # never abort env.ps1 sourcing. Enumerating every transient AppX/DCOM
+      # HRESULT is whack-a-mole (this exact throw is what let the un-enumerated
+      # "Server execution failed" kill the Windows installer build), so degrade
+      # to "unavailable via AppX" for anything that reaches here. The transient
+      # set above still governs whether we spent retries before giving up.
+      Write-Warning ("Get-AppxPackage -Name '$Name' failed with a non-transient AppX error: " +
+        "$msg. Treating the package as unavailable via AppX and falling back to the DIY " +
+        "toolchain cache.")
       return $null
     }
-    throw
   }
+  return $null
 }
 
 function Resolve-TtdExe {

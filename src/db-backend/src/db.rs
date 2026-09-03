@@ -1462,6 +1462,55 @@ pub struct MaterializedReplaySession {
     /// `step(Action::Continue, ...)` returns and emits one DAP
     /// `output` event per drained hit.  Cleared on every drain.
     pending_tracepoint_hits: Vec<TracepointHit>,
+    /// Session-level breakpoint suppression, used by the internal
+    /// "run to line" / `local_step_jump` brackets that wrap a move in
+    /// `disable_breakpoints() ... enable_breakpoints()`.
+    ///
+    /// `None` — no suppression: every breakpoint fires according to
+    /// its own `enabled` flag.
+    ///
+    /// `Some(threshold)` — every breakpoint whose `id < threshold`
+    /// (i.e. every breakpoint that already existed when
+    /// `disable_breakpoints` was called) is suppressed for the
+    /// duration of the bracket.  Breakpoints added AFTER the disable
+    /// — the bracket's own temporary target breakpoint — still fire,
+    /// which is precisely what makes run-to-line work.
+    ///
+    /// Crucially this is SEPARATE from the per-breakpoint `enabled`
+    /// field.  `enabled` is the USER's intent, set only via
+    /// `toggle_breakpoint`; a bracket must never overwrite it, or a
+    /// breakpoint the user deliberately switched off would come back
+    /// silently re-enabled after an unrelated jump.  Restore-all is
+    /// not restore.
+    ///
+    /// WHY A THRESHOLD AND NOT A `bool`.  The obvious move is to copy
+    /// `EmulatorReplaySession`'s session-level `breakpoints_enabled`
+    /// flag.  That breaks run-to-line, and it breaks it silently.  The
+    /// bracket is:
+    ///
+    ///   disable_breakpoints()
+    ///   add_breakpoint(target)      // hardcodes `enabled: true`
+    ///   step(Action::Continue, ..)  // expected to stop at `target`
+    ///   delete_breakpoint(target)
+    ///   enable_breakpoints()
+    ///
+    /// A blanket flag suppresses the bracket's OWN temporary target
+    /// breakpoint too, so `Continue` never stops and the jump runs off
+    /// the end of the trace.  The bracket needs to distinguish
+    /// "breakpoints that existed when suppression began" from
+    /// "breakpoints the bracket itself created" — a distinction a
+    /// boolean cannot express, but a high-water mark on
+    /// `breakpoint_next_id` expresses exactly.
+    ///
+    /// That the same threshold also leaves per-breakpoint `enabled`
+    /// meaning purely the user's intent — fixing the restore-all half
+    /// above without a second mechanism — is the sign it is the right
+    /// shape rather than a patch.
+    ///
+    /// `bracket_temporary_breakpoint_fires_while_others_are_suppressed`
+    /// is the regression test for this specific trap; it reddens the
+    /// moment anyone collapses this field back down to a `bool`.
+    breakpoint_suppression: Option<i64>,
 }
 
 impl MaterializedReplaySession {
@@ -1483,6 +1532,7 @@ impl MaterializedReplaySession {
             tracepoint_list,
             tracepoint_next_id: 0,
             pending_tracepoint_hits: Vec::new(),
+            breakpoint_suppression: None,
         }
     }
 
@@ -1966,6 +2016,7 @@ impl MaterializedReplaySession {
         // honour the M9 condition layer when present.
         if let Some(bp) = table.get(&(line_key, None))
             && bp.enabled
+            && !self.breakpoint_suppressed(bp)
             && self.condition_satisfied_at(bp, step.step_id)
         {
             return true;
@@ -1978,12 +2029,20 @@ impl MaterializedReplaySession {
         if let Some(step_col) = step.column
             && let Some(bp) = table.get(&(line_key, Some(step_col.0)))
             && bp.enabled
+            && !self.breakpoint_suppressed(bp)
             && self.condition_satisfied_at(bp, step.step_id)
         {
             return true;
         }
 
         false
+    }
+
+    /// Whether `bp` is currently suppressed by an active run-to-line
+    /// bracket.  Orthogonal to `bp.enabled`, which carries the user's
+    /// own intent; a breakpoint fires only when BOTH say yes.
+    fn breakpoint_suppressed(&self, bp: &Breakpoint) -> bool {
+        matches!(self.breakpoint_suppression, Some(threshold) if bp.id < threshold)
     }
 
     /// M10 — return the registered DAP-pipeline tracepoint that
@@ -2623,21 +2682,24 @@ impl ReplaySession for MaterializedReplaySession {
         Err(format!("breakpoint id {} not found", breakpoint.id).into())
     }
 
+    /// Lift the session-level suppression installed by
+    /// `disable_breakpoints`, ending a run-to-line bracket.
+    ///
+    /// This restores each breakpoint to exactly the state the USER
+    /// left it in, because the bracket never touched the per-breakpoint
+    /// `enabled` flags in the first place.  A breakpoint the user
+    /// disabled via `toggle_breakpoint` stays disabled across the
+    /// bracket — re-enabling everything would destroy that intent.
     fn enable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
-        for path_breakpoints in self.breakpoint_list.iter_mut() {
-            for b in path_breakpoints.values_mut() {
-                b.enabled = false;
-            }
-        }
+        self.breakpoint_suppression = None;
         Ok(())
     }
 
+    /// Suppress every breakpoint that exists right now, for the
+    /// duration of an internal move bracket.  Breakpoints added after
+    /// this call (the bracket's own temporary target) still fire.
     fn disable_breakpoints(&mut self) -> Result<(), Box<dyn Error>> {
-        for path_breakpoints in self.breakpoint_list.iter_mut() {
-            for b in path_breakpoints.values_mut() {
-                b.enabled = false;
-            }
-        }
+        self.breakpoint_suppression = Some(self.breakpoint_next_id as i64);
         Ok(())
     }
 
@@ -4431,6 +4493,7 @@ mod breakpoint_condition_tests {
 
     use crate::db::{Db, DbCall, DbStep, EndOfProgram, MaterializedReplaySession};
     use crate::in_memory_trace_reader::InMemoryTraceReader;
+    use crate::replay::ReplaySession;
     use crate::trace_reader::TraceReader;
 
     /// Build a single-step in-memory trace with the supplied
@@ -4723,6 +4786,206 @@ mod breakpoint_condition_tests {
             .evaluate_breakpoint_condition("x == 1 || missing == 1", StepId(0))
             .expect("short-circuit: RHS must not be evaluated");
         assert!(result);
+    }
+
+    // ---------------------------------------------------------------
+    // Breakpoint enable/disable bracket
+    //
+    // `MaterializedReplaySession::enable_breakpoints` used to be a
+    // byte-for-byte copy of `disable_breakpoints` (both set
+    // `enabled = false`), so the internal "run to line" bracket
+    //
+    //     disable_breakpoints(); ...move...; enable_breakpoints();
+    //
+    // permanently killed every breakpoint in the session, silently.
+    // It was unreachable only because materialized traces take the
+    // index-jump arm in `Handler::source_line_jump` and never entered
+    // the bracket — a loaded trap, not a fix.
+    //
+    // These tests target `MaterializedReplaySession` specifically: the
+    // sibling implementations (emulator, recreator) spell this
+    // correctly, so a shared-trait test would have hidden the bug.
+    // They also vary the state a naive test leaves constant — a test
+    // that sets one always-enabled breakpoint and checks "breakpoints
+    // still work after a jump" passes under BOTH spellings.
+    // ---------------------------------------------------------------
+
+    /// Build a session over a synthetic trace with one step per line,
+    /// lines `1..=line_count`, all in `synthetic.src`.  Enough for the
+    /// breakpoint registry and the stop check; the value tables stay
+    /// empty because these tests never evaluate a condition.
+    fn session_with_lines(line_count: usize) -> MaterializedReplaySession {
+        let trace_dir = PathBuf::from("/tmp/breakpoint-bracket-tests");
+        let mut db = Db::new(&trace_dir);
+
+        // PathId(0) is the sentinel reserved by the CTFS loader.
+        db.paths.push(String::new());
+        db.paths.push("synthetic.src".to_string());
+        db.path_map.insert("synthetic.src".to_string(), PathId(1));
+
+        db.variable_names.push("<sentinel>".to_string());
+        db.functions.push(FunctionRecord {
+            path_id: PathId(1),
+            line: Line(1),
+            name: "<top-level>".to_string(),
+        });
+
+        let call_key = CallKey(0);
+        db.calls.push(DbCall {
+            key: call_key,
+            function_id: FunctionId(0),
+            args: Vec::new(),
+            return_value: ValueRecord::None { type_id: TypeId(0) },
+            step_id: StepId(0),
+            depth: 0,
+            parent_key: CallKey(-1),
+            children_keys: Vec::new(),
+        });
+
+        db.step_map.push(std::collections::HashMap::new()); // sentinel for PathId(0)
+        let mut path1_map: std::collections::HashMap<usize, Vec<DbStep>> = std::collections::HashMap::new();
+
+        for idx in 0..line_count {
+            let step = DbStep {
+                step_id: StepId(idx as i64),
+                path_id: PathId(1),
+                line: Line((idx + 1) as i64),
+                column: None,
+                call_key,
+                global_call_key: call_key,
+            };
+            db.steps.push(step);
+            db.variables.push(Vec::new());
+            db.instructions.push(Vec::new());
+            db.compound.push(std::collections::HashMap::new());
+            db.cells.push(std::collections::HashMap::new());
+            db.variable_cells.push(std::collections::HashMap::new());
+            path1_map.insert(idx + 1, vec![step]);
+        }
+        db.step_map.push(path1_map);
+        db.end_of_program = EndOfProgram::Normal;
+
+        let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(db));
+        MaterializedReplaySession::new(reader)
+    }
+
+    /// The step recorded at `line` in the synthetic trace.
+    fn step_at_line(line: i64) -> DbStep {
+        DbStep {
+            step_id: StepId(line - 1),
+            path_id: PathId(1),
+            line: Line(line),
+            column: None,
+            call_key: CallKey(0),
+            global_call_key: CallKey(0),
+        }
+    }
+
+    /// A `disable_breakpoints()`/`enable_breakpoints()` bracket must
+    /// leave breakpoints FIRING afterwards.
+    ///
+    /// Reddens against the copy-paste bug: with `enable_breakpoints`
+    /// spelled as `disable_breakpoints`, the breakpoint stays dead
+    /// after the bracket closes and the final assert fails.
+    #[test]
+    fn enable_breakpoints_restores_firing_after_a_bracket() {
+        let mut session = session_with_lines(3);
+        session
+            .add_breakpoint("synthetic.src", 2, None, None)
+            .expect("add breakpoint at line 2");
+
+        assert!(
+            session.step_matches_any_breakpoint(&step_at_line(2)),
+            "a freshly added breakpoint must fire"
+        );
+
+        session.disable_breakpoints().expect("disable");
+        assert!(
+            !session.step_matches_any_breakpoint(&step_at_line(2)),
+            "inside the bracket the pre-existing breakpoint must be suppressed"
+        );
+
+        session.enable_breakpoints().expect("enable");
+        assert!(
+            session.step_matches_any_breakpoint(&step_at_line(2)),
+            "enable_breakpoints must RESTORE firing, not disable it again"
+        );
+    }
+
+    /// A breakpoint the user deliberately switched off via
+    /// `toggle_breakpoint` must STILL be off after an internal
+    /// run-to-line bracket.  Restore-all is not restore.
+    ///
+    /// Reddens against the obvious-but-wrong repair (`b.enabled =
+    /// true` in `enable_breakpoints`), which silently resurrects
+    /// breakpoints the user turned off.
+    #[test]
+    fn user_disabled_breakpoint_stays_disabled_across_a_bracket() {
+        let mut session = session_with_lines(3);
+        let user_off = session
+            .add_breakpoint("synthetic.src", 1, None, None)
+            .expect("add breakpoint at line 1");
+        session
+            .add_breakpoint("synthetic.src", 3, None, None)
+            .expect("add breakpoint at line 3");
+
+        // The user switches the line-1 breakpoint off by hand.
+        let toggled = session.toggle_breakpoint(&user_off).expect("toggle line 1 off");
+        assert!(!toggled.enabled, "toggle must have switched it off");
+        assert!(!session.step_matches_any_breakpoint(&step_at_line(1)));
+        assert!(session.step_matches_any_breakpoint(&step_at_line(3)));
+
+        // An unrelated internal move brackets the session.
+        session.disable_breakpoints().expect("disable");
+        session.enable_breakpoints().expect("enable");
+
+        assert!(
+            !session.step_matches_any_breakpoint(&step_at_line(1)),
+            "a breakpoint the USER disabled must not come back enabled after an internal bracket"
+        );
+        assert!(
+            session.step_matches_any_breakpoint(&step_at_line(3)),
+            "the untouched breakpoint must still fire"
+        );
+    }
+
+    /// The bracket's own temporary target breakpoint — added AFTER
+    /// `disable_breakpoints` — must still fire, or run-to-line could
+    /// never stop anywhere.  Pre-existing breakpoints stay suppressed
+    /// for the duration.
+    ///
+    /// Reddens against a naive session-wide `breakpoints_enabled`
+    /// flag that gates every breakpoint unconditionally: the
+    /// temporary breakpoint would never fire and the jump would run
+    /// off the end of the trace.
+    #[test]
+    fn bracket_temporary_breakpoint_fires_while_others_are_suppressed() {
+        let mut session = session_with_lines(3);
+        session
+            .add_breakpoint("synthetic.src", 1, None, None)
+            .expect("pre-existing user breakpoint at line 1");
+
+        session.disable_breakpoints().expect("disable");
+        let temporary = session
+            .add_breakpoint("synthetic.src", 3, None, None)
+            .expect("bracket's temporary target at line 3");
+
+        assert!(
+            !session.step_matches_any_breakpoint(&step_at_line(1)),
+            "the pre-existing breakpoint must be suppressed inside the bracket"
+        );
+        assert!(
+            session.step_matches_any_breakpoint(&step_at_line(3)),
+            "the bracket's own temporary breakpoint must still fire"
+        );
+
+        session.delete_breakpoint(&temporary).expect("remove temporary");
+        session.enable_breakpoints().expect("enable");
+
+        assert!(
+            session.step_matches_any_breakpoint(&step_at_line(1)),
+            "the user breakpoint must fire again once the bracket closes"
+        );
     }
 }
 

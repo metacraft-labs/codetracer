@@ -279,6 +279,12 @@ proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
   ## helper of the same name so ``renderFilterPicker`` can stay generic.
   r.appendChild(host, child)
 
+proc setInnerHtml(r: MockRenderer; node: MockNode; html: string) =
+  ## Set the inner HTML of a mock node.  ``renderFilterPicker`` uses this to
+  ## inject the chevron SVG.  In the mock renderer this is a no-op: tests do
+  ## not inspect the chevron SVG content.
+  discard
+
 # Web-renderer picker helpers forward-declared here (before renderFilterPicker)
 # so that generic instantiation for WebRenderer finds setInnerHtml /
 # appendRenderedChild. Mirrors the VCS view's pattern exactly.

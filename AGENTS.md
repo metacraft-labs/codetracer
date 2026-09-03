@@ -1,5 +1,56 @@
 # Instructions for Codex
 
+## Where a checkout — or a worktree — has to live
+
+**A checkout of this repo must sit DIRECTLY under the workspace root, beside its
+sibling repos.** A `git worktree` is a checkout and this rule is not relaxed for
+it: put worktrees at `<workspace>/<name>`, never at `<workspace>/.agent-wt/<name>`
+or in any other subdirectory, and never outside the workspace.
+
+```
+/path/to/workspace/          # the workspace root
+  codetracer/                # the main checkout
+  my-feature/                # CORRECT — a worktree, beside the siblings
+  isonim/  runquota/  nim-agents/  codetracer-trace-format/  ...
+  .agent-wt/
+    my-feature/              # WRONG — its parent is `.agent-wt`, which has no siblings
+```
+
+The reason is that **the parent directory of the checkout IS the workspace root,
+by definition**, for four independent resolvers that reach siblings by the
+relative path `../<sibling>`:
+
+| resolver | where | how it fails from the wrong place |
+| --- | --- | --- |
+| Nim | `config.nims` (`repoRoot.parentDir()`), `src/Tuprules.tup` (`$(ROOT)/../…`) | `--path` to a missing dir is silently ignored → `cannot open file: runquota_process`, minutes in |
+| Cargo | `src/db-backend/Cargo.toml` (`path = "../../../codetracer-trace-format/…"`) | `failed to load manifest` |
+| cc | `src/db-backend/build.rs` (`../../../codetracer-native-recorder/ct_emulator`) | 81 undefined `mcr*` symbols at link |
+| direnv/nix | `.envrc` (`../io-mon`, `../reprobuild`, `../direnv-nix-flake-overrides`, …) | overrides silently not applied |
+
+None of the four can be pointed elsewhere per-worktree, so relocating the
+checkout is the only fix. In particular **`runquota` has no override at all** by
+design — see the tier notes in `scripts/require-siblings.sh` — so no environment
+variable can paper over a badly-placed worktree.
+
+Create one like this, from the main checkout:
+
+```bash
+git -C /path/to/workspace/codetracer worktree add /path/to/workspace/<name> <branch>
+```
+
+and move a misplaced one like this:
+
+```bash
+git worktree move /path/to/workspace/.agent-wt/<name> /path/to/workspace/<name>
+```
+
+`scripts/require-siblings.sh` runs before every build (`just build-once`,
+`just build`, `just test-gui`, …) and refuses a badly-placed checkout by name.
+**Do not answer it with `CODETRACER_SKIP_SIBLING_CHECK=1`**: that escape hatch is
+for genuinely different layouts (vendored trees, Nix builds that pre-stage the
+paths). Used here it only removes the message — the build still cannot see the
+siblings and dies later naming a *module* instead of the real problem.
+
 ## Building the full frontend (Nim + Electron)
 
 To rebuild the full CodeTracer frontend (Nim backend CLI, Nim renderer JS, webpack bundles):

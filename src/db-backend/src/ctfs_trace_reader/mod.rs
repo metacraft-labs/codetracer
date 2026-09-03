@@ -1201,12 +1201,22 @@ impl CTFSTraceReader {
             .map_err(|e| format!("new-format container has no readable meta.dat: {e}"))?;
         let meta = meta_dat::parse_meta_dat(&meta_bytes).map_err(|e| format!("meta.dat is malformed: {e}"))?;
 
-        // An MCR (live-recording) container carries checkpoint streams rather
-        // than a materialized execution, and needs the emulator rather than
-        // this reader. `setup_from_vfs` routes those away before reaching here;
-        // refusing by name is still better than silently producing a trace with
-        // zero steps, which reads to a user as "the program did nothing".
-        if meta.flags & meta_dat::FLAG_HAS_MCR_FIELDS != 0 {
+        // Refuse ONLY a container that carries NO materialized execution stream
+        // at all — no `steps.dat` and no legacy `events.log`. Such a container is
+        // a pure-MCR checkpoint bundle: it carries per-thread checkpoint streams
+        // the emulator replays, and this materialized reader would produce a trace
+        // with zero steps (which reads to a user as "the program did nothing").
+        //
+        // The refusal MUST be driven by STRUCTURAL ABSENCE of the materialized
+        // streams, NOT by `FLAG_HAS_MCR_FIELDS`: a COMBINED container ships BOTH
+        // MCR checkpoint streams AND a materialized `steps.dat`/`values.dat`/
+        // `calls.dat`, and it is fully readable here. This reader's job is the
+        // MATERIALIZED altitude — it reads steps/values/calls/spans/interning by
+        // structural presence below and simply ignores the native tNNN/cp0
+        // checkpoint streams (those are the emulator's altitude). See the
+        // trace-format spec, "Stream presence is structural, not flag-gated".
+        let has_materialized_execution = ctfs.has_file("steps.dat") || ctfs.has_file("events.log");
+        if !has_materialized_execution && meta.flags & meta_dat::FLAG_HAS_MCR_FIELDS != 0 {
             return Err(
                 "this is an MCR (live-recording) container; it needs the emulator replay session, \
                         not the materialized CTFS reader"
@@ -4688,5 +4698,255 @@ mod tests {
         idx.extend_from_slice(&0u64.to_le_bytes()); // first chunk offset
         idx.extend_from_slice(&1u64.to_le_bytes()); // first chunk geid
         idx
+    }
+
+    // ── Stream-presence flags are a hint, not a gate ────────────────────────
+    //
+    // Spec: codetracer-trace-format-spec/internal-files.md, "Stream-presence
+    // flags are a hint, not a gate" + ctfs-container.md §6 "Stream presence is
+    // structural, not flag-gated". A stream's EXISTENCE is answered by the
+    // structural presence of its `<stream>.dat` file entry, never by the
+    // `meta.dat` stream-presence bit (which a writer may stamp only at close).
+
+    /// The canonical MCR extended block used by the MCR-refusal tests below.
+    fn test_mcr_fields() -> meta_dat::McrFields {
+        meta_dat::McrFields {
+            tick_source: 1,
+            total_threads: 1,
+            atomic_mode: 0,
+            total_events: 0,
+            total_checkpoints: 0,
+            start_time_unix_us: 0,
+            platform: "linux-x86_64".to_owned(),
+            tick_granularity: "instruction".to_owned(),
+            tick_source_str: "rdtsc".to_owned(),
+            atomic_mode_str: "seq_cst".to_owned(),
+            start_time_str: "1970-01-01T00:00:00Z".to_owned(),
+            hook_profile: String::new(),
+            hook_strategies: Vec::new(),
+        }
+    }
+
+    /// Build a REAL split-stream bundle with the production Rust `CtfsTraceWriter`
+    /// (steps / values / calls + binary interning), then read every internal file
+    /// back out.
+    ///
+    /// Returns `(meta_bytes, other_files)` where `other_files` EXCLUDES `meta.dat`
+    /// AND `events.log`. Callers re-stamp their own `meta.dat` to control the
+    /// stream-presence bits / MCR bit, and the dropped `events.log` makes the
+    /// repackaged container `events.log`-free so `is_new_format` routes it through
+    /// `open_new_format_rust` (the new-format materialized reader). Nothing is
+    /// mocked: these are the exact bytes the writer produced.
+    fn real_split_bundle_files() -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
+        use codetracer_trace_types::{
+            CallRecord, FullValueRecord, FunctionId, FunctionRecord, Line, PathId, ReturnRecord, StepRecord,
+            TraceLowLevelEvent, TypeId, TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, VariableId,
+        };
+        use codetracer_trace_writer::ctfs_writer::CtfsTraceWriter;
+        use codetracer_trace_writer::trace_writer::TraceWriter;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path_buf = dir.path().join("bundle");
+        let mut writer = CtfsTraceWriter::new("test_program", &[])
+            .with_step_stream(true)
+            .with_value_stream(true)
+            .with_steps_chunk_size(2)
+            .with_values_chunk_size(2);
+        TraceWriter::begin_writing_trace_events(&mut writer, &path_buf).unwrap();
+
+        let src = "/test/prog.rs";
+        let int_type = TypeId(1);
+        let mut events: Vec<TraceLowLevelEvent> = vec![
+            TraceLowLevelEvent::Path(std::path::PathBuf::from(src)),
+            TraceLowLevelEvent::Type(TypeRecord {
+                kind: TypeKind::None,
+                lang_type: "None".to_string(),
+                specific_info: TypeSpecificInfo::None,
+            }),
+            TraceLowLevelEvent::Type(TypeRecord {
+                kind: TypeKind::Int,
+                lang_type: "Int".to_string(),
+                specific_info: TypeSpecificInfo::None,
+            }),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<toplevel>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "main".to_string(),
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(1),
+                args: vec![],
+            }),
+        ];
+        for i in 0..4usize {
+            events.push(TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(10 + i as i64),
+            }));
+            events.push(TraceLowLevelEvent::VariableName(format!("var_{i}")));
+            events.push(TraceLowLevelEvent::Value(FullValueRecord {
+                variable_id: VariableId(i),
+                value: ValueRecord::Int {
+                    i: (i * 100) as i64,
+                    type_id: int_type,
+                },
+            }));
+        }
+        events.push(TraceLowLevelEvent::Return(ReturnRecord {
+            return_value: ValueRecord::None { type_id: TypeId(0) },
+        }));
+        TraceWriter::append_events(&mut writer, &mut events);
+        TraceWriter::finish_writing_trace_events(&mut writer).unwrap();
+
+        let ct = path_buf.with_extension("ct");
+        let mut reader = CtfsReader::open(&ct).unwrap();
+        let names: Vec<String> = reader.file_names().iter().map(|s| s.to_string()).collect();
+        let mut meta_bytes = Vec::new();
+        let mut others: Vec<(String, Vec<u8>)> = Vec::new();
+        for name in names {
+            let bytes = reader.read_file(&name).unwrap();
+            if name == "meta.dat" {
+                meta_bytes = bytes;
+            } else if name == "events.log" {
+                // Dropped on purpose — see the doc comment.
+            } else {
+                others.push((name, bytes));
+            }
+        }
+        assert!(!meta_bytes.is_empty(), "real bundle must carry meta.dat");
+        assert!(
+            others.iter().any(|(n, _)| n == "steps.dat"),
+            "real bundle must carry steps.dat"
+        );
+        (meta_bytes, others)
+    }
+
+    /// Repackage a set of internal files into a fresh `.ct` image and return its
+    /// bytes (via the test container writer, which lays out the same block
+    /// mapping the production writers use).
+    fn repackage_ct(meta: &[u8], others: &[(String, Vec<u8>)]) -> Vec<u8> {
+        let dir = tempfile::tempdir().unwrap();
+        let ct = dir.path().join("repacked.ct");
+        let mut files: Vec<(&str, &[u8])> = vec![("meta.dat", meta)];
+        for (n, b) in others {
+            files.push((n.as_str(), b.as_slice()));
+        }
+        ctfs_container::write_minimal_ctfs(&ct, &files).unwrap();
+        std::fs::read(&ct).unwrap()
+    }
+
+    /// STRUCTURAL PRESENCE WINS: a container whose `steps.dat` is present but
+    /// whose `has_step_stream` (bit 9) hint is CLEAR must still read its steps.
+    ///
+    /// The db-backend `serialize_meta_dat` emits only bits 0..3, so re-stamping
+    /// the real bundle's meta leaves `steps.dat` structurally present with the
+    /// step bit cleared — exactly the still-recording shape the spec forbids a
+    /// reader from gating on.
+    #[test]
+    fn step_stream_read_by_structural_presence_when_step_bit_clear() {
+        let (meta, others) = real_split_bundle_files();
+
+        let mut md = meta_dat::parse_meta_dat(&meta).unwrap();
+        md.mcr = None;
+        let cleared = meta_dat::serialize_meta_dat(&md);
+        assert_eq!(
+            meta_dat::parse_meta_dat(&cleared).unwrap().flags & meta_dat::FLAG_HAS_STEP_STREAM,
+            0,
+            "test precondition: the has_step_stream hint bit must be CLEAR",
+        );
+        let bytes = repackage_ct(&cleared, &others);
+
+        // The seekable step source resolves existence by structure, not the bit.
+        let mut ctfs = CtfsReader::from_bytes(bytes.clone()).unwrap();
+        assert!(ctfs.has_file("steps.dat"), "steps.dat is structurally present");
+        let stream = crate::ctfs_trace_reader::step_value_stream_source::SeekableStepStream::open_from_ctfs(&mut ctfs)
+            .unwrap()
+            .expect("steps.dat present ⇒ seekable step stream opens despite a clear has_step_stream bit");
+        assert!(
+            stream.step_count() > 0,
+            "steps must be read by structural presence, not gated on the clear hint bit",
+        );
+
+        // And the full materialized reader (new-format path) opens it too.
+        let reader = CTFSTraceReader::from_bytes(bytes).unwrap();
+        assert!(reader.step_count() > 0, "materialized reader serves steps by structure");
+    }
+
+    /// COMBINED CONTAINER: a container carrying BOTH `FLAG_HAS_MCR_FIELDS` AND a
+    /// materialized `steps.dat` must open via the materialized reader — it is no
+    /// longer refused as "an MCR container". The reader serves the materialized
+    /// altitude and ignores the (absent here) native checkpoint streams.
+    #[test]
+    fn combined_mcr_and_steps_opens_via_materialized_reader() {
+        let (meta, others) = real_split_bundle_files();
+
+        let mut md = meta_dat::parse_meta_dat(&meta).unwrap();
+        md.mcr = Some(test_mcr_fields());
+        let combined = meta_dat::serialize_meta_dat(&md);
+        assert_ne!(
+            meta_dat::parse_meta_dat(&combined).unwrap().flags & meta_dat::FLAG_HAS_MCR_FIELDS,
+            0,
+            "combined meta carries the MCR bit",
+        );
+        let bytes = repackage_ct(&combined, &others);
+
+        // Before the spec amendment this returned the "needs the emulator" error.
+        let reader = CTFSTraceReader::from_bytes(bytes)
+            .expect("a combined MCR+steps container must open via the materialized reader");
+        assert!(
+            reader.step_count() > 0,
+            "combined container serves its materialized steps",
+        );
+    }
+
+    /// PURE-MCR: a container with `FLAG_HAS_MCR_FIELDS` and NO materialized
+    /// execution stream (no `steps.dat`, no legacy `events.log`) must STILL be
+    /// refused with the emulator message — the refusal is driven by structural
+    /// absence of a materialized stream, not by the MCR bit. Exercised through
+    /// the (crate-private) `open_new_format_rust`, the only site that produces
+    /// this refusal.
+    #[test]
+    fn pure_mcr_without_materialized_streams_still_refused() {
+        let md = meta_dat::MetaDat {
+            version: meta_dat::META_DAT_VERSION,
+            flags: 0,
+            recording_id: TEST_RECORDING_ID.to_owned(),
+            program: "/usr/bin/example".to_owned(),
+            args: vec![],
+            workdir: "/tmp".to_owned(),
+            recorder_id: "mcr".to_owned(),
+            paths: vec![],
+            mcr: Some(test_mcr_fields()),
+            replay_launch: None,
+            layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
+        };
+        let dat = meta_dat::serialize_meta_dat(&md);
+        let dir = tempfile::tempdir().unwrap();
+        let ct = dir.path().join("pure_mcr.ct");
+        // A placeholder native thread stream, but NO steps.dat / events.log.
+        ctfs_container::write_minimal_ctfs(&ct, &[("meta.dat", &dat), ("t00000000000", b"")]).unwrap();
+
+        let mut ctfs = CtfsReader::open(&ct).unwrap();
+        let err = CTFSTraceReader::open_new_format_rust(&mut ctfs)
+            .expect_err("a pure-MCR container with no materialized stream must be refused");
+        assert!(
+            err.to_string().contains("needs the emulator"),
+            "the pure-MCR refusal message must be preserved, got: {err}",
+        );
     }
 }

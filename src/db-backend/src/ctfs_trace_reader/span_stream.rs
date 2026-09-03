@@ -535,29 +535,27 @@ pub fn meta_dat_has_span_stream(meta: &[u8]) -> bool {
 impl SpanStreamReader {
     /// Open the span stream inside an already-open container.
     ///
-    /// Returns `Ok(None)` when the container declares no span stream (bit 13
-    /// clear) — the caller then has no spans, which is the normal case for
-    /// every recording that is not a server session.  A container that DOES
-    /// declare the stream but cannot produce `spans.dat` / `spans.idx` is an
-    /// error, not a silent `None`: the declaration is the container's own claim
-    /// and breaking it means the file is damaged.
+    /// Existence is answered by STRUCTURAL PRESENCE of `spans.dat`, never by
+    /// `meta.dat`'s bit-13 `has_span_stream` hint — a writer may only learn a
+    /// stream is non-empty near the end and stamp its bit at close, so gating on
+    /// the bit would refuse a span stream that structurally exists in a
+    /// still-recording trace (trace-format spec: "Stream-presence flags are a
+    /// hint, not a gate").
+    ///
+    /// Returns `Ok(None)` when the container carries no `spans.dat` — the caller
+    /// then has no spans, which is the normal case for every recording that is
+    /// not a server session.  A container that DOES carry `spans.dat` but cannot
+    /// produce its companion `spans.idx` is an error, not a silent `None`: the
+    /// half-present stream means the file is damaged.
     pub fn open_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<SpanStreamReader>, String> {
-        let meta = match ctfs.read_file("meta.dat") {
-            Ok(meta) => meta,
-            // A container with no meta.dat cannot declare bit 13, so it has no
-            // span stream by construction.
+        let dat = match ctfs.read_file(SPANS_DATA_FILE_NAME) {
+            Ok(dat) => dat,
             Err(CtfsError::FileNotFound(_)) => return Ok(None),
-            Err(e) => return Err(format!("spans: failed to read meta.dat: {e}")),
+            Err(e) => return Err(format!("spans: failed to read {SPANS_DATA_FILE_NAME}: {e}")),
         };
-        if !meta_dat_has_span_stream(&meta) {
-            return Ok(None);
-        }
-        let dat = ctfs
-            .read_file(SPANS_DATA_FILE_NAME)
-            .map_err(|e| format!("{SPANS_DATA_FILE_NAME} missing despite meta.dat bit 13: {e}"))?;
         let idx = ctfs
             .read_file(SPANS_INDEX_FILE_NAME)
-            .map_err(|e| format!("{SPANS_INDEX_FILE_NAME} missing despite meta.dat bit 13: {e}"))?;
+            .map_err(|e| format!("{SPANS_INDEX_FILE_NAME} missing despite {SPANS_DATA_FILE_NAME} presence: {e}"))?;
         Ok(Some(SpanStreamReader::from_files(dat, &idx)?))
     }
 
