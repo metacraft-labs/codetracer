@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>CONSTRAINTS listing probe</title>
+<link rel="stylesheet" href="./codetracer.css">
+<style>
+  /* The app supplies an ambient text colour from an ancestor of the pane.
+     This page has no such ancestor, so without it `.constraints`' own colour
+     would fall back to the initial value and every reading below would be
+     about the harness rather than the pane. */
+  body { margin: 0; display: flex; gap: 16px; padding: 16px;
+         background: #1b1b1b; align-items: flex-start; color: #f3f3f3; }
+  .frame { width: 400px; height: 620px; display: flex; flex-direction: column;
+           border: 1px solid #444; background: #232323; }
+  .frame > h2 { font: 600 11px/1 system-ui, sans-serif; letter-spacing: .09em;
+                color: #bbb; margin: 0; padding: 9px 10px;
+                border-bottom: 1px solid #444; text-transform: uppercase; }
+  .frame > div { flex: 1; min-height: 0; overflow: hidden; display: flex;
+                 color: #f3f3f3; }
+  #ct-probe-summary { position: fixed; bottom: 2px; left: 4px;
+                      font: 10px monospace; color: #666; }
+</style>
+</head>
+<body>
+  <div class="frame"><h2>Constraints</h2><div id="ct-listing-pane"></div></div>
+  <div class="frame"><h2>Constraints &mdash; bundle totals</h2><div id="ct-counts-pane"></div></div>
+  <div class="frame"><h2>Constraints &mdash; after a build with no listing</h2><div id="ct-degraded-pane"></div></div>
+  <div id="ct-probe-summary"></div>
+  <script src="./probe.js"></script>
+</body></html>
