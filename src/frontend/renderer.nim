@@ -875,10 +875,50 @@ proc stopAction* {.locks: 0.}=
 
 
 proc loadTheme*(name: cstring) =
+  ## Swap the theme stylesheet for `name`.
+  ##
+  ## THE DIRECTORY COMES OFF THE LINK THAT IS ALREADY THERE, and it has to,
+  ## because the two hosts spell it differently and this proc runs on both:
+  ##
+  ##   src/frontend/index.html            href='frontend/styles/…'   relative
+  ##   platform/web_deployment.nim        href="/frontend/styles/…"  absolute
+  ##
+  ## The relative one is right for a document loaded off a filesystem. The
+  ## absolute one is right for a document served at many addresses, which is
+  ## why every other reference in the web entry document is absolute too.
+  ##
+  ## THIS COMPOSED A RELATIVE PATH UNCONDITIONALLY, and so made the theme a
+  ## function of URL DEPTH on the web. A relative reference resolves against the
+  ## document's directory. `/noir` has no directory part, so
+  ## `frontend/styles/x.css` resolved to `/frontend/styles/x.css` and worked —
+  ## which is why this survived. At a two-segment address the directory is
+  ## `/noir/`, the same string resolves to `/noir/frontend/styles/x.css`, and
+  ## the deployment's own `/noir/*` rewrite answers THAT with the entry
+  ## document. The browser parses `index.html` as CSS, finds no rules, and the
+  ## whole application renders unstyled — panes included, so the Build pane
+  ## stays parked off-screen and a user cannot read its output at all.
+  ##
+  ## `/noir/new` and `/noir/demo` are both two-segment addresses. This was not
+  ## introduced by either; it was latent behind the one-segment route.
+  ##
+  ## Reading the DOM property rather than the attribute is deliberate: `.href`
+  ## is already resolved against the document, so the prefix it yields is
+  ## correct on both hosts without this proc having to know which one it is on.
   var link = jq("#theme")
   let currentTheme = cast[JsObject](link).dataset.theme.to(cstring)
   if currentTheme != name:
-    let linkValue = cstring(fmt"frontend/styles/{name}_theme_electron.css?theme={now()}")
+    # Cut the cache-busting query BEFORE looking for the last separator, so a
+    # second swap composes off the first one's path and not off its `?theme=`.
+    var resolved = $cast[JsObject](link).href.to(cstring)
+    let query = resolved.find('?')
+    if query >= 0:
+      resolved = resolved[0 ..< query]
+    let cut = resolved.rfind('/')
+    # An href with no separator at all cannot happen from either document, but
+    # falling back to the historical relative spelling keeps a malformed one
+    # behaving exactly as it did before rather than producing an empty path.
+    let prefix = if cut >= 0: resolved[0 .. cut] else: "frontend/styles/"
+    let linkValue = cstring(fmt"{prefix}{name}_theme_electron.css?theme={now()}")
     cast[js](link).href = linkValue
     cast[js](link).dataset.theme = name
 
