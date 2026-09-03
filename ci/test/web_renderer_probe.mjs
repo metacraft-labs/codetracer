@@ -672,6 +672,10 @@ if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
     settleObserved: null,
     settleWaitMs: null,
     settleBudgetMs: null,
+    totalMsFromClick: null,
+    productDeadlineMs: null,
+    beforeProductDeadline: null,
+    timeoutNotice: '',
     consoleAtSettle: [],
     headlineBefore: '',
     headlineAfter: '',
@@ -719,6 +723,7 @@ if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
       await page.mouse.move(
         gutterRunClick.slot.centre.x, gutterRunClick.slot.centre.y);
       await page.waitForTimeout(300);
+      const clickedAt = Date.now();
       await page.mouse.click(
         gutterRunClick.slot.centre.x, gutterRunClick.slot.centre.y);
       gutterRunClick.clicked = true;
@@ -794,6 +799,32 @@ if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
       // The ELAPSED TIME is recorded, not just the final count, because a
       // settle that took 45s and one that took 200ms are different facts about
       // the product and a boolean cannot tell them apart.
+      // AND THE PRODUCT'S OWN DEADLINE IS A DIFFERENT ANSWER FROM A SETTLE.
+      //
+      // `runTestFromGutter` arms `setTimeout(…, editorTestRunFrames * 300)` at
+      // the click — `editorTestRunFrames = 400` (`ui/editor.nim:2164`), so
+      // 120000ms. When it fires it calls `restoreTestButton`, which CLEARS the
+      // slot, and shows the notification "The test run did not answer within
+      // two minutes…".
+      //
+      // So a cleared slot has two causes and only one of them is a settle. The
+      // waits above can put the sample well past that deadline — 30000 for the
+      // start, 180000 for the exit, 10000 for the verdict — and a run that hung
+      // for 150s would reach this poll with the slot already tidied by the
+      // product and read as "cleared when the run settled". A false PASS, and
+      // invisible in a green run, which is the worse half of the two failure
+      // modes this arm has now had.
+      //
+      // The comment on the budget below used to claim it was "deliberately
+      // under the product's deadline". True of the budget in isolation and
+      // false of the elapsed time from the click, which is what actually
+      // decides whether the deadline has fired. Both are now measured.
+      gutterRunClick.productDeadlineMs = 120000;
+      gutterRunClick.msSinceClick = Date.now() - clickedAt;
+      gutterRunClick.timeoutNotice = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('.notification-message'))
+          .map((e) => (e.textContent || '').trim())
+          .find((t) => t.includes('did not answer within two minutes')) || '');
       gutterRunClick.settleBudgetMs = 60000;
       {
         const started = Date.now();
@@ -804,6 +835,11 @@ if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
           n = await runningCount();
         }
         gutterRunClick.settleWaitMs = Date.now() - started;
+        gutterRunClick.totalMsFromClick = Date.now() - clickedAt;
+        // Did the sample happen while the product's own deadline could still
+        // not have fired? Only then is a cleared slot attributable to a settle.
+        gutterRunClick.beforeProductDeadline =
+          gutterRunClick.totalMsFromClick < gutterRunClick.productDeadlineMs;
         gutterRunClick.runningAfterSettle = n;
         gutterRunClick.settleObserved = n === 0;
         // The console tail AT THE MOMENT OF SAMPLING, so a red run names the

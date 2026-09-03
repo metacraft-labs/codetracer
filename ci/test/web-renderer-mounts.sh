@@ -2500,6 +2500,7 @@ if ! run_arm gutter-run "" "/noir"; then
 	ck fail "arm G could not be measured (second half)"
 	ck fail "arm G could not be measured (third half)"
 	ck fail "arm G could not be measured (fourth half)"
+	ck fail "arm G could not be measured (deadline attribution)"
 else
 	probe_click_gutter_run=""
 	g_slot="$(python3 -c '
@@ -2525,6 +2526,10 @@ print("yes" if s and s["ownsHitArea"] and not s["overlapsBreakpoint"]
 	g_settled="$(json gutter-run gutterRunClick.runningAfterSettle)"
 	g_settlems="$(json gutter-run gutterRunClick.settleWaitMs)"
 	g_budget="$(json gutter-run gutterRunClick.settleBudgetMs)"
+	g_total="$(json gutter-run gutterRunClick.totalMsFromClick)"
+	g_pdl="$(json gutter-run gutterRunClick.productDeadlineMs)"
+	g_before="$(json gutter-run gutterRunClick.beforeProductDeadline)"
+	g_notice="$(json gutter-run gutterRunClick.timeoutNotice)"
 	g_tail="$(python3 -c '
 import json, sys
 g = json.load(open(sys.argv[1])).get("gutterRunClick") or {}
@@ -2583,6 +2588,30 @@ print(" | ".join(l.replace("log: codetracer-noir-build: ", "")
 		ck ok "arm G: the control showed a running state (${g_running} slot) and CLEARED it when the run actually settled, ${g_settlems}ms after the verdict — headline '${g_headbefore}' -> '${g_headafter}'"
 	else
 		ck fail "arm G: running slots at the press=${g_running}, still ${g_settled} after waiting ${g_settlems}ms of a ${g_budget}ms budget — expected at least one and then none. Console tail: ${g_tail}"
+	fi
+
+	# AND THE SLOT WAS CLEARED BY THE RUN, NOT BY THE PRODUCT GIVING UP ON IT.
+	#
+	# `runTestFromGutter` arms a `setTimeout` at the click for
+	# `editorTestRunFrames * 300` = 120000ms (`ui/editor.nim:2164`, used at
+	# :2321). When it fires it calls `restoreTestButton`, which clears the slot,
+	# and shows "The test run did not answer within two minutes…". So a cleared
+	# slot has TWO causes and the check above cannot tell them apart.
+	#
+	# It can be reached: the waits ahead of that poll are 30000 for the start,
+	# 180000 for the exit and 10000 for the verdict, so a run that hung for 150s
+	# arrives at the poll with the slot already tidied and reads as a clean
+	# settle. That is a false PASS in the gate that guards the deploy, and it is
+	# invisible in a green run — the worse of the two failure modes this arm has
+	# had, because the racy one at least went red.
+	#
+	# Two independent readings, because either alone can be argued with: the
+	# elapsed time from the CLICK against the product's own constant, and the
+	# absence of the notification the product paints when that constant fires.
+	if [ "${g_before}" = "true" ] && [ -z "${g_notice}" ]; then
+		ck ok "arm G: and it was the RUN that cleared it, not the two-minute deadline — sampled ${g_total}ms after the click against a ${g_pdl}ms product deadline, with no timeout notice on screen"
+	else
+		ck fail "arm G: the slot was sampled ${g_total}ms after the click against a ${g_pdl}ms product deadline (beforeDeadline=${g_before}), notice='${g_notice}' — a cleared slot here is the product giving up, not a settle, and the check above would have passed on it"
 	fi
 fi
 echo
@@ -2692,7 +2721,7 @@ echo
 #     confirming an absence: a dispatch refused SYNCHRONOUSLY left the slot
 #     spinning for the full two-minute deadline, because `runTestFromGutter`
 #     armed the spinner on the line after the hook that had already settled.
-expect_count 84
+expect_count 85
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

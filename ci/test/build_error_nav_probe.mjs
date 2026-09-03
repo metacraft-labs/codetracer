@@ -211,16 +211,30 @@ try {
   }
 
   // Let the compile finish. A first compile fetches ~20 MB of wasm.
+  // WAIT FOR THE BUILD'S OWN EXIT LINE, not for a class name.
+  //
+  // This predicate used to be `rows > 0 && !(running &&
+  // !running.className.includes('disabled'))`, and both halves are unsound as a
+  // settle signal. `rows > 0` is true from the FIRST diagnostic row, mid-
+  // compile. And reading `className.includes('disabled')` to decide whether a
+  // build is still running is the one check that cannot tell a live control
+  // from a dead one — the blindness that produced a false defect report in this
+  // campaign, here doing worse work than it did there, because a wait that
+  // returns early does not fail: it hands the fixed delay below the job of
+  // being the real wait, silently.
+  //
+  // `web_noir_build.onExit` reports `$phase & "-exit"`, so a finished compile
+  // says so on the console with its own verdict. That is the event, it is
+  // already captured, and it cannot be satisfied by a partially painted pane.
   const deadline = Date.now() + settleMs;
+  let buildExitLine = '';
   while (Date.now() < deadline) {
-    const settled = await page.evaluate(() => {
-      const running = document.querySelector('.build-stop-btn');
-      const rows = (document.getElementById('build') || { children: [] }).children.length;
-      return rows > 0 && !(running && !running.className.includes('disabled'));
-    });
-    if (settled) break;
+    buildExitLine = consoleLines.find(
+      (l) => l.includes('codetracer-noir-build:') && l.includes('-exit')) || '';
+    if (buildExitLine) break;
     await page.waitForTimeout(250);
   }
+  report.buildExitLine = buildExitLine;
   await page.waitForTimeout(1500);
 
   report.problemsPaneOpened = await page.evaluate(
