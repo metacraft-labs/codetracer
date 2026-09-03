@@ -249,7 +249,20 @@ const
     projectRootPath / "libs/nim-uuid4/src"
   ]
   StylusCssEntryPoints = @[
-    "default_white_theme",
+    # `renderer.nim`'s `loadTheme` asks for `{name}_theme_electron.css`, so the
+    # `_electron` suffix is part of the contract rather than decoration.
+    #
+    # This list carried `default_white_theme`, which is a PALETTE — `@import
+    # "defaults"` plus colour variables, with no `@import "codetracer"` and so
+    # no rules at all. It compiled to a 0-byte file every time, silently, and
+    # the light theme was never built by `just build-once`.
+    # `toolbar-marks-contrast.spec.ts` had to carry a note telling readers the
+    # stylesheet its own error message asks for cannot be produced on macOS.
+    #
+    # `default_white_theme_electron` is the entry point that pairs that palette
+    # with `codetracer.styl`. Same fix in `nix/packages/default.nix`, which had
+    # the identical substitution in the packaged build.
+    "default_white_theme_electron",
     "default_dark_theme_electron",
     "default_dark_theme_extension",
     "loader",

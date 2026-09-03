@@ -1307,7 +1307,26 @@
             ${pkgs.typescript}/bin/tsc src/helpers.ts
 
             echo "Transpiling .styl into .css files using stylus"
-            node $stylus src/frontend/styles/default_white_theme.styl
+            # `renderer.nim`'s `loadTheme` resolves a theme to
+            # `frontend/styles/{name}_theme_electron.css`, so these two names are
+            # the contract — the `_electron` suffix is not decoration.
+            #
+            # `default_white_theme.styl` was being built in the light theme's
+            # place, and it is a palette: `@import "defaults"` and a list of
+            # colour variables, with no `@import "codetracer"` and therefore no
+            # rules.  It compiled to a 0-byte file, every time, silently.
+            #
+            # What shipped was a deployment with exactly one stylesheet in it.
+            # Asking for any other theme fetched a path that does not exist,
+            # which the static host answers with the SPA's index.html under
+            # `content-type: text/html` and `X-Content-Type-Options: nosniff`, so
+            # the browser refuses it as a stylesheet and the window renders
+            # unstyled. Confirmed against noirstudio.dev: `default_white`,
+            # `default_black` and `mac_classic` all returned `text/html`.
+            #
+            # `default_white_theme_electron.styl` is the entry point that pairs
+            # the white palette with `codetracer.styl`; it compiles to 330 KB.
+            node $stylus src/frontend/styles/default_white_theme_electron.styl
             node $stylus src/frontend/styles/default_dark_theme_electron.styl
             node $stylus src/frontend/styles/loader.styl
             node $stylus src/frontend/styles/subwindow.styl
