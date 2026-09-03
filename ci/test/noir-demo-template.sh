@@ -141,6 +141,7 @@ print("\n".join(sorted(names)))' "$1"
 }
 
 nargo_passed_count() {
+	# shellcheck disable=SC2016 # prose about `nargo test --format json`, not an expansion
 	python3 -c '
 import json, sys
 for line in open(sys.argv[1]):
@@ -326,7 +327,12 @@ fix_dir="${cache}/fixed"
 materialise "${fix_dir}" demo >/dev/null
 # The one-line repair the demo path ends at. If this does not change the
 # answer, the bug is not where the demo says it is.
-python3 - "${fix_dir}/src/sort.nr" <<'PY'
+
+# Capture the status directly rather than reading `$?` on the next line: the
+# heredoc makes the two lines look adjacent when they are not, and `$?` there
+# is one edit away from reporting some other command's status (SC2181).
+repair_rc=0
+python3 - "${fix_dir}/src/sort.nr" <<'PY' || repair_rc=$?
 import sys
 p = sys.argv[1]
 s = open(p).read()
@@ -336,7 +342,7 @@ if s.count(old) != 1:
     sys.exit("arm F: expected exactly one SETTLE_PASSES definition to repair")
 open(p, "w").write(s.replace(old, new))
 PY
-if [ $? -ne 0 ]; then
+if [ "${repair_rc}" -ne 0 ]; then
 	ck fail "arm F: the SETTLE_PASSES line this arm repairs is no longer there"
 	ck fail "arm F: (skipped) the repaired circuit settles the round correctly"
 	ck fail "arm F: (skipped) the repaired circuit prints the published price"
