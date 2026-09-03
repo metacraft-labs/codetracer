@@ -1253,13 +1253,13 @@ proc reopenAuxiliaryPanels(data: Data) =
   data.ui.editModeHiddenPanels.setLen(0)
   data.ui.savedLayoutBeforeEdit = nil
 
-proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
-  ## Keep Monaco editor options and context keys aligned with the requested read-only flag.
-  if data.ui.readOnly == readOnly:
-    if data.ui.mode == EditMode and not readOnly:
-      data.closeAuxiliaryPanels()
-    return
-  data.ui.readOnly = readOnly
+proc applyReadOnlyToEditors(data: Data, readOnly: bool) =
+  ## Bring the panels, the shortcuts and every Monaco instance into line with a
+  ## `data.ui.readOnly` that has ALREADY been assigned.
+  ##
+  ## Split out from `setEditorsReadOnlyState` so a mode transition can assign
+  ## the flag before it rearranges GoldenLayout and still do this work after —
+  ## see `beginReadOnlyTransition` for why the order matters.
   # THE PANEL WORK MUST NOT BE ABLE TO EAT THE EDITOR WORK.
   #
   # `data.ui.readOnly` has already been assigned above, and everything BELOW
@@ -1294,30 +1294,73 @@ proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
       editor.disableDebugShortcuts()
   data.setEditorsEditable(not readOnly)
   # THE EDITORS A TRANSITION IS STILL BUILDING ARE NOT REACHED BY THIS WALK,
-  # and that is a known, measured gap rather than an oversight.
+  # and that is why the flag is now assigned by a separate, EARLIER call.
   #
   # `setEditorsEditable` skips any entry whose `monacoEditor` is nil, which is
   # correct — but a mode transition rearranges GoldenLayout on its way here and
   # the Monaco instance behind a tab the rearrangement opened is created by a
   # Karax redraw that nothing in this call awaits. Such an editor is
-  # constructed reading `data.ui.readOnly` (`ui/editor.nim:2724`) as it stood
-  # BEFORE this proc assigned it, so it comes up with the previous mode's
-  # answer and nothing revisits it.
+  # constructed reading `data.ui.readOnly` (`ui/editor.nim:2762`), so if the
+  # flag were still the previous mode's answer at that moment, the editor would
+  # come up wrong and nothing would revisit it.
   #
-  # Measured on `cloud` and on this tree, three round trips: after Stop the
-  # topbar was `edit-commands` and the debugger panes were gone, and
-  # `getRawOptions().readOnly` was still `true` — Edit mode you cannot type in
-  # (`ci/test/noir-mode-roundtrip.sh`, "the editors are writable again", red on
-  # both). A deferred re-application by one macrotask was tried here and
-  # measured to change nothing, so it is not left behind pretending to.
+  # Measured on `cloud` and before this change, three round trips: after Stop
+  # the topbar was `edit-commands`, and `getRawOptions().readOnly` was still
+  # `true` — Edit mode you cannot type in (`ci/test/noir-mode-roundtrip.sh`,
+  # "the editors are writable again"). A deferred re-application by one
+  # macrotask was tried here and measured to change nothing; it is not left
+  # behind pretending to, and it must not be reinvented.
   #
-  # THE FIX IS AN ORDERING CHANGE, not a retry: `data.ui.readOnly` has to be
-  # assigned before any layout the transition restores is applied, so the
-  # editors that layout builds are constructed with the right answer. That
-  # reorders `switchToEdit`/`switchToDebug`, which the desktop shares, so it
-  # needs its own change and its own verification.
+  # `beginReadOnlyTransition` / `finishReadOnlyTransition` are the fix: the
+  # flag lands before the layout, this walk runs after it.
+
+proc beginReadOnlyTransition(data: Data, readOnly: bool): bool
+    {.discardable.} =
+  ## Assign `data.ui.readOnly` NOW — ahead of any layout the caller is about to
+  ## restore — and answer whether it actually changed.
+  ##
+  ## THIS IS THE ORDERING, AND IT IS THE WHOLE POINT. A mode transition
+  ## restores a saved GoldenLayout, and every editor that layout opens is a
+  ## FRESH Monaco built by a later Karax redraw which reads `data.ui.readOnly`
+  ## at construction (`ui/editor.nim:2762`). Assigning the flag after the
+  ## restore — which is what `setEditorsReadOnlyState` alone does — builds every
+  ## one of those editors against the mode the tab is LEAVING.
+  ##
+  ## Shared with the desktop: `switchToEdit` and `switchToDebug` are this
+  ## renderer's, not the web's.
+  result = data.ui.readOnly != readOnly
+  data.ui.readOnly = readOnly
+
+proc finishReadOnlyTransition(data: Data, readOnly: bool, changed: bool) =
+  ## The other half of `beginReadOnlyTransition`, run once the caller has
+  ## finished rearranging the layout.
+  ##
+  ## `changed` has to be carried from the earlier call rather than re-derived:
+  ## the flag has already been assigned, so `data.ui.readOnly == readOnly`
+  ## always holds by now and the question cannot be asked again.
+  if not changed:
+    # The no-change arm `setEditorsReadOnlyState` has always had: entering Edit
+    # mode still closes the debugger's auxiliary panels even when the flag was
+    # already `false`.
+    if data.ui.mode == EditMode and not readOnly:
+      data.closeAuxiliaryPanels()
+    return
+  data.applyReadOnlyToEditors(readOnly)
+
+proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
+  ## Keep Monaco editor options and context keys aligned with the requested
+  ## read-only flag, for callers that are NOT rearranging the layout between
+  ## the two halves.
+  let changed = data.beginReadOnlyTransition(readOnly)
+  data.finishReadOnlyTransition(readOnly, changed)
 
 proc switchToEdit*(data: Data) =
+  # THE FLAG BEFORE THE LAYOUT. `restoreSavedLayout` below rebuilds
+  # GoldenLayout, and the editors it opens read `data.ui.readOnly` as they are
+  # constructed; this used to be assigned by the `setEditorsReadOnlyState` at
+  # the foot of the proc, so a returning session came back read-only and no
+  # later walk could reach the editors that had not been built yet.
+  let readOnlyChanged = data.beginReadOnlyTransition(false)
   if data.ui.mode != EditMode:
     data.ui.mode = EditMode
 
@@ -1386,7 +1429,7 @@ proc switchToEdit*(data: Data) =
           # correct.
           cerror "layout: component clear " & $content & "/" & $id &
             " raised a Defect and was skipped"
-  data.setEditorsReadOnlyState(false)
+  data.finishReadOnlyTransition(false, readOnlyChanged)
   redrawAfterModeSwitch()
   # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
   # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw
@@ -1402,54 +1445,50 @@ proc switchToDebug*(data: Data) =
     data.ui.lastUsedEditLayout = cast[GoldenLayoutResolvedConfig](
       JSON.parse(JSON.stringify(currentLayout)))
 
+  # THE FLAG BEFORE THE LAYOUT, for the reason `beginReadOnlyTransition`
+  # gives — and here it is also what makes the conversion below safe.
+  let readOnlyChanged = data.beginReadOnlyTransition(true)
+
   if data.ui.mode != DebugMode:
     data.ui.mode = DebugMode
 
-    # THIS SITE IS DELIBERATELY LEFT UNCONVERTED, AND THAT IS A MEASUREMENT,
-    # NOT AN OVERSIGHT.
+    # THIS SITE USED TO BE LEFT UNCONVERTED ON PURPOSE, and what unblocked it
+    # is the `beginReadOnlyTransition` two lines above rather than anything
+    # here.
     #
-    # It has the same defect as the two `restoreSavedLayout` now fixes: a
-    # resolved config handed to a `loadLayout` that wants an unresolved one,
-    # producing `debug-mode: failed to restore debug layout: e.trimStart is not
-    # a function` (measured on the assembled bundle, `ui_js.nim:1311`) and
-    # swallowed. Converting it here makes the restore SUCCEED — and that turns
-    # out to be worse than the failure, because what it restores is wrong.
+    # It had the same defect as the two `restoreSavedLayout` fixes: a resolved
+    # config handed to a `loadLayout` that wants an unresolved one, producing
+    # `debug-mode: failed to restore debug layout: e.trimStart is not a
+    # function` — measured again on this tree's own bundle, at the first Run of
+    # every tab — and swallowed by the bare `except`.
     #
-    # `savedLayoutBeforeEdit` is written by `switchToEdit`, and `switchToEdit`
-    # runs once at BOOT: a fresh Noir Studio tab starts in `DebugMode` (see
-    # `debug.nim`'s `mountedTopbarSurface`, which defaults to
-    # `tsDebuggerControls`, and the `refreshTopbarSurface ... wanted=
-    # tsEditCommands` this produces at ~1.3s). So on the FIRST Run the field
-    # holds the boot-time EDIT layout, not a debug layout, and restoring it
-    # rebuilds GoldenLayout — while `data.ui.readOnly` is still `false`,
-    # because it is not set until `setEditorsReadOnlyState(true)` four lines
-    # below. The editor Monaco builds during that rebuild reads `readOnly` at
-    # construction (`ui/editor.nim:2724`) and is therefore WRITABLE, and the
-    # later `setEditorsEditable(false)` cannot reach it because the Karax
-    # redraw that creates it has not run yet.
+    # Converting it USED to be worse than the failure, and the reason was the
+    # ordering: `savedLayoutBeforeEdit` is written by `switchToEdit`, and
+    # `switchToEdit` runs once at BOOT because a fresh Noir Studio tab starts
+    # in `DebugMode` (`debug.nim`'s `mountedTopbarSurface` defaults to
+    # `tsDebuggerControls`). So on the FIRST Run the field holds the boot-time
+    # EDIT layout, and restoring it rebuilt GoldenLayout while
+    # `data.ui.readOnly` was still `false` — every Monaco the rebuild opened
+    # read `false` at construction (`ui/editor.nim:2762`) and the
+    # `setEditorsEditable(false)` further down could not reach an editor the
+    # Karax redraw had not created yet. Measured then, three trips: three
+    # debugger panes, `data-topbar-surface=debugger-controls`, and
+    # `getRawOptions().readOnly == false` — a replay session the user could
+    # type into.
     #
-    # Measured, three trips, with the conversion applied here: every leg
-    # reported `data-topbar-surface=debugger-controls` with three debugger
-    # panes and `getRawOptions().readOnly == false` — a replay session the user
-    # can type into. Without it, `readOnly` is `true` on every trip and the
-    # return leg still works, because the return leg is `switchToEdit`'s
-    # restore of `lastUsedEditLayout` and not this one.
-    #
-    # WHAT WOULD MAKE THIS SAFE TO CONVERT, so it is a unit of work and not a
-    # wall: `savedLayoutBeforeEdit` must stop being written by a `switchToEdit`
-    # that is not leaving a real debug session, and `data.ui.readOnly` must be
-    # assigned before any layout the transition restores is applied rather than
-    # after. Both are changes to the transition's ORDER, which is shared with
-    # the desktop, so neither belongs in the same change as the conversion.
+    # With the flag assigned first, that outcome is gone: whatever this
+    # restores is built read-only. What remains is churn rather than a defect —
+    # on the FIRST Run of a web tab this re-applies an edit layout that
+    # `web_replay_host.installDebugSurfaceEntry` immediately loads the real
+    # debugging layout over. The honest fix for THAT is for a web tab to stop
+    # booting with `data.ui.mode == DebugMode` while showing an edit surface,
+    # which is a change to the entry surface and not to this transition.
     if not data.ui.savedLayoutBeforeEdit.isNil and not data.ui.layout.isNil:
-      try:
-        data.ui.layout.loadLayout(data.ui.savedLayoutBeforeEdit)
-        data.ui.resolvedConfig = data.ui.savedLayoutBeforeEdit
+      if data.restoreSavedLayout(data.ui.savedLayoutBeforeEdit,
+                                 "the debug layout"):
         data.ui.savedLayoutBeforeEdit = nil
-      except:
-        cerror fmt"debug-mode: failed to restore debug layout: {getCurrentExceptionMsg()}"
 
-  data.setEditorsReadOnlyState(true)
+  data.finishReadOnlyTransition(true, readOnlyChanged)
   redrawAfterModeSwitch()
   # THE TOPBAR IS NOT PART OF THAT REDRAW. `#isonim-debug-controls` lives
   # outside Karax's VDOM — `ui/debug.nim`'s header says why — so a redraw

@@ -109,22 +109,35 @@ type
     ## chrome: `ui/menu.nim`'s `requestMenuRender` followed by
     ## `ui/debug.nim`'s `requestDebugControlsRender`.
     gate: MenuRenderGate
-    shell: MockNode           ## the current `#menu` subtree, nil before first render
+    shell: MockNode           ## the `#menu` host itself — a stable node, as in
+                              ## the document, where `#menu` is not re-created
     controlsMounted: bool     ## `ui/debug.nim`'s `isoNimDebugMounted`
     useGate: bool             ## false reproduces the pre-#555 behaviour
+    preserveHost: bool        ## false reproduces the pre-fix `renderMenuShellInto`
     owner: string             ## stands in for the per-session `MenuComponent`
     shellRenders: int
     controlMounts: int
     redraws: int
 
-proc newMenuChromeSim(useGate = true): MenuChromeSim =
-  MenuChromeSim(gate: MenuRenderGate(), useGate: useGate, owner: "session-0")
+proc newMenuChromeSim(useGate = true; preserveHost = true): MenuChromeSim =
+  let r = MockRenderer()
+  let host = r.createElement("div")
+  r.setAttribute(host, "id", "menu")
+  MenuChromeSim(
+    gate: MenuRenderGate(),
+    shell: host,
+    useGate: useGate,
+    preserveHost: preserveHost,
+    owner: "session-0")
 
 proc hostIntact(sim: MenuChromeSim): bool =
   ## What `requestMenuRender` checks against the live DOM: the `#menu` host
   ## still has content AND the debug-controls host is still in it.
   not sim.shell.isNil and sim.shell.children.len > 0 and
     not findById(sim.shell, "isonim-debug-controls").isNil
+
+proc controlsHost(sim: MenuChromeSim): MockNode =
+  findById(sim.shell, "isonim-debug-controls")
 
 proc redraw(sim: MenuChromeSim; model: MenuShellModel;
             keyNavigation = false; owner = "session-0") =
@@ -143,12 +156,27 @@ proc redraw(sim: MenuChromeSim; model: MenuShellModel;
     if sim.useGate: sim.gate.shouldRender(signature, sim.hostIntact)
     else: true
   if render:
-    # `renderMenuShellInto` clears the host and rebuilds the subtree, so the
-    # `#isonim-debug-controls` node the toolbar was mounted into is gone and
-    # a fresh empty one takes its place. Replacing `sim.shell` models exactly
-    # that loss of node identity.
+    # THE PRODUCTION PROC, not a stand-in for it. `renderMenuShellInto` is what
+    # `ui/menu.nim` calls, and what a rebuild does to the
+    # `#isonim-debug-controls` NODE is the subject of the identity suite below
+    # — so the simulation has to go through it rather than model it. (It used
+    # to call `renderMenuShell` and replace the whole subtree, which ASSUMED
+    # the loss of node identity instead of measuring it.)
     let r = MockRenderer()
-    sim.shell = renderMenuShell(r, model)
+    if sim.preserveHost:
+      renderMenuShellInto(r, sim.shell, model)
+    else:
+      # THE PRE-FIX REBUILD, kept so the arms below can still observe the
+      # storm: clear the host and re-create the whole subtree, which is what
+      # `renderMenuShellInto` did before it learned to carry the topbar host
+      # across. Written out here rather than reached through a flag on the
+      # production proc, because production has no such flag and must not grow
+      # one for a test.
+      r.clearChildren(sim.shell)
+      let fresh = renderMenuShell(r, model)
+      let moving = fresh.children
+      for child in moving:
+        r.appendChild(sim.shell, child)
     sim.shellRenders += 1
     sim.gate.noteRendered(signature)
 
@@ -169,7 +197,12 @@ suite "issue #555 — menu redraw storm tears down the debug toolbar":
   test "the pre-fix wiring rebuilds the toolbar on every single redraw":
     # Guards the guard: proves the simulation below can actually observe the
     # storm, so a passing `controlMounts == 1` means something.
-    let sim = newMenuChromeSim(useGate = false)
+    #
+    # BOTH halves of the pre-fix wiring are needed for it: no gate, so every
+    # redraw rebuilds, AND a rebuild that re-creates the topbar host, so every
+    # rebuild costs a mount. Either fix alone stops the storm, which is why
+    # this arm now has to name both.
+    let sim = newMenuChromeSim(useGate = false, preserveHost = false)
     let model = traceMenuModel("hello")
     for _ in 0 ..< 45:
       sim.redraw(model)
@@ -205,11 +238,19 @@ suite "issue #555 — menu redraw storm tears down the debug toolbar":
       sim.redraw(traceMenuModel("hello", launchConfigs = 2))
 
     check sim.redraws == 50
-    # One mount per genuine menu change, and nothing else.
+    # Four rebuilds, one per genuine menu change — and ONE mount for the whole
+    # open. It used to be one mount per rebuild, because a rebuild re-created
+    # the host; now the host is carried across and the toolbar is mounted only
+    # the first time. Fifty redraws, one mount.
     check sim.shellRenders == 4
-    check sim.controlMounts == 4
+    check sim.controlMounts == 1
 
-  test "a genuine menu change still re-renders and re-mounts":
+  test "a genuine menu change re-renders the shell and does NOT re-mount":
+    # The gate decides whether the SHELL is rebuilt; the host preservation
+    # decides whether a rebuild costs the toolbar. They are separate, and this
+    # is the case where they disagree: the menu really did change, so the
+    # rebuild is required — and the toolbar still must not move, or the next
+    # click after a menu change would be discarded.
     let sim = newMenuChromeSim()
     sim.redraw(traceMenuModel("hello"))
     check sim.shellRenders == 1
@@ -219,7 +260,7 @@ suite "issue #555 — menu redraw storm tears down the debug toolbar":
 
     sim.redraw(traceMenuModel("hello", launchConfigs = 1))
     check sim.shellRenders == 2
-    check sim.controlMounts == 2
+    check sim.controlMounts == 1
 
   test "opening the menu re-renders even though the tree is unchanged":
     let sim = newMenuChromeSim()
@@ -263,6 +304,120 @@ suite "issue #555 — menu redraw storm tears down the debug toolbar":
     sim.shell.children.setLen(0)
     sim.redraw(model)
     check sim.shellRenders == 2
+    check sim.controlMounts == 2
+
+suite "a menu-shell rebuild must not replace the topbar host":
+  ## WHY NODE IDENTITY AND NOT MOUNT COUNT.
+  ##
+  ## The suite above counts re-mounts, which is the FLICKER. This one is about
+  ## the other consequence, which no mount count can see: a pointer press is
+  ## `mousedown` then `mouseup`, and the browser fires a `click` only when both
+  ## landed on the SAME node. A shell rebuild between them replaces every
+  ## button in the topbar, and the browser then produces NO `click` event at
+  ## all — the control is painted, hit-testable and dead for exactly one press.
+  ##
+  ## Measured in one tab against the assembled bundle, four arms with
+  ## capture-phase listeners: with a click on the menu-bar background first,
+  ## `mousedown` and `mouseup` landed on different nodes and no `click` was
+  ## produced; with nothing before it, with a click inside the editor, or with
+  ## a JS blur, all three events arrived on one node and the control ran.
+  ##
+  ## `#isonim-debug-controls` is a CHILD of `#menu`, so touching the caption
+  ## bar is enough to trigger it. Hence the property asserted here: a rebuild
+  ## may replace everything else, and must leave THAT node where it is.
+
+  test "the host node survives a rebuild, with its mounted toolbar inside":
+    let sim = newMenuChromeSim()
+    sim.redraw(traceMenuModel("hello"))
+    let host = sim.controlsHost
+    check not host.isNil
+    check host.children.len == 1          # `ui/debug.nim` mounted the toolbar
+
+    # A genuine menu change, so the gate cannot decline the rebuild — this is
+    # the case a redraw storm and a caption-bar click both produce.
+    sim.redraw(traceMenuModel("hello", launchConfigs = 1))
+    check sim.shellRenders == 2
+
+    let after = sim.controlsHost
+    check not after.isNil
+    # IDENTITY, not equality of shape: `MockNode.id` is unique per created
+    # node, so a re-created host would carry a different one.
+    check after.id == host.id
+    check after.children.len == 1
+    check after.children[0].id == host.children[0].id
+    # And no second mount was needed, because nothing was lost.
+    check sim.controlMounts == 1
+
+  test "the pre-fix rebuild is what loses it — the arm for the check above":
+    # Same gestures, the only difference being the rebuild strategy. Without
+    # this the assertion above could pass because the simulation never rebuilds
+    # anything.
+    let sim = newMenuChromeSim(preserveHost = false)
+    sim.redraw(traceMenuModel("hello"))
+    let host = sim.controlsHost
+    check not host.isNil
+
+    sim.redraw(traceMenuModel("hello", launchConfigs = 1))
+    check sim.shellRenders == 2
+
+    let after = sim.controlsHost
+    check not after.isNil
+    check after.id != host.id             # a different node: the gesture is lost
+    check sim.controlMounts == 2
+
+  test "the host keeps its place among the shell's children":
+    # Swapped back in, not appended: the caption bar's order is `#menu`'s
+    # children, and a topbar that jumped to the end would be a visible defect
+    # of its own.
+    let sim = newMenuChromeSim()
+    sim.redraw(traceMenuModel("hello"))
+    var indexBefore = -1
+    for i, child in sim.shell.children:
+      if child.attributes.getOrDefault("id", "") == "isonim-debug-controls":
+        indexBefore = i
+    check indexBefore >= 0
+
+    sim.redraw(traceMenuModel("hello", launchConfigs = 1))
+    var indexAfter = -1
+    for i, child in sim.shell.children:
+      if child.attributes.getOrDefault("id", "") == "isonim-debug-controls":
+        indexAfter = i
+    check indexAfter == indexBefore
+    # Exactly one such host, so the swap replaced the placeholder rather than
+    # leaving both in the tree.
+    var hosts = 0
+    for child in sim.shell.children:
+      if child.attributes.getOrDefault("id", "") == "isonim-debug-controls":
+        hosts += 1
+    check hosts == 1
+
+  test "the toolbar survives forty-five rebuilds with the gate switched off":
+    # The storm arm's own subject, re-asked as identity. Even when EVERY redraw
+    # rebuilds the shell, the host and the toolbar in it are the same nodes at
+    # the end as at the start — so no press in that whole window is discarded.
+    let sim = newMenuChromeSim(useGate = false)
+    sim.redraw(traceMenuModel("hello"))
+    let host = sim.controlsHost
+    let toolbar = host.children[0]
+    for _ in 0 ..< 45:
+      sim.redraw(traceMenuModel("hello"))
+    check sim.shellRenders == 46
+    check sim.controlsHost.id == host.id
+    check sim.controlsHost.children[0].id == toolbar.id
+    check sim.controlMounts == 1
+
+  test "a host that is genuinely gone is re-created and re-mounted":
+    # The preservation must not become a refusal to recover: when something
+    # outside our control empties `#menu` — session switching, the welcome
+    # screen — there is no host to carry across and a fresh one is correct.
+    let sim = newMenuChromeSim()
+    sim.redraw(traceMenuModel("hello"))
+    let host = sim.controlsHost
+    sim.shell.children.setLen(0)
+    sim.redraw(traceMenuModel("hello"))
+    check sim.shellRenders == 2
+    check not sim.controlsHost.isNil
+    check sim.controlsHost.id != host.id
     check sim.controlMounts == 2
 
 suite "issue #555 — render gate primitives":

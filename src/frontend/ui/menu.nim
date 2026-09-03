@@ -22,9 +22,10 @@ when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_menu_shell_view import
-    MenuNestedRecord, MenuNodeRecord, MenuNodeRecordKind, MenuRecordElement,
-    MenuRecordFolder, MenuSearchResultRecord, MenuShellCallbacks,
-    MenuShellModel, NavigationMenuId, captionBarHostClasses, renderMenuShellInto
+    DebugControlsHostId, MenuNestedRecord, MenuNodeRecord, MenuNodeRecordKind,
+    MenuRecordElement, MenuRecordFolder, MenuSearchResultRecord,
+    MenuShellCallbacks, MenuShellModel, NavigationMenuId,
+    captionBarHostClasses, renderMenuShellInto
   from menu_render_gate import
     MenuRenderGate, invalidate, menuRenderSignature, noteRendered, shouldRender
 
@@ -672,7 +673,7 @@ when defined(js):
     let hostIntact =
       not dom_api.isNodeNil(dom_api.Node(container).firstChild) and
       not dom_api.isNodeNil(dom_api.Node(dom_api.getElementById(
-        dom_api.document, cstring"isonim-debug-controls")))
+        dom_api.document, cstring DebugControlsHostId)))
     if not menuShellGate.shouldRender(signature, hostIntact):
       # The mounted chrome is already correct.  The cascade below still runs:
       # every one of those calls is an idempotent repair that returns early

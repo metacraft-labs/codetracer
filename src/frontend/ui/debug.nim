@@ -35,6 +35,7 @@ from ../viewmodel/views/isonim_edit_mode_toolbar_view import
   mountIsoNimEditModeToolbar
 from ../viewmodel/views/isonim_debug_shell_view import
   DebugShellId, commandPaletteHostId, renderDebugChromeInto
+from ../viewmodel/views/isonim_menu_shell_view import DebugControlsHostId
 from isonim/web/web_renderer import WebRenderer
 
 # Module-level DebugControlsVM instance. Created once and fed data whenever
@@ -181,7 +182,7 @@ proc tryMountIsoNimDebugControls() =
     if isoNimDebugMounted:
       return
     debugRetryCount += 1
-    let container = dom_api.getElementById(dom_api.document, cstring"isonim-debug-controls")
+    let container = dom_api.getElementById(dom_api.document, cstring DebugControlsHostId)
     if dom_api.isNodeNil(dom_api.Node(container)):
       if debugRetryCount > 100:
         cerror "tryMountIsoNimDebugControls: container not found after 100 retries, giving up"
@@ -245,7 +246,7 @@ proc requestDebugControlsRender*(self: DebugComponent) =
     return
   let container = dom_api.getElementById(
     dom_api.document,
-    cstring"isonim-debug-controls")
+    cstring DebugControlsHostId)
   if dom_api.isNodeNil(dom_api.Node(container)):
     return
   # Issue #555 — why this path used to fire on essentially every redraw.
@@ -355,7 +356,7 @@ proc remountDebugControls*() =
   ## emptied underneath it. A no-op when the toolbar is genuinely up.
   let container = dom_api.getElementById(
     dom_api.document,
-    cstring"isonim-debug-controls")
+    cstring DebugControlsHostId)
   if dom_api.isNodeNil(dom_api.Node(container)):
     return
   if not shouldRemountDebugControls(
@@ -387,7 +388,7 @@ proc refreshTopbarSurface*() =
     return
   let container = dom_api.getElementById(
     dom_api.document,
-    cstring"isonim-debug-controls")
+    cstring DebugControlsHostId)
   if dom_api.isNodeNil(dom_api.Node(container)):
     return
   cdebug "refreshTopbarSurface: " & $mountedTopbarSurface & " -> " &

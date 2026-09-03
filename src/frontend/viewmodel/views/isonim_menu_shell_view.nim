@@ -4,7 +4,7 @@
 ## owns the shared ``#menu`` host structure so the global menu chrome no longer
 ## needs a Karax ``setRenderer`` registration.
 
-import std/strutils
+import std/[strutils, tables]
 import isonim/dsl/ui
 from isonim/core/computation import createRenderEffect
 import isonim/testing/mock_dom
@@ -75,6 +75,11 @@ const
   ## controls are hidden and the bar reclaims the space.
   MenuShellFullscreenClass* = "menu-shell--native-fullscreen"
   NavigationMenuId* = "navigation-menu"
+  DebugControlsHostId* = "isonim-debug-controls"
+    ## The topbar host, named once because three modules have to agree on it:
+    ## this view emits it, `ui/debug.nim` mounts the toolbar into it, and
+    ## `ui/menu.nim` asks whether it is still on screen before trusting the
+    ## render gate.
   MenuShellSessionTabBarId* = "session-tab-bar"
   MenuRootId* = "menu-root"
   MenuMainId* = "menu-main"
@@ -331,7 +336,7 @@ template renderMenuShellImpl(
                         hr(class = "menu-sub-group-separator"):
                           discard
 
-      tdiv(id = "isonim-debug-controls"):
+      tdiv(id = DebugControlsHostId):
         discard
       tdiv(id = "debug", class = "ct-header"):
         discard
@@ -366,6 +371,80 @@ proc renderMenuShell*(
     callbacks: MenuShellCallbacks = MenuShellCallbacks()): MockNode =
   renderMenuShellImpl(r, model, callbacks)
 
+# ---------------------------------------------------------------------------
+# Rebuilding the shell around a host that must NOT be rebuilt
+# ---------------------------------------------------------------------------
+#
+# `renderMenuShellInto` clears its host and re-creates the whole subtree, and
+# `#isonim-debug-controls` is part of that subtree — so every shell rebuild
+# used to hand `ui/debug.nim` a brand-new, empty host and take the mounted
+# debugger toolbar with it.  Issue #555's flicker was one consequence and
+# `ui/menu_render_gate.nim` addressed it by rebuilding LESS OFTEN; this is the
+# other consequence, and rebuilding less often cannot fix it:
+#
+#   THE REBUILD DESTROYS THE NEXT CLICK, not merely the current paint.  A
+#   pointer press is `mousedown` then `mouseup`, and per the DOM spec the
+#   browser fires a `click` ONLY when both landed on the same node.  A rebuild
+#   that happens between them replaces every button in the toolbar, the two
+#   land on different nodes, and NO `click` EVENT IS PRODUCED AT ALL.  Measured
+#   in one tab, four arms, capture-phase listeners on `window`:
+#
+#     nothing beforehand           mousedown/mouseup/click, same node -> ran
+#     click the topbar background  mousedown+mouseup, DIFFERENT nodes,
+#                                  no click event whatsoever          -> nothing
+#     click inside the editor      same node                          -> ran
+#     blur via JS                  same node                          -> ran
+#
+#   Clicking the menu bar's own background is enough, because
+#   `#isonim-debug-controls` is a CHILD of `#menu`.  So a user who touches the
+#   caption bar and then presses Run, or Step, or Stop, gets one silently
+#   discarded press — the control is painted, hit-testable and dead.
+#
+# The fix is structural: the shell is rebuilt AROUND the existing host rather
+# than over it.  The host is detached before the clear, and swapped back in
+# place of the fresh placeholder the view emits, so its node identity — and
+# with it every button the toolbar mounted inside — survives a rebuild.
+#
+# NOT a synthetic re-dispatch of the lost click.  Node identity is the actual
+# problem; re-dispatching would paper over the one gesture a test happens to
+# drive while leaving every other control equally affected.
+#
+# The host carries no attribute but its `id` and no listener of its own (the
+# view emits it with an empty body), so carrying the old node forward loses
+# nothing the render would have set on it.  If it ever gains one, this swap is
+# the place that has to start reconciling it.
+#
+# The helpers below exist so that ONE implementation serves both backends: the
+# mock renderer is what lets the identity property be asserted headlessly
+# (`src/tests/gui/tests/session-chrome/menu_redraw_storm_test.nim`), and a
+# JS-only fix would have been a fix nothing could test.
+
+proc menuShellFindChild(r: MockRenderer; parent: MockNode; id: string): MockNode =
+  ## The host is a DIRECT child of the shell root, so this deliberately does
+  ## not recurse: a nested element that happened to share the id must not be
+  ## mistaken for it.
+  for child in parent.children:
+    if child.kind == mnkElement and
+        child.attributes.getOrDefault("id", "") == id:
+      return child
+  nil
+
+proc menuShellIsNilNode(node: MockNode): bool = node.isNil
+
+proc menuShellDetach(r: MockRenderer; parent, child: MockNode) =
+  r.removeChild(parent, child)
+
+proc menuShellSwap(r: MockRenderer; parent, incoming, outgoing: MockNode) =
+  r.insertBefore(parent, incoming, outgoing)
+  r.removeChild(parent, outgoing)
+
+proc menuShellMoveChildren(r: MockRenderer; destination, source: MockNode) =
+  ## Over a COPY of the child list: `appendChild` detaches first, so iterating
+  ## `source.children` directly would skip every other node.
+  let moving = source.children
+  for child in moving:
+    r.appendChild(destination, child)
+
 when defined(js):
   proc renderMenuShell*(
       r: WebRenderer;
@@ -374,18 +453,79 @@ when defined(js):
         isonim_dom.Element =
     renderMenuShellImpl(r, model, callbacks)
 
+  proc menuShellFindChild(r: WebRenderer; parent: isonim_dom.Element;
+                          id: string): isonim_dom.Element =
+    var child = isonim_dom.Node(parent).firstChild
+    while not isonim_dom.isNodeNil(child):
+      # `nodeType == 1` is ELEMENT_NODE; `getAttribute` does not exist on the
+      # text nodes a shell render can leave between elements.
+      if child.nodeType == 1:
+        let element = cast[isonim_dom.Element](child)
+        let raw = isonim_dom.getAttribute(element, cstring"id")
+        if not raw.isNil and $raw == id:
+          return element
+      child = child.nextSibling
+    nil
+
+  proc menuShellIsNilNode(node: isonim_dom.Element): bool =
+    isonim_dom.isNodeNil(isonim_dom.Node(node))
+
+  proc menuShellDetach(r: WebRenderer; parent, child: isonim_dom.Element) =
+    discard isonim_dom.removeChild(
+      isonim_dom.Node(parent), isonim_dom.Node(child))
+
+  proc menuShellSwap(r: WebRenderer;
+                     parent, incoming, outgoing: isonim_dom.Element) =
+    discard isonim_dom.replaceChild(
+      isonim_dom.Node(parent),
+      isonim_dom.Node(incoming),
+      isonim_dom.Node(outgoing))
+
+  proc menuShellMoveChildren(r: WebRenderer;
+                             destination, source: isonim_dom.Element) =
+    let destinationNode = isonim_dom.Node(destination)
+    let sourceNode = isonim_dom.Node(source)
+    while not isonim_dom.isNodeNil(sourceNode.firstChild):
+      discard isonim_dom.appendChild(destinationNode, sourceNode.firstChild)
+
+# BELOW THE BACKEND HELPERS ON PURPOSE. A template binds the overloads it can
+# already see at its definition site, so a template declared above the
+# `when defined(js)` block would resolve `menuShellFindChild` and friends to
+# the mock ones and fail to compile for the web.
+template renderMenuShellIntoImpl(
+    r: untyped;
+    container: untyped;
+    model: MenuShellModel;
+    callbacks: MenuShellCallbacks): untyped =
+  let preservedHost = menuShellFindChild(r, container, DebugControlsHostId)
+  let hasPreserved = not menuShellIsNilNode(preservedHost)
+  if hasPreserved:
+    # Out of the host BEFORE the clear, or the clear takes it with everything
+    # else.
+    menuShellDetach(r, container, preservedHost)
+  r.clearChildren(container)
+  let shell = renderMenuShell(r, model, callbacks)
+  if hasPreserved:
+    let placeholder = menuShellFindChild(r, shell, DebugControlsHostId)
+    if not menuShellIsNilNode(placeholder):
+      menuShellSwap(r, shell, preservedHost, placeholder)
+  # NB: only the shell's *children* are moved into the caller's host; this
+  # wrapper is discarded.  A class set on it never reaches the document, so
+  # the caption-bar host classes are owned by `ui/menu.nim` instead — it also
+  # has to track fullscreen, which no render pass knows about.
+  menuShellMoveChildren(r, container, shell)
+
+proc renderMenuShellInto*(
+    r: MockRenderer;
+    container: MockNode;
+    model: MenuShellModel;
+    callbacks: MenuShellCallbacks = MenuShellCallbacks()) =
+  renderMenuShellIntoImpl(r, container, model, callbacks)
+
+when defined(js):
   proc renderMenuShellInto*(
       r: WebRenderer;
       container: isonim_dom.Element;
       model: MenuShellModel;
       callbacks: MenuShellCallbacks = MenuShellCallbacks()) =
-    r.clearChildren(container)
-    let shell = renderMenuShell(r, model, callbacks)
-    let shellNode = isonim_dom.Node(shell)
-    let containerNode = isonim_dom.Node(container)
-    # NB: only the shell's *children* are moved into the caller's host; this
-    # wrapper is discarded.  A class set on it never reaches the document, so
-    # the caption-bar host classes are owned by `ui/menu.nim` instead — it also
-    # has to track fullscreen, which no render pass knows about.
-    while not isonim_dom.isNodeNil(shellNode.firstChild):
-      discard isonim_dom.appendChild(containerNode, shellNode.firstChild)
+    renderMenuShellIntoImpl(r, container, model, callbacks)

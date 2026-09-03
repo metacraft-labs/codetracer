@@ -852,6 +852,54 @@ proc requestSavedAutoHideState(): JsObject =
   """.}
 
 # Triage: rename to initGoldenLayout
+proc bindLayoutItemForTab(state: GoldenItemState; container: GoldenContainer) =
+  ## Give the component this tab belongs to a handle on its GoldenLayout item.
+  ##
+  ## THE COMPONENT IS THE ONE THE TAB NAMES, not "the most recently opened one
+  ## of this content". Both `registerComponent` bodies used to read
+  ## `componentMapping[state.content][openComponentIds[state.content][^1]]`,
+  ## and that heuristic is wrong in two ways at once:
+  ##
+  ##   * WITH SEVERAL TABS OF ONE CONTENT it hands every tab's layout item to
+  ##     the same component — the last one opened — so the other components end
+  ##     up with a stale item or none, and `closeAuxiliaryPanels` then removes
+  ##     the wrong pane.
+  ##   * WHEN THE LAST OPENED ID HAS NO COMPONENT AT ALL the lookup answers
+  ##     `undefined` and the assignment THROWS. Measured on the assembled
+  ##     bundle, driving Run and then Stop in a browser: `layout: GoldenLayout
+  ##     rejected the edit layout: Cannot read properties of undefined (reading
+  ##     'layoutItem')`, thrown from inside `loadLayout` after GoldenLayout had
+  ##     already torn the debug layout down and mounted five of the edit
+  ##     layout's components. The restore aborted half-way and left the
+  ##     workspace EMPTY: no editor, no Files, no VCS, no tabs at all. The
+  ##     mode-roundtrip gate saw that as "the editors are writable again"
+  ##     failing on every trip — there was no editor pane left to be writable —
+  ##     and as a caret that never moved, because there was no source view to
+  ##     paint it in.
+  ##
+  ## `state.id` is the authority the same handler already uses two lines further
+  ## down for `Content.UnifiedDiff`, and that `findPanelByContentAndId(
+  ## state.content, state.id)` uses above.
+  ##
+  ## A MISSING COMPONENT IS NAMED RATHER THAN THROWN. A tab can legitimately
+  ## exist with no component behind it — `web_replay_host` loads a debugging
+  ## layout that declares a retired `Content.Trace` pane and deliberately skips
+  ## constructing it — and one such pane must not abort the load of every other.
+  if data.ui.openComponentIds[state.content].find(state.id) == -1:
+    data.ui.openComponentIds[state.content].add(state.id)
+
+  let similarComponents = data.ui.componentMapping[state.content]
+  if not similarComponents.hasKey(state.id):
+    cwarn "layout: tab for " & $state.content & "/" & $state.id &
+      " has no component; its layout item is not bound"
+    return
+  let component = similarComponents[state.id]
+  if component.isNil:
+    cwarn "layout: tab for " & $state.content & "/" & $state.id &
+      " maps to a nil component; its layout item is not bound"
+    return
+  component.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
+
 proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
                  containerElement: kdom.Element = nil) =
   ## Initialise GoldenLayout for the active session.
@@ -999,18 +1047,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       data.ui.saveLayout = true
       #componentMapping -> all registered components in data
       #content -> enum {TERMINAL, TRACELOG etc..}
-
-      if data.ui.openComponentIds[state.content].find(state.id) == -1:
-        data.ui.openComponentIds[state.content].add(state.id)
-
-      let similarComponents = data.ui.componentMapping[state.content]
-
-      if similarComponents.len > 0:
-        let openComponents = data.ui.openComponentIds[state.content]
-        let lastComponentId = if openComponents.len > 0: openComponents[^1] else: 0
-        let lastComponent = similarComponents[lastComponentId]
-
-        lastComponent.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
+      bindLayoutItemForTab(state, container)
 
       tab.setTitle(state.label)
 
@@ -1155,23 +1192,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       # prepare layout to be saved on upcoming stateChanged event
       data.ui.saveLayout = true
 
-      # add contentItem to component
-      # all components - data.ui.componentMapping
-      let similarComponents = data.ui.componentMapping[state.content]
-
-      ## check if id of the component was added to the open components register
-      # data.ui.openComponentIds all components that are open
-      if data.ui.openComponentIds[state.content].find(state.id) == -1:
-        data.ui.openComponentIds[state.content].add(state.id)
-
-      ## map corresponding layout item to the last component that was added
-      if similarComponents.len > 0:
-        let openComponents = data.ui.openComponentIds[state.content]
-        # ^1 - last element of an array
-        let lastComponentId = if openComponents.len > 0: openComponents[^1] else: 0
-        let lastComponent = similarComponents[lastComponentId]
-        # container.tab.contentItem reference to golden layout item
-        lastComponent.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
+      # add contentItem to the component this tab names, and register the id as
+      # open — both in `bindLayoutItemForTab`, which the editor registration
+      # above shares.
+      bindLayoutItemForTab(state, container)
 
       if state.content == Content.UnifiedDiff:
         let component = data.ui.componentMapping[state.content][state.id]
