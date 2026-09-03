@@ -33,6 +33,34 @@ if ! printf '%s\n' "${capabilities_json}" |
 	exit 1
 fi
 
+# De-poison the runner before we start, and make sure we do not poison it on
+# the way out.
+#
+# The repro user daemon is PERSISTENT and its endpoint is deliberately stable
+# across nix-develop sessions, so a single daemon serves every job on a runner
+# indefinitely. On macOS it is started via launchd, and when that fails it
+# falls back to a plain fork+setsid that never performs the `chdir("/")` step
+# of daemonising -- so it inherits the cwd of whichever `repro build` first
+# spawned it. This script builds from `${tmp_root}/project-*` and then deletes
+# `${tmp_root}`, so a daemon left running here is left holding a DELETED
+# directory, and every later `repro build` on this runner -- in this job or any
+# other, this project or any other -- dies in `getCurrentDir()` with
+#
+#     daemon-hosted build failed: No such file or directory
+#
+# Reproduced locally: spawn the daemon from dir A through the fork path,
+# `rm -rf A`, then build from dir B and it fails exactly so.
+#
+# So: stop any daemon inherited from an earlier job (otherwise this run dies on
+# someone else's dangling cwd), and stop ours before `rm -rf "${tmp_root}"`
+# below (otherwise we are the ones who poison the next job). `|| true` because
+# "no daemon running" is the normal case, not an error.
+#
+# The durable fix is upstream in reprobuild -- add the missing `chdir("/")` to
+# the fork path and let the daemon tolerate a vanished cwd. This only stops
+# codetracer's jobs being both the cause and the victim.
+repro daemon stop >/dev/null 2>&1 || true
+
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/reprobuild-macos-smoke.XXXXXX")"
 cleanup() {
 	status=$?
@@ -40,6 +68,9 @@ cleanup() {
 		echo "keeping smoke temp dir after failure: ${tmp_root}" >&2
 		return
 	fi
+	# MUST precede the rm: see the note above. A daemon still holding
+	# ${tmp_root} as its cwd outlives this script and breaks the next job.
+	repro daemon stop >/dev/null 2>&1 || true
 	rm -rf "${tmp_root}"
 }
 trap cleanup EXIT

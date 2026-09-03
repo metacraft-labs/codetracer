@@ -4242,7 +4242,38 @@ jobs:
         # in-repo ``libs/codetracer-trace-format{,-nim}`` staged above feed the
         # recipe; no ``--override-input`` is needed for the tup/reprobuild dev
         # build. Replaces the old Homebrew ``./non-nix-build/build.sh``.
-        run: nix develop . --command just build-once
+        #
+        # The `repro daemon stop` is a de-poisoning step, not hygiene. The
+        # repro user daemon is PERSISTENT and its endpoint is deliberately
+        # stable across nix-develop sessions, so one daemon serves every job on
+        # a runner indefinitely. On macOS it is started via launchd, and when
+        # that fails it falls back to a plain fork+setsid that never does the
+        # `chdir("/")` step of daemonising -- so it inherits the cwd of
+        # whichever `repro build` first spawned it. When that cwd was an
+        # ephemeral dir (a `nix develop` TMPDIR, or the reprobuild smoke test's
+        # `mktemp -d`, both of which are deleted afterwards), the surviving
+        # daemon is left holding a deleted directory, and EVERY later
+        # `repro build` on that runner dies in `getCurrentDir()` with
+        #
+        #     daemon-hosted build failed: No such file or directory
+        #
+        # -- which is what killed this step, in a DIFFERENT job from the one
+        # that poisoned the runner. Reproduced locally: spawn the daemon from
+        # dir A via the fork path, `rm -rf A`, then build from dir B and it
+        # fails exactly so.
+        #
+        # Stopping first makes the next build spawn a daemon whose cwd is this
+        # checkout, which persists for the life of the job, so this step does
+        # not re-poison the runner either. `|| true` because a runner with no
+        # daemon yet is the normal case, not an error.
+        #
+        # The durable fix is upstream in reprobuild (add the missing
+        # `chdir("/")` in the fork path, and make the daemon tolerate a
+        # vanished cwd); this only stops codetracer's jobs being the victim.
+        run: |
+          set -euo pipefail
+          nix develop . --command repro daemon stop >/dev/null 2>&1 || true
+          nix develop . --command just build-once
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
