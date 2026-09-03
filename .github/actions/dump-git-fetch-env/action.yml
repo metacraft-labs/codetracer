@@ -90,7 +90,26 @@ runs:
         keys="$(git config --list --show-origin --name-only 2>/dev/null \
           | grep -iE 'http\.|url\.|credential')"
         if [ -n "${keys}" ]; then
-          printf '%s\n' "${keys}" | sed 's/^/  /'
+          # REDACT CREDENTIALS THAT LIVE IN THE KEY NAME ITSELF.
+          #
+          # This block deliberately prints names and never values, on the
+          # reasoning that a name cannot carry a secret. That reasoning stops
+          # holding the moment anyone authenticates git the way nix's fetcher
+          # actually honours it. Measured on nix 2.25: the fetcher respects
+          # `url.<...>.insteadOf` from the user's git config and IGNORES
+          # `http.<...>.extraHeader` -- so the only rewrite that can
+          # authenticate a `builtins.fetchGit` is
+          #
+          #     url."https://x-access-token:<TOKEN>@github.com/".insteadOf
+          #
+          # which puts the token INSIDE the key name, where this loop would
+          # print it in full. Strip any `user:pass@` from the names so that
+          # adopting that fix cannot silently turn this diagnostic into the
+          # leak. Done here rather than at the call site because the next
+          # person to add a `--name-only` dump will copy this block.
+          printf '%s\n' "${keys}" \
+            | sed -E 's#://[^/@[:space:]]*:[^/@[:space:]]*@#://<redacted>@#g' \
+            | sed 's/^/  /'
         else
           echo "  (none — git has no http./url./credential keys from any file)"
         fi
