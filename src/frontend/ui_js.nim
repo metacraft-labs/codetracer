@@ -2597,14 +2597,63 @@ when not defined(ctInExtension):
       # calltrace.nim, state.nim, event_log.nim, etc. are the canonical
       # rendering path and mount directly into GoldenLayout containers.
 
+    # SUBSCRIBE THE COMPONENTS THAT ARE NOT SUBSCRIBED YET, and only those.
+    #
+    # This loop used to call `register` on every component in the mapping,
+    # reusing `component.api` when one was already there. `register` is purely
+    # ADDITIVE — `Component.register` calls `api.subscribe` once per event
+    # kind, `subscribe` appends to `m.handlers[kind]`, and because a component
+    # mediator is `isRemote` it also emits `CtSubscribe`, which appends the
+    # mediator to `data.viewsApi.subscribers[kind]`. So re-registering a
+    # component that was already registered doubles BOTH lists, and one
+    # `emit` then fans out to two subscriber entries, each of which runs two
+    # handlers.
+    #
+    # MEASURED, in a browser, on the assembled web bundle: a single
+    # `viewsApi.emit(CtNotification, ...)` reached `StatusComponent.onNotification`
+    # FOUR times — `subscribers: 2`, then `handlers: 2` on each delivery. The
+    # user-visible form was a report of "3 duplicate notifications" on
+    # noirstudio.dev, three rather than four only because
+    # `ui/status.nim`'s `NOTIFICATION_LIMIT` caps the stack at three.
+    #
+    # IT WAS NEVER ONLY THE NOTIFICATIONS. Counting `subscribe:` per mediator
+    # across one `/noir` load, five mediators subscribe to anything and THREE
+    # of them had a duplicated event kind:
+    #
+    #   Debug #0         CtCompleteMove x2
+    #   Status #0        InternalStatusUpdate x2, CtCompleteMove x2,
+    #                    CtNotification x2
+    #   RequestPanel #0  CtUpdatedHttpRequests x2
+    #
+    # So every debugger step ran the Debug and Status move handlers twice and
+    # every HTTP-request delta was folded into the Request panel twice. The
+    # notification stack is simply the one subscriber that APPENDS to a list
+    # on each delivery instead of assigning state, so it is where the
+    # duplication became visible rather than merely wasteful. After this
+    # change the same measurement reports zero duplicated kinds and the status
+    # bar's coalesced render requests drop from 14 to 11 for an identical
+    # load.
+    #
+    # This is the same defect family as #612, arriving through a different
+    # door: that one was dead components left subscribed, this one is live
+    # components subscribed twice.
+    #
+    # FIXED HERE RATHER THAN BY DE-DUPLICATING THE NOTIFICATION LIST, because
+    # a filter over the toast stack would hide the duplication and leave
+    # Debug and RequestPanel still running twice.
+    #
+    # The guard is the invariant `types.registerComponent` already enforces
+    # (`component.api.isNil`) and that `Component.unregister` already states:
+    # "`registerComponent` skips components that already carry an `api`". A
+    # component that was torn down has had `api` set back to nil by
+    # `unregister`, so it is still picked up here — which is the case this
+    # loop exists for: components built before `data.viewsApi` existed.
     for content, components in data.ui.componentMapping:
       for i, component in components:
-        let componentToMiddlewareApi =
-          if component.api.isNil:
-            setupLocalViewToMiddlewareApi(cstring(fmt"{content} #{component.id} api"), data.viewsApi)
-          else:
-            component.api
-        component.register(componentToMiddlewareApi)
+        if not component.api.isNil:
+          continue
+        component.register(setupLocalViewToMiddlewareApi(
+          cstring(fmt"{content} #{component.id} api"), data.viewsApi))
 
     # Replay the last known debugger position so that newly-created
     # VMs (which start with rrTicks=0) learn the current position.
