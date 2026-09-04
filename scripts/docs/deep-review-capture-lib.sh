@@ -232,7 +232,7 @@ ctdr_require_sibling_binary_not_stale() {
 	done < <(git -C "${repo_abs}" ls-files -z 2>/dev/null)
 
 	[[ -z ${newer} ]] || ctdr_die \
-		"stale sibling build: ${label} ('${binary_abs}') is older than its source '${newer}'. This capture photographs what these binaries produce, so it would publish images of an out-of-date ${label}. Rebuild it in '${repo_abs}', then run this again."
+		"stale sibling build: ${label} ('${binary_abs}') is older than its source '${newer}'. This capture publishes what these binaries produce, so the book would get images made by an out-of-date binary. Rebuild it in '${repo_abs}', then run this again."
 }
 
 # ctdr_require_fresh_build <repo-root> [extra-stylesheet ...]
