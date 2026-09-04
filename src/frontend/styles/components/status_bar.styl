@@ -557,6 +557,24 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     max-height: 50vh
     overflow-y: scroll
     background-color: colors-ui-surface-base-panel
+    // THE HISTORY LIST STACKS THE SAME NOTIFICATIONS AS THE LIVE TOAST STACK,
+    // AND OWED THEM THE SAME GAP.
+    //
+    // `#active-notifications` above is `display: flex` with
+    // `gap: NOTIFICATION_STACK_GAP`, so two live toasts sit 0.5rem apart. This
+    // container renders the identical `.status-notification.ct-notification`
+    // elements — same markup, same per-kind 0.0625rem coloured border
+    // (`notifications.styl:11`) — but laid them out as plain blocks with no
+    // gap and no child margin. Adjacent notifications therefore ABUTTED, and
+    // two touching 1px borders read as one 2px divider rather than as two
+    // separate notices; a run of same-kind notifications read as a single
+    // block with lines ruled through it.
+    //
+    // The same token, not a new number, because these are the same objects in
+    // a different place — a second value here would be the thing that drifts.
+    display: flex
+    flex-direction: column
+    gap: NOTIFICATION_STACK_GAP
     border-top: 5px solid colors-ui-surface-primary-tertiary
     border-left: 5px solid colors-ui-surface-primary-tertiary
     border-right: 5px solid colors-ui-surface-primary-tertiary
@@ -569,7 +587,6 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     .status-notification-header
       color: #5885ac !important;
       text-indent: 10px;
-      font-family: arial;
       font-weight: bold;
 
   #bug-report-container
@@ -590,14 +607,12 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     .bug-report-header
       color: #5885ac !important
       text-indent: 10px
-      font-family: arial
       font-weight: bold
 
     .bug-report-text
       color: #5885ac !important
       text-indent: 10px
       margin-left: 10%
-      font-family: arial
       font-weight: bold
 
     .bug-report-description
