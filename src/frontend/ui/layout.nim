@@ -1162,9 +1162,21 @@ proc setupDragToPinListeners(layout: GoldenLayout) =
   """.}
 
 
-proc mountComponentContainer*(host: Element, componentId: cstring) =
+proc mountComponentContainer(host: Element, componentId: cstring) =
   ## Replace `host`'s children with the single `.component-container` div a
   ## GoldenLayout component mounts into.
+  ##
+  ## NOT EXPORTED, and that is asserted rather than incidental. Its three
+  ## callers are the two `genericUiComponent` registrations below and nothing
+  ## else — `grep -rn mountComponentContainer src` finds this module, a test
+  ## that reads this module's SOURCE TEXT, and no importer. It carried a `*`
+  ## until 2026-09-04, and while it did, `ci/test/frontend-reachability.sh`
+  ## counted it: b59186fa0 added a test that mentions the name, which moved it
+  ## out of the uncounted "only its own module reaches it" bucket and into the
+  ## counted "tested, and no product module reaches it" one, taking the
+  ## repository from the recorded ceiling of 1228 to 1229 and reddening
+  ## `lint-nim` for a second reason nobody had reported. An export nobody
+  ## outside can use is what that guard exists to find.
   ##
   ## Built with `createElement` + `setAttribute` rather than
   ## `innerHTML = fmt"<div id={componentId} class=...>"`, which is what this

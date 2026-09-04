@@ -33,8 +33,15 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1224 bash ci/test/frontend-reachability.sh`, so 1225
-# findings fail `lint-nim` and 1224 do not.
+# `env CT_REACHABILITY_MAX=1228 bash ci/test/frontend-reachability.sh`, so 1229
+# findings fail `lint-nim` and 1228 do not.
+#
+# THAT SENTENCE SAID 1224 AND 1225 WHILE THE INVOCATION SAID 1228, from 04:04
+# to 18:00 on 2026-09-04. The ceiling was raised three times in twenty-nine
+# minutes (1224 -> 1226 -> 1228) by commits whose subjects were about other
+# things, and each raise moved the `env` and left this paragraph, and the step
+# LABEL beside it, behind. `ci/lint/nim.sh` now runs a step that fails when the
+# three disagree, so the numbers above cannot go stale again without a red.
 #
 # Before 2026-09-04 neither variable had a setter anywhere in the repository.
 # The paragraph above described a design; `grep -rn CT_REACHABILITY` over
@@ -60,16 +67,16 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${here}/../.." && pwd)"
 
 args=()
-if [[ -n "${CT_REACHABILITY_MAX:-}" ]]; then
+if [[ -n ${CT_REACHABILITY_MAX:-} ]]; then
 	args+=(--max "${CT_REACHABILITY_MAX}")
 fi
-if [[ "${CT_REACHABILITY_ENFORCE:-0}" == "1" ]]; then
+if [[ ${CT_REACHABILITY_ENFORCE:-0} == "1" ]]; then
 	args+=(--enforce)
 fi
-if [[ "${CT_REACHABILITY_INCLUDE_OWN_MODULE:-0}" == "1" ]]; then
+if [[ ${CT_REACHABILITY_INCLUDE_OWN_MODULE:-0} == "1" ]]; then
 	args+=(--include-own-module)
 fi
-if [[ -n "${CT_REACHABILITY_JSON:-}" ]]; then
+if [[ -n ${CT_REACHABILITY_JSON:-} ]]; then
 	args+=(--json "${CT_REACHABILITY_JSON}")
 fi
 

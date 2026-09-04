@@ -2644,6 +2644,48 @@ jobs:
         # attributable to different steps.
         run: nix develop .#devShells.x86_64-linux.default --command just test-tests-pane-row-controls
 
+      - name: A typed watch expression, in a browser, showing a correct value
+        # The STATE pane's Watches tab, opened by a click on the product's own
+        # tab button and filled by keystrokes into its own `#watch-0`.
+        #
+        # The two steps above assert that the product mounts and that a control
+        # does what it promises. This asserts the third thing neither can: that
+        # a pane a user must NAVIGATE TO is navigable. Every headless suite over
+        # this pane drove the MockRenderer, whose tab strip the WebRenderer — the
+        # one browsers run — did not have; `stWatches` was reachable from
+        # `vm.selectTab` and from no gesture in any shipping product, and every
+        # one of those suites was green over it. A probe that switches tabs by
+        # calling the ViewModel cannot fail for that reason, so this one does not
+        # call it.
+        #
+        # WHY IT CAN RUN HERE, unlike its two neighbours. There is no engine on
+        # this page and it needs none: the rows come from
+        # `ci/test/watch-expressions-probe/backend-response.json`, which is the
+        # `ct/load-locals` body captured verbatim from
+        # `watch_expressions_dap_test.rs` under `CT_WRITE_WATCH_FIXTURE`, and
+        # they enter through the product's own `applyLocalsResponse`. So the
+        # Noir compiler, the tracer and the replay engine — the OPTIONAL bundle
+        # assets that force the row-controls gate to skip its recording arms
+        # here — are not on this gate's path at all. Its dependencies are `nim
+        # js`, stylus and Chromium, and this lane already proves it has all
+        # three: `test-css-token-resolution` compiles the stylesheets above and
+        # `test-web-renderer-mounts` drives Playwright's Chromium. Measured on
+        # this branch before it was wired: 24 of 24, no skips.
+        #
+        # It EXITS 2 when any of those three is missing rather than passing, and
+        # in THIS lane that must be red: a shell that has stopped providing
+        # Chromium is a lane defect, not an absent optional capability, and the
+        # loud-skip branch exists for developer machines outside the dev shell.
+        #
+        # The transport half is `watch_expressions_dap_test.rs`'s and stays
+        # there; because this page renders that suite's own captured body, the
+        # two cannot drift apart without it noticing.
+        #
+        # Placed immediately after the two browser steps so all three read the
+        # same bundle and a mount, a behaviour and a navigation regression are
+        # attributable to different steps.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-watch-expressions-in-browser
+
       - name: A registered known failure signals when it goes green
         # The ledger `just test-vm` now consults, gated in both directions.
         #

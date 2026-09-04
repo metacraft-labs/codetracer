@@ -518,7 +518,13 @@ assertEqual(filesMatching(/titleElement\.textContent = /),
   'the scan finds the editor tab title, which carries an absolute path');
 assertEqual(filesMatching(/titleElement\.innerHTML/), '',
   'and it is never written as markup');
-assertEqual(filesMatching(/proc mountComponentContainer\*/),
+// Anchored on the PARAMETER LIST, not on the `*`. This read
+// `/proc mountComponentContainer\*/` until the proc stopped being exported
+// (it has no caller outside its own module, and the `*` was costing a
+// `frontend-reachability` finding), at which point an assertion about an
+// HTML sink would have failed over a visibility marker it does not care
+// about.
+assertEqual(filesMatching(/proc mountComponentContainer\(/),
   'src/frontend/ui/layout.nim',
   'the component host is mounted through createElement + setAttribute');
 

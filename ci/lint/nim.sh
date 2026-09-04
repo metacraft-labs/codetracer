@@ -81,22 +81,116 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 # report is not a gate. Its ALLOW-LIST hygiene could redden this lane; its stated
 # subject could not.
 #
-# 1224 is today's exact count, measured on this tree on 2026-09-04 — not the
-# 1217 the previous note recorded, which is seven findings of drift accumulated
-# while nothing was watching, and a small demonstration of why a number nobody
-# asserts stops being true.
+# 1228 is this tree's exact count, re-measured on 2026-09-04 after the three
+# raises below. THE NUMBER IN THIS PARAGRAPH SAID 1224 FOR HALF A DAY WHILE THE
+# LINE BELOW SAID 1228, and that is the defect worth recording here rather than
+# only in a commit. The ceiling went 1224 -> 1226 -> 1228 in twenty-nine
+# minutes, and no raising commit's SUBJECT mentioned the ratchet:
+#
+#   896166e27  ci(lint-nim): engage the reachability ratchet at 1224   1224
+#   6954db651  ci: settle the gate-coverage merge against the tree     1226
+#   9f9bbbef5  ci: clone python-recorder from `dev`, like the other 12 1228
+#
+# Each raise moved the `env` on the next line and left every sentence about it
+# behind — this one, the step LABEL one line down, and the header of
+# `frontend-reachability.sh`. A guard whose documented threshold and actual
+# threshold differ by four is a guard a reader cannot check. The three are now
+# asserted to agree by `assert_reachability_prose_agrees` below, so the next
+# raise cannot land without touching all three.
 #
 # WHAT THIS BUYS, PRECISELY: the count can go down and can never go up. A new
-# unreached export fails this lane by pushing the total to 1225. It does NOT ask
+# unreached export fails this lane by pushing the total to 1229. It does NOT ask
 # anyone to clear the backlog, and deliberately so — a guard that reddens CI over
-# 1224 pre-existing findings on day one is a guard that gets switched off on day
+# 1228 pre-existing findings on day one is a guard that gets switched off on day
 # one, which is the argument in the script's own header and is still right.
+#
+# IT HAS ALREADY BITTEN ONCE, and the bite was correct. `layout.mountComponent-
+# Container` carried a `*` no other module used; b59186fa0 added a test that
+# mentions the name, which moved it from the uncounted "only its own module
+# reaches it" bucket into the counted "tested, and no product module reaches it"
+# one and took the tree to 1229. The fix was to drop the `*` — the export nobody
+# outside could use — and not to raise this number a fourth time.
 #
 # WHEN YOU DELETE OR WIRE A SYMBOL, LOWER THIS NUMBER. Nothing forces that yet:
 # unlike the shell-gate inventory next door, `--max` is a `>` and not an `=`, so
 # slack accumulates silently under it. That is the script's contract, not this
 # line's, and changing it belongs in a diff that says so.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1224 + allow-list hygiene)" \
+
+# THE PROSE GUARD. Three sentences name this threshold and all three drifted off
+# it; the cheapest permanent fix is to make a raise that does not touch them
+# fail. Pure grep over two checked-in files, no toolchain, milliseconds.
+assert_reachability_prose_agrees() {
+	local setter="${CT_PROSE_SETTER_FILE:-ci/lint/nim.sh}"
+	local header="${CT_PROSE_HEADER_FILE:-ci/test/frontend-reachability.sh}"
+	local max label hdr hdr_set hdr_fail hdr_pass rc=0
+
+	# THE THRESHOLD ITSELF, read from the only line that decides anything.
+	max="$(grep -oE 'CT_REACHABILITY_MAX=[0-9]+' "${setter}" | grep -oE '[0-9]+' | head -1)"
+	if [ -z "${max}" ]; then
+		echo "  [FAILED] no 'CT_REACHABILITY_MAX=<n>' setter in ${setter}." >&2
+		echo "           This guard asserts prose against that line; with no line to" >&2
+		echo "           read it would pass over anything, so it fails instead." >&2
+		return 1
+	fi
+
+	# (1) THE STEP LABEL, which is the sentence a reader of the CI log sees.
+	label="$(grep -oE 'frontend reachability: exported symbols nothing reaches \(ratchet at [0-9]+' \
+		"${setter}" | grep -oE '[0-9]+$' | head -1)"
+	if [ "${label}" != "${max}" ]; then
+		echo "  [FAILED] ${setter}: the step label says 'ratchet at ${label:-<none>}'," >&2
+		echo "           the setter says CT_REACHABILITY_MAX=${max}." >&2
+		rc=1
+	fi
+
+	# (2) AND (3) THE SCRIPT'S OWN HEADER: it quotes the invocation and then
+	# states both sides of the boundary. Comment markers are stripped and the
+	# block is joined onto one line first, so re-wrapping the paragraph cannot
+	# hide a stale number from this check.
+	#
+	# The quoted path below is the REPO-RELATIVE one the header names, and is
+	# deliberately not `${header}`: that variable is the file being READ, which
+	# the contract suite points at a copy under /tmp. Interpolating it made this
+	# check silently unmatchable for every arm, which is how the suite's own
+	# unmutated control caught it before it landed.
+	hdr="$(sed -e 's/^#[[:space:]]\{0,1\}//' "${header}" | tr '\n' ' ')"
+	hdr_set="$(printf '%s' "${hdr}" |
+		grep -oE 'CT_REACHABILITY_MAX=[0-9]+ bash ci/test/frontend-reachability\.sh' |
+		grep -oE '[0-9]+' | head -1)"
+	hdr_fail="$(printf '%s' "${hdr}" |
+		grep -oE 'so +[0-9]+ +findings fail' | grep -oE '[0-9]+' | head -1)"
+	hdr_pass="$(printf '%s' "${hdr}" |
+		grep -oE 'and +[0-9]+ +do not\.' | grep -oE '[0-9]+' | head -1)"
+	if [ "${hdr_set}" != "${max}" ] || [ "${hdr_fail}" != "$((max + 1))" ] ||
+		[ "${hdr_pass}" != "${max}" ]; then
+		echo "  [FAILED] ${header}'s header describes a ratchet at ${hdr_set:-<none>}," >&2
+		echo "           where ${hdr_fail:-<none>} findings fail and ${hdr_pass:-<none>} pass." >&2
+		echo "           The setter says ${max}, so $((max + 1)) fails and ${max} passes." >&2
+		rc=1
+	fi
+
+	if [ "${rc}" -ne 0 ]; then
+		echo "           RAISING THE CEILING MEANS CORRECTING THE SENTENCES THAT" >&2
+		echo "           DESCRIBE IT, IN THE SAME DIFF. The ceiling moved 1224 ->" >&2
+		echo "           1226 -> 1228 in twenty-nine minutes on 2026-09-04 and none" >&2
+		echo "           of the three descriptions moved with it." >&2
+		return 1
+	fi
+	echo "  label, header and setter all say ${max} (so $((max + 1)) fails, ${max} passes)"
+	return 0
+}
+# Its contract suite runs first, for the reason the shell-gate block above
+# gives: a guard over PROSE is the easiest kind to write so that it can never
+# fail, and one that has not been watched fail is not evidence. The suite proved
+# its worth immediately — the first draft of the function interpolated the file
+# being READ into the pattern matching the quoted invocation, so it could not
+# match a copy, and the unmutated control caught that before it landed.
+lint_step "reachability prose guard: contract suite" \
+	bash ci/test/reachability-prose-guard-test.sh
+
+lint_step "frontend reachability: the ratchet's prose agrees with its threshold" \
+	assert_reachability_prose_agrees
+
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1228 + allow-list hygiene)" \
 	env CT_REACHABILITY_MAX=1228 bash ci/test/frontend-reachability.sh
 
 # The Embed SDK's boundary, in both directions: a consumer may reach the SDK
