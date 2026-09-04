@@ -61,6 +61,32 @@ tmp_root="$(mktemp -d)"
 cleanup() { rm -rf "$tmp_root"; }
 trap cleanup EXIT
 
+
+skipped=0
+skip() {
+	skipped=$((skipped + 1))
+	printf '  skip %s\n' "$1"
+	if [ "$#" -gt 1 ]; then
+		shift
+		printf '         %s\n' "$@"
+	fi
+}
+
+# The pre-fix file is read from a PINNED commit, never from `origin/dev`.
+# Two reasons, and the first is fatal: once this fix lands, `origin/dev` carries
+# the FIXED file, so a case phrased as "origin/dev must be rejected" would
+# silently invert into asserting that the fix is broken. Second, the lint lane
+# checks out at the default fetch-depth of 1, so `origin/dev` is often not
+# present as a ref at all.
+#
+# 9df1b076e is the commit this work was branched from; it is an ancestor of dev
+# and its content is immutable.
+HISTORICAL_REV="9df1b076e"
+
+historical_available() {
+	git -C "$REPO_ROOT" cat-file -e "$HISTORICAL_REV:$1" 2>/dev/null
+}
+
 rc=0
 out=""
 run_guard() {
@@ -92,8 +118,9 @@ fi
 
 # --- Case 3: THE HISTORICAL DEFECT, from git, not from a mock --------------
 hist="$tmp_root/prefix-codetracer.yml"
-if git -C "$REPO_ROOT" show origin/dev:.github/workflows/codetracer.yml >"$hist" 2>/dev/null &&
-	[ -s "$hist" ]; then
+if historical_available .github/workflows/codetracer.yml &&
+	git -C "$REPO_ROOT" show "$HISTORICAL_REV:.github/workflows/codetracer.yml" \
+		>"$hist" 2>/dev/null && [ -s "$hist" ]; then
 
 	run_guard "$hist"
 	if [ "$rc" -ne 0 ]; then
@@ -107,7 +134,7 @@ if git -C "$REPO_ROOT" show origin/dev:.github/workflows/codetracer.yml >"$hist"
 	for want in "job 'test-non-gui' clones codetracer-ruby-recorder" \
 		"job 'test-ui-tests' clones codetracer-ruby-recorder" \
 		"job 'test-ui-tests' clones codetracer-js-recorder"; do
-		if printf '%s' "$out" | grep -qF "$want"; then
+		if grep -qF "$want" <<<"$out"; then
 			ok "the pre-fix report names: $want"
 		else
 			fail "the pre-fix report names: $want" "$out"
@@ -118,7 +145,7 @@ if git -C "$REPO_ROOT" show origin/dev:.github/workflows/codetracer.yml >"$hist"
 	# `viewmodel-tests` was broken in the checker, not in the workflow. It
 	# builds the JS recorder through `just test-vm-recorder-gated` ->
 	# `scripts/build-siblings.sh --only codetracer-js-recorder`.
-	if printf '%s' "$out" | grep -qF "job 'viewmodel-tests'"; then
+	if grep -qF "job 'viewmodel-tests'" <<<"$out"; then
 		fail "viewmodel-tests is NOT reported: it builds via a Justfile recipe" \
 			"Following 'just <target>' into the Justfile is what distinguishes" \
 			"a real gap from a build the checker merely could not see." \
@@ -127,8 +154,11 @@ if git -C "$REPO_ROOT" show origin/dev:.github/workflows/codetracer.yml >"$hist"
 		ok "viewmodel-tests is not reported: its Justfile route is followed"
 	fi
 else
-	fail "the real pre-fix workflow could be read from origin/dev" \
-		"Without the historical fixture this suite cannot prove the checker fails."
+	# See the note on HISTORICAL_REV: shallow checkouts are the norm in the lint
+	# lane. Cases 5-7 below plant the same defects synthetically and assert the
+	# same messages, so failure-capability is proved without the real workflow.
+	skip "the real pre-fix workflow is unavailable at $HISTORICAL_REV" \
+		"(shallow clone). The planted fixtures below still prove the checker fails."
 fi
 
 # --- Case 5: a clone with no build at all is rejected ----------------------
@@ -148,7 +178,7 @@ jobs:
         run: ./ci/test/non-gui.sh
 EOF
 run_guard "$tmp_root/bare.yml"
-if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -qF "clones codetracer-ruby-recorder but never builds it"; then
+if [ "$rc" -eq 1 ] && grep -qF "clones codetracer-ruby-recorder but never builds it" <<<"$out"; then
 	ok "a clone with no build anywhere in the job is rejected"
 else
 	fail "a clone with no build anywhere in the job is rejected" "rc=$rc" "$out"
@@ -256,4 +286,8 @@ if [ "$failures" -ne 0 ]; then
 	printf '%d of %d assertions failed\n' "$failures" "$assertions"
 	exit 1
 fi
-printf 'all %d assertions passed\n' "$assertions"
+if [ "$skipped" -ne 0 ]; then
+	printf 'all %d assertions passed (%d skipped: no historical blob)\n' "$assertions" "$skipped"
+else
+	printf 'all %d assertions passed\n' "$assertions"
+fi

@@ -128,8 +128,8 @@ run_detect() {
 			echo "PATH_IS=$PATH"
 		' _ "$DETECT" "$ws")"
 	out="$(printf '%s\n' "$raw" | grep -v '^PATH_IS=')"
-	if printf '%s\n' "$raw" | grep '^PATH_IS=' |
-		grep -q "$ws/codetracer-ruby-recorder/gems"; then
+	if grep -q "$ws/codetracer-ruby-recorder/gems" \
+		<<<"$(grep '^PATH_IS=' <<<"$raw")"; then
 		ruby_on_path="yes"
 	else
 		ruby_on_path="no"
@@ -149,7 +149,7 @@ ws="$tmp_root/ruby-unbuilt"
 build_ws "$ws" "" ""
 run_detect "$ws"
 
-if printf '%s' "$out" | grep -q "codetracer-ruby-recorder native extension is NOT built"; then
+if grep -q "codetracer-ruby-recorder native extension is NOT built" <<<"$out"; then
 	ok "a checked-in wrapper with no compiled extension WARNS"
 else
 	fail "a checked-in wrapper with no compiled extension WARNS" \
@@ -157,7 +157,7 @@ else
 		"$out"
 fi
 
-if printf '%s' "$out" | grep -q "gems present, extension NOT built"; then
+if grep -q "gems present, extension NOT built" <<<"$out"; then
 	ok "the summary says NOT built rather than (native)"
 else
 	fail "the summary says NOT built rather than (native)" "$out"
@@ -174,7 +174,7 @@ fi
 # --- Case 2: the probe names the HOST's extension, not always .so -----------
 # `scripts/build-siblings.sh` hard-codes `.so` (deliberately -- its gate is
 # Linux-only). A detector that copied that would be wrong on every Mac.
-if printf '%s' "$out" | grep -q "codetracer_ruby_recorder.$host_dlext"; then
+if grep -q "codetracer_ruby_recorder.$host_dlext" <<<"$out"; then
 	ok "the warning names this host's DLEXT (.$host_dlext)"
 else
 	fail "the warning names this host's DLEXT (.$host_dlext)" \
@@ -188,13 +188,13 @@ ws="$tmp_root/ruby-built"
 build_ws "$ws" "codetracer_ruby_recorder.$host_dlext" ""
 run_detect "$ws"
 
-if printf '%s' "$out" | grep -q "codetracer-ruby-recorder (native)"; then
+if grep -q "codetracer-ruby-recorder (native)" <<<"$out"; then
 	ok "a built extension is reported as (native)"
 else
 	fail "a built extension is reported as (native)" "$out"
 fi
 
-if printf '%s' "$out" | grep -q "NOT built"; then
+if grep -q "NOT built" <<<"$out"; then
 	fail "a built extension produces no 'not built' warning" "$out"
 else
 	ok "a built extension produces no 'not built' warning"
@@ -213,7 +213,7 @@ fi
 ws="$tmp_root/ruby-libname"
 build_ws "$ws" "libcodetracer_ruby_recorder.$host_dlext" ""
 run_detect "$ws"
-if printf '%s' "$out" | grep -q "codetracer-ruby-recorder (native)"; then
+if grep -q "codetracer-ruby-recorder (native)" <<<"$out"; then
 	ok "the cargo-named lib*.$host_dlext is accepted, as load_extension! accepts it"
 else
 	fail "the cargo-named lib*.$host_dlext is accepted, as load_extension! accepts it" \
@@ -226,7 +226,7 @@ fi
 ws="$tmp_root/ruby-junk"
 build_ws "$ws" "libsomething_else.$host_dlext" ""
 run_detect "$ws"
-if printf '%s' "$out" | grep -q "NOT built"; then
+if grep -q "NOT built" <<<"$out"; then
 	ok "an unrelated artefact in target/release does not count as the extension"
 else
 	fail "an unrelated artefact in target/release does not count as the extension" \
@@ -241,7 +241,7 @@ fi
 ws="$tmp_root/py-uninstalled"
 build_ws "$ws" "codetracer_ruby_recorder.$host_dlext" ""
 run_detect "$ws"
-if printf '%s' "$out" | grep -q "codetracer-python-recorder is NOT installed"; then
+if grep -q "codetracer-python-recorder is NOT installed" <<<"$out"; then
 	ok "a venv without the recorder installed WARNS"
 else
 	fail "a venv without the recorder installed WARNS" \
@@ -250,7 +250,7 @@ else
 		"$out"
 fi
 
-if printf '%s' "$out" | grep -q "sources present, NOT installed"; then
+if grep -q "sources present, NOT installed" <<<"$out"; then
 	ok "the python summary distinguishes sources from an installed recorder"
 else
 	fail "the python summary distinguishes sources from an installed recorder" "$out"
@@ -260,13 +260,13 @@ fi
 ws="$tmp_root/py-installed"
 build_ws "$ws" "codetracer_ruby_recorder.$host_dlext" "1"
 run_detect "$ws"
-if printf '%s' "$out" | grep -q "codetracer-python-recorder (installed)"; then
+if grep -q "codetracer-python-recorder (installed)" <<<"$out"; then
 	ok "an installed recorder is reported as installed"
 else
 	fail "an installed recorder is reported as installed" "$out"
 fi
 
-if printf '%s' "$out" | grep -q "NOT installed"; then
+if grep -q "NOT installed" <<<"$out"; then
 	fail "an installed recorder produces no warning" "$out"
 else
 	ok "an installed recorder produces no warning"

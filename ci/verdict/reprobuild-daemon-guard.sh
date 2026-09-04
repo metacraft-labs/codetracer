@@ -183,7 +183,8 @@ for file in "$target_dir"/macos-*.sh; do
 		;;
 	esac
 
-	if ! printf '%s\n' "$body" | grep -v '^[[:space:]]*#' | grep -q 'repro daemon stop'; then
+	if ! grep -q 'repro daemon stop' \
+		<<<"$(grep -v '^[[:space:]]*#' <<<"$body")"; then
 		violation "$rel" \
 			"the EXIT handler ('$handler') does not run 'repro daemon stop'." \
 			"A daemon spawned by this script outlives it, holding this checkout" \

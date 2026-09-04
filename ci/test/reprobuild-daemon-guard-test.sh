@@ -55,6 +55,32 @@ trap cleanup EXIT
 # status into globals. Assigning and then reading `$?` would work, but only
 # because the status of an assignment happens to be the status of its command
 # substitution -- too subtle to rest a dozen assertions on.
+
+skipped=0
+skip() {
+	skipped=$((skipped + 1))
+	printf '  skip %s\n' "$1"
+	if [ "$#" -gt 1 ]; then
+		shift
+		printf '         %s\n' "$@"
+	fi
+}
+
+# The pre-fix file is read from a PINNED commit, never from `origin/dev`.
+# Two reasons, and the first is fatal: once this fix lands, `origin/dev` carries
+# the FIXED file, so a case phrased as "origin/dev must be rejected" would
+# silently invert into asserting that the fix is broken. Second, the lint lane
+# checks out at the default fetch-depth of 1, so `origin/dev` is often not
+# present as a ref at all.
+#
+# 9df1b076e is the commit this work was branched from; it is an ancestor of dev
+# and its content is immutable.
+HISTORICAL_REV="9df1b076e"
+
+historical_available() {
+	git -C "$REPO_ROOT" cat-file -e "$HISTORICAL_REV:$1" 2>/dev/null
+}
+
 rc=0
 out=""
 run_guard() {
@@ -104,12 +130,13 @@ fi
 # including in its trap. If the checker cannot see that, it cannot see anything.
 hist="$tmp_root/historical"
 mkdir -p "$hist"
-if git -C "$REPO_ROOT" show origin/dev:ci/reprobuild/macos-daemon-build.sh \
-	>"$hist/macos-daemon-build.sh" 2>/dev/null &&
+if historical_available ci/reprobuild/macos-daemon-build.sh &&
+	git -C "$REPO_ROOT" show "$HISTORICAL_REV:ci/reprobuild/macos-daemon-build.sh" \
+		>"$hist/macos-daemon-build.sh" 2>/dev/null &&
 	[ -s "$hist/macos-daemon-build.sh" ]; then
 
 	run_guard "$hist"
-	if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "no 'repro daemon stop' before"; then
+	if [ "$rc" -ne 0 ] && grep -q "no 'repro daemon stop' before" <<<"$out"; then
 		ok "the real pre-fix macos-daemon-build.sh is rejected, and says why"
 	else
 		fail "the real pre-fix macos-daemon-build.sh is rejected, and says why" \
@@ -118,16 +145,20 @@ if git -C "$REPO_ROOT" show origin/dev:ci/reprobuild/macos-daemon-build.sh \
 			"checker is measuring nothing."
 	fi
 
-	if printf '%s' "$out" | grep -q "does not run 'repro daemon stop'"; then
+	if grep -q "does not run 'repro daemon stop'" <<<"$out"; then
 		ok "the missing stop in the EXIT handler is reported separately"
 	else
 		fail "the missing stop in the EXIT handler is reported separately" \
 			"$out"
 	fi
 else
-	fail "the real pre-fix macos-daemon-build.sh could be read from origin/dev" \
-		"git show origin/dev:ci/reprobuild/macos-daemon-build.sh produced nothing." \
-		"Without the historical fixture this suite cannot prove the checker fails."
+	# Not a failure: the lint lane checks out shallow, so the historical blob is
+	# frequently absent. The synthetic fixtures below prove the checker can fail
+	# without it -- case 7 asserts the same "no stop before the build" message
+	# against a planted file. This case only ADDS the real article when the
+	# object graph reaches far enough to supply it.
+	skip "the real pre-fix macos-daemon-build.sh is unavailable at $HISTORICAL_REV" \
+		"(shallow clone). The planted fixtures below still prove the checker fails."
 fi
 
 # --- Case 5: a trap armed inside a function is rejected ---------------------
@@ -150,7 +181,7 @@ start
 repro build . --daemon=auto
 EOF
 run_guard "$inner"
-if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "armed inside a function"; then
+if [ "$rc" -ne 0 ] && grep -q "armed inside a function" <<<"$out"; then
 	ok "a trap armed inside a function is rejected"
 else
 	fail "a trap armed inside a function is rejected" "$out"
@@ -169,7 +200,7 @@ trap 'rm -rf /tmp/x' EXIT
 repro build . --daemon=auto
 EOF
 run_guard "$dbl"
-if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "REPLACES rather than"; then
+if [ "$rc" -ne 0 ] && grep -q "REPLACES rather than" <<<"$out"; then
 	ok "a second EXIT trap, which discards the first, is rejected"
 else
 	fail "a second EXIT trap, which discards the first, is rejected" "$out"
@@ -194,7 +225,7 @@ trap cleanup EXIT
 repro build . --daemon=auto
 EOF
 run_guard "$prose"
-if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "no 'repro daemon stop' before"; then
+if [ "$rc" -ne 0 ] && grep -q "no 'repro daemon stop' before" <<<"$out"; then
 	ok "a comment mentioning the stop does not count as running it"
 else
 	fail "a comment mentioning the stop does not count as running it" "$out"
@@ -228,4 +259,8 @@ if [ "$failures" -ne 0 ]; then
 	printf '%d of %d assertions failed\n' "$failures" "$assertions"
 	exit 1
 fi
-printf 'all %d assertions passed\n' "$assertions"
+if [ "$skipped" -ne 0 ]; then
+	printf 'all %d assertions passed (%d skipped: no historical blob)\n' "$assertions" "$skipped"
+else
+	printf 'all %d assertions passed\n' "$assertions"
+fi
