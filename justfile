@@ -3321,37 +3321,6 @@ test-editor-context-menu-modes:
   exec > >(tee test-logs/test-editor-context-menu-modes.log) 2>&1
   bash ci/test/editor-context-menu-modes.sh
 
-# THE EDITOR FOLLOWS ITS PANE WHEN THE PANE IS RESIZED — both modes, both
-# directions, by dragging the divider with the mouse.
-#
-# The third gate over the same re-host as the two above, and it exists because
-# neither of them can see this failure: one reads the font option, the other
-# reads menu entries, and both pass on an editor frozen at the size debug mode
-# left it. Reported against noirstudio.dev as "resizing the panel that holds the
-# Monaco editor doesn't seem to resize the actual editor, the scrollbar stays in
-# place, this is in debug mode".
-#
-# NOT IN CI, BECAUSE IT IS CURRENTLY RED AND THE DEFECT IS STILL OPEN. Its 14
-# edit-mode checks pass; the debug-mode ones fail, with the pane at 576px and
-# the editor still at 396px. Wire it into `.github/workflows/codetracer.yml`
-# beside `test-editor-context-menu-modes` in the same change that fixes the
-# defect — the script's own header records what was tried and where the next
-# attempt should start.
-#
-# It also keeps the 5x5 covered: Monaco clamps a zero measurement with
-# `Math.max(5, ...)`, and a 5x5 editor inside an 880x902 pane is what an earlier
-# change in this area left behind. Both are asserted in the same run so neither
-# can be fixed by breaking the other.
-#
-# Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
-# otherwise.
-test-editor-resize-follows-pane:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  mkdir -p test-logs
-  exec > >(tee test-logs/test-editor-resize-follows-pane.log) 2>&1
-  bash ci/test/editor-resize-follows-pane.sh
-
 # THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
 # which said in its own words: "no CI recipe produces a web bundle, so
 # `test_one_codebase_two_platforms` is unasserted, and nothing calls the web

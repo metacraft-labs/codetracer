@@ -3419,6 +3419,21 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
   if not self.api.isNil:
     self.api.emit(InternalLastCompleteMove, EmptyArg())
 
+# WRITE `importjs` BODIES AS CONCATENATED SINGLE-LINE STRINGS, the
+# `"..." & "..."` form every proc below uses. NOT as a multi-line triple-quoted
+# `{.importjs: """ ... """.}`, however much more readable that is.
+#
+# Measured, chasing the resize defect recorded on `monacoEditorAdoptInto`: the
+# SAME JavaScript, in the multi-line form, did not run — while the emitted
+# `ui.js` visibly contained it, at module-init scope, with no page error and the
+# renderer otherwise initialising normally. Rewritten as concatenated
+# single-line strings it ran immediately, confirmed by markers at every guard.
+#
+# This has the same shape as the char-code-array trap: the source looks right,
+# the emitted output looks present, and a text search over the bundle proves
+# nothing about whether it executes. Verify JS-side behaviour by observing an
+# effect in the page, never by grepping the bundle.
+
 proc monacoEditorIsAttached(editor: MonacoEditor): bool {.importjs:
   "(function(e){ var n = e && e.getDomNode && e.getDomNode(); " &
   "return !!(n && n.isConnected); })(#)".}
