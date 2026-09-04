@@ -622,6 +622,31 @@ for g in ${gates}; do
 
 	dark=$((dark + 1))
 	bad "${g} is reachable from NO workflow lane, NO recipe a lane calls, and NO other reachable script"
+	# THE RULE, STATED WHERE IT REACHES THE PERSON WHO IS WRONG. A gate lands
+	# with its recipe and its workflow step, or it does not land. Recording it
+	# instead is only legitimate when the gate CANNOT be wired today, and then
+	# the entry must name the missing capability rather than say "dark".
+	cat >&2 <<-GUIDANCE
+
+		           A gate lands WIRED, or it does not land. Two things are
+		           needed and neither is optional:
+
+		             1. a \`just\` recipe that runs it, and
+		             2. a step in .github/workflows/codetracer.yml that calls
+		                that recipe in a lane which actually runs.
+
+		           Adding it to ${known_dark_file} is NOT the fix, and is
+		           only honest in one case: the gate CANNOT be wired today
+		           because the capability it needs does not exist in CI yet.
+		           Then the entry must NAME that capability and say what
+		           would make it green -- as the wasm entries do ("no CI job
+		           builds the wasm engine"). "Nobody wired it yet" is not a
+		           reason; it is the defect this check reports.
+
+		           If you record it, the ceiling in that file must move up in
+		           the SAME diff, where a reviewer sees it.
+
+	GUIDANCE
 done
 
 # An inventory naming a gate that no longer exists is rot of the same kind.

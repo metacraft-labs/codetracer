@@ -15,6 +15,33 @@
 #
 # RECORDED-DARK-CEILING: 24
 #
+# TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
+#
+#   BLOCKED — the gate cannot be wired today because the capability it needs
+#   does not exist in CI. `browser-seekable-container.sh` and
+#   `worker-backend-wasm-e2e.sh` are the model: NO CI JOB BUILDS THE WASM
+#   ENGINE, so there is nothing to wire them to. Recording these is the honest
+#   outcome. The entry MUST name the missing capability and say what would make
+#   it green, so the blocker is trackable and the entry dies when it lifts.
+#
+#   UNWIRED — there was no blocker. The `just` recipe and the workflow step
+#   were simply not written. `tests-pane-row-controls.sh` (e617829b3) and
+#   `editor-context-menu-modes.sh` (0d76e11dc) were both this. THESE MAY NOT BE
+#   ADDED. The gate lands wired or it does not land.
+#
+# The difference matters because "a reason is recorded" is satisfied by both,
+# and only one deserves it. A list that accepts "I didn't get to it" as a reason
+# is an escape hatch wearing a ratchet's clothes, and the ceiling above moved
+# three times in one day before this rule existed: 22 -> 23 -> 24 -> 25.
+#
+# It has since come back DOWN to 24, because bb376d63c gave
+# `editor-context-menu-modes.sh` its recipe and its step and deleted its line.
+# That is the whole mechanism working: the both-directions rule turned wiring
+# into the cheaper path, which is the only way a ratchet ratchets.
+#
+# `shell-gate-coverage.sh` states this rule in its own failure output, at the
+# moment someone's unwired gate is reported, because that is where it is read.
+#
 # It is not an exemption list. `NOT-A-CI-GATE:` in a file's own header is the
 # exemption, and it means "this is not a gate" — a claim about the file, made in
 # the file, that a reviewer can disagree with. Nine scripts under `scripts/` say
