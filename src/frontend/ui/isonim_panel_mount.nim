@@ -71,6 +71,45 @@ func isoNimPanelNeedsMount*(idLatchSaysMounted: bool;
   else:
     not containerCarriesMark
 
+func isoNimPanelMountIsLive*(mountedVMIsCurrent: bool;
+                             hostIsInDocument: bool): bool =
+  ## Is the mount a SINGLE-INSTANCE pane remembers still the one on screen?
+  ##
+  ## The three replay panes — State, Call Trace, Timeline — never had the
+  ## id-keyed table above. Each kept one module-level `isoNimXMounted: bool`,
+  ## set on mount and cleared at exactly one place: the pane's
+  ## `initXVMWithStore`, when the stub-backed ViewModel is replaced by the
+  ## real one. So the boolean answered a question about the module's own
+  ## history and nothing else.
+  ##
+  ## **A boolean that records "I mounted once" cannot answer "is it mounted
+  ## now".** `layout.swapLayout` hands GoldenLayout a whole new tree; the DOM
+  ## the pane mounted into is destroyed and `itemDestroyed` is deliberately
+  ## suppressed for the duration, so no reset runs. The flag stays `true`, the
+  ## next `tryMount` returns at its first line, and the pane is blank with no
+  ## error, no exception and no log — the same silence documented at the top
+  ## of this file for the id-keyed panes.
+  ##
+  ## Both halves are load-bearing and neither subsumes the other:
+  ##
+  ##   * `hostIsInDocument` — `document.contains(host)`, asked of the element
+  ##     the module actually mounted into. Covers the layout swap, the session
+  ##     switch and the panel close with one question and no reset list.
+  ##   * `mountedVMIsCurrent` — the host can be perfectly alive and holding
+  ##     the DOM of a ViewModel that has since been replaced. This is the
+  ##     case the old flag's single reset site existed for, and dropping it
+  ##     would leave the stub backend's rows on screen after the real one
+  ##     arrived.
+  when defined(ctIsoNimPanelIdLatch):
+    # THE PRE-FIX ANSWER, reachable only by defining this symbol — the same
+    # control-data lever `isoNimPanelNeedsMount` above uses, and defined by
+    # nothing in the product. `isoNimXMounted` was set true on mount and
+    # cleared only on a ViewModel swap, so it is exactly `mountedVMIsCurrent`
+    # with the DOM question left unasked.
+    mountedVMIsCurrent
+  else:
+    mountedVMIsCurrent and hostIsInDocument
+
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
 
@@ -82,3 +121,16 @@ when defined(js):
   proc markIsoNimPanelContainerMounted*(container: isonim_dom_api.Element) =
     ## Record the mount ON THE ELEMENT, so it cannot outlive it.
     isonim_dom_api.setAttribute(container, IsoNimPanelMountedAttr, cstring"1")
+
+  proc jsDocumentContains(host: isonim_dom_api.Element): bool
+      {.importjs: "document.contains(#)".}
+
+  proc isoNimPanelHostIsInDocument*(host: isonim_dom_api.Element): bool =
+    ## `document.contains(host)` — the whole of the liveness question.
+    ##
+    ## A `nil` host means the pane has never mounted, which is not live
+    ## either, so the null check is part of the answer rather than a guard
+    ## around it.
+    if isonim_dom_api.isNodeNil(isonim_dom_api.Node(host)):
+      return false
+    jsDocumentContains(host)

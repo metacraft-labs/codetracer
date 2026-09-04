@@ -2,6 +2,11 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
   state, editor, debug, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
   welcome_screen,
+  # The five panes whose mount was moved into this file's component factory.
+  # `state` was already imported; `calltrace`, `trace`, `event_log` and
+  # `terminal_output` are new here and are imported for exactly one symbol
+  # each — their `tryMountIsoNim…` proc. See the factory arms below.
+  calltrace, trace, event_log, terminal_output,
   calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
   test_results, constraints,
   frame_viewer, pixel_history, shader_debug, video_player,
@@ -1760,6 +1765,72 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         if not isDirectMountComponent:
           cwarn "layout: genericUiComponent has no direct mount for " &
             $state.content & " id " & $state.id
+
+        # THE FIVE PANES THAT HAD NO ARM HERE.
+        #
+        # This proc is the only site that KNOWS the container exists:
+        # `element.mountComponentContainer(editorLabel)` above has just built
+        # `#<x>Component-<id>`, and this dispatch runs 200 ms later. Every
+        # other pane in `isDirectMountComponent` has been mounted from here
+        # all along. These five mounted from their `register` method or from
+        # their `initXVMWithStore`, and then POLLED for a container that
+        # neither of those moments can guarantee.
+        #
+        # Measured on 25 real Electron desktop session logs (2026-09), on the
+        # modern shared-store path: `#stateComponent-0`,
+        # `#calltraceComponent-0` and `#timelineComponent-0` were absent at
+        # retry #1 in ALL 25 runs. The two that ran long enough to reach a
+        # verdict gave up at retry #200, 10.9 s and 30.4 s of runway in:
+        #
+        #   ERROR | state.nim     | tryMountIsoNimStatePanel: not ready after 200 retries, giving up
+        #   ERROR | calltrace.nim | tryMountIsoNimCalltrace: not ready after 200 retries, giving up
+        #   DEBUG | trace.nim     | IsoNim timeline panel: not ready after 200 retries, giving up
+        #
+        # The other 23 ended mid-poll between retry #20 and #110 with the
+        # container still absent. There is no retry margin to widen: the poll
+        # starts before the thing it polls for can exist, so it is not a race
+        # a faster machine wins. The State, Call Trace and Timeline panes were
+        # blank on the desktop for every one of those sessions.
+        #
+        # `1cb7b9d6` added the `register`-time call in `ui/state.nim` and it
+        # genuinely fixed Noir Studio — but `CalltraceComponent.register` has
+        # ALWAYS made the equivalent call, and calltrace still gave up on the
+        # desktop in both runs above. On the desktop `register` runs at
+        # component-construction time (`types.createUIComponents` in `onInit`),
+        # which is EARLIER than the container, not later. A second poll window
+        # opened before the container exists is still a poll that loses.
+        #
+        # Called unqualified: the module `state` is shadowed inside this
+        # closure by its own `state: GoldenItemState` parameter, so
+        # `state.tryMountIsoNimStatePanel()` would resolve against the wrong
+        # `state`.
+        if state.content == Content.State:
+          tryMountIsoNimStatePanel()
+
+        if state.content == Content.Calltrace:
+          tryMountIsoNimCalltrace()
+
+        # The Timeline was the worst-placed of the five and the reason nobody
+        # reported it: `TimelineComponent` has no `register` method at all. It
+        # falls back to the base method in `types.nim`, which only assigns
+        # `self.api`, so the timeline was the one pane with NO mount call on
+        # the component-registration path — its only callers were the two
+        # `initTimelineVM*` procs. This arm is its first.
+        if state.content == Content.Timeline:
+          tryMountIsoNimTimelinePanel()
+
+        # EventLog and TerminalOutput are the same shape as Calltrace: both
+        # mount from `register` and nowhere else, and both are in
+        # `isDirectMountComponent`. They are joined here so the invariant
+        # `test_every_mountable_pane_has_a_factory_arm.nim` asserts — every
+        # direct-mount `Content` has an arm — holds without an allowlist of
+        # unexamined exemptions. Their mounts are idempotent and additionally
+        # guarded on their own component ref, so this arm can only help.
+        if state.content == Content.EventLog:
+          tryMountIsoNimEventLogPanel()
+
+        if state.content == Content.TerminalOutput:
+          tryMountIsoNimTerminalOutputPanel()
 
         if state.content == Content.Shell:
           let shellComponent = ShellComponent(component)

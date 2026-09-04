@@ -45,7 +45,7 @@ const eventLogMaxReloadRetries* = 8
 # callback can trigger DataTables initialisation via events().
 var eventLogComponentRef: EventLogComponent
 
-proc tryMountIsoNimEventLogPanel()
+proc tryMountIsoNimEventLogPanel*()
 proc eventLogAfterRedraws(self: EventLogComponent)
 when defined(js):
   proc stringifyJs(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
@@ -384,7 +384,7 @@ proc mergeLiveDebuggerRows(self: EventLogComponent; data: var TableData): int =
       data.data.add(liveRow)
       result += 1
 
-proc tryMountIsoNimEventLogPanel() =
+proc tryMountIsoNimEventLogPanel*() =
   ## Mount the IsoNim event log view into the GoldenLayout-managed
   ## event log component container. The container is created by
   ## GoldenLayout with the id `eventLogComponent-0`. The IsoNim view

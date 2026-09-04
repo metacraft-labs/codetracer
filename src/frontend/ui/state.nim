@@ -1,6 +1,7 @@
 import
   ui_imports,
   value,
+  isonim_panel_mount,
   ../communication,
   ../event_helpers,
   ../../common/ct_event,
@@ -32,7 +33,16 @@ import origin_chain_runtime
 var stateVMInstance: StateVM
 var stateVMStore: ReplayDataStore
 var stateHistoryBridge: proc(expression: string)
-var isoNimStateMounted: bool = false
+
+# WAS `var isoNimStateMounted: bool = false`. See `isoNimPanelMountIsLive` in
+# `ui/isonim_panel_mount.nim` for why a boolean could not answer the question
+# it was being asked. These two record WHAT was mounted and WHERE, so the
+# answer can be re-derived from the document instead of remembered.
+var mountedStateVM: StateVM
+  ## The ViewModel whose DOM the live State panel holds, or `nil`.
+var mountedStateHost: dom_api.Element
+  ## The element that DOM was mounted into. Asked `document.contains` rather
+  ## than trusted: `layout.swapLayout` destroys it without telling this module.
 
 when defined(js):
   proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
@@ -119,8 +129,16 @@ type
     key: cstring
     retryCount: int
 
+proc statePanelIsLive(): bool =
+  ## Is the State panel mounted RIGHT NOW, into an element still in the
+  ## document, with the ViewModel that is current?
+  isoNimPanelMountIsLive(
+    mountedVMIsCurrent = not mountedStateVM.isNil and
+                         mountedStateVM == stateVMInstance,
+    hostIsInDocument = isoNimPanelHostIsInDocument(mountedStateHost))
+
 proc doMountStatePanel(data: StateMountData) {.cdecl.} =
-  if isoNimStateMounted:
+  if statePanelIsLive():
     return
   data.retryCount += 1
   let container = dom_api.getElementById(dom_api.document, data.key)
@@ -147,8 +165,10 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
     discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
   cdebug "[PIPELINE] tryMountIsoNimStatePanel: container found, mounting now"
-  isoNimStateMounted = true
+  mountedStateVM = stateVMInstance
+  mountedStateHost = container
   mountIsoNimStatePanel(container, stateVMInstance)
+  markIsoNimPanelContainerMounted(container)
   cdebug "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
 
   let panelContainer = container
@@ -166,20 +186,22 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
         observePlaceholderBadgeJs(nodeList[i])
     , 0, panelContainer)
 
-proc tryMountIsoNimStatePanel() =
+proc tryMountIsoNimStatePanel*() =
   ## Mount the IsoNim state panel view into the GoldenLayout-managed
   ## state component container. The container is created by GoldenLayout
   ## with the id `stateComponent-0`. The IsoNim view is the primary
   ## renderer — no Karax renderer is involved.
   ##
   ## After mounting:
-  ## - `isoNimStateMounted` is set to true
+  ## - `statePanelIsLive()` answers true until the host leaves the document
+  ##   or the ViewModel is replaced
   ## - `registerLocals` still feeds data into the store, and IsoNim's
   ##   reactive effects update the DOM automatically
   ##
   ## Safe to call multiple times — mounts only once.
-  cdebug "[PIPELINE] tryMountIsoNimStatePanel: called, isoNimStateMounted=" & $isoNimStateMounted & " vmIsNil=" & $stateVMInstance.isNil
-  if isoNimStateMounted or stateVMInstance.isNil:
+  cdebug "[PIPELINE] tryMountIsoNimStatePanel: called, panelIsLive=" &
+    $statePanelIsLive() & " vmIsNil=" & $stateVMInstance.isNil
+  if statePanelIsLive() or stateVMInstance.isNil:
     cdebug "[PIPELINE] tryMountIsoNimStatePanel: skipping (already mounted or VM nil)"
     return
 
@@ -354,7 +376,11 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
   ## panel uses the real DapApi instead of the no-op stub.
   if stateVMInstance != nil:
     clog "StateVM: replacing existing instance with shared-store version"
-    isoNimStateMounted = false
+    # No flag to reset. `statePanelIsLive` compares `mountedStateVM` against
+    # `stateVMInstance`, so the assignment below IS the invalidation: the next
+    # `tryMountIsoNimStatePanel` sees a live host holding the old VM's DOM and
+    # remounts. This was the one and only site that cleared `isoNimStateMounted`
+    # and it is the reason the flag could not simply be deleted.
   stateVMStore = store
   stateVMInstance = createStateVM(store)
   stateVMInstance.onToggleHistory = stateHistoryBridge
@@ -723,7 +749,25 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   # Initialize the parallel ViewModel instance (no-op if already created).
   initStateVM()
 
-  # AND MOUNT, HERE, BECAUSE THIS IS THE MOMENT THE CONTAINER EXISTS.
+  # AND MOUNT, HERE — BUT THIS IS NOT THE MOMENT THE CONTAINER EXISTS, AND
+  # THE MOUNT THAT MATTERS IS NOW IN `ui/layout.nim`'s COMPONENT FACTORY.
+  #
+  # The paragraphs below were written from the Noir Studio measurement and are
+  # correct about that surface, where `register` does run after GoldenLayout
+  # has built the pane. They are NOT correct in general. On the Electron
+  # desktop `register` runs at component-CONSTRUCTION time — `createUIComponents`
+  # in `types.nim`, called from `onInit` — which is EARLIER than the container,
+  # not later. 25 desktop session logs (2026-09) show the container absent at
+  # retry #1 in every run, and `CalltraceComponent.register` has always made
+  # the equivalent call and still gave up at retry #200 on the desktop. So this
+  # call opened a second poll window ahead of the container rather than mounting
+  # at a moment the container is known to exist.
+  #
+  # The site that knows is `layout.mountComponentContainer`'s dispatch, which
+  # now carries a `Content.State` arm. This call is KEPT as a cheap
+  # no-op-if-absent: on the web surface it is the earlier of the two and it is
+  # the one `1cb7b9d6` proved, and `statePanelIsLive` makes a second mount
+  # impossible rather than merely unlikely.
   #
   # `initStateVM` returns immediately when `stateVMInstance` is already set —
   # which it always is by now, because `initStateVMWithStore` created it when
@@ -750,8 +794,8 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   # is the difference the two panes' behaviour has been showing all along.
   #
   # Guarded exactly as calltrace's is: with no VM there is nothing to mount,
-  # and `tryMountIsoNimStatePanel` is idempotent — it returns early once
-  # `isoNimStateMounted` is set — so an already-mounted panel is untouched.
+  # and `tryMountIsoNimStatePanel` is idempotent — it returns early while
+  # `statePanelIsLive()` holds — so an already-mounted panel is untouched.
   if stateVMInstance != nil:
     tryMountIsoNimStatePanel()
 

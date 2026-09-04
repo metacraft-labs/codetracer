@@ -42,7 +42,7 @@ var terminalOutputVMStore: ReplayDataStore
 var terminalOutputComponentRef: TerminalOutputComponent
 var isoNimTerminalOutputMounted*: bool = false
 
-proc tryMountIsoNimTerminalOutputPanel()
+proc tryMountIsoNimTerminalOutputPanel*()
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
@@ -89,7 +89,7 @@ proc initTerminalOutputVM() =
   clog "TerminalOutputVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimTerminalOutputPanel()
 
-proc tryMountIsoNimTerminalOutputPanel() =
+proc tryMountIsoNimTerminalOutputPanel*() =
   ## Mount the IsoNim terminal-output view into the GoldenLayout-managed
   ## container. The container is created by GoldenLayout under the id
   ## ``terminalComponent-{id}`` (note the truncation — the default

@@ -1,5 +1,5 @@
 import
-  ui_imports, value, ../utils,
+  ui_imports, value, ../utils, isonim_panel_mount,
   ../communication, ../../common/ct_event
 
 from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
@@ -31,7 +31,23 @@ from ../viewmodel/views/isonim_calltrace_view import
 # view is the primary renderer once mounted.
 var calltraceVMInstance: CalltraceVM
 var calltraceVMStore: ReplayDataStore
-var isoNimCalltraceMounted: bool = false
+
+# WAS `var isoNimCalltraceMounted: bool = false`. See `isoNimPanelMountIsLive`
+# in `ui/isonim_panel_mount.nim`: a boolean that records "I mounted once"
+# cannot answer "is it mounted now", and `layout.swapLayout` destroys the DOM
+# without running any reset.
+var mountedCalltraceVM: CalltraceVM
+  ## The ViewModel whose DOM the live Call Trace holds, or `nil`.
+var mountedCalltraceHost: dom_api.Element
+  ## The element that DOM was mounted into, asked `document.contains`.
+
+proc calltracePanelIsLive(): bool =
+  ## Is the Call Trace mounted RIGHT NOW, into an element still in the
+  ## document, with the ViewModel that is current?
+  isoNimPanelMountIsLive(
+    mountedVMIsCurrent = not mountedCalltraceVM.isNil and
+                         mountedCalltraceVM == calltraceVMInstance,
+    hostIsInDocument = isoNimPanelHostIsInDocument(mountedCalltraceHost))
 
 let returnValueName: cstring = "<return value>"
 
@@ -288,20 +304,22 @@ proc calltraceScroll(self: CalltraceComponent, height: int) =
 # the call sites without forward declarations.
 # ---------------------------------------------------------------------------
 
-proc tryMountIsoNimCalltrace() =
+proc tryMountIsoNimCalltrace*() =
   ## Mount the IsoNim calltrace view into the GoldenLayout-managed
   ## calltrace component container. The container is created by
   ## GoldenLayout with the id `calltraceComponent-0`. The IsoNim view
   ## is the primary renderer — no Karax renderer is involved.
   ##
   ## After mounting:
-  ## - `isoNimCalltraceMounted` is set to true
+  ## - `calltracePanelIsLive()` answers true until the host leaves the
+  ##   document or the ViewModel is replaced
   ## - onUpdatedCalltrace / onCompleteMove still feed data into the
   ##   store, and IsoNim's reactive effects update the DOM automatically
   ##
   ## Safe to call multiple times — mounts only once.
-  cdebug "[PIPELINE] tryMountIsoNimCalltrace: called, isoNimCalltraceMounted=" & $isoNimCalltraceMounted & " vmIsNil=" & $calltraceVMInstance.isNil
-  if isoNimCalltraceMounted or calltraceVMInstance.isNil:
+  cdebug "[PIPELINE] tryMountIsoNimCalltrace: called, panelIsLive=" &
+    $calltracePanelIsLive() & " vmIsNil=" & $calltraceVMInstance.isNil
+  if calltracePanelIsLive() or calltraceVMInstance.isNil:
     cdebug "[PIPELINE] tryMountIsoNimCalltrace: skipping (already mounted or VM nil)"
     return
 
@@ -310,7 +328,7 @@ proc tryMountIsoNimCalltrace() =
   let key = cstring"calltraceComponent-0"
   var calltraceRetryCount = 0
   proc doMount() =
-    if isoNimCalltraceMounted:
+    if calltracePanelIsLive():
       return
     calltraceRetryCount += 1
     let container = dom_api.getElementById(dom_api.document, key)
@@ -337,8 +355,10 @@ proc tryMountIsoNimCalltrace() =
       discard dom_api.removeChild(containerNode, containerNode.firstChild)
 
     cdebug "[PIPELINE] tryMountIsoNimCalltrace: container found, mounting now"
-    isoNimCalltraceMounted = true
+    mountedCalltraceVM = calltraceVMInstance
+    mountedCalltraceHost = container
     mountIsoNimCalltrace(container, calltraceVMInstance)
+    markIsoNimPanelContainerMounted(container)
     cdebug "[PIPELINE] tryMountIsoNimCalltrace: mount COMPLETE in #calltraceComponent-0"
 
   doMount()
@@ -353,9 +373,9 @@ proc initCalltraceVMWithStore*(store: ReplayDataStore) =
   ## panel uses the real DapApi instead of the no-op stub.
   if calltraceVMInstance != nil:
     clog "CalltraceVM: replacing existing instance with shared-store version"
-    # Reset the IsoNim mount flag so tryMountIsoNimCalltrace() will
-    # remount the view with the new, real-backend VM instance.
-    isoNimCalltraceMounted = false
+    # No flag to reset. `calltracePanelIsLive` compares `mountedCalltraceVM`
+    # against `calltraceVMInstance`, so the assignment below IS the
+    # invalidation and the remount happens for the same reason it used to.
   calltraceVMStore = store
   # Clear any pending calltrace request in the shared store's tracker
   # so the new VM's auto-load effect isn't deduplicated against a
@@ -404,7 +424,7 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   # One progress line, not two: the previous pair logged `storeId`, the
   # line count and `totalCalls` twice, the first being a strict subset of
   # the second.
-  cdebug fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}, isoNimMounted={isoNimCalltraceMounted}"
+  cdebug fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}, isoNimMounted={calltracePanelIsLive()}"
   if calltraceVMStore.isNil:
     # Stays at ERROR: this silently DROPS a backend calltrace response.
     # The store is created by `initCalltraceVMWithStore` (or the stub
