@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 32
+# RECORDED-DARK-CEILING: 31
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -371,11 +371,27 @@ ci/test/chord_stopcallback_probe.mjs
 # `{"path":"src/combat.nr","line":42}`; renaming the command without rebuilding
 # tripped the probe's own staleness gate with exit 2.
 
-# Named ONLY in comments, at `ci/test/editor-context-menu-modes.sh:17` and
-# `ci/test/editor_context_menu_modes_probe.mjs:33`.
+# `ci/test/mode_layout_probe.mjs` STOOD HERE AND ITS LINE IS GONE. It was named
+# ONLY in comments, at `ci/test/editor-context-menu-modes.sh:17` and
+# `ci/test/editor_context_menu_modes_probe.mjs:33`, and the entry recorded that
+# half of what was believed about it was wrong: it DOES measure rendered
+# `.lm_title` geometry — the exact quantity that went to zero in the defect it
+# covers — at lines 96-116 and 338-343.
 #
-# WORTH NAMING PRECISELY, because half of what was believed about it was wrong.
-# It DOES measure rendered `.lm_title` geometry — the exact quantity that went to
-# zero in the defect it would cover — at lines 96-116 and 338-343. The gate is
-# real and it is pointed at the right thing. It has simply never been run.
-ci/test/mode_layout_probe.mjs
+# THE REASON IT COULD NOT SIMPLY BE CALLED, which is the part worth keeping.
+# It is an INSTRUMENT, not a gate: eleven legs of measurement written to a JSON
+# report, and exit 0 whether it measured everything or timed out on its first
+# selector. Its own header says "Reports facts. The shell counts assertions",
+# and there was no shell. A recipe that ran it would have made it REACHABLE and
+# measured nothing — which is the `refs_in` trap in a different costume.
+#
+# `ci/test/mode-layout-in-browser.sh` is the missing half: it assembles a
+# bundle, serves it, drives the probe at `/noir`, and counts seventeen
+# assertions over what came back. It is `just test-mode-layout-in-browser`,
+# called by the "One layout per mode" step in `codetracer.yml`'s
+# `viewmodel-tests` job. Measured before landing: 17 checks, 0 failures, 1
+# SKIPPED — the debug-mode editor, which has nothing to be in a bundle with no
+# replay engine, read from the product's own strips rather than assumed, and
+# verified to flip both ways with synthetic input. Proved able to fail against
+# the real product: `convertTabTitle` reverted to `TEST RESULTS` reddens two
+# named assertions.

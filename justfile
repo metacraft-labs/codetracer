@@ -3308,6 +3308,41 @@ test-low-level-code-row-click: build-storybook-components
   exec > >(tee test-logs/test-low-level-code-row-click.log) 2>&1
   node ci/test/low_level_code_row_click_probe.mjs
 
+# ONE LAYOUT PER MODE, AND IT SURVIVES A RELOAD.
+#
+# `ci/test/mode_layout_probe.mjs` measures eleven legs of rendered geometry
+# through a real tab — three round trips between the modes, a splitter drag
+# followed by a reload, and a deliberately corrupted layout store — and writes
+# a JSON report. It has no verdict of its own: it exits 0 whether it measured
+# everything or timed out on its first selector, and its header says as much
+# ("Reports facts. The shell counts assertions"). Until
+# `ci/test/mode-layout-in-browser.sh` there was no shell, so the probe was
+# named in two comments and recorded dark among the three gates nothing
+# referenced.
+#
+# WHAT IT ASSERTS THAT `mode_layout_test.nim` CANNOT. That test exercises the
+# layout MODEL, and every assertion in it can hold of a product whose workspace
+# looks wrong: a layout config is not a workspace. Nothing in this gate reads a
+# config — every check is over a `getBoundingClientRect()` or over the tab
+# strip the panes are actually in, because a pane exiled at zero width
+# satisfies a presence check exactly as a working one does.
+#
+# ONE ARM SKIPS HERE, LOUDLY AND COUNTED SEPARATELY. Without a replay engine
+# and a Noir toolchain — both OPTIONAL bundle assets this recipe does not build
+# — debug mode reaches no session and opens no source file, so the debug-mode
+# editor has nothing to measure. The gate reads that from the product (the edit
+# legs carry a source tab, the debug legs carry none) and skips rather than
+# reddening; a permanently red lane stops being read.
+#
+# Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
+# otherwise (~80s), then ~20s in the browser.
+test-mode-layout-in-browser:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-mode-layout-in-browser.log) 2>&1
+  bash ci/test/mode-layout-in-browser.sh
+
 # A TEST ROW OFFERS TWO ACTIONS AND ONLY ONE OF THEM RE-RUNS.
 #
 # The TESTS pane's per-row `⟳` and `⏵`, driven in a real browser. The

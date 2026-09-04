@@ -2743,6 +2743,66 @@ jobs:
         # Seconds: ~2s for the `nim js` and ~5s for the browser leg.
         run: nix develop .#devShells.x86_64-linux.default --command just test-low-level-code-row-click
 
+      - name: One layout per mode, and it survives a reload
+        # THE SECOND OF THE THREE GATES NOTHING REFERENCED, and the one whose
+        # description in `shell-gate-coverage.known-dark.txt` was half wrong in
+        # the useful direction: `ci/test/mode_layout_probe.mjs` DOES measure
+        # rendered `.lm_title` geometry — the exact quantity that went to zero
+        # in the defect it covers — at its lines 96-116 and 338-343. It was
+        # pointed at the right thing and had simply never been run.
+        #
+        # It could not be wired as it stood, because it is an INSTRUMENT and not
+        # a gate: eleven legs of measurement written to a JSON report, and exit
+        # 0 whether it measured everything or timed out on its first selector.
+        # `ci/test/mode-layout-in-browser.sh` is the missing half — it assembles
+        # a bundle, serves it, drives the probe at the `/noir` route, and counts
+        # seventeen assertions over what came back.
+        #
+        # WHY THE MODEL TEST DOES NOT COVER THIS.
+        # `src/tests/gui/tests/layout/mode_layout_test.nim` exercises the layout
+        # MODEL — the per-mode tables and the placement engine. Every assertion
+        # in it can hold of a product whose workspace looks wrong, because a
+        # layout config is not a workspace: GoldenLayout still has to accept it,
+        # build the stacks and give each pane a box. So nothing here reads a
+        # config. It asks whether a mode switch CHANGES the strips (it did not,
+        # before this work — the previous mode's arrangement was carried
+        # across), whether TESTS and CONSTRAINTS are tabs OF the stacks the
+        # request named, whether the third round trip reproduces the first
+        # (`Mode-Transitions.md` §6: the failure mode is a slot that is right
+        # once and empty afterwards), whether a splitter drag SURVIVES A RELOAD,
+        # and whether a layout store filled with rubbish degrades to a populated
+        # workspace rather than an empty window.
+        #
+        # ONE ARM SKIPS HERE, AND THE SKIP IS COUNTED SEPARATELY FROM THE
+        # PASSES. This job builds no replay engine and no Noir toolchain, so
+        # debug mode reaches no session and opens no source file, and the
+        # debug-mode editor has nothing to be. Measured: 1600x0 with zero
+        # `.view-line`s. Asserting "the editor is never empty" there would be a
+        # permanently red lane on a correct product. The gate reads the absence
+        # from the product itself — the edit legs carry a source tab, the debug
+        # legs carry none — and says UNMEASURED.
+        #
+        # THAT BRANCH WAS VERIFIED IN BOTH DIRECTIONS WITH SYNTHETIC INPUT
+        # (`CT_MODE_LAYOUT_REPORT` reads a report the script did not produce): a
+        # report whose debug legs carry a source tab AND a 1600x0 editor makes
+        # the arm RUN and FAIL, naming the box; the same report with a painted
+        # editor makes it RUN and PASS. 17 checks + 1 skip becomes 18 checks.
+        #
+        # PROVED ABLE TO FAIL AGAINST THE REAL PRODUCT before landing: caption
+        # `TestResults` back to `TEST RESULTS` in `ui/layout.nim`'s
+        # `convertTabTitle` and rebuild, and two named assertions redden — "no
+        # TESTS tab at all" in both modes, and "the old caption TEST RESULTS is
+        # on screen in" all eleven legs. Exit 1.
+        #
+        # NOT WIRED INTO THE DEPLOY LANE HERE, deliberately. That lane's
+        # `studio-bundle/` has the engine and the toolchain, so the skipped arm
+        # would run there — but whether it PASSES there has not been measured,
+        # and wiring a step on the strength of an expectation is how a lane
+        # becomes permanently red. That step belongs to whoever runs it first.
+        #
+        # ~80s to assemble the bundle, ~20s in the browser.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-mode-layout-in-browser
+
       - name: A typed watch expression, in a browser, showing a correct value
         # The STATE pane's Watches tab, opened by a click on the product's own
         # tab button and filled by keystrokes into its own `#watch-0`.
