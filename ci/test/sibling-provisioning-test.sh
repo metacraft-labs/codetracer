@@ -198,7 +198,26 @@ echo "siblings: entries pin a reproducible revision"
 # `<=`, never `==`: converting more of them must not fail the suite, and adding
 # one must. Lower this number as blocks are converted; there is no legitimate
 # reason to raise it.
-readonly BRANCH_TIP_CEILING=59
+#
+# 67 -> 53 in one pass, in two steps and for two different reasons:
+#
+#   67 -> 62  `provision-repro-lock-siblings` replaced the five `=dev` entries
+#             for the IsoNim family with `repro develop`, which supplies exact
+#             SHAs from repro.lock. Converted by deletion, not by pinning.
+#
+#   62 -> 53  io-mon, nim-shm-queue, nim-shm-gset and nim-stackable-hooks are
+#             all flake INPUTS of this repo, so a rev for each already exists
+#             in flake.lock and is what the `ci` dev shell and reprobuild
+#             compile against. Their sibling checkouts said `=dev`, which is a
+#             different thing that merely usually agrees -- one pin spelled in
+#             two places, with nothing keeping the two spellings equal. They
+#             now name the flake.lock rev, so the checkout and the shell are
+#             the same revision by construction.
+#
+# The ceiling had been exceeded (67 > 59) on `dev` for some time without ever
+# being reported, because this suite ran inside `ci-verdict` behind steps that
+# aborted first, and no `Codetracer CI` run on `dev` reached it.
+readonly BRANCH_TIP_CEILING=53
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops
