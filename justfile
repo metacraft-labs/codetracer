@@ -861,34 +861,47 @@ test-gui-visible *args: build-once build-siblings
   esac
   just test-e2e {{args}}
 
-# Status-bar footer guards — the two BROWSER-ONLY specs, in seconds.
+# The BROWSER-ONLY stylesheet guards — every surface whose PAINTING has been
+# reported broken by a user, in seconds.
 #
-# Neither needs Electron, a recorded trace, a language recorder or a display:
-# both lay the footer's own markup out in a plain Playwright page carrying the
-# COMPILED theme stylesheet and measure what the user would see.
+# None of these needs Electron, a recorded trace, a language recorder or a
+# display: each lays a surface's own markup out in a plain Playwright page
+# carrying the COMPILED theme stylesheet and measures what the user would see.
 #
-#   footer-visibility-css-guard  — is every required region THERE, and on screen
-#   footer-contrast-guard        — is what is there READABLE against its background
+#   footer-visibility-css-guard  — is every required footer region THERE, and on screen
+#   footer-contrast-guard        — is the footer READABLE against its background
+#   build-panel-contrast-guard   — is the BUILD output panel readable, in both themes
 #
-# The two are complements, and each was written after a regression the other
-# could not see: the footer shipped tabs-only three times (b27da3947,
+# The first two are complements, and each was written after a regression the
+# other could not see: the footer shipped tabs-only three times (b27da3947,
 # 51a3e820e, 00fd68b7f) with the colours fine, and shipped every readout at
 # 1.22:1 — the user-agent default black on #1b1b1b — with the geometry fine.
 #
+# WHY THE RECIPE IS NO LONGER CALLED `test-status-bar-guards`. The build panel
+# then shipped the SAME defect on a different surface — `.build-output-line`
+# and the idle header at 1.42:1 on the web and 1.05:1 under Electron's
+# Bootstrap, again because nothing in the ancestry ever declared a `color` —
+# and it was found the same way the first two were, by a user looking at the
+# screen. Three reports of one shape is a class of defect, not three
+# coincidences, and the recipe that catches it should be named for the
+# question rather than for the first place it was asked. Adding a surface here
+# is now cheaper than writing a new recipe, which is the point.
+#
 # Deliberately NOT routed through `test-e2e`: that recipe demands $DISPLAY on
 # Linux, starts Xvfb via `test-gui-prebuilt`, and builds storybook, none of
-# which these two need. It is also not given `build-once` as a prereq, so it
+# which these need. It is also not given `build-once` as a prereq, so it
 # stays usable as a fast local loop — the cost is that it reads whatever
 # `src/build-debug/frontend/styles` currently holds, so RUN `just build-once`
 # FIRST after editing any `.styl` or you are grading the previous build. CI
 # gets this right by construction: it runs after the package is built.
-test-status-bar-guards *args:
+test-css-contrast-guards *args:
   #!/usr/bin/env bash
   set -e
   cd src/tests/gui && \
     npm install --no-audit --no-fund && \
     npx playwright test tests/status-bar/footer-visibility-css-guard.spec.ts \
-                        tests/status-bar/footer-contrast-guard.spec.ts {{args}}
+                        tests/status-bar/footer-contrast-guard.spec.ts \
+                        tests/build/build-panel-contrast-guard.spec.ts {{args}}
 
 # Run the MCR visual replay regression gate used by CI.
 test-visual-replay-gate:

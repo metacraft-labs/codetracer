@@ -474,17 +474,35 @@ export async function probeBarContrast(
  *
  * Closing any of those needs pixel sampling, not another rule here.
  */
-export function contrastFailures(probes: readonly ContrastProbe[]): string[] {
+/*
+ * `regions` is a parameter and not `BAR_CONTRAST_REGIONS` directly because
+ * `probeBarContrast` already took one and this did not, so the second surface
+ * to use this machinery — `tests/build/build-panel-contrast-guard.spec.ts`,
+ * for the build output panel — got correct ratios attached to the wrong
+ * sentence: every failure it raised was explained as "a readout the status bar
+ * is required to show".  The `why` for a region has to come from the same list
+ * the probe measured, or the message describes a different surface than the
+ * number does.  Defaulted, so every existing caller is unchanged.
+ *
+ * Sharing this at all is the point: the sRGB luminance formula was already
+ * written out three times in this tree (here, `toolbar-marks-contrast.spec.ts`,
+ * and the theme-detection shortcut in `tools/visual-review`), and a fourth copy
+ * for the build panel would have been the cheapest thing to write.
+ */
+export function contrastFailures(
+  probes: readonly ContrastProbe[],
+  regions: readonly ContrastRegion[] = BAR_CONTRAST_REGIONS,
+): string[] {
   const reasonFor = (selector: string): string =>
-    BAR_CONTRAST_REGIONS.find((r) => r.selector === selector)?.why ??
-    "a readout the status bar is required to show";
+    regions.find((r) => r.selector === selector)?.why ??
+    "a readout this surface is required to show";
 
   const failures: string[] = [];
   for (const probe of probes) {
     if (!probe.found) {
       failures.push(
         `${probe.selector}: not present in the page — ` +
-          "the markup has drifted from isonim_status_view.nim, and this " +
+          "the markup has drifted from the Nim view that emits it, and this " +
           `check is measuring nothing.  ${reasonFor(probe.selector)}`,
       );
       continue;

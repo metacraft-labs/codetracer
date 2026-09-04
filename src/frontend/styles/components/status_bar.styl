@@ -41,11 +41,101 @@ STATUS_BAR_OUTER_HEIGHT = STATUS_BAR_CONTENT_HEIGHT + 2 * STATUS_BAR_VERTICAL_PA
 NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   // 3rem. Clears the bar, then leaves exactly one inter-toast gap above it.
 
+// THE BUILD PANEL'S TEXT COLOUR — REPORTED AS *"hardly readable due to low
+// contrast"*, AND THE WORST OF IT WAS NEVER CHOSEN AT ALL.
+//
+// This is the same defect as the status bar two commits ago, in the same file:
+// `body` (`components/legacy.styl`) declares a `background-color` and NO
+// `color`; `.build-panel` declared a `background-color` and no `color`; `#build`
+// declared a `background-color` and no `color`; and NO ancestor in between
+// declares one either — `#auto-hide-overlay`, `#auto-hide-overlay-body`,
+// `#auto-hide-overlay-content`, `#root-container` and `#dom-root` are all
+// background-only. BUILD is a STANDALONE auto-hide pane (`ui/layout.nim`
+// registers it as one, `auto_hide.doShowOverlayImpl` reparents it into
+// `#auto-hide-overlay-content`), so it is NOT inside `.lm_goldenlayout` and
+// does not pick up that sheet's `color: colors-ui-text-primary-label`. The
+// declaration simply ran out.
+//
+// So two tiers inherited the USER-AGENT default. Measured in Chromium against
+// the compiled theme, on this panel's own `colors-ui-surface-base-panel`
+// (grey-700, `#282828`):
+//
+//   tier                                     web      Electron
+//   `.build-output-line` (located, no sev)   1.42:1   1.05:1
+//   `.build-command-label` (idle/running)    1.42:1   1.05:1
+//
+// The web host serves no Bootstrap, so there the inherited value is
+// `canvastext` → BLACK. `src/frontend/index.html` loads
+// `third_party/bootstrap-4.3.1-dist/css/bootstrap.css` AFTER the theme link and
+// Bootstrap declares `body { color: #212529 }`, so in the desktop shell the
+// same text is `#212529` — 1.05:1, which is not "low contrast", it is INVISIBLE.
+// Both are worse than the 1.22:1 the status bar shipped.
+//
+// The rest of the panel was chosen, but chosen as raw hex against no measured
+// surface, and the error tier misses AA:
+//
+//   `.build-stderr` / `.build-line-error` / `.build-header.build-failed`
+//     `#f85149`                                            4.40:1  (AA is 4.5)
+//   `.build-stop-btn`  `rgba(248,81,73,0.7)`               2.80:1
+//   `.build-stop-btn.disabled`  (that, times `opacity:0.3`) 1.30:1
+//
+// EVERY COLOUR BELOW NOW RESOLVES THROUGH A TOKEN, because the numbers above
+// are only true of `#282828` and a raw hex cannot follow the surface it was
+// picked against. The ramp for the control buttons is three DISTINCT tokens
+// rather than one token times `opacity`, so the disabled state is a colour
+// change — an `opacity` multiplier is what drove the stop button to 1.30:1, and
+// it is the same mistake `tests/gui/tests/debug-controls/toolbar-marks-contrast.spec.ts`
+// already refuses for the debugger strip.
+//
+// `-primary` and not `-hover` for the severity tiers: `-primary` is the design
+// system's BASE state and `-hover` is its hover state, and the base state is
+// what compiler output is read in. It costs nothing here — every `-primary`
+// severity token clears AA on this surface by a wide margin.
+//
+// The measured result, identical in both themes (see the note on Block B below
+// for why "both themes" is one number here):
+//
+//   tier                            before    after   token
+//   `.build-output-line`            1.42:1   13.29:1  colors-ui-text-primary-body
+//   `.build-command-label`          1.42:1    8.81:1  colors-ui-text-primary-label
+//   `.build-stderr`                 4.40:1    7.77:1  colors-ui-text-error-primary
+//   `.build-line-error`             4.40:1    7.77:1  colors-ui-text-error-primary
+//   `.build-header.build-failed`    4.40:1    7.77:1  colors-ui-text-error-primary
+//   `.build-line-warning`           5.84:1    8.74:1  colors-ui-text-warning-primary
+//   `.build-header.build-succeeded` 5.80:1   12.17:1  colors-ui-text-success-primary
+//   `.build-ctrl-btn.active`        5.80:1   12.17:1  colors-ui-text-success-primary
+//   `.build-ctrl-btn`               4.83:1    8.81:1  colors-ui-text-primary-label
+//   `.build-ctrl-btn.disabled`      1.30:1    4.68:1  colors-ui-text-primary-label-subtle
+//   `.build-duration`               6.27:1    7.11:1  colors-ui-text-primary-caption
+//   `.build-stop-btn`               2.80:1    7.77:1  colors-ui-icon-error-primary
+//   `.build-stdout` / `.build-line-info`  13.29:1 (unchanged)
+//
+// The two translucent hover SCRIMS stay as they are — they are surfaces, not
+// ink, and the ink measured against what they composite to still clears AA:
+// `rgba(255,255,255,0.1)` over `#282828` is `#3e3e3e` and carries
+// `colors-ui-text-primary-body` at 9.64:1; `rgba(248,81,73,0.15)` is `#472e2d`
+// and carries `colors-ui-icon-error-on-color` at 8.56:1.
+//
+// `src/tests/gui/tests/build/build-panel-contrast-guard.spec.ts` measures all
+// of it and fails on anything under 4.5:1, and one of its arms re-paints the
+// shipped `#f85149`/inherited-black and asserts the guard rejects them — a
+// threshold nothing can violate is not a gate.
 .build-panel
   height: 100%
   display: flex
   flex-direction: column
   background-color: colors-ui-surface-base-panel
+  // The declaration whose absence is the bug. Everything in this subtree that
+  // does not name a colour now inherits a CHOSEN one instead of `canvastext`.
+  //
+  // The comment goes ABOVE the property and is indented to the SAME column as
+  // it: an indented comment placed after a declaration opens a child block in
+  // Stylus, which silently closed `.build-panel` here and re-emitted every
+  // nested rule below at the top level — `.build-header`, `.build-ctrl-btn`,
+  // `.build-duration` and `.build-output-container` compiled as GLOBAL
+  // selectors one specificity step weaker than written. It measured the same
+  // in a fixture that contains nothing else and would not have in the app.
+  color: colors-ui-text-primary-body
 
   .build-header
     padding: 4px 8px
@@ -54,12 +144,13 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     display: flex
     align-items: center
     justify-content: space-between
+    color: colors-ui-text-primary-label
 
     &.build-failed
-      color: #f85149
+      color: colors-ui-text-error-primary
 
     &.build-succeeded
-      color: #3fb950
+      color: colors-ui-text-success-primary
 
   .build-header-controls
     display: flex
@@ -76,31 +167,31 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     border-radius: 3px
     cursor: pointer
     font-size: 12px
-    color: rgba(255, 255, 255, 0.5)
+    color: colors-ui-text-primary-label
     user-select: none
 
     &:hover
-      color: rgba(255, 255, 255, 0.9)
+      color: colors-ui-text-primary-body
       background-color: rgba(255, 255, 255, 0.1)
 
     &.disabled
-      opacity: 0.3
+      color: colors-ui-text-primary-label-subtle
       cursor: default
       pointer-events: none
 
     &.active
-      color: #3fb950
+      color: colors-ui-text-success-primary
 
   .build-stop-btn
-    color: rgba(248, 81, 73, 0.7)
+    color: colors-ui-icon-error-primary
 
     &:hover
-      color: #f85149
+      color: colors-ui-icon-error-on-color
       background-color: rgba(248, 81, 73, 0.15)
 
   .build-duration
     font-size: 12px
-    color: rgba(255, 255, 255, 0.6)
+    color: colors-ui-text-primary-caption
     margin-left: 4px
     white-space: nowrap
 
@@ -150,8 +241,34 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
 // The legacy Karax build panel. Same four declarations, same fix: the IsoNim
 // panel above did not invent the typo, it copied it down from here.
+//
+// AND THIS BLOCK IS NOT ONLY LEGACY — IT IS WHAT PAINTS THE LIVE PANEL'S TEXT.
+// `isonim_build_view.nim` gives the output container `id = "build"` (both the
+// Web and the Mock renderer do), so every selector here is an ID selector
+// matching inside `.build-panel`, and it OUTRANKS the class-only rules above:
+// `#build .build-stdout` is (0,1,1,0) against `.build-panel
+// .build-output-container .build-stdout` at (0,0,3,0). A colour written above
+// and not here does not reach an output line. That is why the severity tiers
+// live down here and why the base `color` has to be repeated.
+//
+// `#build-errors` is a separate pane that is NOT inside `.build-panel`, so it
+// does not inherit the base colour declared there; without the `color` on this
+// block it would keep inheriting `canvastext`.
+//
+// ONE PALETTE, BOTH THEMES — so the "check the other theme" question has a
+// short answer here and it is not "it's fine". `colors-*` are Stylus
+// compile-time variables from `styles/generated/`, and neither
+// `default_white_theme.styl` nor `default_dark_theme.styl` redefines a single
+// one of them (`grep '^colors-' on both returns nothing`). Compiling
+// `default_dark_theme_electron.styl` and `default_white_theme_electron.styl`
+// and diffing the two `.build-panel`/`#build` blocks gives ZERO differing
+// bytes. The panel is `#282828` with the same ink in the light theme as in the
+// dark one, so every ratio in the table above is one number, not two — and a
+// future Light-mode token set will move both blocks together because both
+// blocks name tokens.
 #build, #build-errors
   background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
   font-family: "SpaceMono", monospace !important
   font-size: 14px
   line-height: 24px
@@ -169,7 +286,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     white-space: pre-wrap
 
   .build-stderr
-    color: #f85149
+    color: colors-ui-text-error-primary
     font-style: italic
 
   .build-location
@@ -180,11 +297,18 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     &:hover
       text-decoration: underline
 
+  // A located line whose severity parsed as `blsNone` — `lineClass` in
+  // `isonim_build_view.nim` emits `build-output-line build-clickable` with NO
+  // severity class for it, and it was in the geometry rule below and in no
+  // colour rule anywhere. This is the 1.42:1 / 1.05:1 row.
+  .build-output-line
+    color: colors-ui-text-primary-body
+
   .build-line-error
-    color: #f85149
+    color: colors-ui-text-error-primary
 
   .build-line-warning
-    color: #d29922
+    color: colors-ui-text-warning-primary
 
   .build-line-info
     color: colors-ui-text-primary-body
