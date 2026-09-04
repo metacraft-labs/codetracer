@@ -704,6 +704,25 @@ proc startNoirBuild*(saved: seq[string] = @[]) =
   activeRevealsBuildPane = true
   if activeInFlight:
     report("build-ignored", "reason=already-running")
+    # AN IGNORED GESTURE STILL SHOWS THE PANE, and the automatic compile is
+    # what made this matter rather than a refinement of an old case.
+    #
+    # `startNoirConstraintsCompile` runs about a macrotask after the mount and
+    # holds `activeInFlight` for the second or so it takes — measured at 456 ms
+    # locally and 910 ms against the deployed CDN. A Ctrl+B inside that window
+    # used to return here and do NOTHING VISIBLE: the compile the user asked
+    # for was already running, but it was running under the flag that suppresses
+    # the reveal, so their keypress produced no pane, no output and no message.
+    # A gesture that is answered by silence is indistinguishable from one the
+    # product did not receive.
+    #
+    # It reveals rather than queues. The build the user wanted IS the build in
+    # flight — same project, same command, same producer, same pane — so
+    # showing them that pane is the whole of the correct answer, and a second
+    # compile of identical bytes would be waste dressed as responsiveness.
+    #
+    # This also covers the case that predates all of it: pressing Ctrl+B twice.
+    ensureBuildPaneVisible()
     return
   let tmpl = currentProject()
   if not tmpl.hasFiles:

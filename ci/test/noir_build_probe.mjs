@@ -37,10 +37,15 @@
 import { chromium } from 'playwright';
 
 const url = process.argv[2];
-const gesture = process.argv[3] || 'shortcut';   // shortcut | button | run
+const gesture = process.argv[3] || 'shortcut';   // shortcut | button | run | none
 const settleMs = Number(process.argv[4] || 12000);
+// Where to write `<prefix>-before-full.png`, `-before-pane.png`, `-after-*`.
+// Optional: the assertions below read numbers, and a screenshot is what a
+// human reads when a number is disputed. Nothing depends on it being set.
+const shotPrefix = process.argv[5] || '';
 if (!url) {
-  console.error('usage: noir_build_probe.mjs <url> [gesture] [settleMs]');
+  console.error(
+    'usage: noir_build_probe.mjs <url> [gesture] [settleMs] [shotPrefix]');
   process.exit(2);
 }
 
@@ -51,9 +56,30 @@ const pageErrors = [];
 const consoleLines = [];
 const wasmRequests = [];
 
+// EVERY CONSOLE LINE IS TIMESTAMPED, and the timestamps are the only way this
+// program can report how long a compile took.
+//
+// The subject is a wasm module fetched over HTTP and run in a worker, so there
+// is no wall-clock number in the DOM to read and no `performance` mark the
+// product emits. What the product DOES emit is `web_noir_build.report`, which
+// prints `<phase>-started` and `<phase>-exit` on the console — so the interval
+// between those two lines is the compile, measured from the product's own
+// account of its own dispatch rather than from a poll that could be late by a
+// whole polling interval.
+//
+// Relative to navigation, because an absolute epoch would make two runs
+// incomparable and the question is always "how long after the page opened".
+const navigationStart = Date.now();
+const stamp = () => Date.now() - navigationStart;
+const consoleTimeline = [];
+
 page.on('pageerror', (e) =>
   pageErrors.push(String((e && e.message) || e).slice(0, 300)));
-page.on('console', (m) => consoleLines.push(`${m.type()}: ${m.text().slice(0, 500)}`));
+page.on('console', (m) => {
+  const text = m.text().slice(0, 500);
+  consoleLines.push(`${m.type()}: ${text}`);
+  if (text.includes('codetracer-')) consoleTimeline.push({ ms: stamp(), text });
+});
 page.on('response', async (r) => {
   const u = r.url();
   if (!u.endsWith('.wasm')) return;
@@ -93,6 +119,13 @@ await page.addInitScript(() => {
 
 const report = {
   url, gesture,
+  // WHICH BUILD THIS MEASURED. Read from the page's own
+  // `#codetracer-deployment` block, so a verdict about "the deployed site"
+  // names the revision it was taken against instead of whatever was live when
+  // somebody read the report. A local bundle carries the same block.
+  revision: '',
+  commit: '',
+  branch: '',
   loadError: '',
   gestureError: '',
   mounted: false,
@@ -107,6 +140,25 @@ const report = {
   stopButtonEnabled: false,
   headerText: '',
   constraints: {},
+  // THE PANE AS A VISITOR WHO HAS DONE NOTHING SEES IT.
+  //
+  // The distinction this field exists for is the whole of the defect it was
+  // added against: `constraints` is read after a gesture, and every assertion
+  // over it was green on a deployment where a visitor who made no gesture saw
+  // no listing at all. A pane that only works when driven is not a pane that
+  // works, and only a snapshot taken BEFORE the driving can tell them apart.
+  constraintsBefore: {},
+  // The persistent-storage toast, and specifically whether it is sitting on
+  // the pane above. See `noticeScript`.
+  notice: {},
+  noticeBefore: {},
+  consoleTimeline: [],
+  // Milliseconds from the product's own `-started` line to its `-exit` line,
+  // per phase. Empty when a phase did not run.
+  phaseMs: {},
+  // Milliseconds from navigation to the pane holding its first opcode row.
+  // -1 when it never did.
+  msToFirstListing: -1,
   pageErrors: [],
   consoleLines: [],
 };
@@ -192,6 +244,125 @@ const constraintsScript = () => {
     firstOpcode: opcodes.length ? text(opcodes[0]) : '',
     lastOpcode: opcodes.length ? text(opcodes[opcodes.length - 1]) : '',
     provenance: text(pane.querySelector('.constraints-provenance')),
+    absence: text(pane.querySelector('.constraints-absence')),
+    // `stale` and `compiling` live here — see `containerClass` in
+    // `views/isonim_constraints_view.nim`.
+    paneClass: pane.className,
+    // ROWS BY INDEX, split into the three spans the view emits, so an
+    // assertion can name ONE row and say what it must contain.
+    //
+    // This is the field that makes the gate's constraints arm falsifiable for
+    // its own reason. `opcodeRows >= 1` is an existential: it is satisfied by
+    // any row, including a row of the wrong listing, and the only way it can
+    // go red is if the pane is empty. A named index with named text can go red
+    // because the compiler changed what it prints, because the parser split it
+    // differently, or because a different project was compiled — three
+    // failures the count cannot see.
+    //
+    // Capped at 60: `/noir/demo` has 829 rows, and a JSON dump of all of them
+    // would bury every other field in this report.
+    opcodesByIndex: opcodes.slice(0, 60).map((o) => ({
+      offset: text(o.querySelector('.low-level-code-instruction-offset')),
+      name: text(o.querySelector('.low-level-code-instruction-name')),
+      args: text(o.querySelector('.low-level-code-instruction-args')),
+      laidOut: laidOut(o),
+    })),
+  };
+};
+
+// THE PERSISTENT-STORAGE TOAST, AND WHAT IT IS SITTING ON.
+//
+// `#active-notifications` is `position: fixed` above the status bar and holds
+// every toast the product raises. The durability notice is the one that is
+// raised on a first visit and stays until dismissed, so where it lands is not
+// a flash — it is the default first screen.
+//
+// THE MEASUREMENT IS THE INTERSECTION, IN PIXELS, WITH THE CONSTRAINTS PANE.
+// Not "is the toast visible" and not "is the pane visible": both were true on
+// the deployment this was written against, while the toast covered the lower
+// ~180px of the pane's column. An area is the only reading that distinguishes
+// "both are on screen" from "one is on top of the other", and it is a number
+// a gate can hold at zero.
+//
+// `elementFromPoint` is also asked, at a point inside the pane that the toast
+// claims, because an intersection of rectangles is geometry and the question
+// is about PAINT — a toast that intersects but is painted underneath would be
+// a different and much smaller problem.
+const noticeScript = () => {
+  const host = document.getElementById('active-notifications');
+  const text = (el) => el ? (el.innerText || el.textContent || '')
+    .replace(/\s+/g, ' ').trim() : '';
+  const toasts = host
+    ? Array.from(host.querySelectorAll('.status-notification'))
+    : [];
+  // The durability notice by its own sentence, not by position in the stack:
+  // any other toast raised in the same second would otherwise be measured
+  // instead of it.
+  const durability = toasts.filter(
+    (t) => text(t).includes('saved in this browser'));
+  const pane = document.querySelector('.component-container.constraints');
+  const paneBox = pane ? pane.getBoundingClientRect() : null;
+  const describe = (t) => {
+    const b = t.getBoundingClientRect();
+    const rect = [Math.round(b.x), Math.round(b.y),
+                  Math.round(b.width), Math.round(b.height)];
+    let overlapPx = 0;
+    let coversPaneAt = '';
+    if (paneBox && paneBox.width > 0 && paneBox.height > 0) {
+      const w = Math.max(0, Math.min(b.right, paneBox.right) -
+                            Math.max(b.x, paneBox.x));
+      const h = Math.max(0, Math.min(b.bottom, paneBox.bottom) -
+                            Math.max(b.y, paneBox.y));
+      overlapPx = Math.round(w * h);
+      if (overlapPx > 0) {
+        // The centre of the intersection: a point that is inside BOTH boxes,
+        // so whatever `elementFromPoint` answers is the one that won.
+        const cx = (Math.max(b.x, paneBox.x) +
+                    Math.min(b.right, paneBox.right)) / 2;
+        const cy = (Math.max(b.y, paneBox.y) +
+                    Math.min(b.bottom, paneBox.bottom)) / 2;
+        const top = document.elementFromPoint(cx, cy);
+        coversPaneAt = top
+          ? top.tagName + '.' + String(top.className || '').slice(0, 60)
+          : 'nothing-at-point';
+      }
+    }
+    return {
+      text: text(t).slice(0, 400),
+      rect,
+      // TRUNCATION, ASKED OF THE ELEMENT RATHER THAN OF A SCREENSHOT. The
+      // report this was added for described the text as clipped on its left
+      // edge (`...ort project`), which an element-only screenshot of a
+      // NEIGHBOURING element reproduces by cropping and which the page itself
+      // may or may not be doing. `scrollWidth > clientWidth` is the page's own
+      // answer, and it is the one that settles it.
+      overflowsHorizontally: t.scrollWidth > t.clientWidth + 1,
+      messageOverflows: (() => {
+        const m = t.querySelector('.notification-message');
+        return !!m && m.scrollWidth > m.clientWidth + 1;
+      })(),
+      overlapPx,
+      coversPaneAt,
+    };
+  };
+  return {
+    hostPresent: !!host,
+    hostRect: host ? (() => {
+      const b = host.getBoundingClientRect();
+      return [Math.round(b.x), Math.round(b.y),
+              Math.round(b.width), Math.round(b.height)];
+    })() : [],
+    toastCount: toasts.length,
+    durabilityCount: durability.length,
+    paneRect: paneBox
+      ? [Math.round(paneBox.x), Math.round(paneBox.y),
+         Math.round(paneBox.width), Math.round(paneBox.height)]
+      : [],
+    durability: durability.map(describe),
+    // The whole stack's worst offender, so a toast this probe does not know
+    // about cannot cover the pane unreported.
+    maxOverlapPx: toasts.reduce(
+      (acc, t) => Math.max(acc, describe(t).overlapPx), 0),
   };
 };
 
@@ -288,11 +459,84 @@ try {
   // topbar, which is where a user's pointer is when they have just used a
   // menu, and the assertion that the build ran is what says whether it was
   // enough.
-  try {
-    await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
-  } catch (e) { /* no topbar is itself reported by the mount assertions */ }
+  //
+  // AND NOT ON THE `none` ARM. A click is a gesture. The arm whose claim is
+  // "a visitor who does nothing sees the listing" cannot open a menu first,
+  // and there is nothing for it to blur: it presses no chord, so Mousetrap's
+  // `stopCallback` has nothing to refuse. Leaving the click in would also put
+  // an open File menu over the FILES pane in every screenshot the arm takes,
+  // which is how it was noticed.
+  if (gesture !== 'none') {
+    try {
+      await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
+    } catch (e) { /* no topbar is itself reported by the mount assertions */ }
+  }
 
-  if (gesture === 'run') {
+  // WHICH BUILD THIS IS. The block is in the document, so no request is made
+  // and no ordering is raced; a page without one reports the empty identity,
+  // which is a correct deployment rather than a failure.
+  report.revision = await page.evaluate(() => {
+    const el = document.getElementById('codetracer-deployment');
+    if (!el) return '';
+    try {
+      const d = JSON.parse(el.textContent || '{}');
+      return JSON.stringify(
+        { revision: d.revision || '', commit: d.commit || '',
+          branch: d.branch || '' });
+    } catch (e) { return ''; }
+  });
+  if (report.revision) {
+    try {
+      const d = JSON.parse(report.revision);
+      report.revision = d.revision;
+      report.commit = d.commit;
+      report.branch = d.branch;
+    } catch (e) { /* reported verbatim if it will not parse */ }
+  }
+
+  // ---------------------------------------------------------------------
+  // BEFORE ANY GESTURE. What does the pane show a visitor who just landed?
+  // ---------------------------------------------------------------------
+  //
+  // This snapshot is the control for the whole of the "compiles on load"
+  // claim, and it is taken HERE — after the mount and the layout settle, and
+  // before a single key is pressed — because that is the state a visitor is
+  // actually in. Note that on a build which compiles on load this is a RACE
+  // by design: the compile is in flight, so `constraintsBefore` is expected to
+  // show the pane's `compiling` state and `constraints` to show the listing.
+  // The gate reads `constraints` for the listing and this one for the third
+  // state; neither is asserted to be the other.
+  report.constraintsBefore = await page.evaluate(constraintsScript);
+  report.noticeBefore = await page.evaluate(noticeScript);
+  if (shotPrefix) {
+    await page.screenshot({ path: `${shotPrefix}-before-full.png` });
+    try {
+      const el = await page.$('.component-container.constraints');
+      if (el) await el.screenshot({ path: `${shotPrefix}-before-pane.png` });
+    } catch (e) { /* the pane's absence is reported by the snapshot above */ }
+  }
+
+  if (gesture === 'none') {
+    // THE VISITOR WHO LANDS AND READS, and makes no gesture at all.
+    //
+    // The arm the whole "by default" complaint is about: every other gesture
+    // here drives the page, and a pane that only works when driven passes all
+    // of them. Nothing is pressed and nothing is clicked; the wait below is
+    // the reader's patience, and what the pane holds at the end of it is the
+    // product's answer.
+    //
+    // It waits for the LISTING rather than for a fixed delay, so a fast
+    // machine is not held for the timeout and a slow one is not cut off before
+    // the compiler has been fetched. The fixed fallback is the timeout itself,
+    // which is what a build that never compiles spends.
+    const deadline = Date.now() + settleMs;
+    while (Date.now() < deadline) {
+      const rows = await page.evaluate(() => document.querySelectorAll(
+        '.component-container.constraints .constraints-opcode').length);
+      if (rows > 0) { report.msToFirstListing = stamp(); break; }
+      await page.waitForTimeout(250);
+    }
+  } else if (gesture === 'run') {
     // RUN is `ctrl+enter`, deliberately not `ctrl+r` or `F5` — both are the
     // browser's own reload on every platform, and a studio that ate either
     // would be taking a key away from the user rather than giving them one.
@@ -303,7 +547,14 @@ try {
 
   // The pane is created on demand by `openLayoutTab(Content.Build)`, then the
   // IsoNim view mounts into it. Both are asynchronous.
-  for (let i = 0; i < 40; i += 1) {
+  //
+  // ONE POLL FOR THE `none` ARM, not forty. The automatic compile mounts the
+  // BUILD pane without revealing it (`web_noir_build.activeRevealsBuildPane`),
+  // so `#build` may well be in the DOM — that is worth recording — but there
+  // is no gesture in flight for the loop to be waiting on, and forty quarter-
+  // seconds of waiting for one would be ten seconds spent measuring nothing.
+  const buildPaneTries = gesture === 'none' ? 1 : 40;
+  for (let i = 0; i < buildPaneTries; i += 1) {
     const seen = await page.evaluate(() => !!document.getElementById('build'));
     if (seen) { report.buildPaneOpened = true; break; }
     await page.waitForTimeout(250);
@@ -390,17 +641,59 @@ try {
   // Playwright's actionability check rather than switching anything.
   //
   // ORDER MATTERS: the BUILD pane is read above, before this dismisses it.
-  try {
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(750);
-  } catch (e) { /* reported by constraints.paneVisible below */ }
+  //
+  // NOT ON THE `none` ARM, and this is the one line that would invalidate it.
+  // Escape is a keypress. An arm whose entire claim is "a visitor who makes no
+  // gesture sees the listing" cannot press a key before reading the pane —
+  // that is precisely the substitution the arm exists to catch, and it would
+  // have gone unnoticed because the pane looks identical either way. On that
+  // arm the automatic compile never reveals the overlay in the first place, so
+  // there is nothing to dismiss.
+  if (gesture !== 'none') {
+    try {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(750);
+    } catch (e) { /* reported by constraints.paneVisible below */ }
+  }
   report.constraints = await page.evaluate(constraintsScript);
+  report.notice = await page.evaluate(noticeScript);
+
+  if (shotPrefix) {
+    await page.screenshot({ path: `${shotPrefix}-after-full.png` });
+    try {
+      const el = await page.$('.component-container.constraints');
+      if (el) await el.screenshot({ path: `${shotPrefix}-after-pane.png` });
+    } catch (e) { /* the pane's absence is reported by the snapshot above */ }
+  }
 
   report.workerMessages = await page.evaluate(
     () => (window.__ctWorkerMessages || []).slice());
 } catch (e) {
   report.loadError = String((e && e.message) || e).slice(0, 400);
 }
+
+// PHASE DURATIONS, paired off the product's own console lines.
+//
+// `web_noir_build.report` prints `<phase>-started` and `<phase>-exit`, so a
+// compile's duration is the gap between the two — the product's account of
+// its own dispatch, not this program's guess at when a poll noticed something.
+// Unpaired lines are dropped rather than defaulted: a `-started` with no
+// `-exit` means the phase did not finish, and reporting a duration for it
+// would be inventing the number the reader most needs to be missing.
+for (const entry of consoleTimeline) {
+  const m = entry.text.match(/codetracer-noir-build: (\w+)-(started|exit)/);
+  if (!m) continue;
+  const [, phase, edge] = m;
+  report.phaseMs[phase] = report.phaseMs[phase] || {};
+  report.phaseMs[phase][edge] = entry.ms;
+}
+for (const phase of Object.keys(report.phaseMs)) {
+  const p = report.phaseMs[phase];
+  if (typeof p.started === 'number' && typeof p.exit === 'number') {
+    p.ms = p.exit - p.started;
+  }
+}
+report.consoleTimeline = consoleTimeline;
 
 report.wasmRequests = wasmRequests;
 report.pageErrors = pageErrors;

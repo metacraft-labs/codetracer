@@ -284,14 +284,25 @@ print(sum(1 for x in d if needle in str(x)))
 }
 
 probe() {
-	# `probe <label> <dir> <url-path> <gesture>`
-	local label="$1" dir="$2" url_path="$3" gesture="$4"
+	# `probe <label> <dir> <url-path> <gesture> [settleMs]`
+	#
+	# The settle defaults to the probe's own 12 s, which is the budget a
+	# GESTURE needs. The `none` arm passes a longer one deliberately: its
+	# subject is a compile the PAGE starts, and that clock begins when the page
+	# decides to rather than when this script presses something, so it has the
+	# mount and the module fetch inside it.
+	local label="$1" dir="$2" url_path="$3" gesture="$4" settle="${5:-12000}"
 	if ! start_server "${dir}"; then
 		echo "  the static server did not start" >&2
 		return 2
 	fi
+	# `<cache>/<label>` is the screenshot prefix. Nothing below asserts on the
+	# images; they are what a human opens when a number is disputed, and a gate
+	# whose failure message can be checked against a picture is one people
+	# believe.
 	node ci/test/noir_build_probe.mjs \
-		"http://127.0.0.1:${port}${url_path}" "${gesture}" \
+		"http://127.0.0.1:${port}${url_path}" "${gesture}" "${settle}" \
+		"${cache}/${label}" \
 		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
 	local rc=$?
 	stop_server
@@ -332,6 +343,186 @@ for r in d.get("consoleLines", [])[-12:]:
     print("          " + str(r)[:200])
 ' "${cache}/${label}.json"
 }
+
+# ---------------------------------------------------------------------------
+# ARM 0 — THE VISITOR WHO LANDS AND DOES NOTHING.
+# ---------------------------------------------------------------------------
+#
+# WHY THIS ARM IS FIRST, and why every arm below it was green while the defect
+# it names was shipped.
+#
+# Every other arm in this file drives the page: Ctrl+B, the pane's ▶,
+# Ctrl+Enter. A pane that only paints when driven passes all of them. Measured
+# on the deployed site at revision b6e28026 with NO gesture and a twenty-second
+# wait: `opcodeRows: 0`, the function row reads `main`, the provenance reads
+# "measured at build time", the caption says "Build the project to see the
+# compiler's own listing here" — and ZERO `.wasm` requests and ZERO `start`
+# messages, because nothing had asked the compiler for anything. One Ctrl+B
+# later the same page reported 34 rows and `func 0`. The listing worked;
+# nothing started it.
+#
+# The bug report was worded "the CONSTRAINTS panel shown BY DEFAULT still
+# displays just counts", so the default is the subject and a gesture is the one
+# thing this arm may not perform. `noir_build_probe.mjs`'s `none` gesture is
+# built for that: it presses nothing, clicks nothing — not even the topbar blur
+# click the other arms need — and does not press Escape before reading the
+# pane.
+#
+# WHAT IT ASSERTS, and why not "the pane has rows". An existential over rows
+# can only go red when the pane is empty, so it cannot distinguish a listing
+# from the wrong listing. The assertions below name a COUNT and then a ROW AT
+# AN INDEX with its text, which additionally goes red if the compiler changes
+# what it prints, if the row parser splits it differently, or if some other
+# project was compiled.
+echo "Arm 0: a visitor who lands on /noir and makes no gesture sees the listing"
+if ! probe visitor "${bundle}" /noir none 30000; then
+	echo "RESULT: FAILED — the no-gesture arm could not be measured" >&2
+	exit 1
+fi
+
+v_rev="$(json visitor revision)"
+v_rows="$(json visitor constraints.opcodeRows)"
+v_laid="$(json visitor constraints.opcodeRowsLaidOut)"
+v_func="$(count_matching visitor constraints.functionNames 'func 0')"
+v_main="$(count_matching visitor constraints.functionNames 'main')"
+v_prov="$(json visitor constraints.provenance)"
+v_starts="$(count_matching visitor workerMessages '"kind":"start"')"
+v_ms="$(json visitor msToFirstListing)"
+note "the page under this arm reports itself as revision '${v_rev}'"
+
+if [ "${v_starts:-0}" -ge 1 ]; then
+	ck ok "${v_starts} 'start' message(s) reached the worker WITHOUT a gesture"
+else
+	ck fail "no 'start' message reached the worker: the page never asked the compiler for anything, so the pane cannot have a listing to show"
+fi
+
+# THE COUNT, EXACTLY. `hello_noir` compiles to 17 constrained opcodes plus 9
+# and 8 unconstrained ones — 34 printed rows, and the same 34 three readings of
+# this template agree on (`noirTemplateNargoInfoJson` ships 17,
+# `noir-template-acir-count.mjs` measures 17 from `acir_locations`, and the
+# listing prints 17 constrained rows). `-eq` and not `-ge`: a pane that grew a
+# row would be reporting a circuit that is not this one.
+if [ "${v_rows:-0}" -eq 34 ]; then
+	ck ok "the pane holds exactly 34 opcode rows, with no gesture made"
+else
+	ck fail "the pane holds ${v_rows} opcode rows with no gesture (expected 34) — this is the shipped defect: counts by default, a listing only after Ctrl+B"
+	note "headline:   $(json visitor constraints.headline)"
+	note "caption:    $(json visitor constraints.noticeText)"
+	note "provenance: ${v_prov}"
+fi
+
+if [ "${v_laid:-0}" -ge 1 ]; then
+	ck ok "${v_laid} of them are laid out and hit-tested, so they are rows a user reads"
+else
+	ck fail "no opcode row survived the hit test: the rows are in the DOM and nobody can see them"
+	note "pane rect: $(json visitor constraints.paneRect)  covered by: $(json visitor constraints.paneCovering)"
+fi
+
+# ROW 1, BY NAME. `reportFromAcirListing` splits each printed line once on the
+# first space, so this row's `name` is `ASSERT` and its `args` are the rest.
+# The whole chain is in this one assertion: the module emitted `acir_listing`,
+# the parser split it, the view painted the three spans.
+v_row1="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+ops = d.get("constraints", {}).get("opcodesByIndex", [])
+if len(ops) < 2:
+    print("MISSING")
+else:
+    o = ops[1]
+    print("%s|%s|%s" % (o.get("offset"), o.get("name"), o.get("args")))
+' "${cache}/visitor.json" 2>/dev/null)"
+if [ "${v_row1}" = "1|ASSERT|0 = w0*w2 - w1*w2 - 1" ]; then
+	ck ok "row 1 reads '1 ASSERT 0 = w0*w2 - w1*w2 - 1' — the compiler's own text, parsed and painted"
+else
+	ck fail "row 1 is '${v_row1}', not '1|ASSERT|0 = w0*w2 - w1*w2 - 1'"
+	note "an existential on the row COUNT cannot see this; that is why the index is named"
+fi
+
+# THE STRING THAT SAYS WHICH PRODUCER PAINTED THE PANE, with no gesture to
+# credit it to. `func 0` heads the listing's constrained block; `main` is what
+# the compile-time `nargo info` constant calls the same function. Both report
+# 17, so only the NAME distinguishes them.
+if [ "${v_func:-0}" -ge 1 ] && [ "${v_main:-0}" -eq 0 ]; then
+	ck ok "the function row reads 'func 0' and not 'main': the listing came from a compile this page ran by itself"
+else
+	ck fail "the function rows are $(json visitor constraints.functionNames)"
+	if [ "${v_main:-0}" -ge 1 ]; then
+		note "a row reads 'main', which is the compile-time nargo-info constant — the pane is showing the shipped number, which is the defect"
+	fi
+fi
+
+case "${v_prov}" in
+*"compiled in this tab"*)
+	ck ok "the provenance reads '${v_prov}'"
+	;;
+*)
+	ck fail "the provenance reads '${v_prov}', not 'compiled in this tab at …'"
+	note "'measured at build time' is the bundled constant, i.e. no compile happened"
+	;;
+esac
+
+if [ "${v_ms:-0}" != "-1" ] && [ "${v_ms:-0}" -gt 0 ] 2>/dev/null; then
+	note "the listing was on screen ${v_ms} ms after navigation"
+fi
+
+# ---------------------------------------------------------------------------
+# ARM 0b — AND THE STORAGE TOAST IS NOT SITTING ON IT.
+# ---------------------------------------------------------------------------
+#
+# The durability notice is raised once per browser session and stays until it
+# is dismissed, so where it lands is the default first screen and not a flash.
+# Measured on the deployed site at b6e28026: 466px wide, `bottom: 3rem`,
+# anchored `right: 8px`, and therefore overlapping the CONSTRAINTS column by
+# 67,816 px² — the full 392px width of the pane for 173px of its height, with
+# `elementFromPoint` at the centre of the intersection answering
+# `DIV.notification-message`. It covered exactly the rows this gate's arm 0
+# just finished counting.
+#
+# AN AREA AND NOT A BOOLEAN. "Is the toast visible" and "is the pane visible"
+# were both true throughout; only an intersection distinguishes two things
+# being on screen from one being on top of the other, and only a number can be
+# held at zero.
+v_overlap="$(json visitor notice.maxOverlapPx)"
+v_toasts="$(json visitor notice.durabilityCount)"
+
+if [ "${v_toasts:-0}" -eq 1 ]; then
+	ck ok "the storage notice is on screen exactly once"
+else
+	ck fail "the storage notice appears ${v_toasts} time(s); expected exactly 1"
+fi
+
+if [ "${v_overlap:-0}" -eq 0 ]; then
+	ck ok "no toast overlaps the CONSTRAINTS pane (0 px of intersection)"
+else
+	ck fail "a toast covers ${v_overlap} px of the CONSTRAINTS pane — the listing is behind the notice"
+	note "toast:  $(json visitor notice.durability)"
+	note "pane:   $(json visitor notice.paneRect)"
+fi
+
+# THE OTHER HALF OF THE REPORT, CHECKED AND ANSWERED. The notice was also
+# described as clipped on its left edge — the text reading `…ort project` and
+# `…ected yet`. Asked of the element rather than of a screenshot, on the
+# deployed site and here, `scrollWidth > clientWidth` is FALSE for both the
+# toast and its message: the box is intact and the whole sentence is laid out.
+# The clipping was an artefact of cropping a screenshot to the neighbouring
+# PANE element, which cuts the toast at the pane's left border. This assertion
+# is what keeps that answer from having to be rediscovered.
+v_clip="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+ts = d.get("notice", {}).get("durability", [])
+print(sum(1 for t in ts
+          if t.get("overflowsHorizontally") or t.get("messageOverflows")))
+' "${cache}/visitor.json" 2>/dev/null)"
+if [ "${v_clip:-0}" -eq 0 ]; then
+	ck ok "and its text is not horizontally clipped (scrollWidth == clientWidth)"
+else
+	ck fail "${v_clip} toast(s) overflow horizontally: the sentence really is being cut off"
+fi
+
+dump visitor
+echo
 
 # ---------------------------------------------------------------------------
 # ARM 1 — the control. Ctrl+B on the shipped template.
@@ -952,7 +1143,13 @@ echo "checks: ${checks}   failures: ${failures}"
 
 # THE COUNT ITSELF. A guard that returned early, an arm that was skipped, or a
 # `probe` that failed silently would otherwise reduce this gate to whatever ran.
-expected_checks=41
+# 41 + the 9 of arms 0 and 0b: six that a visitor who makes NO gesture sees the
+# listing (a start message reached the worker, the row count is exactly 34, the
+# rows survive the hit test, row 1 reads what the compiler printed, the
+# function row says `func 0` and not `main`, and the provenance says "compiled
+# in this tab") and three that the storage toast is not on top of it (raised
+# exactly once, zero pixels of overlap, and not horizontally clipped).
+expected_checks=50
 if [ "${checks}" -ne "${expected_checks}" ]; then
 	echo "  ${checks} assertion(s) ran; this gate declares ${expected_checks}." >&2
 	echo "  An arm was skipped, or one was added without moving the number." >&2

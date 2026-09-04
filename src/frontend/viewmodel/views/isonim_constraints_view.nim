@@ -134,6 +134,24 @@ proc listingNoticeFor*(report: ConstraintReport): string =
   ## genuinely nothing to list until something compiles. A pane that rendered a
   ## blank listing area for that would look broken; one that says which of the
   ## two answers it is holding is merely honest about a real difference.
+  # PROGRESS OUTRANKS EVERY OTHER CAPTION, INCLUDING THE ABSENCE.
+  #
+  # ABOVE the absence guard, and this is the state a visitor is in for the
+  # first second and a half of a page load. The VM starts at
+  # `absentReport("No circuit has been compiled for this project yet.")`, the
+  # automatic compile is dispatched about a macrotask after the mount, and the
+  # bundled `nargo info` counts arrive over `newWebIpc`'s deferred reply some
+  # time after THAT. So "no counts at all, and a compile running" is the
+  # opening state of every visit, not an edge case — and the absence sentence
+  # is a worse answer to "why is there nothing here" than the true one, which
+  # is that something is being compiled right now.
+  #
+  # `absenceTextFor` is the other half: it suppresses the absence sentence for
+  # exactly this window, so the pane makes one statement rather than two that
+  # contradict each other in tone.
+  if report.compiling:
+    return "Compiling this project with the Noir compiler this page runs. " &
+      "The generated code will appear here when it finishes."
   if report.absence.len > 0:
     return ""
   if report.functions.len == 0:
@@ -150,9 +168,6 @@ proc listingNoticeFor*(report: ConstraintReport): string =
   # caption left over from the previous compile ("this build's compiler does
   # not print a constraint listing") describes a finished attempt, and showing
   # it during the next one would report the past as the present.
-  if report.compiling:
-    return "Compiling this project with the Noir compiler this page runs. " &
-      "The generated code will appear here when it finishes."
   if report.hasListing():
     return ""
   # WHAT THE PANE WAS TOLD BEATS WHAT IT CAN INFER. A compile that succeeded
@@ -165,6 +180,30 @@ proc listingNoticeFor*(report: ConstraintReport): string =
   "These are totals, not the generated code: they come from `nargo info`, " &
     "which reports how many opcodes a circuit has and does not print them. " &
     "Build the project to see the compiler's own listing here."
+
+proc absenceTextFor*(report: ConstraintReport): string =
+  ## The absence sentence, or "" while a compile is running.
+  ##
+  ## `absence` is normally the WHOLE content of the pane — §1b.3 step 6's
+  ## "never a blank editor, never an error page", applied to a pane. This is
+  ## the one state in which it is not the best sentence available.
+  ##
+  ## The VM opens at `absentReport("No circuit has been compiled for this
+  ## project yet.")` and the automatic compile is dispatched about a macrotask
+  ## later, so for the first seconds of every visit that sentence is competing
+  ## with `listingNoticeFor`'s "Compiling this project…". Both would be
+  ## rendered, one under the other, and they disagree in tone: the first says
+  ## nothing has happened, the second says something is happening. The second
+  ## is the true one and it is also the one that answers the reader's question,
+  ## so it is the one that is kept.
+  ##
+  ## THE SENTENCE IS NOT DELETED, only withheld: a compile that fails clears
+  ## `compiling` through `noteCompileSettled` and the absence comes straight
+  ## back, which is correct — at that point nothing HAS been compiled, and the
+  ## pane says so again.
+  if report.compiling:
+    return ""
+  report.absence
 
 proc containerClass*(report: ConstraintReport): string =
   ## `stale` beside the base class, so CSS can dim the rows while the headline
@@ -180,8 +219,17 @@ proc containerClass*(report: ConstraintReport): string =
   ## them is what `compiling` announces, so a visitor who types and presses
   ## Build is in both at once. A class that could only say one would have to
   ## pick, and picking would drop the half the reader most needs.
+  ##
+  ## AN ABSENCE STILL GETS `compiling`, and nothing else. The pane's opening
+  ## state has no counts and a compile in flight, so a class list that dropped
+  ## the flag for an absence would leave `absenceTextFor`'s caption unstyled in
+  ## exactly the window it was written for. `stale` is still excluded: counts
+  ## that do not exist cannot have stopped describing anything.
   if report.absence.len > 0:
-    return ConstraintsContainerClass
+    result = ConstraintsContainerClass
+    if report.compiling:
+      result.add " compiling"
+    return
   result = ConstraintsContainerClass
   if report.stale:
     result.add " stale"
@@ -286,9 +334,10 @@ proc renderConstraintsPanel*(r: MockRenderer; vm: ConstraintsVM): MockNode =
     else:
       r.setAttribute(provenanceNode, "class", "constraints-provenance hidden")
 
+    let absence = absenceTextFor(report)
     r.clearChildren(absenceNode)
-    if report.absence.len > 0:
-      r.appendChild(absenceNode, r.createTextNode(report.absence))
+    if absence.len > 0:
+      r.appendChild(absenceNode, r.createTextNode(absence))
       r.setAttribute(absenceNode, "class", "constraints-absence")
     else:
       r.setAttribute(absenceNode, "class", "constraints-absence hidden")
@@ -409,9 +458,10 @@ when defined(js):
         cstring(if report.provenance.len > 0: "constraints-provenance"
                 else: "constraints-provenance hidden"))
 
-      setWebText(absenceNode, report.absence)
+      let absence = absenceTextFor(report)
+      setWebText(absenceNode, absence)
       isonim_dom.setAttribute(absenceNode, cstring"class",
-        cstring(if report.absence.len > 0: "constraints-absence"
+        cstring(if absence.len > 0: "constraints-absence"
                 else: "constraints-absence hidden"))
 
     panel

@@ -117,6 +117,44 @@ type
     headline*: Memo[string]
 
 proc setReport*(vm: ConstraintsVM; report: ConstraintReport) =
+  ## Replace the whole report.
+  ##
+  ## ## An in-flight compile SURVIVES a report that is not its answer
+  ##
+  ## THE DEFECT THIS CLOSES, measured in a browser rather than reasoned about.
+  ## With a `MutationObserver` watching every class change on the pane from
+  ## before any page script ran, the `compiling` class NEVER APPEARED — the
+  ## pane went straight from the `nargo info` caption to 34 rows, three and a
+  ## half seconds later — while the console showed
+  ## `constraints-compile-started` and then `nbpCompile-exit` in between.
+  ##
+  ## The flag was being set and then overwritten. `onNs9PanesConstraints`
+  ## delivers the BUNDLED `nargo info` counts, and it does not arrive during
+  ## the mount: the pane host answers over `newWebIpc`, whose `deferHostReply`
+  ## is a `setTimeout`, and the panel itself mounts on a retry loop — so that
+  ## report can land seconds after the automatic compile was dispatched. It is
+  ## a whole `ConstraintReport` with `compiling: false` by construction, so it
+  ## silently ended a wait that was still going on.
+  ##
+  ## THE RULE, and it is about which report is being written rather than about
+  ## when: **a report that carries no listing is not the answer the compile
+  ## will bring, so it does not end the wait.** The bundled counts are exactly
+  ## that — `parseNargoInfoJson` produces totals and no rows, because
+  ## `nargo info` prints none. A report that DOES carry a listing is a
+  ## compile's own answer and clears the flag, which is what makes the success
+  ## path need no separate call.
+  ##
+  ## Not "preserve the flag whenever it is set", which would be the same rule
+  ## with the interesting half removed: that version cannot distinguish the
+  ## compile's answer from anything else, so `noteCompileSettled` would become
+  ## the only thing that ever cleared it and a sink that landed before the exit
+  ## callback would paint a listing captioned "compiling".
+  if vm.report.val.compiling and not report.hasListing() and
+     report.absence.len == 0:
+    var incoming = report
+    incoming.compiling = true
+    vm.report.val = incoming
+    return
   vm.report.val = report
 
 proc noteCompileStarted*(vm: ConstraintsVM) =

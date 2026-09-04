@@ -287,3 +287,39 @@ ns9-row-padding = 2px 8px
   font-size: 0.85em
   line-height: 1.35
   opacity: 0.6
+
+// A COMPILE IS RUNNING, and the pane says so as PROGRESS rather than as
+// absence.
+//
+// THE STATE THIS EXISTS FOR. The pane's original defect was that its two
+// states were "a number" and "no number". Compiling on load adds a third — it
+// holds the bundled `nargo info` totals for the second or so between the page
+// mounting and the first listing landing — and an unlabelled third state reads
+// as the second. `listingNoticeFor` supplies the sentence; this makes the
+// sentence look like something in flight instead of another dim caption
+// indistinguishable from the one that says there is nothing to show.
+//
+// NOT A SPINNER, and not the rows dimmed. The rows on screen during a
+// recompile are a real listing from a real compile, and `.stale` is the class
+// that says they may no longer describe the source; dimming them again here
+// would spend the pane's one dimming vocabulary on a second meaning. The
+// animation is on the CAPTION, which is the element whose whole content is the
+// claim "something is happening".
+.constraints.compiling .constraints-listing-notice
+  opacity: 0.85
+  animation: constraints-compiling-pulse 1.4s ease-in-out infinite
+
+// `prefers-reduced-motion` is honoured rather than overridden: the sentence
+// carries the whole message on its own, so a reader who has asked for no
+// animation loses nothing but the animation.
+@media (prefers-reduced-motion: reduce)
+  .constraints.compiling .constraints-listing-notice
+    animation: none
+
+@keyframes constraints-compiling-pulse
+  0%
+    opacity: 0.85
+  50%
+    opacity: 0.45
+  100%
+    opacity: 0.85
