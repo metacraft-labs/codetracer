@@ -223,6 +223,32 @@ in_set() { grep -Fxq -- "$1" <<<"$2"; }
 echo "=== shell gate coverage — can CI reach every gate in ci/test/? ==="
 echo
 
+# THIS FLOOR IS THE REASON THE REST OF THIS FILE CAN BE TRUSTED, AND IT HAS NOW
+# BEEN PAID FOR ONCE.
+#
+# It reads like boilerplate. It is not. On 2026-09-04, widening the subject past
+# `*.sh` was written as `find_ext_args="-name *.sh"` built into a string and
+# expanded unquoted — and `*.sh` IS A GLOB, which this repository matches at its
+# root (`env.sh`, `build_for_extension.sh`, `install-on-distributions.sh`). The
+# shell expanded the pattern before `find` saw it, the expression became
+# `-name build_for_extension.sh env.sh ...`, `find` rejected it, and the scan
+# returned ZERO gates.
+#
+# Zero gates satisfies every check below. Without this floor the run would have
+# printed
+#
+#     gates: 0 found, 0 reachable, 0 declared not-a-gate,
+#            0 recorded dark, 0 UNRECORDED dark
+#     RESULT: OK
+#
+# — a perfect score from an instrument that had measured nothing, which is the
+# exact defect this whole file exists to report, arriving through its own front
+# door. Every "must not contain" check in this script is vacuously true over an
+# empty subject.
+#
+# A guard that can report on nothing will eventually be handed nothing. Keep
+# this first, keep it a hard `exit 1`, and do not let its threshold drift down
+# to zero. See Verification-Harness-Traps.md trap 6.
 echo "Step 0: the subject list is non-empty"
 echo "    A scan that found nothing reports perfect coverage of nothing."
 if [ "${gate_count}" -ge 10 ]; then
