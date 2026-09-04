@@ -121,9 +121,44 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 #
 # `--max` is now an equality. Fewer findings than the number fails as "lower it
 # to what you measured", the same rule and very nearly the same sentence the
-# shell-gate inventory uses for its own ceiling. 1223 is this tree's exact
-# count, measured on 2026-09-04 after the three raises above and the deletions
-# that followed them.
+# shell-gate inventory uses for its own ceiling.
+#
+# BECAUSE IT IS AN EQUALITY, THIS NUMBER TRACKS THE TREE IN BOTH DIRECTIONS.
+# The protection is not the value; it is that the value cannot move without a
+# reviewed line in a diff AND the three sentences that describe it moving too.
+# A ceiling held below the tree does not make the guard stricter — it makes it
+# permanently red, and a lane that is always red is a lane nobody reads.
+#
+#   1223  measured after the equality landed and the dead entry points went
+#   1226  `viewmodel/platform/web_deployment.nim` gained three exports
+#
+# THE 1226 RAISE, ARGUED RATHER THAN ASSUMED. The three are `bundledAssetPaths`
+# and `isBundledAssetPath` (which the guard counts twice — a forward
+# declaration and its definition). They are NOT dead: `web_deployment.nim`
+# itself calls all three, at :367, :706 and :895, and dropping their `*` was
+# tried and compiles cleanly, which proves no OTHER product module needs them.
+# The export exists so `test_platform_web.nim` can assert that two declarations
+# of the same four bundled assets cannot drift apart. Removing it would force
+# the list to be duplicated in the test — a third copy, and a third thing to
+# drift, defeating the exact check that needs the export.
+#
+# The allow-list was considered and refused: it names this shape under WHEN AN
+# ENTRY IS WRONG, and it is right to.
+#
+# AND THE FINDING UNDERNEATH, WHICH IS BIGGER THAN THE RAISE AND IS NOT FIXED
+# HERE. Bucket A prints as "tested, no product module reaches it". For 355 of
+# its 650 entries that sentence is FALSE: the declaring module does reach them.
+# `frontend-reachability-guard.py` tests `key in tested` BEFORE `elif readers`,
+# so any symbol its own module uses is relabelled the moment a test mentions
+# its name — the same promotion this file already records for
+# `layout.mountComponentContainer`. Classifying those as bucket C
+# ("only its own module reaches it", deliberately not counted) would take the
+# counted total from 1226 to 871.
+#
+# That is a 355-finding change to what this lane enforces, and it is a design
+# decision about whether "exported, called only by its own module, and tested"
+# is worth counting — not a thing to slip into a ceiling-raise commit. Measured
+# and recorded so the next person has the number; deliberately not acted on.
 
 # THE PROSE GUARD. Three sentences name this threshold and all three drifted off
 # it; the cheapest permanent fix is to make a raise that does not touch them
@@ -207,8 +242,8 @@ lint_step "reachability ratchet: contract suite (equality, both directions)" \
 lint_step "frontend reachability: the ratchet's prose agrees with its threshold" \
 	assert_reachability_prose_agrees
 
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1223 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1223 bash ci/test/frontend-reachability.sh
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1226 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

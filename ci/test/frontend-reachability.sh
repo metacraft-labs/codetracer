@@ -33,15 +33,16 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1223 bash ci/test/frontend-reachability.sh`, so 1224
-# findings fail `lint-nim` and 1223 do not.
+# `env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh`, so 1227
+# findings fail `lint-nim` and 1226 do not.
 #
 # AND SO DOES 1222, SINCE 2026-09-04: the threshold is an EQUALITY, not a
 # ceiling with room under it. Fewer findings than the number fails as "the
 # ceiling has slack, lower it to what you measured", because slack is a budget —
 # five slots had already accumulated (1223 measured against a ceiling of 1228)
 # and five new unreached exports could have landed unremarked. Only the exact
-# count passes. The sentence above is phrased in the one direction the prose
+# count passes, which means this number TRACKS THE TREE in both directions and
+# every move is a reviewed line in a diff. The sentence above is phrased in the one direction the prose
 # guard parses; both directions are asserted by the contract suite.
 #
 # THAT SENTENCE SAID 1224 AND 1225 WHILE THE INVOCATION SAID 1228, from 04:04
