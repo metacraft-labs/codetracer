@@ -49,7 +49,7 @@ WEBP="${REPO_ROOT}/scripts/docs/generate-webp-animations.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=43
+EXPECTED_ASSERTIONS=46
 
 ASSERTIONS=0
 FAILURES=0
@@ -399,6 +399,32 @@ assert_contains "${MATCH}" "verified at ${REV_OLD}" \
 UNKNOWN="$(rr_guard "${BACKEND}" 0123456789012345678901234567890123456789)"
 assert_contains "${UNKNOWN}" "cannot tell whether" \
 	"a revision the checkout does not have and cannot fetch is a refusal, not a pass"
+
+# -- a MOVING ref is compared against what it points at now ------------------
+#
+# The one workflow step that calls this script passes `RR_BACKEND_REF: dev`. A
+# reused workspace's local `dev` branch is exactly as stale as the checkout
+# sitting on it, so resolving the name locally would answer "is this checkout at
+# the `dev` it was at last week" — which is not a freshness question.
+UPSTREAM="${TEST_ROOT}/upstream-backend"
+git clone -q "${BACKEND}" "${UPSTREAM}"
+git -C "${UPSTREAM}" checkout -q -B dev "${REV_OLD}"
+MOVING="${TEST_ROOT}/moving-backend"
+git clone -q --branch dev "${UPSTREAM}" "${MOVING}"
+# Upstream moves on; the clone's local `dev` does not.
+git -C "${UPSTREAM}" reset -q --hard "${REV_NEW}"
+MOVED="$(rr_guard "${MOVING}" dev)"
+assert_contains "${MOVED}" "is a moving ref; re-fetching it" \
+	"a branch name is re-fetched rather than resolved against a stale local branch"
+assert_contains "${MOVED}" "stale codetracer-native-backend checkout" \
+	"...so a checkout sitting on last week's dev is refused"
+
+git -C "${MOVING}" config advice.detachedHead false
+git -C "${MOVING}" fetch -q origin dev
+git -C "${MOVING}" checkout -q "${REV_NEW}"
+CAUGHT_UP="$(rr_guard "${MOVING}" dev)"
+assert_contains "${CAUGHT_UP}" "verified at ${REV_NEW}" \
+	"a checkout brought up to the branch tip is reused"
 
 # END TO END, as a script: `main` must resolve the ref even though the directory
 # is present. This is the exact thing the old code skipped, and it fails before

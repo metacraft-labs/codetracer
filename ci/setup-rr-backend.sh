@@ -72,25 +72,43 @@ require_locked_checkout() {
 		exit 1
 	}
 
-	# The lock yields a full SHA; RR_BACKEND_REF may be a branch or tag. Try the
-	# ref as given, then as a remote-tracking branch, and only then reach for
-	# the network — the common CI case (already at the locked SHA) must not need
-	# a fetch, and must not need a credential either.
-	want="$(git -C "$dir" rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null)" ||
-		want="$(git -C "$dir" rev-parse --verify --quiet "origin/${ref}^{commit}" 2>/dev/null)" ||
-		want=""
+	# A FULL SHA CAN BE ANSWERED LOCALLY; A BRANCH CANNOT.
+	#
+	# The workspace lock yields an immutable 40-hex commit, so resolving it in
+	# the existing checkout is the whole question: no network, no credential —
+	# which matters, because that is the common CI path.
+	#
+	# `RR_BACKEND_REF` may instead name a MOVING ref, and the one workflow step
+	# that calls this script passes `dev`. A reused workspace's local `dev`
+	# branch is exactly as stale as the checkout sitting on it, so resolving the
+	# name locally would answer "is this checkout at the `dev` it was at last
+	# week" — which is not a freshness question at all. A moving ref is therefore
+	# always re-fetched, and a fetch that fails is a refusal rather than a
+	# fallback to the stale local branch. Set `RR_BACKEND_REF` to a commit if
+	# this has to work offline.
+	local is_sha=0
+	[[ $ref =~ ^[0-9a-f]{40}$ ]] && is_sha=1
+
+	want=""
+	if [[ $is_sha -eq 1 ]]; then
+		want="$(git -C "$dir" rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null)" || want=""
+	fi
 
 	if [[ -z $want ]]; then
-		echo "Ref '$ref' is not known to the existing checkout; fetching it." >&2
+		if [[ $is_sha -eq 0 ]]; then
+			echo "Ref '$ref' is a moving ref; re-fetching it so the comparison is against what it points at NOW." >&2
+		else
+			echo "Ref '$ref' is not known to the existing checkout; fetching it." >&2
+		fi
 		if git -C "$dir" fetch --quiet origin "$ref" 2>/dev/null; then
 			want="$(git -C "$dir" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" || want=""
 		fi
 	fi
 
 	if [[ -z $want ]]; then
-		echo "Error: cannot tell whether the codetracer-native-backend at '$dir' is the workspace-locked revision." >&2
+		echo "Error: cannot tell whether the codetracer-native-backend at '$dir' is the revision this build is pinned to." >&2
 		echo "  it is at:      $head" >&2
-		echo "  it must be at: $ref  (which this checkout does not have and could not fetch)" >&2
+		echo "  it must be at: $ref  (which this checkout could not resolve and could not fetch)" >&2
 		echo "Fetch it there, re-provision the sibling, or set RR_BACKEND_REF to the revision you mean." >&2
 		exit 1
 	fi
