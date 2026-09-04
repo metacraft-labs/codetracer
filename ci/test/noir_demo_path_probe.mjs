@@ -188,5 +188,78 @@ out.openTabs = await page.evaluate(() =>
   Array.from(document.querySelectorAll('.lm_title')).map((t) => t.textContent.trim()).slice(0, 8));
 
 out.pageErrors = pageErrors.slice(0, 10);
+
+// --- arm D: a RELOAD keeps the tabs, and the tabs keep their files ----------
+//
+// Reported as *"initially the editor has all files already opened as tab, but
+// the tabs are not populated; I need to close the tabs and re-open the files to
+// properly load their content"*.
+//
+// This needs its OWN context and a reload inside it, which is why it cannot be
+// folded into the arrival page above. `browser.newPage()` gives each page a
+// fresh context, and the whole defect lives in what a SECOND load does with
+// what the first one persisted: since `2b480df0a` (on top of `eb597f69a`'s
+// `CODETRACER_MODE_LAYOUT_EDIT`) the edit layout comes from localStorage, so
+// the restored config names one `editorComponent` per tab the visitor had open.
+// `renderer.createUIComponents` builds a component for each and nothing asks
+// for its source, so every restored tab mounted blank — measured on the
+// deployed `4e9cff5ae`: five tabs, `hasMonaco === false` on all five, and zero
+// source models in the page.
+//
+// NAMED FILES WITH KNOWN CONTENT, not "some tab has text". The two files below
+// are opened by this arm explicitly, so the assertion cannot be satisfied by
+// whichever file the entry heuristic happens to pick, and it does not depend on
+// the template's file LIST — a demo that gains a README still has to satisfy it.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1680, height: 1050 } });
+  const p = await ctx.newPage();
+  const reloadErrors = [];
+  p.on('pageerror', (e) => reloadErrors.push(String((e && e.message) || e).slice(0, 300)));
+  await p.goto(`${base}/noir/demo`, { waitUntil: 'load' });
+  await sleep(MOUNT_MS);
+
+  const FS = '[id^="filesystemComponent"]';
+  const opened = [];
+  for (const f of ['config.nr', 'sort.nr']) {
+    try {
+      await p.locator(`${FS} >> text="${f}"`).first().click({ timeout: 15000 });
+      opened.push(f);
+      await sleep(2500);
+    } catch (e) { /* reported below as a missing entry */ }
+  }
+  out.restoredOpened = opened;
+  await sleep(4000);
+
+  // THE RELOAD IS THE MEASUREMENT. No gesture after it: the workaround this
+  // gate exists to make unnecessary is a close and a re-open, so performing one
+  // here would assert the workaround rather than the fix.
+  await p.reload({ waitUntil: 'load' });
+  await sleep(MOUNT_MS + 6000);
+
+  out.restoredTabs = await p.evaluate(() => {
+    const d = window.data;
+    const eds = (d && d.ui && d.ui.editors) || {};
+    const res = {};
+    for (const k of Object.keys(eds)) {
+      const e = eds[k];
+      let model = null;
+      try { model = e && e.monacoEditor && e.monacoEditor.getModel && e.monacoEditor.getModel(); } catch (err) { /* not mounted */ }
+      const dom = (e && e.monacoEditor && e.monacoEditor.getDomNode && e.monacoEditor.getDomNode()) || null;
+      const lines = dom ? dom.querySelector('.view-lines') : null;
+      res[String(k)] = {
+        hasMonaco: !!(e && e.monacoEditor),
+        len: model ? model.getValue().length : 0,
+        text: model ? model.getValue().slice(0, 400) : '',
+        rendered: lines ? (lines.innerText || '').trim().length : -1,
+      };
+    }
+    return res;
+  });
+  out.restoredTabTitles = await p.evaluate(() =>
+    Array.from(document.querySelectorAll('.lm_title')).map((t) => t.textContent.trim()).slice(0, 12));
+  out.restoredPageErrors = reloadErrors.slice(0, 10);
+  await ctx.close();
+}
+
 console.log(JSON.stringify(out, null, 2));
 await browser.close();

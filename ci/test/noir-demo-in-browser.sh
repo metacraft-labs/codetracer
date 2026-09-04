@@ -329,6 +329,79 @@ else
 	note "rows: $(q flow.sample | cut -c1-260)"
 fi
 
+# --- arm F: a reload keeps the tabs, and the tabs keep their files ---------
+#
+# Reported as "initially the editor has all files already opened as tab, but the
+# tabs are not populated; I need to close the tabs and re-open the files". The
+# edit layout is persisted (`CODETRACER_MODE_LAYOUT_EDIT`) and restored on the
+# next load, so the restored config names an `editorComponent` per open tab —
+# containers that `createUIComponents` built components for and that nothing
+# asked a source for. Measured on the deployed `4e9cff5ae`: five tabs in the
+# strip, `hasMonaco === false` on every one.
+#
+# ASSERTED ON NAMED FILES, and on the file the arm itself opened, so this cannot
+# pass because some other tab happens to hold text, and it does not encode the
+# template's file LIST — a demo that gains a README still has to satisfy it.
+restored_check() { python3 -c '
+import json, sys
+doc = json.load(open(sys.argv[1]))
+tabs = doc.get("restoredTabs") or {}
+name, marker = sys.argv[2], sys.argv[3]
+hit = [v for k, v in tabs.items() if k.endswith("/" + name)]
+if not hit:
+    print("MISSING"); raise SystemExit
+v = hit[0]
+if not v.get("hasMonaco"):
+    print("NO_EDITOR"); raise SystemExit
+if not v.get("len"):
+    print("EMPTY"); raise SystemExit
+if marker not in (v.get("text") or ""):
+    print("WRONG_CONTENT"); raise SystemExit
+if (v.get("rendered") or 0) <= 0:
+    print("NOT_RENDERED"); raise SystemExit
+print("OK %d" % v["len"])' "${cache}/probe.json" "$1" "$2"; }
+
+echo
+echo "--- arm F: a reload keeps the tabs, and the tabs keep their files ---"
+note "tabs after the reload: $(q restoredTabTitles | cut -c1-200)"
+while IFS='|' read -r f marker; do
+	[ -n "${f}" ] || continue
+	verdict="$(restored_check "${f}" "${marker}")"
+	case "${verdict}" in
+	OK*)
+		ck ok "after a reload ${f}'s restored tab holds its file (${verdict#OK } chars), with no close/re-open"
+		;;
+	MISSING)
+		ck fail "after a reload there is no editor entry for ${f} at all — the tab the arm opened did not come back"
+		;;
+	NO_EDITOR)
+		ck fail "after a reload ${f} has a tab and NO editor — the restored pane was never populated"
+		;;
+	EMPTY)
+		ck fail "after a reload ${f}'s editor holds zero characters"
+		;;
+	WRONG_CONTENT)
+		ck fail "after a reload ${f}'s editor does not hold ${f} — expected to find '${marker}'"
+		;;
+	NOT_RENDERED)
+		ck fail "after a reload ${f}'s model has content but the editor painted nothing"
+		;;
+	*)
+		ck fail "the restored-tab probe reported '${verdict}' for ${f}"
+		;;
+	esac
+done <<-'FILES'
+	config.nr|Parameters of the ETH/USD feed
+	sort.nr|bubble passes
+FILES
+
+reload_errors="$(q restoredPageErrors)"
+if [ -z "${reload_errors}" ] || [ "${reload_errors}" = "[]" ]; then
+	ck ok "and the reload itself threw nothing — no 'editor <name> exists' out of the restored layout"
+else
+	ck fail "uncaught page errors on the reload: ${reload_errors:0:300}"
+fi
+
 errors="$(q pageErrors)"
 echo
 if [ -z "${errors}" ] || [ "${errors}" = "[]" ]; then
@@ -338,7 +411,7 @@ else
 fi
 
 echo
-expect_count 13
+expect_count 16
 if [ "${failures}" -eq 0 ]; then
 	printf 'RESULT: PASSED — %d assertion(s) over ui.js %s.\n' "${checks}" "${ui_digest}"
 	exit 0

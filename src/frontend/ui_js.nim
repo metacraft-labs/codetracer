@@ -3733,6 +3733,16 @@ proc onNoTrace(
   # Create UI components if not already created (needed for menu, status bar, etc.)
   # This must happen before tryInitLayout since layout initialization uses these components
   data.createUIComponents()
+  # WHICH EDITOR PANES DID THE RESTORED LAYOUT JUST NAME?
+  #
+  # Read HERE, immediately after the walk that creates them and before anything
+  # opens a tab of its own, so the list is exactly "panes that came from the
+  # stored layout" and cannot pick up a tab this startup opened. Each is a
+  # container with no `tabInfo` — see the long note in `utils.openNewEditorView`
+  # — and the loop after `waitForLayoutGround` below is what asks for its source.
+  var restoredEditorTabs: seq[cstring] = @[]
+  for editorName, _ in data.ui.editors:
+    restoredEditorTabs.add(editorName)
   data.refreshCommandPaletteMenuIndex()
   data.refreshCommandPaletteFileIndex()
 
@@ -3792,6 +3802,34 @@ proc onNoTrace(
       # actionable.
       cerror "edit-mode: GoldenLayout did not become ready within 5s; " &
         "the editor was not opened for " & $initialEditPath
+
+  # AND FILL THE TABS THE RESTORED LAYOUT BROUGHT BACK.
+  #
+  # Reported as *"initially the editor has all files already opened as tab, but
+  # the tabs are not populated; I need to close the tabs and re-open the files
+  # to properly load their content"*. Measured on the deployed `4e9cff5ae` at
+  # `/noir/demo`, on a reload with `CODETRACER_MODE_LAYOUT_EDIT` in
+  # localStorage: five tabs in the strip, `hasMonaco == false` on every one of
+  # them, zero source models in `monaco.editor.getModels()`, and no `.view-lines`
+  # in any editor container — beside a file tree and a CONSTRAINTS pane that
+  # were both correct.
+  #
+  # `openTab` is the same call the tree's click handler and the line above make,
+  # so a restored tab is filled by exactly the path that fills a fresh one; the
+  # `hasKey` check keeps it off the tab startup already opened, whose
+  # `TabInfo(loading: true)` is written before `openNewEditorView`'s first await.
+  # This is deliberately not a new loader: the visitor's workaround proved the
+  # content was reachable and the editor could show it, so the fix is to make
+  # the request, not to add a second way of answering it.
+  if restoredEditorTabs.len > 0:
+    if await waitForLayoutGround(data):
+      for restoredName in restoredEditorTabs:
+        if not data.services.editor.open.hasKey(restoredName):
+          data.openTab(restoredName, ViewSource)
+    else:
+      cerror "edit-mode: GoldenLayout did not become ready within 5s; " &
+        "the restored tabs were left unpopulated (" &
+        $restoredEditorTabs.len & ")"
   let ext = $toJsLang(response.lang)
   # for i, file in data.save.files:
     # if i < TAB_LIMIT:

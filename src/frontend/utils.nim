@@ -1615,12 +1615,44 @@ proc openNewEditorView*(
     #   cwarn $tabInfo
     #   cerror "editor: tabInfo print: " & getCurrentExceptionMsg()
 
-    data.makeEditorViewDetailed(
-      editorName,
-      editorView,
-      tabInfo,
-      location
-    )
+    # A RESTORED LAYOUT HAS ALREADY BUILT THIS PANE, AND IT IS EMPTY.
+    #
+    # `renderer.createUIComponents` walks `data.ui.resolvedConfig` once at
+    # startup and calls `makeComponent` for every `component` node it finds.
+    # Since the edit layout began being restored from the mode store
+    # (`2b480df0a`, on top of `eb597f69a`'s `CODETRACER_MODE_LAYOUT_EDIT`), that
+    # config carries one `editorComponent` node per tab the visitor had open, so
+    # the walk registers an `EditorViewComponent` in `data.ui.editors` for each
+    # — with a `layoutItem`, and with NO `tabInfo`, because nothing on that path
+    # asks for the file's source. `renderTopLevelEditorDirect`'s mount poll
+    # waits on `not self.tabInfo.isNil`, never gets it, and gives up: the tab is
+    # in the strip, the container is on screen, and it never fills.
+    #
+    # Reaching here for such a pane used to raise out of `makeEditorViewComponent`
+    # ("editor <name> exists"), which is an unhandled rejection inside this async
+    # proc — so the ONE file edit-mode startup opens by itself died too, and a
+    # click on any restored file in the tree died the same way. Adopting the pane
+    # instead is what the visitor's own workaround does by hand: the content is
+    # available, the container is real, and only the hand-off was missing.
+    #
+    # The guard is `tabInfo.isNil`, not `hasKey`: a component that already has a
+    # tabInfo is a genuine duplicate tab, which is the invariant the raise was
+    # put there to catch, and it still raises.
+    let restored =
+      if data.ui.editors.hasKey(editorName): data.ui.editors[editorName]
+      else: nil
+    if not restored.isNil and restored.tabInfo.isNil:
+      data.services.editor.open[editorName] = tabInfo
+      restored.tabInfo = tabInfo
+      data.services.editor.active = editorName
+      data.redraw()
+    else:
+      data.makeEditorViewDetailed(
+        editorName,
+        editorView,
+        tabInfo,
+        location
+      )
 
     if line != NO_LINE:
       proc cb =
