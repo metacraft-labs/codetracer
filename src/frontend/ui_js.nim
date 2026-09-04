@@ -6087,8 +6087,8 @@ when defined(ctWeb) and not defined(ctInExtension):
                 reportFromAcirListing(listing, packageDir, provenance))
 
           web_noir_build.noirGeneratedCodeSink =
-            proc(listing: string; artefactJson: string; packageDir: string;
-                 provenance: string) =
+            proc(listing: string; artefactJson: string; projectRoot: string;
+                 packageDir: string; provenance: string) =
               # THE ON-DEMAND BOUNDARY. This hands the compile's raw outputs
               # over as TEXT and stops. Nothing is parsed, no call stack is
               # resolved, no anchor is built and no surface is opened —
@@ -6101,7 +6101,7 @@ when defined(ctWeb) and not defined(ctInExtension):
               # its visibility, beside panes that have already caused re-render
               # storms.
               generated_code.noteCompileArtefact(
-                listing, artefactJson, packageDir, provenance)
+                listing, artefactJson, projectRoot, packageDir, provenance)
 
           web_noir_build.noirTestRunSink =
             proc(response: NoirTestResponse; packageDir: string) =

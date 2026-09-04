@@ -426,6 +426,37 @@ proc syncFromSource*(anchors: seq[MappingAnchor]; path: string; line: int;
     "synchronisation is suspended here rather than interpolated to the " &
     "nearest anchor")
 
+proc rebaseSources*(anchors: seq[MappingAnchor];
+                    toReaderPath: proc(path: string): string {.closure.}):
+                    seq[MappingAnchor] =
+  ## Rewrite every source path through `toReaderPath`, keeping everything else.
+  ##
+  ## WHY THIS EXISTS, AND WHAT BREAKS WITHOUT IT. A producer spells its source
+  ## paths the way its ARTEFACT does — Noir's `file_map` says
+  ## `hello_noir/src/main.nr`, because that is the key the compiler was handed.
+  ## The editor opens tabs by the renderer's spelling, `/hello_noir/src/main.nr`.
+  ## `syncFromSource` compares those two strings, so without a rebase EVERY
+  ## query misses and the surface reports "this line has no anchor over it" for
+  ## every line of the file.
+  ##
+  ## THAT IS THE WORST AVAILABLE FAILURE for this feature, because it is
+  ## indistinguishable from a correct answer: a build stripped of debug
+  ## information produces exactly the same screen. The listing opens, the rows
+  ## are real, the reason is a true sentence — and the mapping the artefact
+  ## does carry is silently unreachable. Nothing in the model can detect it,
+  ## because a path that matches nothing is not a malformed path.
+  ##
+  ## A MAPPER RATHER THAN A PREFIX PAIR, because the rule is the producer's:
+  ## `noir_build_producer.rendererPathFor` passes an unmatched path through
+  ## unchanged rather than bolting a slash onto it, since the stdlib's own
+  ## sources reach these artefacts and inventing a project-relative identity
+  ## for them would make an anchor claim the project contains a file it does
+  ## not. This module must not know that rule; it must only apply it.
+  result = anchors
+  for a in result.mitems:
+    for r in a.sources.mitems:
+      r.path = toReaderPath(r.path)
+
 proc anchorsFromSource*(anchors: seq[MappingAnchor]; path: string;
                         line: int): seq[int] =
   ## EVERY anchor a source position produced, in row order — not the first.

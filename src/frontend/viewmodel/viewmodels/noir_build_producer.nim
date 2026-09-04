@@ -223,6 +223,27 @@ proc escapeHtmlText*(text: string): string =
     of '\'': result.add "&#39;"
     else: result.add ch
 
+proc rendererPathFor*(projectRoot, packageDir, vfsPath: string): string =
+  ## `rendererPath`'s rule, WITHOUT a producer.
+  ##
+  ## Extracted because a second consumer arrived and the alternative was a
+  ## second copy: the generated-code listing anchors its rows to source
+  ## positions the compiler spells the same way a diagnostic's `file` is
+  ## spelled, and it has to compare them against the path the editor opened a
+  ## tab by. Two copies of this rule is how one of them comes to disagree, and
+  ## the disagreement is invisible — a listing whose anchors never match the
+  ## cursor simply reports "no generated code is mapped to this line" for every
+  ## line in the file, which looks exactly like an artefact with no debug
+  ## information.
+  ##
+  ## `rendererPath` below is now this function with the producer's two fields
+  ## read out of it, so there is one rule and one place to correct it.
+  if vfsPath.len == 0: return ""
+  let prefix = packageDir & "/"
+  if packageDir.len > 0 and vfsPath.startsWith(prefix):
+    return projectRoot & "/" & vfsPath[prefix.len .. ^1]
+  vfsPath
+
 proc rendererPath*(producer: NoirBuildProducer; vfsPath: string): string =
   ## A diagnostic's `file` in the spelling the renderer opens tabs by.
   ##
@@ -242,11 +263,7 @@ proc rendererPath*(producer: NoirBuildProducer; vfsPath: string): string =
   ## having a slash bolted on: the stdlib's own sources reach diagnostics
   ## occasionally, and inventing a project-relative identity for them would
   ## make a row claim the project contains a file it does not.
-  if vfsPath.len == 0: return ""
-  let prefix = producer.packageDir & "/"
-  if producer.packageDir.len > 0 and vfsPath.startsWith(prefix):
-    return producer.projectRoot & "/" & vfsPath[prefix.len .. ^1]
-  vfsPath
+  rendererPathFor(producer.projectRoot, producer.packageDir, vfsPath)
 
 proc buildSeverityOf*(severity: NoirDiagnosticSeverity): BuildLineSeverity =
   ## `PositionedDiagnostic.severity` → the pane's severity.

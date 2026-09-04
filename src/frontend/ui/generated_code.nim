@@ -56,7 +56,9 @@ from ../viewmodel/viewmodels/edit_mode_toolbar import
   CommandProposal, ProposalConfidence, pcCanonical
 
 from ../viewmodel/viewmodels/generated_code_anchors import
-  MappingAnchor, ArtefactSupport
+  MappingAnchor, ArtefactSupport, rebaseSources
+
+from ../viewmodel/viewmodels/noir_build_producer import rendererPathFor
 
 from ../viewmodel/viewmodels/noir_anchor_producer import
   readArtefactJson, produceAnchors, aroOk
@@ -76,6 +78,11 @@ type
       ## `VfsResponse.acir_listing`, the compiler's own printed opcodes.
     artefactJson: string
       ## The compile artefact, carrying `file_map` and `debug_symbols`.
+    projectRoot: string
+      ## The RENDERER's spelling of the project root — `/hello_noir`. Kept
+      ## beside `packageDir`, which is the COMPILER's — `hello_noir`. The pair
+      ## is what `rendererPathFor` needs, and without it every anchor would
+      ## carry a path no editor tab is keyed by.
     packageDir: string
     provenance: string
     present: bool
@@ -93,7 +100,8 @@ proc initGeneratedCodeVM*() =
   clog "GeneratedCodeVM: instance created"
 
 proc noteCompileArtefact*(listing: string; artefactJson: string;
-                          packageDir: string; provenance: string) =
+                          projectRoot: string; packageDir: string;
+                          provenance: string) =
   ## A COMPILE SUCCEEDED. Installed into
   ## `web_noir_build.noirGeneratedCodeSink` by `ui_js`.
   ##
@@ -109,8 +117,8 @@ proc noteCompileArtefact*(listing: string; artefactJson: string;
   ## remedy is the same — the surface keeps what it is showing, and the new
   ## artefact is what the NEXT invocation reads.
   lastArtefact = CompileArtefact(
-    listing: listing, artefactJson: artefactJson, packageDir: packageDir,
-    provenance: provenance, present: true)
+    listing: listing, artefactJson: artefactJson, projectRoot: projectRoot,
+    packageDir: packageDir, provenance: provenance, present: true)
 
 proc rowsOf(report: ConstraintReport): seq[GeneratedRow] =
   ## Flatten the report's per-function rows into the listing's row space.
@@ -163,6 +171,22 @@ proc buildListing(t: GeneratedCodeTarget; sourcePath: string):
     let read = readArtefactJson(lastArtefact.artefactJson, rows.len)
     if read.outcome == aroOk:
       (anchors, support) = produceAnchors(read.artefact)
+      # THE ANCHORS ARRIVE IN THE COMPILER'S SPELLING AND THE CURSOR IS IN THE
+      # EDITOR'S. `file_map` says `hello_noir/src/main.nr` because that is the
+      # key the compiler was handed; `sourcePath` here is the name the tab was
+      # opened by, `/hello_noir/src/main.nr`. `syncFromSource` compares those
+      # two strings.
+      #
+      # Without this line the listing opens, its rows are real, and every
+      # single line of the file reports that no generated code is mapped to it
+      # — indistinguishable from a build stripped of debug information, and
+      # undetectable by the model, because a path that matches nothing is not
+      # a malformed path. `rendererPathFor` is the SAME rule the build pane's
+      # clickable diagnostics use, called rather than restated.
+      let root = lastArtefact.projectRoot
+      let pkg = lastArtefact.packageDir
+      anchors = rebaseSources(anchors, proc(p: string): string =
+        rendererPathFor(root, pkg, p))
     else:
       # Rows without anchors is a legitimate state, not a failure: every row
       # is unmapped and synchronisation suspends visibly, which is exactly what

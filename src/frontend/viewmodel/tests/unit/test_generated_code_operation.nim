@@ -65,6 +65,7 @@ import ../../viewmodels/generated_code_anchors
 import ../../viewmodels/generated_code_operation
 import ../../viewmodels/generated_code_vm
 import ../../viewmodels/edit_mode_toolbar
+from ../../viewmodels/noir_build_producer import rendererPathFor
 
 # ---------------------------------------------------------------------------
 # Counted assertions. `counted` is a TEMPLATE for the reason
@@ -78,7 +79,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 248
+const ExpectedAssertions = 263
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it — a count edited DOWN to match a short run is a
   ## failed assertion whose identity has been erased.
@@ -103,8 +104,11 @@ const ExpectedAssertions = 248
   ##   −5  `gcl_d11_the_keybinding_resolves_to_the_first_target_…` deleted
   ##   +4  `every_language_with_a_ladder_is_reachable_from_some_path` (6)
   ##       became `every_declared_extension_selects_a_ladder` (10)
+  ##  +15  `the_anchors_are_rebased_into_the_spelling_…` added: 3 for the
+  ##       negative arm, 4 for the positive, 3 for the passthrough rule and 5
+  ##       for "the rebase changed nothing but the paths"
   ##   ───
-  ##   −1  249 → 248
+  ##  +14  249 → 263
   ##
   ## A count that moves down and cannot be decomposed like this is a failed
   ## assertion whose identity is unknown, and lowering the constant is how it
@@ -370,6 +374,67 @@ suite "GCL: the cursor leads, and the correspondence is visible (GCL-D12)":
     let one = syncFromSource(anchors, MainPath, 9)
     counted one.outcome == soAligned
     counted counterpartRows(anchors, one) == (4, 6)
+
+  test "the_anchors_are_rebased_into_the_spelling_the_editor_opened_the_tab_by":
+    # THE FAILURE THIS PREVENTS IS INVISIBLE, which is why both arms are here.
+    #
+    # `file_map` spells a source `hello_noir/src/main.nr` — the key the
+    # compiler was handed. The editor opened its tab as `/hello_noir/src/main.nr`.
+    # `syncFromSource` compares those two strings, so an un-rebased listing
+    # reports "this line has no anchor over it" for EVERY line of the file:
+    # correct-looking, true as a sentence, and indistinguishable from a build
+    # with no debug information. Nothing in the model can catch it, because a
+    # path that matches nothing is not a malformed path.
+    const CompilerPath = "hello_noir/src/main.nr"
+    const EditorPath = "/hello_noir/src/main.nr"
+    const ProjectRoot = "/hello_noir"
+    const PackageDir = "hello_noir"
+
+    let raw = @[exact(0, 3, CompilerPath, 8), exact(4, 6, CompilerPath, 9)]
+
+    # NEGATIVE ARM: the compiler's spelling against the editor's cursor finds
+    # nothing, and says so in a sentence that is true and useless.
+    let unrebased = createGeneratedCodeVM()
+    var l1 = listingFixture()
+    l1.sourcePath = EditorPath
+    l1.anchors = raw
+    unrebased.openListing(l1, 8)
+    counted unrebased.focus.val.outcome == soSuspended
+    counted unrebased.focus.val.reason.len > 0
+    counted unrebased.instantiationCount.val == 0
+
+    # POSITIVE ARM: the same anchors through the same rule the build pane's
+    # clickable diagnostics use, and the cursor now lands.
+    let rebased = createGeneratedCodeVM()
+    var l2 = listingFixture()
+    l2.sourcePath = EditorPath
+    l2.anchors = rebaseSources(raw, proc(p: string): string =
+      rendererPathFor(ProjectRoot, PackageDir, p))
+    rebased.openListing(l2, 8)
+    counted rebased.focus.val.outcome == soAligned
+    counted rebased.focusRows.val == (0, 3)
+    counted EditorPath in rebased.focusText.val
+    discard rebased.noteCursorMoved(EditorPath, 9)
+    counted rebased.focusRows.val == (4, 6)
+
+    # THE RULE PASSES AN UNMATCHED PATH THROUGH rather than bolting a slash on
+    # it: the stdlib's own sources reach these artefacts, and inventing a
+    # project-relative identity for them would make an anchor claim the project
+    # contains a file it does not.
+    counted rendererPathFor(ProjectRoot, PackageDir,
+      "std/field/bn254.nr") == "std/field/bn254.nr"
+    counted rendererPathFor(ProjectRoot, PackageDir, CompilerPath) == EditorPath
+    counted rendererPathFor(ProjectRoot, PackageDir, "") == ""
+
+    # And the rebase changes NOTHING but the paths — a rewrite that dropped a
+    # row range or a fidelity would be a different defect wearing this fix.
+    let mapped = rebaseSources(raw, proc(p: string): string =
+      rendererPathFor(ProjectRoot, PackageDir, p))
+    counted mapped.len == raw.len
+    counted mapped[0].generatedFirst == raw[0].generatedFirst
+    counted mapped[0].generatedLast == raw[0].generatedLast
+    counted mapped[0].fidelity == raw[0].fidelity
+    counted mapped[1].sources[0].startLine == raw[1].sources[0].startLine
 
   test "gcl_d23_the_surface_names_the_producer_that_painted_it":
     # A row count cannot discriminate two producers that agree on every
