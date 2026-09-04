@@ -615,12 +615,22 @@ proc requestAndLoadLocals*(s: HeadlessDebugSession) =
   ##
   ## This closes the data-flow loop that the GUI achieves via event-bus
   ## wiring: request -> response -> store update -> reactive signal change.
+  # THE SESSION'S OWN WATCH LIST, not a literal `[]`.
+  #
+  # This surface exposes `addWatch` / `removeWatch` (below) which write
+  # `stateVM.watchExpressions`, and then asked the backend for no watches
+  # at all — so a headless or SDK caller could add a watch and never
+  # receive an answer to it. Same crossed wiring the GUI had, on a
+  # different surface.
+  var watches: seq[string] = @[]
+  if not s.session.isNil and not s.session.stateVM.isNil:
+    watches = s.session.stateVM.watchExpressions.val
   let args = %*{
     "rrTicks": s.getCurrentRRTicks().int64,
     "countBudget": 3000,
     "minCountLimit": 50,
     "depthLimit": 7,
-    "watchExpressions": [],
+    "watchExpressions": watches,
     "lang": 0,  # auto-detect
   }
   let resp = s.backend.sendDapRequest("ct/load-locals", args)
@@ -629,10 +639,18 @@ proc requestAndLoadLocals*(s: HeadlessDebugSession) =
     if not body.isNil and body.kind == JObject:
       let localsNode = body.getOrDefault("locals")
       if not localsNode.isNil and localsNode.kind == JArray:
+        # Watch answers ride the same list and are separated by
+        # `value.isWatch`, exactly as the GUI's `syncStoreLocals` does.
         var variables: seq[Variable]
+        var watchResults: seq[Variable]
         for localNode in localsNode:
-          variables.add(parseVariable(localNode))
+          let parsed = parseVariable(localNode)
+          if localNode.getOrDefault("value").getOrDefault("isWatch").getBool(false):
+            watchResults.add(parsed)
+          else:
+            variables.add(parsed)
         s.session.store.updateLocals(variables)
+        s.session.store.updateWatches(watchResults)
         s.session.store.locals.loadedForRRTicks.val = s.getCurrentRRTicks()
         drain()
 

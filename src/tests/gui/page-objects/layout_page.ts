@@ -62,8 +62,18 @@ export class ProgramStateVariable {
 export class ProgramStateTab extends TabObject {
   private variables: ProgramStateVariable[] = [];
 
+  /**
+   * The watch-expression input.
+   *
+   * `#watch-0`, NOT `#watch`. The view renders
+   * `input#watch-{componentId}` (`isonim_state_view.nim`, and the legacy
+   * `StateComponent.watchInputId` before it), so the bare `#watch` this
+   * used to ask for has never matched an element in any product. Nothing
+   * caught it because no spec ever typed into the box — the locator was
+   * defined and never asserted through.
+   */
   watchExpressionTextBox(): Locator {
-    return this.root.locator("#watch");
+    return this.root.locator("#watch-0");
   }
 
   async programStateVariables(forceReload = false): Promise<ProgramStateVariable[]> {

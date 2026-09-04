@@ -54,7 +54,7 @@
 ## both backends, so that is a real gap in the lane, not a property of this
 ## suite — see BlockTracer.milestones.org's M2b entry.
 
-import std/[json, options, sets, unittest]
+import std/[json, options, sets, strutils, unittest]
 
 import codetracer_embed
 
@@ -256,6 +256,35 @@ suite "M2b — the five panes drive headlessly (MockBackendService, no renderer)
       check p.state.currentVariables.val[0].name == "g"
       p.state.selectTab(stWatches)
       check p.state.currentVariables.val.len == 0
+      # THE WATCHES TAB SHOWS THE WATCH ANSWERS.
+      #
+      # This arm of `currentVariables` used to be a literal
+      # `newSeq[store_types.Variable]()`, so it could show nothing
+      # whatever the backend answered — and the check above, on its own,
+      # passed against that stub for exactly the same reason it passes
+      # now. An assertion that only ever observes an EMPTY tab cannot
+      # tell a working tab from a hard-coded one, so the tab is also
+      # asserted with something in it.
+      p.store.updateWatches(@[
+        makeVariable("asteroid_masses[1]", "2000", "Field"),
+        makeVariable("x + 1", "cannot evaluate `x + 1`: `+` would have to be computed", "watch error"),
+      ])
+      # `require`, not `check`: against the pre-fix stub this arm answers
+      # an EMPTY seq, and the row reads below would then die with an
+      # `IndexDefect` whose message says only "the container is empty" —
+      # naming the symptom and not the defect. Aborting here makes the
+      # failure report the sentence that is actually false.
+      require p.state.currentVariables.val.len == 2 # the Watches tab shows the watch answers
+      check p.state.currentVariables.val[0].name == "asteroid_masses[1]"
+      check p.state.currentVariables.val[0].value == "2000"
+      # A REFUSED watch is a row carrying its reason, not an absence.
+      check p.state.currentVariables.val[1].name == "x + 1"
+      check p.state.currentVariables.val[1].value.contains("cannot evaluate")
+      # And the watches must not have leaked into the Locals tab.
+      p.state.selectTab(stLocals)
+      check p.state.currentVariables.val.len == 1
+      check p.state.currentVariables.val[0].name == "x"
+      p.state.selectTab(stWatches)
       p.state.addWatch("x + 1")
       p.state.addWatch("x + 1")
       check p.state.watchExpressions.val == @["x + 1"]

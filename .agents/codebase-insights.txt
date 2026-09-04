@@ -2863,3 +2863,67 @@ commands.
   runs on the workstation), and the floor is asserted by NAME — `index.html`
   and `ui.js` must appear in the manifest, because a manifest built from the
   wrong directory has neither and a bare `> 0` would not notice.
+
+## Watch expressions: seven places, and the wire was always carrying them
+
+- 2026-09-04: `CtLoadLocalsArguments.watchExpressions` has existed on both
+  sides of the wire for as long as the State pane has, and the frontend has
+  always populated it. There was never a missing feature to design — there
+  were seven disconnected pieces, each of which reads as success from the
+  others' point of view. Anyone touching this area should know all seven:
+  * **`db.rs` dropped the field with a `warn!`** ("watch expressions not
+    supported for db traces currently"). The request carried the expression
+    and the response carried no row for it AND no reason, so the pane could
+    not tell "not evaluated" from "no such variable".
+  * **`state_vm.nim`'s `currentVariables` memo returned a literal empty seq
+    for `stWatches`**, with a comment promising it would be filled in "when
+    the backend supports them". The tab could show nothing whatever the
+    backend answered.
+  * **The WebRenderer panel in `isonim_state_view.nim` had no tab strip.**
+    The Locals/Globals/Watches buttons existed only in the *MockRenderer*
+    panel in the same file, which is what the headless view tests render —
+    so `stWatches` was reachable from `vm.selectTab` and from no gesture in
+    any shipping product. A test that switched tabs through the ViewModel
+    passed against a product no user could navigate.
+  * **The typed expression and the answered request were on different
+    objects.** The live input form (`wireWatchInputForm`) calls
+    `StateVM.addWatch`; the reply the product paints comes from
+    `StateComponent.loadLocals` -> `CtLoadLocalsResponse` ->
+    `registerLocals`, and `loadLocals` read `StateComponent.watchExpressions`
+    — a field written only by `submitWatchExpression`, which has NO CALL
+    SITES anywhere in the repo. `ui/state.nim` now sources the list from the
+    ViewModel and installs `onWatchesChangedProc` to re-ask.
+  * **`replay_data_store.requestLocals` keyed its dedup on the COUNT of
+    watch expressions**, so swapping one watch for another at the same step
+    was suppressed and the pane kept answering a deleted expression.
+  * **`headless_session.requestAndLoadLocals` hardcoded
+    `"watchExpressions": []`** while the same file exposes `addWatch` /
+    `removeWatch` — the identical crossed wiring on the SDK surface.
+  * **The page objects located `#watch`; the view renders `#watch-0`.**
+    Both `layout_page.ts` and `variable-state-pane.ts` had a locator that
+    has never matched an element. Nothing caught it because no spec ever
+    typed into the box.
+- 2026-09-04: **do NOT route watch evaluation through
+  `tracepoint_interpreter`**, which is what `db.rs`'s TODO pointed at. It is
+  gated behind the `syntax-highlight` feature (it compiles expressions with
+  tree-sitter) and `src/db-backend/build_wasm.sh` builds the browser engine
+  with `--no-default-features --features browser-transport`. In that build
+  `TracepointInterpreter::evaluate` is the stub in `tracepoint_interpreter/
+  mod.rs` that returns `vec![]`. Using it would ship a feature that works on
+  the desktop and silently answers nothing in a browser — the same defect
+  one layer down. `watch_expression.rs` therefore depends on nothing but the
+  trace's own value records and answers identically in both builds.
+- 2026-09-04: a REFUSED watch travels as `ValueRecord::Error { msg }`, not
+  as a new wire field. The Nim `Value` already has an `Error` kind whose
+  text representation is its `msg`
+  (`common_types/utils/text_representation.nim`), so a refusal renders as a
+  visible row on every existing frontend without any of them learning a new
+  case. `Value.isWatch` — declared in `common_types/language_features/
+  value.nim` and styled `.value-watch` since before any backend wrote it —
+  is what separates a watch row from a local; the Rust `Value` gained the
+  matching `is_watch` field.
+- 2026-09-04: watch rows are appended to `locals` AFTER the sort and dedup
+  in `Db::load_locals`, deliberately. Sorting them in would scatter them
+  through the list in name order, and the dedup (`a.expression ==
+  b.expression`) would DELETE a watch whose expression equals a local's
+  name — which is the most ordinary watch anyone types.

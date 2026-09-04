@@ -45,8 +45,58 @@ export class VariableStatePane {
     await btn.dispatchEvent("click");
   }
 
+  /**
+   * The watch-expression input.
+   *
+   * `#watch-0`, NOT `#watch`. The view renders
+   * `input#watch-{componentId}` (`isonim_state_view.nim`, and the legacy
+   * `StateComponent.watchInputId` before it), so the bare `#watch` this
+   * used to ask for has never matched an element in any product. Nothing
+   * caught it because no spec ever typed into the box — the locator was
+   * defined and never asserted through.
+   */
   watchExpressionTextBox(): Locator {
-    return this.root.locator("#watch");
+    return this.root.locator("#watch-0");
+  }
+
+  /** The Locals / Globals / Watches tab strip inside the pane. */
+  stateTabButton(which: "locals" | "globals" | "watches"): Locator {
+    return this.root.locator(`.state-tabs .tab-${which}`).first();
+  }
+
+  /**
+   * Switch the pane to one of its three tabs.
+   *
+   * This is a click on the product's own button, deliberately, and not a
+   * `vm.selectTab` call: until the tab strip was added to the WebRenderer
+   * panel the Watches tab could ONLY be reached from a ViewModel call, so
+   * a test that reached it that way would have passed against a product
+   * in which no user could get there.
+   */
+  async selectStateTab(which: "locals" | "globals" | "watches"): Promise<void> {
+    const btn = this.stateTabButton(which);
+    await btn.waitFor({ state: "visible", timeout: 15_000 });
+    try {
+      await btn.click({ timeout: 5_000 });
+    } catch {
+      await btn.dispatchEvent("click");
+    }
+  }
+
+  /**
+   * Type an expression into the watch box and submit it.
+   *
+   * Typed as KEYSTROKES and submitted with Enter, because the form's
+   * `submit` handler is what calls `StateVM.addWatch` — setting the
+   * input's `value` property would bypass the only path a user has.
+   */
+  async addWatchExpression(expression: string): Promise<void> {
+    const box = this.watchExpressionTextBox();
+    await box.waitFor({ state: "visible", timeout: 15_000 });
+    await box.click();
+    await box.fill("");
+    await box.type(expression, { delay: 10 });
+    await box.press("Enter");
   }
 
   variableRow(name: string): Locator {
