@@ -462,12 +462,23 @@ try {
     // toolbar's actual contents say whether the control is missing, renamed, or
     // on a surface that never mounted. Recorded whether or not Run was found,
     // so a passing run also carries the baseline.
+    //
+    // DERIVED THE SAME WAY `noir_mode_roundtrip_probe.mjs` derives `buttonIds`
+    // — `panel.querySelectorAll('button')` — so the two gates report the same
+    // fact in the same words and a disagreement between them is a real
+    // disagreement rather than two selectors looking at different things.
     out.editToolbarButtons = await page.evaluate(() => {
       const panel = document.querySelector('[data-topbar-surface]');
       return {
         surface: panel ? panel.getAttribute('data-topbar-surface') : null,
-        ids: Array.from(document.querySelectorAll('[id$="-image"]'))
-          .map((e) => e.id),
+        buttonIds: panel
+          ? Array.from(panel.querySelectorAll('button')).map((b) => b.id || '(no id)')
+          : null,
+        panelChildren: panel
+          ? Array.from(panel.children).map(
+              (c) => `${c.tagName.toLowerCase()}.${String(c.className || '').slice(0, 40)}`)
+          : null,
+        imageIds: Array.from(document.querySelectorAll('[id$="-image"]')).map((e) => e.id),
       };
     });
     if (runButton) {
