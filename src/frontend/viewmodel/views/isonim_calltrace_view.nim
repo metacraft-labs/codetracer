@@ -292,6 +292,32 @@ when defined(js):
   proc calltraceElementHeight(el: isonim_dom.Element): float
     {.importjs: "#.getBoundingClientRect().height".}
 
+  proc setCalltraceTabBusy(busy: bool) =
+    ## Add or remove `lm_tab_busy` on the CALLTRACE tab.
+    ##
+    ## The tab is found by `data-ct-panel-content`, stamped by
+    ## `ui/layout.nim`'s `markPanelTab`, NOT by its title text — see the note
+    ## there for why the title is not available as a handle.
+    ##
+    ## `querySelectorAll` rather than `querySelector`: a session can hold more
+    ## than one calltrace panel (multi-replay, and a panel pinned to an
+    ## auto-hide edge keeps its tab), and leaving the others latched on would
+    ## show a permanent busy state on a panel that finished loading.
+    ##
+    ## Silent when no tab matches. That is the ordinary state during start-up
+    ## — the panel mounts and this effect first runs before GoldenLayout has
+    ## emitted `tab` — and the effect re-runs on the next state change.
+    {.emit: """
+      var _tabs = document.querySelectorAll("[data-ct-panel-content='Calltrace']");
+      for (var _i = 0; _i < _tabs.length; _i++) {
+        if (`busy`) {
+          _tabs[_i].classList.add('lm_tab_busy');
+        } else {
+          _tabs[_i].classList.remove('lm_tab_busy');
+        }
+      }
+    """.}
+
   proc measureCallRowHeight(linesContainer: isonim_dom.Element): float =
     ## Return the rendered CSS-pixel height of the first calltrace row found
     ## inside `linesContainer`.  Returns 0.0 if no rows have been rendered yet.
@@ -642,10 +668,24 @@ when defined(js):
             tdiv(ref = linesContainer, class = "calltrace-lines",
                  transform = "translateY(" & $(int(vm.store.calltrace.startLineIndex.val.float * vm.rowHeightPx.val)) & "px)"):
               discard
+        # NO TEXT. This used to read "Loading..." at `font-size: 3ch`,
+        # absolutely positioned across the middle of the pane, and the user
+        # asked for it to go: "a 'Loading' indicator (which really needs to be
+        # redesigned to be more discreet — for example, some appropriate
+        # visual change in the call trace tab title can indicate the loading
+        # state)".
+        #
+        # The element STAYS, empty, keeping its id and its `isLoading`
+        # binding, because it is the DOM's single statement of whether the
+        # calltrace is loading and three other things read or write it: the
+        # two imperative `style.display` writes in `ui/calltrace.nim`
+        # (`registerCalltrace`, `eventuallyScroll`) and the unit tests over
+        # the Mock renderer. `calltrace.styl` now draws it as a 2px hairline
+        # along the pane's top edge instead of a headline.
         tdiv(class = "calltrace-loading",
              id = "calltrace-toggle-loading-0",
              display = displayIf(vm.isLoading.val)):
-          text "Loading..."
+          discard
 
     # Render the full window the store currently holds.  The `.calltrace-lines`
     # container is positioned with `translateY(startLineIndex * 24px)` so the
@@ -690,6 +730,16 @@ when defined(js):
         if h > 0.0:
           vm.setRowHeightPx(h)
       , 0)
+
+    # The discreet indicator the user asked for, in the tab rather than
+    # across the pane. Toggles a class; adds no element and changes no text,
+    # so `.lm_tabs` keeps its child shape (asserted by
+    # `tests/layout/tab_strip_geometry.spec.ts`), the tab keeps its width,
+    # and every exact-match on `.lm_title` text — the several Playwright
+    # specs comparing "CALLTRACE", and the auto-hide code that uses the title
+    # as a panel's identity — keeps resolving.
+    createEffect proc() =
+      setCalltraceTabBusy(vm.isLoading.val)
 
     renderSearchResultsList(r, resultsContainer, vm)
     renderTraceSvg(r, svgContainer, vm)

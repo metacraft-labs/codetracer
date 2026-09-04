@@ -271,6 +271,42 @@ LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
   height: 1.01em !important
 
 // ---------------------------------------------------------------------------
+// Busy tab
+//
+// The panel is loading. Shown by breathing the title's opacity, and by
+// nothing else — no badge, no spinner, no added element and no change to the
+// title text.
+//
+// That restraint is a constraint, not taste. `.lm_tabs` is asserted to hold
+// only `.lm_tab` children (`tests/layout/tab_strip_geometry.spec.ts`, which
+// also measures per-tab widths), the tab row is over-constrained enough that
+// `.lm_close_tab` needs `flex-shrink: 0` to survive, and the title TEXT is an
+// identity key: `ui/auto_hide.nim` matches a docked panel by its exact
+// `textContent`, and several Playwright specs compare `.lm_title` to
+// "CALLTRACE" exactly. An opacity animation costs no layout and changes no
+// string, so it cannot reach any of them.
+//
+// The class is applied by `views/isonim_calltrace_view.nim`'s
+// `setCalltraceTabBusy`, keyed on `data-ct-panel-content`.
+.lm_header .lm_tab.lm_tab_busy .lm_title
+  animation: lm-tab-busy-pulse 1.4s ease-in-out infinite
+
+@keyframes lm-tab-busy-pulse
+  0%
+    opacity: 1
+  50%
+    opacity: 0.45
+  100%
+    opacity: 1
+
+// Honour a reduced-motion preference: keep the state legible, drop the
+// motion. A dimmed title still reads as "this panel is working".
+@media (prefers-reduced-motion: reduce)
+  .lm_header .lm_tab.lm_tab_busy .lm_title
+    animation: none
+    opacity: 0.6
+
+// ---------------------------------------------------------------------------
 // Selected panel
 //
 // Selection is shown by the outline alone — one stroked path around the tab,

@@ -272,6 +272,24 @@ proc injectPinButton(tabElement: JsObject, onPin: proc()) =
   """.}
 
 
+proc markPanelTab(tabElement: JsObject, content: Content) =
+  ## Stamp `data-ct-panel-content` on a GoldenLayout tab so a panel can find
+  ## its own tab without matching on the title text.
+  ##
+  ## Matching on text is what the docked-panel outline and the auto-hide
+  ## overlay do (`auto_hide.nim`, and `layout.nim`'s outline geometry), and it
+  ## is the reason a tab title is effectively an identity key here: append one
+  ## character to it and those lookups stop resolving, along with the several
+  ## Playwright specs that compare `.lm_title` text exactly. A panel that wants
+  ## to decorate its own tab — the calltrace busy state is the first — needs a
+  ## handle that is not the title, or the decoration and the identity fight.
+  if tabElement.isNil or tabElement.isUndefined:
+    return
+  let name = cstring($content)
+  {.emit: """
+    `tabElement`.setAttribute('data-ct-panel-content', `name`);
+  """.}
+
 proc setupDropdownDismissListeners() =
   ## Close an open dropdown when Escape is pressed or the pointer goes down
   ## outside it.  Without this the branch picker stayed open until its own
@@ -1894,6 +1912,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       # M21: Attach "Send to Window" context menu to the tab.
       addPanelTransferContextMenu(tab, cast[GoldenContentItem](tab.contentItem))
       let genericContentItem = cast[GoldenContentItem](tab.contentItem)
+      markPanelTab(tab.element, state.content)
       injectPinButton(tab.element, proc() =
         pinPanel(cast[GoldenLayout](layout), genericContentItem, AutoHideEdge.Left))
 

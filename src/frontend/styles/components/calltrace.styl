@@ -3,11 +3,44 @@
   overflow: auto
   padding-top: 0.5em
 
+// A 2px hairline along the pane's top edge, not a headline across its middle.
+//
+// This used to be `left: 15ch; top: 50%; font-size: 3ch` — the word
+// "Loading..." rendered three times the body size in the centre of the panel,
+// which is what the user asked to have redesigned: "which really needs to be
+// redesigned to be more discreet". The element is now empty (see
+// `views/isonim_calltrace_view.nim`); all of its appearance is here.
+//
+// `display` is still toggled between `none` and `block` by the `isLoading`
+// binding and by the two imperative writes in `ui/calltrace.nim`, so this
+// rule only has to describe the visible case.
 .calltrace-loading
   position: absolute
-  left: 15ch
-  top: 50%
-  font-size: 3ch
+  left: 0
+  top: 0
+  width: 100%
+  height: 2px
+  pointer-events: none
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    colors-ui-text-primary-label 50%,
+    transparent 100%)
+  opacity: 0.45
+  animation: calltrace-loading-sweep 1.4s ease-in-out infinite
+
+@keyframes calltrace-loading-sweep
+  0%
+    opacity: 0.12
+  50%
+    opacity: 0.5
+  100%
+    opacity: 0.12
+
+@media (prefers-reduced-motion: reduce)
+  .calltrace-loading
+    animation: none
+    opacity: 0.35
 
 .calltrace-view
 
