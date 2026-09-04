@@ -1900,9 +1900,29 @@ proc dispatchSaveEffect(data: Data, effect: ReRecordEffect,
 proc saveFiles*(data: Data, path: cstring = cstring"", saveAs: bool = false): int {.discardable.} =
   ## Write the modified buffers back to disk via the main process.
   ## Returns the number of save messages dispatched.
-  for effect in saveEffects(data.saveTargets(), $path, saveAs):
+  ##
+  ## A SKIP IS REPORTED, because the skip is now reachable. `editorReady` used
+  ## to mean "the `monacoEditor` field is not nil", which was true of an
+  ## orphaned widget, so such a tab was saved — with the empty string Monaco
+  ## answers for a widget whose model is gone. It now means the editor has a
+  ## live model, so that tab is correctly left alone. But a DIRTY tab that is
+  ## skipped is a save the user asked for and did not get, and a silent no-op on
+  ## the save path is the same class of defect as the wipe it replaces: the user
+  ## presses Ctrl+S, nothing happens, and nothing says so.
+  let targets = data.saveTargets()
+  for effect in saveEffects(targets, $path, saveAs):
     if data.dispatchSaveEffect(effect, saveAs):
       inc result
+  for tab in targets:
+    if not tab.changed or tab.editorReady:
+      continue
+    if path.len > 0 and tab.name != $path:
+      continue
+    cerror fmt"saveFiles: {tab.name} has unsaved changes but no live editor"
+    data.viewsApi.errorMessage(cstring(
+      "'" & tab.name & "' has unsaved changes but its editor is no longer " &
+      "live, so it was not saved. Its stored copy is unchanged. Reopen the " &
+      "file to recover the tab, then save again."))
 
 proc buildRecordEnv(envDump: cstring): JsObject =
   ## Convert the serialized environment captured in trace metadata back into
