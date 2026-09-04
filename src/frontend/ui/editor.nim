@@ -1489,7 +1489,6 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
   var addDeleteTracepoint:        ContextMenuItem
   var toggleTracepoint:           ContextMenuItem
   var targetToken:                cstring
-  var listLine:                   seq[int]
   var contextMenu:                seq[ContextMenuItem]
 
   # Trace context menu items
@@ -1749,9 +1748,11 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
       deleteAllBreakpoints = ContextMenuItem(
         name: "Delete ALL breakpoints",
         hint: "",
+        # `deleteAllBreakpoints` empties `pointList.breakpoints` itself now, so
+        # the assignment that used to be here was masking the index corruption
+        # inside it rather than finishing its work.
         handler: proc(e: Event) =
           data.services.debugger.deleteAllBreakpoints(self)
-          data.pointList.breakpoints = @[]
       )
 
       contextMenu &= deleteAllBreakpoints
