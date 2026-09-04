@@ -1,0 +1,152 @@
+# Periodic CI coverage for `dev`, which push runs stopped providing.
+#
+# WHAT THIS EXISTS FOR. On 2026-09-03, THIRTEEN consecutive `dev` runs
+# (1a427e3e through a3068f90) ended `cancelled` with ZERO job records ever
+# created, and `dev` had gone 22 commits without a `lint-bash` result of any
+# kind. The runs did not fail -- they never started. `codetracer.yml`'s
+# concurrency group admits one pending run per branch and evicts it when the
+# next push arrives, and on a fleet where jobs wait hours for a runner, a
+# mainline run never reaches `in_progress` before that happens. Each run's
+# `updated_at` equals the next run's `created_at`, all the way down.
+#
+# `cancel-in-progress: false` does not help, because it protects a run that has
+# STARTED. Nothing on `dev` starts. The result was a 100% loss of mainline
+# coverage, which is how an SC2016 regression sat on `dev` unobserved while
+# gating every build artifact in the repository.
+#
+# WHY A CLOCK RATHER THAN UNGROUPING THE PUSHES. Per-commit coverage and a
+# short queue cannot both hold while agents land continuously. Reverting to
+# `github.run_id` grouping buys per-commit coverage at the price of an
+# unbounded queue -- the state that produced 46 pending runs whose survivors
+# were eight hours old -- and a queue that deep does not deliver coverage
+# either, since it never reaches most of its entries. Running the full suite
+# against the CURRENT TIP on a clock gets the part that actually matters, a
+# real verdict on `dev` at a known cadence, without the queue growing.
+#
+# WHY THIS FILE IS SEPARATE FROM codetracer.yml. A `schedule:` trigger fires
+# ONLY on the repository's default branch, and only from THAT branch's copy of
+# the file. This repository's default branch is `stable`, not `dev`
+# (`gh api repos/metacraft-labs/codetracer --jq .default_branch`). A
+# `schedule:` entry added directly to codetracer.yml would therefore give
+# `stable` periodic coverage and `dev` none -- the opposite of the problem.
+# This workflow carries the clock and does one thing with it: dispatch
+# codetracer.yml against `dev`, which runs `dev`'s copy of that file against
+# `dev`'s tip.
+#
+# THIS FILE MUST EXIST ON THE DEFAULT BRANCH TO TICK. Landing it on `dev` alone
+# does nothing; GitHub will not schedule it until it reaches `stable`. That is
+# a property of the trigger, not an oversight.
+name: dev coverage schedule
+
+on:
+  schedule:
+    # 23:00 UTC daily.
+    #
+    # CADENCE, FROM MEASUREMENT. A full run of `Codetracer CI` needs 12-18h,
+    # dominated by the eph-win-x64 lane: in run 33655651533 a Windows job was
+    # created at 2026-09-02T16:33 and did not start until 2026-09-03T07:29 --
+    # roughly 15 hours queued. Daily leaves ~6h of headroom over the worst
+    # observed duration, so one coverage run finishes before the next is
+    # created.
+    #
+    # A FASTER CLOCK WOULD BE THEATRE, AND SLIGHTLY WORSE THAN THAT. Coverage
+    # runs share one group, so a tick arriving while the previous run is still
+    # going produces a pending run that the tick after it evicts -- reproducing,
+    # inside the coverage group, the exact eviction this workflow exists to
+    # escape. Anything under ~18h buys no extra verdicts and burns fleet
+    # capacity that the mainline queue is already short of.
+    #
+    # THE HOUR. Pushes to `dev` on 2026-09-03 spanned 05:55-17:15 UTC, so 23:00
+    # starts the run in the quietest part of the day and gives the long Windows
+    # queue the whole night to drain.
+    - cron: "0 23 * * *"
+
+  # So the cadence can be tested, and a verdict obtained on demand, without
+  # waiting a day for the clock.
+  workflow_dispatch:
+
+# Deliberately its own group, and NOT the group codetracer.yml uses. This
+# workflow is cheap (one API call) and must never be evicted by, or evict,
+# anything in the main workflow's group.
+concurrency:
+  group: dev-coverage-schedule
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    permissions:
+      # `gh workflow run` creates a workflow dispatch; reading `contents` is
+      # not enough. Nothing else here needs a grant.
+      actions: write
+      contents: read
+    steps:
+      - name: Fail if the PREVIOUS coverage run never ran
+        # THE GUARD ON THIS MECHANISM, AND IT HAS TO LIVE OUT HERE.
+        #
+        # The failure this whole workflow exists to escape is a run that is
+        # evicted while still PENDING, having created no jobs. The natural
+        # instinct is to let `queue-watchdog` inside `codetracer.yml` report
+        # that -- but it cannot, and the reason is worth writing down so nobody
+        # wires it up later expecting it to work: if the coverage run is
+        # evicted while pending, NOTHING in it runs, and that includes the
+        # watchdog. An alarm inside the run shares the fate of the run.
+        # (`queue-watchdog` also stays PR-only for its own stated reason: on a
+        # coverage run `RUNNING == 0 && QUEUED > 0` holds for hours during the
+        # normal ~15h eph-win-x64 tail, so it would be red on every single
+        # coverage run and become exactly the wallpaper its `if:` guards
+        # against.)
+        #
+        # So the check runs HERE: a different workflow, a different concurrency
+        # group, a stock GitHub-hosted runner that is never starved. It looks at
+        # what the last tick actually produced rather than at configuration,
+        # because "the schedule is configured" and "the schedule delivers a
+        # verdict" are the two things this campaign keeps discovering are not
+        # the same claim.
+        #
+        # `jobs == 0 && completed` is the precise signature of eviction: a run
+        # that started always has job records, and a run still legitimately in
+        # flight is not `completed`. A long-running previous run is NOT an
+        # error -- a full suite needs 12-18h against a 24h clock, so overlap is
+        # expected and reported rather than failed.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prev="$(gh api \
+            "repos/${GH_REPO}/actions/workflows/codetracer.yml/runs?event=workflow_dispatch&branch=dev&per_page=1" \
+            --jq '.workflow_runs[0] | "\(.id) \(.status) \(.conclusion)"' 2>/dev/null || true)"
+          if [ -z "${prev}" ] || [ "${prev}" = "null null null" ]; then
+            echo "no previous coverage run to check — first tick, nothing to verify"
+            exit 0
+          fi
+          read -r prev_id prev_status prev_conclusion <<<"${prev}"
+          njobs="$(gh api \
+            "repos/${GH_REPO}/actions/runs/${prev_id}/jobs?per_page=100" \
+            --jq '.jobs | length')"
+          echo "previous coverage run ${prev_id}: status=${prev_status} conclusion=${prev_conclusion} jobs=${njobs}"
+          if [ "${prev_status}" = "completed" ] && [ "${njobs}" -eq 0 ]; then
+            echo "::error::Coverage run ${prev_id} completed having created ZERO jobs (conclusion=${prev_conclusion}). It was evicted while pending and produced no verdict — the same failure the push group has, now in the coverage group. dev is NOT being measured."
+            exit 1
+          fi
+          if [ "${prev_status}" != "completed" ]; then
+            echo "::notice::Coverage run ${prev_id} is still ${prev_status} with ${njobs} jobs; a full suite needs 12-18h, so overlap with the 24h clock is expected."
+          fi
+
+      - name: Dispatch Codetracer CI against the current dev tip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Resolve the tip explicitly and log it, so the run this workflow
+          # caused can always be tied to the commit it was meant to verify.
+          # `gh workflow run --ref dev` resolves the ref itself, but does not
+          # report WHICH commit it resolved to, and "the tip at 23:00" is the
+          # one fact a reader needs when the verdict disagrees with a later
+          # manual run.
+          tip="$(gh api "repos/${GH_REPO}/git/ref/heads/dev" --jq .object.sha)"
+          echo "dev tip is ${tip}"
+          gh workflow run codetracer.yml --ref dev
+          echo "dispatched Codetracer CI against dev@${tip}"
