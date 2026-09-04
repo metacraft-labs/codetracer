@@ -5314,6 +5314,23 @@ jobs:
           CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
           CODETRACER_DB_TESTS_ONLY: "1"
 
+      # Named separately from the suite above, which already contains it, so a
+      # regression here is attributable from the job list without reading a
+      # full Playwright report. The two assertions are the Event Log's
+      # contract: its rows do not change when the reader moves, and a move
+      # relocates only the dimming boundary
+      # (`GUI/Core-Panes/Event-Log-Pane.md` § "What a move changes, and what it
+      # does not"). It runs `always()` for the same reason it exists — the
+      # failure it guards against, the pane emptying after a jump, is one a
+      # reader hits immediately, so it should be reported even when an earlier
+      # spec in the suite has already gone red.
+      - name: Event Log stays static across a jump
+        if: always()
+        run: ./ci/test/ui-tests-db.sh tests/event-log/event_log_is_static_across_jumps.spec.ts
+        env:
+          CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
+          CODETRACER_DB_TESTS_ONLY: "1"
+
   test-ui-tests-rr:
     # ROUTED to the GPU hosts (H4). The earlier hold on this job -- "the GPU
     # hosts are hybrid i9-12900Ks, so unpinned rr is a core-type lottery" --

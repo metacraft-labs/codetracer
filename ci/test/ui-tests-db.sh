@@ -8,6 +8,11 @@
 # on macOS) and in the Xvfb wrapping (test-gui-prebuilt starts Xvfb on Linux;
 # macOS drives test-e2e directly with the native display).
 #
+# Arguments are forwarded to Playwright, so a caller can name a single spec
+# (e.g. ``tests/event-log/event_log_is_static_across_jumps.spec.ts``) and get a
+# separately attributable CI step for it. With no arguments the whole DB-based
+# suite runs, which is the default every existing caller relies on.
+#
 # Environment:
 #   CODETRACER_CI_PLATFORM  — "nixos" or "macos" (default: "nixos")
 #   CODETRACER_E2E_CT_PATH  — path to ct binary (overridable)
@@ -21,7 +26,7 @@ case "$PLATFORM" in
 nixos)
 	export CODETRACER_E2E_CT_PATH="${CODETRACER_E2E_CT_PATH:-$REPO_ROOT/result/bin/ct}"
 	export CODETRACER_DB_TESTS_ONLY=1
-	exec nix develop .#devShells.x86_64-linux.default --command just test-gui-prebuilt
+	exec nix develop .#devShells.x86_64-linux.default --command just test-gui-prebuilt "$@"
 	;;
 macos)
 	# The ct binary comes from codetracer's reprobuild build
@@ -44,7 +49,7 @@ macos)
 	# cases Darwin and cd's into ``src/tests/gui`` (the Playwright suite kept
 	# the historical ``tsc-ui-tests`` package name but the directory moved
 	# into the source tree) to run ``npx playwright test --workers=1``.
-	exec nix develop . --command just test-e2e
+	exec nix develop . --command just test-e2e "$@"
 	;;
 *)
 	echo "ERROR: unknown CODETRACER_CI_PLATFORM: $PLATFORM" >&2

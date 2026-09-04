@@ -827,6 +827,20 @@ test-gui-prebuilt *args:
 test-gui *args: build-once build-siblings
   just test-gui-prebuilt {{args}}
 
+# Assert the Event Log is static across a jump, and that a jump moves only the
+# dimming boundary. Reported as "the event log completely disappears after some
+# jumps through the call trace"; the contract it checks is
+# `GUI/Core-Panes/Event-Log-Pane.md` § "What a move changes, and what it does
+# not". Runs against an already-built binary — pair it with `build-once` (or
+# use `test-gui`) if the frontend has changed.
+#
+# Kept as its own recipe because the two assertions are cheap, they fail for
+# distinct reasons (a rebuilt row set vs. a mis-placed dimming boundary), and
+# the row-identity assertion is the one that catches ANY future silent rebuild
+# of the pane, not just the vanish that prompted it.
+test-event-log-static *args:
+  just test-gui-prebuilt tests/event-log/event_log_is_static_across_jumps.spec.ts {{args}}
+
 # Run GUI tests with windows visible on the current desktop session.
 # On Linux, requires a running display server ($DISPLAY must be set).
 # On Windows, always works (no $DISPLAY needed).

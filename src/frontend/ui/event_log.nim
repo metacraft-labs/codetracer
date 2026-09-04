@@ -1283,7 +1283,19 @@ proc events(self: EventLogComponent) =
             saveState: true},
           columns:        denseColumns,
           bInfo: false,
-          createdRow: rowTimestamp,
+          # DataTables calls `createdRow(row, data, dataIndex, cells)`, so the
+          # third argument is the row's ORDINAL, not a position on the
+          # timeline.  Passing `rowTimestamp` straight in therefore compared
+          # each event's `directLocationRRTicks` against a row number: for any
+          # real trace the ticks dwarf the ordinal, so nearly every freshly
+          # created row was classed `future` — `opacity: 0.5` on the whole
+          # table — until a later `findActiveRow` happened to re-class it with
+          # the real position.  When that correction does not run, the table
+          # stays uniformly dimmed.  Dim against the debugger's actual
+          # position instead; `self.activeRowTicks` is what `findActiveRow`
+          # uses, so both paths now agree.
+          createdRow: proc(row: Element, event: ProgramEvent, dataIndex: int) =
+            rowTimestamp(row, event, self.activeRowTicks),
           language: js{
             emptyTable: proc: cstring =
               # TODO if self.receivedUpdates:

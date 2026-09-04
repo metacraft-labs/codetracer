@@ -827,27 +827,45 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       disposeProc: dispose,
     )
 
-    # Auto-load effect: whenever page, sort, search, or debugger position
-    # changes, request fresh event log data from the backend.
+    # Auto-load effect: whenever page, sort or search changes, request fresh
+    # event log data from the backend.  **The debugger's position is not one
+    # of those things**, and this effect must never reload because the reader
+    # moved.  `GUI/Core-Panes/Event-Log-Pane.md` § "What a move changes, and
+    # what it does not" states the contract: the row set is a property of the
+    # recording, a move changes only which rows are dimmed, and the position
+    # is not a parameter of the fetch.
     #
-    # Dedup intentionally piggybacks on the effect itself: ``store.debugger``
-    # is reassigned on every legacy ``updateDebuggerPosition`` call (the
-    # signal does *not* compare values), so without an explicit guard this
-    # effect re-fires several times per CtCompleteMove — once per panel
-    # that calls ``updateDebuggerPosition`` on the shared store.  When the
-    # trace's entry stop sits on a non-zero rrTicks (e.g. the JavaScript
-    # recorder's flow_test where step[0] has call_key=-1 and the first
-    # real call starts at step 1, giving rrTicks=1 at launch) every one of
-    # those reassignments would issue a fresh ``ct/event-load``.  Each
-    # response then triggers ``onUpdatedEvents`` → ``ajax.reload`` →
-    # ``ct/update-table``; the DataTables ``td.dt-empty`` "Loading…"
-    # placeholder never clears because a newer ajax round-trip is always
-    # in flight, and the GUI test times out.  Tracking the last
-    # (rrTicks, page, pageSize, searchQuery, sortColumn, sortAscending)
-    # tuple lets unchanged events keep the table populated rather than
-    # forcing a reload — events are intrinsically static for non-live
-    # traces, so re-fetching with the same parameters is wasted work.
-    var lastTicks: uint64 = 0
+    # The effect still *reads* ``store.debugger`` — the first load has to wait
+    # until a position exists — but the position takes no part in the decision
+    # to reload.  It used to: ``rrTicks`` sat in the dedup tuple below, so
+    # every jump changed the tuple and issued a fresh ``ct/event-load``.  That
+    # was the mechanism behind "the event log completely disappears after some
+    # jumps".  The chain is worth spelling out, because no single link looks
+    # like a bug on its own:
+    #
+    #   jump → ``updateDebuggerPosition`` → this effect refires
+    #        → ``ct/event-load`` → the backend re-emits ``updatedEvents``
+    #        → ``onUpdatedEvents`` → ``ajax.reload`` → ``ct/update-table``
+    #        → ``onUpdatedTable``, which drops any response whose ``draw``
+    #          is not the newest (``event_log.nim``'s ``self.drawId`` guard).
+    #
+    # ``store.debugger`` is reassigned once per panel per CtCompleteMove and
+    # the signal does not compare values, so a single jump fires this effect
+    # several times and puts several draws in flight at once.  Whenever a
+    # newer draw is issued before the previous reply lands, the previous reply
+    # is discarded — and if the newest reply is the one that goes missing,
+    # ``tableCallback`` is never invoked and DataTables is left holding no
+    # rows at all.  That is the pane vanishing, and it explains why only
+    # *some* jumps do it: it takes a lost race, not merely a jump.
+    #
+    # Keying on (page, pageSize, searchQuery, sortColumn, sortAscending)
+    # alone means a move now issues no request, so there is no race to lose.
+    # Nothing is given up by dropping ``rrTicks``: the backend's ``event_load``
+    # reads only ``start``/``count`` and never looked at it. Growth in a live
+    # session is not this effect's job either — ``event_log.nim``'s
+    # CtCompleteMove subscriber emits ``CtEventLoad`` for a first load or a
+    # source revision, which is where a genuinely growing event set is picked
+    # up.
     var lastPage = -1
     var lastPageSize = -1
     var lastQuery = ""
@@ -862,17 +880,16 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       let col = sortColumn.val
       let asc = sortAscending.val
       let debuggerState = store.debugger.val
-      let ticks = debuggerState.rrTicks
       let location = debuggerState.location
       let hasDebuggerPosition =
-        ticks > 0'u64 or location.file.len > 0 or location.line != 0
+        debuggerState.rrTicks > 0'u64 or location.file.len > 0 or
+        location.line != 0
       if hasDebuggerPosition or not hasFired:
         if hasFired and hasDebuggerPosition == lastHadDebuggerPosition and
-            ticks == lastTicks and page == lastPage and
+            page == lastPage and
             ps == lastPageSize and query == lastQuery and
             col == lastCol and asc == lastAsc:
           return
-        lastTicks = ticks
         lastPage = page
         lastPageSize = ps
         lastQuery = query
@@ -886,7 +903,6 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
           "searchQuery": query,
           "sortColumn": col,
           "sortAscending": asc,
-          "rrTicks": ticks,
         }
         let future = store.backend.send("ct/event-load", args)
         let vmRef = vm
