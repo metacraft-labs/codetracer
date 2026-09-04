@@ -21,16 +21,33 @@
 # THIS LANE IS GREEN BY DESIGN UNTIL THE BACKLOG IS CLEARED
 # ---------------------------------------------------------
 # The first run reports 1180 findings. A guard that reddens CI on day one is a
-# guard that gets disabled on day one, so the default here is REPORT: the lane
+# guard that gets disabled on day one, so the DEFAULT here is REPORT: the lane
 # prints the findings, groups them by module, and exits 0.
 #
 # Two ways to make it bite, in the order they should be adopted:
 #
 #   CT_REACHABILITY_MAX=<n>   ratchet. Fails only above a recorded ceiling, so
-#                             the number can go down and never up. This is the
-#                             right next step, and `n` should be set to today's
-#                             count the moment someone starts triaging.
+#                             the number can go down and never up.
 #   CT_REACHABILITY_ENFORCE=1 fails on any finding. For after the backlog.
+#
+# THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
+# --------------------------------------------------------------------------
+# `ci/lint/nim.sh` now invokes this script as
+# `env CT_REACHABILITY_MAX=1224 bash ci/test/frontend-reachability.sh`, so 1225
+# findings fail `lint-nim` and 1224 do not.
+#
+# Before 2026-09-04 neither variable had a setter anywhere in the repository.
+# The paragraph above described a design; `grep -rn CT_REACHABILITY` over
+# `.github/`, `justfile`, `ci/` and `scripts/` returned one hit, and it was a
+# comment in `nim.sh` recommending that somebody engage it. This lane ran on
+# every push, printed its findings, and could not fail over any number of them.
+# The allow-list hygiene below could redden CI; the twelve-times-found defect
+# this whole file exists for could not.
+#
+# That is worth stating in the file rather than only in the commit, because the
+# gap was invisible from HERE: everything on this side of the boundary was
+# correct, tested, and documented. A capability nothing invokes is exactly the
+# shape of defect this script was written to find, and it was one.
 #
 # The allow-list's own hygiene is enforced in ALL modes: an entry without a
 # reason, or naming a symbol that no longer exists, fails this lane today. That

@@ -55,7 +55,7 @@ lint_step "test-lane coverage: every test-shaped file runs somewhere" \
 lint_step "shell-gate coverage guard: contract suite" \
 	bash ci/test/shell-gate-coverage-test.sh
 
-lint_step "shell-gate coverage: every gate in ci/test/ is reachable from CI" \
+lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable from a workflow lane" \
 	bash ci/test/shell-gate-coverage.sh
 
 # AND THE THIRD ASKING OF THE SAME QUESTION, one level down: not "does this file
@@ -69,14 +69,35 @@ lint_step "shell-gate coverage: every gate in ci/test/ is reachable from CI" \
 # over the checked-out tree: no Nim toolchain, no browser, no network, under
 # five seconds.
 #
-# IT CANNOT REDDEN THIS LANE OVER THE BACKLOG, and that is deliberate on its
-# part, not a concession here: the default mode is REPORT — today 1217 findings,
-# printed and grouped, exit 0 — because a guard that reddens CI on day one is a
-# guard that gets disabled on day one. What it DOES fail on today is allow-list
-# hygiene: an entry with no reason, or naming a symbol that no longer exists.
-# Set CT_REACHABILITY_MAX to today's count to start ratcheting.
-lint_step "frontend reachability: exported symbols nothing reaches (report + allow-list hygiene)" \
-	bash ci/test/frontend-reachability.sh
+# THE RATCHET IS NOW ENGAGED. It was not, and that was the defect.
+#
+# The script is built to bite in two escalating ways — `CT_REACHABILITY_MAX=<n>`
+# for a ceiling that can only fall, `CT_REACHABILITY_ENFORCE=1` for zero — and it
+# documents both in its own header. Neither variable had a SETTER anywhere in
+# this repository: `grep -rn CT_REACHABILITY .github/ justfile ci/ scripts/`
+# returned exactly one hit, and it was the sentence that used to be on this line
+# saying somebody should do it. So the guard ran on every push, printed its
+# findings, and could not fail over any of them, for any number of them. A
+# report is not a gate. Its ALLOW-LIST hygiene could redden this lane; its stated
+# subject could not.
+#
+# 1224 is today's exact count, measured on this tree on 2026-09-04 — not the
+# 1217 the previous note recorded, which is seven findings of drift accumulated
+# while nothing was watching, and a small demonstration of why a number nobody
+# asserts stops being true.
+#
+# WHAT THIS BUYS, PRECISELY: the count can go down and can never go up. A new
+# unreached export fails this lane by pushing the total to 1225. It does NOT ask
+# anyone to clear the backlog, and deliberately so — a guard that reddens CI over
+# 1224 pre-existing findings on day one is a guard that gets switched off on day
+# one, which is the argument in the script's own header and is still right.
+#
+# WHEN YOU DELETE OR WIRE A SYMBOL, LOWER THIS NUMBER. Nothing forces that yet:
+# unlike the shell-gate inventory next door, `--max` is a `>` and not an `=`, so
+# slack accumulates silently under it. That is the script's contract, not this
+# line's, and changing it belongs in a diff that says so.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1224 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1224 bash ci/test/frontend-reachability.sh
 
 # The Embed SDK's boundary, in both directions: a consumer may reach the SDK
 # only through `codetracer_embed`, and the SDK's own import graph carries no
