@@ -39,6 +39,29 @@ set -uo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
+# THE SUITE RUNS THE REAL SCRIPTS, so a shell that cannot run them reports
+# their guards as ABSENT rather than as unrunnable — which is this suite making
+# the very mistake it grades, one level up.
+#
+# MEASURED on macOS, where `/usr/bin/env bash` is 3.2 and has no `mapfile`:
+# four contracts went red with "the command unexpectedly succeeded", because
+# `scripts/docs/generate-webp-animations.sh` died at its `mapfile` line before
+# reaching the guard, and three more followed. Under the `lint-bash` lane's
+# bash 5 the same tree is 46/46. A reader who met those four on a workstation
+# would have gone looking for a defect in a fix that is fine.
+#
+# `bash.sh`'s `require-tools` line already refuses a shell missing `openssl` or
+# `sha256sum` BY NAME. This is the same refusal for the interpreter itself.
+if ! command -v mapfile >/dev/null 2>&1 && ! type -t mapfile >/dev/null 2>&1; then
+	echo "stale-artefact-guards-test: this bash (${BASH_VERSION}) has no \`mapfile\`." >&2
+	echo "  The suite executes the scripts it grades, and several of them use it, so" >&2
+	echo "  the guards would be reported MISSING when they are merely unreachable." >&2
+	echo "  Run it in the lane it belongs to:" >&2
+	echo "    nix develop .#\$(...)lint -c ./ci/lint/bash.sh" >&2
+	echo "  or under any bash >= 4." >&2
+	exit 2
+fi
+
 VISUAL_CAPTURE="${REPO_ROOT}/scripts/docs/capture-visual-recording-screenshots.sh"
 STORYBOOK_FRESHNESS="${REPO_ROOT}/tools/visual-review/storybook-freshness.mjs"
 STORYBOOK_DEPS="${REPO_ROOT}/scripts/storybook-deps.sh"
