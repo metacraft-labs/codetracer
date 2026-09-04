@@ -350,7 +350,15 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
           $lastCompleteMove.location.rrTicks & ")"
     cdebug message
     if not lastCompleteMove.isNil:
-      viewsApi.emit(CtCompleteMove, lastCompleteMove.toJs)
+      # Batched, for exactly the reason the real `CtCompleteMove` fan-out
+      # above is batched: this replays the SAME fan-out, so unbatched it
+      # flushed observers once per subscriber write and drove several
+      # redundant round-trips and re-renders per replay. The live path got
+      # its `isoBatch.batch` wrapper and this one, which is the same event
+      # by another door, did not.
+      let cached = lastCompleteMove
+      isoBatch.batch proc() =
+        viewsApi.emit(CtCompleteMove, cached.toJs)
   )
   viewsApi.subscribe(InternalTraceMapUpdate, proc(kind: CtEventKind, value: Tracepoint, sub: Subscriber) =
     updateTraceMap(value)

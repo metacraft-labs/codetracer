@@ -3098,22 +3098,52 @@ proc loadInitialFlowIfReady(self: EditorViewComponent): bool =
   true
 
 proc scheduleInitialFlowLoad(self: EditorViewComponent) =
-  var attempts = 0
-
-  proc tryLoad() =
-    if self.isNil:
-      return
-    if not self.api.isNil and self.flow.isNil:
-      self.api.emit(InternalLastCompleteMove, EmptyArg())
-    if not self.flow.isNil:
-      return
-    if self.loadPendingFlowIfReady() or self.loadInitialFlowIfReady():
-      return
-    attempts += 1
-    if attempts <= 200:
-      discard setTimeout(proc() = tryLoad(), 50)
-
-  discard setTimeout(proc() = tryLoad(), 0)
+  ## ONE deferred attempt, and no re-emit.
+  ##
+  ## This used to retry at 20Hz for up to 200 attempts, re-emitting
+  ## `InternalLastCompleteMove` on every tick. That emit is not free: the
+  ## `middleware.nim` subscriber replays the cached move as a full
+  ## `CtCompleteMove` fan-out, and the legacy `StateComponent.onCompleteMove`
+  ## -> `onMove` -> `loadLocals` chain (`ui/state.nim`) issues `CtLoadLocals`
+  ## on every one of them, unconditionally and with no dedup anywhere along
+  ## it. Each reply repainted the pane. On the first jumps into a freshly
+  ## opened editor that produced ~145 State-pane mutations over ~4.8s from an
+  ## input that never once differed — the rapid re-render the user reported,
+  ## with the Calltrace pane stuck on "Loading" underneath it.
+  ##
+  ## The ViewModel layer was NOT the path, though the first diagnosis said it
+  ## was: IsoNim's `writeSignal` compares by value, and `DebuggerState` is a
+  ## plain object, so a redundant replay is absorbed before any effect sees
+  ## it. `tests/state/state_render_storm_test.nim` pins that, because nothing
+  ## at the store layer says it and its own comment reads the other way.
+  ##
+  ## The poll was standing in for events that already exist. Each of its
+  ## three preconditions has one:
+  ##
+  ##   * `self.api` — set by `register`, which is this proc's only caller.
+  ##   * `tabInfo.monacoEditor` — created by `initMonacoForEditor`, and BOTH
+  ##     of its call sites (the IsoNim mount loop and
+  ##     `renderExpandedEditorDirect`) call `editorAfterRedraw` immediately
+  ##     afterwards, which runs `loadPendingFlowIfReady` /
+  ##     `loadInitialFlowIfReady`.
+  ##   * a usable location — delivered by the `CtCompleteMove` subscription
+  ##     installed in `register`, plus the SINGLE `InternalLastCompleteMove`
+  ##     replay `register` emits just above this call for an editor opened
+  ##     after the debugger has already moved. `onCompleteMove` itself then
+  ##     either loads the flow directly (monaco ready) or parks it in
+  ##     `pendingFlowLocation` for `editorAfterRedraw` to drain.
+  ##
+  ## So the only case left for this proc is "monaco was already mounted when
+  ## `register` ran" — one attempt on the next turn of the event loop covers
+  ## it, and any later arrival is covered by the events above.
+  discard setTimeout(
+    proc() =
+      if self.isNil or not self.flow.isNil:
+        return
+      if self.loadPendingFlowIfReady():
+        return
+      discard self.loadInitialFlowIfReady(),
+    0)
 
 # ---------------------------------------------------------------------------
 # IsoNim primary rendering — Monaco init and after-redraw extracted procs
