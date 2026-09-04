@@ -148,3 +148,18 @@
       // The mark is decoration inside a button that already handles the click;
       // without this, `:hover` flickers as the pointer crosses the glyph edge.
       pointer-events: none
+
+      // A NO-OP TODAY, AND THAT IS THE POINT.
+      //
+      // The `16px` box over a 16-unit grid above already puts this set's
+      // strokes at exactly 1px, so this changes nothing now. It is written
+      // because the sentence above — "both marks here are 16x16 today, so the
+      // two spellings agree" — is a fact about the current artwork, not a
+      // property of the rule, and `.ct-control-mark` is what it looks like
+      // when that fact stops holding: a 17-unit mark added to a 16-unit box
+      // silently thinned its own hairline to 0.784px. Stating the policy in
+      // both places makes the two sets agree by construction rather than by
+      // coincidence, so a non-16 mark added here is drawn at the same weight
+      // as its neighbours instead of a proportionally lighter one.
+      path, line, polyline, polygon, circle, rect, ellipse
+        vector-effect: non-scaling-stroke
