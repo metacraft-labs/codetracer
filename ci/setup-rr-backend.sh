@@ -43,16 +43,83 @@ resolve_ref() {
 	resolve_sibling_rev codetracer-native-backend
 }
 
+# PRESENCE IS NOT THE LOCKED REVISION.
+#
+# This script used to reuse whatever checkout happened to be at $CLONE_DIR on
+# the strength of `[[ -d "$CLONE_DIR/.git" ]]`, with a comment asserting the
+# revision was right ("cloned by the shared setup-dev-env CI action at the
+# workspace-locked revision") from nothing but the directory being there. Worse,
+# `main()` deliberately SKIPPED resolving the locked revision whenever the
+# directory existed, so the one value that could have answered the question was
+# never computed. The evidence that stale checkouts happen on exactly these
+# machines is nine lines below: "Clean up any previous clone (self-hosted
+# runners reuse workspaces)".
+#
+# What this decides is which backend binary CI builds and tests against, which
+# makes it the most consequential existence-as-freshness site in the tree: a
+# green run against last week's `ct-native-replay` is indistinguishable from a
+# green run against the locked one.
+#
+# It REFUSES rather than re-checking-out. A reused workspace on a runner and a
+# developer's sibling checkout with work in it are the same directory to this
+# script, and `git checkout` in the second is destructive. `RR_BACKEND_REF` is
+# the documented way to state a different revision on purpose.
+require_locked_checkout() {
+	local dir="$1" ref="$2" head want
+
+	head="$(git -C "$dir" rev-parse HEAD 2>/dev/null)" || {
+		echo "Error: '$dir' has a .git but no resolvable HEAD; it is not a usable checkout of codetracer-native-backend." >&2
+		exit 1
+	}
+
+	# The lock yields a full SHA; RR_BACKEND_REF may be a branch or tag. Try the
+	# ref as given, then as a remote-tracking branch, and only then reach for
+	# the network — the common CI case (already at the locked SHA) must not need
+	# a fetch, and must not need a credential either.
+	want="$(git -C "$dir" rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null)" ||
+		want="$(git -C "$dir" rev-parse --verify --quiet "origin/${ref}^{commit}" 2>/dev/null)" ||
+		want=""
+
+	if [[ -z $want ]]; then
+		echo "Ref '$ref' is not known to the existing checkout; fetching it." >&2
+		if git -C "$dir" fetch --quiet origin "$ref" 2>/dev/null; then
+			want="$(git -C "$dir" rev-parse --verify --quiet 'FETCH_HEAD^{commit}' 2>/dev/null)" || want=""
+		fi
+	fi
+
+	if [[ -z $want ]]; then
+		echo "Error: cannot tell whether the codetracer-native-backend at '$dir' is the workspace-locked revision." >&2
+		echo "  it is at:      $head" >&2
+		echo "  it must be at: $ref  (which this checkout does not have and could not fetch)" >&2
+		echo "Fetch it there, re-provision the sibling, or set RR_BACKEND_REF to the revision you mean." >&2
+		exit 1
+	fi
+
+	if [[ $head != "$want" ]]; then
+		echo "Error: stale codetracer-native-backend checkout at '$dir'." >&2
+		echo "  it is at:      $head" >&2
+		echo "  it must be at: $want  (from ref '$ref')" >&2
+		echo "This decides which ct-native-replay CI builds and tests against, so it is" >&2
+		echo "refused rather than silently reused. Fix it with:" >&2
+		echo "  git -C '$dir' checkout $want && git -C '$dir' submodule update --init --recursive" >&2
+		echo "or set RR_BACKEND_REF to the revision you actually mean." >&2
+		exit 1
+	fi
+
+	echo "Reusing already-provided codetracer-native-backend at $dir (verified at $head)"
+}
+
 clone_rr_backend() {
 	local ref="$1"
 
 	# If the sibling was already provided at the expected location (e.g.
 	# cloned by the shared setup-dev-env CI action at the workspace-locked
-	# revision), reuse it instead of re-cloning. This keeps the script
-	# working both in CI (where setup-dev-env may pre-clone siblings) and
-	# locally (where the sibling typically already lives next to this repo).
+	# revision), reuse it instead of re-cloning -- but only after checking
+	# that it IS at that revision. This keeps the script working both in CI
+	# (where setup-dev-env may pre-clone siblings) and locally (where the
+	# sibling typically already lives next to this repo).
 	if [[ -d "$CLONE_DIR/.git" ]]; then
-		echo "Reusing already-provided codetracer-native-backend at $CLONE_DIR"
+		require_locked_checkout "$CLONE_DIR" "$ref"
 		return 0
 	fi
 
@@ -191,15 +258,20 @@ export_to_github_env() {
 }
 
 main() {
-	# Only resolve a sibling revision when we actually need to clone. If the
-	# sibling is already present (provided by setup-dev-env in CI, or living
-	# next to this repo locally), skip resolution entirely — the resolver and
-	# its workspace-lock lookup are not needed in that case.
-	local ref=""
-	if [[ ! -d "$CLONE_DIR/.git" ]]; then
-		ref=$(resolve_ref)
-		echo "Using rr-backend ref: $ref"
-	fi
+	# ALWAYS resolve the sibling revision, present or not.
+	#
+	# This used to be conditional on the directory being absent, on the
+	# reasoning that "the resolver and its workspace-lock lookup are not needed
+	# in that case". They are: the locked revision is the only thing that can
+	# distinguish a correctly-provisioned sibling from a workspace a self-hosted
+	# runner left behind, and skipping the lookup is what made that question
+	# unanswerable. It costs one script invocation and no network.
+	#
+	# A commit with no lock now fails here instead of silently accepting
+	# whatever is on disk; `RR_BACKEND_REF` states a revision explicitly.
+	local ref
+	ref=$(resolve_ref)
+	echo "Using rr-backend ref: $ref"
 
 	clone_rr_backend "$ref"
 	build_rr_support
@@ -207,4 +279,16 @@ main() {
 	export_to_github_env
 }
 
-main "$@"
+# Executed as a script, sourceable as a library.
+#
+# `ci/test/stale-artefact-guards-test.sh` sources this file to exercise
+# `require_locked_checkout` against real git repositories without reaching
+# `build_rr_support`, which needs nix, a private-repo credential and forty
+# minutes. The alternative — asserting on the source text of the guard — would
+# only prove the file contains a string, which is not what this repository means
+# by a contract suite. `AGENTS.md` asks for exactly this shape ("when creating
+# executables, always make sure the functionality can also be used as a
+# library").
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi
