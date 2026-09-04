@@ -43,6 +43,11 @@ import
   # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
   # everything about where a mode's arrangement lives is in there.
   ui/mode_layouts,
+  # WHAT A READ-ONLY TRANSITION MUST DO, decided in an importless module so it
+  # can be exercised headlessly. `Mode-Transitions.md` §5a states the transition
+  # as an arrival; it was implemented as a diff, and the two disagree exactly
+  # when the flag and the editors have got out of step.
+  ui/read_only_transition,
   ../ct_test/contracts,
   ../common/noir_constraints,
   viewmodel/viewmodels/[test_results_vm, constraints_vm],
@@ -1284,9 +1289,15 @@ proc reopenAuxiliaryPanels(data: Data) =
   data.ui.layoutBeforeAuxiliaryClose = nil
 
 proc applyReadOnlyToEditors(data: Data, readOnly: bool;
-                            rearrangePanels: bool = true) =
+                            plan: ReadOnlyTransitionPlan) =
   ## Bring the panels, the shortcuts and every Monaco instance into line with a
   ## `data.ui.readOnly` that has ALREADY been assigned.
+  ##
+  ## UNCONDITIONAL NOW, and `panels` carries the one decision that is still
+  ## conditional. This proc used to be reached only when the flag had CHANGED,
+  ## which meant the editors were reconciled only when the model already agreed
+  ## they needed to be — see `ui/read_only_transition.nim` for why that cannot
+  ## establish §5a's postcondition.
   ##
   ## Split out from `setEditorsReadOnlyState` so a mode transition can assign
   ## the flag before it rearranges GoldenLayout and still do this work after —
@@ -1332,14 +1343,15 @@ proc applyReadOnlyToEditors(data: Data, readOnly: bool;
   # `{.base.}` methods and a nil dispatcher raises `NilAccessDefect`, which a
   # bare `except:` does not stop.
   try:
-    if not rearrangePanels:
+    case plan.panels
+    of apaLeaveAlone:
       # The caller has already installed the entering mode's whole layout. The
       # panels it declares are on screen; the ones it does not are absent
       # rather than emptied, which is what §4.5 asks for.
       discard
-    elif readOnly:
+    of apaReopenDebugPanels:
       data.reopenAuxiliaryPanels()
-    else:
+    of apaCloseDebugPanels:
       data.closeAuxiliaryPanels()
   except CatchableError:
     cerror "layout: auxiliary panels while going readOnly=" & $readOnly &
@@ -1347,14 +1359,16 @@ proc applyReadOnlyToEditors(data: Data, readOnly: bool;
   except Defect:
     cerror "layout: auxiliary panels while going readOnly=" & $readOnly &
       " raised a Defect; the editors are still brought into line below"
-  for _, editor in data.ui.editors:
-    if editor.isNil:
-      continue
-    if readOnly:
-      editor.enableDebugShortcuts()
-    else:
-      editor.disableDebugShortcuts()
-  data.setEditorsEditable(not readOnly)
+  if plan.applyShortcutContextKeys:
+    for _, editor in data.ui.editors:
+      if editor.isNil:
+        continue
+      if readOnly:
+        editor.enableDebugShortcuts()
+      else:
+        editor.disableDebugShortcuts()
+  if plan.applyEditability:
+    data.setEditorsEditable(not readOnly)
   # THE EDITORS A TRANSITION IS STILL BUILDING ARE NOT REACHED BY THIS WALK,
   # and that is why the flag is now assigned by a separate, EARLIER call.
   #
@@ -1401,9 +1415,22 @@ proc beginReadOnlyTransition(data: Data, readOnly: bool): bool
   ## ahead of the restore but this walk absent, the one surviving Monaco read
   ## `readOnly == false` through every replay leg of three round trips — a
   ## replay whose source claimed to be editable.
+  ##
+  ## THE WALK IS NO LONGER GUARDED ON THE FLAG HAVING CHANGED. `data.ui.readOnly`
+  ## and the `readOnly` option on a live Monaco instance are two different facts,
+  ## and the guard assumed they could not disagree. They can: `CTRL+E`
+  ## (`toggleReadOnly`) clears the flag mid-session without moving `data.ui.mode`
+  ## — `Mode-Transitions.md` §4.4 requires exactly that — so a Stop pressed
+  ## afterwards saw `false == false`, made NO call here and none in
+  ## `finishReadOnlyTransition` either, and left every instance holding whatever
+  ## it was last given. §5a is a statement about the state the transition
+  ## ARRIVES AT, and a diff cannot establish a postcondition it is blind to.
+  ##
+  ## `result` still reports whether the flag moved, because the PANEL half
+  ## legitimately depends on it — see `panelAction`.
   result = data.ui.readOnly != readOnly
   data.ui.readOnly = readOnly
-  if result:
+  if readOnlyTransitionAppliesEditability(result):
     data.setEditorsEditable(not readOnly)
 
 proc finishReadOnlyTransition(data: Data, readOnly: bool, changed: bool;
@@ -1414,16 +1441,18 @@ proc finishReadOnlyTransition(data: Data, readOnly: bool, changed: bool;
   ## `changed` has to be carried from the earlier call rather than re-derived:
   ## the flag has already been assigned, so `data.ui.readOnly == readOnly`
   ## always holds by now and the question cannot be asked again.
-  if not changed:
-    # The no-change arm `setEditorsReadOnlyState` has always had: entering Edit
-    # mode still closes the debugger's auxiliary panels even when the flag was
-    # already `false`. Not when the caller has swapped the layout, for the
-    # reason `applyReadOnlyToEditors` gives at length — a mode's layout already
-    # states which panels the mode has.
-    if rearrangePanels and data.ui.mode == EditMode and not readOnly:
-      data.closeAuxiliaryPanels()
-    return
-  data.applyReadOnlyToEditors(readOnly, rearrangePanels)
+  ##
+  ## IT NO LONGER DECIDES WHETHER THE EDITORS ARE RECONCILED. It used to: this
+  ## proc returned early on `not changed`, which under Stop skipped both
+  ## `setEditorsEditable` AND the `disableDebugShortcuts` loop that resets
+  ## Monaco's `readOnly` context key. `changed` now reaches only the panel
+  ## decision, which is the one thing it is genuinely about.
+  let plan = planReadOnlyTransition(
+    flagChanged = changed,
+    readOnly = readOnly,
+    rearrangePanels = rearrangePanels,
+    modeIsEdit = data.ui.mode == EditMode)
+  data.applyReadOnlyToEditors(readOnly, plan)
 
 proc setEditorsReadOnlyState(data: Data, readOnly: bool) =
   ## Keep Monaco editor options and context keys aligned with the requested

@@ -150,6 +150,82 @@ test.describe("The editor after a debug session is stopped", () => {
     ).toBe(true);
   });
 
+  test("Stop repairs an editor that is read-only while the flag says otherwise", async ({
+    ctPage,
+  }) => {
+    // THE EXACT HOLE THE CHANGE GUARD LEFT, and the case the ordinary
+    // Run/Stop test above cannot reach.
+    //
+    // On the plain path `data.ui.readOnly` goes true at Run and false at Stop,
+    // so the flag CHANGED and the guarded call fired. The defect needs the flag
+    // and the editors to disagree, and `Mode-Transitions.md` §4.4 makes that
+    // reachable on purpose: CTRL+E (`aToggleReadOnly`) clears `data.ui.readOnly`
+    // mid-session and deliberately does not touch `data.ui.mode`. Stop then
+    // asked for `readOnly = false` against a flag already reading `false`,
+    // `beginReadOnlyTransition` returned `changed = false`, and BOTH halves of
+    // the transition were skipped: no `setEditorsEditable`, and no
+    // `disableDebugShortcuts` loop to reset Monaco's `readOnly` context key.
+    //
+    // The disagreement is then FORCED rather than hoped for. Clearing the flag
+    // with CTRL+E and putting the visible editor back to `readOnly: true`
+    // underneath it reproduces the state in one step, instead of relying on a
+    // particular sequence of pane teardowns to produce it. What is asserted is
+    // still the user's own property — a typed character reaching the buffer —
+    // and Stop is still the only thing between the two readings.
+    await ctPage.waitForSelector(".lm_goldenlayout", { timeout: 60_000 });
+    await ctPage.waitForSelector(".view-line", { timeout: 90_000 });
+
+    const writableBefore = await typeIntoEditor(ctPage, "CT_GUARD_CONTROL");
+    expect(
+      writableBefore,
+      "control failed: the editor did not accept a keystroke before any debug " +
+        "session, so this run proves nothing about Stop",
+    ).toBe(true);
+
+    await ctPage.locator("#run-image").click({ timeout: 30_000 });
+    await ctPage.waitForSelector(".isonim-debug-controls", { timeout: 180_000 });
+    await ctPage.waitForSelector(".view-line", { timeout: 60_000 });
+
+    // Construct the disagreement: model flag false, visible editor read-only.
+    const staged = await ctPage.evaluate(() => {
+      const w = globalThis as any;
+      const data = w.data;
+      const editor =
+        data?.ui?.editors?.[data?.services?.editor?.active]?.monacoEditor ??
+        w.monaco.editor.getEditors()[0];
+      data.ui.readOnly = false;
+      editor.updateOptions({ readOnly: true });
+      return {
+        flag: data.ui.readOnly,
+        editorReadOnly: editor.getOption(
+          w.monaco.editor.EditorOption.readOnly,
+        ) as boolean,
+      };
+    });
+    // The precondition is asserted, not assumed. If the two do not actually
+    // disagree at this point the test below would pass for the wrong reason.
+    expect(
+      staged,
+      "could not stage the disagreement the change guard is blind to",
+    ).toEqual({ flag: false, editorReadOnly: true });
+
+    await ctPage.locator("#stop-image").click({ timeout: 30_000 });
+    await ctPage.waitForSelector(".edit-mode-toolbar", { timeout: 180_000 });
+    await ctPage.waitForSelector(".view-line", { timeout: 60_000 });
+
+    const stateAfter = await readEditorState(ctPage);
+    const writableAfter = await typeIntoEditor(ctPage, "CT_AFTER_GUARDED_STOP");
+    expect(
+      writableAfter,
+      "the editor did not accept a keystroke after Stop, in the one case the " +
+        "transition could not see: `data.ui.readOnly` already read false while " +
+        "the editor was read-only, so the guarded `setEditorsEditable` made " +
+        `zero calls. The active editor's readOnly reads ${stateAfter.readOnly}; ` +
+        `across the page the flags are ${JSON.stringify(stateAfter.readOnlyFlags)}. ` +
+        "§5a states the transition as an arrival, not a difference.",
+    ).toBe(true);
+  });
+
   test("CTRL+E restores editability if Stop did not", async ({ ctPage }) => {
     // A narrowing measurement, not a duplicate. CTRL+E dispatches
     // `toggleReadOnly` from the config (`aToggleReadOnly` in
