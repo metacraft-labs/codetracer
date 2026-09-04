@@ -1328,6 +1328,17 @@
             # the white palette with `codetracer.styl`; it compiles to 330 KB.
             node $stylus src/frontend/styles/default_white_theme_electron.styl
             node $stylus src/frontend/styles/default_dark_theme_electron.styl
+            # The web and extension shells link `default_dark_theme_extension.css`,
+            # and web/server mode additionally expects `default_dark_theme.css`.
+            # src/frontend/styles/Tupfile builds both (the second as a copy of the
+            # first); this derivation built neither, so the nix-packaged deployment
+            # shipped without the two stylesheets those surfaces actually load, and
+            # the build-panel / footer-visibility stylesheet guards failed on the
+            # Linux leg while passing on the tup-built macOS one. Keep this list in
+            # step with that Tupfile.
+            node $stylus src/frontend/styles/default_dark_theme_extension.styl
+            cp src/frontend/styles/default_dark_theme_extension.css \
+              src/frontend/styles/default_dark_theme.css
             node $stylus src/frontend/styles/loader.styl
             node $stylus src/frontend/styles/subwindow.styl
 

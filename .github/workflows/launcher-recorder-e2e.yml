@@ -551,6 +551,20 @@ jobs:
             codetracer-trace-format
             codetracer-trace-format-nim
             codetracer-native-recorder
+            # The io-mon family. `ct` itself imports io_mon/depfile from
+            # src/ct_test/incremental/io_mon_capture.nim, so WITHOUT these the
+            # core build dies with `cannot open file: io_mon/depfile`, no
+            # src/build-debug/bin/ct is emitted, and this gate fails in its
+            # artifact check having never reached the launcher or a recorder.
+            # SHA-pinned, not lock-resolved, and identical to the pins the main
+            # CI lane uses (.github/workflows/codetracer.yml): a published
+            # workspace lock still carries an io-mon rev that predates
+            # depfile.nim, so a bare `io-mon` here can silently resolve to a
+            # revision that cannot build `ct`.
+            io-mon=e2ee15afe8dd7f538ec2ce79af9a1aa512addce2
+            nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
+            nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
+            nim-stackable-hooks=dev
             # Not in the workspace lock -- pinned to flake.lock's revs. See
             # "THE REMAINING TWO" above before changing either of these.
             isonim=9936c544925004bada019204b5b111f39d1a54bf

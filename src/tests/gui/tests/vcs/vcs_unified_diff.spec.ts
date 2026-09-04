@@ -42,6 +42,10 @@ function commit(message: string): void {
     "user.name=CodeTracer Tests",
     "-c",
     "user.email=tests@codetracer.dev",
+    // A runner with commit.gpgsign=true and no secret key would abort this
+    // commit; the diff behaviour under test is unrelated to signing.
+    "-c",
+    "commit.gpgsign=false",
     "commit",
     "-m",
     message,
@@ -493,6 +497,10 @@ function historyCommit(message: string): string {
     "user.name=CodeTracer Tests",
     "-c",
     "user.email=tests@codetracer.dev",
+    // As above: keep this throwaway history repo hermetic against a signing
+    // configuration inherited from the host.
+    "-c",
+    "commit.gpgsign=false",
     "commit",
     "-m",
     message,

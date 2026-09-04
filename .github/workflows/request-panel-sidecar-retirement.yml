@@ -101,8 +101,12 @@ jobs:
       # src/tests/gui/tests/request-panel/request_span_languages.nim).
       #
       # Each `ref` is that repo's own default branch, which is NOT uniform
-      # across the six: python is `stable`, beam is `main`, the rest are
-      # `dev`. Pinning the wrong one silently tests a stale recorder.
+      # across the six: python is `stable`, the other five are `dev`.
+      # Pinning the wrong one silently tests a stale recorder -- or, as with
+      # the `ref: main` this line used to claim for beam, fails the clone
+      # outright: codetracer-beam-recorder has no `main` branch and never had
+      # one, so this job died in setup on every run for three weeks and its
+      # sidecar assertions never executed once.
       - name: Clone codetracer-python-recorder sibling
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
@@ -134,7 +138,7 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-beam-recorder
-          ref: main
+          ref: dev
           path: ${{ github.workspace }}/../codetracer-beam-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
