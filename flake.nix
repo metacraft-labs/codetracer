@@ -1,5 +1,5 @@
 {
-  description = "Code Tracer";
+  description = "CodeTracer";
 
   inputs = {
     # Multi-language toolchain management.
