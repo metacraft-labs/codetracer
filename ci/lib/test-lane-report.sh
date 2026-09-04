@@ -45,7 +45,26 @@
 #   crashed        the process was killed by a signal. Whatever it printed is a
 #                  prefix of the run, not the run.
 #   no-results     it produced no [OK] and no [FAILED] at all: it failed to
-#                  compile, failed to start, or asserted nothing.
+#                  compile, or failed to start.
+#
+#                  THIS LINE USED TO END "or asserted nothing", AND THAT WAS
+#                  FALSE. `oks` is `grep -c '\[OK\]'`, and `std/unittest` prints
+#                  one `[OK] <name>` PER TEST BLOCK THAT DID NOT FAIL — never one
+#                  per `check`. Measured on this host with the repo's own Nim:
+#
+#                      suite "a suite that asserts nothing":
+#                        test "case one asserts nothing":
+#                          discard
+#
+#                  prints `[OK] case one asserts nothing` and exits 0. A file of
+#                  fifty empty cases scores `OK (50 tests)`. This classifier
+#                  cannot see assertions at all; it counts case markers, and no
+#                  amount of arithmetic over `[OK]` lines can become an assertion
+#                  count. The `no-assertions` verdict below is the only branch
+#                  that observes one, and only when the file DECLARES it.
+#   no-assertions  the file declared `CHECKS: 0` — it ran cases and asserted
+#                  nothing. An assertion that did not run is not an assertion
+#                  that passed.
 #   silent-failure it exited non-zero having printed no [FAILED] line. Two ways
 #                  that happens and both are invisible otherwise: a `check`
 #                  inside a plain `proc` (unittest's `fail` only marks the case
@@ -54,7 +73,7 @@
 #   partial        it reported at least one [FAILED]. The ordinary red run.
 #   ok             every case reported [OK] and the process exited 0.
 classify_test_run() {
-	local rc="$1" oks="$2" fails="$3"
+	local rc="$1" oks="$2" fails="$3" checks="${4:-}"
 
 	# FIRST, and deliberately so: a death by signal outranks every count.
 	# Bash reports a signalled child as 128+N, and no Nim `unittest` run exits
@@ -82,6 +101,27 @@ classify_test_run() {
 
 	if [ "${rc}" -ne 0 ]; then
 		echo "silent-failure"
+		return 0
+	fi
+
+	# THE ONLY BRANCH THAT OBSERVES AN ASSERTION RATHER THAN A CASE MARKER, and
+	# it fires only when the file states its own count. A file that prints
+	#
+	#     CHECKS: 0
+	#
+	# ran its cases and asserted nothing, which every branch above reads as `ok`
+	# because every branch above is counting `[OK]` lines. Ranked BELOW `partial`
+	# and `silent-failure` on purpose: a file that failed has a more specific
+	# story than one that asserted nothing, and the reader should get that one.
+	#
+	# An UNDECLARED count is deliberately NOT a failure here. Almost no file in
+	# this tree declares one yet, so scoring absence would redden every lane on
+	# day one — the guard-that-gets-switched-off argument this repository makes
+	# about its other backlogs. It is instead COUNTED AND REPORTED by
+	# `run-nim-test-lane.sh`, the same treatment `[SKIPPED]` gets and for the
+	# same reason: the reader is told how much of the tally is unmeasured.
+	if [ -n "${checks}" ] && [ "${checks}" -eq 0 ]; then
+		echo "no-assertions"
 		return 0
 	fi
 
@@ -132,6 +172,10 @@ test_run_headline() {
 	no-results)
 		echo "DID NOT RUN (exit ${rc}; no [OK] or [FAILED] lines — compile error," \
 			"or the binary produced no test results)"
+		;;
+	no-assertions)
+		echo "ASSERTED NOTHING (exit ${rc}, ${oks} [OK] case(s), CHECKS: 0) —" \
+			"the cases ran and made no assertion; a case marker is not an assertion"
 		;;
 	silent-failure)
 		echo "FAILED WITHOUT A [FAILED] LINE (exit ${rc}, ${oks} OK)"

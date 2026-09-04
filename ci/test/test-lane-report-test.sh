@@ -59,7 +59,13 @@ JUSTFILE="${REPO_ROOT}/justfile"
 # Every contract below, counted once. The reconciliation at the end fails
 # loudly if this disagrees with what actually ran, so a contract can never go
 # missing silently.
-TOTAL_CONTRACTS=13
+#
+# 13 -> 16 on 2026-09-04, for the three assertion-count contracts: `CHECKS: 0`
+# is a failure, `CHECKS: 7` is not, and a file declaring nothing classifies
+# exactly as it did before. The number went UP because the suite gained three
+# contracts; it is raised here, in the same diff, rather than the reconciliation
+# being relaxed — that check caught this edit and is the reason it is correct.
+TOTAL_CONTRACTS=16
 
 pass_count=0
 
@@ -152,6 +158,37 @@ echo "  SKIP: Ruby recorder not available: ct record failed (exit 1)"
 for i in 1 2 3 4 5; do echo "  [SKIPPED] ruby case ${i}"; done
 EOF
 
+# THE SIXTH VARIANT, AND THE ONE `green.sh` ABOVE HAS ALWAYS BEEN. Three bare
+# `[OK]` lines are EXACTLY what a file of three empty test cases prints —
+# measured with this repo's own Nim on 2026-09-04:
+#
+#     suite "a suite that asserts nothing":
+#       test "case one asserts nothing":
+#         discard
+#
+#     [Suite] a suite that asserts nothing
+#       [OK] case one asserts nothing
+#
+# `std/unittest` prints one `[OK]` per test BLOCK that did not fail, never one
+# per `check`, and no formatter hook fires on a check that passes. So the count
+# has to come from the file, and a file that states `CHECKS: 0` is saying it ran
+# its cases and asserted nothing.
+cat >"${tmp_dir}/zero-assertions.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "[Suite] Cases that assert nothing"
+for i in 1 2 3; do echo "  [OK] case ${i}"; done
+echo "CHECKS: 0"
+EOF
+
+# And the same shape with the assertions actually made, which must stay green —
+# otherwise the branch above is just a way to fail every file that declares.
+cat >"${tmp_dir}/declared-assertions.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "[Suite] Cases that assert"
+for i in 1 2 3; do echo "  [OK] case ${i}"; done
+echo "CHECKS: 7"
+EOF
+
 chmod +x "${tmp_dir}"/*.sh
 
 # run_fixture NAME — sets the globals a lane would compute, exactly the way the
@@ -166,7 +203,18 @@ run_fixture() {
 	fixture_oks=$(echo "${fixture_output}" | grep -c '\[OK\]' || true)
 	fixture_fails=$(echo "${fixture_output}" | grep -c '\[FAILED\]' || true)
 	fixture_skips=$(echo "${fixture_output}" | grep -c '\[SKIPPED\]' || true)
-	fixture_verdict="$(classify_test_run "${fixture_rc}" "${fixture_oks}" "${fixture_fails}")"
+	# Extracted exactly as `run-nim-test-lane.sh` extracts it, for the reason in
+	# this helper's own comment: the contracts have to test the real pipeline. An
+	# absent declaration stays the empty string, which is the backward-compatible
+	# case and must keep classifying as it always did.
+	fixture_checks=""
+	if echo "${fixture_output}" | grep -qE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+'; then
+		fixture_checks=$(echo "${fixture_output}" |
+			grep -oE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+' |
+			grep -oE '[0-9]+' | awk '{s += $1} END {print s + 0}')
+	fi
+	fixture_verdict="$(classify_test_run "${fixture_rc}" "${fixture_oks}" \
+		"${fixture_fails}" "${fixture_checks}")"
 	fixture_headline="$(test_run_headline "${fixture_verdict}" "${fixture_rc}" \
 		"${fixture_oks}" "${fixture_fails}" "${fixture_skips}")"
 }
@@ -292,6 +340,47 @@ else
 	fail "a clean run passes and a run that produced no results does not" \
 		"green='${green_verdict}', empty='${fixture_verdict}'" \
 		"A build that reports nothing must never be scored 'OK (0 tests)'."
+fi
+
+# --- a declared assertion count is the only assertion evidence there is ----
+#
+# `green.sh` above — three bare `[OK]` lines — is byte-for-byte what a file of
+# three EMPTY test cases prints, and this suite has always certified it as `ok`.
+# That is correct and stays correct: with no declaration there is nothing to go
+# on, and scoring absence would redden every lane in the repository at once.
+# What was wrong was the claim, in this library's own header, that `no-results`
+# covers a run that "asserted nothing". It cannot: `oks` counts case markers.
+
+run_fixture zero-assertions.sh
+if [ "${fixture_verdict}" = "no-assertions" ] &&
+	test_run_is_failure "${fixture_verdict}" &&
+	grep -q 'ASSERTED NOTHING' <<<"${fixture_headline}"; then
+	ok "three [OK] cases that declare CHECKS: 0 is a failure, not a green run"
+else
+	fail "three [OK] cases that declare CHECKS: 0 is a failure, not a green run" \
+		"Got '${fixture_verdict}': ${fixture_headline}" \
+		"This is the shape a file of empty test cases prints. If it scores" \
+		"'ok', the tally is counting cases that assert nothing as passes."
+fi
+
+run_fixture declared-assertions.sh
+if [ "${fixture_verdict}" = "ok" ] && ! test_run_is_failure "${fixture_verdict}"; then
+	ok "the same three cases declaring CHECKS: 7 stay green"
+else
+	fail "the same three cases declaring CHECKS: 7 stay green" \
+		"Got '${fixture_verdict}': ${fixture_headline}" \
+		"Otherwise the branch above is not a check on assertions, it is just" \
+		"a way to fail every file that declares one."
+fi
+
+run_fixture green.sh
+if [ "${fixture_verdict}" = "ok" ]; then
+	ok "a run declaring NO count classifies exactly as before — the change is additive"
+else
+	fail "a run declaring NO count classifies exactly as before" \
+		"Got '${fixture_verdict}': ${fixture_headline}" \
+		"Almost no file declares a count yet; if absence scored as a failure" \
+		"every lane would go red at once and the guard would be switched off."
 fi
 
 # --- 11-13. a green run that skipped most of itself must say so -----------

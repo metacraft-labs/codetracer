@@ -133,6 +133,9 @@ failed=0
 passed=0
 total_oks=0
 total_skips=0
+total_checks=0
+declared_files=0
+undeclared_files=0
 files=0
 
 while read -r f; do
@@ -187,9 +190,36 @@ while read -r f; do
 	oks="$(printf '%s\n' "${output}" | grep -c '\[OK\]' || true)"
 	fails="$(printf '%s\n' "${output}" | grep -c '\[FAILED\]' || true)"
 	skips="$(printf '%s\n' "${output}" | grep -c '\[SKIPPED\]' || true)"
+
+	# THE ASSERTION COUNT, WHEN THE FILE STATES ONE. `oks` above is a count of
+	# `[OK]` lines, and `std/unittest` prints one per TEST BLOCK, never one per
+	# `check` — so a file of empty cases scores `OK (n tests)`. Nothing in the
+	# unittest output carries an assertion count, and no `OutputFormatter` hook
+	# fires on a check that PASSES, so the number has to come from the file:
+	#
+	#     CHECKS: <n>
+	#
+	# on a line of its own. The convention already exists here by hand —
+	# `test_wasm_worker.nim` compares `asyncOk + asyncFailed` against a declared
+	# `expectedAsyncChecks`, and `test_opfs_volume.nim` keeps a `checksRun`
+	# counter and refuses to exit 0 at zero — and this makes the lane able to
+	# read it instead of each file re-implementing the refusal.
+	#
+	# Summed, not taken once: a file may print a count per suite.
+	checks=""
+	if printf '%s\n' "${output}" | grep -qE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+'; then
+		checks="$(printf '%s\n' "${output}" |
+			grep -oE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+' |
+			grep -oE '[0-9]+' | awk '{s += $1} END {print s + 0}')"
+		total_checks=$((total_checks + checks))
+		declared_files=$((declared_files + 1))
+	else
+		undeclared_files=$((undeclared_files + 1))
+	fi
+
 	total_oks=$((total_oks + oks))
 	total_skips=$((total_skips + skips))
-	verdict="$(classify_test_run "${rc}" "${oks}" "${fails}")"
+	verdict="$(classify_test_run "${rc}" "${oks}" "${fails}" "${checks}")"
 	test_run_headline "${verdict}" "${rc}" "${oks}" "${fails}" "${skips}"
 
 	# THE KNOWN-FAILURE LEDGER (ci/lib/known-test-failures.tsv).
@@ -302,6 +332,28 @@ if [ "${total_skips}" -gt 0 ]; then
 		"${total_skips} SKIPPED"
 else
 	echo "${lane}: ${passed} file(s) passed, ${failed} failed, ${total_oks} case(s)"
+fi
+
+# HOW MUCH OF THAT TALLY IS AN ASSERTION COUNT, AND HOW MUCH IS CASE MARKERS.
+#
+# `${total_oks} case(s)` above is a count of `[OK]` lines, and one of those is
+# printed per test BLOCK that did not fail — including a block that asserted
+# nothing. Reporting the split is the same remedy `[SKIPPED]` gets: a number
+# that cannot be scored today is still worth putting in front of the reader,
+# because the alternative is a lane that looks fully measured and is not.
+#
+# This is a REPORT, deliberately, and it is the honest half of a two-part fix.
+# The other half — requiring the declaration — cannot land until the files carry
+# it, and turning absence into a failure now would redden every lane at once.
+if [ "${declared_files}" -gt 0 ]; then
+	echo "${lane}: ${total_checks} assertion(s) declared by ${declared_files} file(s);" \
+		"${undeclared_files} file(s) declared none — for those, the case count above" \
+		"is the only evidence, and a case marker is not an assertion"
+else
+	echo "${lane}: NO file declared an assertion count (${undeclared_files} file(s))." \
+		"The case count above counts [OK] lines, which unittest prints per test" \
+		"block — a block that asserts nothing prints one too. Emit 'CHECKS: <n>'" \
+		"to make a file's assertions countable."
 fi
 
 # Vacuous-pass guards. A lane whose file list is empty, or whose files all
