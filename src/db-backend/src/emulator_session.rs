@@ -2053,11 +2053,13 @@ impl ReplaySession for EmulatorReplaySession {
     /// which is a factual claim about the program that would be a
     /// fabrication.
     fn load_history(&mut self, _arg: &LoadHistoryArg) -> Result<(Vec<HistoryResultWithRecord>, i64), Box<dyn Error>> {
-        Err("EmulatorReplaySession::load_history is not available for MCR traces: value history \
+        Err(
+            "EmulatorReplaySession::load_history is not available for MCR traces: value history \
              needs a record of past values, and an MCR replay reaches an earlier step only by \
              re-executing forwards from the recorded CP0 snapshot. Returning an empty history \
              would be indistinguishable from `this value never changed`, so this refuses instead."
-            .into())
+                .into(),
+        )
     }
 
     fn add_breakpoint(
@@ -4338,7 +4340,9 @@ mod tests {
         let via_event_state = capture_emulator_state();
 
         let mut via_tracepoint = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
-        via_tracepoint.tracepoint_jump(&event).expect("tracepoint_jump must succeed");
+        via_tracepoint
+            .tracepoint_jump(&event)
+            .expect("tracepoint_jump must succeed");
 
         assert_eq!(capture_emulator_state(), via_event_state);
         assert_eq!(via_tracepoint.current_step_id(), via_event.current_step_id());
