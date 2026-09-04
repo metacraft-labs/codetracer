@@ -1351,14 +1351,56 @@ package codeTracer:
           "    fi\n" &
           "  done\n" &
           "}\n" &
+          # `../../`, NOT `../`. These binaries live in `Contents/MacOS/bin`,
+          # so one level up is `Contents/MacOS` and the Frameworks directory is
+          # two. The published 2026-08-30 dmg shipped `../` and every native
+          # program in it died before main():
+          #
+          #   dyld[65642]: Library not loaded:
+          #       @executable_path/../Frameworks/libcrypto.3.dylib
+          #     Reason: tried: '.../Contents/MacOS/Frameworks/libcrypto.3.dylib'
+          #       (no such file)
+          #
+          # The library was never missing -- all ten were in Contents/Frameworks
+          # the whole time. Only the load command was wrong, which is why a gate
+          # that walks symlinks and file trees could not see it;
+          # ci/test/macho-closure.py reads the load commands themselves.
+          #
+          # `@loader_path` rather than `@executable_path`: for a main executable
+          # the two are identical, but this loop rewrites whatever in `bin/` has
+          # the exec bit, and if a dylib ever lands there @executable_path would
+          # silently mean some other program's directory. @loader_path is the
+          # file's own directory in every case.
           "find \"$MACOS/bin\" -type f -print | while IFS= read -r binary; do\n" &
           "  [ -x \"$binary\" ] || continue\n" &
-          "  rewrite_macho_deps \"$binary\" '@executable_path/../Frameworks'\n" &
+          # Copied from the Nix store, which is 0555/0444, and install_name_tool
+          # writes in place -- the same read-only trap that stopped patchelf in
+          # the AppImage closure pass (1f7ca8dd).
+          "  chmod u+w \"$binary\"\n" &
+          "  rewrite_macho_deps \"$binary\" '@loader_path/../../Frameworks'\n" &
           "done\n" &
           "find \"$FRAMEWORKS\" -type f -print | while IFS= read -r dylib; do\n" &
           "  chmod u+w \"$dylib\"\n" &
           "  install_name_tool -id \"@rpath/$(basename \"$dylib\")\" \"$dylib\" 2>/dev/null || true\n" &
           "  rewrite_macho_deps \"$dylib\" '@loader_path'\n" &
+          "done\n" &
+          # Re-sign LAST, after every load-command edit. Editing a Mach-O
+          # invalidates the signature it was carrying, and on arm64 an invalid
+          # signature is not a link error -- the kernel kills the process, which
+          # looks nothing like the dyld message above and sends the next reader
+          # hunting the wrong defect. The shipped binaries are `adhoc,
+          # linker-signed`, so ad-hoc (`-s -`) is what restores them in kind.
+          #
+          # Not `--deep`: it is deprecated and it re-signs nested code that this
+          # loop already covers file by file. Frameworks first, then bin/, so a
+          # signature is never invalidated by a later edit to something it
+          # contains.
+          "find \"$FRAMEWORKS\" -type f -print | while IFS= read -r dylib; do\n" &
+          "  codesign -s - --force \"$dylib\" 2>/dev/null || true\n" &
+          "done\n" &
+          "find \"$MACOS/bin\" -type f -print | while IFS= read -r binary; do\n" &
+          "  [ -x \"$binary\" ] || continue\n" &
+          "  codesign -s - --force \"$binary\" 2>/dev/null || true\n" &
           "done\n" &
           # LAST, because it has to see the finished tree.
           #
