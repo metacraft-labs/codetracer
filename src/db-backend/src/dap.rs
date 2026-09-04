@@ -7,6 +7,81 @@ use crate::transport::DapResult;
 use serde::{Deserialize, Serialize, de::DeserializeOwned, de::Error as SerdeError};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Counter — increments once per deserialization pass over an INBOUND DAP
+/// payload: the bytes a client sent us, whether the pass starts from the raw
+/// text or from an already-built [`Value`].
+///
+/// The point of the counter is that "how many times do we deserialize each
+/// request" is otherwise invisible. Issue #222 was that every inbound request
+/// was decoded three times on the native path and four in the browser worker,
+/// and nothing in the tree could observe it: the passes live in three
+/// different functions, each of which looks like a single reasonable
+/// `serde_json` call on its own. A budget assertion over this counter is what
+/// turns "that looks redundant" into a check that fails.
+///
+/// Unconditional and public, following the two counters that already do this
+/// in this crate — `dap_handler::Handler::origin_summary_chain_builds` and
+/// `dap_handler::Handler::marker_decode_calls`. It is a `Relaxed` add on an
+/// already cache-hot line, once per decode of a message that is about to be
+/// parsed anyway; it is not measurable next to the parse it counts.
+///
+/// Because it is process-global and cargo runs a test binary's tests in
+/// threads of ONE process, any test that resets it and asserts on it must
+/// serialise against every other such test — see
+/// `tests/dap_protocol.rs::test_inbound_request_deserialization_budget`.
+pub static INBOUND_PARSES: AtomicUsize = AtomicUsize::new(0);
+
+/// Read the inbound-deserialization counter.
+#[inline]
+pub fn inbound_parse_count() -> usize {
+    INBOUND_PARSES.load(Ordering::Relaxed)
+}
+
+/// Reset the inbound-deserialization counter. Test-support: see the note on
+/// [`INBOUND_PARSES`] about serialising concurrent readers.
+#[inline]
+pub fn reset_inbound_parse_count() {
+    INBOUND_PARSES.store(0, Ordering::Relaxed);
+}
+
+/// Deserialize an inbound payload from its raw text, counting the pass.
+///
+/// Every deserialization of client-supplied DAP bytes goes through this or
+/// one of its two siblings; `tests/dap_protocol.rs` asserts (by source scan)
+/// that no bare `serde_json::from_str` / `from_value` re-appears on the
+/// inbound path, because a pass the counter never sees is a pass the budget
+/// cannot hold.
+#[inline]
+pub fn parse_inbound_str<T: DeserializeOwned>(s: &str) -> serde_json::Result<T> {
+    INBOUND_PARSES.fetch_add(1, Ordering::Relaxed);
+    serde_json::from_str(s)
+}
+
+/// Deserialize an inbound payload out of an owned [`Value`], counting the
+/// pass. Prefer [`parse_inbound_value_ref`] when the `Value` is still needed
+/// afterwards: it borrows instead of forcing a deep clone at the call site.
+#[inline]
+pub fn parse_inbound_value<T: DeserializeOwned>(value: Value) -> serde_json::Result<T> {
+    INBOUND_PARSES.fetch_add(1, Ordering::Relaxed);
+    serde_json::from_value(value)
+}
+
+/// Deserialize an inbound payload out of a borrowed [`Value`], counting the
+/// pass.
+///
+/// `&Value` is itself a `serde_json` `Deserializer`, so this reads the tree in
+/// place. It exists because the alternative at the call sites that keep their
+/// `Value` — `Request::load_args` and friends — was
+/// `from_value(self.arguments.clone())`, and that clone deep-copies the whole
+/// arguments subtree on every single request purely to hand serde something
+/// owned.
+#[inline]
+pub fn parse_inbound_value_ref<T: DeserializeOwned>(value: &Value) -> serde_json::Result<T> {
+    INBOUND_PARSES.fetch_add(1, Ordering::Relaxed);
+    T::deserialize(value)
+}
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
 pub struct ProtocolMessage {
@@ -208,7 +283,7 @@ pub struct DisconnectResponseBody {}
 
 impl Request {
     pub fn load_args<T: DeserializeOwned>(&self) -> DapResult<T> {
-        Ok(serde_json::from_value::<T>(self.arguments.clone())?)
+        Ok(parse_inbound_value::<T>(self.arguments.clone())?)
     }
 
     /// Like `load_args`, but for commands whose arguments are entirely
@@ -234,7 +309,7 @@ impl Request {
         if self.arguments.is_null() {
             return Ok(T::default());
         }
-        Ok(serde_json::from_value::<T>(self.arguments.clone())?)
+        Ok(parse_inbound_value::<T>(self.arguments.clone())?)
     }
 }
 
@@ -549,7 +624,7 @@ impl DapClient {
 }
 
 pub fn from_json(s: &str) -> DapResult<DapMessage> {
-    let value: Value = serde_json::from_str(s)?;
+    let value: Value = parse_inbound_str(s)?;
     match value.get("type").and_then(|v| v.as_str()) {
         Some("request") => {
             // if value.get("kind").and_then(|v| v.as_str()) == Some("launch") {
@@ -557,11 +632,11 @@ pub fn from_json(s: &str) -> DapResult<DapMessage> {
             // value,
             // )?))
             // } else {
-            Ok(DapMessage::Request(serde_json::from_value(value)?))
+            Ok(DapMessage::Request(parse_inbound_value(value)?))
             // }
         }
-        Some("response") => Ok(DapMessage::Response(serde_json::from_value(value)?)),
-        Some("event") => Ok(DapMessage::Event(serde_json::from_value(value)?)),
+        Some("response") => Ok(DapMessage::Response(parse_inbound_value(value)?)),
+        Some("event") => Ok(DapMessage::Event(parse_inbound_value(value)?)),
         _ => Err(serde_json::Error::custom("Unknown DAP message type"))?,
     }
 }
@@ -719,7 +794,7 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
         // A client whose request cannot be decoded still has a continuation
         // parked under that `seq`; answering with it settles the request
         // instead of leaving it to time out.
-        let raw_value: Value = serde_json::from_str(&dap_message_str).unwrap_or(Value::Null);
+        let raw_value: Value = parse_inbound_str(&dap_message_str).unwrap_or(Value::Null);
 
         let dap_message = match from_json(&dap_message_str) {
             Ok(message) => message,

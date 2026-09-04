@@ -704,7 +704,7 @@ pub fn location_from_jump_arguments(command: &str, arguments: &serde_json::Value
             present.join(", ")
         ));
     }
-    serde_json::from_value::<Location>(arguments.clone())
+    crate::dap::parse_inbound_value_ref::<Location>(arguments)
         .map_err(|e| format!("{command} could not read its `Location` payload: {e}"))
 }
 

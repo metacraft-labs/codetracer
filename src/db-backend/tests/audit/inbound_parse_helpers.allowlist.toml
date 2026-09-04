@@ -1,0 +1,57 @@
+# Issue #222 — every inbound DAP deserialization goes through a counted helper.
+#
+# The budget assertion that guards #222
+# (`tests/dap_protocol.rs::test_inbound_request_deserialization_budget`)
+# measures `db_backend::dap::INBOUND_PARSES`, and that counter is incremented
+# by exactly three functions in `src/dap.rs`:
+#
+#   dap::parse_inbound_str        text   -> T
+#   dap::parse_inbound_value      Value  -> T   (consumes the Value)
+#   dap::parse_inbound_value_ref  &Value -> T   (borrows; no deep clone)
+#
+# A pass that does NOT go through one of them is a pass the budget cannot
+# see, and the budget then stays green while the redundant decode comes
+# back. That is precisely how #222 survived: three separate `serde_json`
+# calls, in three different functions, each defensible on its own, with
+# nothing in the tree able to add them up.
+#
+# So `test_no_uncounted_inbound_deserialization` scans the inbound decoder's
+# own source file and holds the number of bare `serde_json` entry points in
+# it to the waivers below — which are the bodies of the counting helpers
+# themselves, and nothing else.
+#
+# When you update this file:
+#   - Adding a waiver means adding an inbound decode the budget cannot
+#     measure. Prefer routing the call through a helper.
+#   - If a new counted helper is genuinely needed, raise the matching
+#     `budget` by one and say here which function the call sits in.
+#   - Comment lines (`//`) are skipped by the scan, so prose about these
+#     rules — including inside `dap.rs` — does not need a waiver.
+
+schema_version = 1
+
+# Files scanned. Only `src/dap.rs` decodes inbound client payloads:
+# `src/dap_server.rs`'s `serde_json::from_slice` / `from_value` calls read
+# trace FILES off disk (`TraceLowLevelEvent` streams), not client bytes, and
+# `src/task.rs`'s remaining calls are in `#[cfg(test)]` fixtures — its one
+# inbound decode (`location_from_jump_arguments`) already goes through
+# `dap::parse_inbound_value_ref`.
+scan = ["src/dap.rs"]
+
+[[allow]]
+file = "src/dap.rs"
+needle = "serde_json::from_str"
+budget = 1
+reason = "the body of `dap::parse_inbound_str`, the counting helper itself"
+
+[[allow]]
+file = "src/dap.rs"
+needle = "serde_json::from_value"
+budget = 1
+reason = "the body of `dap::parse_inbound_value`, the counting helper itself"
+
+[[allow]]
+file = "src/dap.rs"
+needle = "serde_json::from_slice"
+budget = 0
+reason = "nothing on the inbound path decodes raw bytes directly; the transports hand over a &str"
