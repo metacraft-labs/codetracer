@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 23
+# RECORDED-DARK-CEILING: 21
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -105,10 +105,20 @@
 # =============================================================================
 # WIRED TO A `just` RECIPE THAT NO WORKFLOW CALLS
 # =============================================================================
-# Fifteen: the thirteen the old scan credited to the justfile, plus the two under
-# scripts/ that the old scan could not see at all. Each has a recipe, each recipe
-# is real and probably works when a person types it, and no lane types it. Named
-# with the recipe that is their only caller.
+# Fourteen. It was fifteen — the thirteen the old scan credited to the justfile,
+# plus the two under scripts/ that the old scan could not see at all — and
+# `ci/test/noir-mode-roundtrip.sh` came off the list when it was wired into
+# `deploy-web-codetracer.yml`, which is the only job that assembles the Noir
+# compiler and replay engine its preconditions demand. Each remaining one has a
+# recipe, each recipe is real and probably works when a person types it, and no
+# lane types it. Named with the recipe that is their only caller.
+#
+# NOTE FOR WHOEVER WIRES THE NEXT ONE. `noir-mode-roundtrip.sh` was green only
+# after two of its own assertions were repaired: FILES asked for
+# `#filesystemComponent-0`, an id `viewmodel/views/isonim_filesystem_view.nim`
+# has never emitted, and VCS asserted `> 0` commit rows against a template that
+# is not a git repository. A gate that has never run is not a gate that passes,
+# so budget for fixing it, not merely for calling it.
 
 # `just test-noir-build-mutations` — the mutation arms for the pane below.
 ci/test/noir-build-mutations.sh
@@ -121,9 +131,6 @@ ci/test/noir-build-in-browser.sh
 
 # `just test-noir-replay-in-browser`.
 ci/test/noir-replay-in-browser.sh
-
-# `just test-noir-mode-roundtrip`.
-ci/test/noir-mode-roundtrip.sh
 
 # `just test-noir-edit-persists`.
 ci/test/noir-edit-persists.sh
@@ -222,21 +229,21 @@ ci/test/constraints-listing-browser.sh
 # =============================================================================
 # NOT A GATE, AND NOT AN EXEMPTION EITHER
 # =============================================================================
-
-# A LIBRARY, listed here rather than marked `NOT-A-CI-GATE:` — and the
-# distinction is the point. It resolves a bundle's copy of an asset whose name
-# carries a content digest, and it is dark for one reason only: all five scripts
-# that `source` it are dark (`wasm-worker-session.sh`, `noir-replay-in-browser.sh`,
-# `noir-mode-roundtrip.sh`, `noir-build-in-browser.sh`,
-# `build-error-navigation-in-browser.sh`). Wire any one of them and this lights
-# up on its own — at which point the both-directions rule deletes this line.
 #
-# A `NOT-A-CI-GATE:` marker here would be a landmine for exactly that reason:
-# the guard fails a file that is reachable AND declares it is not a gate, so the
-# marker would have to be removed by whoever wires a consumer, and they would
-# have no reason to expect it. `visual-replay-gate-lib.sh` is the same shape and
-# carries no marker, because its consumer is live.
-ci/lib/published-asset.sh
+# `ci/lib/published-asset.sh` STOOD HERE AND ITS LINE IS GONE, which is this
+# section working exactly as its own entry predicted. The entry read: "it is
+# dark for one reason only: all five scripts that `source` it are dark ...
+# Wire any one of them and this lights up on its own — at which point the
+# both-directions rule deletes this line." `ci/test/noir-mode-roundtrip.sh` was
+# wired in this commit and it `source`s the library at line 77, so the library
+# is reachable and the guard would have failed on a stale entry.
+#
+# The reasoning against a `NOT-A-CI-GATE:` marker is kept, because it is about
+# the next library someone is tempted to list: the guard fails a file that is
+# reachable AND declares it is not a gate, so the marker would have to be
+# removed by whoever wires a consumer, and they would have no reason to expect
+# it. `visual-replay-gate-lib.sh` is the same shape and carries no marker,
+# because its consumer is live.
 
 # --- added 2026-09-04, with M0's browser seekable-container gate -------------
 #
