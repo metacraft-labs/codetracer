@@ -481,6 +481,64 @@ jq -r '.editorPaintedLines[0:6][]' <"${control}" | sed 's/^/        /'
 echo
 
 # ---------------------------------------------------------------------------
+echo "The debugger's panes hold something, each asked by name"
+echo "    Every check above and every pane check this repository had asks"
+echo "    \`document.querySelector('#stateComponent-0')\` — whether the"
+echo "    CONTAINER exists. GoldenLayout builds that container whether or not"
+echo "    anything ever mounts into it, so a blank pane and a working one are"
+echo "    indistinguishable to it. Both read 'present' over 25 desktop"
+echo "    sessions in which all three panes were blank."
+# ---------------------------------------------------------------------------
+# WHY A SECOND PROBE AND NOT A FIELD ON THE FIRST. `noir_replay_probe.mjs`
+# ends by returning to EDIT mode — that round trip is what it is for — and the
+# replay panes are gone by then. This one stops in the replay session and reads
+# `childElementCount` there, so the two cannot be merged without one of them
+# measuring the wrong moment.
+#
+# ASKED PER PANE, BY NAME. "some pane mounted" cannot fail for its own reason,
+# and these fail independently: on this surface State and Call Trace mounted
+# and the Timeline did not, so an aggregate would have been green over it.
+panes_out="${cache}/panes.json"
+if start_server "${bundle}"; then
+	node ci/test/pane_children_probe.mjs "http://127.0.0.1:${port}/noir" \
+		90000 >"${panes_out}" 2>"${panes_out}.err"
+	stop_server
+else
+	echo "  the static server did not start for the pane probe" >&2
+	exit 2
+fi
+
+# THE HARNESS CONTROL, FIRST. Every count below is zero on a run that never
+# reached a replay session, and a gate that read those zeros as the defect
+# would fail loudest when it was measuring nothing. `#next-image` is the Next
+# button the debug toolbar renders only once the engine has answered its
+# handshake and reported a position.
+pane_replay="$(field "${panes_out}" '.replayReached')"
+ck "$([ "${pane_replay}" = true ] && echo ok || echo no)" \
+	"the pane probe reached a replay session (so a zero below is a give-up, not a run that never started)"
+
+for pane in state calltrace timeline eventLog terminal; do
+	kids="$(field "${panes_out}" ".panes.${pane}.descendants")"
+	present="$(field "${panes_out}" ".panes.${pane}.present")"
+	ck "$([ "${present}" = true ] && echo ok || echo no)" \
+		"the ${pane} pane's container exists"
+	# The container existing is the OLD check and it passes over the defect;
+	# this is the one that does not.
+	ck "$([ "${kids}" -gt 0 ] 2>/dev/null && echo ok || echo no)" \
+		"the ${pane} pane HOLDS SOMETHING (${kids} descendants)"
+done
+
+# The give-up in its own words, recorded rather than asserted. A pane can be
+# populated while an EARLIER caller's poll still exhausted its budget — that is
+# exactly what happens here, because the mount that works is the one
+# `ui/layout.nim`'s component factory makes and the pollers that lose run
+# before it. Asserting no give-up would therefore fail over a working product;
+# printing them keeps the attribution available for the next reader.
+note "mount give-ups during the run (a populated pane above means a LATER caller mounted it):"
+jq -r '.giveUpLines[]' <"${panes_out}" | sed 's/^/        /'
+echo
+
+# ---------------------------------------------------------------------------
 echo "Mutation arm A: the engine's wasm is not served"
 echo "    Reddens the FETCH assertion. A deployment that declares an engine"
 echo "    and serves a 404 must not read as a session that simply had no"
