@@ -72,3 +72,72 @@ suite "the latch describes a container, not a name":
     # defect. Asserted literally because it is what reaches the DOM and what a
     # browser assertion reads back.
     check IsoNimPanelMountedAttr == cstring"data-ct-isonim-mounted"
+
+suite "the single-instance panes ask the document, not their memory":
+  ## `isoNimPanelMountIsLive` is the same change of subject one shape further
+  ## along. State, Call Trace and Timeline never had the id-keyed table above;
+  ## each kept one module-level `isoNimXMounted: bool`, set on mount and cleared
+  ## at exactly one site — the pane's `initXVMWithStore`, when the stub-backed
+  ## ViewModel is replaced by the real one.
+  ##
+  ## THE CONTROL-DATA RUN is the same symbol as above:
+  ##
+  ##     nim c -r -d:ctIsoNimPanelIdLatch \
+  ##       --path:src src/tests/gui/tests/layout/isonim_panel_mount_test.nim
+  ##
+  ## restores the answer to `mountedVMIsCurrent` alone, which is exactly what
+  ## the deleted boolean computed. The first test below is written so that it
+  ## FAILS under that define, naming the pane state that produced a blank panel.
+
+  test "AFTER A LAYOUT SWAP: the flag says mounted, the host is gone":
+    # THE CASE THE BOOLEAN COULD NOT SEE, and the one this suite exists for.
+    #
+    # `layout.swapLayout` hands GoldenLayout a whole new tree. The host the
+    # pane mounted into is destroyed, and `itemDestroyed` is suppressed for the
+    # duration of the swap — deliberately, because that suppression is what
+    # stops a mode switch throwing away Monaco buffers. So no reset runs:
+    #
+    #   * the ViewModel has not been replaced, so the old flag stays true
+    #   * `document.contains(host)` is false — that element is not in the page
+    #
+    # The pane must mount. Under the boolean it did not, and the pane came back
+    # blank with no error, no exception and no log.
+    #
+    # THIS IS THE ASSERTION THAT FAILS UNDER `-d:ctIsoNimPanelIdLatch`.
+    check not isoNimPanelMountIsLive(mountedVMIsCurrent = true,
+                                     hostIsInDocument = false)
+
+  test "a live host holding the current ViewModel is not remounted":
+    # The other half, and the reason this is not simply "always mount". Every
+    # mount's first act is to delete the host's children, so remounting over a
+    # live view tears down a rendered tree on every registration.
+    check isoNimPanelMountIsLive(mountedVMIsCurrent = true,
+                                 hostIsInDocument = true)
+
+  test "a live host holding a REPLACED ViewModel is remounted":
+    # The case the deleted flag's single reset site existed for: the stub
+    # backend's ViewModel is swapped for the real one while the host is
+    # perfectly alive. Without this half the pane would keep showing the stub's
+    # rows after the real backend arrived, and deleting the flag would have
+    # been a regression rather than a fix.
+    check not isoNimPanelMountIsLive(mountedVMIsCurrent = false,
+                                     hostIsInDocument = true)
+
+  test "a pane that has never mounted is never live":
+    # The boot case. `mountedXHost` is nil, so `isoNimPanelHostIsInDocument`
+    # answers false, and both halves agree.
+    check not isoNimPanelMountIsLive(mountedVMIsCurrent = false,
+                                     hostIsInDocument = false)
+
+  test "both halves decide, and neither subsumes the other":
+    # Stated as the matrix because a predicate that ignored one input would
+    # still pass three of the four cases above by accident. Live is exactly the
+    # top-right corner.
+    var liveCount = 0
+    for vmCurrent in [false, true]:
+      for inDocument in [false, true]:
+        if isoNimPanelMountIsLive(vmCurrent, inDocument):
+          inc liveCount
+          check vmCurrent
+          check inDocument
+    check liveCount == 1
