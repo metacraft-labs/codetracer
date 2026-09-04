@@ -6579,92 +6579,50 @@ jobs:
           bash ci/verdict/queue-watchdog.sh --poll \
             --deadline-minutes 30 --interval-seconds 30
 
-  ci-verdict:
-    # Final gate: assert that CI actually RAN the jobs it gates on.
+  ci-contract-suites:
+    # The static contract suites that used to sit INSIDE `ci-verdict`, ahead of
+    # its verdict step.
     #
-    # GitHub reports a job whose dependency failed as `skipped`, and
-    # `skipped` is not `failure`. When `lint-rust` started failing early —
-    # in `Setup dev env` for want of a repo-workspaces workspace lock on
-    # the pushed commit, or one step later at `direnv: not found` — every
-    # job declaring `needs: [lint-bash, lint-nim, lint-nix, lint-rust]`,
-    # including `test-non-gui`, the whole non-GUI suite, was silently
-    # skipped. The run went red regardless, so for six weeks "the tests
-    # are failing" and "the tests never ran" looked identical. On `dev`,
-    # `test-non-gui` last actually executed on 2026-06-25.
+    # WHY THEY MOVED. `ci-verdict` answers one question -- "did the required
+    # jobs actually run?" -- and that answer is the thing every other gate in
+    # this repo is read through. It used to answer it in its FOURTEENTH step,
+    # behind thirteen unrelated self-tests. Any one of them exiting non-zero
+    # ended the job before the verdict step, and GitHub then showed
+    # `ci-verdict` red with no verdict in it at all. A red `ci-verdict` was
+    # therefore ambiguous between "a required job did not run" -- the alarm --
+    # and "the docs-preview comment suite is broken", which has nothing to do
+    # with it. During that window the campaign was reading a missing verdict as
+    # an ordinary red, which is precisely the "checks that pass by not running"
+    # failure this whole effort exists to eliminate, turned inside out.
     #
-    # This job exists so those two states never look alike again. It does
-    # not suppress or soften any failure: a required job that ran and
-    # failed still fails this gate (exit 1). It only ensures that a
-    # required job which never ran fails LOUDLY and differently (exit 2).
+    # None of these suites needs the `needs:` list, and none of them informs
+    # the verdict. They are static checks over this workflow file and over
+    # scripts in `ci/` and `tools/`. Given a job of their own they start in the
+    # FIRST scheduling wave rather than after every build and test lane has
+    # concluded, so a workflow-shape defect is now reported in about a minute
+    # instead of at the end of the run -- or, on a run whose Windows lane
+    # queues for hours, not at all.
     #
-    # It deliberately runs on a stock GitHub-hosted runner with nothing
-    # but checkout + bash + jq — no Nix, no dev shell, no setup-dev-env,
-    # no workspace lock, no cross-repo siblings. A watchdog must not share
-    # the failure mode it is watching for; if this job needed the dev env,
-    # the very outage it reports would take it down too.
+    # NOTHING declares `needs:` on this job and it is deliberately absent from
+    # `ci/verdict/required-jobs.txt`: like `workspace-lock-freshness` and
+    # `queue-watchdog`, it must be loud and structurally incapable of cascading
+    # into a skipped test job.
     #
-    # RESOLVED LATENCY — historical note, kept so the failure mode stays
-    # recognizable. Two jobs in the needs: list below, `reprobuild-macos-smoke`
-    # and `origin-dap-macos`, used to request `runs-on: eph-macos-arm64`, a
-    # label no registered runner carried (the org's darwin runners expose
-    # `self-hosted`/`macOS`/`ARM64`/`darwin`/`nix-darwin`/`aarch64-darwin`).
-    # Those jobs never got scheduled: they sat queued until GitHub's 24-hour
-    # ceiling cancelled them, and because this gate waits on them its verdict
-    # could not be published until ~24h after the push. They now request
-    # `aarch64-darwin`, which the m3-mcl-* runners carry, so the verdict is
-    # prompt again. If a macOS job ever queues indefinitely once more, the
-    # requested label has drifted from what the darwin runners advertise — do
-    # not read a missing verdict as a passing one while that is true, and do
-    # not "fix" it by dropping those jobs from needs:, which would remove the
-    # delay only by giving up the coverage this gate exists to protect.
-    needs:
-      - lint-bash
-      - lint-nim
-      - lint-nix
-      - lint-rust
-      - dev-build
-      - nix-build
-      - appimage-build
-      - dmg-build
-      - appimage-lib-check
-      - appimage-cross-distro
-      - dmg-lib-check
-      - test-non-gui
-      - test-ui-tests
-      - test-ui-tests-rr
-      - cross-process-linux
-      - viewmodel-tests
-      - visual-replay-regression-gate
-      - ct-test-release-gate
-      - ct-test-providers
-      - windows-bootstrap-smoke
-      - windows-named-pipe-tests
-      - windows-rust-components
-      - windows-headless-test
-      - origin-dap-windows
-      - origin-dap-macos
-      - reprobuild-linux-smoke
-      - reprobuild-macos-smoke
+    # Stock ubuntu-latest, and that is load-bearing rather than incidental --
+    # every suite below is chosen for needing nothing but bash, git, coreutils,
+    # node or python3. A watchdog must not share the failure mode it watches
+    # for; if these needed the dev shell, the outages they report would take
+    # them down too.
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          # No later step in this job talks to a git remote, so the token has
-          # nothing to do after the checkout and should not outlive it: these
-          # runners reuse their work tree, and actions/checkout otherwise
-          # leaves the credential in `.git/config` for whatever runs next.
-          # (`nix develop` is unaffected either way -- Nix's fetcher does not
-          # read gitconfig; its credentials come from netrc/access-tokens.)
+          # Same reasoning as `ci-verdict`: no step here talks to a git remote
+          # after the checkout, and these runners reuse their work tree.
           persist-credentials: false
           submodules: false
-
-      - name: Self-test the verdict gate
-        # The gate is only worth trusting if its own contracts hold, so
-        # they are checked on every run, against fixtures captured from
-        # the real broken runs this gate was built for.
-        run: bash ci/verdict/required-jobs-test.sh
 
       - name: Assert the Windows lane provisions its own git and bash
         # The eph-win-x64 image ships neither; five of the six Windows jobs
@@ -6825,12 +6783,146 @@ jobs:
         # the state of the dev-shell lanes.
         run: bash tools/visual-review/deepreview-harness-test.sh
 
+  ci-verdict:
+    # Final gate: assert that CI actually RAN the jobs it gates on.
+    #
+    # GitHub reports a job whose dependency failed as `skipped`, and
+    # `skipped` is not `failure`. When `lint-rust` started failing early —
+    # in `Setup dev env` for want of a repo-workspaces workspace lock on
+    # the pushed commit, or one step later at `direnv: not found` — every
+    # job declaring `needs: [lint-bash, lint-nim, lint-nix, lint-rust]`,
+    # including `test-non-gui`, the whole non-GUI suite, was silently
+    # skipped. The run went red regardless, so for six weeks "the tests
+    # are failing" and "the tests never ran" looked identical. On `dev`,
+    # `test-non-gui` last actually executed on 2026-06-25.
+    #
+    # This job exists so those two states never look alike again. It does
+    # not suppress or soften any failure: a required job that ran and
+    # failed still fails this gate (exit 1). It only ensures that a
+    # required job which never ran fails LOUDLY and differently (exit 2).
+    #
+    # It deliberately runs on a stock GitHub-hosted runner with nothing
+    # but checkout + bash + jq — no Nix, no dev shell, no setup-dev-env,
+    # no workspace lock, no cross-repo siblings. A watchdog must not share
+    # the failure mode it is watching for; if this job needed the dev env,
+    # the very outage it reports would take it down too.
+    #
+    # THE VERDICT PUBLISHES EVEN WHEN A GUARD IS BROKEN.
+    #
+    # This job used to reach its verdict in its fourteenth step, behind
+    # thirteen unrelated static self-tests. Any one of them exiting non-zero
+    # ended the job first, and GitHub then showed `ci-verdict` red with NO
+    # VERDICT IN IT. That made a red `ci-verdict` ambiguous between the alarm
+    # it exists to raise -- "a required job never ran" -- and "an unrelated
+    # contract suite is broken", and for as long as that was true the one
+    # instrument the rest of this pipeline is read through could be silenced
+    # by a defect it does not even watch for.
+    #
+    # Two changes make that unreachable:
+    #
+    #   1. The thirteen unrelated suites moved to `ci-contract-suites` above.
+    #      They inform nothing here, they need no `needs:` list, and in their
+    #      own job they also report in the first scheduling wave instead of
+    #      after every build lane has concluded.
+    #
+    #   2. What remains -- this gate's OWN self-test, which genuinely bears on
+    #      whether the verdict can be trusted -- runs `continue-on-error` with
+    #      its outcome re-raised in the LAST step. So the verdict is computed
+    #      and printed on every run, unconditionally, and a broken self-test
+    #      still turns this job red. Neither failure can hide the other.
+    #
+    # If you add a step to this job, it goes AFTER the verdict step or it does
+    # not go here at all. The ordering is the fix.
+    #
+    # RESOLVED LATENCY — historical note, kept so the failure mode stays
+    # recognizable. Two jobs in the needs: list below, `reprobuild-macos-smoke`
+    # and `origin-dap-macos`, used to request `runs-on: eph-macos-arm64`, a
+    # label no registered runner carried (the org's darwin runners expose
+    # `self-hosted`/`macOS`/`ARM64`/`darwin`/`nix-darwin`/`aarch64-darwin`).
+    # Those jobs never got scheduled: they sat queued until GitHub's 24-hour
+    # ceiling cancelled them, and because this gate waits on them its verdict
+    # could not be published until ~24h after the push. They now request
+    # `aarch64-darwin`, which the m3-mcl-* runners carry, so the verdict is
+    # prompt again. If a macOS job ever queues indefinitely once more, the
+    # requested label has drifted from what the darwin runners advertise — do
+    # not read a missing verdict as a passing one while that is true, and do
+    # not "fix" it by dropping those jobs from needs:, which would remove the
+    # delay only by giving up the coverage this gate exists to protect.
+    needs:
+      - lint-bash
+      - lint-nim
+      - lint-nix
+      - lint-rust
+      - dev-build
+      - nix-build
+      - appimage-build
+      - dmg-build
+      - appimage-lib-check
+      - appimage-cross-distro
+      - dmg-lib-check
+      - test-non-gui
+      - test-ui-tests
+      - test-ui-tests-rr
+      - cross-process-linux
+      - viewmodel-tests
+      - visual-replay-regression-gate
+      - ct-test-release-gate
+      - ct-test-providers
+      - windows-bootstrap-smoke
+      - windows-named-pipe-tests
+      - windows-rust-components
+      - windows-headless-test
+      - origin-dap-windows
+      - origin-dap-macos
+      - reprobuild-linux-smoke
+      - reprobuild-macos-smoke
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # No later step in this job talks to a git remote, so the token has
+          # nothing to do after the checkout and should not outlive it: these
+          # runners reuse their work tree, and actions/checkout otherwise
+          # leaves the credential in `.git/config` for whatever runs next.
+          # (`nix develop` is unaffected either way -- Nix's fetcher does not
+          # read gitconfig; its credentials come from netrc/access-tokens.)
+          persist-credentials: false
+          submodules: false
+
+      - name: Self-test the verdict gate
+        # Records its outcome instead of aborting the job, and the LAST step
+        # re-raises it. See the header note "THE VERDICT PUBLISHES EVEN WHEN A
+        # GUARD IS BROKEN" -- a self-test that halts the job here would take
+        # the verdict down with it, which is the exact defect this ordering
+        # was changed to remove. `continue-on-error` does not soften anything:
+        # the outcome is asserted below and a broken self-test still fails
+        # this job.
+        id: verdict-selftest
+        continue-on-error: true
+        run: bash ci/verdict/required-jobs-test.sh
+
       - name: Assert the required jobs actually ran
+        # ALWAYS runs. This is the answer the job exists to produce, and it is
+        # produced before anything else in this job is allowed to fail.
+        if: always()
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           printf '%s' "$NEEDS_JSON" > "${RUNNER_TEMP}/needs.json"
           bash ci/verdict/required-jobs.sh --needs-json "${RUNNER_TEMP}/needs.json"
+
+      - name: Re-raise a failed self-test
+        # The self-test above is `continue-on-error` so that a broken guard
+        # cannot suppress the verdict. It must still turn this job red, or
+        # "the gate's own contracts are broken" would be silent -- trading one
+        # invisible failure for another. Runs last so the verdict is already
+        # printed and in the log by the time this exits non-zero.
+        if: always() && steps.verdict-selftest.outcome == 'failure'
+        run: |
+          echo "::error::ci/verdict/required-jobs-test.sh failed -- the verdict above was produced by a gate whose own contracts do not hold. Read the verdict, then fix the gate." >&2
+          exit 1
 
   workspace-lock-freshness:
     # Alarm, not a gate: is the shared manifests repo still receiving workspace

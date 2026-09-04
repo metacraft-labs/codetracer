@@ -250,6 +250,62 @@ for _act in "$ACTIONS_DIR"/*/action.yml; do
 done
 unset _act _dir
 
+# `provision-repro-lock-siblings` has no `siblings:` block to read, and that is
+# not an oversight in the action -- it is the point of it. It runs
+#
+#     repro develop --all --reset --into=<siblings root>
+#
+# which clones exactly the `deps` this repo's own `repro.lock` declares, at the
+# revisions it pins. Its predecessor, `setup-isonim-siblings`, hand-wrote a
+# NINE-repo list resolved against the workspace lock in metacraft-manifests --
+# a repo set that reflected whatever the last pusher happened to have checked
+# out, and which disagreed with `repro.lock` about isonim's revision.
+#
+# The names are therefore read from `repro.lock` rather than restated here.
+# That keeps this check falsifiable in the direction that matters: if a repo
+# stops being declared in the lock, the action stops cloning it, and this
+# suite must report the jobs that need it as broken. A hard-coded list here
+# would keep saying "provisioned" after the action had stopped providing it,
+# which is precisely the class of gate this suite exists to be the opposite of.
+#
+# The self entry (`path = "."`) is skipped: the primary checkout is not one of
+# its own siblings, and handing it to a clone step would `rm -rf` the work tree
+# mid-run -- a defect the sibling wiring has already had once.
+repro_lock_deps() { # echoes one bare repo name per line
+	[ -f "$REPO_ROOT/repro.lock" ] || return 0
+	awk '
+		/^deps[ \t]*=/ {
+			line = $0
+			n = split(line, entries, /\}[ \t]*,[ \t]*\{/)
+			for (i = 1; i <= n; i++) {
+				e = entries[i]
+				if (e !~ /path[ \t]*=[ \t]*"\.\"/) {
+					if (match(e, /name[ \t]*=[ \t]*"[^"]+"/)) {
+						nm = substr(e, RSTART, RLENGTH)
+						sub(/^name[ \t]*=[ \t]*"/, "", nm)
+						sub(/"$/, "", nm)
+						print nm
+					}
+				}
+			}
+		}
+	' "$REPO_ROOT/repro.lock"
+}
+
+_repro_provides="$(repro_lock_deps | tr '\n' ' ')"
+if [ -d "$ACTIONS_DIR/provision-repro-lock-siblings" ]; then
+	if [ -z "${_repro_provides// /}" ]; then
+		fail "provision-repro-lock-siblings exists but repro.lock declares no deps" \
+			"Every job relying on it provisions nothing, and this suite cannot" \
+			"tell that apart from the action having been deleted."
+		echo
+		echo "$failures of $assertions assertions failed"
+		exit 1
+	fi
+	COMPOSITE_PROVIDES["provision-repro-lock-siblings"]="$_repro_provides"
+fi
+unset _repro_provides
+
 # -----------------------------------------------------------------------------
 # 3. Every build-once job provisions the table.
 #

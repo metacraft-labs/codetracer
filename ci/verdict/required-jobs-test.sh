@@ -42,7 +42,15 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "${tmp_dir}"' EXIT
+# Preserve the exit status across the cleanup. A bare `trap 'rm -rf ...' EXIT`
+# lets the trap's own (successful) status become the script's on bash 3.2 --
+# which is /bin/bash on macOS, where developers run this. The effect is that
+# this suite dies mid-way (`declare -A` is a bash-4 feature, so contract 6
+# aborts under `set -u`) and still exits 0: the count assertion at the bottom,
+# which is what protects against exactly that, is never reached. CI's bash 5
+# is unaffected, so this was invisible there -- a self-test that cannot fail,
+# in the one script the rest of this pipeline is read through.
+trap 'rc=$?; rm -rf "${tmp_dir}"; exit "${rc}"' EXIT
 
 pass_count=0
 
@@ -278,10 +286,77 @@ done <"${MANIFEST}"
 [[ -z ${missing_needs} ]] || fail "ci-verdict job is missing needs: entries for:${missing_needs}"
 ok "ci-verdict declares every manifest job in needs:"
 
+# ---------------------------------------------------------------------
+# 10. ORDERING GUARD: the verdict must publish even when a guard breaks.
+#
+#     This gate spent its life answering in its FOURTEENTH step, behind
+#     thirteen unrelated static self-tests. Any one of them exiting
+#     non-zero ended the job before the verdict step ran, and GitHub then
+#     showed `ci-verdict` red with no verdict in it -- making the alarm
+#     ("a required job never ran") indistinguishable from "some unrelated
+#     contract suite is broken". The instrument every other gate is read
+#     through could be silenced by a defect it does not even watch for.
+#
+#     The fix is structural, so the guard on it must be structural too: a
+#     comment saying "keep the verdict first" is exactly the kind of prose
+#     that goes stale while the thing it describes drifts. These are the
+#     three properties that make the failure unreachable, asserted against
+#     the workflow file itself.
+# ---------------------------------------------------------------------
+verdict_block="$(sed -n '/^  ci-verdict:/,/^  [a-zA-Z0-9_-]*:[[:space:]]*$/p' "${WORKFLOW}")"
+
+# (a) The verdict step exists and is unconditional.
+verdict_step="$(awk '
+	/^      - name: Assert the required jobs actually ran$/ { grab = 1; next }
+	grab && /^      - name: / { exit }
+	grab { print }
+' <<<"${verdict_block}")"
+[[ -n ${verdict_step} ]] ||
+	fail "ci-verdict has no step named 'Assert the required jobs actually ran'"
+grep -qE '^        if: always\(\)[[:space:]]*$' <<<"${verdict_step}" ||
+	fail "the verdict step must carry 'if: always()', or a failure in any earlier step suppresses the answer this job exists to produce"
+
+# (b) No step before the verdict may abort the job. Checkout is exempt:
+#     without a work tree there is nothing to compute a verdict from, so
+#     its failure is not a suppressed verdict, it is no verdict possible.
+preceding="$(awk '
+	/^      - name: Assert the required jobs actually ran$/ { exit }
+	{ print }
+' <<<"${verdict_block}")"
+offenders=""
+current=""
+current_body=""
+check_step() {
+	[[ -z ${current} ]] && return 0
+	[[ ${current} == "Checkout" ]] && return 0
+	grep -qE '^        continue-on-error: true[[:space:]]*$' <<<"${current_body}" ||
+		offenders="${offenders}
+  - ${current}"
+}
+while IFS= read -r line; do
+	if [[ ${line} =~ ^\ {6}-\ name:\ (.*)$ ]]; then
+		check_step
+		current="${BASH_REMATCH[1]}"
+		current_body=""
+	else
+		current_body="${current_body}
+${line}"
+	fi
+done <<<"${preceding}"
+check_step
+[[ -z ${offenders} ]] || fail "these ci-verdict steps run BEFORE the verdict and can abort the job, suppressing it:${offenders}
+Move them to ci-contract-suites, or mark them continue-on-error and re-raise after the verdict."
+
+# (c) A self-test made non-fatal must still be able to fail the job, or
+#     this guard would have traded a suppressed verdict for a silent one.
+grep -qE "steps\.verdict-selftest\.outcome == 'failure'" <<<"${verdict_block}" ||
+	fail "ci-verdict marks its self-test continue-on-error but never re-raises it; a broken gate would report success"
+ok "the verdict publishes before any guard can abort the job, and a broken guard still fails it"
+
 echo
 # The count is asserted so that a contract deleted or short-circuited by
 # an early `return` cannot leave this suite quietly reporting success on
 # fewer checks than it claims to run.
-echo "required-jobs-test summary: expected=12 executed=${pass_count} failed=0"
-[[ ${pass_count} -eq 12 ]] || fail "expected 12 assertions to run, ran ${pass_count}"
+echo "required-jobs-test summary: expected=13 executed=${pass_count} failed=0"
+[[ ${pass_count} -eq 13 ]] || fail "expected 12 assertions to run, ran ${pass_count}"
 echo "required-jobs-test: all contracts hold."
