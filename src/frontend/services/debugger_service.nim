@@ -543,11 +543,21 @@ proc onAddBreakResponse*(self: DebuggerService, response: BreakpointInfo, c: boo
       refreshEditorLine(self.data.ui.editors[response.path], response.line)
 
 proc deleteAllBreakpoints*(self: DebuggerService, editor: EditorViewComponent) =
-  let breakpointsCopy = data.pointList.breakpoints
-  for i, b in breakpointsCopy:
-    delete(data.pointList.breakpoints, i..i)
-    data.services.debugger.breakpointTable[b.path].del(b.line)
+  ## THE LIST IS EMPTIED AT THE END, not spliced while it is being walked.
+  ##
+  ## This used to take a copy of `pointList.breakpoints`, walk the COPY's
+  ## indices, and `delete(data.pointList.breakpoints, i..i)` at each one — so
+  ## after the first removal every index addressed the wrong element, and the
+  ## last iteration of a three-breakpoint run indexed past the end of a
+  ## one-element seq. It was invisible because the only caller assigned `@[]`
+  ## over the wreckage immediately afterwards; the second caller would not have
+  ## been so lucky. `breakpointTable` was always correct, because it is keyed by
+  ## the breakpoint's own path and line rather than by a position in a seq.
+  for b in data.pointList.breakpoints:
+    if data.services.debugger.breakpointTable.hasKey(b.path):
+      data.services.debugger.breakpointTable[b.path].del(b.line)
     editor.refreshEditorLine(b.line)
+  data.pointList.breakpoints = @[]
   data.pointList.redrawBreakpoints = true
   self.dapSetBreakpoints()
 
