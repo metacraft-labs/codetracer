@@ -199,6 +199,17 @@ type
     typeName*: string
     hasChildren*: bool
     children*: seq[Variable]
+    isWatch*: bool
+      ## True when this row answers a user-entered watch expression rather
+      ## than reporting a recorded local.
+      ##
+      ## Watch answers ride the `ct/load-locals` response — there is no
+      ## separate `evaluate` route — so every host that reads that response
+      ## has to split them out. Carrying the flag on the row is what lets
+      ## `applyLocalsResponse` be the ONE place that does it, instead of
+      ## each host reimplementing the split (which is how the headless
+      ## surface came to ask for no watches at all while the GUI asked for
+      ## them and threw the answers away).
 
   EventLogRow* = object
     ## One row in the event-log panel.

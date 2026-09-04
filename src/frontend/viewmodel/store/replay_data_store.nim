@@ -865,6 +865,34 @@ proc updateWatches*(store: ReplayDataStore;
     vmDebug "[PIPELINE] updateWatches: setting " & $watches.len & " watch result(s)"
   store.locals.watches.val = watches
 
+proc applyLocalsResponse*(store: ReplayDataStore;
+                          rows: seq[Variable]) =
+  ## Write ONE `ct/load-locals` response into the store, splitting the
+  ## watch answers out of the locals.
+  ##
+  ## THE ONE PLACE THE SPLIT HAPPENS. Watch answers ride this response
+  ## (there is no `evaluate` route) and are marked `isWatch` by the
+  ## backend, so every host that reads the response has to separate them.
+  ## Before this existed each host did it — or failed to — on its own:
+  ## the GUI asked for watches and discarded the answers, and the headless
+  ## session asked for none at all while exporting `addWatch`. A single
+  ## entry point is what stops the next host from inventing a third
+  ## behaviour.
+  ##
+  ## Both signals are written on every response, INCLUDING with an empty
+  ## seq: a step where a watch stops resolving must clear the previous
+  ## step's answer rather than leave a stale value on screen next to a
+  ## position it is no longer true of.
+  var locals = newSeq[Variable]()
+  var watches = newSeq[Variable]()
+  for row in rows:
+    if row.isWatch:
+      watches.add(row)
+    else:
+      locals.add(row)
+  store.updateLocals(locals)
+  store.updateWatches(watches)
+
 proc updateCodeStateLine*(store: ReplayDataStore;
                           line: int;
                           sourceCode: string) =
@@ -886,11 +914,12 @@ proc updateCodeStateLine*(store: ReplayDataStore;
 
 proc makeVariable*(name, value, typeName: string;
                    hasChildren: bool = false;
-                   children: seq[Variable] = @[]): Variable =
+                   children: seq[Variable] = @[];
+                   isWatch: bool = false): Variable =
   ## Convenience constructor for Variable — avoids the need for callers
   ## to import store/types.
   Variable(name: name, value: value, typeName: typeName,
-           hasChildren: hasChildren, children: children)
+           hasChildren: hasChildren, children: children, isWatch: isWatch)
 
 proc newVariableSeq*(): seq[Variable] =
   ## Create an empty seq of store Variables. Useful for callers that

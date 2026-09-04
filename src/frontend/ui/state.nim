@@ -565,35 +565,23 @@ proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   ## proper field per ``TypeKind``.
   if stateVMStore.isNil:
     return
-  var vmLocals = newVariableSeq()
-  # WATCH ANSWERS TRAVEL IN THE SAME LIST and are separated here.
-  #
-  # There is no `evaluate` route: `ct/load-locals` answers both, and the
-  # backend marks a watch row with `value.isWatch` (see
-  # `db-backend/src/watch_expression.rs`). They go into their own signal
-  # rather than staying mixed into the locals for two reasons — a watch
-  # may name the same thing as a local, and a REFUSED watch is an `Error`
-  # value carrying its reason, which belongs in the Watches tab and not
-  # in a list of the step's locals.
-  var vmWatches = newVariableSeq()
+  # WATCH ANSWERS TRAVEL IN THE SAME LIST. Each row carries `value.isWatch`
+  # (set by the backend — see `db-backend/src/watch_expression.rs`); the
+  # split itself belongs to `applyLocalsResponse`, which is the one place
+  # every host performs it.
+  var vmRows = newVariableSeq()
   for v in legacyLocals:
     let hasChild = (if v.value.isNil: false else: v.value.elements.len > 0 or v.value.kind in {TypeKind.Pointer, TypeKind.Ref} or v.value.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
-    let row = makeVariable(
+    vmRows.add(makeVariable(
       name = $v.expression,
       value = valueDisplayText(v.value),
       typeName = valueDisplayType(v.value),
       hasChildren = hasChild,
       children = toVariableChildren(v.value),
-    )
-    if not v.value.isNil and v.value.isWatch:
-      vmWatches.add(row)
-    else:
-      vmLocals.add(row)
-  stateVMStore.updateLocals(vmLocals)
-  # WRITTEN EVEN WHEN EMPTY. A step whose watch stopped resolving must
-  # clear the previous answer rather than leave a stale one on screen.
-  stateVMStore.updateWatches(vmWatches)
-  cdebug fmt"[PIPELINE] syncStoreLocals: synced {vmLocals.len} locals and {vmWatches.len} watch result(s) into store"
+      isWatch = (not v.value.isNil and v.value.isWatch),
+    ))
+  stateVMStore.applyLocalsResponse(vmRows)
+  cdebug fmt"[PIPELINE] syncStoreLocals: synced {vmRows.len} row(s) into store"
 
 proc lookupSourceLine(path: cstring; line: int): string =
   ## Look up the source code at `<path>:<line>` from the editor cache.

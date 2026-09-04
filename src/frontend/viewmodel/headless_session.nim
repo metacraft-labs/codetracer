@@ -639,18 +639,16 @@ proc requestAndLoadLocals*(s: HeadlessDebugSession) =
     if not body.isNil and body.kind == JObject:
       let localsNode = body.getOrDefault("locals")
       if not localsNode.isNil and localsNode.kind == JArray:
-        # Watch answers ride the same list and are separated by
-        # `value.isWatch`, exactly as the GUI's `syncStoreLocals` does.
-        var variables: seq[Variable]
-        var watchResults: seq[Variable]
+        # Watch answers ride the same list, marked `value.isWatch`. The
+        # split itself is `applyLocalsResponse`'s — the one place every
+        # host does it.
+        var rows: seq[Variable]
         for localNode in localsNode:
-          let parsed = parseVariable(localNode)
-          if localNode.getOrDefault("value").getOrDefault("isWatch").getBool(false):
-            watchResults.add(parsed)
-          else:
-            variables.add(parsed)
-        s.session.store.updateLocals(variables)
-        s.session.store.updateWatches(watchResults)
+          var parsed = parseVariable(localNode)
+          parsed.isWatch =
+            localNode.getOrDefault("value").getOrDefault("isWatch").getBool(false)
+          rows.add(parsed)
+        s.session.store.applyLocalsResponse(rows)
         s.session.store.locals.loadedForRRTicks.val = s.getCurrentRRTicks()
         drain()
 
