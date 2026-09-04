@@ -1785,6 +1785,25 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
             data.services.editor.active = editorPath
             let editor = data.ui.editors[editorPath]
             editor.refreshFlowAfterActivation()
+
+            # A GENERATED-CODE LISTING FOLLOWS THE ACTIVE SOURCE TAB.
+            # `Generated-Code-Listing.md` §6.2: the leader is the document the
+            # user last interacted with, and switching tabs IS that
+            # interaction. The line travels with the path because each tab
+            # carries its own cursor — a consumer told only the path would
+            # keep the previous tab's line under the new tab's name until the
+            # user happened to move the caret.
+            #
+            # Read from the Monaco instance rather than from `tabInfo
+            # .viewLine`, which is a scroll target and not a caret: they agree
+            # after a jump and diverge the moment a user clicks a line.
+            if not editorActiveTabChangedHook.isNil:
+              var activeLine = 1
+              if not editor.monacoEditor.isNil:
+                let position = editor.monacoEditor.getPosition()
+                if not position.isNil:
+                  activeLine = cast[int](position.lineNumber)
+              editorActiveTabChangedHook(editorPath, activeLine)
             let tab = EditorViewTabArgs(name: editorPath, editorView: editor.editorView)
             # check if current active tab is newly created or it exists in tab history
             if data.services.editor.tabHistory.find(tab) == -1:

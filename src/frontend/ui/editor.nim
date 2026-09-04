@@ -11,6 +11,12 @@ import
 
 from welcome_screen import resetView
 from event_log import findTRNode
+# The generated-code operation's open path, reached from the context menu
+# below. Imported for exactly these three symbols; `generated_code` imports
+# `ui_imports` and the viewmodels and nothing from here, so there is no cycle.
+from generated_code import generatedCodeCommandsAt, showGeneratedCode
+from ../viewmodel/viewmodels/generated_code_operation import
+  TargetCommand, TargetAvailability, gaEnabled, gaDisabled, commandLabel
 from dom import createElement
 from mode_layouts import isEditingMode
 
@@ -1578,6 +1584,47 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
       contextMenu &= sourceLineForward
       contextMenu &= sourceLineBackward
 
+    # SHOW GENERATED CODE. `Generated-Code-Listing.md` §10 (GCL-D19): the
+    # surface is in NO mode's default layout, and "an on-demand open path must
+    # exist — removing the pane from the default layout without adding the open
+    # path would remove the feature". This is that path, and it is outside the
+    # `editing` split above because §1 puts the operation in BOTH modes, from
+    # the same gesture: what a line compiled to is a fact about the program,
+    # not about whether a recording is open.
+    #
+    # ONE ROW PER TARGET, EACH WITH ITS OWN NAME (GCL-D11). Noir contributes
+    # Show ACIR, Show Brillig and Show SSA; Nim contributes Show Generated C
+    # and Show Assembly. A single "Show Assembly Code" row cannot mean all of
+    # those, which is what `openAlternativeView`'s positional `id: int` has
+    # been doing — "level 1" means disassembly for C and generated C for Nim,
+    # and the name of the thing being opened exists nowhere.
+    #
+    # A LANGUAGE WITH NO TARGET CONTRIBUTES NO ROW — absent, not disabled,
+    # because there is nothing to explain. A target that exists and cannot be
+    # produced is the disabled case, and it carries the build proposal's own
+    # sentence (GCL-D17).
+    for command in generatedCodeCommandsAt(path):
+      let targetId = command.target.id
+      let capturedPath = path
+      let capturedLine = line
+      if command.availability == gaDisabled:
+        contextMenu &= ContextMenuItem(
+          name: commandLabel(command.target),
+          hint: "",
+          handler: proc(e: Event) = discard,
+          disabled: true,
+          disabledReason: command.reason)
+      elif command.availability == gaEnabled:
+        contextMenu &= ContextMenuItem(
+          name: commandLabel(command.target),
+          hint: "shows what the line under the cursor compiled to",
+          handler: proc(e: Event) =
+            # THE CURSOR IS THE ARGUMENT. GCL-D10: the operation takes a
+            # position, not a project — a listing opened over a whole project
+            # has no anchor to place the reader at, and its entry names are
+            # the compiler's rather than the developer's.
+            showGeneratedCode(self.data, capturedPath, capturedLine, targetId))
+
     try:
       targetToken = self.getTokenFromPosition(ev.target.position)
       # copied/adapted from getTokenFromPosition
@@ -2540,6 +2587,33 @@ var editorSourceChangedHook*: proc(path: cstring)
   ## Nil means no host installed one, which is the desktop's state and the
   ## state of every build before the Constraints pane needed to know.
 
+var editorCursorMovedHook*: proc(path: cstring; line: int)
+  ## THE CURSOR MOVED IN `path`, to `line`.
+  ##
+  ## `Generated-Code-Listing.md` §6: a generated-code listing is anchored to
+  ## the cursor, and the two documents move together while both are readable.
+  ## This is the leader's end of that.
+  ##
+  ## FIRED FOR EVERY CURSOR EVENT MONACO PRODUCES, including column-only moves
+  ## and — because a Monaco instance exists per tab — moves in models that are
+  ## not on screen. The filtering is deliberately NOT done here: which of them
+  ## matter is a property of the consumer's state (is anything open, which tab
+  ## is active, has the line actually changed), and a hook that guessed would
+  ## have to re-derive that state from the editor, which is the wrong end.
+  ## `generated_code_vm.noteCursorMoved` refuses all three, and each refusal is
+  ## asserted.
+  ##
+  ## Nil means no host installed one, which is every build with no
+  ## generated-code listing open.
+
+var editorActiveTabChangedHook*: proc(path: cstring; line: int)
+  ## THE USER SWITCHED SOURCE TABS, and here is the new tab's own cursor line.
+  ##
+  ## The line travels WITH the path rather than being fetched afterwards: each
+  ## tab carries its own cursor, and a consumer that switched files and then
+  ## waited for a cursor event would spend the interval showing the previous
+  ## tab's line under the new tab's name.
+
 const editorTestRunFrames = 400
   ## 400 × 300 ms = two minutes. Long enough for a cold 16 MB wasm compiler to
   ## be fetched, instantiated and run over a project; short enough that a
@@ -3398,6 +3472,25 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
       # cannot.
       if not editorSourceChangedHook.isNil:
         editorSourceChangedHook(self.name))
+
+  # THE CURSOR IS THE SUBJECT OF THE GENERATED-CODE OPERATION, and this is
+  # where it is read. `Generated-Code-Listing.md` §2 (GCL-D10): the operation
+  # takes a POSITION, not a project, because the map the artefact carries runs
+  # from generated position back to source position and inverting it is what
+  # answers "what did this function of mine become".
+  #
+  # Subscribed unconditionally rather than only while a listing is open. The
+  # alternative — attach on open, detach on close — needs a disposable per tab
+  # and a teardown that survives a tab being closed while the listing is not,
+  # and the thing it would save is a nil check. `editorCursorMovedHook` is nil
+  # for every build with nothing open, so the cost when nothing is listening
+  # is one comparison per cursor event.
+  tabInfo.monacoEditor.toJs.onDidChangeCursorPosition(proc(ev: js) =
+    if editorCursorMovedHook.isNil:
+      return
+    if ev.isNil or ev.position.isNil:
+      return
+    editorCursorMovedHook(self.name, cast[int](ev.position.lineNumber)))
 
   console.log("DELEGATING SHORTCUTS")
 

@@ -172,6 +172,36 @@ var
     ## `listing` is ordinary rather than a fault: a compiler module older than
     ## `VfsResponse.acir_listing` answers without it, and the pane must then
     ## say it has no counts rather than show a number from somewhere else.
+  noirGeneratedCodeSink*: proc(listing: string; artefactJson: string;
+                               packageDir: string; provenance: string)
+    ## Where a finished COMPILE's RAW OUTPUTS go, for the generated-code
+    ## operation. `Generated-Code-Listing.md` §1, §8.
+    ##
+    ## SEPARATE FROM `noirConstraintsSink` ABOVE, AND NOT A WIDENING OF IT.
+    ## The two want different things from the same compile, and folding them
+    ## would force one of them to be wrong:
+    ##
+    ##   * The Constraints pane is a STANDING surface. It is told on every
+    ##     compile and it parses immediately, because its whole job is to
+    ##     have a current number on screen without being asked.
+    ##   * The generated-code listing is INVOKED, never permanently displayed
+    ##     (§1). It must be told on every compile — otherwise the first
+    ##     invocation after a build would read a superseded artefact — and it
+    ##     must parse NOTHING until a user asks, or the surface is permanent
+    ##     in everything but its visibility.
+    ##
+    ## So this sink carries `artefactJson` as TEXT and the consumer stores it.
+    ## `artefactJson` is the whole compile artefact — `file_map` plus
+    ## `debug_symbols` — which is what `noir_anchor_producer.readArtefactJson`
+    ## takes, and it is deliberately not pre-parsed here: parsing it is the
+    ## expensive half, and moving it to this side would put it back on every
+    ## compile.
+    ##
+    ## Empty strings are ordinary, not faults, for `noirConstraintsSink`'s
+    ## reason: a compiler module older than `VfsResponse.acir_listing` answers
+    ## without a listing, and the surface must then say so rather than render
+    ## an empty document.
+
   noirTestRunSink*: proc(response: NoirTestResponse; packageDir: string)
     ## Where a finished test run's verdicts go, besides the build pane.
     ##
@@ -486,6 +516,24 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
     # pane could not previously say.
     noirConstraintsSink(producer.acirListing, tmpl.name,
                         "compiled in this tab at " & $jsLocalTimeText())
+
+  # THE SAME COMPILE, FOR THE SURFACE THAT IS NOT STANDING. Published under
+  # the same three conditions as the line above and for the same reason —
+  # Build and Run compile the same program, and NOT on `nbpTestRecord`, whose
+  # `force_brillig` artefact has no located ACIR opcode at all (GCL-D9), so a
+  # listing built from it would be one row presented as the circuit.
+  #
+  # `producer.artifact` is `nil` unless the compile succeeded, which the
+  # verdict above already establishes; `$nil` would be the string "null", and
+  # `readArtefactJson` reports that as unparseable rather than throwing, so the
+  # listing would still render with every row unmapped. The guard is here
+  # anyway, because "it degrades correctly" is not a reason to pass rubbish.
+  if phase == nbpCompile and verdict == npvSucceeded and
+     not noirGeneratedCodeSink.isNil:
+    let artefactJson =
+      if producer.artifact.isNil: "" else: $producer.artifact
+    noirGeneratedCodeSink(producer.acirListing, artefactJson, tmpl.name,
+                          "compiled in this tab at " & $jsLocalTimeText())
 
   if phase == nbpCompile and verdict == npvSucceeded and
      activeIntent == nriRun:

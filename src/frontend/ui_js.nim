@@ -39,7 +39,7 @@ import
   # so) precisely so a non-Electron caller can use it; `onNoTrace` reads the
   # editor's declared width out of the layout config with it.
   index/layout_config_repair,
-  ui/[test_results, constraints],
+  ui/[test_results, constraints, generated_code],
   # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
   # everything about where a mode's arrangement lives is in there.
   ui/mode_layouts,
@@ -6086,6 +6086,23 @@ when defined(ctWeb) and not defined(ctInExtension):
               constraints.constraintsVMInstance.setReport(
                 reportFromAcirListing(listing, packageDir, provenance))
 
+          web_noir_build.noirGeneratedCodeSink =
+            proc(listing: string; artefactJson: string; packageDir: string;
+                 provenance: string) =
+              # THE ON-DEMAND BOUNDARY. This hands the compile's raw outputs
+              # over as TEXT and stops. Nothing is parsed, no call stack is
+              # resolved, no anchor is built and no surface is opened —
+              # `ui/generated_code.showGeneratedCode`, reached only from a
+              # user's gesture, is what does all of that.
+              #
+              # The distinction is §1's: the operation is "invoked, never
+              # permanently displayed". A sink that built a listing on every
+              # compile would have made the surface permanent in everything but
+              # its visibility, beside panes that have already caused re-render
+              # storms.
+              generated_code.noteCompileArtefact(
+                listing, artefactJson, packageDir, provenance)
+
           web_noir_build.noirTestRunSink =
             proc(response: NoirTestResponse; packageDir: string) =
               if test_results.testResultsVMInstance.isNil:
@@ -6150,7 +6167,28 @@ when defined(ctWeb) and not defined(ctInExtension):
         # since rewritten. That is the exact state the pane's own header argues
         # is worse than showing no number at all, because the reader cannot
         # tell. This line is the caller.
-        editor.editorSourceChangedHook = constraints.noteEditorSourceChanged
+        editor.editorSourceChangedHook =
+          proc(path: cstring) =
+            # ONE EDIT, TWO SURFACES. Both are describing the artefact of one
+            # compilation and both stop describing the source on screen at the
+            # same instant, so they are told by one hook rather than by two
+            # subscriptions that could drift. `ui/editor` fires this inside the
+            # `reloadChange` guard, so a `setValue` during a tab reload — a
+            # content change that is not an edit — reaches neither.
+            constraints.noteEditorSourceChanged(path)
+            # GCL-D18: marks the generated-code tab stale, suspends the
+            # correspondence, and KEEPS the rows.
+            generated_code.noteEditorSourceEdited(path)
+
+        # THE CURSOR IS THE SUBJECT OF THE OPERATION (GCL-D10), and this is
+        # where the editor's caret reaches it. Named procs on both ends rather
+        # than a closure here, for the reason `ui/constraints
+        # .noteEditorSourceChanged` records: an anonymous `proc` in a 400-line
+        # install block is how the previous version of that wiring managed to
+        # not exist for as long as it did.
+        editor.editorCursorMovedHook = generated_code.noteEditorCursorMoved
+        editor.editorActiveTabChangedHook =
+          generated_code.noteEditorTabActivated
 
         editor.editorTestRunHook =
           proc(path: cstring; selector: cstring; line: int): cstring =
