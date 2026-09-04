@@ -5,12 +5,14 @@
  * `Auto-Hide-Panes.md` §3.1 keeps the status bar's own content (language,
  * encoding, cursor location) in the footer while the bottom auto-hide tab
  * strip moves in; §10.3 puts the collapsed-strip icon zone in the same bar.
- * Twice now a single stylesheet rule has made the bar tabs-only —
- * `b27da3947 "feat: Redesign of the status bar"` and, after that rule was
- * removed, `51a3e820e "fix: UI regressions"` writing it straight back — and
- * both times the symptom was not a footer complaint but a suite-wide
- * timeout, because every Electron spec opens with `readyOnEntryTest` waiting
- * for `.location-path` to be *visible*.
+ * Three times now a single stylesheet rule has made the bar tabs-only —
+ * `b27da3947 "feat: Redesign of the status bar"`; after that rule was
+ * removed, `51a3e820e "fix: UI regressions"` writing it straight back; and
+ * `00fd68b7f "fix: status bar styling"` reaching the same result a third way.
+ * The first two announced themselves as a suite-wide timeout rather than as a
+ * footer complaint, because every Electron spec opens with `readyOnEntryTest`
+ * waiting for `.location-path` to be *visible*.  The third announced nothing
+ * at all and shipped for two weeks — see below.
  *
  * WHY A SECOND GUARD, GIVEN `status-bar-footer-contract.spec.ts` EXISTS.
  * That spec asserts the same contract and would have failed on `51a3e820e`
@@ -27,21 +29,34 @@
  * `:where()`, `:has()`, an enumerated list, `visibility`, `opacity`, a
  * hidden ancestor — and a guard that recognises the spelling of the last
  * regression is exactly the guard the next one walks past.  It asks the
- * browser whether each region has a box the user could look at.
+ * browser whether each region has a box the user could look at, and whether
+ * that box is where the user is looking.
  * `verify_the_guard_fires_for_spellings_it_has_never_seen` proves that by
- * re-running the check under six different spellings, five of which have
+ * re-running the check under ten different spellings, eight of which have
  * never been written in this repo.
  *
- * WHERE IT STOPS — read this before relying on it.  Asking for a box catches
- * every regression that changes LAYOUT, and none that changes only PAINTING.
- * A footer moved off-screen (`position: absolute; left: -9999px`), clipped
- * (`clip-path: inset(100%)`), faded by `filter: opacity(0)` rather than
- * `opacity: 0`, or drawn in the background colour keeps a full-size box and
- * passes here.  `readyOnEntryTest` passes on those too — Playwright calls an
- * off-screen `.location-path` "visible, enabled and stable" — so that family
- * is currently unguarded by anything in the suite.  The full measured list of
- * what is caught and what is not lives above `footerVisibilityFailures` in
- * `page-objects/status-footer-contract.ts`.
+ * WHY IT ASKS THE SECOND QUESTION.  It used to ask only the first, and said
+ * so: its own "where it stops" note named `position: absolute; left: -9999px`
+ * as the head of the list of things it could not see.  Eight days later
+ * `00fd68b7f` wrote precisely that on `#file-info-status` and `.status-right`
+ * and compiled it into all three themes, and it shipped for two weeks with
+ * this guard green — because an off-screen element has a full-size box, and
+ * Playwright's own visibility predicate calls it "visible, enabled and
+ * stable" too.  A documented blind spot is not a smaller guard; it is a
+ * published route past it.  `verify_the_guard_refuses_the_regression_that_
+ * shipped` is that exact stylesheet rule, watched being refused.
+ *
+ * WHERE IT STOPS — read this before relying on it.  Asking for a correctly
+ * placed box catches every regression that changes LAYOUT or PLACEMENT, and
+ * none that changes only PAINTING.  A footer clipped (`clip-path:
+ * inset(100%)`), faded by `filter: opacity(0)` rather than `opacity: 0`,
+ * drawn in the background colour, or covered by an overlay keeps a full-size
+ * box in the right place and passes here.  That boundary is no longer only
+ * prose: `SURVIVING_HIDE_SPELLINGS` in `page-objects/status-footer-contract.ts`
+ * is the measured MISSED list as data, and
+ * `verify_the_blind_spot_is_where_the_guard_says_it_is` runs every entry, so
+ * strengthening the predicate without re-deriving the list turns this file
+ * red.  The narrative version lives above `footerVisibilityFailures`.
  *
  * IT ALSO TRUSTS THE BUILD.  It reads whatever `src/build-debug` currently
  * holds, and cannot tell a fresh theme from a stale one — editing
@@ -65,9 +80,11 @@ import * as path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
-  BLANKET_HIDE_SPELLINGS,
+  CAUGHT_HIDE_SPELLINGS,
   COLLAPSED_ICON_ZONE_ACTIVE_CLASS,
   FOOTER_REQUIRED_REGIONS,
+  OFF_SCREEN_RULE_CSS,
+  SURVIVING_HIDE_SPELLINGS,
   footerVisibilityFailures,
   probeCollapsedIconZone,
   probeFooterRegions,
@@ -263,13 +280,15 @@ test.describe("footer visibility guard (Auto-Hide-Panes §3.1 / §10.3)", () => 
 
       expect(
         footerVisibilityFailures(probes),
-        `\`${theme}\` hides part of the status bar footer.  Auto-Hide-Panes ` +
-          "§3.1 keeps the bar's own content (language, encoding, cursor " +
-          "location) while hosting the bottom tab strip, and §10.3 puts the " +
-          "icon zone in the same bar.  A quieter footer has to come from " +
-          "restyling or from changing the design doc first — not from hiding " +
+        `\`${theme}\` takes part of the status bar footer away from the ` +
+          "user — by removing its box, or by leaving the box intact and " +
+          "putting it where nobody is looking.  Auto-Hide-Panes §3.1 keeps " +
+          "the bar's own content (language, encoding, cursor location) while " +
+          "hosting the bottom tab strip, and §10.3 puts the icon zone in the " +
+          "same bar.  A quieter footer has to come from restyling or from " +
+          "changing the design doc first — not from hiding or exiling " +
           "`#status-base`'s children.  See `status_bar.styl`, and the " +
-          "regressions in `b27da3947` and `51a3e820e`.",
+          "regressions in `b27da3947`, `51a3e820e` and `00fd68b7f`.",
       ).toEqual([]);
 
       // §10.3: the icon zone is idle-hidden but reachable.  The regression's
@@ -293,9 +312,10 @@ test.describe("footer visibility guard (Auto-Hide-Panes §3.1 / §10.3)", () => 
     // The point of the whole file.  The check above must fail for ANY way of
     // hiding the footer, not for the one that has been written before, so
     // each spelling is applied on top of a known-good theme and the check
-    // must go red.  Five of the six have never appeared in this repo.
+    // must go red.  Eight of the ten have never appeared in this repo; the
+    // other two are the rules that shipped.
     const survived: string[] = [];
-    for (const spelling of BLANKET_HIDE_SPELLINGS) {
+    for (const spelling of CAUGHT_HIDE_SPELLINGS) {
       await layOutFooter(page, THEMES[0], spelling.css);
       const failures = footerVisibilityFailures(await probeFooterRegions(page));
       if (failures.length === 0) survived.push(`${spelling.name}: ${spelling.css}`);
@@ -313,6 +333,113 @@ test.describe("footer visibility guard (Auto-Hide-Panes §3.1 / §10.3)", () => 
     expect(
       footerVisibilityFailures(await probeFooterRegions(page)),
       "the unmodified built theme must satisfy the same check",
+    ).toEqual([]);
+  });
+
+  test("verify_the_guard_refuses_the_regression_that_shipped", async ({
+    page,
+  }) => {
+    // Control data, not a synthesised spelling.  `OFF_SCREEN_RULE_CSS` is
+    // `00fd68b7f`'s rule as it compiled into all three built themes, and the
+    // predicate this guard published as unable to see it named it verbatim.
+    // Watch it refused, region by region, with the coordinate in the message
+    // — a guard that has never said no is not a guard, and this one's whole
+    // history is that it said yes to the thing it was written to prevent.
+    await layOutFooter(page, THEMES[0], OFF_SCREEN_RULE_CSS);
+
+    const failures = footerVisibilityFailures(await probeFooterRegions(page));
+
+    // Every region the rule displaced, by name.  `#auto-hide-bottom-strip` is
+    // deliberately absent: the rule leaves the tab strip alone, which is the
+    // whole intent of a tabs-only footer, and a control that expected all six
+    // would be describing a different rule.
+    const refused = failures
+      .map((f) => {
+        const at = f.indexOf(": off-screen");
+        return at < 0 ? `NOT AN OFF-SCREEN FAILURE: ${f}` : f.slice(0, at);
+      })
+      .sort();
+    expect(
+      refused,
+      "the rule displaces the two readout groups and everything inside them",
+    ).toEqual(
+      [
+        "#status-base #file-info-status",
+        "#status-base #file-info-status .file-info-status-language",
+        "#status-base #file-info-status #stable-status",
+        "#status-base .status-right .location-path",
+        "#status-base #copy-path-image",
+      ].sort(),
+    );
+
+    // The diagnosis has to carry the coordinate, or a red guard sends whoever
+    // reads it back to the stylesheet to work out what "off-screen" meant.
+    for (const failure of failures) {
+      expect(failure, "each refusal names where the box actually went").toMatch(
+        /at x=-9\d{3},/,
+      );
+    }
+
+    // Both negative controls, the other direction: the strip is untouched and
+    // still passes, and the unmodified theme passes in full.  A predicate
+    // that rejects everything is not an improvement on one that rejects
+    // nothing.
+    const strip = "#status-base #auto-hide-bottom-strip";
+    expect(
+      footerVisibilityFailures(await probeFooterRegions(page, [strip])),
+      "the tab strip is not moved by this rule and must stay green",
+    ).toEqual([]);
+
+    await layOutFooter(page, THEMES[0]);
+    expect(
+      footerVisibilityFailures(await probeFooterRegions(page)),
+      "and the current, correct theme must still satisfy the guard",
+    ).toEqual([]);
+  });
+
+  test("verify_the_blind_spot_is_where_the_guard_says_it_is", async ({
+    page,
+  }) => {
+    // The odd one out: it asserts a WEAKNESS, on purpose.
+    //
+    // `SURVIVING_HIDE_SPELLINGS` is the MISSED list this file publishes, and
+    // the last MISSED list this file published was accurate right up to the
+    // moment someone read it as a route.  Running it makes two things true
+    // that prose alone cannot: the list is measured rather than asserted, and
+    // it cannot silently shrink — strengthening `footerVisibilityFailures`
+    // without moving an entry into `CAUGHT_HIDE_SPELLINGS` turns this red.
+    const unexpectedlyCaught: string[] = [];
+    for (const spelling of SURVIVING_HIDE_SPELLINGS) {
+      await layOutFooter(page, THEMES[0], spelling.css);
+      const failures = footerVisibilityFailures(await probeFooterRegions(page));
+      if (failures.length > 0) {
+        unexpectedlyCaught.push(`${spelling.name} — ${failures[0]}`);
+      }
+    }
+    expect(
+      unexpectedlyCaught,
+      "the guard now catches these, which is good news and a stale document. " +
+        "Move each one into CAUGHT_HIDE_SPELLINGS and re-derive the MISSED " +
+        "prose in ALL FIVE places that carry it: above " +
+        "`footerVisibilityFailures` in `page-objects/status-footer-contract" +
+        ".ts`; the `WHERE IT STOPS` note in this file's header; " +
+        "`src/frontend/styles/components/status_bar.styl`; " +
+        "`.agents/codebase-insights.txt`; and " +
+        "`codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones" +
+        ".org`. Do not simply delete the entry: a list that shrinks without " +
+        "saying so is worse than one that is honest about its edge, and a " +
+        "check that is corrected while the sentences describing it are not " +
+        "is how this guard came to publish a route past itself.",
+    ).toEqual([]);
+
+    // The two lists must stay disjoint, or "caught" and "missed" stop meaning
+    // anything.
+    const caught = new Set(CAUGHT_HIDE_SPELLINGS.map((s) => s.css));
+    expect(
+      SURVIVING_HIDE_SPELLINGS.filter((s) => caught.has(s.css)).map(
+        (s) => s.name,
+      ),
+      "a spelling cannot be both caught and missed",
     ).toEqual([]);
   });
 

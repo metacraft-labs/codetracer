@@ -14,7 +14,7 @@
  * <file path>` on the right, BUILD | PROBLEMS | SEARCH RESULTS labels ... as
  * auto-hide pane triggers".
  *
- * This spec exists because that contract was silently broken once and the
+ * This spec exists because that contract was silently broken and the
  * breakage was invisible except as a suite-wide timeout in an unrelated
  * place.  A single stylesheet rule,
  *
@@ -30,6 +30,17 @@
  * spec starts with `readyOnEntryTest`, which waits for `.location-path` to be
  * visible, so the whole suite went red on a footer nobody was looking at.
  *
+ * A third attempt reached the same footer without going red at all.
+ * `00fd68b7f "fix: status bar styling"` wrote `position: absolute; left:
+ * -9999px` on `#file-info-status` and `.status-right`, and Playwright reports
+ * an off-screen `.location-path` as "visible, enabled and stable" — so
+ * `readyOnEntryTest` passed, this spec passed, and the footer was gone for
+ * two weeks.  That is why the shared predicate in `status-footer-contract.ts`
+ * now measures placement as well as box, and why the negative control below
+ * runs the whole `CAUGHT_HIDE_SPELLINGS` list through the *predicate* rather
+ * than through the readiness wait: the readiness wait cannot see this family
+ * and never will.
+ *
  * No mocks: this drives the real Electron app against a real recorded trace.
  */
 import * as fs from "node:fs";
@@ -44,7 +55,8 @@ import {
   bottomStripTabs,
 } from "../../page-objects/auto-hide-strip";
 import {
-  BLANKET_HIDE_SPELLINGS,
+  CAUGHT_HIDE_SPELLINGS,
+  TABS_ONLY_RULE_CSS,
   footerVisibilityFailures,
   probeFooterRegions,
 } from "../../page-objects/status-footer-contract";
@@ -53,12 +65,14 @@ const repoRoot = path.resolve(__dirname, "../../../../..");
 
 /**
  * The rule that broke the footer — twice, `b27da3947` and `51a3e820e` — kept
- * verbatim as the first entry of `BLANKET_HIDE_SPELLINGS` so the historical
- * case stays covered by name.  The negative controls below run the whole
- * list, because a control that only recognises the spelling that shipped is
- * a control the next spelling walks past.
+ * verbatim in `status-footer-contract.ts` so the historical case stays
+ * covered by name.  The negative controls below run the whole
+ * `CAUGHT_HIDE_SPELLINGS` list, because a control that only recognises the
+ * spelling that shipped is a control the next spelling walks past — which is
+ * not a hypothetical: `00fd68b7f` was the next spelling, and it is now entry
+ * seven of that list.
  */
-const TABS_ONLY_RULE = BLANKET_HIDE_SPELLINGS[0].css;
+const TABS_ONLY_RULE = TABS_ONLY_RULE_CSS;
 
 /**
  * `minWidth` passed to `BrowserWindow` in `src/frontend/index/window.nim`.
@@ -255,6 +269,14 @@ test.describe("status bar footer contract (Auto-Hide-Panes §3.1 / §10.3)", () 
     // it has a box, so an attachment wait would report readiness for a footer
     // that never renders. Prove the wait still fails loudly if the blanket
     // hide comes back, so a repeat regression cannot pass unnoticed.
+    //
+    // What this control does NOT establish, and must not be read as
+    // establishing: that `readyOnEntryTest` covers the footer. It covers this
+    // ONE spelling. `00fd68b7f`'s off-screen rule left `.location-path` with a
+    // box and Playwright called it visible, enabled and stable; the readiness
+    // wait passed and the footer was gone. The general case is the
+    // `CAUGHT_HIDE_SPELLINGS` control below, which asserts through
+    // `footerVisibilityFailures` for exactly that reason.
     await readyOnEntryTest(ctPage);
 
     await ctPage.addStyleTag({ content: TABS_ONLY_RULE });
@@ -275,21 +297,24 @@ test.describe("status bar footer contract (Auto-Hide-Panes §3.1 / §10.3)", () 
     test.setTimeout(180_000);
     // The second negative control, and the one that generalises.  The test
     // above pins the historical rule and the suite-wide symptom it produced;
-    // this one applies every entry of `BLANKET_HIDE_SPELLINGS` — five of
+    // this one applies every entry of `CAUGHT_HIDE_SPELLINGS` — eight of
     // which have never been written in this repo — and requires the shared
     // visibility check to reject each of them in the real renderer.
     //
     // Note what the two controls measure differently.  `readyOnEntryTest`
     // rejects on `display`/`visibility` hides because Playwright's
     // visibility predicate is box-and-`visibility`; an `opacity: 0` footer
-    // would sail past it while being just as invisible to the user.  That
-    // gap is why `footerVisibilityFailures` also folds in effective opacity,
+    // would sail past it while being just as invisible to the user, and an
+    // OFF-SCREEN footer sails past it too — Playwright reports a
+    // `.location-path` at x = -9999 as "visible, enabled and stable", which
+    // is how `00fd68b7f` shipped for two weeks.  Those two gaps are why
+    // `footerVisibilityFailures` folds in effective opacity AND placement,
     // and why this control asserts through it rather than through the
     // readiness wait.
     await readyOnEntryTest(ctPage);
 
     const survived: string[] = [];
-    for (const spelling of BLANKET_HIDE_SPELLINGS) {
+    for (const spelling of CAUGHT_HIDE_SPELLINGS) {
       const injected = await ctPage.addStyleTag({ content: spelling.css });
       const failures = footerVisibilityFailures(
         await probeFooterRegions(ctPage),

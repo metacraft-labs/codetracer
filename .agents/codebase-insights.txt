@@ -531,27 +531,42 @@ and a correlation marker's counterpart is by definition in another process.
   `src/tests/gui/tests/status-bar/footer-visibility-css-guard.spec.ts` +
   `src/tests/gui/page-objects/status-footer-contract.ts`: it applies the BUILT
   theme CSS to the footer's markup in a plain Chromium page and asks whether
-  each region has a box. It costs ~7 s, needs no `ct`/trace/recorder, and —
-  measured — runs under both `CODETRACER_DB_TESTS_ONLY=1` and
-  `CODETRACER_RR_TESTS_ONLY=1`, whereas `status-bar-footer-contract.spec.ts` and
-  `status-bar-render-stability.spec.ts` are skipped outright by the RR lane.
+  each region has a box AND whether that box is inside the viewport. It costs
+  ~7 s, needs no `ct`/trace/recorder, and — measured — runs under both
+  `CODETRACER_DB_TESTS_ONLY=1` and `CODETRACER_RR_TESTS_ONLY=1`, whereas
+  `status-bar-footer-contract.spec.ts` and `status-bar-render-stability.spec.ts`
+  are skipped outright by the RR lane.
   KNOW ITS EDGE — it does not trip on "any spelling", and an early draft of this
-  note said so wrongly. Measured over 28 spellings: it catches everything that
-  removes the BOX (`display`, `visibility`, `opacity`, `transform: scale(0)`,
-  `content-visibility`, `font-size: 0`, zero width/height, flex collapse, and
-  all of those on an ancestor, under any selector syntax including `@media` and
-  `:has()`), and misses everything that keeps the box and only changes the
-  PAINTING — off-screen (`position: absolute; left: -9999px`,
-  `translateX(-9999px)`, legacy `clip`), `clip-path`, `filter: opacity(0)` (yes,
-  while bare `opacity: 0` is caught), opacity `0.001`, `color: transparent`, and
-  occlusion by an overlay. `readyOnEntryTest` and Playwright's `toBeVisible` are
-  box+`visibility` predicates and miss that family too — Playwright calls an
-  off-screen `.location-path` "visible, enabled and stable" — so nothing guards
-  it today. Also: the guard reads whatever is in `src/build-debug`, so editing
-  `status_bar.styl` and running `just test-gui-prebuilt` WITHOUT `just
-  build-once` reports green against the old build; a MISSING build fails loudly,
-  a STALE one does not. Add new hiding spellings to `BLANKET_HIDE_SPELLINGS`
-  rather than rewriting it.
+  note said so wrongly. THE SECOND HALF OF THE PREDICATE EXISTS BECAUSE THE
+  FIRST VERSION OF THIS NOTE WAS READ AS A ROUTE: it listed off-screen
+  placement first among the misses, and `00fd68b7f "fix: status bar styling"`
+  then wrote `position: absolute; left: -9999px` onto `#file-info-status` and
+  `.status-right`, which shipped for two weeks with the guard green. Re-measured
+  over the same 27 spellings after the change: 19 caught, 8 missed. CAUGHT —
+  everything that removes the BOX (`display`, `visibility`, `opacity`,
+  `transform: scale(0)`, `content-visibility`, `font-size: 0`, zero
+  width/height, flex collapse, and all of those on an ancestor, under any
+  selector syntax including `@media` and `:has()`), plus everything that MOVES
+  the box off-screen (`position: absolute/fixed` with a big negative
+  `left`/`top`/`right`, `transform: translateX(-9999px)`). MISSED — everything
+  that keeps a full-size box AT ITS PROPER COORDINATES and changes only the
+  PAINTING: `clip-path`, the legacy `position: absolute; clip: rect(0,0,0,0)`
+  idiom (which the old note mis-filed as off-screen — its `absolute` leaves the
+  element where it was), `filter: opacity(0)` (yes, while bare `opacity: 0` is
+  caught) and `filter: blur()`, opacity `0.001`, `color: transparent`, a colour
+  equal to the background, and occlusion by an overlay. `readyOnEntryTest` and
+  Playwright's `toBeVisible` are box+`visibility` predicates and miss BOTH
+  families — Playwright calls an off-screen `.location-path` "visible, enabled
+  and stable" — so the shared predicate is now strictly stronger than the
+  readiness wait, and the painting family is still guarded by nothing. Also: the
+  guard reads whatever is in `src/build-debug`, so editing `status_bar.styl` and
+  running `just test-gui-prebuilt` WITHOUT `just build-once` reports green
+  against the old build; a MISSING build fails loudly, a STALE one does not. Add
+  new hiding spellings to `CAUGHT_HIDE_SPELLINGS` rather than rewriting it — and
+  if you strengthen the predicate, move the entry out of
+  `SURVIVING_HIDE_SPELLINGS` and re-derive the prose in all four places that
+  carry it (that module, the guard's header, `status_bar.styl`, and this note).
+  `verify_the_blind_spot_is_where_the_guard_says_it_is` fails until you do.
 - 2026-08-10 (a `resize` handler that re-renders the menu is a render storm —
   M66 review): `ui/menu.nim::requestMenuRender` is NOT coalesced — it clears and
   rebuilds `#menu` wholesale (61 elements) and cascades into the session tab
