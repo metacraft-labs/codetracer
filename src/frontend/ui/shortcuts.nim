@@ -624,6 +624,21 @@ proc configureShortcuts* =
   Mousetrap.prototype.stopCallback = proc(): bool =
     return false
 
+  # ALT+E IS CLAIMED TWICE, FOR TWO DIFFERENT ACTIONS, and this is the half a
+  # user gets with the caret OUTSIDE the editor. `ui/editor.nim`'s `commands`
+  # table claims `ALT+KeyE` for `toggleMacroExpansion`, and with the caret
+  # inside the editor that is what answers — Monaco stops keydown propagation
+  # before the bubble phase this listener sits on. One key, two actions,
+  # decided by focus: the same shape as the `CTRL+E` defect whose post-mortem
+  # stands in `ui/editor.nim` three lines above the surviving claim.
+  #
+  # It is enumerated and counted as a row of `KNOWN_MONACO_SEMANTIC_COLLISIONS`
+  # in `shortcut_labels.nim` rather than fixed here, because the spec asks for
+  # both: `GUI/Keyboard-Shortcuts-System.md` gives ALT+E to "Focus event log"
+  # in its Layer-1 table and to "Toggle macro expansion" in its Layer-2 list.
+  # The row records that this bind should win — `ALT+C` and `ALT+V` are its
+  # uncontested siblings, while `toggleMacroExpansion` has no `ClientAction`,
+  # no menu item and one call site — and what retires the row.
   Mousetrap.`bind`("alt+e") do ():
     data.focusEventLog()
 

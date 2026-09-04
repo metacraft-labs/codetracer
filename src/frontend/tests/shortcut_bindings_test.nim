@@ -68,8 +68,8 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 152
-  ## RAISED FROM 107 BY 45, DELIBERATELY, and the 45 is derived from the two new
+const ExpectedAssertions = 156
+  ## RAISED FROM 107 BY 49, DELIBERATELY, and the 49 is derived from the two new
   ## cases rather than read off a run.
   ##
   ## +27 for enumerating Monaco's `commands` table: 1 sizing the extraction, 3
@@ -80,13 +80,14 @@ const ExpectedAssertions = 152
   ## table, so adding or removing a Monaco command moves this number —
   ## deliberately, which is the whole reason the registry is walked.
   ##
-  ## +18 for the collision rule: 3 sizing checks (the collision set and both
-  ## classification tables), 1 per COLLISION asserting it is classified exactly
-  ## once (there are four, so this number moves the day a claim is added or
-  ## fixed), 1 per row of each classification table asserting the row is still
-  ## OBSERVED (2 + 2), 2 naming the semantic defects individually, 2 asserting
-  ## the other claimant still exists, and 3 on the instrument that proves the
-  ## detector can answer NO.
+  ## +22 for the collision rule: 3 sizing checks (the collision set and both
+  ## classification tables), 4 on the two site resolvers that make a failure
+  ## name a LINE rather than a registry, 1 per COLLISION asserting it is
+  ## classified exactly once (there are four, so this number moves the day a
+  ## claim is added or fixed), 1 per row of each classification table asserting
+  ## the row is still OBSERVED (2 + 2), 2 naming the semantic defects
+  ## individually, 2 asserting the other claimant still exists, and 3 on the
+  ## instrument that proves the detector can answer NO.
   ##
   ## 31 before the two Stop cases below; +5 for the binding pin and +20 for the
   ## Monaco-delegation family (9 non-vacuity checks, 10 membership checks and
@@ -593,12 +594,89 @@ suite "shipped shortcut bindings":
     ## A NEW COLLISION IS IN NEITHER TABLE AND FAILS HERE. A FIXED ONE LEAVES
     ## THE DETECTOR'S OUTPUT AND FAILS HERE TOO, as an unobserved row — so
     ## neither adding a claim nor fixing one can be done silently.
+    ## WHAT A FAILURE HERE PRINTS. Naming the two REGISTRIES is not enough to
+    ## act on — a reader sent to "`hardBoundChords`" has a sixty-entry list and
+    ## a chord spelled three ways to search it with. So each claimant is
+    ## resolved back to `file:line` and the statement it runs, out of the same
+    ## `staticRead`s the enumeration guards use. The chord, both sites and both
+    ## actions are in the report.
+    const editorSourceForSites = staticRead("../ui/editor.nim")
+    const shortcutsSourceForSites = staticRead("../ui/shortcuts.nim")
+    const uiJsSourceForSites = staticRead("../ui_js.nim")
+
+    proc siteBody(lines: seq[string]; index: int): string =
+      ## The statement a bind runs: the matched line, or the first real line
+      ## under it when the match is only the header of a multi-line body.
+      let head = lines[index].strip()
+      if not (head.endsWith("=") or head.endsWith("do ():") or
+              head.endsWith("do () -> bool:")):
+        return head
+      for j in index + 1 ..< lines.len:
+        let candidate = lines[j].strip()
+        if candidate.len > 0 and not candidate.startsWith("#"):
+          return candidate
+      head
+
+    proc monacoSite(chord: string): string =
+      ## Where `ui/editor.nim`'s `commands` claims `chord`. Matched by
+      ## CANONICALISING each key rather than by rebuilding the Monaco spelling,
+      ## because `ALT+E` -> `ALT+KeyE` is not invertible in general.
+      const marker = "cstring\""
+      let lines = editorSourceForSites.splitLines()
+      var inTable = false
+      for i, rawLine in lines:
+        let line = rawLine.strip()
+        if not inTable:
+          if line.startsWith("var commands = JsAssoc["):
+            inTable = true
+          continue
+        if line == "}":
+          break
+        if line.startsWith("#") or not line.startsWith(marker):
+          continue
+        let closeQuote = line.find('"', marker.len)
+        if closeQuote < 0 or closeQuote + 1 >= line.len or
+            line[closeQuote + 1] != ':':
+          continue
+        if canonicalChord(line[marker.len ..< closeQuote]) == chord:
+          return "ui/editor.nim:" & $(i + 1) & "  " & siteBody(lines, i)
+      ""
+
+    proc hardBindSite(chord: string): string =
+      ## Where a `Mousetrap.bind` literal claims `chord`. Lower-cased, which is
+      ## the spelling those two files write and the third of the three this
+      ## comparison has to cross.
+      let needle = "Mousetrap.`bind`(\"" & chord.toLowerAscii & "\")"
+      for (name, source) in [
+          ("ui/shortcuts.nim", shortcutsSourceForSites),
+          ("ui_js.nim", uiJsSourceForSites)]:
+        let lines = source.splitLines()
+        for i, rawLine in lines:
+          let line = rawLine.strip()
+          if line.startsWith("#") or needle notin line:
+            continue
+          return name & ":" & $(i + 1) & "  " & siteBody(lines, i)
+      ""
+
     let collisions = monacoChordCollisions(config)
     var collisionChords: seq[string] = @[]
     for (chord, other) in collisions:
       collisionChords.add($chord)
-      checkpoint("COLLISION " & $chord &
-        " — ui/editor.nim `commands` vs " & $other)
+      checkpoint("COLLISION on " & $chord & " — claimed by BOTH:")
+      checkpoint("    ui/editor.nim `commands`  @ " & monacoSite($chord))
+      checkpoint("    " & $other & "  @ " & hardBindSite($chord))
+
+    # THE RESOLVERS ARE INSTRUMENTS AND ARE CHECKED AS SUCH. Both return "" for
+    # a chord they cannot place, and "" is what a resolver that matched nothing
+    # returns for everything — so a report reading "claimed by BOTH: @  @ " is
+    # indistinguishable from a working one on a green run, and would be the
+    # only thing a reader saw on a red one.
+    counted monacoSite("ALT+E").startsWith("ui/editor.nim:")
+    counted hardBindSite("ALT+E").startsWith("ui/shortcuts.nim:")
+    counted hardBindSite("CTRL+ENTER").startsWith("ui_js.nim:")
+    # AND THE NEGATIVE, so "matches everything" fails too: `F10` is bound
+    # through the YAML by `Mousetrap.bind(renderer)`, with no literal anywhere.
+    counted hardBindSite("F10") == ""
 
     # THE COUNTS FIRST. An empty collision list satisfies "every collision is
     # classified" perfectly, and an empty classification table satisfies "every

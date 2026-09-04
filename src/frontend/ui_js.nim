@@ -6553,10 +6553,37 @@ when defined(ctWeb) and not defined(ctInExtension):
         data.actions[ClientAction.build] = proc(actionData: JsObject) =
           saveThenCompile(runAfter = false)
 
-        # RUN has no configured chord, so it gets one that nothing else binds.
+        # RUN has no configured chord, so it gets one the YAML does not claim.
         # NOT `ctrl+r` and NOT `F5`: both are the browser's own reload on every
         # platform, and a studio that ate either would be taking a key away
         # from the user rather than giving them one.
+        #
+        # THIS LINE USED TO SAY "one that NOTHING ELSE BINDS", AND THAT WAS
+        # FALSE WHEN IT WAS WRITTEN. `ui/editor.nim`'s `commands` table has
+        # claimed `CTRL+Enter` for `runTracepoints` all along, and registers it
+        # on every Monaco instance in every build. It was not visible from here
+        # because that table was the one chord registry nothing enumerated:
+        # `conflictList` sees collisions between two YAML entries and
+        # `hardBoundChords` enumerates the `Mousetrap.bind` literals, and a
+        # `commands` entry is neither. The two registries this claim was checked
+        # against were the only two that could be checked.
+        #
+        # THE CONSEQUENCE, and it is this build specifically. Monaco stops
+        # keydown propagation before the bubble phase Mousetrap listens on
+        # (measured; see the `CTRL+B` entry in `MONACO_SHORTCUTS_WHITELIST`), so
+        # with the caret in the editor this bind never fires and the Monaco
+        # command answers instead — `runTracepoints`, which in the web studio
+        # has no trace and no tracepoint service and returns at `trace.nim`'s
+        # "services not yet initialized, skipping". In an editor-first product
+        # the caret is in the editor, so Run is dead where it is used, silently.
+        #
+        # The collision is now ENUMERATED AND COUNTED, as a row of
+        # `KNOWN_MONACO_SEMANTIC_COLLISIONS` in `ui/shortcut_labels.nim`, with
+        # what would retire it: the web Run has to reach Monaco (either
+        # `commands` becomes build-aware or this Run is delegated through
+        # `delegateShortcut`), and that needs a `ctWeb` browser measurement this
+        # comment's change did not have. `shortcut_bindings_test.nim` fails the
+        # day the row stops describing the tree, in either direction.
         Mousetrap.`bind`("ctrl+enter") do ():
           saveThenCompile(runAfter = true)
 
