@@ -847,10 +847,14 @@
   // onto a `#3a5070` chip is how it stayed dark either way.
   //
   // `colors-ui-icon-primary-default` (grey-100, `#dddddd`) is the design
-  // system's own default icon colour and gives 6.04:1 here, and 5.33:1
+  // system's own default icon colour and gives 6.04:1 here, and 4.72:1
   // against the `#4a6080` this lightens to on hover — so both resting and
   // hover states clear the threshold, which is why the hover background did
-  // not have to move. It clears 4.5:1 as well, which matters because these
+  // not have to move. Hover is the tighter of the two and the only reason
+  // this rule is not simply grey-150: `#c8c8c8` would land at 3.83:1 once
+  // the chip lightens, i.e. legible at rest and not while being pointed at,
+  // which is the wrong way round. It clears 4.5:1 as well, which matters
+  // because these
   // are rendered as TEXT glyphs (`text icon.icon` in
   // `isonim_auto_hide_collapsed_icons_view.nim`), not as background images,
   // so the stricter text threshold is the honest one to hold them to.

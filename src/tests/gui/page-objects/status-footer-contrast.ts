@@ -215,12 +215,21 @@ export const IMAGE_PAINTED_ICONS: readonly {
   readonly selector: string;
   readonly asset: string;
   readonly ink: string;
+  /** The ink's measured ratio against the bar, and the threshold it meets. */
+  readonly measured: string;
   readonly why: string;
 }[] = [
   {
     selector: "#status-base #copy-path-image",
     asset: "src/public/resources/menu/copy_file_path_dark.svg",
     ink: "#ABABAB",
+    measured:
+      "7.50:1 on the bar's #1b1b1b, against a 3:1 floor for a control — " +
+      "comfortably clear.  Note this is NOT the 8.31:1 that reading " +
+      "`getComputedStyle(...).color` on the element reports: that number " +
+      "describes the `#b4b4b4` the button inherits from its `ct-button-*` " +
+      "class, which paints nothing here.  Two plausible-looking values, one " +
+      "of them meaningless, is exactly why the asset is pinned instead.",
     why:
       "the only copy affordance for the debug location; painted by " +
       "`background-image`, with both paths stroked in this colour",
