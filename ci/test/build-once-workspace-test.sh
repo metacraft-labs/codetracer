@@ -387,7 +387,7 @@ for wf in "$WORKFLOW_DIR"/*.yml; do
 		provided=" $(sibling_names_in_block "$job_tmp" | tr '\n' ' ') "
 		rm -f "$job_tmp"
 		for comp in "${!COMPOSITE_PROVIDES[@]}"; do
-			if printf '%s\n' "$job_body" | grep -q "actions/$comp"; then
+			if grep -q "actions/$comp" <<<"$job_body"; then
 				provided="${provided}${COMPOSITE_PROVIDES[$comp]} "
 			fi
 		done
@@ -521,7 +521,7 @@ else
 			"that counts zero exits 1, pipefail propagates it, and 'set -e' kills the" \
 			"script at the assignment before any report is emitted. Capture the count" \
 			"with a trailing '|| true' and default an empty capture to 0."
-	elif printf '%s' "$out" | grep -q "required sibling repo(s) are missing"; then
+	elif grep -q "required sibling repo(s) are missing" <<<"$out"; then
 		ok "the preflight exited $rc and named the missing repos ($(printf '%s' "$out" | wc -l | tr -d ' ') lines)"
 	else
 		fail "the preflight names the missing repos" \

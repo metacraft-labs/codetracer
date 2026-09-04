@@ -479,7 +479,10 @@ if [ -f "$LOCK_ACTION" ]; then
 	# A 40-hex string in the RUNS section would be a pin this action chose
 	# rather than one the lock supplies. (The description may quote SHAs as
 	# prose; only the executable half is scanned.)
-	if sed -n '/^runs:/,$p' "$LOCK_ACTION" | grep -Eq '\b[0-9a-f]{40}\b'; then
+	# Here-string, not a pipe: `grep -q` exits on its first match, `sed` then
+	# takes SIGPIPE, and under `set -o pipefail` a SUCCESSFUL MATCH is reported
+	# as failure. See ci/test/grep-q-pipefail-gate.sh.
+	if grep -Eq '\b[0-9a-f]{40}\b' <<<"$(sed -n '/^runs:/,$p' "$LOCK_ACTION")"; then
 		lock_action_handwritten+=("its runs: section contains a hard-coded 40-hex revision")
 	fi
 fi

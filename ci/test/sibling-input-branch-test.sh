@@ -133,7 +133,7 @@ for repo in $(printf '%s\n' "$flake_list" "$workflow_list" | cut -f1 | sort -u);
 
 	if [ "$fref" = "$wref" ]; then
 		pass "$repo: both name '$fref'"
-	elif printf '%s' "$wref" | grep -qE '^[0-9a-f]{40}$'; then
+	elif grep -qE '^[0-9a-f]{40}$' <<<"$wref"; then
 		# The workflow pins a COMMIT while flake.nix tracks a branch. That is
 		# not the disagreement this suite exists to catch -- it is the stronger
 		# form of agreement, PROVIDED the commit is the one flake.lock has

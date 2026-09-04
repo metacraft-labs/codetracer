@@ -19,6 +19,3 @@
 # in a false-GREEN position — each reads as a spurious failure, which is loud.
 # Fix them with the here-string form and delete these lines.
 ci/test/shell-gate-coverage.sh	if head -n "${MARKER_SCAN_LINES}" "${g}" 2>/dev/null | grep -qF "${MARKER}"; then
-ci/test/build-once-workspace-test.sh	printf '%s\n' "$job_code" | grep -qE 'just build-once|scripts/build-once\.sh' || continue
-ci/test/build-once-workspace-test.sh	if printf '%s\n' "$job_body" | grep -q "actions/$comp"; then
-ci/test/build-once-workspace-test.sh	elif printf '%s' "$out" | grep -q "required sibling repo(s) are missing"; then
