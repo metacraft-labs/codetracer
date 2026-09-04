@@ -85,32 +85,108 @@ proc hasBranchStateAt*[B](branchesTaken: openArray[B]; position: int): bool =
       return false
   table.hasKey(position)
 
-proc flowLineStyleKind*[F](flow: F; position: int; finished: bool):
-    FlowLineStyleKind =
-  ## The class `position` earns in `flow`.
+proc insideUntakenBranch*[B](branchesTaken: openArray[B]; position: int): bool =
+  ## Does `position` fall inside the interior of an arm the run DECLINED?
   ##
-  ## Identical to `common_types/codetracer_features/flow.toLineFlowKind`, which
-  ## this module cannot call: that proc lives in an included module, so calling
-  ## it would mean naming one of the two `FlowViewUpdate` copies and losing the
-  ## genericity the header explains. `relevantStepCount` is, despite its name, a
-  ## list of *line numbers* the walker visited — see
-  ## `flow_preloader.rs:761`, which pushes `line`, not a step count.
-  if position in flow.relevantStepCount:
-    flskHit
-  elif finished:
-    flskSkip
-  else:
-    flskUnknown
+  ## This is the whole of the dimming rule
+  ## (`GUI/Debugging-Features/Omniscience-Flow.md` § *Dimming means "the run did
+  ## not take this branch"*):
+  ##
+  ##   > A source line is dimmed when, and only when, it belongs to a branch of
+  ##   > a conditional — `if`, `else`, `else if`, `switch`/`case`, `match` arm —
+  ##   > that the recorded run did not enter. Not having executed is not, by
+  ##   > itself, a reason to dim a line.
+  ##
+  ## The two tables are joined by header line: `table` says what the run did
+  ## with the arm that header introduces, `extents` says which lines that arm
+  ## occupies. A header with a state and no extent contributes NOTHING — the
+  ## state is known, the arm's lines are not, and inventing a span would turn
+  ## "nothing is claimed" into a claim.
+  ##
+  ## `NotTaken` is a `mixin` because this module names no types: `BranchState`
+  ## lives in an *included* module and therefore exists twice with incompatible
+  ## field types, once through `common/types.nim` and once through
+  ## `frontend/types.nim`. Naming either copy would make this module usable from
+  ## only one of the two worlds — the same reason `hasKey` and `isNil` are left
+  ## to instantiation above, and the reason the headless tests can run the very
+  ## code the renderer runs.
+  mixin NotTaken
+  if branchesTaken.len == 0:
+    return false
+  if branchesTaken[0].len == 0:
+    return false
+  let states = branchesTaken[0][0].table
+  let extents = branchesTaken[0][0].extents
+  when compiles(states.isNil):
+    if states.isNil:
+      return false
+  when compiles(extents.isNil):
+    # A window built by hand rather than by `FlowViewUpdate::new` — the
+    # review-dataset adapter builds one — has no extents at all. No arm can be
+    # shown to have been declined, so nothing is dimmed.
+    if extents.isNil:
+      return false
+  for header, state in states:
+    if state != NotTaken:
+      continue
+    if not extents.hasKey(header):
+      continue
+    let extent = extents[header]
+    if position >= extent.firstLine and position <= extent.lastLine:
+      return true
+  false
 
 proc flowStyledLines*[F](flow: F; finished: bool): seq[FlowStyledLine] =
-  ## Every line of the function `flow` describes, with the class it earns.
+  ## Every line of the function `flow` describes that EARNS a class, with the
+  ## class it earns.
   ##
-  ## Excluded, matching the behaviour `flowStyleLines` has always had:
+  ## ## What changed, and why the old rule was wrong
   ##
-  ##   * lines the outer branch table has a state for — those are painted by
-  ##     `conditionStyleLines`' `flow-taken` / `flow-not-taken` pass instead, and
-  ##     painting both would fight over the same line;
-  ##   * comment lines, which are not executable and would all report as skipped.
+  ## This used to be `position in relevantStepCount ? hit : (finished ? skip :
+  ## unknown)`, and both non-hit outcomes render at `opacity: 0.5`
+  ## (`styles/components/flow.styl`), so the effective rule was **"dim every
+  ## line this window has no step for"**. Reported as: *"I jump into a function
+  ## and all of its lines before the current line get dimmed."*
+  ##
+  ## Dimming is a claim about the PROGRAM; "the flow window has no step for this
+  ## line" is a claim about the WINDOW. The second moves with the cursor, with
+  ## the loop iteration on the slider, and with how far a bounded walk got —
+  ## `relevantStepCount` is not even the backend's answer by the time it is read
+  ## here, because `ui/flow.nim` clears it and rebuilds it down to the displayed
+  ## loop iteration. Rendering the second as the first tells the reader
+  ## something false in exactly the case that matters: a line that already
+  ## executed, above the current position, dimmed as though it never ran.
+  ##
+  ## Three lines that ran and were dimmed by the old rule, all now correct: a
+  ## loop body while the reader looks at a different iteration; every line of a
+  ## loop whose slider widget does not exist yet; and a line carrying no step of
+  ## its OWN — a closing brace, a declaration, or the continuation line of a
+  ## multi-line statement, which is the case in the failing report.
+  ##
+  ## ## Two states, not three
+  ##
+  ## A line is dimmed because a branch was not taken, or it is left alone.
+  ## `flskUnknown` is no longer produced: it existed to avoid over-claiming
+  ## while a window loaded, and it rendered identically to `flskSkip`, so the
+  ## downgrade was real in the data and invisible on screen. Under the new rule
+  ## there is nothing to downgrade — a window with no branch information dims
+  ## nothing. `finished` is therefore no longer consulted, which is just as well:
+  ## it is never `true` in live replay at all (`FlowUpdate::new` sets it
+  ## `false` and only `FlowUpdate::error` sets it `true`), so the safeguard it
+  ## gated had been inert since it was written.
+  ##
+  ## ## Excluded
+  ##
+  ##   * lines the outer branch table has a state for — the arm HEADERS. Those
+  ##     are painted by `conditionStyleLines`' `flow-taken` / `flow-not-taken`
+  ##     pass, and painting both would fight over the same line. This is also
+  ##     what keeps the header of a declined arm undimmed, which the spec
+  ##     requires by name: the condition line is the line whose test was
+  ##     evaluated, so it ran.
+  ##   * comment lines, which are not executable.
+  ##   * lines about which nothing is claimed — emitted as no entry at all
+  ##     rather than as a third kind, because "undimmed" is the absence of a
+  ##     statement, not a statement of absence.
   ##
   ## A nil flow, or one whose location spans no lines, yields an empty seq
   ## rather than raising.
@@ -125,6 +201,7 @@ proc flowStyledLines*[F](flow: F; finished: bool): seq[FlowStyledLine] =
       continue
     if position in flow.commentLines:
       continue
-    result.add(FlowStyledLine(
-      position: position,
-      kind: flowLineStyleKind(flow, position, finished)))
+    if insideUntakenBranch(flow.branchesTaken, position):
+      result.add(FlowStyledLine(position: position, kind: flskSkip))
+    elif position in flow.relevantStepCount:
+      result.add(FlowStyledLine(position: position, kind: flskHit))

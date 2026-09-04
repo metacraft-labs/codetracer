@@ -54,8 +54,38 @@ type
     exprOrder*:    seq[langstring]
     events*: seq[FlowEvent]
 
+  BranchExtent* = object
+    ## The lines an arm of a conditional occupies, ITS HEADER EXCLUDED.
+    ##
+    ## Mirrors `task.rs`'s `BranchExtent`, which crosses as
+    ## `{ "firstLine": n, "lastLine": m }` — the wire is an unchecked
+    ## `JsObject.to(T)` cast (`frontend/dap.nim`), so the field names here are
+    ## the contract and there is no parser to catch a disagreement.
+    ##
+    ## `Omniscience-Flow.md` § *Dimming means "the run did not take this
+    ## branch"*: "What is dimmed is the arm's interior, not its header. The
+    ## line carrying the condition is evidence — for an `else if`, it is the
+    ## line whose test was evaluated and came out false, so it demonstrably
+    ## *did* run."
+    firstLine*: int
+    lastLine*: int
+
   BranchesTaken* = object ## Table of branch states
     table*: TableLike[int, BranchState]
+    extents*: TableLike[int, BranchExtent]
+      ## `header_line` -> the interior of the arm that header introduces, for
+      ## the headers the backend could locate a body for.
+      ##
+      ## KEYED THE SAME WAY AS `table` ON PURPOSE: a renderer asking "is this
+      ## line inside an arm that was not taken" joins the two by header line
+      ## and needs no third index.
+      ##
+      ## Absent for a header whose body node the language's grammar
+      ## configuration did not name, and absent entirely on a window that did
+      ## not come from the backend at all (the review-dataset adapter builds
+      ## one by hand). Both are the same case for the reader: the state is
+      ## known and the extent is not, so nothing is claimed about the arm's
+      ## lines and none of them is dimmed.
 
   LoopIterationSteps* = object ## Table of Loop Iteration steps
     table*: TableLike[int, int]
@@ -157,13 +187,29 @@ proc parseFlowModeWireName*(name: string): FlowMode =
 
 
 
-proc toLineFlowKind*(flow: FlowViewUpdate, position: int, finished: bool): LineFlowKind =
-  ## Return the LineFlowKind for  FlowViewUpdate at position and if finished or not
-  if flow.isNil:
-    LineFlowUnknown
-  elif position in flow.relevantStepCount:
-    LineFlowHit
-  elif finished:
-    LineFlowSkip
-  else:
-    LineFlowUnknown
+## `toLineFlowKind` WAS HERE, AND IS DELETED RATHER THAN CORRECTED.
+##
+## It was the second statement of the per-line flow rule —
+##
+##     if position in flow.relevantStepCount: LineFlowHit
+##     elif finished:                         LineFlowSkip
+##     else:                                  LineFlowUnknown
+##
+## — and `ui/flow_line_styles.nim`'s header named it as the proc that module
+## deliberately duplicated, because an *included* module cannot be called from
+## one that must compile against both copies of `FlowViewUpdate`.
+##
+## That rule is the defect reported as *"I jump into a function and all of its
+## lines before the current line get dimmed"*, and
+## `GUI/Debugging-Features/Omniscience-Flow.md` § *Dimming means "the run did
+## not take this branch"* now forbids it: a line is dimmed when, and only when,
+## it belongs to an arm of a conditional the run did not enter. Not having
+## executed is not, by itself, a reason to dim a line.
+##
+## Deleted and not fixed because it had NO production caller — only the
+## `flow_line_styles`-era duplicate did the work — and a dead proc stating a
+## rule the spec forbids is worse than no proc at all: it is a correct-looking
+## thing for the next reader to reach for. `flowStyledLines` in
+## `ui/flow_line_styles.nim` is the one implementation, and `LineFlowKind`
+## itself is left in place because it is a wire-adjacent enum rather than a
+## decision.

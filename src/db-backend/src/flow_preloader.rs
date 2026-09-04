@@ -871,6 +871,20 @@ impl<'a> CallFlowPreloader<'a> {
                 .expr_loader
                 .final_branch_load(path_buf, &flow_view_update.branches_taken[0][0].table),
         );
+        // WHERE EACH ARM IS, alongside whether it ran.
+        //
+        // Shipped so the renderer can dim the interior of an arm the run
+        // declined instead of dimming every line it has no step for — the
+        // difference between a claim about the PROGRAM and a claim about how
+        // far this window's walk got. See `BranchExtent` in `task.rs` and
+        // `Omniscience-Flow.md` § *Dimming means "the run did not take this
+        // branch"*.
+        //
+        // After the two `add_branches` calls, not before: those decide which
+        // headers carry a state, and an extent is only ever read by joining it
+        // to one. Independent of them in fact — an arm occupies the same lines
+        // whatever ran — so the order is for the reader, not for correctness.
+        flow_view_update.add_branch_extents(self.flow_preloader.expr_loader.branch_extents(path_buf));
         Ok(flow_view_update)
     }
 

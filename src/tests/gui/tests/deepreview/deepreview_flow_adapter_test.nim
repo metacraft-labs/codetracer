@@ -106,10 +106,18 @@ suite "the adapter produces a well-formed FlowUpdate from a fixture":
     # The fixture's first call of `main` visits lines 1, 2, 3, 4 and 10.
     check view.relevantStepCount == @[1, 2, 3, 4, 10]
     check view.positionStepCounts[2] == @[1]
-    for line in [1, 2, 3, 4, 10]:
-      check ct.toLineFlowKind(view, line, finished = true) == ct.LineFlowHit
-    for line in [5, 6, 7, 8, 9, 11, 12]:
-      check ct.toLineFlowKind(view, line, finished = true) == ct.LineFlowSkip
+    # Read through `flowStyledLines`, the one implementation of the per-line
+    # rule. `ct.toLineFlowKind` was a second copy of it and is deleted — see
+    # the note in its place in `common_types/codetracer_features/flow.nim`.
+    var hits: seq[int] = @[]
+    for s in flowStyledLines(view, finished = true):
+      check s.kind == flskHit
+      hits.add(s.position)
+    # Line 1 is `functionFirst` and carries no flow, so the derived hits over
+    # the offered span are 2, 3, 4 and 10. Lines 5-9, 11 and 12 earn no class:
+    # the dataset records no branch, so nothing is claimed about them and they
+    # are not dimmed.
+    check hits == @[2, 3, 4, 10]
 
   test "a DeepReviewLoop becomes a Loop the slider can drive":
     # "`FlowViewUpdate.loops: seq[Loop]` <- `DeepReviewLoop`. Different shapes
@@ -177,11 +185,23 @@ suite "the adapter emits a well-formed empty branchesTaken":
     let styled = flowStyledLines(update.viewUpdates[ct.ViewSource],
                                  update.finished)
     # `flowStyleLines` has always spanned `functionFirst + 1 .. functionLast` —
-    # the signature line carries no flow — so `main` (1..12) yields 2..12.
-    check styled.len == 11
-    check styled[0] == FlowStyledLine(position: 2, kind: flskHit)
-    check styled[4] == FlowStyledLine(position: 6, kind: flskSkip)
-    check styled[8] == FlowStyledLine(position: 10, kind: flskHit)
+    # the signature line carries no flow — so `main` (1..12) offers 2..12.
+    #
+    # NOTHING IS DIMMED HERE, and that is the correct reading rather than a
+    # loss. The adapter emits a well-formed but EMPTY branch table (the test
+    # above pins that), so no arm of any conditional is shown to have been
+    # declined, and `Omniscience-Flow.md` § *Dimming means "the run did not take
+    # this branch"* makes "not dimmed" the rendering of "nothing is claimed
+    # about this line". Line 6 was `flskSkip` before that rule was written, on
+    # the strength of nothing but its absence from `relevantStepCount`.
+    # The fixture's first call of `main` visits 1, 2, 3, 4 and 10; the span
+    # offered is 2..12, so four lines earn a class and every one of them is a
+    # hit.
+    check styled == @[
+      FlowStyledLine(position: 2, kind: flskHit),
+      FlowStyledLine(position: 3, kind: flskHit),
+      FlowStyledLine(position: 4, kind: flskHit),
+      FlowStyledLine(position: 10, kind: flskHit)]
 
 suite "the adapter selects one invocation and does not merge them":
 

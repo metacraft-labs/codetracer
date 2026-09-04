@@ -968,10 +968,48 @@ pub struct LoopIterationSteps {
     pub table: HashMap<usize, usize>,
 }
 
+/// The lines an arm of a conditional OCCUPIES, header excluded.
+///
+/// `GUI/Debugging-Features/Omniscience-Flow.md` § *Dimming means "the run did
+/// not take this branch"* requires the renderer to dim **the arm's interior,
+/// not its header** — the condition line is the line whose test was evaluated,
+/// so it demonstrably ran, and dimming it makes the one line that proves the
+/// branch was considered look like the one that proves it was not.
+///
+/// The values are not new. `Branch::code_first_line` / `code_last_line` have
+/// been populated from the tree-sitter node since branch analysis was written
+/// (`expr_loader.rs`, `extract_branches`), and were read at exactly one place —
+/// building `position_branches` — and never left the backend. `branches_taken`
+/// shipped `header_line` alone, so the frontend could learn "line 28 was not
+/// taken" and had no way to learn that lines 29-30 are 28's arm. That is why
+/// dimming was keyed on `relevant_step_count` instead, and therefore on where
+/// the reader is standing rather than on what the program did.
+///
+/// This is a WIRE change, not an analysis change.
+#[derive(Debug, Default, Copy, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
+pub struct BranchExtent {
+    pub first_line: usize,
+    pub last_line: usize,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct BranchesTaken {
     pub table: HashMap<usize, BranchState>,
+    /// `header_line` -> the interior of the arm that header introduces.
+    ///
+    /// Keyed identically to `table` so the two are joined by header line and a
+    /// reader needs no third index. A header present in `table` and absent
+    /// here is the honest "the state is known, the extent is not" case, and the
+    /// renderer leaves such a line undimmed rather than guessing an extent —
+    /// undimmed is the rendering of "nothing is claimed", which the spec makes
+    /// the correct answer rather than a fallback.
+    ///
+    /// Static per file: an arm occupies the same lines whatever the run did, so
+    /// this is filled once per flow window rather than per loop iteration.
+    #[serde(default)]
+    pub extents: HashMap<usize, BranchExtent>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -1048,6 +1086,24 @@ impl FlowViewUpdate {
                 .table
                 .insert(key, value);
         }
+    }
+
+    /// Record where each arm of each conditional in this file BEGINS AND ENDS.
+    ///
+    /// Written onto `branches_taken[0][0]` — the outer table, the one holding
+    /// the conditionals that are not inside any loop, and the one
+    /// `flow_line_styles.flowStyledLines` reads. Extents are a property of the
+    /// source text rather than of the run, so unlike `add_branches` this is
+    /// called once per window and not once per loop iteration.
+    #[allow(clippy::unwrap_used)]
+    pub fn add_branch_extents(&mut self, extents: HashMap<usize, BranchExtent>) {
+        if self.branches_taken.is_empty() || self.branches_taken[0].is_empty() {
+            // The shape `FlowViewUpdate::new` guarantees is absent, which means
+            // this window was not built by it. Nothing to attach to, and
+            // fabricating the slot here would hide that from the caller.
+            return;
+        }
+        self.branches_taken[0][0].extents.extend(extents);
     }
 }
 

@@ -1,7 +1,8 @@
 use crate::{
     lang::Lang,
     task::{
-        Branch, BranchId, BranchState, CoreTrace, Location, LoopShape, LoopShapeId, NO_BRANCH_ID, NO_POSITION, Position,
+        Branch, BranchExtent, BranchId, BranchState, CoreTrace, Location, LoopShape, LoopShapeId, NO_BRANCH_ID,
+        NO_POSITION, Position,
     },
 };
 use codetracer_trace_types::Line;
@@ -2209,6 +2210,52 @@ impl ExprLoader {
             }
         }
         results
+    }
+
+    /// Where every arm in `path` begins and ends, keyed by its header line.
+    ///
+    /// The same key `load_branch_for_position` and `final_branch_load` report
+    /// state under, so the renderer joins the two without a third index.
+    ///
+    /// A branch whose body node was never identified is SKIPPED rather than
+    /// reported with a sentinel. `Branch::new` leaves both positions at
+    /// `NO_POSITION` and `extract_branches` only overwrites them when it finds
+    /// a `branches_body` node for the language, so a language whose node names
+    /// are not configured yields no extents at all — and the renderer's answer
+    /// for a line with no extent is "not dimmed", which is the correct
+    /// rendering of "nothing is claimed about this line". Emitting `-1..-1`
+    /// would instead be a claim, and an empty one that ranges over nothing only
+    /// by accident.
+    pub fn branch_extents(&self, path: &PathBuf) -> HashMap<usize, BranchExtent> {
+        let mut extents: HashMap<usize, BranchExtent> = HashMap::default();
+        if !self.processed_files.contains_key(path) {
+            return extents;
+        }
+        for branch in &self.processed_files[path].branch {
+            if branch.is_none
+                || branch.header_line.0 == NO_POSITION
+                || branch.code_first_line.0 == NO_POSITION
+                || branch.code_last_line.0 == NO_POSITION
+            {
+                continue;
+            }
+            // An arm whose body ends before it begins is not a span. This is
+            // reachable for a one-line arm written `if c { f(); }`, where
+            // `code_first_line` is the header line + 1 and `code_last_line` is
+            // the header line itself — a range the renderer must not read as
+            // "everything from here down".
+            if branch.code_last_line.0 < branch.code_first_line.0 {
+                continue;
+            }
+            extents.insert(
+                branch.header_line.0 as usize,
+                BranchExtent {
+                    first_line: branch.code_first_line.0 as usize,
+                    last_line: branch.code_last_line.0 as usize,
+                },
+            );
+        }
+        extents
     }
 
     pub fn get_loop_shape(&self, line: Position, path: &PathBuf) -> Option<LoopShape> {
