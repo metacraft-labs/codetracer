@@ -35,7 +35,19 @@ childProcess.execFileSync("git", ["init"], { cwd: gitEditFixture, stdio: "ignore
 childProcess.execFileSync("git", ["add", "."], { cwd: gitEditFixture, stdio: "ignore" });
 childProcess.execFileSync(
   "git",
-  ["-c", "user.name=CodeTracer Tests", "-c", "user.email=tests@codetracer.dev", "commit", "-m", "initial"],
+  // commit.gpgsign=false: a runner configured to sign, with no secret key
+  // present, would abort this fixture commit. Edit mode is not about signing.
+  [
+    "-c",
+    "user.name=CodeTracer Tests",
+    "-c",
+    "user.email=tests@codetracer.dev",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-m",
+    "initial",
+  ],
   { cwd: gitEditFixture, stdio: "ignore" },
 );
 

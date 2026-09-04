@@ -184,6 +184,10 @@ function createGitWorkspace(): string {
   run("git", ["init", "."], root);
   run("git", ["config", "user.email", "codetracer-gui@example.invalid"], root);
   run("git", ["config", "user.name", "CodeTracer GUI E2E"], root);
+  // This fixture is about worktree UI, not the host's signing setup. A runner
+  // with commit.gpgsign=true and no secret key aborts the commit below with
+  // `gpg: skipped ...: No secret key`, so pin it off for this throwaway repo.
+  run("git", ["config", "commit.gpgsign", "false"], root);
   run("git", ["add", "."], root);
   run("git", ["commit", "-m", "Initial fixture"], root);
   return root;

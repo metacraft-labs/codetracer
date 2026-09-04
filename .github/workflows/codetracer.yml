@@ -6189,6 +6189,13 @@ jobs:
         env:
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
           CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # codetracer-native-recorder depends on the PRIVATE metacraft-labs/lldb-sys.rs.
+          # Cargo's default libgit2 transport does not read gitconfig, so it never
+          # presents the org-scoped extraHeader that `Setup dev env` installs job-wide
+          # (GIT_CONFIG_KEY_0/VALUE_0/COUNT) and reports the resulting 401 as the
+          # misleading "revision ... not found". Forcing the git CLI makes cargo use
+          # that credential, exactly as the dmg-build and visual-replay lanes already do.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: nix develop '.?submodules=1' --command just test-ct-providers
 
       - name: Upload sibling build logs
