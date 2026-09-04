@@ -41,6 +41,18 @@ import path from 'node:path';
 /// Install the browser globals `worker.js` and the Rust side need, wired to
 /// `onOutbound` instead of a worker port.
 function installGlobals(onOutbound) {
+  // Mirror `worker_host.mjs`'s opt-in log silencing so a benchmark can turn
+  // the engine's per-request `console.log` off in BOTH arms. Silencing only
+  // one arm would be worse than silencing neither.
+  if (process.env.CT_SILENCE_ENGINE_LOG === '1') {
+    const noop = () => {};
+    console.log = noop;
+    console.debug = noop;
+    console.info = noop;
+    console.warn = noop;
+    console.error = noop;
+  }
+
   class DedicatedWorkerGlobalScope {
     static [Symbol.hasInstance](value) {
       return value === globalThis;

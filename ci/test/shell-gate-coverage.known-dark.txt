@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 23
+# RECORDED-DARK-CEILING: 24
 #
 # It is not an exemption list. `NOT-A-CI-GATE:` in a file's own header is the
 # exemption, and it means "this is not a gate" — a claim about the file, made in
@@ -216,3 +216,29 @@ ci/lib/published-asset.sh
 # ceiling above went 22 -> 23 in this diff precisely so that debt is visible to
 # a reviewer instead of being absorbed silently.
 ci/test/editor-context-menu-modes.sh
+
+# --- added 2026-09-04, with M0's browser seekable-container gate -------------
+#
+# Ceiling raised 23 -> 24 in this diff, deliberately and in the open, per the
+# rule above.
+#
+# Drives the REAL `wasm32-unknown-unknown` engine over split-stream `.ct`
+# containers it writes on the spot, which is the only way to check what it
+# checks: on the host `CTFSTraceReader::open` exists and the Nim FFI reader is
+# linked in, and neither is true in a browser tab, so a host-side suite cannot
+# stand in for it.
+#
+# It is dark for EXACTLY the reason `ci/test/worker-backend-wasm-e2e.sh` above
+# is, and it is the SAME MISSING ARTEFACT for both: `src/db-backend/build_wasm.sh`
+# takes tens of minutes, needs a wasm sysroot and an `llvm-ar`, and regenerates
+# the private emulator's C output from the `codetracer-native-recorder` sibling.
+# No CI job builds it today, so wiring this gate would wire a job that cannot
+# find its input and fails on every run -- which is worse than a recorded hole,
+# because a red that is always red stops being read.
+#
+# Whoever wires the wasm engine build into CI should wire BOTH of these in the
+# same change and delete both lines; the both-directions rule at the top will
+# then demand it by name. Until then the gate is run by hand, and the M0
+# milestone entry records the runs and their numbers rather than implying CI
+# did.
+ci/test/browser-seekable-container.sh

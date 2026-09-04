@@ -1914,22 +1914,6 @@ impl MaterializedReplaySession {
     // returns if it has hit any breakpoints
     #[allow(clippy::expect_used)] // Trace must have at least one step
     fn step_continue(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
-        // Build an iterator over steps after (or before) the current step.
-        let steps: Vec<DbStep> = if forward {
-            let slice = self.reader.steps_from(self.step_id);
-            // Skip the current step itself.
-            if slice.len() > 1 { slice[1..].to_vec() } else { vec![] }
-        } else {
-            let all = self.reader.steps_from(StepId(0));
-            let end = self.step_id.0 as usize;
-            if end <= all.len() {
-                let mut v = all[..end].to_vec();
-                v.reverse();
-                v
-            } else {
-                vec![]
-            }
-        };
         // M10 — clear any leftover hits from a previous Continue.  The
         // DAP handler drains after every step call, but a paranoid
         // reset here means a malformed caller (or a test rig that
@@ -1937,7 +1921,28 @@ impl MaterializedReplaySession {
         self.pending_tracepoint_hits.clear();
         let breakpoint_active = !self.breakpoint_list.is_empty();
         let tracepoint_active = self.tracepoint_list.iter().any(|per_path| !per_path.is_empty());
-        for step in steps {
+
+        // M0/3 — walk the steps after (or before) the current one WITHOUT
+        // materializing them.
+        //
+        // This used to take `steps_from` and `to_vec()` it: a second full copy
+        // of the trace's step table on top of the whole-table build the slice
+        // itself forced, and the backward direction copied the entire prefix
+        // and reversed it. Continue then walked that copy and usually stopped
+        // within a few steps at the first breakpoint. `scan_steps_from` visits
+        // the same steps in the same order, and stops where the old loop
+        // stopped, so a Continue that hits a breakpoint early now costs what it
+        // actually walked.
+        //
+        // The scan is collected into `hit` rather than returning directly,
+        // because the closure cannot return from the enclosing function.
+        let mut hit: Option<StepId> = None;
+        let mut pending = Vec::new();
+        // Clone the `Arc` so the scan does not hold a borrow of `self.reader`
+        // while the closure below borrows `self` for the two match helpers.
+        let reader = self.reader.clone();
+        let from = self.step_id;
+        reader.scan_steps_from(from, forward, &mut |step: &DbStep| {
             // M10 — collect every tracepoint hit on the way to the
             // eventual breakpoint stop (or end-of-trace).  Tracepoint
             // matching MUST happen BEFORE the breakpoint check so a
@@ -1946,18 +1951,26 @@ impl MaterializedReplaySession {
             // stop point (the convention DAP `output` consumers
             // expect: the log appears in the trace before the
             // matching stop event).
-            if tracepoint_active && let Some(hit) = self.step_matches_any_tracepoint(&step) {
-                self.pending_tracepoint_hits.push(hit);
+            if tracepoint_active && let Some(h) = self.step_matches_any_tracepoint(step) {
+                pending.push(h);
             }
             if breakpoint_active {
-                if self.step_matches_any_breakpoint(&step) {
-                    self.step_id_jump(step.step_id);
-                    // true: has hit a breakpoint
-                    return Ok(true);
+                if self.step_matches_any_breakpoint(step) {
+                    hit = Some(step.step_id);
+                    return false;
                 }
-            } else if !tracepoint_active {
-                break;
+                true
+            } else {
+                // Neither list is active: there is nothing to look for, so
+                // Continue runs to the boundary without inspecting steps.
+                tracepoint_active
             }
+        });
+        self.pending_tracepoint_hits.extend(pending);
+        if let Some(step_id) = hit {
+            self.step_id_jump(step_id);
+            // true: has hit a breakpoint
+            return Ok(true);
         }
 
         // If the continue step doesn't find a valid breakpoint.
@@ -2252,7 +2265,32 @@ impl MaterializedReplaySession {
         };
         let function_path = self.reader.path(function.path_id).unwrap_or("");
         let function_line = function.line.0;
-        let call_steps = self.reader.steps_from(call.step_id);
+
+        // M0/3 — find the first matching step by a BOUNDED forward walk from
+        // the call's entry step, instead of borrowing `steps_from(call.step_id)`
+        // (which forced the whole step table to be built just to run a `.find()`
+        // that almost always succeeds within the call's own first few steps).
+        //
+        // `scan_steps_from` skips its start step, and `steps_from` included it,
+        // so the entry step is tested explicitly first. The search still runs to
+        // the end of the trace if nothing matches, exactly as `.find()` did —
+        // this changes what the walk COSTS, not where it stops.
+        let find_first = |matches: &dyn Fn(&DbStep) -> bool| -> Option<StepId> {
+            if let Some(entry) = self.reader.step(call.step_id)
+                && matches(entry)
+            {
+                return Some(entry.step_id);
+            }
+            let mut found = None;
+            self.reader.scan_steps_from(call.step_id, true, &mut |step: &DbStep| {
+                if matches(step) {
+                    found = Some(step.step_id);
+                    return false;
+                }
+                true
+            });
+            found
+        };
 
         if function_path.ends_with(".nr") {
             // Noir DWARF can point a function at the synthetic/comment/header
@@ -2260,11 +2298,10 @@ impl MaterializedReplaySession {
             // line recorded for the same file. Prefer that executable line so
             // run-to-entry opens the state/editor on user code, not line 1.
             let header_line = if function_line <= 0 { 1 } else { function_line };
-            if let Some(step) = call_steps
-                .iter()
-                .find(|step| step.call_key == call.key && step.path_id == function.path_id && step.line.0 > header_line)
-            {
-                return step.step_id;
+            if let Some(step_id) = find_first(&|step: &DbStep| {
+                step.call_key == call.key && step.path_id == function.path_id && step.line.0 > header_line
+            }) {
+                return step_id;
             }
         }
 
@@ -2272,11 +2309,10 @@ impl MaterializedReplaySession {
             return call.step_id;
         }
 
-        call_steps
-            .iter()
-            .find(|step| step.call_key == call.key && step.path_id == function.path_id && step.line.0 >= function_line)
-            .map(|step| step.step_id)
-            .unwrap_or(call.step_id)
+        find_first(&|step: &DbStep| {
+            step.call_key == call.key && step.path_id == function.path_id && step.line.0 >= function_line
+        })
+        .unwrap_or(call.step_id)
     }
 }
 
