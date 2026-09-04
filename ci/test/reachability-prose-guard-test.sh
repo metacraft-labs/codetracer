@@ -45,7 +45,14 @@ reach_sh="ci/test/frontend-reachability.sh"
 # copied here. A copy would drift, and a suite covering a copy of the guard
 # proves nothing about the guard.
 fn_src="$(sed -n '/^assert_reachability_prose_agrees() {/,/^}/p' "${nim_sh}")"
-if ! printf '%s' "${fn_src}" | grep -q 'CT_PROSE_HEADER_FILE'; then
+# A HERE-STRING, NOT A PIPE. `producer | grep -q PAT` returns a successful
+# match AS FAILURE whenever the producer is still writing when `grep` exits and
+# `pipefail` is set — which this file sets on line 8. The failure is racy and
+# size-dependent, so it hides on a short function and appears when the function
+# grows past a pipe buffer, at which point this suite would refuse to run and
+# blame a rename. `ci/test/grep-q-pipefail-gate.sh` is the standing check;
+# this was the one site it had left to report.
+if ! grep -q 'CT_PROSE_HEADER_FILE' <<<"${fn_src}"; then
 	echo "reachability-prose-guard-test.sh: could not lift" >&2
 	echo "  assert_reachability_prose_agrees out of ${nim_sh}. If it was renamed or" >&2
 	echo "  its overrides removed, this suite is covering nothing — fix it here." >&2
