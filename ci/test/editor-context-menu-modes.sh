@@ -284,7 +284,12 @@ for n in menu.get('names') or []:
 }
 
 has_entry() {
-	names_of "$1" | grep -Fxq "$2"
+	# Here-string, not a pipe. `grep -Fxq` exits on its first match, `names_of`
+	# then takes SIGPIPE, and under `set -o pipefail` a SUCCESSFUL MATCH is
+	# reported as FAILURE -- so this predicate would answer "absent" for a menu
+	# entry that is present, which is the exact inversion of what it is for.
+	# See ci/test/grep-q-pipefail-gate.sh, which is what caught this.
+	grep -Fxq "$2" <<<"$(names_of "$1")"
 }
 
 edit_names="$(names_of edit | paste -sd, -)"
