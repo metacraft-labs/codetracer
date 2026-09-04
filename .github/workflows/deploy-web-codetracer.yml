@@ -708,6 +708,38 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/noir-demo-in-browser.sh
           '
 
+      - name: Prove a jump lands on screen and a tree click opens its file
+        # THE STEP ABOVE PROVES THE DEMO IS WORTH OPENING. This proves it is
+        # still usable once the visitor RUNS it, which is a different claim:
+        # every gesture here works in Edit mode and all of them failed after a
+        # Run, so nothing before this step could see it.
+        #
+        # Entering Debug mode rebuilds the layout, which left
+        # `EditorViewComponent.layoutItem` pointing at an item the new tree
+        # does not contain. `showTab` activated through that cached `.parent`
+        # and threw `componentItem is not a child of this stack` — inside an
+        # async proc, so it surfaced as an unhandled REJECTION and not as an
+        # error event. That is why a user reported the same defect twice, with
+        # a fix shipped in between, and why the console is asserted here.
+        #
+        # The height reading is not padding. The failed activation leaves the
+        # editor's DOM node disconnected, and Monaco then reports a one-line
+        # "visible" range with the caret sitting on the target — so "the caret
+        # is on the right line" and "the line is visible" were BOTH true for
+        # 8/8 jumps into a pane the user could not see. Without
+        # `getDomNode().isConnected` and a height, this arm would have passed
+        # on the reported defect.
+        #
+        # Same refusal rule as the step above: no replay engine, no session, no
+        # Debug mode — it exits 2 rather than reporting zero failures over an
+        # empty list.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_WEB_BUNDLE_DIR="$(pwd)/studio-bundle"
+            direnv exec "$(pwd)" bash ci/test/jump-follow-in-browser.sh
+          '
+
       - name: Upload what the pre-publish browser saw and reported
         # BOTH FORMS. This step shipped sixteen PNGs and no JSON, which made a
         # DOM failure undiagnosable by construction: the run-control check

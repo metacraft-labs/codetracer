@@ -3657,6 +3657,30 @@ test-build-error-navigation:
   exec > >(tee test-logs/test-build-error-navigation.log) 2>&1
   bash ci/test/build-error-navigation-in-browser.sh
 
+# A call-trace jump puts its target line on screen, and a click in the file
+# tree opens its file — both in DEBUG mode, both with a clean console.
+#
+# The gestures all work in Edit mode and failed after a Run, because entering
+# Debug mode rebuilds the layout and left `EditorViewComponent.layoutItem`
+# pointing at an item the new tree does not contain; `showTab` then activated
+# through that cached `.parent` and threw `componentItem is not a child of this
+# stack` inside an async proc, where it surfaced only as an unhandled
+# rejection.  Measured on the pre-fix tree: 0/8 jumps followed, with the active
+# editor's Monaco node DISCONNECTED — while its caret sat on the target line,
+# which is why the console and the pane's height are both part of the verdict.
+#
+# Needs the replay engine AND the Noir modules: set CT_REPLAY_ENGINE_DIR (or
+# CT_REPLAY_ENGINE_GLUE / CT_REPLAY_ENGINE_WASM) and CT_NOIR_WASM_COMPILER /
+# CT_NOIR_WASM_TRACER, or CT_WEB_BUNDLE_DIR at a tree that already carries
+# them.  Without a session there is no Debug mode and the gate refuses rather
+# than passing over an empty list.
+test-jump-follow:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-jump-follow.log) 2>&1
+  bash ci/test/jump-follow-in-browser.sh
+
 # Every check in the build-error navigation gate, killed on purpose, one at a
 # time.
 #

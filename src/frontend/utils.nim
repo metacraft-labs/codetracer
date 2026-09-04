@@ -1689,6 +1689,40 @@ proc makeEditorViewDetailed(
   cdebug "editor: after open layout tab, active = " & $editorName
   data.services.editor.active = editorName
 
+proc findLiveLayoutItemForEditor*(data: Data, editorName: cstring): GoldenContentItem =
+  ## Ask the LIVE layout which component item currently carries ``editorName``,
+  ## ignoring every cached reference.
+  ##
+  ## `EditorViewComponent.layoutItem` is a cache, and a mode switch or a
+  ## close/reopen replaces the item it points at. The stale value still answers
+  ## `.parent`, so `setActiveContentItem` is handed a stack that no longer
+  ## contains the child and throws `componentItem is not a child of this stack`
+  ## — inside an async proc, where it surfaces as an unhandled rejection and
+  ## not as anything the user or the console makes obvious.
+  ##
+  ## The key is `componentState.fullPath`, which is the editor tab path
+  ## `openPanel` stamped on the item at creation and is what
+  ## `layout.nim`'s `itemDestroyed` handler already matches editors by.
+  if data.ui.isNil or data.ui.layout.isNil or data.ui.layout.groundItem.isNil:
+    return nil
+  var pending: seq[GoldenContentItem] = @[data.ui.layout.groundItem]
+  while pending.len > 0:
+    let item = pending.pop()
+    if item.isNil:
+      continue
+    if item.isComponent:
+      let state =
+        try:
+          if not item.componentState.isNil: item.componentState
+          else: cast[GoldenItemState](item.toConfig().componentState)
+        except CatchableError:
+          nil
+      if not state.isNil and not state.fullPath.isNil and state.fullPath == editorName:
+        return item
+    for child in item.contentItems:
+      pending.add(child)
+  return nil
+
 proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line: int = NO_LINE, col: int = NO_COLUMN) =
   if tab.isNil:
     cerror "tabs: tab is nil in showTab"
@@ -1704,6 +1738,9 @@ proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line
     return
 
   var contentItem: GoldenContentItem
+  # Carried out of the block below so the activation can name the view kind
+  # when it has to re-create the tab.
+  var tabEditorView = EditorView.ViewSource
 
   if data.ui.editors.hasKey(editorName):
     var editor: EditorViewComponent
@@ -1716,15 +1753,17 @@ proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line
       cwarn "editor is nil in showTab " & $editorName
       return
 
+    tabEditorView = editor.editorView
+    # A NIL `layoutItem` IS NOT A REASON TO GIVE UP.
+    # It used to return here, which is one of the ways a click in the file tree
+    # did nothing at all. `contentItem` is left nil instead and the activation
+    # below re-resolves it against the live layout.
     if editor.layoutItem.isNil:
-      cwarn "editor.layoutItem is nil in showTab " & $editorName
-      return
+      cwarn "editor.layoutItem is nil in showTab " & $editorName &
+        "; resolving against the live layout"
     contentItem = editor.layoutItem
     if not editor.noInfo.isNil:
       editor.noInfo.message = noInfoMessage
-
-    if line != -1:
-      editor.focusLine(line, col)
 
     # else:
     #   # TODO expansions in low level editors?
@@ -1746,13 +1785,56 @@ proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line
     cwarn "no editor for " & $editorName
     return
 
-  assert not contentItem.isNil
-
-  if not contentItem.parent.isNil and contentItem.parent.isStack:
-    # TODO: bug sometimes here
-    contentItem.parent.toJs.setActiveContentItem(contentItem)
+  # ACTIVATE THROUGH AN ITEM THE LAYOUT STILL OWNS.
+  #
+  # The cached `.parent` used to be dereferenced unconditionally here — the
+  # "TODO: bug sometimes here" that stood at this line. Reported twice from
+  # `noirstudio.dev`: "I'm still unable to reliably open files. Some clicks in
+  # the file tree work, others don't", with
+  # `Error: componentItem is not a child of this stack` at
+  # `setActiveContentItem` ← `showTab` ← `openTab` ← the filesystem row click.
+  #
+  # RE-RESOLVED, NOT GUARDED. `isAttachedToLayout` alone would stop the throw
+  # and leave the tab unopened — turning a loud, diagnosable defect into
+  # exactly the silent "some clicks do nothing" the user reported, with a clean
+  # console. So a stale reference is re-bound to the item the layout actually
+  # holds, and an item the layout does not hold at all is RE-CREATED. Only a
+  # genuine failure of both refuses, and it says so by name.
+  if not contentItem.isNil and isAttachedToLayout(contentItem, data.ui.layout):
+    if not contentItem.parent.isNil and contentItem.parent.isStack:
+      contentItem.parent.toJs.setActiveContentItem(contentItem)
+    else:
+      contentItem.container.show()
   else:
-    contentItem.container.show()
+    let live = data.findLiveLayoutItemForEditor(editorName)
+    if not live.isNil:
+      # Re-bind the holder, not just this call: leaving the stale value in
+      # place would re-pay the walk on every activation and keep every other
+      # reader of `layoutItem` pointing at a detached node.
+      data.ui.editors[editorName].layoutItem = live
+      contentItem = live
+      if not live.parent.isNil and live.parent.isStack:
+        live.parent.toJs.setActiveContentItem(live)
+      else:
+        live.container.show()
+    else:
+      cwarn "tabs: showTab: " & $editorName &
+        " has no live layout item; re-creating its tab"
+      data.openLayoutTab(
+        Content.EditorView, isEditor = true,
+        path = editorName, editorView = tabEditorView)
+
+  # THE CARET IS MOVED AFTER THE TAB IS ON SCREEN.
+  #
+  # `focusLine` ran before the activation above, so `revealLineInCenter` was
+  # computing a scroll offset against a container GoldenLayout had not shown
+  # yet — and on the re-creation path it ran against the outgoing component
+  # entirely. Both are the user's "the editor was not always following the
+  # position of the caret/cursor after the jump".
+  if line != -1 and data.ui.editors.hasKey(editorName):
+    let shown = data.ui.editors[editorName]
+    if not shown.isNil and not isNull(shown.monacoEditor):
+      shown.focusLine(line, col)
 
 # a function for opening various kinds of editor viewer tabs:
 #   the `name` here is relatively generic:
