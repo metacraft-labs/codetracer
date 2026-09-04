@@ -113,6 +113,14 @@ stage() {
 
 run_guard() { bash "${guard}" --root "$1" 2>&1; }
 
+# EVERY MATCH BELOW IS A HERE-STRING, NOT `printf | grep -q`. Under the
+# `set -uo pipefail` on line 26 that pipeline reports FALSE FOR A MATCH THAT IS
+# PRESENT: `grep -q` exits at its first hit, `printf` takes EPIPE, and pipefail
+# adopts printf's failure. The guard this file tests carries the same note at
+# `in_set`, and the failure mode is specific to a suite like this one: a false
+# negative here reads as "this arm SURVIVED", which is a mutation test reporting
+# that the guard is broken when the guard is fine.
+
 echo "=== shell-gate-coverage selftest — eleven arms ==="
 echo
 

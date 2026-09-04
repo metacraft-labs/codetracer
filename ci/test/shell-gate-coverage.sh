@@ -568,7 +568,14 @@ for g in ${gates}; do
 	# The repo-relative path IS the identity, in the inventory as in the walk.
 	b="${g}"
 	has_marker=0
-	if head -n "${MARKER_SCAN_LINES}" "${g}" 2>/dev/null | grep -qF "${MARKER}"; then
+	# A HERE-STRING, FOR THE REASON THIS FILE ALREADY SPELLS OUT AT `in_set`.
+	# `producer | grep -q` under `set -uo pipefail` reports FALSE FOR A MATCH
+	# THAT IS PRESENT: `grep -q` exits at the first hit, the producer takes
+	# EPIPE, and pipefail hands the pipeline the producer's failure. Forty
+	# lines of `head` will rarely fill a pipe buffer, so this site would have
+	# lied only occasionally — which is worse than always, not better.
+	head_lines="$(head -n "${MARKER_SCAN_LINES}" "${g}" 2>/dev/null)"
+	if grep -qF -- "${MARKER}" <<<"${head_lines}"; then
 		has_marker=1
 	fi
 	is_known_dark=0
@@ -594,8 +601,11 @@ for g in ${gates}; do
 
 	if [ "${has_marker}" -eq 1 ]; then
 		declared=$((declared + 1))
-		reason="$(head -n "${MARKER_SCAN_LINES}" "${g}" | grep -F "${MARKER}" | head -1 |
-			sed "s/.*${MARKER}[[:space:]]*//")"
+		# Same shape, same fix: the trailing `head -1` closes the pipe on
+		# `grep`, so a file declaring the marker twice would EPIPE here.
+		# `${head_lines}` is already in hand from the marker test above.
+		reason="$(grep -F -- "${MARKER}" <<<"${head_lines}" |
+			sed -e '1!d' -e "s/.*${MARKER}[[:space:]]*//")"
 		if [ -n "${reason}" ]; then
 			note "${g}: not a CI gate — ${reason}"
 		else
