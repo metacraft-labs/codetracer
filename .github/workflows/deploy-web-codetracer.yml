@@ -859,6 +859,49 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/noir-mode-roundtrip.sh
           '
 
+      - name: Prove the DEBUG-mode right-click menu exists at all
+        # THE HALF THAT HAS NEVER BEEN MEASURED ANYWHERE, and the reason is the
+        # bundle rather than the gate.
+        #
+        # `ci/test/editor-context-menu-modes.sh` runs in `codetracer.yml` too,
+        # but that job assembles its bundle with no Noir compiler, no tracer and
+        # no replay engine, so its Run leg cannot reach a replay session and the
+        # Debug half reports itself unmeasured. Every Debug assertion in that
+        # gate has therefore been vacuous since it was written — the Edit half
+        # is all that has ever run.
+        #
+        # This job is the only one with all three, already assembled into
+        # `studio-bundle/`, which is why the browser gates above run here. Same
+        # reasoning, verbatim, as the mode-round-trip step: it was never
+        # BLOCKED; the step was simply not written.
+        #
+        # WHAT IT CAUGHT ON ITS FIRST REAL RUN. Measured locally on a bundle
+        # carrying the wasm (86fbb1285): the Run leg reached a real session with
+        # the debug controls mounted and 14 non-blank code lines on screen, and
+        # the Debug-mode context menu had ZERO entries against Edit mode's SEVEN
+        # on the same file and the same line. The cause was not the menu: the
+        # BUILD auto-hide overlay was left open and `#auto-hide-backdrop` —
+        # transparent, `position: fixed`, z-index 98 — covered the entire
+        # 1440x900 viewport, so `elementFromPoint` at the click answered
+        # `div#auto-hide-backdrop` while the editor beneath it was 474x802 and
+        # `isConnected`. The event never reached Monaco.
+        #
+        # The gate asserts the hit test separately from the row count for
+        # exactly that reason — a count cannot name what ate the click — and it
+        # reads `clientWidth`/`clientHeight`/`isConnected` rather than a Monaco
+        # self-report, because Monaco answers a plausible one-line visible range
+        # for a DETACHED pane and that has produced false passes here before.
+        #
+        # Same refusal rule as the steps above: if no session is reached the
+        # gate says the Debug half went unmeasured rather than reporting zero
+        # failures over an empty list.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_WEB_BUNDLE_DIR="$(pwd)/studio-bundle"
+            direnv exec "$(pwd)" bash ci/test/editor-context-menu-modes.sh
+          '
+
       - name: Upload what the pre-publish browser saw and reported
         # BOTH FORMS. This step shipped sixteen PNGs and no JSON, which made a
         # DOM failure undiagnosable by construction: the run-control check

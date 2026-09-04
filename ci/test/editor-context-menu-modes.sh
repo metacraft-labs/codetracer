@@ -720,9 +720,20 @@ else
 	note "  present: Jump to line, Run to Cursor, Jump backward to line, Copy"
 	note "  absent:  Cut, Paste, Replace"
 	note ""
-	note "The Debug half is also asserted by the GUI suite, where a Run produces"
-	note "a real session with source on screen:"
+	note "NOTHING ELSE COVERS THIS HALF, and the claim that something did was"
+	note "wrong. This gate used to point at the GUI spec"
 	note "  src/tests/gui/tests/editor/editor_context_menu_is_mode_dependent.spec.ts"
+	note "as asserting the Debug half 'where a Run produces a real session'. That"
+	note "spec sets deploymentMode: 'web', but the fixture reads that option only"
+	note "under launchMode 'trace' (src/tests/gui/lib/fixtures.ts); under"
+	note "launchMode 'edit' it calls launchEditMode, which is _electron.launch."
+	note "On the Electron surface the edit-mode toolbar is never installed —"
+	note "installEditModeToolbar is inside 'when defined(ctWeb)' — so #run-image"
+	note "and .edit-mode-toolbar do not render, and the spec times out reaching"
+	note "for them BEFORE its Debug assertion. It cannot reach this half at all."
+	note ""
+	note "So supply the three variables above, or run this gate in the deploy"
+	note "workflow where the studio bundle already carries them."
 	echo
 fi
 
