@@ -358,7 +358,26 @@ for wf in "$WORKFLOW_DIR"/*.yml; do
 		# looked for -- which silently dropped three of the six build-once jobs
 		# from this scan.
 		job_code="$(printf '%s\n' "$job_body" | grep -vE '^[[:space:]]*#')"
-		printf '%s\n' "$job_code" | grep -qE 'just build-once|scripts/build-once\.sh' || continue
+		# HERESTRING, NOT A PIPE, and the difference is not stylistic.
+		#
+		# This script runs under `set -uo pipefail`. `grep -q` exits on its
+		# FIRST match, which closes the pipe; if `printf` has not finished
+		# writing by then it dies of SIGPIPE, and `pipefail` makes the whole
+		# pipeline report that failure. So `printf ... | grep -q ... || continue`
+		# skips the job precisely WHEN THE PATTERN MATCHES -- the exact
+		# inversion of what it is written to do.
+		#
+		# It has been surviving on a race it usually wins: a job body smaller
+		# than the 64 KiB pipe buffer is written in full before `grep` can exit,
+		# so `printf` never sees EPIPE. The jobs in this file are near that size
+		# and growing, and the failure is silent when it comes -- a dropped job
+		# is one this suite then never checks, while still reporting a pass over
+		# the jobs it did reach. The same defect elsewhere in this repo
+		# fabricated two of three failures in a gate that gates every build.
+		#
+		# A herestring feeds `grep` from a temporary file: no pipe, no writer,
+		# no EPIPE, and the exit status is `grep`'s own in every case.
+		grep -qE 'just build-once|scripts/build-once\.sh' <<<"$job_code" || continue
 		build_once_jobs=$((build_once_jobs + 1))
 
 		# What this job provisions: its own inline blocks, plus the blocks of
