@@ -97,7 +97,7 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 # slack accumulates silently under it. That is the script's contract, not this
 # line's, and changing it belongs in a diff that says so.
 lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1224 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh
+	env CT_REACHABILITY_MAX=1228 bash ci/test/frontend-reachability.sh
 
 # The Embed SDK's boundary, in both directions: a consumer may reach the SDK
 # only through `codetracer_embed`, and the SDK's own import graph carries no

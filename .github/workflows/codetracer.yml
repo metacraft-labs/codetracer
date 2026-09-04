@@ -4507,7 +4507,29 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-python-recorder
-          ref: stable
+          # `dev`, like the other twelve sibling clones in this workflow. This
+          # was the ONLY one on `stable`, and it was the only one with no
+          # comment saying why -- next to `codetracer-trace-format`, which is
+          # deliberately on `dev` and says so. An unexplained outlier beside an
+          # explained one is what cost the time here, so: what `dev` gives us is
+          # a tree whose `requires-python` is TRUE. `stable` declares `>=3.8` in
+          # both pyproject files, which this repo's own
+          # `just test-python-version-alignment` correctly fails -- checks (F)
+          # and (G) of 21 -- because an ABI-locked extension has a closed range
+          # and the pure recorder evaluates PEP 604 unions that need 3.10+.
+          # That was fixed on `dev` in 53edd25 on 2026-08-28 and never promoted.
+          #
+          # `dev` is also the HEALTHIER branch, which is the opposite of how the
+          # two names read: at the time of writing the main `CI` workflow is
+          # green on `dev@53edd25` and red on `stable@73c6f2f`.
+          #
+          # Revisit if `stable` starts being a release pointer something outside
+          # these repos pins -- no such consumer was found in either product's
+          # workflows, but absence of a reference is not proof of absence. If it
+          # is, the right fix is to promote `dev` -> `stable` THERE (a merge,
+          # never a force-push: `stable` holds 73c6f2f, which `dev` lacks) and
+          # change this line back.
+          ref: dev
           path: ${{ github.workspace }}/../codetracer-python-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
@@ -5184,7 +5206,29 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-python-recorder
-          ref: stable
+          # `dev`, like the other twelve sibling clones in this workflow. This
+          # was the ONLY one on `stable`, and it was the only one with no
+          # comment saying why -- next to `codetracer-trace-format`, which is
+          # deliberately on `dev` and says so. An unexplained outlier beside an
+          # explained one is what cost the time here, so: what `dev` gives us is
+          # a tree whose `requires-python` is TRUE. `stable` declares `>=3.8` in
+          # both pyproject files, which this repo's own
+          # `just test-python-version-alignment` correctly fails -- checks (F)
+          # and (G) of 21 -- because an ABI-locked extension has a closed range
+          # and the pure recorder evaluates PEP 604 unions that need 3.10+.
+          # That was fixed on `dev` in 53edd25 on 2026-08-28 and never promoted.
+          #
+          # `dev` is also the HEALTHIER branch, which is the opposite of how the
+          # two names read: at the time of writing the main `CI` workflow is
+          # green on `dev@53edd25` and red on `stable@73c6f2f`.
+          #
+          # Revisit if `stable` starts being a release pointer something outside
+          # these repos pins -- no such consumer was found in either product's
+          # workflows, but absence of a reference is not proof of absence. If it
+          # is, the right fix is to promote `dev` -> `stable` THERE (a merge,
+          # never a force-push: `stable` holds 73c6f2f, which `dev` lacks) and
+          # change this line back.
+          ref: dev
           path: ${{ github.workspace }}/../codetracer-python-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 

@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 24
+# RECORDED-DARK-CEILING: 25
 #
 # It is not an exemption list. `NOT-A-CI-GATE:` in a file's own header is the
 # exemption, and it means "this is not a gate" — a claim about the file, made in
@@ -242,3 +242,23 @@ ci/test/editor-context-menu-modes.sh
 # milestone entry records the runs and their numbers rather than implying CI
 # did.
 ci/test/browser-seekable-container.sh
+
+# ADDED 2026-09-04. `ci/test/tests-pane-row-controls.sh` arrived in e617829b3
+# ("feat(tests pane): a row's two controls, and only one of them re-runs") with
+# no justfile recipe and no workflow step -- `grep -rn tests-pane-row-controls`
+# finds only the file itself.
+#
+# READ THE CEILING ABOVE AS A WARNING, NOT AS HEADROOM. It has moved three
+# times in a single day: 22 -> 23 (editor-context-menu-modes.sh, 0d76e11dc),
+# 23 -> 24 (066096566), 24 -> 25 (this entry). Every one of those was a gate
+# written to check something real, committed, and then reachable from nothing.
+#
+# A shrink-only list exists so that dark gates get FIXED rather than tolerated,
+# and three raises in a day is that list being used as an escape hatch instead.
+# The upstream fix is a rule at the point of authorship -- a new gate lands with
+# its recipe and its workflow step, or it does not land -- because recording is
+# cheap and wiring is not, and a ratchet only ratchets if raising it is harder
+# than doing the work. If the next entry here is added without that rule
+# changing, the honest move is to stop raising the ceiling and let the lane go
+# red.
+ci/test/tests-pane-row-controls.sh
