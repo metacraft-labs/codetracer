@@ -35,7 +35,7 @@
 # reads a file; it does not run it), and arms 10 and 11 are the two directions
 # of the ratchet that stops the exception list absorbing the next hole.
 #
-# AND A FOURTH, LATER THE SAME DAY, WHICH IS WHY THERE ARE NOW THIRTEEN. With
+# AND A FOURTH, LATER THE SAME DAY, WHICH IS WHY THERE WERE THEN THIRTEEN. With
 # the justfile-as-root fix already landed, the guard printed `143 reachable` and
 # `RESULT: OK` — and two of those 143 were credited by a mention rather than a
 # wire, which no arm could see because arms 5 and 9 only cover comments and
@@ -47,9 +47,26 @@
 #
 # Both were found by attributing every one of the 143 credits to the line that
 # made it, which is the measurement this file exists to make unnecessary next
-# time. Honest figures after: 172 found, 141 reachable, 10 declared not-a-gate,
-# 21 recorded dark — the dark inventory did NOT grow, because one gate was
-# deleted as dead and one declared not-a-gate in its own header.
+# time. Figures after that step: 172 found, 141 reachable, 10 declared
+# not-a-gate, 21 recorded dark — the dark inventory did NOT grow, because one
+# gate was deleted as dead and one declared not-a-gate in its own header.
+#
+# AND A FIFTH, WHICH IS WHY THERE ARE NOW FIFTEEN, and it is the same sentence
+# as blind spot (b) with one word changed: the scan was `-name '*.sh'`. 43 gates
+# under `ci/` and `scripts/` are Node or Python and none of them could produce a
+# finding. Twelve were dark; three were referenced NOWHERE, not even in a
+# comment. Arms 14 and 14b are that, frozen, one per extension — widening the
+# `find` and widening the token regex in `refs_of_text` are separate edits and
+# either alone leaves half the subject invisible.
+#
+# ARM 14c IS THE CONTROL THAT MAKES 14 AND 14b MEAN ANYTHING: a `.mjs` a
+# reachable gate actually invokes must still be CREDITED. Without it both arms
+# are satisfied by a guard that calls every non-shell file dark, which would be
+# a worse instrument than the one being replaced.
+#
+# Honest figures, same tree, same day: 216 found, 172 reachable, 11 declared
+# not-a-gate, 33 recorded dark, 0 UNRECORDED. The ceiling moved 21 -> 33 in the
+# open, which is the rule at the top of the inventory working as written.
 #
 # A NOTE ON WHAT AN ARM IS WORTH. Arm 7's mutation is deliberately generous: a
 # real recipe, in the real justfile, with a real `bash` invocation of a real
@@ -137,7 +154,7 @@ run_guard() { bash "${guard}" --root "$1" 2>&1; }
 # negative here reads as "this arm SURVIVED", which is a mutation test reporting
 # that the guard is broken when the guard is fine.
 
-echo "=== shell-gate-coverage selftest — thirteen arms ==="
+echo "=== shell-gate-coverage selftest — fifteen arms ==="
 echo
 
 # ---------------------------------------------------------------------------
@@ -344,6 +361,48 @@ m_paths_filter_only() {
 }
 arm "13/a paths: trigger filter is not a wire" \
 	"ci/test/only-watched.sh is reachable from NO workflow lane" m_paths_filter_only
+
+# ARM 14 — A GATE IS NOT ONLY A SHELL SCRIPT. The scan was `-name '*.sh'`, which
+# is the THIRD instance of this guard's own recurring defect, after "the justfile
+# was a root" and "the scan was one directory". 43 gates under `ci/` are Node or
+# Python — Playwright browser probes, pure-python3 guards, the
+# `noir-wasm-worker/` harness — and none of them could produce a finding.
+# Twelve were dark, and three of those were referenced NOWHERE, not even by a
+# comment. `mode_layout_probe.mjs` is the one that stings: it measures the
+# rendered `.lm_title` geometry that went to zero in the defect it covers, and
+# has never run.
+#
+# BOTH new extensions are mutated, because widening the `find` and widening the
+# TOKEN REGEX in `refs_of_text` are two separate edits and either alone leaves
+# half the subject invisible.
+m_nonshell_dark() {
+	printf '// a probe nothing runs\nconsole.log("x");\n' \
+		>"${work}/arm/ci/test/orphan_probe.mjs"
+	printf '# a guard nothing runs\nprint("x")\n' \
+		>"${work}/arm/ci/test/orphan_guard.py"
+}
+arm "14/a dark .mjs is still a dark gate" \
+	"ci/test/orphan_probe.mjs is reachable from NO workflow lane" m_nonshell_dark
+arm "14b/a dark .py is still a dark gate" \
+	"ci/test/orphan_guard.py is reachable from NO workflow lane" m_nonshell_dark
+
+# AND THE OTHER DIRECTION FOR THE SAME WIDENING: a non-shell gate that IS
+# invoked must be credited, or arm 14 is satisfied by a guard that simply calls
+# every `.mjs` dark. This is the control arm 14 needs, and it is why the
+# mutation below is expected to leave the tree GREEN — so it is asserted
+# directly rather than through `arm`, which requires a red.
+stage "${work}/arm"
+printf '// a probe a wired gate runs\nconsole.log("x");\n' \
+	>"${work}/arm/ci/test/wired_probe.mjs"
+printf '#!/usr/bin/env bash\nnode ci/test/wired_probe.mjs\n' \
+	>"${work}/arm/ci/test/gate2.sh"
+nonshell_out="$(run_guard "${work}/arm")"
+if grep -q 'RESULT: OK' <<<"${nonshell_out}"; then
+	ok "14c/a .mjs invoked by a reachable gate IS credited (the widening is not a blanket)"
+else
+	bad "14c/a .mjs invoked by a reachable gate was reported dark — the widening invents holes"
+	printf '%s\n' "${nonshell_out}" | grep -E '\[FAILED\]' | head -3 | sed 's/^/           /'
+fi
 
 echo
 echo "${checks} check(s), ${failures} failure(s)"

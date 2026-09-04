@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 21
+# RECORDED-DARK-CEILING: 33
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -272,3 +272,96 @@ ci/test/constraints-listing-browser.sh
 # milestone entry records the runs and their numbers rather than implying CI
 # did.
 ci/test/browser-seekable-container.sh
+
+# =============================================================================
+# THE SUBJECT STOPPED BEING ONLY SHELL — 2026-09-04, CEILING 21 -> 33
+# =============================================================================
+# `shell-gate-coverage.sh` scanned `-name '*.sh'`. That was the THIRD instance of
+# its own recurring defect, after "the justfile was a root" and "the scan was one
+# directory": a dark-gate finder that cannot see most of its subject reports a
+# clean sweep of the part it can. 43 gates under `ci/` and `scripts/` are Node or
+# Python — Playwright browser probes, pure-python3 guards, and the
+# `noir-wasm-worker/` harness — and NONE of them could produce a finding.
+#
+# Twelve did, the moment the extension list grew. Same tree, same day: 216 found,
+# 172 reachable, 10 declared not-a-gate, 33 recorded dark, 0 UNRECORDED.
+#
+# WIRING THESE IS DELIBERATELY NOT DONE HERE, for the reason this file already
+# gives about the twenty-two before them: each needs an owner who knows what it
+# costs to run and whether it passes today, and a guard author quietly adding
+# twelve browser jobs to CI would be making twelve decisions that are not theirs.
+# What is done here is making the number impossible to lose.
+
+# ---------------------------------------------------------------------------
+# SEVEN THAT ARE DARK ONLY BECAUSE THEIR DRIVER IS
+# ---------------------------------------------------------------------------
+# Each is invoked, with a real `node` or `python3` line, by exactly one shell
+# gate — and that gate is recorded dark ABOVE, in the "wired to a `just` recipe
+# that no workflow calls" section. This is precisely the shape
+# `ci/lib/published-asset.sh` had before it evicted itself: wire the driver and
+# these light up on their own, at which point the both-directions rule at the top
+# of this file deletes these lines without anyone remembering to.
+#
+# THEY ARE NOT SEPARATE HOLES. Counting them as twelve independent dark gates
+# would overstate the problem; they are two holes (the Noir browser family and
+# the wasm-worker session gate) with nine files in them.
+
+# `ci/test/build-error-navigation-in-browser.sh:304` and `:315`.
+ci/test/build_error_nav_probe.mjs
+ci/test/build_error_nav_query.py
+
+# `ci/test/noir-build-in-browser.sh:297`.
+ci/test/noir_build_probe.mjs
+
+# `ci/test/noir-edit-persists.sh:176`.
+ci/test/noir_edit_persists_probe.mjs
+
+# `ci/test/noir-replay-in-browser.sh:277` and `:503`.
+ci/test/noir_replay_probe.mjs
+ci/test/pane_children_probe.mjs
+
+# `ci/test/wasm-worker-session.sh:394`.
+ci/test/wasm_session_probe.mjs
+
+# ---------------------------------------------------------------------------
+# TWO ORPHANS IN A DIRECTORY WHOSE OTHER HALF IS WIRED
+# ---------------------------------------------------------------------------
+# `ci/test/noir-wasm-worker-e2e.sh` IS reachable — `deploy-web-codetracer.yml`
+# reaches it — and it runs `ci/test/noir-wasm-worker/compare.mjs`, and ONLY that.
+# `compare.mjs` imports neither of these two, verified by reading its import list.
+# So a live lane runs one file out of a four-file directory while the other two
+# each pin a specific, named defect and have never executed.
+#
+# This is the near-miss worth reading twice, and it is the same shape as the
+# `cli-record-smoke.sh` note above: a reader scanning for `noir-wasm-worker`
+# finds a hit in a live workflow and stops.
+ci/test/noir-wasm-worker/host_mismatch.mjs
+ci/test/noir-wasm-worker/transpile_route.mjs
+
+# ---------------------------------------------------------------------------
+# THREE THAT NOTHING ANYWHERE REFERENCES, IN ANY FORM
+# ---------------------------------------------------------------------------
+# Not a workflow, not a recipe, not another gate — and not a dark one either.
+# These are the sharpest of the twelve, because the two categories above at least
+# have a driver to wire. Their only mentions are PROSE, which is the trap this
+# guard's `refs_in` exists to refuse.
+
+# Referenced by NOTHING AT ALL, not even a comment. It measures what
+# `ui/shortcuts.nim:318` buys by replacing `Mousetrap.prototype.stopCallback` —
+# a question about chord delivery that the two enumerated chord registries
+# cannot answer.
+ci/test/chord_stopcallback_probe.mjs
+
+# Named ONLY in a comment, at `ci/test/web-bundle-assets.sh:323`, which describes
+# it as the thing that "can assert what a click on the row does" — present tense,
+# about a probe nothing runs.
+ci/test/low_level_code_row_click_probe.mjs
+
+# Named ONLY in comments, at `ci/test/editor-context-menu-modes.sh:17` and
+# `ci/test/editor_context_menu_modes_probe.mjs:33`.
+#
+# WORTH NAMING PRECISELY, because half of what was believed about it was wrong.
+# It DOES measure rendered `.lm_title` geometry — the exact quantity that went to
+# zero in the defect it would cover — at lines 96-116 and 338-343. The gate is
+# real and it is pointed at the right thing. It has simply never been run.
+ci/test/mode_layout_probe.mjs

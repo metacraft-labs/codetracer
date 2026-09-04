@@ -133,7 +133,22 @@ bad() {
 #
 # `gate_home` is still `ci/test`, because that is where this guard and its
 # inventory file live. It is no longer where the subject lives.
+#
+# AND THE SUBJECT IS NO LONGER ONLY SHELL, since 2026-09-04. `-name '*.sh'` was
+# the third instance of this file's own recurring defect — a dark-gate finder
+# that cannot see most of its subject reports a clean sweep of the part it can.
+# 43 gates under `ci/` are Node or Python: browser probes driven by Playwright
+# (`mode_layout_probe.mjs`, `chord_double_fire_probe.mjs`), guards in pure
+# python3 (`frontend-reachability-guard.py`, `macho-closure.py`), and the
+# `noir-wasm-worker/` harness. Twelve of the 43 were reachable from nothing, and
+# three of those were referenced NOWHERE IN THE REPOSITORY at all — not by a
+# workflow, not by a recipe, not by another script, not even by a dark one.
+#
+# `mode_layout_probe.mjs` is the one worth naming: it measures rendered
+# `.lm_title` geometry, which is the exact quantity that went to zero in the
+# defect it covers, and nothing has ever run it.
 gate_dirs="ci scripts"
+gate_exts="sh mjs py"
 gate_home="ci/test"
 if [ ! -d "${gate_home}" ]; then
 	echo "no ${gate_home} under ${root}; this guard has no subject" >&2
@@ -158,8 +173,26 @@ gate_find_dirs=""
 for d in ${gate_dirs}; do
 	[ -d "${d}" ] && gate_find_dirs="${gate_find_dirs} ${d}"
 done
+# FILTERED WITH `grep`, NOT WITH `find -name`, AND THIS IS A BUG THAT BIT.
+#
+# The obvious form builds `-name *.sh -o -name *.mjs` into a string and expands
+# it unquoted. `*.sh` IS THEN A GLOB, and this repository has `.sh` files at its
+# root — `env.sh`, `build_for_extension.sh`, `install-on-distributions.sh` — so
+# the shell expanded the pattern before `find` ever saw it and the whole
+# expression became `-name build_for_extension.sh env.sh ...`. `find` rejected
+# it, the scan returned ZERO gates, and only Step 0's non-vacuity floor turned
+# that into a visible failure rather than a clean sweep of nothing.
+#
+# Which is Step 0 earning its place: without it this would have printed
+# "0 found, 0 reachable, 0 UNRECORDED dark" and exited 0.
+#
+# `node_modules` is pruned because `ci/test/noir-wasm-worker/` carries one, and a
+# vendored dependency is not this repository's gate.
+ext_re="$(printf '%s' "${gate_exts}" | tr ' ' '|')"
 # shellcheck disable=SC2086
-gates="$(find ${gate_find_dirs} -type f -name '*.sh' 2>/dev/null | sed 's#^\./##' | sort)"
+gates="$(find ${gate_find_dirs} \( -name node_modules -o -name .git \) -prune -o \
+	-type f -print 2>/dev/null |
+	sed 's#^\./##' | grep -E "\.(${ext_re})\$" | sort)"
 gate_count="$(printf '%s\n' "${gates}" | grep -c . || true)"
 
 # A HERE-STRING, NOT A PIPE, AND THIS IS A CORRECTNESS FIX RATHER THAN STYLE.
@@ -306,9 +339,16 @@ refs_of_text() {
 	END { if (cur != "") emit(cur) }
 
 	function emit(line,   n, i, j, t, u, rest, arr) {
+		# COMMENT MARKERS FOR ALL THREE LANGUAGES, not just `#`. Widening the
+		# subject to `.mjs` and `.py` without widening this would re-create the
+		# exact defect the comment rule exists for, in the new files: a probe
+		# named in a `//` doc comment would be credited as wired.
 		if (line ~ /^[ \t]*#/) return
-		# A linter reads; it does not run. See rule 3 in the header above.
-		if (line ~ /(^|[^A-Za-z0-9_-])(shellcheck|shfmt)([^A-Za-z0-9_-]|$)/) return
+		if (line ~ /^[ \t]*\/\//) return
+		if (line ~ /^[ \t]*\*/) return
+		# A linter reads; it does not run. See rule 3 in the header above. The
+		# Node and Python linters are here for the same reason `shellcheck` is.
+		if (line ~ /(^|[^A-Za-z0-9_-])(shellcheck|shfmt|eslint|prettier|ruff|mypy|black|flake8|pylint)([^A-Za-z0-9_-]|$)/) return
 		# A `paths:` TRIGGER FILTER NAMES A FILE TO WATCH, NOT ONE TO RUN — and
 		# it is rule 3 one more step along: `shellcheck x.sh` at least opens the
 		# file, while `- x.sh` under `on: push: paths:` only decides whether the
@@ -326,7 +366,7 @@ refs_of_text() {
 		# unbroken token ending in `.sh`, optionally quoted. A real step is
 		# `- run: bash x.sh` or `- uses: ...` and always carries a space before
 		# the path, so it cannot match this.
-		if (line ~ /^[ \t]*-[ \t]*[^ \t]*\.sh[^ \t]*[ \t]*$/) return
+		if (line ~ /^[ \t]*-[ \t]*[^ \t]*\.(sh|mjs|py)[^ \t]*[ \t]*$/) return
 
 		n = split(line, arr, /[ \t]+/)
 		for (i = 1; i <= n; i++) {
@@ -354,7 +394,7 @@ refs_of_text() {
 		}
 
 		rest = line
-		while (match(rest, /[A-Za-z0-9_.\/-]*[A-Za-z0-9_-]\.sh/)) {
+		while (match(rest, /[A-Za-z0-9_.\/-]*[A-Za-z0-9_-]\.(sh|mjs|py)/)) {
 			print "S " substr(rest, RSTART, RLENGTH)
 			rest = substr(rest, RSTART + RLENGTH)
 		}
@@ -736,7 +776,7 @@ while read -r n; do
 	# in a workflow may be some other repository's, and is not this guard's
 	# business.
 	case "${n}" in
-	ci/*.sh | scripts/*.sh) ;;
+	ci/*.sh | scripts/*.sh | ci/*.mjs | scripts/*.mjs | ci/*.py | scripts/*.py) ;;
 	*) continue ;;
 	esac
 	if [ ! -f "${n}" ]; then

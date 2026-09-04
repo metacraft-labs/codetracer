@@ -1,3 +1,11 @@
+// NOT-A-CI-GATE: documentation asset capture.
+//
+// The same claim, in the same words, that its six siblings under `scripts/docs/`
+// make about themselves — it produces a screenshot for the book, and asserts
+// nothing about the product. It came into view on 2026-09-04 only because
+// `shell-gate-coverage.sh` widened its subject past `*.sh`; the `.sh` capture
+// tools beside it have carried this marker since 2026-09-01.
+
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
