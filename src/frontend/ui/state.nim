@@ -722,6 +722,39 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
 
   # Initialize the parallel ViewModel instance (no-op if already created).
   initStateVM()
+
+  # AND MOUNT, HERE, BECAUSE THIS IS THE MOMENT THE CONTAINER EXISTS.
+  #
+  # `initStateVM` returns immediately when `stateVMInstance` is already set —
+  # which it always is by now, because `initStateVMWithStore` created it when
+  # the session store was installed. So the ONLY `tryMountIsoNimStatePanel`
+  # call this component had was that one, and it ran while the front end was
+  # still in edit mode, where `#stateComponent-0` does not exist: GoldenLayout
+  # has not built the replay layout yet. `doMountStatePanel` polls for the
+  # container 200 times at 10 ms, exhausts the budget in ~2 s, logs
+  # "not ready after 200 retries, giving up" and returns — and nothing calls
+  # it again. `register` runs LATER, when GoldenLayout has created the panel
+  # and registered the component into it, which is precisely when the mount
+  # can succeed, and it was the one caller that did not attempt it.
+  #
+  # Measured on the deployed Noir Studio (noirstudio.dev, 2026-09-04): a
+  # recorded session had `#stateComponent-0` present, visible and EMPTY —
+  # `children.length == 0` — while the engine was answering `ct/load-locals`
+  # with `x` and `y` and `syncStoreLocals` was writing them into the store.
+  # Every layer below the panel was correct; the panel was never mounted, so
+  # the State pane stayed blank however far the visitor navigated. That is the
+  # report "the state panel stays empty as I navigate the noir recording".
+  #
+  # `CalltraceComponent.register` (`ui/calltrace.nim`) has always made this
+  # call and its panel mounts on the same page, from the same give-up, which
+  # is the difference the two panes' behaviour has been showing all along.
+  #
+  # Guarded exactly as calltrace's is: with no VM there is nothing to mount,
+  # and `tryMountIsoNimStatePanel` is idempotent — it returns early once
+  # `isoNimStateMounted` is set — so an already-mounted panel is untouched.
+  if stateVMInstance != nil:
+    tryMountIsoNimStatePanel()
+
   let stateComponent = self
   stateHistoryBridge = proc(expression: string) =
     if not stateComponent.api.isNil:
