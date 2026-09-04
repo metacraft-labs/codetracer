@@ -6849,6 +6849,7 @@ jobs:
     # not "fix" it by dropping those jobs from needs:, which would remove the
     # delay only by giving up the coverage this gate exists to protect.
     needs:
+      - ci-contract-suites
       - lint-bash
       - lint-nim
       - lint-nix

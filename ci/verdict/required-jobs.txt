@@ -24,6 +24,14 @@
 # single result under their job id in the `needs` context.
 
 # --- static analysis -------------------------------------------------
+# The eleven static contract suites that used to run inside `ci-verdict`
+# itself, ahead of its verdict step. They are listed here for the same reason
+# every other name is: a run in which they are skipped or missing has lost the
+# coverage they provide, and that must be reported as lost coverage rather
+# than as a pass. This job carries `if: always()` and declares no `needs:`, so
+# the only ways it does not run are deletion or cancellation -- which are
+# exactly the two states this manifest exists to catch.
+ci-contract-suites
 lint-bash
 lint-nim
 lint-nix
