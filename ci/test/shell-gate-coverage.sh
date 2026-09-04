@@ -88,9 +88,22 @@ bad() {
 	printf '  [FAILED] %s\n' "$*"
 }
 
-gate_dir="ci/test"
-if [ ! -d "${gate_dir}" ]; then
-	echo "no ${gate_dir} under ${root}; this guard has no subject" >&2
+# WHERE THE GATES LIVE — AND WHY THIS IS NO LONGER ONE DIRECTORY.
+#
+# This was `gate_dir="ci/test"` with `find -maxdepth 1`, which put `ci/verdict/`,
+# `ci/runner/`, `ci/lib/`, `ci/build/`, `ci/deploy/`, `ci/reprobuild/` and the
+# whole of `scripts/` OUTSIDE the universe of the check whose entire job is to
+# find gates nothing runs. A dark-gate finder that cannot see most of the
+# repository's shell reports a clean sweep of the corner it was pointed at, and
+# `scripts/require-tup-globs.sh` — a build prerequisite that only ever gets
+# SHELLCHECKED, never run — sat outside it the whole time.
+#
+# `gate_home` is still `ci/test`, because that is where this guard and its
+# inventory file live. It is no longer where the subject lives.
+gate_dirs="ci scripts"
+gate_home="ci/test"
+if [ ! -d "${gate_home}" ]; then
+	echo "no ${gate_home} under ${root}; this guard has no subject" >&2
 	exit 2
 fi
 
@@ -102,7 +115,18 @@ fi
 # `mapfile` nor associative arrays — `ci/test/test-lane-coverage.sh` is written
 # the same way for the same reason. A guard that only runs on the CI box cannot
 # be checked before it is pushed.
-gates="$(find "${gate_dir}" -maxdepth 1 -type f -name '*.sh' | sed 's#^\./##' | sort)"
+#
+# IDENTITY IS THE REPO-RELATIVE PATH, NOT THE BASENAME. Widening the scan made
+# basenames ambiguous — `nix.sh` is both `ci/build/nix.sh` and `ci/lint/nix.sh`,
+# `rust.sh` is both `ci/lint/rust.sh` and `ci/test/rust.sh` — and a set keyed by
+# basename would have reported the dark one of each pair as covered by the
+# reachable one.
+gate_find_dirs=""
+for d in ${gate_dirs}; do
+	[ -d "${d}" ] && gate_find_dirs="${gate_find_dirs} ${d}"
+done
+# shellcheck disable=SC2086
+gates="$(find ${gate_find_dirs} -type f -name '*.sh' 2>/dev/null | sed 's#^\./##' | sort)"
 gate_count="$(printf '%s\n' "${gates}" | grep -c . || true)"
 
 # A HERE-STRING, NOT A PIPE, AND THIS IS A CORRECTNESS FIX RATHER THAN STYLE.
@@ -148,25 +172,38 @@ echo
 # ---------------------------------------------------------------------------
 # The roots: what CI can start from.
 # ---------------------------------------------------------------------------
-# Workflows, the justfile, and the `ci/lint/*.sh` dispatchers.
+# THE WORKFLOWS, AND NOTHING ELSE. THIS IS THE OTHER HALF OF THE FIX.
 #
-# The dispatchers are roots because a workflow invokes them directly
-# (`codetracer.yml` runs `ci/lint/nim.sh`), and they are where several gates are
-# actually wired — `test-lane-coverage.sh` reaches CI through `nim.sh` and not
-# through any workflow that names it. Leaving them out reported gates as dark
-# that CI runs on every push, which is the false-positive direction and the one
-# that gets a guard switched off.
-roots="$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | sort)
-$(find ci/lint -maxdepth 1 -type f -name '*.sh' 2>/dev/null | sort)"
-[ -f justfile ] && roots="${roots}
-justfile"
-[ -f Justfile ] && roots="${roots}
-Justfile"
+# This list used to include the justfile and the `ci/lint/*.sh` dispatchers as
+# roots in their own right, and the justfile is the one that made the number a
+# fiction: EVERY gate any `just` recipe mentioned was seeded as reachable,
+# whether or not any lane runs that recipe. `just` is a developer entry point.
+# Most of its 200-odd recipes are things a person types; a handful are things CI
+# types. Seeding from the file rather than from the recipes CI actually calls
+# credited fourteen gates — the `noir-*` family, the `desktop-*` family,
+# `cli-record-smoke.sh`, `python-recorder-smoke.sh` and the rest — as covered
+# while they ran in no lane at all.
+#
+# The dispatchers do not need to be roots either, and making them roots hid the
+# same class of error one level down. `ci/lint/nim.sh` IS reachable — four
+# workflow steps name it — so the walk below reaches it the ordinary way, and if
+# a day comes when no workflow names it, this guard should say so rather than
+# assume it.
+#
+# NOT A ROOT, DELIBERATELY: `.gitlab-ci.yml`. It exists, it is 120 lines, and it
+# names `just test` and `ci/test/ui-tests.sh`. Counting it would credit
+# `ui-tests.sh` and everything under `just test` — and this repository's CI is
+# GitHub Actions: the inventory beside this file has recorded `ui-tests.sh` as
+# dark since 2026-09-01 with `ui-tests-db.sh is wired and this is not` as the
+# reason, which is a statement about the GitHub lanes. Treating the GitLab file
+# as a lane would silently retire that finding and five more. If somebody
+# revives that pipeline, add it here and watch six entries evict themselves.
+roots="$(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | sort)"
 root_count="$(printf '%s\n' "${roots}" | grep -c . || true)"
 
 echo "Step 1: the CI roots are readable"
 if [ "${root_count}" -ge 2 ]; then
-	ok "${root_count} CI root(s): workflows plus the justfile"
+	ok "${root_count} CI root(s): the workflow files, and only those"
 else
 	bad "found ${root_count} CI root(s) — reachability below would be measured from nothing"
 	echo
