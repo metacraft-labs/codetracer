@@ -2964,14 +2964,52 @@ pub fn handle_message_browser(
                         req.command,
                     );
                 }
-                format!(
-                    "no trace is open: `{}` arrived before the launch handshake completed \
-                     (received launch={}, configurationDone={}). Send `launch` with a \
-                     `traceFolder` and `configurationDone` (in either order) first.",
-                    req.command,
-                    ctx.launch_request.is_some(),
-                    ctx.received_configuration_done,
-                )
+                // What decides THIS branch is `handler` being `None`, and the
+                // only thing that installs a handler is
+                // `browser_setup_from_vfs_when_ready`. So the message must
+                // report that function's preconditions, not the handshake
+                // flags: it returns early without `configurationDone`, and
+                // without a `launch` that named a trace folder, and it leaves
+                // `handler` unset when `setup_from_vfs` fails.
+                //
+                // `launch_request.is_some()` is the wrong witness and was the
+                // bug here. It is set for ANY accepted launch — including a
+                // `program`-style one, which *clears* `launch_trace_folder` —
+                // and it is never read by the browser setup path at all. It
+                // let the message print `launch=true, configurationDone=true`
+                // while asserting in the same sentence that the request
+                // "arrived before the launch handshake completed", and then
+                // advise sending the two things the caller had just sent.
+                //
+                // `launch_trace_folder` is the value that actually gates the
+                // path, so it is the one reported.
+                // Note the asymmetry: three of these four cases genuinely ARE
+                // an incomplete launch handshake, and say so. Only the fourth
+                // — both preconditions met, handler still absent — must not,
+                // because that is the case the old message got wrong.
+                let awaiting_configuration_done = !ctx.received_configuration_done;
+                let awaiting_trace_folder = ctx.launch_trace_folder.as_os_str().is_empty();
+                let reason = match (awaiting_configuration_done, awaiting_trace_folder) {
+                    (true, true) => "the launch handshake is incomplete: neither `configurationDone` nor a \
+                         `launch` naming a `traceFolder` has arrived yet. Send both (in either \
+                         order)"
+                        .to_string(),
+                    (true, false) => "the launch handshake is incomplete: a `launch` named a `traceFolder`, \
+                         but `configurationDone` has not arrived yet. Send `configurationDone`"
+                        .to_string(),
+                    (false, true) => "the launch handshake is incomplete: `configurationDone` arrived, but no \
+                         `launch` has named a `traceFolder` — note that a `launch` carrying only \
+                         `program` does not name one. Send `launch` with a `traceFolder`"
+                        .to_string(),
+                    (false, false) => format!(
+                        "`configurationDone` and a `launch` naming `traceFolder` {:?} both \
+                         arrived, so the handshake is COMPLETE and opening the trace from the \
+                         virtual filesystem is what failed. Check that the folder was written to \
+                         the VFS before `launch`; the worker log carries the setup error",
+                        ctx.launch_trace_folder.to_string_lossy(),
+                    ),
+                };
+                format!("no trace is open: `{}` cannot be serviced — {reason}.", req.command)
             };
             let failure: Option<String> = match handler {
                 Some(h) if h.initialized => {
@@ -4166,6 +4204,68 @@ mod tests {
             assert!(
                 !message.1.contains("before the launch handshake"),
                 "the refusal must not blame the handshake, got: {}",
+                message.1,
+            );
+        }
+
+        /// #187. The disconnect case above was guarded; this one was not.
+        ///
+        /// A `launch` carrying `program` instead of `traceFolder` is
+        /// *accepted* — it sets `launch_request` and CLEARS
+        /// `launch_trace_folder` — so after `configurationDone` both
+        /// handshake halves read as received while no handler is ever
+        /// built. The old refusal reported `launch_request.is_some()`, a
+        /// value the browser setup path never consults, and so printed
+        /// `launch=true, configurationDone=true` inside a sentence
+        /// asserting the request "arrived before the launch handshake
+        /// completed" — contradicting itself, then advising the caller to
+        /// send the two things it had just sent.
+        ///
+        /// The refusal must instead name the thing that actually gates the
+        /// path: no `traceFolder`.
+        #[test]
+        fn a_program_launch_is_refused_for_the_missing_trace_folder_not_the_handshake() {
+            let folder = "browser-handshake-program-only";
+            let (handler, received) = drive(
+                folder,
+                &[
+                    ("initialize", json!({})),
+                    ("launch", json!({ "program": "/tmp/some-binary" })),
+                    ("configurationDone", json!({})),
+                    ("threads", json!({})),
+                ],
+            );
+            assert!(
+                handler.is_none(),
+                "a `program` launch names no trace folder, so no trace can be open",
+            );
+
+            let message = received
+                .iter()
+                .find_map(|m| match m {
+                    DapMessage::Response(r) if r.command == "threads" => {
+                        Some((r.success, r.message.clone().unwrap_or_default()))
+                    }
+                    _ => None,
+                })
+                .expect("the request must still be answered");
+            assert!(!message.0, "the request must be refused");
+            assert!(
+                message.1.contains("traceFolder"),
+                "the refusal must name the missing `traceFolder`, got: {}",
+                message.1,
+            );
+            // The self-contradiction, pinned directly: both halves arrived,
+            // so nothing may claim the handshake was incomplete.
+            assert!(
+                !message.1.contains("before the launch handshake"),
+                "both handshake halves arrived — the refusal must not claim otherwise, got: {}",
+                message.1,
+            );
+            assert!(
+                !message.1.contains("configurationDone="),
+                "reporting `launch=`/`configurationDone=` flags is what made this message \
+                 self-contradictory; they do not decide this branch. got: {}",
                 message.1,
             );
         }

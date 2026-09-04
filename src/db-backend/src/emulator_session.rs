@@ -4525,6 +4525,27 @@ mod tests {
         }
     }
 
+    /// Assert that `messages` carries a successful DAP *response* for
+    /// `command`, correlated to the `seq` that [`jump_request`] sends.
+    ///
+    /// Events are deliberately not accepted here. `request_seq` is the only
+    /// field that settles a pending request on a DAP transport, so matching
+    /// on it is what makes this a response check rather than a restatement
+    /// of the `ct/complete-move` assertions the callers already make.
+    fn assert_response_for(messages: &[crate::dap::DapMessage], command: &str) {
+        let seq = jump_request(command).base.seq;
+        assert!(
+            messages.iter().any(|msg| matches!(
+                msg,
+                crate::dap::DapMessage::Response(r)
+                    if r.command == command && r.request_seq == seq && r.success
+            )),
+            "`{command}` must send a DAP response correlated to request_seq {seq}; \
+             events alone never settle the request and the caller waits forever. \
+             got {messages:?}",
+        );
+    }
+
     /// REACHABILITY. `ct/event-jump` — an Event Log row click — reaches
     /// this session with no `trace_kind` guard in the way, and must now
     /// complete instead of trapping.
@@ -4564,6 +4585,10 @@ mod tests {
             )),
             "the click must publish a complete-move at the target tick; got {messages:?}",
         );
+        // As for `ct/calltrace-jump`: the events above are not a response.
+        // `event_jump` carried the identical omission and was fixed in the
+        // same change, so it gets the identical gate.
+        assert_response_for(&messages, "ct/event-jump");
     }
 
     /// REACHABILITY. `ct/history-jump` — an origin-chain hop — likewise.
@@ -4601,7 +4626,7 @@ mod tests {
         let expected = recording_state_after(&bytes, TARGET as usize);
 
         let mut handler = emulator_handler(bytes);
-        let (sender, _receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = std::sync::mpsc::channel();
 
         handler
             .trace_jump(
@@ -4616,6 +4641,51 @@ mod tests {
 
         assert_eq!(handler.step_id, StepId(TARGET));
         assert_eq!(capture_emulator_state(), expected);
+        // `ct/trace-jump` was the third handler carrying the unsettled-request
+        // shape, found by checking the neighbours of the two already fixed.
+        assert_response_for(&receiver.try_iter().collect::<Vec<_>>(), "ct/trace-jump");
+    }
+
+    /// #146. `ct/load-flow` on an emulator trace must be REFUSED BY NAME.
+    ///
+    /// `load_flow` used to pick its session with `== Materialized` / else,
+    /// so an emulator trace fell into the `else` and was handed a
+    /// `RecreatorReplaySession` — an out-of-process rr worker, built here
+    /// with an empty exe path, and unconstructible at all in the browser
+    /// where this trace kind actually runs. The failure surfaced as a
+    /// worker-transport error naming neither flow nor the emulator.
+    ///
+    /// This pins the refusal *and* that it is specific: a bare `is_err()`
+    /// would have passed against the old code too, since that path also
+    /// failed — just for the wrong reason and with the wrong message.
+    #[test]
+    fn load_flow_on_an_emulator_trace_is_refused_by_name_not_by_worker_transport() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut handler = emulator_handler(bytes);
+        let (sender, _receiver) = std::sync::mpsc::channel();
+
+        let err = handler
+            .load_flow(
+                jump_request("ct/load-flow"),
+                crate::task::CtLoadFlowArguments {
+                    location: Location::default(),
+                    flow_mode: crate::task::FlowMode::Call,
+                },
+                sender,
+            )
+            .expect_err("flow on an emulator trace must be refused, not attempted over rr");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("emulator traces"),
+            "the refusal must name the trace kind it declined, got: {message}",
+        );
+        assert!(
+            !message.contains("only supported on Unix and Windows"),
+            "the refusal must not surface as the rr worker-transport error — that is the \
+             symptom this fix removes, got: {message}",
+        );
     }
 
     /// REACHABILITY. `ct/calltrace-jump` — a calltrace row click. This is
@@ -4631,7 +4701,7 @@ mod tests {
         let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
 
         let mut handler = emulator_handler(bytes.clone());
-        let (sender, _receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = std::sync::mpsc::channel();
         handler
             .calltrace_jump(
                 jump_request("ct/calltrace-jump"),
@@ -4642,6 +4712,17 @@ mod tests {
                 sender,
             )
             .expect("a calltrace click on the innermost frame must be served");
+
+        // The command must RESPOND, not merely act.
+        //
+        // Acting and responding are separate failures with the same symptom
+        // on screen. `complete_move` emits `stopped` + `ct/complete-move`,
+        // and a caller keyed on those looks satisfied — but a DAP request is
+        // settled only by a response carrying its `request_seq`, so a caller
+        // that awaits the request itself waits forever. This assertion is
+        // what distinguishes the two: it fails if `respond_dap` is dropped
+        // even though the jump still lands and both events still fire.
+        assert_response_for(&receiver.try_iter().collect::<Vec<_>>(), "ct/calltrace-jump");
 
         let mut handler = emulator_handler(bytes);
         let (sender, _receiver) = std::sync::mpsc::channel();

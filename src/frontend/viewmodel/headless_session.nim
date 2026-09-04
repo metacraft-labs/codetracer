@@ -701,10 +701,11 @@ proc calltraceJump*(s: HeadlessDebugSession; file: string; line: int;
   ## Sends ``ct/calltrace-jump`` and waits for the ``stopped`` +
   ## ``ct/complete-move`` events that carry the new debugger position.
   ##
-  ## The ``ct/calltrace-jump`` handler does NOT send a DAP response --
-  ## it only emits events (``stopped`` + ``ct/complete-move``) via the
-  ## channel.  We use ``sendDapRequestNoResponse`` to avoid blocking
-  ## forever waiting for a response that never arrives.
+  ## The handler does send a DAP response (see ``Handler::calltrace_jump``),
+  ## but this helper synchronises on the events rather than on the reply, so
+  ## it uses ``sendDapRequestNoResponse`` and lets ``waitForEvent`` drop the
+  ## response.  The note that previously stood here -- that the handler sends
+  ## no response at all -- described a defect that has since been fixed.
   let args = %*{
     "file": file,
     "line": line,

@@ -1213,14 +1213,39 @@ impl Handler {
         arg: CtLoadFlowArguments,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let mut flow_replay: Box<dyn ReplaySession> = if self.trace_kind == TraceKind::Materialized {
-            Box::new(MaterializedReplaySession::new(Arc::clone(&self.reader)))
-        } else {
-            Box::new(RecreatorReplaySession::new(
+        // `TraceKind` has THREE variants, and this condition used to have
+        // two arms: `== Materialized`, everything else into the rr branch.
+        // That silently routed `TraceKind::Emulator` — the in-process MCR
+        // emulator that backs the wasm browser client — into a
+        // `RecreatorReplaySession`, which drives an out-of-process rr worker
+        // over a Unix socket. In the browser there is no process to spawn and
+        // no socket to open, and the emulator handler is built with an empty
+        // `worker_exe`/`rr_trace_folder` (see `dap_server.rs`), so the
+        // session was pointed at nothing on every platform.
+        //
+        // The two sibling call sites that make the same choice —
+        // `load_history` and `run_tracepoints` — already test `== Recreator`
+        // rather than `!= Materialized`. This matches them, and names the
+        // remaining case instead of letting it fail as a worker-transport
+        // error that says nothing about flow or about emulator traces.
+        let mut flow_replay: Box<dyn ReplaySession> = match self.trace_kind {
+            TraceKind::Materialized => Box::new(MaterializedReplaySession::new(Arc::clone(&self.reader))),
+            TraceKind::Recreator => Box::new(RecreatorReplaySession::new(
                 "flow",
                 self.load_flow_index,
                 self.ct_rr_args.clone(),
-            ))
+            )),
+            TraceKind::Emulator => {
+                return Err(format!(
+                    "`{}`: flow is not supported on emulator traces yet. The emulator replays \
+                     in-process, so it cannot be driven by the rr replay worker this command \
+                     builds for recreator traces (`EmulatorReplaySession::jump_to_call` is \
+                     still unimplemented). Refusing by name rather than failing later as a \
+                     worker-transport error.",
+                    req.command,
+                )
+                .into());
+            }
         };
         self.load_flow_index += 1;
 
@@ -4976,7 +5001,7 @@ impl Handler {
 
     pub fn trace_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         event: ProgramEvent,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
@@ -4984,14 +5009,18 @@ impl Handler {
             "trace_jump: received request with event direct_location_rr_ticks = {}",
             event.direct_location_rr_ticks
         );
-        eprintln!(
-            "[RUST_DIAG] trace_jump: event.direct_location_rr_ticks = {}",
-            event.direct_location_rr_ticks
-        );
         self.replay.tracepoint_jump(&event)?;
         // self.replay.jump_to(StepId(event.direct_location_rr_ticks))?;
         _ = self.replay.load_location(&mut self.expr_loader)?;
-        self.complete_move(false, sender)?;
+        self.complete_move(false, sender.clone())?;
+
+        // The third member of the same family, and the one the earlier pass
+        // missed: `ct/trace-jump` is the tracepoint-results row click and it
+        // still had the `_req`-discarded shape that `calltrace_jump` and
+        // `event_jump` were fixed out of. Same consequence — events without a
+        // response leave the caller's request unsettled forever — so it gets
+        // the same one-line ending and the same gate.
+        self.respond_dap(req, 0, sender)?;
         Ok(())
     }
 

@@ -126,13 +126,19 @@ proc sendDapRequest*(backend: DapStdioBackend; command: string;
 
 proc sendDapRequestNoResponse*(backend: DapStdioBackend; command: string;
                                 args: JsonNode = newJObject()) =
-  ## Send a DAP request without waiting for a response.
+  ## Send a DAP request and return without reading its reply.
   ##
-  ## Some CT-specific commands (``ct/calltrace-jump``, ``ct/event-jump``,
-  ## etc.) are dispatched via the handler's ``handle_request`` function
-  ## which does NOT send a DAP response — it only sends events through
-  ## the channel.  Using ``sendDapRequest`` for these commands would block
-  ## forever waiting for a response that never arrives.
+  ## This does NOT mean the command is unanswered.  ``ct/calltrace-jump``,
+  ## ``ct/event-jump`` and ``ct/trace-jump`` each end in ``respond_dap`` and
+  ## do send a response; the earlier claim here that they "only send events"
+  ## described a real defect in the engine that has since been fixed, and the
+  ## note outlived it.
+  ##
+  ## What this proc is for is the caller that wants to synchronise on the
+  ## ``stopped`` / ``ct/complete-move`` events rather than on the response.
+  ## The response is left in the stream; ``waitForEvent`` skips non-event
+  ## messages, so it is discarded harmlessly rather than desynchronising the
+  ## next read.
   ##
   ## The caller should follow up with ``waitForEvent`` to consume the
   ## events emitted by the handler.
