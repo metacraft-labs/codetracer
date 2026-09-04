@@ -4873,6 +4873,65 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Build ruby-recorder native extension (macOS)
+        if: matrix.platform == 'macos'
+        # The clone above is NOT enough, and for a long time nothing here said
+        # so. `grep -E 'rake compile|extconf|build-extension'` over `.github/`
+        # returned ZERO hits: the extension was built only by
+        # scripts/build-siblings.sh, which on this workflow is reached solely by
+        # the LINUX ct-test-providers job. Both macOS legs cloned the recorder
+        # and then ran against a tree with no compiled artefact in it.
+        #
+        # It failed silently rather than loudly because scripts/detect-siblings.sh
+        # probed `gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder` --
+        # a nine-line shim CHECKED INTO GIT at mode 100755. That test cannot
+        # fail, so detection printed "(native)", its "not built" warning was
+        # unreachable, and the run died much later inside
+        # `CodeTracer::Native.load_extension!` requiring a file nobody had named.
+        # That probe is fixed too (contract suite:
+        # ci/test/detect-siblings-recorder-artifacts-test.sh); this step closes
+        # the other half, because a correct detector reporting "not built" is
+        # still a red job if nothing ever builds it.
+        #
+        # Same `nix develop --command just <target>` shape as the ct-mcr step
+        # above, and for the same reason: scripts/build-siblings.sh assumes
+        # direnv-allow state and a parent codetracer dev shell, neither of which
+        # this runner has yet, while the sibling's own flake supplies the Rust +
+        # Ruby toolchain `just build-extension` expects.
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-ruby-recorder"
+          nix develop --no-write-lock-file --command just build-extension
+
+          # Assert the artefact, do not assume the exit code. `just
+          # build-extension` succeeding is not the same claim as "the file the
+          # loader requires now exists", and it is the second claim that the
+          # Playwright and non-GUI suites depend on.
+          #
+          # `load_extension!` (gems/codetracer-ruby-recorder/lib/codetracer/native.rb)
+          # accepts `codetracer_ruby_recorder.<RbConfig DLEXT>` or any
+          # `libcodetracer_ruby_recorder.{so,bundle,dylib,dll}` beside it, which
+          # it then links to the name `require` wants. On macOS DLEXT is
+          # `bundle`; asserting `.so` here -- the spelling
+          # scripts/build-siblings.sh used to hard-code -- would fail on every
+          # green build.
+          ext_dir="gems/codetracer-ruby-recorder/ext/native_tracer/target/release"
+          found=""
+          for cand in \
+            "$ext_dir/codetracer_ruby_recorder.bundle" \
+            "$ext_dir/codetracer_ruby_recorder.so" \
+            "$ext_dir/libcodetracer_ruby_recorder.bundle" \
+            "$ext_dir/libcodetracer_ruby_recorder.dylib" \
+            "$ext_dir/libcodetracer_ruby_recorder.so"; do
+            if [ -f "$cand" ]; then found="$cand"; break; fi
+          done
+          if [ -z "$found" ]; then
+            echo "::error::just build-extension reported success but produced no loadable extension in $ext_dir. Contents:"
+            ls -la "$ext_dir" || echo "  (directory does not exist)"
+            exit 1
+          fi
+          echo "ruby recorder native extension: $found"
+
       # ── BEAM (Erlang / Elixir) recorder ──────────────────────────────
       # ``src/db-backend/tests/erlang_flow_dap_test.rs`` and
       # ``elixir_flow_dap_test.rs`` resolve the recorder binary via
@@ -5572,6 +5631,65 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Build ruby-recorder native extension (macOS)
+        if: matrix.platform == 'macos'
+        # The clone above is NOT enough, and for a long time nothing here said
+        # so. `grep -E 'rake compile|extconf|build-extension'` over `.github/`
+        # returned ZERO hits: the extension was built only by
+        # scripts/build-siblings.sh, which on this workflow is reached solely by
+        # the LINUX ct-test-providers job. Both macOS legs cloned the recorder
+        # and then ran against a tree with no compiled artefact in it.
+        #
+        # It failed silently rather than loudly because scripts/detect-siblings.sh
+        # probed `gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder` --
+        # a nine-line shim CHECKED INTO GIT at mode 100755. That test cannot
+        # fail, so detection printed "(native)", its "not built" warning was
+        # unreachable, and the run died much later inside
+        # `CodeTracer::Native.load_extension!` requiring a file nobody had named.
+        # That probe is fixed too (contract suite:
+        # ci/test/detect-siblings-recorder-artifacts-test.sh); this step closes
+        # the other half, because a correct detector reporting "not built" is
+        # still a red job if nothing ever builds it.
+        #
+        # Same `nix develop --command just <target>` shape as the ct-mcr step
+        # above, and for the same reason: scripts/build-siblings.sh assumes
+        # direnv-allow state and a parent codetracer dev shell, neither of which
+        # this runner has yet, while the sibling's own flake supplies the Rust +
+        # Ruby toolchain `just build-extension` expects.
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-ruby-recorder"
+          nix develop --no-write-lock-file --command just build-extension
+
+          # Assert the artefact, do not assume the exit code. `just
+          # build-extension` succeeding is not the same claim as "the file the
+          # loader requires now exists", and it is the second claim that the
+          # Playwright and non-GUI suites depend on.
+          #
+          # `load_extension!` (gems/codetracer-ruby-recorder/lib/codetracer/native.rb)
+          # accepts `codetracer_ruby_recorder.<RbConfig DLEXT>` or any
+          # `libcodetracer_ruby_recorder.{so,bundle,dylib,dll}` beside it, which
+          # it then links to the name `require` wants. On macOS DLEXT is
+          # `bundle`; asserting `.so` here -- the spelling
+          # scripts/build-siblings.sh used to hard-code -- would fail on every
+          # green build.
+          ext_dir="gems/codetracer-ruby-recorder/ext/native_tracer/target/release"
+          found=""
+          for cand in \
+            "$ext_dir/codetracer_ruby_recorder.bundle" \
+            "$ext_dir/codetracer_ruby_recorder.so" \
+            "$ext_dir/libcodetracer_ruby_recorder.bundle" \
+            "$ext_dir/libcodetracer_ruby_recorder.dylib" \
+            "$ext_dir/libcodetracer_ruby_recorder.so"; do
+            if [ -f "$cand" ]; then found="$cand"; break; fi
+          done
+          if [ -z "$found" ]; then
+            echo "::error::just build-extension reported success but produced no loadable extension in $ext_dir. Contents:"
+            ls -la "$ext_dir" || echo "  (directory does not exist)"
+            exit 1
+          fi
+          echo "ruby recorder native extension: $found"
+
       - name: Clone codetracer-js-recorder sibling
         # NOT gated to macOS, unlike the two clones above, and not for symmetry
         # -- the suite below needs this on both legs and neither leg has it.
@@ -5607,6 +5725,37 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-js-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
+
+      - name: Build codetracer-js-recorder sibling
+        # The clone above landed without a build, and the clone alone does not
+        # satisfy what needs it. scripts/materialize-recording.sh resolves
+        # `$JS_RECORDER_ROOT/packages/cli/dist/index.js` and hard-fails with
+        #
+        #     codetracer-js-recorder is not built (…/packages/cli/dist/index.js;
+        #     run 'just build' there)
+        #
+        # `dist/` is PRODUCED, never committed, so there is no stale copy to
+        # fall back on. In this workflow `npm run build` appeared only inside
+        # the comment on the clone step -- the string occurs nowhere in any
+        # `run:` block -- so the fix for "test-ui-tests never cloned the JS
+        # recorder" stopped one step short of making the suite pass.
+        #
+        # NOT gated on macOS, matching the clone above: both legs materialise
+        # recordings through the same script.
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-js-recorder"
+          nix develop --no-write-lock-file --command just build
+
+          # The artefact materialize-recording.sh actually opens, asserted by
+          # the same name it uses. A built-looking tree with no dist/index.js
+          # fails later, inside a Playwright fixture, as a suite-wide timeout.
+          if [ ! -f packages/cli/dist/index.js ]; then
+            echo "::error::just build reported success but packages/cli/dist/index.js is missing; scripts/materialize-recording.sh will fail on every recording."
+            ls -la packages/cli/dist 2>/dev/null || echo "  (packages/cli/dist does not exist)"
+            exit 1
+          fi
+          echo "js recorder CLI: $(pwd)/packages/cli/dist/index.js"
 
       # The browser-only stylesheet guards, ahead of the full suite because
       # they cost seconds and answer for the regressions these surfaces have

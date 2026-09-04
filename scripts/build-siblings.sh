@@ -362,13 +362,32 @@ build_sibling \
 # codetracer_ruby_recorder.so).  The `.so` is what `just build-extension`
 # actually produces, and it is absent from a fresh clone.
 #
-# `.so` is the Linux DLEXT; `just build-extension` normalises the cdylib name to
-# `codetracer_ruby_recorder.<RbConfig DLEXT>` (`.bundle` on macOS).  This gate
-# and ci/test/launcher-recorder-e2e.sh are Linux-x86_64 for v1, so the entry
-# names the Linux spelling rather than pretending to be portable.
+# `just build-extension` normalises the cdylib name to
+# `codetracer_ruby_recorder.<RbConfig DLEXT>` -- `.so` on Linux, `.bundle` on
+# macOS.  This entry used to name the Linux spelling unconditionally, with a
+# comment saying the gate was Linux-only and portability would be pretending.
+# That stopped being true when the macOS `test-non-gui` and `test-ui-tests` jobs
+# grew a ruby-recorder build step: on macOS the build SUCCEEDS and then
+# `build_sibling`'s post-build check reports
+#
+#     build succeeded but …/codetracer_ruby_recorder.so still missing
+#
+# because `.so` is not the name macOS produced.  A hard-coded extension is the
+# same defect as a detector probing the wrong artefact -- it just fails loudly
+# instead of quietly.  So resolve DLEXT the way the loader does.
+_ruby_dlext=""
+if command -v ruby >/dev/null 2>&1; then
+	_ruby_dlext="$(ruby -e 'print RbConfig::CONFIG["DLEXT"]' 2>/dev/null || true)"
+fi
+if [ -z "$_ruby_dlext" ]; then
+	case "$(uname -s)" in
+	Darwin) _ruby_dlext="bundle" ;;
+	*) _ruby_dlext="so" ;;
+	esac
+fi
 build_sibling \
 	codetracer-ruby-recorder \
-	gems/codetracer-ruby-recorder/ext/native_tracer/target/release/codetracer_ruby_recorder.so \
+	"gems/codetracer-ruby-recorder/ext/native_tracer/target/release/codetracer_ruby_recorder.$_ruby_dlext" \
 	"just build-extension"
 
 # BEAM recorder (Erlang + Elixir) — one Rust CLI (`codetracer-beam-recorder`)

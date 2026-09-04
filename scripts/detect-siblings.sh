@@ -270,22 +270,132 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-python-r
 		# E2E test harness picks up the recorder.
 		export CODETRACER_PYTHON_INTERPRETER="$_CT_WORKSPACE_ROOT/codetracer/.python-recorder-venv/bin/python"
 	fi
-	_ct_detect_summary "codetracer-python-recorder"
+
+	# THE SAME GAP THE RUBY BLOCK BELOW HAD, in its Python spelling.
+	#
+	# Everything above keys off DIRECTORIES that exist in a fresh clone: the
+	# source tree, and a venv that `nix develop` materialises whether or not
+	# the recorder was ever installed into it. This block therefore used to
+	# report "detected" unconditionally.
+	#
+	# `codetracer-python-recorder` is a maturin/pyo3 project -- a COMPILED
+	# extension, not a pure-Python package -- so a resolved interpreter proves
+	# nothing about whether `import codetracer_python_recorder` will work. On
+	# the machine this was written on, it did not: the venv existed, the
+	# interpreter ran, and the import raised ModuleNotFoundError while this
+	# script printed "detected".
+	#
+	# Probe site-packages for the installed distribution rather than starting
+	# the interpreter: this file is sourced on every dev-shell entry, and a
+	# `python -c import` on that path is a cost paid by every shell.
+	if [ -n "${CODETRACER_PYTHON_INTERPRETER:-}" ]; then
+		_ct_py_installed=""
+		for _ct_py_sp in "$(dirname "$(dirname "$CODETRACER_PYTHON_INTERPRETER")")"/lib/python*/site-packages; do
+			if [ -e "$_ct_py_sp/codetracer_python_recorder" ] ||
+				[ -n "$(find "$_ct_py_sp" -maxdepth 1 -name 'codetracer_python_recorder*' -print -quit 2>/dev/null)" ]; then
+				_ct_py_installed="$_ct_py_sp"
+				break
+			fi
+		done
+		if [ -n "$_ct_py_installed" ]; then
+			_ct_detect_summary "codetracer-python-recorder (installed)"
+		else
+			echo "  WARNING: codetracer-python-recorder is NOT installed in the venv." >&2
+			echo "    interpreter: $CODETRACER_PYTHON_INTERPRETER" >&2
+			echo "    'import codetracer_python_recorder' will fail; the sources alone are not enough" >&2
+			echo "    (this is a maturin/pyo3 extension and has to be built)." >&2
+			_ct_detect_summary "codetracer-python-recorder (sources present, NOT installed)"
+		fi
+		unset _ct_py_installed _ct_py_sp
+	else
+		# Two ways to land here, and they want different things said, so say
+		# both rather than guessing: either this shell was never entered
+		# through `nix develop` (the ordinary case outside CI), or the shell
+		# hook in nix/shells/main.nix DELIBERATELY left the interpreter unset
+		# because the venv did not match the pinned Python. That hook records
+		# its reason in .python-recorder-venv/.broken, so point at it.
+		echo "  WARNING: codetracer-python-recorder sources found, but no venv interpreter." >&2
+		if [ -f "$_CT_ROOT_DIR/.python-recorder-venv/.broken" ]; then
+			echo "    The dev shell marked the venv broken:" >&2
+			sed 's/^/      /' "$_CT_ROOT_DIR/.python-recorder-venv/.broken" >&2
+		else
+			echo "    Nothing can import the recorder until 'nix develop' materialises one." >&2
+		fi
+		_ct_detect_summary "codetracer-python-recorder (sources only, no interpreter)"
+	fi
 fi
 
 # --- codetracer-ruby-recorder ---
 # Prepends to PATH so `ct` finds recorders via findTool (same as end users).
-# Prefer the native recorder (supports binary CTFS format); fall back to pure-Ruby.
+#
+# PROBE THE COMPILED EXTENSION, NOT THE WRAPPER.
+# ----------------------------------------------
+# This block used to test `-x .../bin/codetracer-ruby-recorder`. That file is a
+# nine-line Ruby shim, and it is CHECKED INTO GIT at mode 100755 -- so it is
+# present and executable in every fresh clone, the test could not fail, this
+# script printed "(native)" unconditionally, and the warning below was
+# UNREACHABLE. The failure surfaced much later and somewhere else, inside
+# `CodeTracer::Native.load_extension!`, as a bare `require` error for a file
+# whose name the user had never seen.
+#
+# What actually has to exist is the cdylib that `load_extension!` requires. Its
+# resolution (gems/codetracer-ruby-recorder/lib/codetracer/native.rb) is:
+# `ext/native_tracer/target/release/codetracer_ruby_recorder.<RbConfig DLEXT>`,
+# or any `libcodetracer_ruby_recorder.{so,bundle,dylib,dll}` beside it, which it
+# then links or copies to the name `require` wants. This probe accepts exactly
+# that set, so it agrees with the loader instead of guessing.
+#
+# DLEXT is `bundle` on macOS and `so` on Linux. Hard-coding `.so` -- which
+# scripts/build-siblings.sh does, deliberately and with a comment, because its
+# gate is Linux-only -- would make this probe wrong on every Mac.
+#
+# Contract suite: ci/test/detect-siblings-recorder-artifacts-test.sh
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -d "$_CT_WORKSPACE_ROOT/codetracer-ruby-recorder/gems" ]; then
 	export RUBY_RECORDER_ROOT="$_CT_WORKSPACE_ROOT/codetracer-ruby-recorder"
-	if [ -x "$_CT_WORKSPACE_ROOT/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder" ]; then
-		export PATH="$_CT_WORKSPACE_ROOT/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin:$PATH"
+	_ct_ruby_gem_dir="$_CT_WORKSPACE_ROOT/codetracer-ruby-recorder/gems/codetracer-ruby-recorder"
+	_ct_ruby_ext_dir="$_ct_ruby_gem_dir/ext/native_tracer/target/release"
+
+	# Ask Ruby for DLEXT when Ruby is available; otherwise fall back to the
+	# platform default, which is what RbConfig would have answered anyway.
+	_ct_ruby_dlext=""
+	if command -v ruby >/dev/null 2>&1; then
+		_ct_ruby_dlext="$(ruby -e 'print RbConfig::CONFIG["DLEXT"]' 2>/dev/null || true)"
+	fi
+	if [ -z "$_ct_ruby_dlext" ]; then
+		case "$(uname -s)" in
+		Darwin) _ct_ruby_dlext="bundle" ;;
+		*) _ct_ruby_dlext="so" ;;
+		esac
+	fi
+
+	_ct_ruby_ext_built=""
+	for _ct_ruby_cand in \
+		"$_ct_ruby_ext_dir/codetracer_ruby_recorder.$_ct_ruby_dlext" \
+		"$_ct_ruby_ext_dir/libcodetracer_ruby_recorder.so" \
+		"$_ct_ruby_ext_dir/libcodetracer_ruby_recorder.bundle" \
+		"$_ct_ruby_ext_dir/libcodetracer_ruby_recorder.dylib" \
+		"$_ct_ruby_ext_dir/libcodetracer_ruby_recorder.dll"; do
+		if [ -f "$_ct_ruby_cand" ]; then
+			_ct_ruby_ext_built="$_ct_ruby_cand"
+			break
+		fi
+	done
+
+	if [ -n "$_ct_ruby_ext_built" ] && [ -x "$_ct_ruby_gem_dir/bin/codetracer-ruby-recorder" ]; then
+		export PATH="$_ct_ruby_gem_dir/bin:$PATH"
 		_ct_detect_summary "codetracer-ruby-recorder (native)"
 	else
-		echo "  WARNING: codetracer-ruby-recorder native extension not built." >&2
+		# Deliberately NOT added to PATH: a wrapper that dies in
+		# `load_extension!` is worse than an absent one, because `ct record`
+		# then reports a `require` failure instead of "no recorder found".
+		echo "  WARNING: codetracer-ruby-recorder native extension is NOT built." >&2
+		echo "    looked for codetracer_ruby_recorder.$_ct_ruby_dlext (and lib*.{so,bundle,dylib,dll}) in:" >&2
+		echo "      $_ct_ruby_ext_dir" >&2
 		echo "    Run: cd $_CT_WORKSPACE_ROOT/codetracer-ruby-recorder && just build-extension" >&2
-		_ct_detect_summary "codetracer-ruby-recorder (gems present, not built)"
+		echo "    Not adding the wrapper to PATH; it would fail inside load_extension!." >&2
+		_ct_detect_summary "codetracer-ruby-recorder (gems present, extension NOT built)"
 	fi
+	unset _ct_ruby_gem_dir _ct_ruby_ext_dir _ct_ruby_dlext _ct_ruby_ext_built _ct_ruby_cand
 fi
 
 # --- codetracer-php-recorder ---

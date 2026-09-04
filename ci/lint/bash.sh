@@ -324,4 +324,31 @@ lint_step "contract suite: the read-only-leftovers sweep runs, finds, and fixes"
 lint_step "contract suite: a worktree does not reinstall the shared git hooks" \
 	bash ci/test/git-hooks-worktree-test.sh
 
+# The macOS reprobuild drivers' daemon-cwd guards. Registered here because the
+# hazard is RUNNER-WIDE and cross-job: a driver that leaves a repro daemon
+# running poisons whatever runs next on that runner, so the job that fails is
+# never the job at fault, and no single lane can observe it. The checker is a
+# static reader (no nix, no Darwin, no daemon), and its suite proves it fails by
+# running it against the real pre-fix script read out of `origin/dev` rather
+# than against a mock of it.
+lint_step "contract suite: macOS reprobuild drivers stop the repro daemon" \
+	bash ci/test/reprobuild-daemon-guard-test.sh
+
+# The compiled-recorder probes in scripts/detect-siblings.sh. Registered here
+# because the thing they get wrong is invisible by construction: a probe that
+# tests a CHECKED-IN file instead of a BUILT one reports success on every clone,
+# so no job can fail on it and no developer sees a warning -- the breakage lands
+# later, inside a recorder's loader, naming a file nobody has heard of. The
+# suite builds fixtures under mktemp and needs no ruby, python, nix or network.
+lint_step "contract suite: recorder probes track the built artefact" \
+	bash ci/test/detect-siblings-recorder-artifacts-test.sh
+
+# The other half of the same defect: an honest detector reporting "not built" is
+# still a red job if no job builds it. Registered here because the check reads
+# the workflow statically -- it needs neither a runner nor a recorder -- and
+# because the gap it closes was invisible to every lane by construction: the
+# jobs that needed the artefact were the jobs that did not build it.
+lint_step "contract suite: a job that clones a recorder builds it" \
+	bash ci/test/recorder-clone-implies-build-test.sh
+
 lint_summary
