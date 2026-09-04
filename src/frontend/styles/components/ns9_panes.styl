@@ -88,16 +88,76 @@ ns9-row-padding = 2px 8px
 
 .test-results-row
   display: grid
-  // mark | name | where | duration.  The name takes the slack and the two
-  // right-hand columns are sized to their content, so a long test name
-  // truncates instead of pushing the duration off the pane.
-  grid-template-columns: 14px minmax(0, 1fr) auto auto
+  // mark | name | where | duration | actions.
+  //
+  // THE NAME OUTRANKS THE LOCATION, and that ordering is the whole of the fix
+  // for what adding a fifth column did to this pane. With `where` sized `auto`
+  // it never shrank, so the controls' 45px came entirely out of the name and
+  // the pane read `test_equa…  src/main.nr:18` — the file spelled out in full
+  // beside a test whose name had been cut in half. A reader scanning for a
+  // test scans the names; the path is context.
+  //
+  // Both flexible columns are `minmax(0, …)` because a grid track's default
+  // `min-width: auto` refuses to go below its content, which is what makes
+  // `text-overflow: ellipsis` silently do nothing inside a grid.
+  grid-template-columns: 14px minmax(0, 1.8fr) minmax(0, 1fr) auto auto
   align-items: baseline
   column-gap: 6px
   padding: ns9-row-padding
 
   &:hover
     background-color: colors-ui-surface-base-card
+
+// THE TWO PER-ROW CONTROLS.
+//
+// PERSISTENTLY VISIBLE AND NOT HOVER-REVEALED, at 0.45 rather than 0. A
+// control that only exists under the pointer is one a reader scanning the pane
+// never learns about, which is this campaign's commonest defect wearing a
+// fashionable costume. They brighten on row hover so the row you are aiming at
+// is the one that answers.
+.test-results-actions
+  display: inline-flex
+  align-items: baseline
+  gap: 2px
+  opacity: 0.45
+
+.test-results-row:hover .test-results-actions
+  opacity: 0.95
+
+.test-results-refresh-btn,
+.test-results-open-btn
+  padding: 0 4px
+  cursor: pointer
+  user-select: none
+  border-radius: 3px
+
+  &:hover
+    background-color: colors-ui-surface-base-card
+
+  // DIMMED, NOT ABSENT, and its `title` says why — the same rule the header's
+  // ▶ follows. The two buttons can be disabled for DIFFERENT reasons (see
+  // `test_results_vm.openAbsence`), so a shared look with per-control text is
+  // exactly right: same affordance, different explanation.
+  &.disabled
+    opacity: 0.3
+    cursor: default
+
+    &:hover
+      background-color: transparent
+
+// SHIFT IS VISIBLE. The modifier changes what `⏵` does, so it changes what
+// `⏵` looks like — a bordered, brightened control the eye catches while the
+// key is down. A tooltip alone would be a promise only a reader who already
+// suspected the feature would go looking for.
+.test-results-open-btn.shift-armed
+  opacity: 1
+  // `colors-ui-text-information-primary` AND NOT an invented `…-accent-…`.
+  // The header of this file records what an unknown token costs here: Stylus
+  // emits the identifier verbatim, the browser drops the declaration, and the
+  // rule silently does nothing. This one is in `generated/mapped.styl`; the
+  // first name tried was not.
+  color: colors-ui-text-information-primary
+  box-shadow: inset 0 0 0 1px colors-ui-border-secondary
 
 .test-results-mark
   text-align: center
@@ -113,6 +173,13 @@ ns9-row-padding = 2px 8px
   opacity: 0.55
   font-size: 0.85em
   white-space: nowrap
+
+// AND THE LOCATION IS WHAT TRUNCATES. See the row's grid comment: without
+// this the ellipsis had nowhere to go and the name lost the argument instead.
+.test-results-where
+  overflow: hidden
+  text-overflow: ellipsis
+  min-width: 0
 
 .test-results-row.passed .test-results-mark
   color: colors-ui-text-success-primary

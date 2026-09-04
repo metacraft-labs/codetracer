@@ -141,6 +141,24 @@ type
       ## replacing it. See `ReplaySessionRequest.newSessionTab`: it is a
       ## REQUEST, and a host that cannot hold two live sessions refuses it
       ## rather than opening one tab over a dead engine.
+    replaySuppressOpen*: bool
+      ## MAKE THE RECORDING, AND DO NOT NAVIGATE.
+      ##
+      ## The TESTS pane's `⟳` is "refresh the recording", which is a different
+      ## gesture from "run this test in the debugger": the reader is still
+      ## reading the pane and wants the artefact refreshed under them, not the
+      ## surface replaced. Without this flag the trace phase opens a session
+      ## unconditionally, so the only way to refresh a recording would be to be
+      ## thrown into it.
+      ##
+      ## SPELLED AS A SUPPRESSION rather than as `replayOpenAfterTrace`,
+      ## because a `bool` field defaults to `false` and the default must be the
+      ## behaviour every existing caller already has. A field meaning "open"
+      ## would silently switch the editor's Run-test control to recording into
+      ## the void.
+      ##
+      ## The trace is still produced, still judged, and still handed to whoever
+      ## retains it — only the navigation is skipped.
     lastTests*: NoirTestResponse
       ## What the last `nbpTest` phase decoded, whole.
       ##
@@ -818,50 +836,68 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
       # steps looking like it was still running. Measured exactly that way:
       # the rows painted, the two `note` calls below never ran, and the tab
       # reported one uncaught page error with no message a user could read.
-      var outcome = rsoNoHost
-      var refusal = ""
-      try:
-        outcome = openReplaySession(ReplaySessionRequest(
-          rawMemoryTrace: producer.stdoutText,
-          packageDir: producer.packageDir,
-          projectRoot: producer.projectRoot,
-          label: producer.replayLabel,
-          newSessionTab: producer.replayInNewSessionTab))
-      except CatchableError as e:
-        refusal = e.msg
-      except:
-        # A BARE arm too: under `nim js` a `Defect` and a raw JS throw are
-        # neither `CatchableError`, and the whole point of this block is that
-        # nothing gets past it.
-        refusal = "the replay host raised a value that is not an exception"
-      if outcome == rsoOpened:
+      # A GUARD AND NOT AN EARLY `return`. Everything below this block —
+      # `setCode`, `setStatus` — is what tells the pane the build finished, and
+      # returning from here to skip one optional step would leave a pane that
+      # traced ten steps looking like it was still running. That is the exact
+      # failure the paragraph above records having measured.
+      if producer.replaySuppressOpen:
+        # REFRESH, NOT ENTER. The recording exists and has just been judged
+        # good; the caller asked for it to be MADE and for the pane it was asked
+        # from to stay on screen. Said out loud for the same reason every other
+        # arm here is: a gesture that produced an artefact and moved nothing
+        # must not be indistinguishable from one that did nothing.
         producer.note(
-          "opening a replay session over this trace" &
-          (if producer.replayLabel.len > 0: " (" & producer.replayLabel & ")"
-           else: ""))
-      elif outcome == rsoNoSecondSession:
-        # REFUSED BY NAME, and nothing was opened. Falling back to the current
-        # tab would destroy the session the user asked to keep beside this one,
-        # which is the entire reason they asked for a new tab.
-        producer.note(
-          "a NEW session tab was asked for and this build holds one live " &
-          "session at a time, so nothing was opened. Ask again without the " &
-          "new-tab option to replace the current session; the rows above are " &
-          "what the trace contains.")
-      elif refusal.len > 0:
-        producer.note("a replay session could not be started: " & refusal)
+          "recording kept" &
+          (if producer.replayLabel.len > 0: " for " & producer.replayLabel
+           else: "") &
+          "; no session was opened, because a refresh was asked for and not " &
+          "an entry")
       else:
-        # SAID OUT LOUD, and this row is the product's answer rather than a
-        # diagnostic. A user who has just watched a program be traced and sees
-        # no debugger appear is owed the reason, and "nothing happened" is the
-        # one thing a pane must never mean. It is also what tells a gate the
-        # difference between a deployment that ships no engine and a wiring
-        # defect that silently declined to open one.
-        producer.note(
-          "this build cannot replay a trace in the tab (" &
-          (if replaySessionServiceInstalled(): "the session was declined"
-           else: "no replay host is installed") &
-          "); the rows above are what the trace contains")
+        var outcome = rsoNoHost
+        var refusal = ""
+        try:
+          outcome = openReplaySession(ReplaySessionRequest(
+            rawMemoryTrace: producer.stdoutText,
+            packageDir: producer.packageDir,
+            projectRoot: producer.projectRoot,
+            label: producer.replayLabel,
+            newSessionTab: producer.replayInNewSessionTab))
+        except CatchableError as e:
+          refusal = e.msg
+        except:
+          # A BARE arm too: under `nim js` a `Defect` and a raw JS throw are
+          # neither `CatchableError`, and the whole point of this block is that
+          # nothing gets past it.
+          refusal = "the replay host raised a value that is not an exception"
+        if outcome == rsoOpened:
+          producer.note(
+            "opening a replay session over this trace" &
+            (if producer.replayLabel.len > 0: " (" & producer.replayLabel & ")"
+             else: ""))
+        elif outcome == rsoNoSecondSession:
+          # REFUSED BY NAME, and nothing was opened. Falling back to the current
+          # tab would destroy the session the user asked to keep beside this
+          # one, which is the entire reason they asked for a new tab.
+          producer.note(
+            "a NEW session tab was asked for and this build holds one live " &
+            "session at a time, so nothing was opened. Ask again without the " &
+            "new-tab option to replace the current session; the rows above " &
+            "are what the trace contains.")
+        elif refusal.len > 0:
+          producer.note("a replay session could not be started: " & refusal)
+        else:
+          # SAID OUT LOUD, and this row is the product's answer rather than a
+          # diagnostic. A user who has just watched a program be traced and
+          # sees no debugger appear is owed the reason, and "nothing happened"
+          # is the one thing a pane must never mean. It is also what tells a
+          # gate the difference between a deployment that ships no engine and a
+          # wiring defect that silently declined to open one.
+          producer.note(
+            "this build cannot replay a trace in the tab (" &
+            (if replaySessionServiceInstalled(): "the session was declined"
+             else: "no replay host is installed") &
+            "); the rows above are what the trace contains")
 
   # A verdict and an exit code must agree, and the VERDICT is the authority.
   # The worker sets a compile's exit code from `response.ok`, so the two

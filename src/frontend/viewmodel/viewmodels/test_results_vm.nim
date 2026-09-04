@@ -84,6 +84,68 @@
 ## Electron arm may point it elsewhere). Nil means no host installed one, and
 ## the view renders the button disabled rather than absent — a Run control that
 ## vanishes is indistinguishable from a pane that has no such feature.
+##
+## ## THE TWO PER-ROW CONTROLS, and why they are two and not one
+##
+## A row is not a status line; it is an entry point into its own recorded
+## execution (Noir-Studio.md §9.1). Two DIFFERENT things a reader wants from
+## one, and they are not the same action under two names:
+##
+##   * **REFRESH THE RECORDING** (`⟳`) — execute this test again and keep the
+##     new recording. Does NOT navigate. The reader stays in the pane, which is
+##     what makes it usable on a row you are not finished reading.
+##   * **OPEN THE RECORDING** (`⏵`) — enter the recording that ALREADY EXISTS.
+##     Executes nothing. This is the whole point: the recording is already
+##     there, so entering it must cost a click and not a compile.
+##
+## Holding **Shift** turns the second into *refresh the recording and open it*
+## — the combined gesture, for the common case where you changed the test and
+## want to step through the new run.
+##
+## And when there is NO recording, the second button means *record and open*.
+## That is not a special case bolted on: `openButtonMode` orders its arms so it
+## falls out — with nothing to reuse, `obmOpenExisting` is simply unreachable,
+## and Shift changes nothing because there is nothing for it to change. What
+## does NOT fall out, and is written by hand, is the LABEL: "Open the
+## recording" over a button about to spend ten seconds compiling is a lie, so
+## the title says "Record this test and open the recording" instead.
+##
+## ## `shiftHeld` is a Signal, and that is the discoverability fix
+##
+## A modifier nobody can see is a capability that is present, correct and never
+## reached — this campaign's signature defect. Three things follow from making
+## the modifier a piece of reactive VM state rather than a field read off the
+## click event:
+##
+##   1. **The tooltip changes while Shift is held**, not when the pointer next
+##      moves. A title computed at mouseover would be STALE EXACTLY WHEN IT
+##      MATTERS: the user is already hovering the button when they reach for
+##      Shift, so a mouseover-time read never fires and the tooltip goes on
+##      describing the unshifted action right up until the shifted one happens.
+##   2. **The button's affordance changes too** — `shift-armed` in the class and
+##      a different glyph — so the modifier is visible and not merely readable.
+##   3. **The title and the click cannot disagree.** `openButtonMode` is ONE
+##      pure function and the tooltip, the class, the glyph and the click
+##      handler are all consumers of it. A view that read `ev.shiftKey` at click
+##      time would have two sources of truth for one decision, and a tooltip
+##      that promised one action while the handler performed the other is worse
+##      than either action alone.
+##
+## The unshifted tooltip also NAMES the modifier, so a user who never presses
+## Shift can still find out the combined action exists.
+##
+## ## The two buttons have DIFFERENT absences, and collapsing them would be a lie
+##
+## Refreshing needs the runner: it is blocked while a run is in flight, blocked
+## by whatever `runAbsence` says about this deployment, and blocked when no host
+## installed a recorder.
+##
+## Opening an EXISTING recording needs none of that. It executes nothing, so a
+## run in flight is not an obstacle; and a deployment with no compiler module
+## cannot make a recording but can certainly replay one it already has. Greying
+## `⏵` out for `runAbsence` would be a control that is dead for a reason which
+## does not apply to it — the same defect shape as one that is dead for no
+## stated reason at all.
 
 import std/[options, strutils, tables]
 
@@ -99,6 +161,49 @@ type
   RunTestsProc* = proc()
     ## The host's runner, named so a `Signal` of it can be created carrying
     ## `nil` — an untyped `nil` gives `createSignal` nothing to infer from.
+
+  TestRowActionProc* = proc(testId: string; selector: string)
+    ## One row's action, as the host implements it. Named for `RunTestsProc`'s
+    ## reason: a `Signal` of it must be constructible carrying nil.
+    ##
+    ## BOTH IDENTITIES ARE PASSED. The pane joins on `testId` and the runner
+    ## takes `selector` (`nargo test --exact`'s string); a host that had only
+    ## one of them would have to re-derive the other, and the derivation is
+    ## exactly what `noirRunTestId` exists to keep in one place.
+
+  TestRecordingRef* = object
+    ## THAT a recording exists for a test, and WHICH ONE — never the recording
+    ## itself.
+    ##
+    ## The trace document is megabytes and lives with the host that produced it
+    ## (`ui/web_noir_build`'s retention table on the web arm). What the pane
+    ## needs is only enough to say "there is one", to label it, and to let a
+    ## check tell one recording from another. `recordingId` is that last part
+    ## and it is the load-bearing field: it is the DISCRIMINATOR a gate reads to
+    ## prove that pressing `⏵` opened the recording that was already there
+    ## rather than quietly making a new one.
+    testId*: string
+    recordingId*: string
+    recordedAtText*: string
+      ## Local wall-clock text, for the tooltip. Human-facing only — nothing
+      ## compares two of these, because a clock is not an identity.
+
+  OpenButtonMode* = enum
+    ## What `⏵` will do if it is pressed RIGHT NOW.
+    ##
+    ## ONE PURE FUNCTION, FOUR CONSUMERS: the title, the class, the glyph and
+    ## the click handler all read `openButtonMode`, so a tooltip that promises
+    ## one action while the handler performs another is not expressible.
+    obmOpenExisting = "open-existing"
+      ## A recording exists and Shift is not held. Enters it. EXECUTES NOTHING,
+      ## which is the property the whole control exists for.
+    obmRefreshAndOpen = "refresh-and-open"
+      ## A recording exists and Shift IS held. Records again, then enters the
+      ## NEW recording. The recording id afterwards must differ.
+    obmRecordAndOpen = "record-and-open"
+      ## No recording exists, so there is nothing to reuse and Shift is
+      ## irrelevant. Records, then enters. The label says so rather than saying
+      ## "open".
 
   TestResultsRowState* = enum
     ## What the pane knows about one test. `trsNotRun` is the state the join
@@ -123,6 +228,16 @@ type
     state*: TestResultsRowState
     durationMs*: int
     message*: string
+    recordingId*: string
+      ## The recording this row can be entered into, or "" for none.
+      ##
+      ## CARRIED ON THE ROW rather than looked up by the view, so that the
+      ## thing the buttons decide on and the thing a check reads off the DOM
+      ## are the same value. The view paints it into `data-ct-recording-id`,
+      ## which is what makes "did pressing ⏵ re-execute?" answerable by
+      ## comparing two strings instead of by watching for a spinner.
+    recordedAtText*: string
+      ## When that recording was made, in local wall-clock text, or "".
 
   TestResultsVM* = ref object of ViewModel
     # -- Mutable state --
@@ -159,6 +274,31 @@ type
       ## Signal; this was the one that was not, so it was also the one that
       ## could not re-render.
 
+    recordings*: Signal[seq[TestRecordingRef]]
+      ## Which tests have a recording that can be entered.
+      ##
+      ## SURVIVES `beginRun` AND `clearRun`, deliberately, and that is the
+      ## difference between this and `summary`. A `TestRunSummary` describes ONE
+      ## run and is blanked when the next starts; a recording is an artefact
+      ## that outlives the run that made it, and blanking it would mean every
+      ## row lost its `⏵` the instant anyone pressed ▶ — the recording still on
+      ## disk, the only way back to it gone.
+
+    shiftHeld*: Signal[bool]
+      ## Whether Shift is down RIGHT NOW.
+      ##
+      ## Driven by document-level keydown/keyup, not by a click event's
+      ## `shiftKey`. See the header: this is what lets the tooltip and the
+      ## button's own appearance change while the pointer is already resting on
+      ## it, and what keeps the promise and the action a single decision.
+
+    refreshRecording*: Signal[TestRowActionProc]
+      ## Record this test again and KEEP THE RESULT WITHOUT NAVIGATING.
+    openExistingRecording*: Signal[TestRowActionProc]
+      ## Enter the recording that already exists. Must execute nothing.
+    recordAndOpenRecording*: Signal[TestRowActionProc]
+      ## Record this test and then enter the recording that produces.
+
     # -- Derived state --
     rows*: Memo[seq[TestResultsRow]]
     isEmpty*: Memo[bool]
@@ -187,9 +327,22 @@ proc shortName*(selector: string): string =
   let idx = selector.rfind("::")
   if idx < 0: selector else: selector[idx + 2 .. ^1]
 
-proc joinRows*(items: seq[TestItem]; summary: TestRunSummary):
+proc recordingFor*(recordings: seq[TestRecordingRef];
+                   testId: string): TestRecordingRef =
+  ## The recording held for `testId`, or a zeroed one.
+  ##
+  ## A LINEAR SCAN over a project's test list, and a `Table` here would buy
+  ## nothing: the catalog this searches is the same one `joinRows` is already
+  ## walking, and both are the length of a Noir project's `#[test]` count.
+  for recording in recordings:
+    if recording.testId == testId:
+      return recording
+  TestRecordingRef()
+
+proc joinRows*(items: seq[TestItem]; summary: TestRunSummary;
+               recordings: seq[TestRecordingRef] = @[]):
     seq[TestResultsRow] =
-  ## Catalog ∪ run, keyed by the runner's own test id.
+  ## Catalog ∪ run ∪ recordings, keyed by the runner's own test id.
   ##
   ## The catalog is the ORDER, because it is the stable one: a run reports
   ## tests as they finish, which on a parallel runner is arrival order and
@@ -207,6 +360,7 @@ proc joinRows*(items: seq[TestItem]; summary: TestRunSummary):
   var seen = initTable[string, bool]()
   for item in items:
     seen[item.id] = true
+    let recording = recordings.recordingFor(item.id)
     if byId.hasKey(item.id):
       let row = byId[item.id]
       result.add TestResultsRow(
@@ -214,21 +368,28 @@ proc joinRows*(items: seq[TestItem]; summary: TestRunSummary):
         name: shortName(item.selector),
         file: item.file, line: item.range.startLine,
         state: stateFromOutcome(row.outcome),
-        durationMs: row.durationMs, message: row.output.strip())
+        durationMs: row.durationMs, message: row.output.strip(),
+        recordingId: recording.recordingId,
+        recordedAtText: recording.recordedAtText)
     else:
       result.add TestResultsRow(
         testId: item.id, selector: item.selector,
         name: shortName(item.selector),
         file: item.file, line: item.range.startLine,
-        state: trsNotRun, durationMs: 0, message: "")
+        state: trsNotRun, durationMs: 0, message: "",
+        recordingId: recording.recordingId,
+        recordedAtText: recording.recordedAtText)
 
   for row in summary.rows:
     if seen.hasKey(row.testId): continue
+    let recording = recordings.recordingFor(row.testId)
     result.add TestResultsRow(
       testId: row.testId, selector: row.testId,
       name: displayName(row.testId), file: "", line: 0,
       state: stateFromOutcome(row.outcome),
-      durationMs: row.durationMs, message: row.output.strip())
+      durationMs: row.durationMs, message: row.output.strip(),
+      recordingId: recording.recordingId,
+      recordedAtText: recording.recordedAtText)
 
 const RunFailedHeadline* = "run failed, no tests ran"
   ## The headline for a run that faulted before any test reported.
@@ -324,7 +485,267 @@ proc startRun*(vm: TestResultsVM) =
   runner()
 
 proc clearRun*(vm: TestResultsVM) =
+  ## Blank the RUN. Recordings are untouched — see `TestResultsVM.recordings`
+  ## for why an artefact must outlive the run that produced it.
   vm.summary.val = TestRunSummary()
+
+# ---------------------------------------------------------------------------
+# The two per-row controls
+# ---------------------------------------------------------------------------
+
+const
+  NoRecorderHostText* = "No host in this build can record a test"
+  NoReplayHostText* = "No host in this build can open a recording"
+  RunInProgressText* = "A test run is already in progress"
+  NeverRecordedText* = "this test has no recording yet"
+  RecordingDiscardedText* = "this test ran, but no recording was kept"
+    ## THE STATE THAT IS NOT "NEVER RUN", and the reason it has its own
+    ## sentence. A row that ran and whose recording is gone looks identical to
+    ## one that never ran if you only ask `recordingId == ""`, and telling a
+    ## user their passing test "has no recording yet" invites them to press the
+    ## button that just failed to leave one.
+
+proc hasRecording*(row: TestResultsRow): bool =
+  ## Whether `⏵` can enter something without executing anything.
+  ##
+  ## ONE GATE, so "the button says open" and "the button opens" cannot drift.
+  ## `recordingId` and not `recordedAtText`: a clock is not an identity, and a
+  ## host that failed to format a time still produced a recording.
+  row.recordingId.len > 0
+
+proc recordingAbsenceText*(row: TestResultsRow): string =
+  ## Why this row has nothing to enter. "" when it has.
+  if row.hasRecording(): ""
+  elif row.state == trsNotRun: NeverRecordedText
+  else: RecordingDiscardedText
+
+proc setShiftHeld*(vm: TestResultsVM; held: bool) =
+  ## Driven by document keydown/keyup. A WRITE TO THE GRAPH: every open
+  ## button's title, class and glyph is recomputed, including the one the
+  ## pointer is already resting on.
+  if vm.shiftHeld.val != held:
+    vm.shiftHeld.val = held
+
+proc setRowActions*(vm: TestResultsVM;
+                    refresh, openExisting, recordAndOpen: TestRowActionProc) =
+  ## Install the host's three per-row actions.
+  ##
+  ## `setRunTests`' rule, for the same reason: these are Signals, so a plain
+  ## field write would reach no observer and every row would keep painting the
+  ## disabled buttons and "No host in this build can record a test" over hosts
+  ## that were by then installed and working.
+  vm.refreshRecording.val = refresh
+  vm.openExistingRecording.val = openExisting
+  vm.recordAndOpenRecording.val = recordAndOpen
+
+proc rememberRecording*(vm: TestResultsVM;
+                        testId, recordingId, recordedAtText: string) =
+  ## A recording now exists for `testId`. Replaces any previous one.
+  ##
+  ## REPLACES RATHER THAN APPENDS, because "the recording of this test" is
+  ## singular from the pane's point of view: `⏵` enters one, and a list would
+  ## be a chooser this design does not have. Refreshing therefore CHANGES the
+  ## id in place, which is exactly what makes the shift arm checkable.
+  if testId.len == 0 or recordingId.len == 0:
+    return
+  var updated = vm.recordings.val
+  for i in 0 ..< updated.len:
+    if updated[i].testId == testId:
+      updated[i] = TestRecordingRef(testId: testId, recordingId: recordingId,
+                                    recordedAtText: recordedAtText)
+      vm.recordings.val = updated
+      return
+  updated.add TestRecordingRef(testId: testId, recordingId: recordingId,
+                               recordedAtText: recordedAtText)
+  vm.recordings.val = updated
+
+proc rememberRecordingForSelector*(vm: TestResultsVM;
+                                   selector, recordingId,
+                                   recordedAtText: string) =
+  ## The same, from the identity a RUNNER knows.
+  ##
+  ## The host that produces a recording holds a selector — `nargo test
+  ## --exact`'s string — and the pane joins on a catalog id. Resolving here and
+  ## not at the call site keeps the catalog the single place the two identities
+  ## meet, and degrades the way `noirRunTestId` does: with no catalog entry the
+  ## selector IS the key, so a recording is still reachable from a row the
+  ## catalog did not predict rather than being silently dropped.
+  for item in vm.catalog.val:
+    if item.selector == selector:
+      vm.rememberRecording(item.id, recordingId, recordedAtText)
+      return
+  vm.rememberRecording(selector, recordingId, recordedAtText)
+
+proc forgetRecordings*(vm: TestResultsVM) =
+  ## Every recording this pane knew about is gone.
+  ##
+  ## Called when the host discards them — a new project, or a reload that left
+  ## the retention table empty. It is what produces the "ran, but no recording
+  ## was kept" state honestly, instead of leaving `⏵` pointing at a blob
+  ## nothing holds any more.
+  vm.recordings.val = @[]
+
+proc refreshAbsence*(vm: TestResultsVM): string =
+  ## Why `⟳` cannot run. "" when it can.
+  ##
+  ## Ordered most-specific first: a run in flight is a transient state with an
+  ## obvious remedy (wait), a deployment absence is a standing fact about this
+  ## bundle, and a nil host is a build that never wired the control.
+  if vm.inFlight.val: RunInProgressText
+  elif vm.runAbsence.val.len > 0: vm.runAbsence.val
+  elif vm.refreshRecording.val.isNil: NoRecorderHostText
+  else: ""
+
+proc openButtonMode*(vm: TestResultsVM; row: TestResultsRow): OpenButtonMode =
+  ## What `⏵` would do if pressed now. THE one decision; four consumers.
+  ##
+  ## The no-recording arm is FIRST, and that ordering is the whole of the
+  ## "pleasing collapse": with nothing to reuse, Shift is not consulted, so
+  ## plain and shifted presses do the same thing without a special case saying
+  ## so.
+  if not row.hasRecording(): obmRecordAndOpen
+  elif vm.shiftHeld.val: obmRefreshAndOpen
+  else: obmOpenExisting
+
+proc openAbsence*(vm: TestResultsVM; row: TestResultsRow): string =
+  ## Why `⏵` cannot run, IN THE MODE IT IS IN. "" when it can.
+  ##
+  ## The two modes have genuinely different requirements and this is where that
+  ## is stated. Entering an existing recording executes nothing, so it is not
+  ## blocked by a run in flight and not blocked by a deployment that cannot
+  ## compile — a bundle with no Noir module can still replay a recording it
+  ## already holds. Greying the control out for either would be a control dead
+  ## for a reason that does not apply to it.
+  case vm.openButtonMode(row)
+  of obmOpenExisting:
+    if vm.openExistingRecording.val.isNil: NoReplayHostText else: ""
+  of obmRefreshAndOpen, obmRecordAndOpen:
+    let absence = vm.refreshAbsence()
+    if absence.len > 0: absence
+    elif vm.recordAndOpenRecording.val.isNil: NoReplayHostText
+    else: ""
+
+proc refreshButtonClass*(vm: TestResultsVM): string =
+  if vm.refreshAbsence().len > 0: "test-results-refresh-btn disabled"
+  else: "test-results-refresh-btn"
+
+proc refreshButtonTitle*(vm: TestResultsVM; row: TestResultsRow): string =
+  ## What `⟳` will do, or why it will not.
+  ##
+  ## The enabled sentence says BOTH halves — that it records, and that it does
+  ## not navigate — because "refresh" alone does not tell a reader whether they
+  ## are about to lose the pane they are looking at.
+  let absence = vm.refreshAbsence()
+  if absence.len > 0:
+    return absence
+  if row.hasRecording():
+    "Record " & row.name & " again, replacing the recording from " &
+      (if row.recordedAtText.len > 0: row.recordedAtText else: "the last run") &
+      ". Stays in this pane."
+  else:
+    "Record " & row.name & " (" & row.recordingAbsenceText() &
+      "). Stays in this pane."
+
+proc openButtonClass*(vm: TestResultsVM; row: TestResultsRow): string =
+  ## `shift-armed` is the VISIBLE half of the modifier.
+  ##
+  ## Only in `obmRefreshAndOpen` — the mode Shift actually changed. Painting it
+  ## in `obmRecordAndOpen` would tell a user Shift had done something on a row
+  ## where it did nothing, which is a worse lie than not showing it at all.
+  result = "test-results-open-btn"
+  if vm.openButtonMode(row) == obmRefreshAndOpen:
+    result.add " shift-armed"
+  if vm.openAbsence(row).len > 0:
+    result.add " disabled"
+
+proc openButtonMark*(vm: TestResultsVM; row: TestResultsRow): string =
+  ## The glyph, which changes with the mode for `shift-armed`'s reason: a
+  ## modifier that alters what a button does should alter what it looks like.
+  case vm.openButtonMode(row)
+  of obmOpenExisting: "⏵"
+  of obmRefreshAndOpen: "⟳⏵"
+  of obmRecordAndOpen: "⏺⏵"
+
+proc openButtonTitle*(vm: TestResultsVM; row: TestResultsRow): string =
+  ## What `⏵` will do, or why it will not.
+  ##
+  ## THE UNSHIFTED SENTENCE NAMES THE MODIFIER. That clause is the only thing
+  ## standing between the combined action and a user who never thinks to press
+  ## Shift, and this campaign has found about twenty capabilities that were
+  ## present, correct and never reached for want of exactly it.
+  ##
+  ## It also names the recording, by time. "Open the recording" is a promise
+  ## that something already exists; naming WHICH one is what lets a reader
+  ## notice when it is older than the edit they just made.
+  let absence = vm.openAbsence(row)
+  if absence.len > 0:
+    # A disabled control that explains itself. In `obmRecordAndOpen` the row's
+    # own absence is appended, so a user is told both that nothing can run and
+    # that there was nothing to open either.
+    if vm.openButtonMode(row) == obmOpenExisting:
+      return absence
+    return absence & " — and " & row.recordingAbsenceText()
+  case vm.openButtonMode(row)
+  of obmOpenExisting:
+    "Open the recording of " & row.name &
+      (if row.recordedAtText.len > 0: " from " & row.recordedAtText else: "") &
+      " — nothing is re-run. Hold Shift to record it again first."
+  of obmRefreshAndOpen:
+    "Record " & row.name & " again and open the NEW recording, replacing " &
+      (if row.recordedAtText.len > 0: "the one from " & row.recordedAtText
+       else: "the existing one") & "."
+  of obmRecordAndOpen:
+    # NOT "OPEN". There is nothing to open and the button is about to spend a
+    # compile; a label promising otherwise is the lie the header names.
+    "Record " & row.name & " and open the recording (" &
+      row.recordingAbsenceText() & ")."
+
+proc noteRowActionRefusal*(vm: TestResultsVM; message: string) =
+  ## A per-row control was pressed and the host could not honour it.
+  ##
+  ## FILED AS A RUN-LEVEL DIAGNOSTIC, so it renders in the pane's existing
+  ## `.test-results-failure` block — the surface that already exists for "an
+  ## attempt was made and it did not work".
+  ##
+  ## SPECIFICALLY NOT `setRunAbsence`, which was the first thing tried and is
+  ## a category error with real consequences. `runAbsence` means "this
+  ## DEPLOYMENT cannot run tests"; writing a failed replay into it would grey
+  ## out the header's ▶ and every row's `⟳` because a `⏵` did not work — a
+  ## refusal in one control disabling three others, and a standing claim about
+  ## the bundle made out of a transient event.
+  if message.len == 0:
+    return
+  var current = vm.summary.val
+  current.diagnostics.add TestRunDiagnostic(
+    severity: "error", message: message)
+  vm.summary.val = current
+
+proc triggerRefresh*(vm: TestResultsVM; row: TestResultsRow) =
+  ## The `⟳` click. Guarded HERE and not in the view, so the mock and web
+  ## renderers cannot disagree about when the control is live — the rule
+  ## `startRun` already follows for the header's ▶.
+  if vm.refreshAbsence().len > 0:
+    return
+  let action = vm.refreshRecording.val
+  if action.isNil:
+    return
+  action(row.testId, row.selector)
+
+proc triggerOpen*(vm: TestResultsVM; row: TestResultsRow) =
+  ## The `⏵` click, dispatched on the SAME `openButtonMode` the tooltip was
+  ## rendered from. Reading `shiftHeld` again here rather than taking a
+  ## modifier off the event is what makes that identity structural.
+  if vm.openAbsence(row).len > 0:
+    return
+  case vm.openButtonMode(row)
+  of obmOpenExisting:
+    let action = vm.openExistingRecording.val
+    if not action.isNil:
+      action(row.testId, row.selector)
+  of obmRefreshAndOpen, obmRecordAndOpen:
+    let action = vm.recordAndOpenRecording.val
+    if not action.isNil:
+      action(row.testId, row.selector)
 
 proc ingestEvent*(vm: TestResultsVM; event: TestEvent) =
   ## Fold one runner event into the run. The fold is
@@ -333,6 +754,20 @@ proc ingestEvent*(vm: TestResultsVM; event: TestEvent) =
   var current = vm.summary.val
   ingestTestEvent(current, event)
   vm.summary.val = current
+
+  # AND THE RECORDING IS HARVESTED OFF THE SAME STREAM.
+  #
+  # `ingestTestEvent` already flattens `event.trace` onto `TestRunRow`, but a
+  # `TestRunSummary` is blanked by the next `beginRun` — so a recording learned
+  # only from there would vanish the moment anyone pressed ▶ again. Copying it
+  # into `recordings` here is what makes it durable, and doing it in this proc
+  # rather than at a call site means every producer that emits a
+  # `recording-created` gets it, not just the one that was in mind.
+  if event.testId.len > 0 and event.trace.isSome:
+    let trace = event.trace.get
+    if trace.recordingId.len > 0:
+      vm.rememberRecording(event.testId, trace.recordingId,
+                           trace.metadata.getOrDefault("recordedAt", ""))
 
 proc applyRunText*(vm: TestResultsVM; text: string): bool =
   ## Fold a whole NDJSON stream. Returns whether it contained any events, so a
@@ -359,8 +794,19 @@ proc createTestResultsVM*(): TestResultsVM =
     var noRunner: RunTestsProc
     let runTests = createSignal(noRunner)
 
+    let recordings = createSignal(newSeq[TestRecordingRef]())
+    let shiftHeld = createSignal(false)
+    # THREE TYPED VARS, for `noRunner`'s reason and not for tidiness.
+    # `createSignal(TestRowActionProc(nil))` compiles on both backends and runs
+    # on one: `nim js` emits the conversion as `null.bind(null)`, which throws
+    # at module scope and takes down every test that merely CONSTRUCTS this VM.
+    var noRefresh, noOpenExisting, noRecordAndOpen: TestRowActionProc
+    let refreshRecording = createSignal(noRefresh)
+    let openExistingRecording = createSignal(noOpenExisting)
+    let recordAndOpenRecording = createSignal(noRecordAndOpen)
+
     let rows = createMemo[seq[TestResultsRow]] proc(): seq[TestResultsRow] =
-      joinRows(catalog.val, summary.val)
+      joinRows(catalog.val, summary.val, recordings.val)
 
     let isEmpty = createMemo[bool] proc(): bool =
       catalog.val.len == 0 and summary.val.rows.len == 0
@@ -390,6 +836,11 @@ proc createTestResultsVM*(): TestResultsVM =
       projectName: projectName,
       inFlight: inFlight,
       runTests: runTests,
+      recordings: recordings,
+      shiftHeld: shiftHeld,
+      refreshRecording: refreshRecording,
+      openExistingRecording: openExistingRecording,
+      recordAndOpenRecording: recordAndOpenRecording,
       rows: rows,
       isEmpty: isEmpty,
       headline: headline,

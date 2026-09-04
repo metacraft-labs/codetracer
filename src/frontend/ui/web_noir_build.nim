@@ -90,12 +90,21 @@ import ../viewmodel/platform/noir_template
 import ./web_project_store
 import ../viewmodel/platform/noir_build
 import ../viewmodel/viewmodels/noir_build_producer
-# The one predicate this module asks of the replay host: can it hold a SECOND
-# live session? `noir_build_producer` imports the service for the request type
-# and does not re-export it, so the question is imported here directly rather
-# than widening that module's export surface for one proc.
+# THE REPLAY HOST, asked two different questions by this module.
+#
+# `canOpenSecondReplaySession` is the predicate the record-in-a-new-tab gesture
+# checks before it offers itself. The rest is `openRetainedTestRecording`'s:
+# entering a recording that already exists is a request to this service and
+# NOTHING ELSE — no dispatch, no worker, no compile — so this module has to be
+# able to make the request itself rather than reaching it through a build phase.
+#
+# `noir_build_producer` imports the same service for the request type and does
+# not re-export it, so these come in directly rather than widening that module's
+# export surface.
 from ../viewmodel/backend/replay_session_service import
-  canOpenSecondReplaySession
+  canOpenSecondReplaySession, openReplaySession, ReplaySessionRequest,
+  ReplaySessionOutcomeKind, rsoOpened, rsoNoHost, rsoEmptyTrace,
+  rsoNoSecondSession
 from ../viewmodel/viewmodels/build_vm import BuildVM
 import ./build as build_pane
 # The PROBLEMS pane's mirror of the same diagnostics. `from ... import` to keep
@@ -185,7 +194,59 @@ var
     ## never reached the worker. Paired with `noirTestRunStarted`, because a
     ## pane left `inFlight` would disable its own button permanently.
 
+  noirTestRecordingSink*: proc(selector, recordingId, recordedAtText: string)
+    ## A RECORDING NOW EXISTS FOR THIS TEST, and here is which one.
+    ##
+    ## The TESTS pane's `⏵` promises to enter a recording without executing
+    ## anything, and it cannot promise that unless something told it a recording
+    ## is there. This is that something. A callback for `noirTestRunSink`'s
+    ## reason: this module must not import `ui/test_results`.
+    ##
+    ## `recordingId` is minted here and is UNIQUE PER RECORDING. That is not
+    ## bookkeeping — it is the only thing that lets a check distinguish "the
+    ## existing recording was opened" from "a new one was quietly made", which
+    ## is the single distinction that makes this feature trustworthy.
+
+type
+  RetainedTestRecording = object
+    ## One test's recording, held so it can be entered again WITHOUT re-running.
+    ##
+    ## THIS IS THE THING THAT DID NOT EXIST. `ReplaySessionRequest` carries the
+    ## whole `MemoryTrace` document, and `noir_build_producer` copied it out of
+    ## `producer.stdoutText` at the one moment it was complete — because the
+    ## next `beginPhase` clears it. So a recording could be MADE and ENTERED in
+    ## one gesture and was then unreachable forever; "open the recording that
+    ## already exists" had nothing to open. `src/ct_test/run_store.nim` is the
+    ## desktop answer to the same question and cannot be the web one: it is a
+    ## filesystem store, and a browser tab has no filesystem.
+    ##
+    ## Retained in memory and per tab, which is the honest scope. A reload ends
+    ## the session and the pane must then say a row ran but no recording was
+    ## kept, rather than offering an entry into nothing.
+    selector: string
+    recordingId: string
+    recordedAtText: string
+    rawMemoryTrace: string
+    packageDir: string
+    projectRoot: string
+
 var
+  retainedRecordings: seq[RetainedTestRecording] = @[]
+    ## A `seq` and not a `Table`: it is indexed by a project's `#[test]` count.
+
+  recordingCounter = 0
+    ## Feeds `recordingId`. Monotonic within the tab, and combined with a
+    ## timestamp so two tabs cannot mint the same id for different traces.
+
+  activeRecordOpenWhenDone = true
+    ## Whether the in-flight `nriTestRecord` gesture should END IN THE
+    ## DEBUGGER.
+    ##
+    ## The TESTS pane's `⟳` is "refresh the recording": make it, keep it, and
+    ## leave the reader where they were. The editor's Run-test control and the
+    ## pane's `⏵` are "enter it". Same three phases, same artefact; only the
+    ## last step differs, which is why this is a flag and not a second path.
+
   activeRecordInNewTab = false
     ## Whether the in-flight `nriTestRecord` gesture asked for a NEW session
     ## tab. §9.1's interaction — "a developer comparing a passing and a failing
@@ -458,6 +519,9 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
       # refuses to record one that does, so its ABI has nothing to encode.
       producer.replayLabel = activeRecordSelector
       producer.replayInNewSessionTab = activeRecordInNewTab
+      # REFRESH VERSUS ENTER, decided here and carried into the trace phase.
+      # The recording is produced either way; only the navigation differs.
+      producer.replaySuppressOpen = not activeRecordOpenWhenDone
       dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
                $noirTraceRequest(producer.artifact, noirTestRecordInputs),
                "nargo trace " & activeRecordSelector)
@@ -472,7 +536,42 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
 
   if phase == nbpTrace and activeIntent == nriTestRecord:
     # The trace arm of `noir_build_producer.onExit` has already offered the
-    # recording to `requestReplaySession` and painted what it contains.
+    # recording to `requestReplaySession` (unless `replaySuppressOpen` asked it
+    # not to) and painted what it contains.
+    #
+    # AND THIS IS WHERE IT IS RETAINED — the last moment `producer.stdoutText`
+    # is both complete and still there. `beginPhase` clears it on the next
+    # dispatch, which is precisely why the recording used to be unreachable
+    # after the gesture that made it: there was no third thing holding a copy.
+    if verdict == npvSucceeded and activeRecordSelector.len > 0 and
+       producer.stdoutText.len > 0:
+      inc recordingCounter
+      let recordingId =
+        "rec-" & $recordingCounter & "-" & $int64(jsNowMs())
+      let recordedAt = $jsLocalTimeText()
+      var replaced = false
+      for i in 0 ..< retainedRecordings.len:
+        if retainedRecordings[i].selector == activeRecordSelector:
+          # REPLACED, NOT APPENDED. "The recording of this test" is singular
+          # from the pane's point of view, and a refresh is supposed to change
+          # which one `⏵` enters — that change of id is what the shift arm's
+          # check reads.
+          retainedRecordings[i] = RetainedTestRecording(
+            selector: activeRecordSelector, recordingId: recordingId,
+            recordedAtText: recordedAt, rawMemoryTrace: producer.stdoutText,
+            packageDir: producer.packageDir,
+            projectRoot: producer.projectRoot)
+          replaced = true
+          break
+      if not replaced:
+        retainedRecordings.add RetainedTestRecording(
+          selector: activeRecordSelector, recordingId: recordingId,
+          recordedAtText: recordedAt, rawMemoryTrace: producer.stdoutText,
+          packageDir: producer.packageDir, projectRoot: producer.projectRoot)
+      report("test-recording-retained",
+             "selector=" & activeRecordSelector & " recording=" & recordingId)
+      if not noirTestRecordingSink.isNil:
+        noirTestRecordingSink(activeRecordSelector, recordingId, recordedAt)
     if not noirTestRunSettled.isNil:
       noirTestRunSettled()
     return
@@ -764,8 +863,88 @@ proc canRecordTestInNewSessionTab*(): bool =
   ## comment names exactly what would make it true.
   canOpenSecondReplaySession()
 
+proc retainedRecordingIdFor*(selector: string): string =
+  ## Which recording `⏵` would enter for this test, or "".
+  ##
+  ## Exported so a host can answer the pane's question without the pane
+  ## learning what a `MemoryTrace` is.
+  for recording in retainedRecordings:
+    if recording.selector == selector:
+      return recording.recordingId
+  ""
+
+proc forgetRetainedRecordings*() =
+  ## Every retained recording is gone — a new project, or a store reset.
+  ##
+  ## Exported and called rather than left to garbage collection, because the
+  ## PANE must be told: a `⏵` still offered over a recording nothing holds is a
+  ## control that renders and does nothing, which is the second-commonest
+  ## defect this campaign has found.
+  retainedRecordings = @[]
+
+proc openRetainedTestRecording*(selector: string;
+                                newSessionTab: bool = false): string =
+  ## ENTER THE RECORDING THIS TEST ALREADY HAS. Returns "" on success, or a
+  ## sentence saying why not.
+  ##
+  ## NOTHING IS DISPATCHED. There is no `dispatch` call in this proc and there
+  ## must never be one: no worker message, no compile, no trace, no `#[test]`
+  ## body executed. It hands the retained `MemoryTrace` straight to
+  ## `openReplaySession`, which is the same call the recording gesture makes at
+  ## the end of its third phase — so the session a user lands in is byte-for-
+  ## byte the one they would have got, arriving in a click instead of a compile.
+  ##
+  ## That is the whole reason the control exists, and it is why the check for
+  ## it reads `data-ct-recording-id` before and after: an id that did not
+  ## change is proof that this path, and not the recording path, was taken.
+  ##
+  ## IT IS NOT BLOCKED BY `activeInFlight`. Entering a recording executes
+  ## nothing, so a run happening elsewhere is not an obstacle — and refusing
+  ## here would make the pane's `⏵` dead for a reason that does not apply to it.
+  if selector.len == 0:
+    report("test-recording-refused", "reason=no-selector")
+    return "no test was named"
+  for recording in retainedRecordings:
+    if recording.selector != selector:
+      continue
+    let outcome = openReplaySession(ReplaySessionRequest(
+      rawMemoryTrace: recording.rawMemoryTrace,
+      packageDir: recording.packageDir,
+      projectRoot: recording.projectRoot,
+      label: recording.selector,
+      newSessionTab: newSessionTab))
+    # EVERY OUTCOME IS REPORTED, not only the happy one. A gesture that reached
+    # the replay host and was declined leaves no trace in the DOM — the pane
+    # looks exactly as it did before the click — so the log is the only place
+    # that can say WHICH of the four things happened. Reporting just `opened`
+    # would leave "the host declined" and "the click never arrived"
+    # indistinguishable, which is the pair every defect in this campaign has
+    # hidden between.
+    report("test-recording-" &
+           (if outcome == rsoOpened: "entered" else: "not-entered"),
+           "selector=" & selector & " recording=" & recording.recordingId &
+           " outcome=" & $outcome & " bytes=" & $recording.rawMemoryTrace.len)
+    case outcome
+    of rsoOpened:
+      return ""
+    of rsoNoSecondSession:
+      return "this build holds one live session at a time, so the recording " &
+             "was not opened beside the current one"
+    of rsoEmptyTrace:
+      return "the recording held for this test is empty"
+    of rsoNoHost:
+      return "no replay host is installed in this build"
+  # SAID, NOT SILENT. The pane only offers `⏵` when it believes a recording
+  # exists, so reaching here means the pane and this module disagree — which is
+  # exactly the drift a caller must be able to report rather than absorb.
+  report("test-recording-not-entered",
+         "selector=" & selector & " outcome=no-such-recording held=" &
+         $retainedRecordings.len)
+  "no recording is held for " & selector
+
 proc startNoirTestRecording*(selector: string;
-                             newSessionTab: bool = false) =
+                             newSessionTab: bool = false;
+                             openWhenDone: bool = true) =
   ## RUN ONE TEST IN THE DEBUGGER — the editor's Run-test control.
   ##
   ## "Running a test" in this product means recording it and replaying it: the
@@ -801,6 +980,7 @@ proc startNoirTestRecording*(selector: string;
   activeIntent = nriTestRecord
   activeRecordSelector = selector
   activeRecordInNewTab = newSessionTab
+  activeRecordOpenWhenDone = openWhenDone
   if not noirTestRunStarted.isNil:
     noirTestRunStarted()
   dispatch(producer, tmpl, nbpTest, noirTestArgs(),
