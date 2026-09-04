@@ -70,7 +70,6 @@ import {
   DEFAULT_BOTTOM_TAB_TITLES,
   OVERLAY_SELECTOR,
   bottomStripTab,
-  closeDockedPanelFromTab,
   openDockedPanelFromTab,
   openOverlayFromTab,
   waitForDefaultBottomTabs,
@@ -322,26 +321,6 @@ async function shotBothThemes(page: Page, stem: string): Promise<void> {
 }
 
 /**
- * Move the pointer off the strip and let the tab see a `mouseleave`.
- *
- * Required between closing a docked panel and hovering the same tab.
- * Clicking a tab to collapse its panel sets `suppressHoverAfterClose` in
- * `ui/auto_hide.nim`, which blocks the hover preview until "the mouse [has
- * left] and re-enter[ed]" — the pointer is still sitting on the tab after the
- * click, so a `hover()` on it fires nothing and the overlay never opens.  The
- * flag is cleared by `onHoverLeave`, which is what this provokes.
- */
-async function leaveStrip(page: Page): Promise<void> {
-  const root = await page.locator("#ROOT").boundingBox();
-  if (root !== null) {
-    await page.mouse.move(root.x + root.width / 2, root.y + root.height / 2);
-  } else {
-    await page.mouse.move(10, 10);
-  }
-  await wait(400);
-}
-
-/**
  * Put the strips into their text-tab rendering.
  *
  * Under a headless/virtual display the heuristic in `updateCollapsedMode`
@@ -383,27 +362,34 @@ test.describe("auto-hide panel focus border", () => {
     const tab = bottomStripTab(ctPage, label);
     const strip = "#auto-hide-bottom-strip";
 
-    // --- Docked: the half the user says already works. ---
-    await openDockedPanelFromTab(ctPage, tab, "bottom", WAIT_TIMEOUT_MS);
-    await wait(600); // let the rAF-scheduled outline settle
-    const docked = await measureOutline(
-      ctPage, "ct-docked-outline", strip, label,
-    );
-    assertOutlineIsReal(docked, "bottom edge, docked");
-    assertOutlineEnclosesTab(docked, "bottom edge, docked");
-    await shotBothThemes(ctPage, "bottom-01-docked");
-
-    // --- Auto-hide: the half they say does not. ---
-    await closeDockedPanelFromTab(ctPage, tab, "bottom", WAIT_TIMEOUT_MS);
-    await leaveStrip(ctPage);
+    // --- Auto-hide first, from a strip with nothing docked. ---
+    //
+    // ENTER EACH STATE FROM A CLEAN START, rather than docking and then
+    // closing to get back to auto-hide.  That route runs through
+    // `suppressHoverAfterClose` in `ui/auto_hide.nim`, which deliberately
+    // blocks the hover preview until the pointer has left the tab and returned
+    // — so the test would be timing its own mouse against a guard that has
+    // nothing to do with the border.  Measured: it made the left-edge case
+    // fail while the identical bottom-edge one passed, which is the signature
+    // of a fixture racing the app rather than of a defect.
     await openOverlayFromTab(ctPage, tab, WAIT_TIMEOUT_MS);
-    await wait(600);
+    await wait(600); // let the rAF-scheduled outline settle
     const overlay = await measureOutline(
       ctPage, "ct-overlay-outline", strip, label,
     );
     assertOutlineIsReal(overlay, "bottom edge, auto-hide");
     assertOutlineEnclosesTab(overlay, "bottom edge, auto-hide");
     await shotBothThemes(ctPage, "bottom-02-auto-hide");
+
+    // --- Then docked: clicking the tab docks the same panel. ---
+    await openDockedPanelFromTab(ctPage, tab, "bottom", WAIT_TIMEOUT_MS);
+    await wait(600);
+    const docked = await measureOutline(
+      ctPage, "ct-docked-outline", strip, label,
+    );
+    assertOutlineIsReal(docked, "bottom edge, docked");
+    assertOutlineEnclosesTab(docked, "bottom edge, docked");
+    await shotBothThemes(ctPage, "bottom-01-docked");
 
     // --- The report itself: the two must agree. ---
     expect(
@@ -457,19 +443,7 @@ test.describe("auto-hide panel focus border", () => {
       await expect(tab).toBeVisible({ timeout: WAIT_TIMEOUT_MS });
       const label = ((await tab.textContent()) ?? "").trim();
 
-      // --- Docked ---
-      await openDockedPanelFromTab(ctPage, tab, lower, WAIT_TIMEOUT_MS);
-      await wait(600);
-      const docked = await measureOutline(
-        ctPage, "ct-docked-outline", strip, label,
-      );
-      assertOutlineIsReal(docked, `${lower} edge, docked`);
-      assertOutlineEnclosesTab(docked, `${lower} edge, docked`);
-      await shotBothThemes(ctPage, `${lower}-01-docked`);
-
-      // --- Auto-hide ---
-      await closeDockedPanelFromTab(ctPage, tab, lower, WAIT_TIMEOUT_MS);
-      await leaveStrip(ctPage);
+      // --- Auto-hide first (see the note on the bottom-edge test) ---
       await openOverlayFromTab(ctPage, tab, WAIT_TIMEOUT_MS);
       await wait(600);
       const overlay = await measureOutline(
@@ -478,6 +452,16 @@ test.describe("auto-hide panel focus border", () => {
       assertOutlineIsReal(overlay, `${lower} edge, auto-hide`);
       assertOutlineEnclosesTab(overlay, `${lower} edge, auto-hide`);
       await shotBothThemes(ctPage, `${lower}-02-auto-hide`);
+
+      // --- Then docked ---
+      await openDockedPanelFromTab(ctPage, tab, lower, WAIT_TIMEOUT_MS);
+      await wait(600);
+      const docked = await measureOutline(
+        ctPage, "ct-docked-outline", strip, label,
+      );
+      assertOutlineIsReal(docked, `${lower} edge, docked`);
+      assertOutlineEnclosesTab(docked, `${lower} edge, docked`);
+      await shotBothThemes(ctPage, `${lower}-01-docked`);
 
       expect(
         overlay.stroke,
