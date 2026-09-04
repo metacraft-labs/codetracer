@@ -207,7 +207,7 @@ while read -r f; do
 	#
 	# Summed, not taken once: a file may print a count per suite.
 	checks=""
-	if printf '%s\n' "${output}" | grep -qE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+'; then
+	if grep -qE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+' <<<"${output}"; then
 		checks="$(printf '%s\n' "${output}" |
 			grep -oE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+' |
 			grep -oE '[0-9]+' | awk '{s += $1} END {print s + 0}')"

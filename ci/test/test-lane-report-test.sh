@@ -208,7 +208,7 @@ run_fixture() {
 	# absent declaration stays the empty string, which is the backward-compatible
 	# case and must keep classifying as it always did.
 	fixture_checks=""
-	if echo "${fixture_output}" | grep -qE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+'; then
+	if grep -qE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+' <<<"${fixture_output}"; then
 		fixture_checks=$(echo "${fixture_output}" |
 			grep -oE '^[[:space:]]*CHECKS:[[:space:]]*[0-9]+' |
 			grep -oE '[0-9]+' | awk '{s += $1} END {print s + 0}')
