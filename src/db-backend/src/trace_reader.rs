@@ -333,7 +333,62 @@ pub trait TraceReader: std::fmt::Debug + Send {
     /// Return a slice of steps starting from `start_id` to the end.
     ///
     /// Returns an empty slice when `start_id` is out of bounds.
+    ///
+    /// # This is the MATERIALIZING accessor
+    ///
+    /// A borrowed contiguous slice cannot be synthesized from a chunked
+    /// stream, so a reader backed by a seekable `steps.dat` has to build the
+    /// WHOLE step table to answer it — which is exactly what M0's gate is
+    /// about. Every caller that only walks forward (or backward) until some
+    /// condition holds should use [`scan_steps_from`](Self::scan_steps_from)
+    /// instead, which is bounded by how far it actually walks.
     fn steps_from(&self, start_id: StepId) -> &[DbStep];
+
+    /// Visit steps in trace order starting from the one adjacent to `start_id`,
+    /// stopping as soon as `visit` returns `false`.
+    ///
+    /// `forward == true` visits `start_id + 1, start_id + 2, …`;
+    /// `forward == false` visits `start_id - 1, start_id - 2, …, 0`.
+    /// The step at `start_id` itself is never visited, matching what every
+    /// caller of [`steps_from`](Self::steps_from) did by hand with `.skip(1)`
+    /// or `[..end]`.
+    ///
+    /// # Why this exists (M0 deliverable 3, `steps_from` half)
+    ///
+    /// Ordinary step-over, step-out, continue and run-to-entry are all
+    /// "walk until a predicate holds, then stop", and they typically stop
+    /// within a handful of steps. Expressed over `steps_from` they nonetheless
+    /// force the whole-table build, because the slice they ask for runs to the
+    /// end of the trace. Expressed here, a reader with a seekable step stream
+    /// serves each visited step from its chunk-aligned lazy cache, so the cost
+    /// is proportional to the distance walked rather than to the trace length —
+    /// which is what lets a trace larger than a tab's memory budget navigate.
+    ///
+    /// The default implementation walks `steps_from`, so a reader with a fully
+    /// materialized step table behaves exactly as it did before.
+    fn scan_steps_from(&self, start_id: StepId, forward: bool, visit: &mut dyn FnMut(&DbStep) -> bool) {
+        if start_id.0 < 0 {
+            return;
+        }
+        if forward {
+            let tail = self.steps_from(start_id);
+            for step in tail.iter().skip(1) {
+                if !visit(step) {
+                    return;
+                }
+            }
+        } else {
+            let all_steps = self.steps_from(StepId(0));
+            let end = start_id.0 as usize;
+            if end <= all_steps.len() {
+                for step in all_steps[..end].iter().rev() {
+                    if !visit(step) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
 
     /// Iterate over all `(path_string, PathId)` entries in the path map.
     ///
@@ -822,24 +877,21 @@ pub trait TraceReader: std::fmt::Debug + Send {
         };
         let mut current_step_id = start_step_id;
 
-        // Iterate using steps_from slice, skipping the first element (the start step itself).
-        let steps_slice = self.steps_from(start_step_id);
-        let iter: Box<dyn Iterator<Item = &DbStep>> = if forward {
-            // Skip the first element (the start step itself).
-            Box::new(steps_slice.iter().skip(1))
-        } else {
-            // For backward iteration, we need all steps before start_step_id.
-            // steps_from gives us [start_step_id..end], but we need [0..start_step_id) reversed.
-            let all_steps = self.steps_from(StepId(0));
-            let end = start_step_id.0 as usize;
-            if end <= all_steps.len() {
-                Box::new(all_steps[..end].iter().rev())
-            } else {
-                Box::new(std::iter::empty())
-            }
-        };
-
-        for new_step in iter {
+        // M0/3 — a BOUNDED walk, not a slice.
+        //
+        // This loop stops at the first step shallow enough to be the
+        // destination, which for ordinary step-over is a handful of steps
+        // away. It used to express that over `steps_from`, whose borrowed
+        // slice runs to the end of the trace and therefore forced the whole
+        // step table to be materialized on a seekable reader — on the very
+        // first navigation command, which is BlockTracer's exact use case.
+        // `scan_steps_from` walks the same steps in the same order and lets
+        // the reader serve them from wherever it can afford to.
+        //
+        // The backward direction was the worse of the two: it asked for
+        // `steps_from(StepId(0))` — the entire trace — purely to walk a few
+        // steps back from the current position.
+        self.scan_steps_from(start_step_id, forward, &mut |new_step| {
             let new_call_key = new_step.call_key;
             current_step_id = new_step.step_id;
             let Some(new_call) = self.call(new_call_key) else {
@@ -849,16 +901,15 @@ pub trait TraceReader: std::fmt::Debug + Send {
                     current_step_id,
                     self.call_count()
                 );
-                break;
+                return false;
             };
 
             info!("for returned: {:?} with depth: {:?}", new_step, new_call.depth);
 
             // depth - delta can be < 0: compare as i64 to avoid underflow.
-            if (new_call.depth as i64) <= initial_call_depth - (delta as i64) {
-                break;
-            }
-        }
+            // Stop here when the step is at or above the target depth.
+            (new_call.depth as i64) > initial_call_depth - (delta as i64)
+        });
 
         current_step_id
     }

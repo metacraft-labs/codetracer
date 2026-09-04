@@ -4153,22 +4153,39 @@ impl Handler {
     fn get_call_target(&self, loc: &SourceCallJumpTarget) -> Option<StepId> {
         let mut line: Line = Line(loc.line as i64);
         let mut path_id: PathId = self.load_path_id(&loc.path)?;
-        // TODO: eventually expose slice index? not obvious if easy
-        // for now this is not often
-        for step in self.reader.steps_from(self.step_id) {
-            let call = self
-                .reader
-                .call(step.call_key)
-                .expect("get_call_target: invalid call_key");
-            let function = self
-                .reader
-                .function(call.function_id)
-                .expect("get_call_target: invalid function_id");
+        // M0/3 — a BOUNDED forward walk. This used to iterate
+        // `steps_from(self.step_id)`, whose borrowed slice runs to the end of
+        // the trace and so forced the whole step table to be materialized for a
+        // loop that breaks at the first step whose enclosing function matches
+        // the clicked token — normally within a few steps of the cursor. (The
+        // old `TODO: eventually expose slice index?` here was asking for
+        // exactly this.)
+        //
+        // `scan_steps_from` skips its start step and `steps_from` included it,
+        // so the current step is tested first.
+        let mut check = |step: &crate::db::DbStep| -> bool {
+            let Some(call) = self.reader.call(step.call_key) else {
+                // A frameless step has no enclosing call; it cannot match a
+                // function name, so keep walking rather than panicking. The
+                // `expect` this replaces would have killed the worker.
+                return true;
+            };
+            let Some(function) = self.reader.function(call.function_id) else {
+                return true;
+            };
             if loc.token == function.name {
                 line = function.line;
                 path_id = function.path_id;
-                break;
+                return false;
             }
+            true
+        };
+        let keep_going = match self.reader.step(self.step_id) {
+            Some(current) => check(current),
+            None => true,
+        };
+        if keep_going {
+            self.reader.scan_steps_from(self.step_id, true, &mut check);
         }
 
         if let Some(step_id) = self.get_closest_step_id(&SourceLocation {

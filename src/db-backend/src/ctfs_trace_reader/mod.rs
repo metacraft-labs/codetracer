@@ -3385,6 +3385,72 @@ impl TraceReader for CTFSTraceReader {
         if start < items.len() { &items[start..] } else { &[] }
     }
 
+    /// M0/3 — the BOUNDED walk that replaces `steps_from` for navigation.
+    ///
+    /// On the lazy step path each visited step is served by
+    /// `LazyStepCache::get`, which fills only that step's chunk-aligned range
+    /// and memoizes it. A walk of `k` steps therefore touches
+    /// `ceil(k / chunk_size) + 1` chunks at most, rather than building the
+    /// whole `Vec<DbStep>` plus the per-path line→steps map that
+    /// `lazy_full_steps` builds. That difference is the M0 gate: a step-over on
+    /// a trace larger than a tab's memory budget now costs one chunk, not the
+    /// trace.
+    ///
+    /// Off the lazy path (legacy `events.log` bundles, Rust-writer combined
+    /// bundles, column-aware traces) `db.steps` is already fully materialized,
+    /// so this walks it directly — identical to the inherited default, without
+    /// its redundant re-slicing.
+    fn scan_steps_from(&self, start_id: StepId, forward: bool, visit: &mut dyn FnMut(&DbStep) -> bool) {
+        if start_id.0 < 0 {
+            return;
+        }
+        let start = start_id.0 as usize;
+
+        if let Some(lazy) = self.lazy_steps.as_ref() {
+            let count = lazy.len();
+            if forward {
+                for index in (start + 1)..count {
+                    // A step the stream cannot reconstruct ends the walk. It
+                    // is not an empty result: the caller keeps whatever it has
+                    // reached, exactly as the slice walk did when it ran off
+                    // the end.
+                    let Some(step) = lazy.get(StepId(index as i64)) else {
+                        return;
+                    };
+                    if !visit(step) {
+                        return;
+                    }
+                }
+            } else {
+                for index in (0..std::cmp::min(start, count)).rev() {
+                    let Some(step) = lazy.get(StepId(index as i64)) else {
+                        return;
+                    };
+                    if !visit(step) {
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        let items: &[DbStep] = &self.db.steps.items;
+        if forward {
+            for step in items.iter().skip(start + 1) {
+                if !visit(step) {
+                    return;
+                }
+            }
+        } else {
+            let end = std::cmp::min(start, items.len());
+            for step in items[..end].iter().rev() {
+                if !visit(step) {
+                    return;
+                }
+            }
+        }
+    }
+
     fn path_entries_iter(&self) -> Box<dyn Iterator<Item = (&str, PathId)> + '_> {
         Box::new(self.db.path_map.iter().map(|(s, &id)| (s.as_str(), id)))
     }

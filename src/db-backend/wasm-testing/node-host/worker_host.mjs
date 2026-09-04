@@ -26,6 +26,26 @@ if (!parentPort) {
   throw new Error('worker_host.mjs must be run as a worker_threads Worker');
 }
 
+// --- optional log silencing (opt-in; off by default) -----------------------
+//
+// `wasm_logger` is initialised at `Config::default()`, so the engine emits a
+// `console.log` per DAP request and several per navigation. Those lines are
+// exactly what a probe wants to read — and exactly what a BENCHMARK must not
+// measure. In a `worker_threads` worker, `console.log` writes to the parent's
+// stdout through a cross-thread stream, so the logging is charged to the worker
+// arm and not to an in-process one: leaving it on makes the transport look
+// expensive for a reason that has nothing to do with the transport.
+//
+// Opt-in, so every existing probe keeps its diagnostics unchanged.
+if (process.env.CT_SILENCE_ENGINE_LOG === '1') {
+  const noop = () => {};
+  console.log = noop;
+  console.debug = noop;
+  console.info = noop;
+  console.warn = noop;
+  console.error = noop;
+}
+
 // --- DedicatedWorkerGlobalScope -------------------------------------------
 class DedicatedWorkerGlobalScope {
   static [Symbol.hasInstance](value) {
