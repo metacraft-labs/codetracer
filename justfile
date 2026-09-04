@@ -646,7 +646,7 @@ ensure-storybook-static *args:
       target="src/tests/gui/$arg"
     fi
 
-    if [ -d "$target" ] && find "$target" -name '*storybook*.spec.ts' -print -quit | grep -q .; then
+    if [ -d "$target" ] && [ -n "$(find "$target" -name '*storybook*.spec.ts' -print -quit)" ]; then
       needs_storybook=1
     fi
   done

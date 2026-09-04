@@ -493,20 +493,20 @@ commands recorded by build.sh (name<TAB>argv):
 $(cut -f1,3 <"$build_trace" | sed 's/^/    /')
 build.sh stdout+stderr:
 $(sed 's/^/    /' "$build_trace.out" 2>/dev/null | tail -n 25)"
-	elif printf '%s' "$livereload_argv" | grep -qF -- "$expected_out_root"; then
+	elif grep -qF -- "$expected_out_root" <<<"$livereload_argv"; then
 		pass "(F) livereload watches $expected_out_root"
 	else
 		fail "(F) livereload watches $expected_out_root" "livereload argv: $livereload_argv"
 	fi
 
 	if [ "$expected_branch" = "tup" ]; then
-		if argv_of "$build_trace" tup | grep -qE '(^| )monitor( |$)'; then
+		if grep -qE '(^| )monitor( |$)' <<<"$(argv_of "$build_trace" tup)"; then
 			pass "(F') build.sh starts tup monitor"
 		else
 			fail "(F') build.sh starts tup monitor" "no 'tup monitor' record"
 		fi
 	else
-		if argv_of "$build_trace" repro | grep -qE '(^| )watch( |$)'; then
+		if grep -qE '(^| )watch( |$)' <<<"$(argv_of "$build_trace" repro)"; then
 			pass "(F') build.sh starts repro watch"
 		else
 			fail "(F') build.sh starts repro watch" \
@@ -517,7 +517,7 @@ $(sed 's/^/    /' "$build_trace.out" 2>/dev/null | tail -n 25)"
 	# --- (G) build-once.sh starts NO watcher --------------------------------
 	# `just build-once` must return; a watch-mode flag leaking into it would
 	# make CI hang rather than fail.
-	if argv_of "$once_trace" webpack | grep -q -- '--watch'; then
+	if grep -q -- '--watch' <<<"$(argv_of "$once_trace" webpack)"; then
 		fail "(G) build-once.sh starts no watcher" \
 			"build-once.sh invoked webpack --watch: $(argv_of "$once_trace" webpack)"
 	elif [ -n "$(first_index "$once_trace" livereload)" ]; then

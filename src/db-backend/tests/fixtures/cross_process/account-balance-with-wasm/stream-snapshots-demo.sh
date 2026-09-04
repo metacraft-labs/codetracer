@@ -131,7 +131,7 @@ require_bin cargo "the Rust toolchain builds the WASM tier"
 require_bin node "runs the Vite build and the page driver"
 require_bin npx "ships with Node.js"
 
-if ! rustc --print target-list 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
+if ! grep -qx 'wasm32-unknown-unknown' <<<"$(rustc --print target-list 2>/dev/null)"; then
 	missing+=("- rustc cannot target wasm32-unknown-unknown (rustup target add wasm32-unknown-unknown)")
 fi
 

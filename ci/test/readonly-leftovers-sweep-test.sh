@@ -276,7 +276,7 @@ run_body() {
 }
 
 expect_line() {
-	if printf '%s' "${OUT}" | grep -qF "$1"; then
+	if grep -qF "$1" <<<"${OUT}"; then
 		pass "$2"
 	else
 		fail "$2" "${OUT}"

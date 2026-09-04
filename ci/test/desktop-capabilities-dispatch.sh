@@ -582,7 +582,7 @@ fi
 # A stale allowlist entry is a failure, so the exemption list cannot outlive
 # the reason it was added.
 for entry in ${CAPS_UNDECLARED_ALLOWLIST[@]+"${CAPS_UNDECLARED_ALLOWLIST[@]}"}; do
-	if describe_commands | grep -qx -- "$entry"; then
+	if grep -qx -- "$entry" <<<"$(describe_commands)"; then
 		ok "allowlisted command '$entry' is still advertised by the core"
 	else
 		bad "CAPS_UNDECLARED_ALLOWLIST names '$entry', which the core no longer advertises — remove the entry"

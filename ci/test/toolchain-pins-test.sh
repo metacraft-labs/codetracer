@@ -222,7 +222,7 @@ expect_rc() {
 
 expect_says() {
 	local needle="$1" what="$2"
-	if printf '%s' "$OUT" | grep -qF -- "$needle"; then
+	if grep -qF -- "$needle" <<<"$OUT"; then
 		pass "$what"
 	else
 		fail "$what: output does not contain '$needle'" "$(printf '%s' "$OUT" | tail -8)"
@@ -231,7 +231,7 @@ expect_says() {
 
 expect_silent_on() {
 	local needle="$1" what="$2"
-	if printf '%s' "$OUT" | grep -qF -- "$needle"; then
+	if grep -qF -- "$needle" <<<"$OUT"; then
 		fail "$what: output wrongly contains '$needle'" "$(printf '%s' "$OUT" | tail -8)"
 	else
 		pass "$what"

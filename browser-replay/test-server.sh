@@ -50,7 +50,7 @@ fi
 
 # Test 4: CORS headers
 CORS=$(curl -sk -D - -o /dev/null "$BASE_URL/traces/test/meta.json" | grep -i "access-control-allow-origin" | head -1)
-if echo "$CORS" | grep -q "\*"; then
+if grep -q "\*" <<<"$CORS"; then
 	pass "CORS header present"
 else
 	fail "CORS header missing: $CORS"
@@ -58,7 +58,7 @@ fi
 
 # Test 5: Alt-Svc header (HTTP/3 advertisement)
 ALT_SVC=$(curl -sk -D - -o /dev/null "$BASE_URL/health" | grep -i "alt-svc" | head -1)
-if echo "$ALT_SVC" | grep -qi "h3"; then
+if grep -qi "h3" <<<"$ALT_SVC"; then
 	pass "Alt-Svc header advertises HTTP/3"
 else
 	fail "Alt-Svc header missing or no h3: $ALT_SVC"
@@ -66,7 +66,7 @@ fi
 
 # Test 6: Accept-Ranges header
 ACCEPT_RANGES=$(curl -sk -D - -o /dev/null "$BASE_URL/traces/test/trace.ct" | grep -i "accept-ranges" | head -1)
-if echo "$ACCEPT_RANGES" | grep -qi "bytes"; then
+if grep -qi "bytes" <<<"$ACCEPT_RANGES"; then
 	pass "Accept-Ranges: bytes header present"
 else
 	fail "Accept-Ranges header missing: $ACCEPT_RANGES"

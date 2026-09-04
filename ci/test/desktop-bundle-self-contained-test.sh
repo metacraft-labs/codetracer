@@ -124,7 +124,7 @@ run_guard() {
 # status would pass while the guard failed for an unrelated reason.
 expect_line() {
 	# expect_line <substring> <label>
-	if printf '%s' "${OUT}" | grep -qF "$1"; then
+	if grep -qF "$1" <<<"${OUT}"; then
 		pass "$2"
 	else
 		fail "$2" "${OUT}"
@@ -132,7 +132,7 @@ expect_line() {
 }
 
 expect_no_line() {
-	if printf '%s' "${OUT}" | grep -qF "$1"; then
+	if grep -qF "$1" <<<"${OUT}"; then
 		fail "$2" "${OUT}"
 	else
 		pass "$2"
@@ -449,7 +449,7 @@ if [ "${NOCHMOD_RC}" -ne 0 ]; then
 else
 	fail "a stager that does not restore owner-write FAILS" "${NOCHMOD_OUT}"
 fi
-if printf '%s' "${NOCHMOD_OUT}" | grep -q 'UNWRITABLE DIRS'; then
+if grep -q 'UNWRITABLE DIRS' <<<"${NOCHMOD_OUT}"; then
 	pass "the failing stager names the unwritable directories as the reason"
 else
 	fail "the failing stager names the unwritable directories as the reason" \
@@ -480,7 +480,7 @@ if [ "${RELINK_RC}" -eq 0 ]; then
 else
 	fail "relink exits 0 when every escape is fixable" "${RELINK_OUT}"
 fi
-if printf '%s' "${RELINK_OUT}" | grep -q 'symlinks relinked   : 1'; then
+if grep -q 'symlinks relinked   : 1' <<<"${RELINK_OUT}"; then
 	pass "relink reports the count it rewrote"
 else
 	fail "relink reports the count it rewrote" "${RELINK_OUT}"
@@ -501,7 +501,7 @@ if [ "${RELINK_RC}" -ne 0 ]; then
 else
 	fail "relink fails on an escape outside any node_modules" "${RELINK_OUT}"
 fi
-if printf '%s' "${RELINK_OUT}" | grep -q 'Contents/MacOS/stray'; then
+if grep -q 'Contents/MacOS/stray' <<<"${RELINK_OUT}"; then
 	pass "relink names the escape it could not fix"
 else
 	fail "relink names the escape it could not fix" "${RELINK_OUT}"

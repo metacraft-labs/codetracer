@@ -178,7 +178,7 @@ fi
 # Group 2 — --verify against checkouts (the non-circular arm)
 # ===========================================================================
 run "$FIX" --verify "$FIX/siblings"
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q "RESULT: PASSED — all $EXPECTED_COUNT declared sibling"; then
+if [ "$RC" -eq 0 ] && grep -q "RESULT: PASSED — all $EXPECTED_COUNT declared sibling" <<<"$OUT"; then
 	pass "--verify passes when all $EXPECTED_COUNT checkouts are at their pins, and says how many"
 else
 	fail "--verify passes when all $EXPECTED_COUNT checkouts are at their pins" "exit $RC: $OUT"
@@ -190,7 +190,7 @@ cp -R "$FIX" "$MUT"
 git -C "$MUT/siblings/codetracer-trace-format" -c user.email=t@t -c user.name=t \
 	commit -q --allow-empty -m "drift"
 run "$MUT" --verify "$MUT/siblings"
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "codetracer-trace-format: built from .* but this commit pins"; then
+if [ "$RC" -ne 0 ] && grep -q "codetracer-trace-format: built from .* but this commit pins" <<<"$OUT"; then
 	pass "MUTATION a sibling moved off its pin -> reddens the revision-equality assertion"
 else
 	fail "MUTATION a sibling moved off its pin -> reddens the revision-equality assertion" \
@@ -202,7 +202,7 @@ MUT="$TMP/absent"
 cp -R "$FIX" "$MUT"
 rm -rf "$MUT/siblings/codetracer-native-recorder"
 run "$MUT" --verify "$MUT/siblings"
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "codetracer-native-recorder: no checkout at"; then
+if [ "$RC" -ne 0 ] && grep -q "codetracer-native-recorder: no checkout at" <<<"$OUT"; then
 	pass "MUTATION an absent sibling -> FAILS loudly; it does not read as 'nothing to check'"
 else
 	fail "MUTATION an absent sibling -> FAILS loudly" \
@@ -214,7 +214,7 @@ MUT="$TMP/dirty"
 cp -R "$FIX" "$MUT"
 echo scratch >"$MUT/siblings/codetracer-trace-format-nim/uncommitted.txt"
 run "$MUT" --verify "$MUT/siblings"
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "codetracer-trace-format-nim: at the pinned commit .* uncommitted change"; then
+if [ "$RC" -ne 0 ] && grep -q "codetracer-trace-format-nim: at the pinned commit .* uncommitted change" <<<"$OUT"; then
 	pass "MUTATION a dirty sibling at the right SHA -> reddens the dirtiness assertion"
 else
 	fail "MUTATION a dirty sibling at the right SHA -> reddens the dirtiness assertion" \
@@ -226,7 +226,7 @@ MUT="$TMP/nongit"
 cp -R "$FIX" "$MUT"
 rm -rf "$MUT/siblings/codetracer-trace-format/.git"
 run "$MUT" --verify "$MUT/siblings"
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "codetracer-trace-format: .* is not a git checkout"; then
+if [ "$RC" -ne 0 ] && grep -q "codetracer-trace-format: .* is not a git checkout" <<<"$OUT"; then
 	pass "MUTATION a non-git sibling directory -> reddens the revision-establishable assertion"
 else
 	fail "MUTATION a non-git sibling directory -> reddens the revision-establishable assertion" \
@@ -251,7 +251,7 @@ PY
 		"the arm could not be applied: the SIBLINGS array literal has changed shape, so this arm is measuring nothing and must be repaired rather than left reporting 'could not be measured'."
 else
 	run "$MUT" --verify "$MUT/siblings"
-	if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "resolved 0 sibling pins"; then
+	if [ "$RC" -ne 0 ] && grep -q "resolved 0 sibling pins" <<<"$OUT"; then
 		pass "MUTATION an emptied sibling list -> reddens the vacuity guard, not some later check"
 	else
 		fail "MUTATION an emptied sibling list -> reddens the vacuity guard" \
@@ -266,8 +266,8 @@ MUT="$TMP/unparseable"
 cp -R "$FIX" "$MUT"
 printf 'this is not json' >"$MUT/flake.lock"
 run "$MUT"
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "did not parse as JSON"; then
-	if printf '%s' "$OUT" | grep -q "does not pin every declared build sibling"; then
+if [ "$RC" -ne 0 ] && grep -q "did not parse as JSON" <<<"$OUT"; then
+	if grep -q "does not pin every declared build sibling" <<<"$OUT"; then
 		fail "MUTATION an unparseable flake.lock -> says PARSE, not 'unpinned'" \
 			"it printed the parse diagnostic and then the false accusation underneath it, which is worse than printing the false one alone: $OUT"
 	else
@@ -287,7 +287,7 @@ d["nodes"]["codetracer-trace-format_4"]["locked"]["rev"] = "dev"
 json.dump(d, open(p, "w"))
 PY
 run "$MUT"
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "does not pin every declared build sibling"; then
+if [ "$RC" -ne 0 ] && grep -q "does not pin every declared build sibling" <<<"$OUT"; then
 	pass "MUTATION a non-SHA locked.rev -> reddens the 40-hex assertion (a branch name is not a pin)"
 else
 	fail "MUTATION a non-SHA locked.rev -> reddens the 40-hex assertion" "exit $RC: $OUT"
@@ -303,7 +303,7 @@ del d["nodes"]["root"]["inputs"]["codetracer-native-recorder"]
 json.dump(d, open(p, "w"))
 PY
 run "$MUT"
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "codetracer-native-recorder not-a-root-input"; then
+if [ "$RC" -ne 0 ] && grep -q "codetracer-native-recorder not-a-root-input" <<<"$OUT"; then
 	pass "MUTATION a sibling dropped from flake.nix -> named explicitly, not silently unpinned"
 else
 	fail "MUTATION a sibling dropped from flake.nix -> named explicitly" "exit $RC: $OUT"

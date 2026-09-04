@@ -161,7 +161,7 @@ fi
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" ]; then
 	export PATH="$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug:$PATH"
 	if command -v patchelf >/dev/null 2>&1 && command -v ldd >/dev/null 2>&1; then
-		if ldd "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" 2>/dev/null | grep -qE "liblldb.*not found|libstdc\+\+.*not found"; then
+		if grep -qE "liblldb.*not found|libstdc\+\+.*not found" <<<"$(ldd "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" 2>/dev/null)"; then
 			_ct_lldb_dir=""
 			if command -v nix >/dev/null 2>&1; then
 				_ct_lldb_dir="$(nix build --no-link --print-out-paths nixpkgs#lldb 2>/dev/null)/lib"
@@ -549,7 +549,7 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] &&
 	# patchelf pass — only when the rustc binary still points at the
 	# generic-Linux interpreter (i.e. has never been patched).
 	if command -v patchelf >/dev/null 2>&1 && command -v file >/dev/null 2>&1 &&
-		file "$_ct_sbf_pt/rust/bin/rustc" 2>/dev/null | grep -q "/lib64/ld-linux"; then
+		grep -q "/lib64/ld-linux" <<<"$(file "$_ct_sbf_pt/rust/bin/rustc" 2>/dev/null)"; then
 		_ct_sbf_glibc=""
 		if command -v nix >/dev/null 2>&1; then
 			_ct_sbf_glibc="$(nix build --no-link --print-out-paths nixpkgs#glibc.out 2>/dev/null)"
@@ -563,8 +563,8 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] &&
 			_ct_sbf_rpath="$_ct_sbf_pt/rust/lib:$_ct_sbf_pt/llvm/lib:$_ct_sbf_zlib/lib:$_ct_sbf_gcc:$_ct_sbf_glibc/lib"
 			_ct_sbf_ld="$_ct_sbf_glibc/lib/ld-linux-x86-64.so.2"
 			find "$_ct_sbf_pt" -type f \( -executable -o -name '*.so*' \) 2>/dev/null | while read -r _ct_sbf_f; do
-				if file "$_ct_sbf_f" 2>/dev/null | grep -q 'dynamically linked\|ELF.*shared object'; then
-					if file "$_ct_sbf_f" 2>/dev/null | grep -q 'pie executable\|executable'; then
+				if grep -q 'dynamically linked\|ELF.*shared object' <<<"$(file "$_ct_sbf_f" 2>/dev/null)"; then
+					if grep -q 'pie executable\|executable' <<<"$(file "$_ct_sbf_f" 2>/dev/null)"; then
 						patchelf --set-interpreter "$_ct_sbf_ld" --set-rpath "$_ct_sbf_rpath" "$_ct_sbf_f" 2>/dev/null || true
 					else
 						patchelf --set-rpath "$_ct_sbf_rpath" "$_ct_sbf_f" 2>/dev/null || true

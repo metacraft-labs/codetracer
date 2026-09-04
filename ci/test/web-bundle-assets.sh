@@ -291,7 +291,7 @@ build renderer src/frontend/ui_js.nim "${out_dir}/ui.js" \
 # `window` beside the third-party bundle's.
 scope_bundle() {
 	local label="$1" file="$2"
-	if head -c 12 "${file}" | grep -q '^(function()'; then
+	if grep -q '^(function()' <<<"$(head -c 12 "${file}")"; then
 		ok "${label}: already scoped"
 		return
 	fi
@@ -608,7 +608,7 @@ else
 	bad "the manifest declares only ${asset_rows} /assets/ row(s) — the rename loop is vacuous"
 fi
 worker_published="$(awk -F'\t' '$2=="wasm-worker"{print $3}' "${published_tsv}")"
-if printf '%s' "${worker_published}" | grep -qE '/assets/wasm-worker\.[0-9a-fA-F]{6,}\.js$'; then
+if grep -qE '/assets/wasm-worker\.[0-9a-fA-F]{6,}\.js$' <<<"${worker_published}"; then
 	ok "wasm-worker, by name, is published content-addressed at ${worker_published}"
 else
 	bad "wasm-worker is published at '${worker_published}', which carries no digest — /assets/* cannot be immutable"

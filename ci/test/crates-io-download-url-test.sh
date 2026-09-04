@@ -223,14 +223,14 @@ probe_drv_json=$(nix derivation show -r ".#packages.$SYSTEM.backend-manager.carg
 	grep -E "crate-$PROBE_CRATE-$PROBE_VERSION|$PROBE_CHECKSUM" |
 	sort -u)
 
-if printf '%s\n' "$probe_drv_json" | grep -q "$PROBE_CHECKSUM"; then
+if grep -q "$PROBE_CHECKSUM" <<<"$probe_drv_json"; then
 	pass "crate-$PROBE_CRATE-$PROBE_VERSION keeps the outputHash its Cargo.lock records"
 else
 	fail "crate-$PROBE_CRATE-$PROBE_VERSION keeps the outputHash its Cargo.lock records" \
 		"the rewrite changed the fixed-output hash: every cached crate would be orphaned"
 fi
 
-if printf '%s\n' "$probe_drv_json" | grep -q "crate-$PROBE_CRATE-$PROBE_VERSION"; then
+if grep -q "crate-$PROBE_CRATE-$PROBE_VERSION" <<<"$probe_drv_json"; then
 	pass "crate-$PROBE_CRATE-$PROBE_VERSION keeps its derivation name"
 else
 	fail "crate-$PROBE_CRATE-$PROBE_VERSION keeps its derivation name" \

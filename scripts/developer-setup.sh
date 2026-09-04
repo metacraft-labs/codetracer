@@ -142,7 +142,7 @@ echo
 
 # Validate username before interpolating into sudo script
 CURRENT_USER="$(whoami)"
-if ! echo "$CURRENT_USER" | grep -qE '^[a-zA-Z_][a-zA-Z0-9_.-]*$'; then
+if ! grep -qE '^[a-zA-Z_][a-zA-Z0-9_.-]*$' <<<"$CURRENT_USER"; then
 	echo "Error: unexpected characters in username: $CURRENT_USER"
 	exit 1
 fi

@@ -189,7 +189,7 @@ print(d.get("dependencies", {}).get("electron", ""))
 	echo "  ${PIN_MANIFEST}: electron = ${declared:-<absent>}"
 	if [ -z "${declared}" ]; then
 		report FAILED "pin manifest declares electron"
-	elif ! printf '%s' "${declared}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+	elif ! grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' <<<"${declared}"; then
 		report FAILED "declared Electron version is EXACT (got '${declared}', which is a range)"
 	else
 		report PASSED "declared Electron version is EXACT (${declared})"

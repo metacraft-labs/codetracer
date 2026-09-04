@@ -94,12 +94,18 @@ run_gate() {
 
 # `check_failed <label> <needle>` — did the check whose text contains <needle>
 # report FAILED?
+#
+# The lines are extracted into a variable rather than piped into `grep -q`: the
+# consumer exits on its first match, the producing `grep -F` takes EPIPE, and
+# under the `set -o pipefail` at the top of this file the pipeline reports 141.
+# In `check_failed` that turns a mutation the suite DID catch into "SURVIVED";
+# in `check_passed` it turns a green baseline into a red one.
 check_failed() {
-	grep -F "[FAILED]" "${cache}/$1.log" | grep -qF "$2"
+	grep -qF "$2" <<<"$(grep -F "[FAILED]" "${cache}/$1.log")"
 }
 # `check_passed <label> <needle>`
 check_passed() {
-	grep -F "[OK]" "${cache}/$1.log" | grep -qF "$2"
+	grep -qF "$2" <<<"$(grep -F "[OK]" "${cache}/$1.log")"
 }
 
 # THE BASELINE, and the reason `check_passed` above exists. It was written and

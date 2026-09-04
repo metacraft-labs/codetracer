@@ -98,21 +98,21 @@ else
 	echo "=== Test: ct print reads request spans out of a .ct container ==="
 	STREAM_OUT=$("$CT" print "$WITH_SPANS")
 	echo "$STREAM_OUT"
-	if echo "$STREAM_OUT" | grep -q "Total: 9 requests"; then
+	if grep -q "Total: 9 requests" <<<"$STREAM_OUT"; then
 		echo "PASS: 9 requests read from the span stream"
 	else
 		echo "FAIL: expected 9 requests from the span stream"
 		exit 1
 	fi
 	# Spot-check one row end to end: method, URL, status and duration.
-	if echo "$STREAM_OUT" | grep -qE "GET .*/api/users .*200 .*12ms"; then
+	if grep -qE "GET .*/api/users .*200 .*12ms" <<<"$STREAM_OUT"; then
 		echo "PASS: request columns rendered from the stream"
 	else
 		echo "FAIL: expected a 'GET /api/users 200 12ms' row"
 		exit 1
 	fi
 	# The process-descriptor span shares the stream but is not a request row.
-	if echo "$STREAM_OUT" | grep -q "php-fpm"; then
+	if grep -q "php-fpm" <<<"$STREAM_OUT"; then
 		echo "FAIL: the process span must not be printed as a request"
 		exit 1
 	fi
@@ -122,7 +122,7 @@ else
 	ERR_OUT=$("$CT" print "$WITH_SPANS" --filter errors)
 	echo "$ERR_OUT"
 	# Spans 6 (404), 7 (500) and 10 (502) carry status=error.
-	if echo "$ERR_OUT" | grep -q "Total: 3 requests"; then
+	if grep -q "Total: 3 requests" <<<"$ERR_OUT"; then
 		echo "PASS: error filter narrowed the stream rows"
 	else
 		echo "FAIL: expected 3 error requests"
@@ -133,7 +133,7 @@ else
 	echo "=== Test: ct print --verify counts span-stream requests ==="
 	VERIFY_OUT=$("$CT" print "$WITH_SPANS" --verify)
 	echo "$VERIFY_OUT"
-	if echo "$VERIFY_OUT" | grep -qE "HTTP requests: +9"; then
+	if grep -qE "HTTP requests: +9" <<<"$VERIFY_OUT"; then
 		echo "PASS: --verify reports the span-stream request count"
 	else
 		echo "FAIL: --verify should report 9 HTTP requests"
@@ -151,11 +151,11 @@ else
 EOF
 	PREFER_OUT=$("$CT" print "$SESSION")
 	echo "$PREFER_OUT"
-	if echo "$PREFER_OUT" | grep -q "/stale"; then
+	if grep -q "/stale" <<<"$PREFER_OUT"; then
 		echo "FAIL: ct print used the stale sidecar instead of the span stream"
 		exit 1
 	fi
-	if echo "$PREFER_OUT" | grep -q "Total: 9 requests"; then
+	if grep -q "Total: 9 requests" <<<"$PREFER_OUT"; then
 		echo "PASS: the container's span stream took precedence over the sidecar"
 	else
 		echo "FAIL: expected the 9 span-stream requests"
@@ -171,7 +171,7 @@ EOF
 EOF
 	LEGACY_OUT=$("$CT" print "$LEGACY")
 	echo "$LEGACY_OUT"
-	if echo "$LEGACY_OUT" | grep -q "/legacy"; then
+	if grep -q "/legacy" <<<"$LEGACY_OUT"; then
 		echo "PASS: a span-free container still prints its legacy sidecar"
 	else
 		echo "FAIL: expected the sidecar row for a span-free container"

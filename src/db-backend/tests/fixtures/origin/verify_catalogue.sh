@@ -46,7 +46,7 @@ errors=()
 
 check_file_present_with_ext() {
 	local dir="$1" ext="$2" label="$3"
-	if ! find "$dir" -maxdepth 1 -type f -name "*${ext}" -print -quit | grep -q .; then
+	if [ -z "$(find "$dir" -maxdepth 1 -type f -name "*${ext}" -print -quit)" ]; then
 		errors+=("$label: no source file matching *$ext in $dir")
 	fi
 }

@@ -382,7 +382,7 @@ ls -al "${APP_DIR}"/lib
 try_patchelf() {
 	local binary="$1"
 	shift
-	if file "$binary" | grep -q "statically linked"; then
+	if grep -q "statically linked" <<<"$(file "$binary")"; then
 		echo "Skipping patchelf for statically-linked binary: $binary"
 		return 0
 	fi

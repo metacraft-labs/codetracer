@@ -91,7 +91,7 @@ if [ "${a_rc}" = 3 ]; then
 else
 	ck no "arm A exit 3 (got ${a_rc})"
 fi
-if printf '%s\n' "${a}" | grep -q "1 registered known failure"; then
+if grep -q "1 registered known failure" <<<"${a}"; then
 	ck ok "and SAYS it did — the count is printed, never silent"
 else
 	ck no "arm A announces the registration"
@@ -113,12 +113,12 @@ if [ "${b_rc}" = 1 ]; then
 else
 	ck no "arm B exit 1 (got ${b_rc})"
 fi
-if printf '%s\n' "${b}" | grep -q "registered red"; then
+if grep -q "registered red" <<<"${b}"; then
 	ck ok "and names the test whose entry must be deleted"
 else
 	ck no "arm B names the test"
 fi
-if printf '%s\n' "${b}" | grep -qi "delete its row"; then
+if grep -qi "delete its row" <<<"${b}"; then
 	ck ok "and says what to do about it"
 else
 	ck no "arm B says what to do"
@@ -144,12 +144,12 @@ if [ "${c_rc}" = 1 ]; then
 else
 	ck no "arm C exit 1 (got ${c_rc})"
 fi
-if printf '%s\n' "${c}" | grep -q "not for the registered reason"; then
+if grep -q "not for the registered reason" <<<"${c}"; then
 	ck ok "and says so, rather than reporting a generic red"
 else
 	ck no "arm C explains"
 fi
-if printf '%s\n' "${c}" | grep -q "BecauseOfWidgetDefect"; then
+if grep -q "BecauseOfWidgetDefect" <<<"${c}"; then
 	ck ok "and quotes the signature it expected to find"
 else
 	ck no "arm C quotes the expected signature"
@@ -169,7 +169,7 @@ if [ "${d_rc}" = 1 ]; then
 else
 	ck no "arm D exit 1 (got ${d_rc})"
 fi
-if printf '%s\n' "${d}" | grep -q "a brand new red"; then
+if grep -q "a brand new red" <<<"${d}"; then
 	ck ok "and names the new one specifically"
 else
 	ck no "arm D names the new failure"
@@ -191,7 +191,7 @@ if [ "${e_rc}" = 1 ]; then
 else
 	ck no "arm E exit 1 (got ${e_rc})"
 fi
-if printf '%s\n' "${e}" | grep -q "no verdict for it at all"; then
+if grep -q "no verdict for it at all" <<<"${e}"; then
 	ck ok "and names that as the reason, not 'it passed'"
 else
 	ck no "arm E explains"
@@ -219,14 +219,14 @@ echo "Arm G: an entry with no signature is refused at load time"
 # ---------------------------------------------------------------------------
 printf 'demo\tsuite/a.nim\tregistered red\t\n' >"${work}/known-test-failures.tsv"
 g="$(printf '%s\n' "[OK] x" | run demo suite/a.nim)"
-if printf '%s\n' "${g}" | grep -q "must be non-empty"; then
+if grep -q "must be non-empty" <<<"${g}"; then
 	ck ok "a row without a signature is rejected, not treated as a wildcard"
 else
 	ck no "arm G rejects a signature-less row"
 fi
 printf 'demo\tsuite/a.nim\tonly three fields\n' >"${work}/known-test-failures.tsv"
 g2="$(printf '%s\n' "[OK] x" | run demo suite/a.nim)"
-if printf '%s\n' "${g2}" | grep -q "expected 4 tab-separated fields"; then
+if grep -q "expected 4 tab-separated fields" <<<"${g2}"; then
 	ck ok "a malformed row is a hard error, not a silently dropped entry"
 else
 	ck no "arm G rejects a malformed row"
@@ -243,7 +243,7 @@ if [ "${h_rc}" = 1 ]; then
 else
 	ck no "arm H exit 1 (got ${h_rc})"
 fi
-if printf '%s\n' "${h_out}" | grep -q "suite/a.nim"; then
+if grep -q "suite/a.nim" <<<"${h_out}"; then
 	ck ok "and names the unreachable entry"
 else
 	ck no "arm H names the entry"

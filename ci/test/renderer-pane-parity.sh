@@ -219,7 +219,7 @@ fi
 
 # Positive control on the PARSE, not on the bundles: a pane everyone knows is
 # there. Without it a parse returning junk could still clear the count above.
-if printf '%s\n' "${registry}" | grep -qx "EventLog"; then
+if grep -qx "EventLog" <<<"${registry}"; then
 	ok "positive control: the parse finds Content.EventLog, a pane known to be dispatched"
 else
 	bad "positive control FAILED: the parse does not find Content.EventLog — it is reading something other than makeComponent's arms"
@@ -365,7 +365,7 @@ for pane in Debug Build BuildErrors Status SearchResults Menu WelcomeScreen \
 	StepList LowLevelCode AgentActivity AgentWorkspace CaptionBarProgress \
 	PixelHistory ShaderDebug VideoPlayer AgentActivityDeepReview RequestPanel \
 	VCS UnifiedDiff; do
-	if ! printf '%s\n' "${registry}" | grep -qx "${pane}"; then
+	if ! grep -qx "${pane}" <<<"${registry}"; then
 		bad "the budget lists Content.${pane} and makeComponent no longer dispatches it — lower the budget in the same commit that removed the pane"
 		stale=$((stale + 1))
 	fi

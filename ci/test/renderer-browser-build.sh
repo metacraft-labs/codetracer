@@ -137,7 +137,7 @@ echo "    it is the one an editor is most likely to undo by 'tidying' the"
 echo "    backend list. Step 2 proves it is load-bearing against the compiler."
 # ---------------------------------------------------------------------------
 for lane in renderer-electron renderer-web; do
-	if test_lane_ids | grep -qx "${lane}"; then
+	if grep -qx "${lane}" <<<"$(test_lane_ids)"; then
 		ok "${lane} is a registered lane id"
 	else
 		bad "${lane} is NOT in test_lane_ids — nothing would ever run it"
@@ -180,12 +180,12 @@ fi
 
 # The subject itself. A lane whose file list lost the entry point would still
 # exit 0 over its remaining files.
-if test_lane_files renderer-web | grep -qx "src/frontend/ui_js.nim"; then
+if grep -qx "src/frontend/ui_js.nim" <<<"$(test_lane_files renderer-web)"; then
 	ok "renderer-web's file list names the renderer entry point"
 else
 	bad "renderer-web does not list src/frontend/ui_js.nim — the lane has no subject"
 fi
-if test_lane_files renderer-electron | grep -qx "src/frontend/ui_js.nim"; then
+if grep -qx "src/frontend/ui_js.nim" <<<"$(test_lane_files renderer-electron)"; then
 	ok "renderer-electron's file list names the renderer entry point"
 else
 	bad "renderer-electron does not list src/frontend/ui_js.nim"
@@ -206,7 +206,7 @@ nodejs_out="$(nim js -d:nodejs -d:chronicles_enabled=off -d:ctRenderer \
 nodejs_rc=$?
 if [ "${nodejs_rc}" -ne 0 ]; then
 	ok "the renderer does NOT compile with -d:nodejs (exit ${nodejs_rc}), so the backend split is load-bearing"
-	if printf '%s' "${nodejs_out}" | grep -q "createElementNS"; then
+	if grep -q "createElementNS" <<<"${nodejs_out}"; then
 		ok "and it fails for the recorded reason: kdom's createElementNS is absent under -d:nodejs"
 	else
 		# Not a failure. The claim under test is "this configuration does not

@@ -170,7 +170,7 @@ build_module() {
 	# it: a build that emitted something else, or a truncated copy, must not
 	# reach a publish directory and fail inside `WebAssembly.compile` where the
 	# message names neither this script nor that file.
-	if ! head -c 4 "${built}" | od -An -tx1 | tr -d ' \n' | grep -q '^0061736d'; then
+	if ! grep -q '^0061736d' <<<"$(head -c 4 "${built}" | od -An -tx1 | tr -d ' \n')"; then
 		echo "  ${artifact} does not begin with the wasm magic" >&2
 		return 1
 	fi

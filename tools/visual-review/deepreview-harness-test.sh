@@ -196,7 +196,7 @@ for required_view in \
 	diff-flow-values \
 	diff-long-line \
 	diff-other-language; do
-	if printf '%s\n' "${VIEW_NAMES}" | grep -qx "${required_view}"; then
+	if grep -qx "${required_view}" <<<"${VIEW_NAMES}"; then
 		ok "the matrix defines the '${required_view}' view"
 	else
 		bad "the matrix defines the '${required_view}' view" "known views: $(printf '%s' "${VIEW_NAMES}" | paste -sd' ' -)"

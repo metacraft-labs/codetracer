@@ -111,7 +111,7 @@ if [ -n "$ct_reprobuild_host" ]; then
 	ct_publish_build_env "$ct_reprobuild_host" "$ct_config" "" "$ct_repro_out_root"
 	if [ -z "${REPRO_VARIANTS:-}" ]; then
 		export REPRO_VARIANTS="buildType=${ct_config}"
-	elif ! printf '%s' "$REPRO_VARIANTS" | grep -q "buildType="; then
+	elif ! grep -q "buildType=" <<<"$REPRO_VARIANTS"; then
 		export REPRO_VARIANTS="${REPRO_VARIANTS},buildType=${ct_config}"
 	fi
 

@@ -414,7 +414,14 @@ note "written to catch. So the check above is run against a planted violation."
 plant 'proc ns1QualifiedViolation*(p: string): bool =
   ## Planted by ci/test/hostfree-build.sh and removed again.
   os.fileExists(p)'
-if strip_comments "${VICTIM}" | grep -qE "${QUALIFIED_RE}"; then
+# HERE-STRING, NOT `strip_comments ... | grep -qE ...`. `${VICTIM}` is a whole
+# Nim module, so the stripped text is far larger than a pipe buffer: `grep -q`
+# exits on the first match, `strip_comments` takes EPIPE, and under the
+# `set -o pipefail` at the top of this file the pipeline reports 141 for a
+# match that succeeded. Both arms of this scenario were exposed, and the second
+# one (below) inverts into a FALSE GREEN: it reports "the check ignores a local
+# named 'files'" whenever the EPIPE race is won, whatever the regex does.
+if grep -qE "${QUALIFIED_RE}" <<<"$(strip_comments "${VICTIM}")"; then
 	ok "the qualified-call check detects a planted os.fileExists"
 else
 	bad "the qualified-call check did NOT detect a planted os.fileExists"
@@ -430,7 +437,7 @@ plant 'proc ns1QualifiedFalsePositiveBait*(): int =
   ## prose, which is not a call.
   var files = @["a", "b"]
   files.len'
-if strip_comments "${VICTIM}" | grep -qE "${QUALIFIED_RE}"; then
+if grep -qE "${QUALIFIED_RE}" <<<"$(strip_comments "${VICTIM}")"; then
 	bad "the qualified-call check fires on a local named 'files' or on prose"
 	note "That is a false positive, and a noisy check is a deleted check."
 else

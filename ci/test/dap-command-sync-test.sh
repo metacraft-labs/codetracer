@@ -66,7 +66,7 @@ expect() {
 	fi
 	local needle
 	for needle in "$@"; do
-		if ! printf '%s' "${output}" | grep -qF -- "${needle}"; then
+		if ! grep -qF -- "${needle}" <<<"${output}"; then
 			ok=0
 			echo "  [FAILED] ${name}: output lacks '${needle}'"
 		fi
@@ -271,7 +271,7 @@ expect "commands that appear only under #[cfg(test)] are not required" \
 	0 "${status}" "${out}" \
 	"OK: every engine-dispatched command"
 checks=$((checks + 1))
-if printf '%s' "${out}" | grep -qF "only-in-tests"; then
+if grep -qF "only-in-tests" <<<"${out}"; then
 	failures=$((failures + 1))
 	echo "  [FAILED] a #[cfg(test)] command leaked into the engine set"
 else

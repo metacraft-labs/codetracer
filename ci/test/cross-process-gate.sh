@@ -99,7 +99,7 @@ done
 
 [ "$(printf '%s\n' "$cross_process_job" | grep -c 'CT_CROSS_PROCESS_REQUIRED: "1"$')" -eq 1 ] ||
 	fail "cross-process workflow must enable required mode exactly once"
-if printf '%s\n' "$cross_process_job" | grep -Eq 'continue-on-error:|CT_CROSS_PROCESS_REQUIRED: "0"'; then
+if grep -Eq 'continue-on-error:|CT_CROSS_PROCESS_REQUIRED: "0"' <<<"$cross_process_job"; then
 	fail "cross-process workflow must not tolerate gate failures or disable required mode"
 fi
 for required_line in \
@@ -326,7 +326,7 @@ expect_failure() {
 	status=$?
 	set -e
 	[ "$status" -ne 0 ] || fail "$description unexpectedly succeeded"
-	printf '%s\n' "$output" | grep -Fq "$fragment" ||
+	grep -Fq "$fragment" <<<"$output" ||
 		fail "$description did not report '$fragment': $output"
 }
 
@@ -397,7 +397,7 @@ rust_skip_output="$(FAKE_RUST_SKIP=1 run_gate 2>&1)"
 rust_skip_status=$?
 set -e
 [ "$rust_skip_status" -ne 0 ] || fail "Rust skip sentinel unexpectedly succeeded"
-printf '%s\n' "$rust_skip_output" | grep -Fq 'emitted a skip sentinel' ||
+grep -Fq 'emitted a skip sentinel' <<<"$rust_skip_output" ||
 	fail "Rust skip sentinel reported the wrong failure"
 
 set +e
@@ -405,7 +405,7 @@ rust_count_output="$(FAKE_RUST_COUNT=9 run_gate 2>&1)"
 rust_count_status=$?
 set -e
 [ "$rust_count_status" -ne 0 ] || fail "wrong Rust execution count unexpectedly succeeded"
-printf '%s\n' "$rust_count_output" | grep -Fq 'did not report exactly 10 executed' ||
+grep -Fq 'did not report exactly 10 executed' <<<"$rust_count_output" ||
 	fail "wrong Rust execution count reported the wrong failure"
 
 # The three-recording target is the one that proves the feature works
@@ -417,7 +417,7 @@ three_trace_skip_status=$?
 set -e
 [ "$three_trace_skip_status" -ne 0 ] ||
 	fail "three-recording skip sentinel unexpectedly succeeded"
-printf '%s\n' "$three_trace_skip_output" | grep -Fq 'emitted a skip sentinel' ||
+grep -Fq 'emitted a skip sentinel' <<<"$three_trace_skip_output" ||
 	fail "three-recording skip sentinel reported the wrong failure"
 
 set +e
@@ -426,7 +426,7 @@ three_trace_count_status=$?
 set -e
 [ "$three_trace_count_status" -ne 0 ] ||
 	fail "wrong three-recording execution count unexpectedly succeeded"
-printf '%s\n' "$three_trace_count_output" | grep -Fq 'did not report exactly 5 executed' ||
+grep -Fq 'did not report exactly 5 executed' <<<"$three_trace_count_output" ||
 	fail "wrong three-recording execution count reported the wrong failure"
 
 set +e
@@ -434,7 +434,7 @@ rust_manifest_output="$(FAKE_RUST_MANIFEST_DRIFT=1 run_gate 2>&1)"
 rust_manifest_status=$?
 set -e
 [ "$rust_manifest_status" -ne 0 ] || fail "Rust manifest drift unexpectedly succeeded"
-printf '%s\n' "$rust_manifest_output" | grep -Fq 'manifest differs from the required test set' ||
+grep -Fq 'manifest differs from the required test set' <<<"$rust_manifest_output" ||
 	fail "Rust manifest drift reported the wrong failure"
 
 set +e
@@ -442,7 +442,7 @@ dap_skip_output="$(FAKE_DAP_SKIP=1 run_gate 2>&1)"
 dap_skip_status=$?
 set -e
 [ "$dap_skip_status" -ne 0 ] || fail "list-processes skip sentinel unexpectedly succeeded"
-printf '%s\n' "$dap_skip_output" | grep -Fq 'emitted a skip sentinel' ||
+grep -Fq 'emitted a skip sentinel' <<<"$dap_skip_output" ||
 	fail "list-processes skip sentinel reported the wrong failure"
 
 set +e
@@ -450,7 +450,7 @@ dap_count_output="$(FAKE_DAP_COUNT=4 run_gate 2>&1)"
 dap_count_status=$?
 set -e
 [ "$dap_count_status" -ne 0 ] || fail "wrong list-processes execution count unexpectedly succeeded"
-printf '%s\n' "$dap_count_output" | grep -Fq 'did not report exactly 5 executed' ||
+grep -Fq 'did not report exactly 5 executed' <<<"$dap_count_output" ||
 	fail "wrong list-processes execution count reported the wrong failure"
 
 set +e
