@@ -741,7 +741,7 @@ fi
 if [ "${failures}" -eq 0 ]; then
 	if [ "${debug_unmeasured:-0}" = "1" ]; then
 		echo "RESULT: OK — ${checks} check(s), 0 failure(s)"
-		echo "  NOTE: the Debug half was NOT measured here (see above); 8 per-entry"
+		echo "  NOTE: the Debug half was NOT measured here (see above); 9 per-entry"
 		echo "        Debug checks had no subject on this surface."
 		exit 0
 	fi
