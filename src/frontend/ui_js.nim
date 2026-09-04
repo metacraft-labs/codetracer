@@ -3087,6 +3087,13 @@ proc handleDapReplaySelected(response: JsObject; sendInitialize: bool) =
   # exotic one. `enterCompletedReplayMode` documents what breaks without it.
   if not activeSessionVM.isNil:
     activeSessionVM.store.enterCompletedReplayMode()
+    # AND A BACKEND IS NOW REACHABLE, which is the fact the store's
+    # request tracker has been missing. Every panel VM issued its first
+    # request from `configureMiddleware`, before this point, into a
+    # channel with no peer; those entries are still marked pending and
+    # would deduplicate the first real request away. See
+    # `resetForNewSession`.
+    activeSessionVM.store.resetForNewSession()
   infoPrint "ui: reinitializing dap for trace ", $trace.recordingId
   if sendInitialize:
     data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
@@ -3105,6 +3112,10 @@ proc handleDapLiveSessionSelected(response: JsObject; sendInitialize: bool) =
   data.activeSession.liveDebugSession = true
   if not activeSessionVM.isNil:
     activeSessionVM.store.setSessionMode(liveMcr)
+    # Same reason as the replay arm above: the boot-time requests were
+    # issued before any backend existed and must not deduplicate the
+    # first real one away.
+    activeSessionVM.store.resetForNewSession()
   infoPrint "ui: initializing live dap session for trace ", $trace.recordingId
   if sendInitialize:
     data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
@@ -6241,6 +6252,18 @@ when defined(ctWeb) and not defined(ctInExtension):
           if debugLayout.isNil:
             cerror "replay: the bundled debug layout did not parse"
             return
+          # THE ENGINE IS READY, and this is the first point on the web path
+          # where that fact and `activeSessionVM` are in the same scope.
+          #
+          # `web_replay_host.openSession` calls this closure only after
+          # `outcome.ready` and after the dap responder is installed — i.e.
+          # after the worker exists and the channel has a peer. Everything
+          # the panel ViewModels asked for BEFORE this moment was issued
+          # from `configureMiddleware` into a channel that dropped it, and
+          # those requests are still recorded as in flight. See
+          # `ReplayDataStore.resetForNewSession`.
+          if not activeSessionVM.isNil:
+            activeSessionVM.store.resetForNewSession()
           # A REPLAY SESSION HAS A TRACE, and until now `data.trace` was nil.
           #
           # `onNoTrace` sets it nil (there is no recording on an editing

@@ -519,6 +519,50 @@ proc clearRequestSpans*(store: ReplayDataStore) =
   store.requestSpans.source.val = ""
   store.requestSpans.loadingState.val = lsIdle
 
+proc resetForNewSession*(store: ReplayDataStore) =
+  ## Forget the requests a previous session — or no session at all — left
+  ## outstanding, now that there is a backend able to answer.
+  ##
+  ## WHY A STORE CAN HOLD A REQUEST THAT WAS NEVER ASKED. The panel
+  ## ViewModels issue their first request from an effect that runs at
+  ## CONSTRUCTION, and construction happens in `configureMiddleware` —
+  ## before `openSession` has made a worker on the web path, and before
+  ## the DAP session is selected on the desktop one. `requestLocals` marks
+  ## `"load-locals"` pending, hands the frame to a channel with no peer
+  ## (`ipc.send` warns `no host for ...` and drops it), and the future is
+  ## never settled, so `markComplete` in its `onComplete` is never reached.
+  ##
+  ## The entry then outlives the moment it was made for. When the worker
+  ## does arrive and the first move re-fires the effect, the request is
+  ## byte-identical — `rrTicks` is 0 at every position on a db-backend
+  ## trace, so the dedup key `"0|"` matches exactly — and `isDuplicate`
+  ## returns true. The store skips the send. Nothing asks, nothing
+  ## answers, and the pane sits on the `lsLoading` the dead boot request
+  ## set, waiting for a reply to a question that was never put. Thirty
+  ## seconds later the DAP timeout (`dap.nim:428`) settles the original
+  ## future, `markComplete` finally runs, and the pane converts from a
+  ## stuck spinner into a silently empty one — a clear that arrives after
+  ## the moment it was needed is not a clear.
+  ##
+  ## `ui/calltrace.nim:383` already carries this fix by hand, for one key
+  ## (`"load-calltrace"`) at one handover. This is the same repair made
+  ## once, for every key, at the moment that actually defines it: a
+  ## backend became reachable, so nothing recorded before now is in
+  ## flight.
+  ##
+  ## THE LOADING FLAG GOES WITH IT. Clearing the tracker alone would let
+  ## the next request through but leave `lsLoading` set from the dead one,
+  ## so the pane would paint "Loading..." over rows it had already
+  ## received. The flag and the tracker entry were set by the same
+  ## statement pair (`replay_data_store.nim:710-711`); they are cleared
+  ## by the same one.
+  ##
+  ## Issuing one duplicate request is the acceptable failure here. A
+  ## request asked twice is answered twice; a request never asked is
+  ## never answered.
+  store.requestTracker.clear()
+  store.locals.loadingState.val = lsIdle
+
 proc requestRequestSpansSince*(store: ReplayDataStore) =
   ## Poll for spans committed since the stored cursor.
   ##
