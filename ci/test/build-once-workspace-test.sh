@@ -95,25 +95,34 @@ readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
 # real gap, so closing one forces its deletion; adding one is a deliberate,
 # reviewed act. There is no ceiling and no wildcard: an unlisted gap fails.
 #
-# Both entries below are the SAME cause, and it is not in this repository.
-# `clone-siblings` resolves a bare entry from the workspace lock published for
-# the commit under test, and the `codetracer` project in
-# metacraft-labs/metacraft-manifests does not declare `isonim` or `runquota` --
-# the lock for d05e45f97e449c03 names 96 repos and neither of those. A bare
-# entry for either fails `Setup dev env` outright with "the workspace lock for
-# codetracer@<sha> pins no revision for these sibling(s)". The two ways to
-# spell around that are both closed on purpose: `launcher-recorder-e2e.yml`'s
-# planner refuses any `<name>=<ref>` entry, and a new branch-tip pin would
-# break the shrink-only ceiling in ci/test/sibling-provisioning-test.sh.
+# THE TWO launcher-recorder-e2e GAPS THAT WERE HERE ARE CLOSED (defect #152).
+# They were recorded as un-closable because the `codetracer` project in
+# metacraft-labs/metacraft-manifests declares neither `isonim` nor `runquota`,
+# so a BARE entry fails `Setup dev env` with "the workspace lock for
+# codetracer@<sha> pins no revision for these sibling(s)" -- and both ways of
+# spelling around it looked shut: the planner refuses a `<name>=<ref>` entry,
+# and a branch-tip pin would breach the shrink-only ceiling in
+# ci/test/sibling-provisioning-test.sh.
+#
+# Both of those are narrower than they read. The planner's `=<ref>` guard
+# covers the THREE REPOS UNDER TEST it emits itself, not the literal block
+# beside it; and the ceiling counts BRANCH TIPS, which a 40-hex commit SHA is
+# not -- that suite's own classify_ref calls it `sha` and accepts it. So
+# launcher-recorder-e2e.yml now pins both to the revisions this repo's
+# flake.lock already pins them to, which is also the only value that keeps the
+# tup driver (which reads ../isonim and ../runquota) and the nix driver (which
+# reads flake.lock) on one tree. The remedy below is still the right end state
+# and is still owed; the SHAs are a bridge, and deleting them once the manifest
+# declares the two repos is a one-line change.
 #
 # REMEDY, and it is a change in another repository: declare `isonim` and
 # `runquota` in codetracer's project manifest, publish a lock
 # (`repro workspace lock --trigger-repo=codetracer`, in a workspace whose
 # `.repro/manifests` is a real git checkout -- where it is a plain directory
-# the lock is generated and then silently dropped), then add the two names to
-# the `siblings:` block in launcher-recorder-e2e.yml and delete these lines.
+# the lock is generated and then silently dropped), then drop the `=<sha>` from
+# the two entries in launcher-recorder-e2e.yml's `siblings:` block.
 #
-# THE OTHER TWO JOBS ARE A DIFFERENT CASE and are recorded as FOUND, not as
+# THE REMAINING FOUR ARE A DIFFERENT CASE and are recorded as FOUND, not as
 # accepted. This suite's first run reported them, they are static facts about
 # the workflow file, and no CI run has yet corroborated them because neither
 # job has reached `build-once` recently -- `viewmodel-tests` died in `Setup dev
@@ -122,10 +131,6 @@ readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
 # listed rather than fixed because fixing them means editing jobs this change
 # cannot exercise; each line says what is missing and what would close it.
 KNOWN_GAPS=(
-	# The lock cannot answer for these two -- see the paragraph above.
-	"launcher-recorder-e2e.yml|launcher-recorder-e2e|isonim"
-	"launcher-recorder-e2e.yml|launcher-recorder-e2e|runquota"
-
 	# viewmodel-tests provisions the IsoNim family through
 	# .github/actions/setup-isonim-siblings and adds codetracer-trace-format-nim,
 	# codetracer-js-recorder and runquota as clone-repo steps -- but not

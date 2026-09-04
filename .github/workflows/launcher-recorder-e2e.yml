@@ -79,14 +79,22 @@
 #   `libs/tree-sitter-nim` submodule included.
 #
 # SIBLING PINNING -- the workspace lock, per policy (LRC-6)
-#   Every sibling below is a BARE REPO NAME.  `clone-siblings` then resolves
-#   each revision from the per-commit WORKSPACE LOCK published for the commit
-#   under test (its NEED_LOCK=1 path: it clones
+#   Almost every sibling below is a BARE REPO NAME.  `clone-siblings` then
+#   resolves each revision from the per-commit WORKSPACE LOCK published for the
+#   commit under test (its NEED_LOCK=1 path: it clones
 #   metacraft-labs/metacraft-manifests@latest and reads the lock through the
 #   bundled resolve-sibling-rev.sh).  The set of names comes from this repo's
 #   blessed clone-list, `.github/sibling-repos`.  Both halves are
 #   metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2, which is
 #   the org-wide rule and not this gate's to re-decide.
+#
+#   TWO ENTRIES ARE THE STATED EXCEPTION, and they carry a 40-hex commit SHA:
+#   `isonim` and `runquota` are not declared in codetracer's project manifest,
+#   so the lock HAS no revision for them and a bare entry fails `Setup dev env`
+#   outright.  A commit SHA is the other reproducible shape `clone-siblings`
+#   accepts -- unlike `=<branch>`, it names the same tree on every re-run.  The
+#   full reasoning, the measurement behind it and the condition for removing it
+#   are at the `siblings:` block itself; see "THE REMAINING TWO" there.
 #
 #   THE REPO UNDER TEST IS STILL PINNED TO `github.sha`, and gets there without
 #   an input: it is the PRIMARY `actions/checkout` (see WORKSPACE LAYOUT
@@ -470,28 +478,61 @@ jobs:
         # per BLOCK, and a block naming one half only is the defect it names).
         # The repeat costs one extra clone of an already-pinned revision.
         #
-        # THE REMAINING TWO ARE NOT IN THIS REPO'S GIFT.  `isonim` and
-        # `runquota` are absent from the `codetracer` project in
-        # metacraft-labs/metacraft-manifests, so the lock has no revision for
-        # them and a bare entry would fail this step outright with
+        # THE REMAINING TWO ARE PINNED BY COMMIT SHA, because the lock cannot
+        # answer for them.  `isonim` and `runquota` are absent from the
+        # `codetracer` project in metacraft-labs/metacraft-manifests, so a BARE
+        # entry does not merely fail to help -- it fails this step outright with
         #
         #   The workspace lock for codetracer@<sha> pins no revision for these
         #   sibling(s): isonim runquota
         #
-        # -- verified against the published lock for d05e45f97e449c03, which
-        # names 96 repos and neither of those.  The two escape hatches are both
-        # closed on purpose and must stay closed: a `<name>=<ref>` entry is
-        # refused by the planner's own guard above (revisions come from the
-        # lock), and it would also push this repo past the shrink-only
-        # branch-tip ceiling in ci/test/sibling-provisioning-test.sh.
+        # That those two, and only those two, are what still stops this gate was
+        # MEASURED, not inferred.  Run 33816756641 (dev @ cf503bc22d8e6c9c) is
+        # the six-repo version of this block: `clone-siblings` resolved all ten
+        # bare entries from the lock without a warning ("Cloned 10 sibling(s)"),
+        # and `just build-once` then died 30 seconds later with
         #
-        # So this gate cannot go green from this repository alone.  The remedy
-        # is to declare `isonim` and `runquota` in codetracer's project manifest
-        # and publish a new lock -- `repro workspace lock --trigger-repo=
-        # codetracer` in a workspace whose `.repro/manifests` is a real git
-        # checkout -- and then add the two names to the block below.
-        # ci/test/launcher-recorder-e2e-workflow-test.sh holds that gap as a
-        # named, shrink-only exception so it cannot be forgotten or widened.
+        #   Cannot start the CodeTracer build: 2 required sibling repo(s) are
+        #   missing.
+        #     * isonim    -- .../_work/codetracer/isonim/src/isonim.nim
+        #     * runquota  -- .../_work/codetracer/runquota/libs/
+        #                    runquota_process/src/runquota_process.nim
+        #
+        # on all three matrix arms, before a compiler was started.  The other
+        # six of the original eight had already been closed; these are the last
+        # two, and they are the whole of defect #152.
+        #
+        # WHY A 40-HEX SHA AND NOT `=dev`.  `clone-siblings` accepts four entry
+        # shapes and only two of them are reproducible: a bare (lock-resolved)
+        # entry, and an immutable commit SHA.  `=dev` is a branch TIP -- a
+        # different revision on every re-run of the same commit -- which
+        # `clone-siblings` itself emits a `::warning:: ... not reproducible` for,
+        # and which ci/test/sibling-provisioning-test.sh caps with a SHRINK-ONLY
+        # ceiling that this block must not push past.  That suite classifies a
+        # 40-hex ref as `sha` and accepts it silently, so these two entries cost
+        # nothing against the ceiling and re-running an old job still clones the
+        # tree that job was built against.
+        #
+        # WHERE THESE TWO SHAS COME FROM -- this repo's own `flake.lock`, which
+        # is the only defensible source for them.  `isonim` and `runquota` are
+        # flake INPUTS here, and their locked revs are what the `ci` dev shell
+        # and the reprobuild driver COMPILE against.  The tup driver, meanwhile,
+        # reads `../isonim` and `../runquota` by relative path (src/Tuprules.tup)
+        # and so reads these CHECKOUTS.  Pinning the checkouts to the same revs
+        # as flake.lock is what keeps those two resolvers looking at one tree.
+        # Run 33021054045 is what the mismatch costs: the `ci` shell would not
+        # compile against the runquota revision this repo pinned, and the direnv
+        # step below reported it as a missing direnv.  So when flake.lock's
+        # `isonim` / `runquota` inputs are bumped, bump these two with them --
+        # they are one pin spelled in two places, not two independent knobs.
+        #
+        # THE PROPER FIX IS STILL IN ANOTHER REPOSITORY, and this is a bridge to
+        # it, not a replacement for it: declare `isonim` and `runquota` in
+        # codetracer's project manifest and publish a lock (`repro workspace lock
+        # --trigger-repo=codetracer`, in a workspace whose `.repro/manifests` is
+        # a real git checkout -- where it is a plain directory the lock is
+        # generated and then silently dropped).  When that lands, delete the
+        # `=<sha>` from both entries and they resolve like every other name here.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
@@ -510,6 +551,10 @@ jobs:
             codetracer-trace-format
             codetracer-trace-format-nim
             codetracer-native-recorder
+            # Not in the workspace lock -- pinned to flake.lock's revs. See
+            # "THE REMAINING TWO" above before changing either of these.
+            isonim=9936c544925004bada019204b5b111f39d1a54bf
+            runquota=f1ca742d19c7b981eeea0fba8b4e029207f43778
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot
