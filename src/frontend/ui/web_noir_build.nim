@@ -173,7 +173,8 @@ var
     ## `VfsResponse.acir_listing` answers without it, and the pane must then
     ## say it has no counts rather than show a number from somewhere else.
   noirGeneratedCodeSink*: proc(listing: string; artefactJson: string;
-                               packageDir: string; provenance: string)
+                               projectRoot: string; packageDir: string;
+                               provenance: string)
     ## Where a finished COMPILE's RAW OUTPUTS go, for the generated-code
     ## operation. `Generated-Code-Listing.md` §1, §8.
     ##
@@ -201,6 +202,16 @@ var
     ## reason: a compiler module older than `VfsResponse.acir_listing` answers
     ## without a listing, and the surface must then say so rather than render
     ## an empty document.
+    ##
+    ## `projectRoot` AND `packageDir` ARE BOTH CARRIED, and the pair is
+    ## load-bearing rather than redundant. The artefact spells its source paths
+    ## the way the COMPILER was handed them (`hello_noir/src/main.nr`); the
+    ## editor opens tabs by the RENDERER's spelling
+    ## (`/hello_noir/src/main.nr`). `noir_build_producer.rendererPathFor` is
+    ## the conversion, and it needs both. A consumer given only one of them
+    ## would compare the compiler's spelling against the editor's and find no
+    ## anchor over any line — a listing that opens, is correct, and never once
+    ## aligns to the cursor it was invoked from.
 
   noirTestRunSink*: proc(response: NoirTestResponse; packageDir: string)
     ## Where a finished test run's verdicts go, besides the build pane.
@@ -532,7 +543,8 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
      not noirGeneratedCodeSink.isNil:
     let artefactJson =
       if producer.artifact.isNil: "" else: $producer.artifact
-    noirGeneratedCodeSink(producer.acirListing, artefactJson, tmpl.name,
+    noirGeneratedCodeSink(producer.acirListing, artefactJson,
+                          producer.projectRoot, producer.packageDir,
                           "compiled in this tab at " & $jsLocalTimeText())
 
   if phase == nbpCompile and verdict == npvSucceeded and
