@@ -800,6 +800,27 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # it would promise a walk that usually is not there.
           element "Verification", aVerification
           element "Start Agent Worktree Session", aStartAgenticWorktreeSession
+          # NOTIFICATIONS — the history panel's only way in.
+          #
+          # `ui/status.nim` builds the full newest-first history and
+          # `views/isonim_status_view.nim` renders it with per-entry dismiss
+          # and action buttons, all of it behind `showNotifications`. That flag
+          # had NO assignment anywhere in the tree — not even a `= false` — so
+          # it sat at the `bool` default and the panel could not be opened by
+          # any means. The status-bar toggle that used to open it was already
+          # commented out at the open-sourcing commit and its now-uncalled proc
+          # was deleted by `df4d3ef2f`; this entry is the affordance that went
+          # with it.
+          #
+          # In the menu rather than back on the status bar, for the reason
+          # `aKeyboardShortcuts` gives below: one node is all three routes at
+          # once, because `ui/menu.nim`'s `generateNameMap` feeds the command
+          # palette from this tree and `index/menu.nim` builds the native macOS
+          # menu from it. Restoring the status-bar button would also re-render
+          # `.status-button`, which `tests/gui/page-objects/status-footer-contrast.ts`
+          # lists as UNREACHABLE and whose contrast is a separate, real defect —
+          # that button should come back with its contrast fixed, not before.
+          element "Notifications", aNotifications
           # element "Step List", aStepList
             # element "Shell", aShell
             # element "Find Results", aFindResults, false
@@ -820,7 +841,7 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
           # element "New Horizontal Tab Group", aNewHorizontalTabGroup, false
           # element "New Vertical Tab Group", aNewVerticalTabGroup, false
           # --sub
-          # element "Notifications", aNotifications, false
+          # (Notifications is live, above, beside the other View entries.)
           # element "Start Window", aStartWindow, false
           # element "Full Screen Toggle", aFullScreen, false
           # folder "Choose App Theme":
@@ -986,7 +1007,36 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         macfolder "Window", "window"
         # TODO: Add this for other OS targets and add missing buttons. Added only on macOS for now, as there the menu is
         # generated automatically
-        macfolder "Help", "help"
+        #
+        # REPORT A PROBLEM — the bug report form's only way in, and it is
+        # spelled twice because the Help folder is.
+        #
+        # The form is complete: `views/isonim_status_view.nim` renders the
+        # title and description fields and the send button, rebinds that button
+        # to `sendBugReportFromDom` so the DOM values are actually read, and
+        # `ui/status.nim`'s `sendBugReport` posts them over
+        # `CODETRACER::send-bug-report-and-logs`, which `index/ipc_utils.nim`
+        # registers and `index/online_sharing.nim` handles. All of it hung off
+        # `showBugReport`, whose ONLY assignment in the whole tree set it to
+        # `false` — so the form could not be opened by any route, and
+        # `ClientAction.aReportProblem` had existed as a live enum member with
+        # a `nil` handler and no menu entry.
+        #
+        # In Help because that is where a reader looks for it, and here rather
+        # than as one plain `folder "Help"` because the existing entry is a
+        # `macfolder`: macOS owns its Help menu (role `help`, which supplies
+        # the search field), so a second all-OS folder of the same name would
+        # give macOS two. `macfolder` carries the entry on macOS,
+        # `macexclude_folder` carries it everywhere else, and neither platform
+        # sees both.
+        #
+        # Like `aKeyboardShortcuts`, one node is three routes: menu, command
+        # palette (`ui/menu.nim`'s `generateNameMap` reads this tree) and — if
+        # `default_config.yaml` ever names `aReportProblem` — a chord.
+        macfolder "Help", "help":
+          element "Report a Problem...", aReportProblem
+        macexclude_folder "Help":
+          element "Report a Problem...", aReportProblem
 
     # Add dynamic launch configurations to Debug menu if available
     if not seqIsNil(data.ui.launchConfigs) and data.ui.launchConfigs.len > 0:
@@ -5511,6 +5561,34 @@ data.actions[ClientAction.aGotoNextError] = proc(actionData: JsObject) =
   errors.gotoNextBuildError()
 data.actions[ClientAction.aGotoPreviousError] = proc(actionData: JsObject) =
   errors.gotoPreviousBuildError()
+
+# The notification history and the bug report, for the same reason and in the
+# same by-name form. `aNotifications` and `aReportProblem` are two more live
+# enum members sitting in that unbroken run of `nil`s — `aReportProblem` in the
+# four-`nil` group with `aUserManual`, `aSuggestFeature` and `aAbout` — so the
+# positional literal is exactly as unsafe to edit here as it was there.
+#
+# Both surfaces were COMPLETE and unreachable. `showNotifications` had no
+# assignment anywhere in the tree; `showBugReport`'s only one set it to
+# `false`. These two lines and the menu entries above are the whole of the
+# wiring they were missing.
+#
+# A toggle, not a one-way open, because both surfaces are status-bar popovers
+# with no dismiss control of their own — the same menu item has to close what
+# it opened. `sendBugReport` still sets `showBugReport = false` on submit, so a
+# sent report closes its own form.
+#
+# `isNil` guarded like every other `data.ui.status` reader in this file: the
+# status component is constructed with the UI and a menu action can arrive
+# before it on a slow start.
+data.actions[ClientAction.aNotifications] = proc(actionData: JsObject) =
+  if not data.ui.status.isNil:
+    data.ui.status.showNotifications = not data.ui.status.showNotifications
+    data.ui.status.redraw()
+data.actions[ClientAction.aReportProblem] = proc(actionData: JsObject) =
+  if not data.ui.status.isNil:
+    data.ui.status.showBugReport = not data.ui.status.showBugReport
+    data.ui.status.redraw()
 
 when defined(ctWeb) and not defined(ctInExtension):
   # `not defined(ctInExtension)` for the same reason the other two ENTRY arms
