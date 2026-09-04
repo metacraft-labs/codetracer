@@ -126,13 +126,7 @@ fn test_session_sequence_parse() {
 /// self-describing, so its `type` cannot be known without reading it once,
 /// and the per-command `arguments` cannot be typed until the command is
 /// known. Everything above two is re-reading bytes already in hand.
-///
-/// TODO(#222): this is set to the DEFECT's own number, not to the floor. It
-/// is here first, and deliberately loose, so that the instrument is proved to
-/// measure the tree as it stands before anything is changed underneath it —
-/// the fix commit lowers it to 2. A budget written after the fix would only
-/// ever have been observed passing.
-const INBOUND_PARSE_BUDGET: usize = 3;
+const INBOUND_PARSE_BUDGET: usize = 2;
 
 /// A representative inbound request: `launch` is the one the native server
 /// decodes most expensively (`dap_server.rs` calls
@@ -256,5 +250,94 @@ fn test_no_uncounted_inbound_deserialization() {
                 waiver["reason"].as_str().unwrap_or("(none given)")
             );
         }
+    }
+}
+
+/// The browser worker's decode, exercised from a native test.
+///
+/// `setup_onmessage_callback`'s closure is `browser-transport`-gated and
+/// needs a `DedicatedWorkerGlobalScope`, and this crate has no
+/// `wasm_bindgen_test` runner, so nothing here could ever execute it. That is
+/// exactly why it was carrying a parse the native path did not (#222): it was
+/// the one copy of the decode nothing measured.
+///
+/// `decode_inbound` is the shared, ungated function it now calls, so the
+/// budget applies to both transports. Here it is on the failure path — the
+/// only path that ever wanted the extra parse — proving the client's `seq`
+/// and `command` still come back, and that recovering them costs no second
+/// read of the payload.
+#[test]
+fn test_failed_decode_recovers_client_identity_without_reparsing() {
+    let _guard = counter_guard();
+
+    // Well-formed JSON, but not a DAP message this backend can decode. The
+    // client is nonetheless blocked on seq 41.
+    let undecodable = r#"{"seq":41,"type":"telepathy","command":"ct/guess-what-i-want"}"#;
+
+    db_backend::dap::reset_inbound_parse_count();
+    let (identity, error) = db_backend::dap::decode_inbound(undecodable).expect_err("not a decodable DAP message");
+    let passes = db_backend::dap::inbound_parse_count();
+
+    assert_eq!(
+        identity.request_seq, 41,
+        "the failure response has to name the seq the client parked its continuation under, \
+         or the request sits there until it times out"
+    );
+    assert_eq!(identity.command, "ct/guess-what-i-want");
+    assert!(format!("{error}").contains("Unknown DAP message type"));
+
+    assert_eq!(
+        passes, 1,
+        "recovering `seq` and `command` for a failure response took {passes} passes over the \
+         payload; it must take none of its own — they come out of the parse that already \
+         happened (#222)."
+    );
+}
+
+/// Building `Request` from the parsed payload by hand (rather than handing
+/// the tree back to serde) has to decode what the derive decoded.
+///
+/// This is the pass #222 removes, and the one place the fix could plausibly
+/// have changed behaviour, so the contract is pinned here: required members
+/// are still required, an absent `arguments` is still `Null`, and unknown
+/// members are still ignored (`Request` has no `deny_unknown_fields`, and DAP
+/// clients do send extra members).
+#[test]
+fn test_request_decode_contract_is_unchanged() {
+    let _guard = counter_guard();
+
+    // Unknown members ignored; `arguments` moved through verbatim.
+    let with_extras = r#"{"seq":7,"type":"request","command":"next","arguments":{"threadId":1},"clientID":"vscode"}"#;
+    match from_json(with_extras).expect("extra members are ignored, not rejected") {
+        DapMessage::Request(req) => {
+            assert_eq!(req.base.seq, 7);
+            assert_eq!(req.base.type_, "request");
+            assert_eq!(req.command, "next");
+            assert_eq!(req.arguments["threadId"], 1);
+        }
+        _ => panic!("expected request"),
+    }
+
+    // `arguments` is `#[serde(default)]`: absent means `Null`, which is what
+    // `load_args_or_default` keys "no arguments were sent" off.
+    let no_arguments = r#"{"seq":8,"type":"request","command":"threads"}"#;
+    match from_json(no_arguments).expect("arguments are optional") {
+        DapMessage::Request(req) => assert!(req.arguments.is_null()),
+        _ => panic!("expected request"),
+    }
+
+    // Required members stay required — a defaulted `seq` would answer some
+    // other request, and a defaulted `command` would run nothing.
+    for (payload, missing) in [
+        (r#"{"type":"request","command":"threads"}"#, "seq"),
+        (r#"{"seq":9,"type":"request"}"#, "command"),
+        (r#"{"seq":"nine","type":"request","command":"threads"}"#, "seq"),
+        (r#"{"seq":9,"type":"request","command":42}"#, "command"),
+    ] {
+        let err = from_json(payload).expect_err("must refuse a request missing a required member");
+        assert!(
+            format!("{err}").contains(missing),
+            "refusing {payload} should name `{missing}`; said: {err}"
+        );
     }
 }

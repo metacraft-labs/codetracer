@@ -1,4 +1,3 @@
-#[cfg(feature = "browser-transport")]
 use crate::dap_error::DapError;
 
 use crate::dap_types::{self, OutputEventBody, SetBreakpointsArguments, StoppedEventBody};
@@ -282,8 +281,17 @@ pub fn new_dap_variable(name: &str, value: &str, variables_reference: i64) -> da
 pub struct DisconnectResponseBody {}
 
 impl Request {
+    /// Deserialize this request's `arguments` into the command's own
+    /// arguments type.
+    ///
+    /// Borrows the tree rather than cloning it (#222). `arguments` is read
+    /// more than once per request in places — `dap_server.rs` reaches into it
+    /// directly for `threadId`, and `launch` is loaded from two separate arms
+    /// — so it cannot be taken; but nothing required the deep copy that
+    /// `from_value(self.arguments.clone())` made purely to hand serde
+    /// something owned.
     pub fn load_args<T: DeserializeOwned>(&self) -> DapResult<T> {
-        Ok(parse_inbound_value::<T>(self.arguments.clone())?)
+        Ok(parse_inbound_value_ref::<T>(&self.arguments)?)
     }
 
     /// Like `load_args`, but for commands whose arguments are entirely
@@ -309,7 +317,7 @@ impl Request {
         if self.arguments.is_null() {
             return Ok(T::default());
         }
-        Ok(parse_inbound_value::<T>(self.arguments.clone())?)
+        Ok(parse_inbound_value_ref::<T>(&self.arguments)?)
     }
 }
 
@@ -623,22 +631,145 @@ impl DapClient {
     }
 }
 
-pub fn from_json(s: &str) -> DapResult<DapMessage> {
-    let value: Value = parse_inbound_str(s)?;
-    match value.get("type").and_then(|v| v.as_str()) {
-        Some("request") => {
-            // if value.get("kind").and_then(|v| v.as_str()) == Some("launch") {
-            // Ok(DapMessage::Request(dap::Request::Launch(serde_json::from_value::<LaunchRequestArguments>(
-            // value,
-            // )?))
-            // } else {
-            Ok(DapMessage::Request(parse_inbound_value(value)?))
-            // }
+/// Everything a failure response needs from a message that could not be
+/// decoded: the `seq` the client parked its continuation under, and the
+/// `command` it was waiting on.
+///
+/// This is what [`decode_inbound`] hands back instead of the raw [`Value`].
+/// The browser worker used to recover the same two fields by parsing the
+/// whole payload a SECOND time, up front, on every message — including the
+/// overwhelming majority that decode fine and never look at it (#222).
+/// Carrying the two fields out of the parse that already happened costs one
+/// short string and removes that pass entirely.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct InboundFailureIdentity {
+    pub request_seq: i64,
+    pub command: String,
+}
+
+impl InboundFailureIdentity {
+    /// Best-effort identity from an already-parsed payload. Absent or
+    /// wrong-typed members give `0` / `""`, which is what a client sees today
+    /// for a message that is not JSON at all.
+    fn from_raw(raw: &Value) -> Self {
+        InboundFailureIdentity {
+            request_seq: raw.get("seq").and_then(|v| v.as_i64()).unwrap_or(0),
+            command: raw.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string(),
         }
-        Some("response") => Ok(DapMessage::Response(parse_inbound_value(value)?)),
-        Some("event") => Ok(DapMessage::Event(parse_inbound_value(value)?)),
-        _ => Err(serde_json::Error::custom("Unknown DAP message type"))?,
     }
+}
+
+/// Decode one inbound DAP message from its raw text.
+///
+/// Ungated on purpose. The browser worker's `onmessage` closure used to do
+/// its own decoding inline — a `serde_json::from_str` for the failure
+/// identity, then `from_json` — and being inside a
+/// `#[cfg(feature = "browser-transport")]` closure that needs a
+/// `DedicatedWorkerGlobalScope`, that code could not be reached by any test
+/// in this crate (there is no `wasm_bindgen_test` runner here). It was
+/// therefore the one copy of the decode path that nothing measured, which is
+/// why it carried a fourth parse the native path did not.
+///
+/// With the decode here, the closure is a caller with no `serde_json` in it,
+/// and `tests/dap_protocol.rs`'s budget covers both transports.
+///
+/// On failure it returns the [`InboundFailureIdentity`] recovered from the
+/// payload so the caller can answer the client instead of leaving the request
+/// to time out — without going back to the bytes to find it.
+pub fn decode_inbound(s: &str) -> Result<DapMessage, (InboundFailureIdentity, DapError)> {
+    // Not JSON at all: there is no `seq` to recover, and — this is the point
+    // — there is no second parse that could have recovered one either.
+    let value: Value = match parse_inbound_str(s) {
+        Ok(value) => value,
+        Err(e) => return Err((InboundFailureIdentity::default(), e.into())),
+    };
+
+    match value.get("type").and_then(|v| v.as_str()) {
+        Some("request") => request_from_value(value)
+            .map(DapMessage::Request)
+            .map_err(|(value, e)| (InboundFailureIdentity::from_raw(&value), e)),
+        // Responses and events are the client direction, not the worker's hot
+        // path, so they keep the generic serde route. The identity has to be
+        // taken before the parse consumes the tree; that is one short string
+        // per inbound response/event, against a whole extra parse per message
+        // before.
+        Some("response") => {
+            let identity = InboundFailureIdentity::from_raw(&value);
+            parse_inbound_value(value)
+                .map(DapMessage::Response)
+                .map_err(|e| (identity, e.into()))
+        }
+        Some("event") => {
+            let identity = InboundFailureIdentity::from_raw(&value);
+            parse_inbound_value(value)
+                .map(DapMessage::Event)
+                .map_err(|e| (identity, e.into()))
+        }
+        _ => Err((
+            InboundFailureIdentity::from_raw(&value),
+            serde_json::Error::custom("Unknown DAP message type").into(),
+        )),
+    }
+}
+
+/// Build a [`Request`] out of a payload that has already been parsed, without
+/// handing the tree back to serde.
+///
+/// This is the second of the three passes #222 is about. `from_value::<Request>`
+/// re-walks the whole message and, because `arguments` is itself a `Value`,
+/// DEEP-COPIES the entire arguments subtree into a fresh one — for a
+/// `setBreakpoints` with a hundred breakpoints, or a `launch` carrying a
+/// restore location, that copy is the bulk of the request. `Request` has three
+/// members and no `deny_unknown_fields`, so reading them out of the map we
+/// already own is the same decode with the copy removed: `arguments` is
+/// *moved*.
+///
+/// The struct literal at the end is the guard against drift — add a member to
+/// `Request` and this function stops compiling until it is handled here too.
+///
+/// On failure the payload is handed back intact, so the caller can still
+/// recover the client's `seq`. Nothing is removed from the map until every
+/// check has passed, which is what makes that possible.
+fn request_from_value(value: Value) -> Result<Request, (Value, DapError)> {
+    let invalid = |value: Value, message: String| (value, DapError::from(serde_json::Error::custom(message)));
+
+    let Some(object) = value.as_object() else {
+        return Err(invalid(value, "a DAP request must be a JSON object".to_string()));
+    };
+
+    // `seq` and `command` are required (no `#[serde(default)]` on either),
+    // and `arguments` is `#[serde(default)]`, so an absent one is `Null`.
+    let Some(seq) = object.get("seq").and_then(Value::as_i64) else {
+        return Err(invalid(
+            value,
+            "a DAP request needs an integer `seq`; the client's continuation is parked under it".to_string(),
+        ));
+    };
+    if !object.get("command").is_some_and(Value::is_string) {
+        return Err(invalid(value, "a DAP request needs a string `command`".to_string()));
+    }
+
+    let Value::Object(mut object) = value else {
+        unreachable!("checked above that the payload is an object")
+    };
+    let command = match object.remove("command") {
+        Some(Value::String(command)) => command,
+        _ => unreachable!("checked above that `command` is a string"),
+    };
+    let arguments = object.remove("arguments").unwrap_or(Value::Null);
+
+    Ok(Request {
+        base: ProtocolMessage {
+            seq,
+            type_: "request".to_string(),
+        },
+        command,
+        arguments,
+    })
+}
+
+pub fn from_json(s: &str) -> DapResult<DapMessage> {
+    decode_inbound(s).map_err(|(_, e)| e)
 }
 
 pub fn to_json(message: &DapMessage) -> DapResult<String> {
@@ -691,21 +822,22 @@ pub fn read_dap_message_from_reader<R: std::io::BufRead>(reader: &mut R) -> DapR
 ///
 /// `request_seq` and `command` are recovered from the raw JSON when they are
 /// there, because that is what lets the client settle the continuation it
-/// parked rather than merely learn that something went wrong.
+/// parked rather than merely learn that something went wrong. They arrive as
+/// an [`InboundFailureIdentity`] out of [`decode_inbound`]'s own parse — this
+/// function used to be handed the whole payload, which the closure had parsed
+/// a second time purely to have it (#222).
 #[cfg(feature = "browser-transport")]
-fn post_decode_failure(scope: &web_sys::DedicatedWorkerGlobalScope, raw: &Value, reason: &str) {
+fn post_decode_failure(scope: &web_sys::DedicatedWorkerGlobalScope, identity: &InboundFailureIdentity, reason: &str) {
     use wasm_bindgen::JsValue;
 
-    let request_seq = raw.get("seq").and_then(|v| v.as_i64()).unwrap_or(0);
-    let command = raw.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let response = DapMessage::Response(Response {
         base: ProtocolMessage {
             seq: 0,
             type_: "response".to_string(),
         },
-        request_seq,
+        request_seq: identity.request_seq,
         success: false,
-        command,
+        command: identity.command.clone(),
         message: Some(format!("the replay engine could not decode this message: {reason}")),
         body: serde_json::json!({}),
     });
@@ -781,7 +913,7 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
                 None => {
                     post_decode_failure(
                         &t_clone,
-                        &Value::Null,
+                        &InboundFailureIdentity::default(),
                         "the message is neither a string nor JSON-serialisable",
                     );
                     return;
@@ -794,12 +926,16 @@ pub fn setup_onmessage_callback() -> Result<(), DapError> {
         // A client whose request cannot be decoded still has a continuation
         // parked under that `seq`; answering with it settles the request
         // instead of leaving it to time out.
-        let raw_value: Value = parse_inbound_str(&dap_message_str).unwrap_or(Value::Null);
-
-        let dap_message = match from_json(&dap_message_str) {
+        //
+        // They come back OUT of the decode now. This used to be an
+        // unconditional `serde_json::from_str::<Value>` right here — a whole
+        // extra parse of every message that arrives, kept only for the rare
+        // one that fails, on the one code path in this file that no test in
+        // this crate can reach (#222).
+        let dap_message = match decode_inbound(&dap_message_str) {
             Ok(message) => message,
-            Err(e) => {
-                post_decode_failure(&t_clone, &raw_value, &format!("{e}"));
+            Err((identity, e)) => {
+                post_decode_failure(&t_clone, &identity, &format!("{e}"));
                 return;
             }
         };
