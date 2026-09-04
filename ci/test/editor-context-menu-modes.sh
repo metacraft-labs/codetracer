@@ -33,15 +33,27 @@
 # test for a menu label. Every reading comes from the DOM of a menu that was
 # opened by a right-click on rendered code.
 #
-# THE DEBUG HALF IS NOT MEASURED HERE, and the gate says so out loud rather
-# than passing over it. Measured on this bundle: switching `/noir` to Debug
-# mode through `data.functions.switchToDebug` leaves the workspace with NO
-# editor pane and no filesystem tree — `[id^=editorComponent-]` count 0, and
-# `monaco.editor.getEditors()[0].getDomNode().isConnected === false` — so there
-# is nothing in Debug mode to right-click. That is a separate defect about the
-# mode transition, not about this menu, and it is reported by the
-# `[debug/subject]` check below. The Debug half of the menu is asserted on the
-# desktop instead, where a Run produces a real session with source on screen:
+# THE DEBUG HALF IS ATTEMPTED THROUGH RUN, which is how a user of
+# `noirstudio.dev` reaches Debug mode — the probe presses the Run chord, waits
+# for the session to report a position with source on screen, and reads the menu
+# there. It needs the Noir wasm modules and the replay engine to be in the
+# bundle; without them the leg reports why.
+#
+# TWO DEFECTS CURRENTLY STAND IN FRONT OF IT, and the gate NAMES them rather
+# than passing over them or failing for them (both reproduce identically on a
+# bundle built from the pre-fix tree, so neither belongs to this change):
+#
+#   1. The mode toggle loses the editor. `switchToDebug` leaves the workspace
+#      with no editor pane and no filesystem tree — `[id^=editorComponent-]`
+#      count 0, `getDomNode().isConnected === false` — with "layout: component
+#      clear EditorView/0 raised a Defect and was skipped" in the console.
+#   2. After a Run there is an editor and no menu. The session mounts, the debug
+#      controls mount, source is painted, and a right-click on it leaves
+#      `contextmenu` NOT defaultPrevented and shows zero rows: CodeTracer's
+#      handler does not run, so the BROWSER's menu is what the user gets.
+#
+# So the Debug half is asserted on the desktop instead, where a Run produces a
+# real session with source on screen:
 # `src/tests/gui/tests/editor/editor_context_menu_is_mode_dependent.spec.ts`.
 #
 # Usage:  bash ci/test/editor-context-menu-modes.sh
@@ -540,16 +552,44 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# THE DEBUG HALF — reported, and its absence named.
+# THE DEBUG HALF — measured when there is something to measure, and NAMED when
+# there is not.
+#
+# The probe reaches Debug mode the way a user does: it presses the Run chord,
+# waits for the session to report a position with source on screen, and reads
+# the menu there. It also records what the MODE TOGGLE does, which is a
+# different and worse answer, so the two are not confused.
 # ---------------------------------------------------------------------------
 debug_opened="$(py "
 import json
 d = json.load(open('${cache}/report.json'))
 leg = (d.get('legs') or {}).get('debug') or {}
 print('yes' if leg.get('opened') else 'no:' + str(leg.get('reason')))")"
-if [ "${debug_opened}" = "yes" ]; then
+debug_count="$(names_of debug | grep -c . || true)"
+debug_line="$(py "
+import json
+d = json.load(open('${cache}/report.json'))
+print(((d.get('legs') or {}).get('debug') or {}).get('lineText') or '<none>')")"
+edit_line="$(py "
+import json
+d = json.load(open('${cache}/report.json'))
+print(((d.get('legs') or {}).get('edit') or {}).get('lineText') or '<none>')")"
+toggle_state="$(py "
+import json
+d = json.load(open('${cache}/report.json'))
+t = (d.get('legs') or {}).get('debugViaToggle') or {}
+print('viewLines=%s editorContainers=%s monacoDomConnected=%s' % (
+    t.get('viewLines'), t.get('editorContainers'), t.get('monacoDomConnected')))")"
+
+if [ "${debug_opened}" = "yes" ] && [ "${debug_count:-0}" -ge 3 ]; then
 	debug_names="$(names_of debug | paste -sd, -)"
-	ck ok "[debug/subject] the Debug-mode menu opened: ${debug_names}"
+	# THE LINE IS NAMED IN THE PASS. An empty menu on a blank line reads exactly
+	# like "the Debug entries are missing", and that is what this leg reported
+	# the first time it ran — `.view-line` exists for blank lines too, and a
+	# click past the end of one gives Monaco no position at all. Both legs'
+	# lines are printed so a reader can see they are code, and the same code.
+	ck ok "[debug/subject] the Debug-mode menu has ${debug_count} entries on" \
+		"'${debug_line}' (the Edit leg clicked '${edit_line}'): ${debug_names}"
 	for entry in "Jump to line" "Run to Cursor" "Jump backward to line" "Copy"; do
 		if has_entry debug "${entry}"; then
 			ck ok "[debug/present] '${entry}'"
@@ -574,23 +614,41 @@ else
 	# convention `web-bundle-assets.sh` uses for the wasm modules it was not
 	# given ("their PLACEMENT is unproven here").
 	#
-	# It is a NOTE and not a failure because the cause is not this menu. It is a
-	# mode-transition defect: switching `/noir` to Debug mode leaves the
-	# workspace with no editor pane and no filesystem tree, so there is nothing
-	# to right-click. A red gate here would be a gate failing for a reason that
-	# is not its own, and would be attributed to whoever touched the menu next.
+	# It is a NOTE and not a failure because the cause is not this menu, and
+	# because it reproduces on the PRE-FIX bundle exactly as it does on this
+	# one. A red here would be a gate failing for a reason that is not its own,
+	# and would be attributed to whoever touched the menu next.
 	debug_checks=0
 	debug_unmeasured=1
 	echo
 	echo "  NOTE: THE DEBUG HALF WAS NOT MEASURED ON THIS SURFACE."
-	note "${debug_opened}"
-	note "Switching /noir to Debug mode leaves the workspace with no editor pane"
-	note "and no filesystem tree — [id^=editorComponent-] count 0, and the"
-	note "surviving Monaco instance's DOM node is disconnected. That is a defect"
-	note "in the mode transition, not in this menu, and it is why the eight"
-	note "per-entry Debug checks below have no subject:"
+	note "leg: ${debug_opened}; entries: ${debug_count:-0}; line: '${debug_line}'"
+	note ""
+	note "TWO SEPARATE DEFECTS STAND BETWEEN THIS GATE AND THE DEBUG MENU, and"
+	note "neither is about the menu's contents:"
+	note ""
+	note '  1. THE MODE TOGGLE LOSES THE EDITOR. switchToDebug leaves the'
+	note "     workspace with no editor pane and no filesystem tree —"
+	note "     ${toggle_state} — with"
+	note "     'layout: component clear EditorView/0 raised a Defect and was"
+	note "     skipped' (ui_js.nim) in the console. So that route has nothing to"
+	note "     right-click at all."
+	note ""
+	note "  2. AFTER A RUN THERE IS AN EDITOR AND NO MENU. The session mounts,"
+	note "     the debug controls mount, source is painted — and a right-click on"
+	note '     that source leaves contextmenu NOT defaultPrevented and shows'
+	note "     zero rows. CodeTracer's handler does not run, which means the"
+	note "     BROWSER's own menu is what a user gets. Reproduced identically on"
+	note "     a bundle built from the pre-fix tree, so it is not this change."
+	note "     Suspect: the editor for a replay session is adopted into its host"
+	note "     ('editor: re-attached monaco for ... into #editorComponent-0',"
+	note "     ui/editor.nim) rather than constructed, and the Monaco-level"
+	note "     gesture handlers are registered by the construction path."
+	note ""
+	note "The eight per-entry Debug checks that had no subject:"
 	note "  present: Jump to line, Run to Cursor, Jump backward to line, Copy"
 	note "  absent:  Cut, Paste, Replace"
+	note ""
 	note "The Debug half is asserted on the desktop instead, where a Run produces"
 	note "a real session with source on screen:"
 	note "  src/tests/gui/tests/editor/editor_context_menu_is_mode_dependent.spec.ts"

@@ -157,16 +157,103 @@ async function openMenuOnLine(page, lineIndex) {
   });
   const lines = await page.$$('.view-line');
   if (!lines.length) return { opened: false, reason: 'no .view-line on screen' };
-  const target = lines[Math.min(lineIndex, lines.length - 1)];
-  const box = await target.boundingBox();
+
+  // A LINE WITH TEXT ON IT.  `.view-line` elements exist for blank lines too,
+  // and a blank one is a few pixels wide — a click "30px into it" lands past
+  // the content, Monaco reports NO position for the event, and
+  // `createContextMenuItems` returns an empty seq before it has read the mode.
+  // The menu is then never shown at all.
+  //
+  // That is not hypothetical: the Debug leg picked index 2, which is blank in
+  // the file this probe drives, and reported an empty menu that read exactly
+  // like "the Debug entries are missing". Blank lines are skipped so the click
+  // is always on code.
+  const candidates = [];
+  for (const el of lines) {
+    const t = ((await el.innerText()) || '').trim();
+    if (t.length > 2) candidates.push({ el, text: t });
+  }
+  if (!candidates.length) {
+    return { opened: false, reason: 'every .view-line on screen is blank' };
+  }
+  const chosen = candidates[Math.min(lineIndex, candidates.length - 1)];
+  const box = await chosen.el.boundingBox();
   if (!box) return { opened: false, reason: '.view-line has no box' };
-  const text = (await target.innerText()).trim();
-  await page.mouse.move(box.x + Math.min(30, box.width / 2), box.y + box.height / 2);
-  await page.mouse.click(box.x + Math.min(30, box.width / 2), box.y + box.height / 2,
-    { button: 'right' });
+  const x = box.x + Math.min(12, Math.max(2, box.width / 3));
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.click(x, y, { button: 'right' });
   await settle(page, 500);
   const menu = await page.evaluate(readMenuScript);
-  return { opened: true, lineText: text.slice(0, 80), lineIndex, menu };
+  return {
+    opened: true,
+    lineText: chosen.text.slice(0, 80),
+    lineIndex,
+    candidateCount: candidates.length,
+    menu,
+  };
+}
+
+// RUN, then read the menu in the session it produced.
+//
+// The gesture is `Ctrl+Enter`, the product's own Run chord — deliberately not
+// `Ctrl+R` or `F5`, both of which are the browser's reload. The editor is
+// blurred first because Mousetrap's default `stopCallback` ignores a chord
+// raised inside a textarea and Monaco's input surface is one. All of that is
+// `ci/test/noir_replay_probe.mjs`'s, and it is spelled the same way here on
+// purpose: two spellings of "Run the program" is two things to keep in step.
+async function debugLegViaRun(page, lineIndex, outPath) {
+  try {
+    await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
+  } catch (e) { /* a missing topbar shows up as a failure to reach a session */ }
+  await page.keyboard.press('Control+Enter');
+
+  // WAITED FOR: THE DEBUG SESSION ON SCREEN, not a log line.
+  //
+  // The first shape of this waited for `OBJ:start` in `window.__ctWorkerMessages`,
+  // copied from `noir_replay_probe.mjs`. That array is empty on this route, so
+  // the wait ran to its 180s ceiling and the leg reported "Run did not reach a
+  // replay session" about a page that had reached one in FIVE SECONDS. The
+  // measurement was of the instrument.
+  //
+  // The three conditions below are the ones this leg actually needs, and each
+  // is a thing a user can see: the debugger is in Debug mode, its controls are
+  // mounted, and the editor has painted source to right-click. A first Run
+  // fetches ~16 MB of compiler and ~4.6 MB of tracer, compiles, traces, then
+  // fetches ~18 MB of engine and instantiates it, so the ceiling stays generous.
+  const deadline = Date.now() + 180000;
+  let ready = null;
+  while (Date.now() < deadline) {
+    const state = await page.evaluate(() => ({
+      mode: (window.data && window.data.ui) ? Number(window.data.ui.mode) : null,
+      controls: !!document.querySelector('#next-image'),
+      lines: document.querySelectorAll('.view-line').length,
+    }));
+    if (state.mode === 0 && state.controls && state.lines > 0) { ready = state; break; }
+    await page.waitForTimeout(500);
+  }
+  if (ready === null) {
+    const state = await page.evaluate(() => ({
+      mode: (window.data && window.data.ui) ? Number(window.data.ui.mode) : null,
+      controls: !!document.querySelector('#next-image'),
+      lines: document.querySelectorAll('.view-line').length,
+    }));
+    return {
+      opened: false,
+      reason: 'Run did not reach a replay session with source on screen within '
+        + `180s (mode=${state.mode} debugControls=${state.controls} `
+        + `viewLines=${state.lines}) — are the Noir wasm modules and the replay `
+        + 'engine in this bundle?',
+    };
+  }
+
+  await settle(page, 2500);
+  await page.screenshot({ path: outPath.replace(/\.json$/, '-debug-session.png') });
+
+  const leg = await openMenuOnLine(page, lineIndex);
+  leg.debugControlsMounted = await page.evaluate(
+    () => !!document.querySelector('#next-image'));
+  return leg;
 }
 
 (async () => {
@@ -205,14 +292,43 @@ async function openMenuOnLine(page, lineIndex) {
     await page.screenshot({ path: outPath.replace(/\.json$/, '-edit.png') });
 
     // ---- DEBUG -----------------------------------------------------------
+    //
+    // TWO ROUTES INTO DEBUG MODE, and they are not equivalent on this surface.
+    //
+    //   * `switchToDebug` is the mode toggle. Measured here, it leaves the
+    //     workspace with NO editor pane and no filesystem tree — the Monaco
+    //     instance's DOM node comes back disconnected — so there is nothing to
+    //     right-click. That is a mode-transition defect and it is REPORTED
+    //     rather than worked around, because a probe that silently took the
+    //     other road would have hidden it.
+    //   * RUN is how a user of `noirstudio.dev` actually gets there: it
+    //     compiles, traces, and opens a real session with the executing source
+    //     on screen. That is the state the report is about, so that is where
+    //     the Debug menu is read.
+    //
+    // Run needs the Noir compiler and tracer and the replay engine to be in the
+    // bundle. When they are not, this leg reports why and the shell gate says
+    // the Debug half was not measured instead of passing over it.
     await page.evaluate(() => {
       const c = document.querySelector('#context-menu-container');
       if (c) c.style.display = 'none';
     });
     report.switchToDebug = await toggleMode(page, 'debug');
-    report.legs.debugMode = await page.evaluate(modeScript);
-    report.legs.debug = await openMenuOnLine(page, LINE);
-    await page.screenshot({ path: outPath.replace(/\.json$/, '-debug.png') });
+    report.legs.debugModeViaToggle = await page.evaluate(modeScript);
+    report.legs.debugViaToggle = await page.evaluate(() => ({
+      viewLines: document.querySelectorAll('.view-line').length,
+      editorContainers: document.querySelectorAll('[id^=editorComponent-]').length,
+      monacoDomConnected: (() => {
+        const m = window.monaco;
+        if (!m || !m.editor.getEditors) return null;
+        const e = m.editor.getEditors()[0];
+        const n = e && e.getDomNode && e.getDomNode();
+        return n ? n.isConnected : null;
+      })(),
+    }));
+
+    // Back to Edit. The Run leg is deliberately LAST — see below.
+    await toggleMode(page, 'edit');
 
     // ---- BACK TO EDIT ----------------------------------------------------
     //
@@ -262,6 +378,31 @@ async function openMenuOnLine(page, lineIndex) {
     }));
     report.legs.editReadOnly = await openMenuOnLine(page, LINE);
     await page.screenshot({ path: outPath.replace(/\.json$/, '-edit-readonly.png') });
+
+    // ---- DEBUG, THROUGH RUN ----------------------------------------------
+    //
+    // LAST, and the order is load-bearing. Run compiles and traces in the tab
+    // and then swaps the whole workspace; when any of that goes wrong the page
+    // does not come back, and a Run placed earlier took the Edit legs down with
+    // it — the first version of this probe reported an EMPTY Edit menu two legs
+    // later and the failure read as a menu defect. Every assertion that can be
+    // made without a session is therefore already made by the time this runs.
+    //
+    // Read-only is cleared first: it was set by the leg above, and Run against
+    // a read-only editor is not the gesture being measured.
+    await page.evaluate(() => {
+      const c = document.querySelector('#context-menu-container');
+      if (c) c.style.display = 'none';
+      try {
+        if (window.data && window.data.ui && window.data.ui.readOnly) {
+          window.data.functions.toggleReadOnly(window.data);
+        }
+      } catch (e) { /* reported by the leg's own reason string */ }
+    });
+    await settle(page, 1000);
+    report.legs.debug = await debugLegViaRun(page, LINE, outPath);
+    report.legs.debugMode = await page.evaluate(modeScript);
+    await page.screenshot({ path: outPath.replace(/\.json$/, '-debug.png') });
   } catch (e) {
     report.fatal = String((e && e.stack) || e).slice(0, 1500);
   } finally {
