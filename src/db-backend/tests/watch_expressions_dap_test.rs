@@ -308,6 +308,20 @@ fn load_locals_with_watches(handler: &mut Handler, watches: &[&str]) -> Rows {
     }
     let body = body.expect("no ct/load-locals response on the channel");
 
+    // EXPORT THE RESPONSE BYTES, for the browser probe to render.
+    //
+    // `ci/test/watch_expressions_browser_probe.nim` mounts the real State
+    // panel in a real browser over this JSON. Capturing it HERE rather
+    // than hand-writing a fixture is the whole point: what the pane is
+    // asked to render is then what this backend actually emitted, and it
+    // cannot drift from the backend without this suite noticing.
+    if let Ok(dir) = std::env::var("CT_WRITE_WATCH_FIXTURE") {
+        let key = watches.join("|").replace(['/', ' '], "_");
+        let path = std::path::Path::new(&dir).join(format!("{key}.json"));
+        std::fs::create_dir_all(&dir).expect("fixture dir");
+        std::fs::write(&path, serde_json::to_string_pretty(&body).expect("serialize")).expect("write fixture");
+    }
+
     Rows(
         body.get("locals")
             .and_then(JsonValue::as_array)

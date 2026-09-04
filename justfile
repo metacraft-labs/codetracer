@@ -3515,6 +3515,25 @@ test-noir-build-in-browser:
 # Needs the two Noir modules, like `test-noir-build-in-browser`: set
 # CT_NOIR_WASM_COMPILER / CT_NOIR_WASM_TRACER, or CT_WEB_BUNDLE_DIR at a tree
 # that already has them. It EXITS 2 rather than passing when they are absent.
+# A typed watch expression, in a real browser, showing a correct value --
+# and an unanswerable one showing a stated reason.
+#
+# The State pane's headless suites drive the MockRenderer, and the tab strip
+# that makes the Watches tab reachable existed only there: `stWatches` could
+# be selected from `vm.selectTab` and from no gesture in any shipping
+# product. So this gate clicks the product's own tab button and types into
+# its own input, and its first mutation arm removes the strip to show the
+# assertion fails against the panel that shipped.
+#
+# Needs Chromium and stylus from the dev shell; it EXITS 2 rather than
+# passing when either is absent. Pass a path to write a screenshot.
+test-watch-expressions-in-browser *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-watch-expressions-in-browser.log) 2>&1
+  bash ci/test/watch-expressions-in-browser.sh {{args}}
+
 test-noir-replay-in-browser:
   #!/usr/bin/env bash
   set -euo pipefail

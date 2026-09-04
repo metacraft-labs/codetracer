@@ -1,0 +1,372 @@
+{
+  "locals": [
+    {
+      "address": -1,
+      "expression": "asteroid_masses",
+      "originSummary": {
+        "confidence": 1.0,
+        "hopCount": 1,
+        "isPlaceholder": false,
+        "placeholderToken": null,
+        "terminatorExpr": "10000",
+        "terminatorFunction": "main",
+        "terminatorKind": "literal"
+      },
+      "value": {
+        "activeVariant": "",
+        "activeVariantValue": null,
+        "address": "",
+        "b": false,
+        "c": "",
+        "cText": "",
+        "elements": [
+          {
+            "activeVariant": "",
+            "activeVariantValue": null,
+            "address": "",
+            "b": false,
+            "c": "",
+            "cText": "",
+            "elements": [],
+            "f": "",
+            "i": "100",
+            "isMutable": false,
+            "isWatch": false,
+            "kind": 7,
+            "msg": "",
+            "r": "",
+            "refValue": null,
+            "text": "",
+            "typ": {
+              "cType": "Field",
+              "elementType": null,
+              "kind": 7,
+              "labels": [],
+              "langType": "Field",
+              "memberTypes": []
+            }
+          },
+          {
+            "activeVariant": "",
+            "activeVariantValue": null,
+            "address": "",
+            "b": false,
+            "c": "",
+            "cText": "",
+            "elements": [],
+            "f": "",
+            "i": "2000",
+            "isMutable": false,
+            "isWatch": false,
+            "kind": 7,
+            "msg": "",
+            "r": "",
+            "refValue": null,
+            "text": "",
+            "typ": {
+              "cType": "Field",
+              "elementType": null,
+              "kind": 7,
+              "labels": [],
+              "langType": "Field",
+              "memberTypes": []
+            }
+          },
+          {
+            "activeVariant": "",
+            "activeVariantValue": null,
+            "address": "",
+            "b": false,
+            "c": "",
+            "cText": "",
+            "elements": [],
+            "f": "",
+            "i": "200",
+            "isMutable": false,
+            "isWatch": false,
+            "kind": 7,
+            "msg": "",
+            "r": "",
+            "refValue": null,
+            "text": "",
+            "typ": {
+              "cType": "Field",
+              "elementType": null,
+              "kind": 7,
+              "labels": [],
+              "langType": "Field",
+              "memberTypes": []
+            }
+          },
+          {
+            "activeVariant": "",
+            "activeVariantValue": null,
+            "address": "",
+            "b": false,
+            "c": "",
+            "cText": "",
+            "elements": [],
+            "f": "",
+            "i": "14",
+            "isMutable": false,
+            "isWatch": false,
+            "kind": 7,
+            "msg": "",
+            "r": "",
+            "refValue": null,
+            "text": "",
+            "typ": {
+              "cType": "Field",
+              "elementType": null,
+              "kind": 7,
+              "labels": [],
+              "langType": "Field",
+              "memberTypes": []
+            }
+          }
+        ],
+        "f": "",
+        "i": "",
+        "isMutable": false,
+        "isWatch": false,
+        "kind": 0,
+        "msg": "",
+        "r": "",
+        "refValue": null,
+        "text": "",
+        "typ": {
+          "cType": "[Field; 4]",
+          "elementType": null,
+          "kind": 0,
+          "labels": [],
+          "langType": "[Field; 4]",
+          "memberTypes": []
+        }
+      }
+    },
+    {
+      "address": -1,
+      "expression": "initial_shield",
+      "originSummary": {
+        "confidence": 1.0,
+        "hopCount": 1,
+        "isPlaceholder": false,
+        "placeholderToken": null,
+        "terminatorExpr": "10000",
+        "terminatorFunction": "main",
+        "terminatorKind": "literal"
+      },
+      "value": {
+        "activeVariant": "",
+        "activeVariantValue": null,
+        "address": "",
+        "b": false,
+        "c": "",
+        "cText": "",
+        "elements": [],
+        "f": "",
+        "i": "10000",
+        "isMutable": false,
+        "isWatch": false,
+        "kind": 7,
+        "msg": "",
+        "r": "",
+        "refValue": null,
+        "text": "",
+        "typ": {
+          "cType": "Field",
+          "elementType": null,
+          "kind": 7,
+          "labels": [],
+          "langType": "Field",
+          "memberTypes": []
+        }
+      }
+    },
+    {
+      "address": -1,
+      "expression": "landing_point",
+      "originSummary": {
+        "confidence": 1.0,
+        "hopCount": 1,
+        "isPlaceholder": false,
+        "placeholderToken": null,
+        "terminatorExpr": "10000",
+        "terminatorFunction": "main",
+        "terminatorKind": "literal"
+      },
+      "value": {
+        "activeVariant": "",
+        "activeVariantValue": null,
+        "address": "",
+        "b": false,
+        "c": "",
+        "cText": "",
+        "elements": [
+          {
+            "activeVariant": "",
+            "activeVariantValue": null,
+            "address": "",
+            "b": false,
+            "c": "",
+            "cText": "",
+            "elements": [],
+            "f": "",
+            "i": "3",
+            "isMutable": false,
+            "isWatch": false,
+            "kind": 7,
+            "msg": "",
+            "r": "",
+            "refValue": null,
+            "text": "",
+            "typ": {
+              "cType": "Field",
+              "elementType": null,
+              "kind": 7,
+              "labels": [],
+              "langType": "Field",
+              "memberTypes": []
+            }
+          },
+          {
+            "activeVariant": "",
+            "activeVariantValue": null,
+            "address": "",
+            "b": false,
+            "c": "",
+            "cText": "",
+            "elements": [],
+            "f": "",
+            "i": "7",
+            "isMutable": false,
+            "isWatch": false,
+            "kind": 7,
+            "msg": "",
+            "r": "",
+            "refValue": null,
+            "text": "",
+            "typ": {
+              "cType": "Field",
+              "elementType": null,
+              "kind": 7,
+              "labels": [],
+              "langType": "Field",
+              "memberTypes": []
+            }
+          }
+        ],
+        "f": "",
+        "i": "",
+        "isMutable": false,
+        "isWatch": false,
+        "kind": 6,
+        "msg": "",
+        "r": "",
+        "refValue": null,
+        "text": "",
+        "typ": {
+          "cType": "Point",
+          "elementType": null,
+          "kind": 6,
+          "labels": [
+            "x",
+            "y"
+          ],
+          "langType": "Point",
+          "memberTypes": []
+        }
+      }
+    },
+    {
+      "address": -1,
+      "expression": "asteroid_masses[1]",
+      "value": {
+        "activeVariant": "",
+        "activeVariantValue": null,
+        "address": "",
+        "b": false,
+        "c": "",
+        "cText": "",
+        "elements": [],
+        "f": "",
+        "i": "2000",
+        "isMutable": false,
+        "isWatch": true,
+        "kind": 7,
+        "msg": "",
+        "r": "",
+        "refValue": null,
+        "text": "",
+        "typ": {
+          "cType": "Field",
+          "elementType": null,
+          "kind": 7,
+          "labels": [],
+          "langType": "Field",
+          "memberTypes": []
+        }
+      }
+    },
+    {
+      "address": -1,
+      "expression": "initial_shield + 1",
+      "value": {
+        "activeVariant": "",
+        "activeVariantValue": null,
+        "address": "",
+        "b": false,
+        "c": "",
+        "cText": "",
+        "elements": [],
+        "f": "",
+        "i": "",
+        "isMutable": false,
+        "isWatch": true,
+        "kind": 24,
+        "msg": "cannot evaluate `initial_shield + 1`: `+` would have to be computed, and a recording only holds the values that were actually recorded. Watch a recorded name (`total`), a field (`p.x`) or an element (`xs[0]`)",
+        "r": "",
+        "refValue": null,
+        "text": "",
+        "typ": {
+          "cType": "watch error",
+          "elementType": null,
+          "kind": 24,
+          "labels": [],
+          "langType": "watch error",
+          "memberTypes": []
+        }
+      }
+    },
+    {
+      "address": -1,
+      "expression": "landing_point.x",
+      "value": {
+        "activeVariant": "",
+        "activeVariantValue": null,
+        "address": "",
+        "b": false,
+        "c": "",
+        "cText": "",
+        "elements": [],
+        "f": "",
+        "i": "3",
+        "isMutable": false,
+        "isWatch": true,
+        "kind": 7,
+        "msg": "",
+        "r": "",
+        "refValue": null,
+        "text": "",
+        "typ": {
+          "cType": "Field",
+          "elementType": null,
+          "kind": 7,
+          "labels": [],
+          "langType": "Field",
+          "memberTypes": []
+        }
+      }
+    }
+  ]
+}

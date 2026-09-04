@@ -123,6 +123,15 @@ pub fn parse_watch_expression(expression: &str) -> Result<WatchPath, WatchRefusa
     // ---- the navigation chain ------------------------------------------
     let mut segments = Vec::new();
     while at < chars.len() {
+        // SKIP INTERIOR WHITESPACE BEFORE DECIDING, so the refusal blames
+        // the operator and not the space in front of it. Measured: `x + 1`
+        // reported "` ` would have to be computed", which names a character
+        // the user does not think of as the problem and reads like a bug in
+        // the parser rather than a statement about the recording.
+        if chars[at].is_whitespace() {
+            at += 1;
+            continue;
+        }
         match chars[at] {
             '.' => {
                 at += 1;
@@ -408,6 +417,13 @@ mod tests {
             refusal.contains("only holds the values that were actually recorded"),
             "the refusal says why a recording cannot answer it: {refusal}"
         );
+    }
+
+    /// The refusal must blame the OPERATOR, not the space before it.
+    #[test]
+    fn a_spaced_operator_is_named_in_the_refusal() {
+        let refusal = parse_watch_expression("shield + 1").expect_err("refused");
+        assert!(refusal.contains("`+` would have to be computed"), "{refusal}");
     }
 
     #[test]
