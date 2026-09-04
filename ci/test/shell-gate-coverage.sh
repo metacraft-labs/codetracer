@@ -212,8 +212,30 @@ else
 fi
 echo
 
-# `names_in FILE...` — every `ci/test/*.sh` basename mentioned in those files.
-names_in() {
+# `refs_in` — reads file paths on STDIN, prints one reference per line:
+#
+#     S <token>     a `*.sh` path or basename this file INVOKES
+#     J <recipe>    a `just <recipe>` this file CALLS
+#
+# THREE THINGS ARE DROPPED, AND EACH OF THEM CREDITED A DARK SCRIPT AS LIVE.
+#
+# 1. COMMENT LINES, for the reason spelled out at length below.
+#
+# 2. LINE CONTINUATIONS ARE JOINED FIRST. `ci/lint/bash.sh` writes every step as
+#    `lint_step "..." \` followed by indented arguments, so the command and its
+#    arguments are on different physical lines. Reading them separately makes
+#    rule 3 unenforceable: the arguments look like a bare invocation.
+#
+# 3. `shellcheck` AND `shfmt` LINES, WHOLESALE. This is the widened scan's
+#    version of "mention is not reachability", and without it the widening finds
+#    almost nothing. `ci/lint/bash.sh` shellchecks eleven scripts it never runs —
+#    `scripts/require-tup-globs.sh`, `scripts/require-siblings.sh`,
+#    `scripts/require-fuse-mount-helper.sh`, `scripts/sibling-pins.sh`,
+#    `scripts/toolchain-pins.sh` among them. A linter READS a file. Counting that
+#    as CI reaching it is the same error as counting a doc comment, one tool
+#    further along: `require-tup-globs.sh` would be reported covered by the lane
+#    that proves only that it parses.
+refs_in() {
 	# Reads paths on STDIN, one per line, so the caller need not expand a list
 	# into positional arguments — bash 3.2 has no array to expand.
 	#
@@ -230,15 +252,63 @@ names_in() {
 	# comment instead of the step, and its selftest's mutation arms rewrote a
 	# comment about a trigger instead of the trigger. Each time a control caught
 	# it; none of the three would have been visible in the transcript.
-	local f out=""
+	local f
 	while read -r f; do
 		[ -n "${f}" ] || continue
 		[ -f "${f}" ] || continue
-		out="${out}$(grep -vE '^[[:space:]]*#' "${f}" 2>/dev/null |
-			grep -ohE '[A-Za-z0-9_.-]+\.sh' 2>/dev/null)
-"
-	done
-	printf '%s\n' "${out}" | grep -v '^$' | sort -u || true
+		refs_of_text <"${f}"
+	done | grep -v '^$' | sort -u || true
+}
+
+# The extractor itself, over one file's text on stdin. `awk`, because joining
+# continuations and then tokenising is a two-state job and `grep` has one state.
+# POSIX awk only: no `gensub`, no `asort`, no `[[:space:]]` outside brackets.
+refs_of_text() {
+	awk '
+	{
+		cur = cur $0
+		if (cur ~ /\\$/) { sub(/\\$/, " ", cur); next }
+		emit(cur); cur = ""
+	}
+	END { if (cur != "") emit(cur) }
+
+	function emit(line,   n, i, j, t, u, rest, arr) {
+		if (line ~ /^[ \t]*#/) return
+		# A linter reads; it does not run. See rule 3 in the header above.
+		if (line ~ /(^|[^A-Za-z0-9_-])(shellcheck|shfmt)([^A-Za-z0-9_-]|$)/) return
+
+		n = split(line, arr, /[ \t]+/)
+		for (i = 1; i <= n; i++) {
+			t = arr[i]
+			gsub(/^[^A-Za-z0-9_.\/-]+/, "", t)
+			gsub(/[^A-Za-z0-9_.\/-]+$/, "", t)
+			if (t != "just") continue
+			# Skip flags, and the VALUE of a flag that takes one — otherwise
+			# `just --justfile X recipe` reports the recipe as `--justfile`.
+			j = i + 1
+			while (j <= n) {
+				u = arr[j]
+				gsub(/^[^A-Za-z0-9_.\/=-]+/, "", u)
+				gsub(/[^A-Za-z0-9_.\/=-]+$/, "", u)
+				if (u !~ /^-/) break
+				if (u == "-f" || u == "--justfile" || u == "-d" ||
+					u == "--working-directory" || u == "--set") j++
+				j++
+			}
+			if (j > n) continue
+			u = arr[j]
+			gsub(/^[^A-Za-z0-9_-]+/, "", u)
+			gsub(/[^A-Za-z0-9_-]+$/, "", u)
+			if (u ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*$/) print "J " u
+		}
+
+		rest = line
+		while (match(rest, /[A-Za-z0-9_.\/-]*[A-Za-z0-9_-]\.sh/)) {
+			print "S " substr(rest, RSTART, RLENGTH)
+			rest = substr(rest, RSTART + RLENGTH)
+		}
+	}
+	'
 }
 
 # ---------------------------------------------------------------------------
