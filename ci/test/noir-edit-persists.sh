@@ -582,13 +582,35 @@ echo
 # Mutation arms. Each patches the ASSEMBLED BUNDLE (never the test), verifies
 # the patch changed bytes, and requires the named assertion to go red.
 # ---------------------------------------------------------------------------
+# THE DIRECTORY COMES BACK IN A VARIABLE, NOT ON STDOUT, AND THAT IS A FIX.
+#
+# `mutate` used to `echo "${dir}"` and be called as `dir="$(mutate ...)"`. Every
+# `ck` it raised on a failure path therefore went into the COMMAND SUBSTITUTION
+# instead of the transcript, and `checks`/`failures` were incremented in a
+# subshell that then exited — so a mutation that did not apply printed nothing,
+# counted nothing, and skipped its arm in silence.
+#
+# MEASURED: a run in which arm F's bundle had gone missing emitted six `Arm`
+# headers and five verdicts. The only trace was `expect_count` reporting 39 where
+# 40 were written — a discrepancy whose obvious "fix" is to lower the number,
+# which would have cemented the silence. An arm that cannot report its own
+# failure is the exact shape this gate exists to rule out.
+mutated_dir=""
+
 mutate() {
 	# mutate ID PYTHON_EXPR — copies the bundle, rewrites the renderer, and
-	# FAILS if the rewrite changed nothing.
+	# FAILS if the rewrite changed nothing. Sets `mutated_dir` on success.
 	local id="$1" expr="$2"
 	local dir="${cache}/mut-${id}"
+	mutated_dir=""
 	rm -rf "${dir}"
-	cp -R "${bundle}" "${dir}"
+	if ! cp -R "${bundle}" "${dir}"; then
+		# Checked, because it was not: the copy failing let the rewrite below
+		# run against a path that did not exist, and the arm died in a Python
+		# traceback on stderr with no assertion either way.
+		ck fail "arm ${id}: the bundle could not be copied from ${bundle}, so the arm measured nothing"
+		return 1
+	fi
 	python3 - "${dir}/${renderer_rel}" "${expr}" <<'PY'
 import re, sys
 path, expr = sys.argv[1], sys.argv[2]
@@ -612,7 +634,7 @@ PY
 		ck fail "arm ${id}: the renderer is byte-identical after the patch"
 		return 1
 	fi
-	echo "${dir}"
+	mutated_dir="${dir}"
 	return 0
 }
 
@@ -625,8 +647,10 @@ arm() {
 	# to defend stays vacuous.
 	local id="$1" desc="$2" pat="$3" repl="$4" target="$5" pyred="$6"
 	echo "Arm ${id}: MUTATION — ${desc}"
-	local dir
-	dir="$(mutate "${id}" "${pat}"$'\x1f'"${repl}")" || return 0
+	# NOT `$(mutate ...)`. See the note above `mutated_dir`: a command
+	# substitution swallows the assertions the failure paths raise.
+	mutate "${id}" "${pat}"$'\x1f'"${repl}" || return 0
+	local dir="${mutated_dir}"
 	if ! probe "${dir}" "${cache}/${id}.json"; then
 		ck fail "arm ${id}: produced no measurement"
 		return 0
@@ -703,7 +727,18 @@ arm F "the sentence opens on the refusal again" \
 	'not (d.get("noticeText") or "").startswith("Your work is saved in this browser")'
 
 # ---------------------------------------------------------------------------
-expect_count 37
+# 37 before the debug-session leg; +3 for the control that says whether the leg
+# ran at all, the Run/Stop round trip, and the bytes read after Stop and before
+# any reload. Moved deliberately and in the same commit as the checks that moved
+# it — this tally is what turns an arm that aborted, or a probe that produced no
+# JSON, into a count mismatch rather than a clean summary.
+#
+# 40 IS THE NUMBER OF ASSERTIONS WRITTEN, NOT THE NUMBER A BROKEN RUN EMITS. A
+# run whose arm cannot copy the bundle used to emit 39, and the tempting repair
+# was to write 39 here. That would have made the tally agree with the breakage
+# instead of detecting it, which is what the tally is for. If this line and the
+# run disagree, find the assertion that did not run — do not lower the number.
+expect_count 40
 if [ "${failures}" -ne 0 ]; then
 	printf '\nRESULT: FAILED — %d check(s), %d failure(s).\n' "${checks}" "${failures}"
 	exit 1
