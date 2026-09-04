@@ -1691,3 +1691,46 @@ proc setupOverlayDismissal*() =
   if not backdrop.isNil:
     backdrop.addEventListener(cstring"click", proc(ev: Event) =
       hideOverlay())
+
+    # AND A RIGHT-CLICK DISMISSES IT TOO, because otherwise it is a gesture
+    # that does nothing at all.
+    #
+    # This element is transparent, `position: fixed`, `top/left/right/bottom:
+    # 0` and z-index 98, so while an overlay is open it covers the ENTIRE
+    # viewport and takes every pointer event aimed at the workspace. That is
+    # deliberate — it is how click-to-dismiss works — but it was wired for
+    # `click` ALONE, and the asymmetry is the defect: a left-click dismissed
+    # the overlay and got the user moving again, while a right-click was
+    # swallowed here and did nothing whatsoever. It did not open a menu,
+    # because the pane underneath never saw the event, and it did not dismiss
+    # the thing that was blocking it, so repeating the gesture repeated the
+    # nothing.
+    #
+    # TWO USER REPORTS have now been traced to this element. It answered
+    # `elementFromPoint` for the first file-tree click after entering Debug
+    # mode, and it answered it again for the right-click behind "in Debug mode
+    # there is no context menu at all" — where it was measured at 1440x900
+    # over an editor that was 474x802 and `isConnected`, with CodeTracer's
+    # `onContextMenu` never firing and `defaultPrevented` false, so the user
+    # got the BROWSER's menu. Those read as two unrelated defects and are one
+    # dead pointer trap.
+    #
+    # DISMISS RATHER THAN PASS THROUGH, and the choice is deliberate. The
+    # event has already been routed to this element, so "let it through" would
+    # mean re-dispatching a synthetic `contextmenu` at the same coordinates to
+    # whatever `elementFromPoint` answers once the backdrop is gone — a
+    # second, untrusted event, delivered to a target picked after a layout
+    # change, on a path no other gesture in this product takes. Dismissing
+    # costs the user one gesture and makes the second one land on a normal
+    # workspace with normal handlers; that trade is the one the overlay's own
+    # left-click dismiss already makes.
+    #
+    # `preventDefault` IS REQUIRED, not incidental. Without it the native menu
+    # is drawn over a workspace that is in the middle of dismissing an
+    # overlay, which is precisely the "I see both the browser menu and the
+    # CodeTracer menu" report this product already fixed once
+    # (`ui/editor.nim`'s `onContextMenu`). A dismiss shows no menu; the next
+    # right-click shows ours.
+    backdrop.addEventListener(cstring"contextmenu", proc(ev: Event) =
+      ev.preventDefault()
+      hideOverlay())
