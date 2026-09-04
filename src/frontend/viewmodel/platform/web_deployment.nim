@@ -1566,7 +1566,7 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
   <div id="root-container">
     <div id="auto-hide-layout-row">
       <div id="auto-hide-strip-left"></div>
-      <div id="auto-hide-docked-left">
+      <div id="auto-hide-docked-left" class="auto-hide-docked">
         <div id="auto-hide-docked-left-content"></div>
         <div id="auto-hide-docked-left-resize" class="auto-hide-docked-resize-handle"></div>
       </div>
@@ -1577,7 +1577,7 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
           <section id="main"></section>
         </div>
       </div>
-      <div id="auto-hide-docked-right">
+      <div id="auto-hide-docked-right" class="auto-hide-docked">
         <div id="auto-hide-docked-right-resize" class="auto-hide-docked-resize-handle"></div>
         <div id="auto-hide-docked-right-content"></div>
       </div>
@@ -1614,7 +1614,7 @@ proc renderEntryDocument*(descriptor: DeploymentDescriptor): string =
       docked sidebar path resolve them by id, and a document carrying half the
       auto-hide surface fails in a different place instead of not at all.
     -->
-    <div id="auto-hide-docked-bottom">
+    <div id="auto-hide-docked-bottom" class="auto-hide-docked">
       <div id="auto-hide-docked-bottom-resize" class="auto-hide-docked-resize-handle auto-hide-docked-resize-handle-bottom"></div>
       <div id="auto-hide-docked-bottom-content"></div>
     </div>

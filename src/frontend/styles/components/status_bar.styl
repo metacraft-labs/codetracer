@@ -248,9 +248,11 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // times it made the bar tabs-only.  A third attempt, 00fd68b7f "fix: status
     // bar styling", reached the same result with `position: absolute;
     // left: -9999px` on `#file-info-status` and `.status-right`, and shipped
-    // undetected for two weeks because that is precisely the family the guards
-    // below document themselves as unable to see (they ask whether a region has
-    // a box, and an off-screen region has one).  The wish behind all three is
+    // undetected for two weeks because that was precisely the family the guards
+    // below documented themselves as unable to see — they asked whether a
+    // region has a box, and an off-screen region has one.  They now ask whether
+    // the box is also where the user is looking, and the rule above is one of
+    // their negative controls.  The wish behind all three is
     // reasonable: a quieter footer.  No such form can deliver it, because
     // every child of this bar is either required by the design or invisible
     // in production
@@ -285,18 +287,27 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // than on wording, by
     // `src/tests/gui/tests/status-bar/footer-visibility-css-guard.spec.ts`:
     // it lays out this bar in a browser with the compiled theme CSS applied and
-    // fails if any required region computes to no box.  Any spelling that
-    // removes the box trips it, however the selector is written — `:not()`,
-    // `:where()`, `:has()`, an enumerated list, `@media`, `display`,
-    // `visibility`, `opacity`, `transform: scale(0)`, or the same applied to an
-    // ancestor.  `status-bar-footer-contract.spec.ts` pins the same contract
-    // against the real Electron app.
+    // fails if any required region computes to no box, OR computes to a box
+    // that lies entirely outside the viewport.  Any spelling that removes the
+    // box trips it, however the selector is written — `:not()`, `:where()`,
+    // `:has()`, an enumerated list, `@media`, `display`, `visibility`,
+    // `opacity`, `transform: scale(0)`, or the same applied to an ancestor —
+    // and so does any spelling that exiles it: `position: absolute/fixed` with
+    // a large negative `left`/`top`/`right`, or `transform: translateX()`.
+    // `status-bar-footer-contract.spec.ts` pins the same contract against the
+    // real Electron app.
     //
     // What it does NOT catch, so you know what you are not covered against:
-    // rules that keep the box and only change the painting — moving the bar
-    // off-screen, `clip-path`, `filter: opacity(0)`, or drawing text in the
-    // background colour.  Those pass both guards.  Run the app and look at the
-    // footer before shipping anything in that family.
+    // rules that keep the box AT ITS PROPER COORDINATES and only change the
+    // painting — `clip-path: inset(100%)`, the legacy `clip: rect(0,0,0,0)`
+    // idiom, `filter: opacity(0)` or `filter: blur()`, an opacity just above
+    // zero, drawing text in the background colour, or covering the bar with an
+    // overlay.  Those pass both guards.  The list is not prose only: it is
+    // `SURVIVING_HIDE_SPELLINGS` in
+    // `src/tests/gui/page-objects/status-footer-contract.ts`, and the guard
+    // runs it, so it cannot quietly go stale the way the previous one did.
+    // Run the app and look at the footer before shipping anything in that
+    // family.
     //
     // NOTE the guard reads the COMPILED theme, so it only sees an edit to this
     // file after `just build-once`.
@@ -557,6 +568,24 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     max-height: 50vh
     overflow-y: scroll
     background-color: colors-ui-surface-base-panel
+    // THE HISTORY LIST STACKS THE SAME NOTIFICATIONS AS THE LIVE TOAST STACK,
+    // AND OWED THEM THE SAME GAP.
+    //
+    // `#active-notifications` above is `display: flex` with
+    // `gap: NOTIFICATION_STACK_GAP`, so two live toasts sit 0.5rem apart. This
+    // container renders the identical `.status-notification.ct-notification`
+    // elements — same markup, same per-kind 0.0625rem coloured border
+    // (`notifications.styl:11`) — but laid them out as plain blocks with no
+    // gap and no child margin. Adjacent notifications therefore ABUTTED, and
+    // two touching 1px borders read as one 2px divider rather than as two
+    // separate notices; a run of same-kind notifications read as a single
+    // block with lines ruled through it.
+    //
+    // The same token, not a new number, because these are the same objects in
+    // a different place — a second value here would be the thing that drifts.
+    display: flex
+    flex-direction: column
+    gap: NOTIFICATION_STACK_GAP
     border-top: 5px solid colors-ui-surface-primary-tertiary
     border-left: 5px solid colors-ui-surface-primary-tertiary
     border-right: 5px solid colors-ui-surface-primary-tertiary
@@ -569,7 +598,6 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     .status-notification-header
       color: #5885ac !important;
       text-indent: 10px;
-      font-family: arial;
       font-weight: bold;
 
   #bug-report-container
@@ -590,14 +618,12 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     .bug-report-header
       color: #5885ac !important
       text-indent: 10px
-      font-family: arial
       font-weight: bold
 
     .bug-report-text
       color: #5885ac !important
       text-indent: 10px
       margin-left: 10%
-      font-family: arial
       font-weight: bold
 
     .bug-report-description
