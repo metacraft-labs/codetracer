@@ -104,6 +104,13 @@ pkgs.mkShell {
     gnused
     findutils
     git
+
+    # `ci/test/stale-artefact-guards-test.sh` issues and inspects real
+    # certificates while checking that `browser-replay/setup-certs.sh` asks
+    # whether one is in date and covers the right names, rather than whether the
+    # file exists. The suite refuses to run without it (exit 3) rather than
+    # skipping that section, so the shell has to carry it.
+    openssl
   ];
 
   shellHook = ''

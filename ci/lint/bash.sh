@@ -41,8 +41,13 @@ source ci/lib/lint-steps.sh
 # Derived from what these scripts INVOKE, not what they mention: this file
 # names `cargo`, `nim` and `node` in prose and invokes none of them directly.
 # `node` is here because tools/visual-review/deepreview-harness-test.sh runs it.
+# `openssl` and `sha256sum` are here because
+# `ci/test/stale-artefact-guards-test.sh` invokes both — the first to issue and
+# inspect real certificates, the second to key a lockfile install. That suite
+# exits 3 on a missing tool rather than skipping the section, so a shell without
+# them has to fail by name here and not four steps later.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh shellcheck bash git python3 node awk diff sort comm timeout
+	bash ci/lib/require-tools.sh shellcheck bash git python3 node awk diff sort comm timeout openssl sha256sum
 
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh
