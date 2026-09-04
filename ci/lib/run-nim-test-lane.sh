@@ -213,6 +213,30 @@ while read -r f; do
 			grep -oE '[0-9]+' | awk '{s += $1} END {print s + 0}')"
 		total_checks=$((total_checks + checks))
 		declared_files=$((declared_files + 1))
+	elif grep -qE '^[[:space:]]*const[[:space:]]+ExpectedAssertions[[:space:]]*=[[:space:]]*[0-9]+' "${f}" 2>/dev/null; then
+		# THE CONVENTION THIS TREE ALREADY HAS, READ INSTEAD OF REPLACED.
+		#
+		# 27 files under `src/frontend/viewmodel/tests/unit/` declare
+		#
+		#     const ExpectedAssertions = <n>
+		#
+		# and ALL 27 also assert `countedAssertions == ExpectedAssertions` in a
+		# case of their own. That second half is what makes the number readable
+		# from here: the file is not merely claiming a count, it FAILS when its
+		# own tally disagrees — so on a run that exited 0, `<n>` has been
+		# validated by the file against itself.
+		#
+		# Reading it costs nothing and makes the tally meaningful today, for 27
+		# of the 63 files in the `vm-unit` lane. Inventing `CHECKS:` and waiting
+		# for adoption would have left the report at "0 declared" indefinitely,
+		# which is the same shape as the flag nobody sets.
+		#
+		# `CHECKS:` above still wins when present: it is a RUNTIME count, and a
+		# static one cannot see a case that returned early.
+		checks="$(grep -oE '^[[:space:]]*const[[:space:]]+ExpectedAssertions[[:space:]]*=[[:space:]]*[0-9]+' "${f}" |
+			grep -oE '[0-9]+$' | head -1)"
+		total_checks=$((total_checks + checks))
+		declared_files=$((declared_files + 1))
 	else
 		undeclared_files=$((undeclared_files + 1))
 	fi
