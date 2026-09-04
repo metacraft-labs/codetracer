@@ -621,6 +621,47 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     check cacheClassFor("/" & hashed) == ccStaticAsset
     check not isBundledAssetPath(hashed)
 
+  test "a theme swap that lands on nothing is not reported as success":
+    ## The Themes menu offers FOUR themes. A web deployment declares ONE
+    ## (`rendererThemeStylesPath`) and the assembly step compiles two sheets, so
+    ## three of the four menu items point `#theme` at a URL the bundle does not
+    ## carry.
+    ##
+    ## An absent URL there does not fail. Pages answers anything it cannot
+    ## resolve with the entry document at `200 text/html` — recorded in this
+    ## file's own comments ("`/nope` 200 — no rule at all; served anyway"). The
+    ## browser drops the working sheet, takes an HTML page, parses zero rules,
+    ## and the application renders unstyled while `dataset.theme` records a
+    ## successful switch.
+    ##
+    ## `loadTheme` used to be two unconditional assignments with nothing asking
+    ## whether the stylesheet existed. A source scan is the cheap always-on
+    ## floor under `ci/test/noir_demo_path_probe.mjs`, which counts
+    ## `cssRules` in a real browser.
+    let renderer = readFile("src/frontend/renderer.nim")
+    # The swap goes through the checked path, not a bare assignment.
+    check renderer.contains("swapThemeHrefImpl(cast[js](link)")
+    # BOTH failure modes are asked about: a MIME-rejected sheet fires `error`,
+    # a sheet served as HTML fires `load` and parses to nothing. Asking only
+    # the first misses the deployed case entirely.
+    check renderer.contains("link.onerror = function()")
+    check renderer.contains("link.onload = function()")
+    check renderer.contains("rules.length > 0")
+    # And it puts the working theme back rather than leaving the app bare.
+    check renderer.contains("link.href = prevHref")
+    check renderer.contains("link.dataset.theme = prevName")
+    # The old unconditional pair must not come back beside it. `dataset.theme`
+    # is still assigned — inside the checked swap — so this asks about the
+    # `.href` assignment that was the actual defect.
+    var bareHrefAssignments = 0
+    for line in renderer.splitLines:
+      let stripped = line.strip()
+      if stripped.startsWith("#") or stripped.startsWith("##"):
+        continue
+      if stripped == "cast[js](link).href = linkValue":
+        bareHrefAssignments += 1
+    check bareHrefAssignments == 0
+
   test "the bundled list and the runtime asset table cannot drift":
     ## Two declarations of the same four files: `bundledAssetPaths` (which
     ## decides the cache class) and `webRuntimeAssets`' `damBundled` rows

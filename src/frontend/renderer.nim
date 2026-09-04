@@ -904,6 +904,77 @@ proc stopAction* {.locks: 0.}=
   discard stopReplaySession(data)
 
 
+proc swapThemeHrefImpl(link: js; newHref, newName, prevHref, prevName: cstring)
+    {.importjs: """
+(function(link, newHref, newName, prevHref, prevName){
+  var settled = false;
+  function finish(){
+    if (settled) { return true; }
+    settled = true;
+    link.onload = null;
+    link.onerror = null;
+    return false;
+  }
+  function revert(why){
+    if (finish()) { return; }
+    console.error("[THEME] '" + newName + "' did not apply (" + why +
+      "); reverting to '" + prevName + "'. This deployment does not serve " +
+      newHref);
+    link.href = prevHref;
+    link.dataset.theme = prevName;
+  }
+  link.onerror = function(){ revert("the stylesheet did not load"); };
+  link.onload = function(){
+    var rules = null;
+    try {
+      rules = link.sheet && link.sheet.cssRules;
+    } catch (e) {
+      // A sheet the document may not read is still a sheet that loaded.
+      // Cannot happen same-origin, and guessing "broken" here would revert a
+      // working theme.
+      finish();
+      return;
+    }
+    if (rules && rules.length > 0) { finish(); }
+    else { revert("the stylesheet parsed to zero rules"); }
+  };
+  link.href = newHref;
+  link.dataset.theme = newName;
+})(#, #, #, #, #)
+""".}
+  ## Point `#theme` at `newHref`, and put it back if that turns out to be
+  ## nothing.
+  ##
+  ## ## The swap used to be two unconditional assignments
+  ##
+  ## `link.href = …; link.dataset.theme = name`, with nothing asking whether the
+  ## stylesheet existed. On the web deployment it usually does not: the entry
+  ## document declares ONE theme (`rendererThemeStylesPath`), the assembly step
+  ## compiles exactly two sheets, and the Themes menu offers FOUR. So three of
+  ## the four menu items pointed the link at a URL the bundle does not carry.
+  ##
+  ## And an absent URL there does not fail — Cloudflare Pages answers anything
+  ## it cannot resolve with the SPA entry document at `200 text/html`, which is
+  ## measured in this repo (`web_deployment.nim`: "`/nope` 200 — no rule at
+  ## all; served anyway"). The browser then drops the previous sheet, takes
+  ## delivery of an HTML page, finds no rules in it, and the whole application
+  ## renders unstyled — while `dataset.theme` records that the switch
+  ## succeeded.
+  ##
+  ## ## Why the check is "did it produce rules", not "was it an error"
+  ##
+  ## Both, because the two hosts fail differently. A MIME-rejected sheet fires
+  ## `error`; a sheet that is served and parses to nothing fires `load`. Asking
+  ## only the first misses the deployed case entirely, which is the one that
+  ## has shipped. `cssRules.length > 0` is the question that is true of a real
+  ## theme on both hosts and false of an entry document on either.
+  ##
+  ## THIS IS NOT A SUBSTITUTE FOR THE SERVER ANSWERING 404, and it does not
+  ## depend on it. Even against a correct 404 the old code would have unstyled
+  ## the app, because it never looked. Making the host 404 is a separate change
+  ## with a blocker recorded in `rewritePrefixes` — `/demo` on a language host
+  ## is served ONLY by the SPA fallback, so a `404.html` would take it out.
+
 proc loadTheme*(name: cstring) =
   ## Swap the theme stylesheet for `name`.
   ##
@@ -949,8 +1020,12 @@ proc loadTheme*(name: cstring) =
     # behaving exactly as it did before rather than producing an empty path.
     let prefix = if cut >= 0: resolved[0 .. cut] else: "frontend/styles/"
     let linkValue = cstring(fmt"{prefix}{name}_theme_electron.css?theme={now()}")
-    cast[js](link).href = linkValue
-    cast[js](link).dataset.theme = name
+    # Through `swapThemeHrefImpl`, which keeps the CURRENT href and name so it
+    # can put them back. Assigning `.href` and `.dataset.theme` here directly is
+    # what let a theme the deployment does not carry render the application
+    # unstyled while reporting success; see that proc.
+    let previousHref = cast[JsObject](link).href.to(cstring)
+    swapThemeHrefImpl(cast[js](link), linkValue, name, previousHref, currentTheme)
 
 
 let monacoThemeNames* = JsAssoc[cstring, cstring]{"mac classic": cstring"codetracerWhite", # TODO

@@ -183,6 +183,29 @@ proc rewritePrefixes*(): seq[string] =
   result.add "/p"
   result.add "/projects"
   result.add "/collab/join"
+  # `/demo` IS NOT HERE, AND IT IS SERVED ANYWAY — which is a blocker on a
+  # change this repository has twice been tempted by.
+  #
+  # `web_entry.classifyPath` returns `efDemo` for `/demo` on a language host
+  # (`noirstudio.dev/demo`), and `test_platform_web` asserts it. But no rewrite
+  # rule names the prefix, so Pages resolves it the only way left: its SPA
+  # fallback, which answers ANY unresolved path with the entry document at
+  # `200 text/html`. The address works by accident.
+  #
+  # That accident is load-bearing for anyone who reaches for a `404.html` —
+  # Pages' documented switch out of fallback mode, and the obvious answer to
+  # "an absent asset must not return 200 HTML". Adding one would 404 `/demo`,
+  # and NOTHING WOULD CATCH IT: the coverage test enumerates only the
+  # neutral-host addresses, and the deploy's HTTP contract loop probes only
+  # `/noir`, `/noir/new`, `/projects`, `/s/probe` and `/p/probe`.
+  #
+  # So `/demo` has to be added here FIRST, with a probe that covers it, before
+  # any not-found handling is introduced. It is deliberately not added in the
+  # same change that recorded this: it needs its own host-matrix reasoning
+  # (`/demo` is meaningless on a language-NEUTRAL host, where the other
+  # unconditional prefixes classify `efUnknown` and open the template with a
+  # sentence), and smuggling it into a theme fix is how the next reader
+  # inherits an untested rewrite.
 
 const pointerObjectSuffix* = "/current.json"
 
