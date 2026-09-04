@@ -215,7 +215,7 @@ const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir",
   ## whatever `wasm_worker_browser.js` dispatches. Read them there.
 
 const noirTemplateConstraintProvenance* =
-  "Measured by compiling the project."
+  "Measured by the Noir compiler this page runs."
   ## Shown in the pane. A count with no provenance is a count a user cannot
   ## judge: "17" means one thing measured a second ago and another thing
   ## shipped in a bundle, and the pane must not make them look alike.
@@ -398,7 +398,7 @@ const noirDemoNargoInfoJson* = """{"programs":[{"package_name":"oracle_settlemen
   ## compiler answered and why it is not the one that measured the hello-world.
 
 const noirDemoConstraintProvenance* =
-  "Measured by compiling the project."
+  "Measured by the Noir compiler this page runs."
   ## The same sentence the hello-world carries, and it is the same claim: the
   ## number was produced by the wasm module the deploy publishes, not by a
   ## native `nargo` a visitor cannot see.

@@ -100,14 +100,14 @@ proc main() =
   # that now says which of the two answers it is holding.
   mountInto("ct-counts-pane",
     parseNargoInfoJson(TemplateNargoInfo,
-      "Measured by compiling the project."))
+      "Measured by the Noir compiler this page runs."))
 
   # A SUCCESSFUL BUILD ON AN ENGINE THAT PRINTS NO LISTING. This is the state
   # every build on the current deploy pin lands in, and the one that used to
   # replace the whole pane with the word "unavailable".
   let vm = createConstraintsVM()
   vm.setReport(parseNargoInfoJson(TemplateNargoInfo,
-    "Measured by compiling the project."))
+    "Measured by the Noir compiler this page runs."))
   vm.noteListingUnavailable(
     "This build's Noir compiler does not print a constraint listing, so " &
     "the generated code cannot be shown for what it just compiled.")
