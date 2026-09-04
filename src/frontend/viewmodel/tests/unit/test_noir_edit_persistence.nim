@@ -52,6 +52,9 @@ import std/[strutils, unittest]
 
 import ../../../ui/web_project_store
 import ../../platform/noir_template
+# `UneditedModelVersion` — the Monaco version id of a model nobody has changed,
+# which is the whole of the truncation guard's evidence.
+from ../../../file_conflicts import UneditedModelVersion
 
 var countedAssertions = 0
 
@@ -59,7 +62,9 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 89
+const ExpectedAssertions = 104
+  ## 89 before the truncation guard; +15 for
+  ## *"a save may not empty a file that nobody emptied"*.
   ## Asserted by the last case. Update it deliberately, in the same commit as
   ## the checks that moved it.
 
@@ -175,6 +180,90 @@ suite "the open project is what gets compiled":
       counted file.content.len > 0
       inc seen
     counted seen == 3
+
+suite "a save may not empty a file that nobody emptied":
+  ## Reported: *"when I enter a debug sesion and hit the Stop button, the
+  ## contents of some files become empty. What's worse is that this seems to be
+  ## persisted even after I refresh the tab."*
+  ##
+  ## The round trip, end to end through the same proc the save host calls. The
+  ## rule itself is unit-tested in
+  ## `src/tests/gui/tests/store/truncation_guard_test.nim`; these assert that
+  ## the store OBEYS it — that the refusal happens before `applyEditToMemory`,
+  ## so neither the compiled bytes nor the writer see the wipe.
+
+  test "an unproven empty save reaches neither memory nor the store":
+    # THE DATA LOSS, as one assertion. A rebuilt editor answers `getValue()`
+    # with `""` from a model with version 1, and that used to be written to
+    # OPFS and read back on reload.
+    reset()
+    var writes: seq[string] = @[]
+    setProjectWriter(proc(relativePath, content: string; onDone: SaveDone) =
+      writes.add content
+      onDone(true, ""))
+
+    var reported = 0
+    var sawError = ""
+    let record = proc(ok: bool; error: string) =
+      inc reported
+      sawError = error
+      counted not ok
+    saveProjectFile("src/main.nr", "", record,
+                    editsSinceLoad = UneditedModelVersion)
+
+    counted reported == 1
+    counted sawError.contains("src/main.nr")
+    # THE STORE WAS NEVER ASKED. A refusal that still wrote would be a refusal
+    # in name only.
+    counted writes.len == 0
+    # AND THE BYTES ARE STILL THERE, in the copy Build compiles.
+    counted vfsContentFor(currentProject(), "src/main.nr") == originalMain
+
+  test "a user who cleared the file still gets an empty file":
+    # The guard must not become a second way to lose work — this time by
+    # refusing an edit the user made on purpose. One edit off the initial
+    # version is all it takes, and it is evidence a rebuilt buffer cannot
+    # produce.
+    reset()
+    var writes: seq[string] = @[]
+    setProjectWriter(proc(relativePath, content: string; onDone: SaveDone) =
+      writes.add content
+      onDone(true, ""))
+
+    var reported = 0
+    let record = proc(ok: bool; error: string) =
+      inc reported
+      counted ok
+    saveProjectFile("src/main.nr", "", record,
+                    editsSinceLoad = UneditedModelVersion + 1)
+
+    counted reported == 1
+    counted writes == @[""]
+    counted vfsContentFor(currentProject(), "src/main.nr") == ""
+
+  test "a save that says nothing about its buffer may not truncate":
+    # The default. A caller that has not been taught to report provenance is
+    # unproven, so it can write anything EXCEPT an empty file — which is what
+    # makes adding a new save path safe by default rather than dangerous by
+    # default.
+    reset()
+    var reported = 0
+    saveProjectFile("src/main.nr", "", proc(ok: bool; error: string) =
+      inc reported
+      counted not ok)
+    counted reported == 1
+    counted vfsContentFor(currentProject(), "src/main.nr") == originalMain
+
+  test "an ordinary edit is unaffected by the guard":
+    # The CONTROL for this suite. Without it the three above could all be green
+    # on a build where saving never works at all.
+    reset()
+    var reported = 0
+    saveProjectFile("src/main.nr", brokenMain, proc(ok: bool; error: string) =
+      inc reported
+      counted ok)
+    counted reported == 1
+    counted vfsContentFor(currentProject(), "src/main.nr") == brokenMain
 
 suite "saving writes through to the project store":
 

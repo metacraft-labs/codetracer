@@ -89,6 +89,13 @@
 
 import std/strutils
 
+# TRUNCATION IS NOT A SAVE. `BufferProvenance` / `classifyWrite` live beside the
+# rest of the pure save model rather than here, because `renderer.nim` consults
+# the same verdict before it sends and the two must not be able to drift.
+from ../file_conflicts import
+  BufferProvenance, TruncationVerdict, tvWrite, tvRefuseUnproven,
+  classifyWrite, refusalSentence
+
 import ../viewmodel/platform/noir_template
 
 # ---------------------------------------------------------------------------
@@ -299,8 +306,27 @@ proc setProjectWriter*(writer: ProjectWriter) =
 proc hasProjectWriter*(): bool =
   not writeThrough.isNil
 
-proc saveProjectFile*(relativePath, content: string; onDone: SaveDone) =
+proc saveProjectFile*(relativePath, content: string; onDone: SaveDone;
+                      editsSinceLoad: int = -1) =
   ## Apply one save to the live project, then persist it.
+  ##
+  ## ## The truncation guard, and why it is here as well as at the sender
+  ##
+  ## Reported: *"when I enter a debug sesion and hit the Stop button, the
+  ## contents of some files become empty. What's worse is that this seems to be
+  ## persisted even after I refresh the tab."*
+  ##
+  ## `renderer.dispatchSaveEffect` already refuses to SEND an empty payload
+  ## from a buffer that cannot show an edit. This refuses to APPLY one, and the
+  ## duplication is deliberate: this proc is the single door to both the
+  ## in-memory project and the store, and `applyEditToMemory` runs FIRST. A
+  ## refusal that lived only at the sender would leave any other caller — a
+  ## future host, a test, a path nobody has written yet — able to wipe the
+  ## live project by calling the obvious function with the obvious arguments.
+  ##
+  ## The order matters as much as the check: nothing is applied to memory
+  ## before the verdict, so a refused save leaves the buffer, the project and
+  ## the store exactly as they were.
   ##
   ## MEMORY FIRST, AND THAT ORDER IS THE POINT. What Build compiles is
   ## `currentProject()`; what survives a reload is the store. If the write
@@ -313,6 +339,17 @@ proc saveProjectFile*(relativePath, content: string; onDone: SaveDone) =
   ##
   ## A path the project does not carry is refused rather than created — see
   ## `applyEditToMemory`.
+  # `contentLength` is read off `content`, never taken from the caller: a
+  # provenance that could disagree with the payload it describes would be one
+  # more thing to get wrong, and the length is not the part a caller knows
+  # better. `editsSinceLoad` defaults to `-1` — unproven — so a caller that has
+  # not been taught to answer cannot truncate a file by omission, while every
+  # non-empty save it makes is unaffected.
+  if classifyWrite(BufferProvenance(contentLength: content.len,
+                                    editsSinceLoad: editsSinceLoad)) ==
+      tvRefuseUnproven:
+    onDone(false, refusalSentence(relativePath))
+    return
   if not applyEditToMemory(relativePath, content):
     onDone(false,
       "'" & relativePath & "' is not a file in this project, so nothing " &

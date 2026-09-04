@@ -548,6 +548,16 @@ proc installProjectSaveHost*() =
     proc(sender: js, payload: JsObject) =
       let name = cast[cstring](payload["name"])
       let raw = cast[cstring](payload["raw"])
+      # THE SENDER'S ACCOUNT OF WHETHER ITS BUFFER WAS EVER EDITED, carried
+      # across the message rather than re-derived here — the host has no editor
+      # to ask. Absent (`-1`) when the sender did not supply it, which
+      # `classifyWrite` treats as unproven: a save that cannot say where its
+      # emptiness came from may not empty a stored file. See
+      # `file_conflicts.BufferProvenance`.
+      var edits = -1
+      let rawEdits = payload["bufferEdits"]
+      if not rawEdits.isNil:
+        edits = rawEdits.to(int)
       let relative = projectRelative(currentProject(), $name)
       if relative.len == 0:
         data.ipc.deliver(cstring"CODETRACER::save-file-error", js{
@@ -561,7 +571,8 @@ proc installProjectSaveHost*() =
         else:
           data.ipc.deliver(cstring"CODETRACER::save-file-error", js{
             name: name, error: cstring(error)
-          })))
+          }),
+        editsSinceLoad = edits))
 
 # THE PARAGRAPH THAT USED TO BE HERE IS GONE, and its removal is the point
 # rather than a tidy-up.

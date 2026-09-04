@@ -42,6 +42,42 @@ type
     untitled*: bool
     editorReady*: bool
 
+  BufferProvenance* = object
+    ## What the buffer a save was read from can prove about ITSELF.
+    ##
+    ## Reported: *"when I enter a debug sesion and hit the Stop button, the
+    ## contents of some files become empty. What's worse is that this seems to
+    ## be persisted even after I refresh the tab."*
+    ##
+    ## A save reads `tab.monacoEditor.getValue()`. If the instance it reads is
+    ## not the one the user typed into — a mode transition destroys the editor's
+    ## GoldenLayout pane and another rebuilds it — then `getValue()` answers for
+    ## a model that never held the file, and the answer is `""`. The save path
+    ## cannot tell that from a user who selected everything and pressed Delete,
+    ## so it wrote the empty string through to OPFS, and the next reload read it
+    ## back. The work is gone and a refresh does not recover it.
+    ##
+    ## THE GUARD IS NOT A HEURISTIC ON LENGTH, because emptying a file is a
+    ## legitimate thing to do and a rule that forbade it would be a different
+    ## defect. It is provenance the wipe cannot forge: `editsSinceLoad` is the
+    ## editor's own count of modifications to the model it is holding. A user
+    ## who deleted the contents of a file made at least one edit to do it. A
+    ## model that was constructed empty and never typed into has made none, and
+    ## no arrangement of panes can give it one.
+    ##
+    ## `-1` means "the buffer could not be asked". Treated as unproven, so a
+    ## caller that cannot supply provenance cannot truncate — a save path that
+    ## has not been taught to answer this question must not be able to delete a
+    ## user's file by omission.
+    contentLength*: int
+    editsSinceLoad*: int
+
+  TruncationVerdict* = enum
+    ## Whether a save may proceed.
+    tvWrite            ## persist it
+    tvRefuseUnproven   ## it would empty a file, and the buffer shows no edit
+                       ## that could have emptied it
+
   ReRecordEffectKind* = enum
     rreSaveFile        ## send `CODETRACER::save-file` for `target`
     rreSaveUntitled    ## send `CODETRACER::save-untitled` for `target`
@@ -148,6 +184,47 @@ proc reRecordGateAfterConflictAction*(action: FileConflictAction;
       rrgDispatch
     else:
       rrgWaitForSaves
+
+const UneditedModelVersion* = 1
+  ## Monaco's version id for a model nobody has modified. `ITextModel`
+  ## documents `getVersionId()` as starting at 1 and increasing on every edit,
+  ## so `<= 1` is "this buffer has never been changed since it was created".
+
+func classifyWrite*(provenance: BufferProvenance): TruncationVerdict =
+  ## May this content be written over whatever is stored for the file?
+  ##
+  ## TRUNCATION IS NOT A SAVE UNLESS SOMEONE TRUNCATED IT. The only refusal is
+  ## an empty payload from a buffer that cannot show an edit — the state a
+  ## rebuilt, never-typed-into editor is in, and the state a user who cleared a
+  ## file can never be in.
+  ##
+  ## Everything else is written, including a deliberately emptied file. The rule
+  ## is about the WRITER BEING UNABLE TO DISTINGUISH an intended empty from a
+  ## wipe, and this is the fact that distinguishes them.
+  when defined(ctSaveWritesAnything):
+    # THE PRE-FIX BEHAVIOUR: whatever the buffer said, write it. Reachable only
+    # by defining this symbol, which only the control-data run in
+    # `truncation_guard_test.nim` does. Nothing in the product defines it.
+    return tvWrite
+  if provenance.contentLength > 0:
+    return tvWrite
+  if provenance.editsSinceLoad > UneditedModelVersion:
+    # The buffer was modified after it was created. Whatever else happened, a
+    # human or a command changed this model, so an empty result is a result.
+    return tvWrite
+  tvRefuseUnproven
+
+func refusalSentence*(relativePath: string): string =
+  ## What the user is told when a truncating save is refused.
+  ##
+  ## SAID ON THE SURFACE, not only in the console. A refusal the user cannot see
+  ## is indistinguishable from a save that worked, and this one is refusing
+  ## something they may believe they asked for — so it names the file, says what
+  ## was declined, and says how to actually empty a file if that was the intent.
+  "Refused to save an empty '" & relativePath & "': the editor holding it " &
+  "has no record of anything being deleted, so this is a buffer that was " &
+  "rebuilt empty rather than a file you cleared. Your stored copy is " &
+  "unchanged. To empty this file, edit it in the editor and save again."
 
 proc saveEffects*(tabs: openArray[SaveTarget]; path: string = "";
                   saveAs: bool = false): seq[ReRecordEffect] =

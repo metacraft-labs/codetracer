@@ -1799,14 +1799,30 @@ proc saveTargets*(data: Data): seq[SaveTarget] =
   ## inserts every tab straight from the IPC payload, long before the Monaco
   ## editor component mounts.  `editorReady` records that distinction so the
   ## save path can skip entries it cannot read a buffer from.
+  ##
+  ## A NON-NIL POINTER IS NOT A LIVE BUFFER, and the difference destroyed a
+  ## user's files. `editorReady` was `not tab.monacoEditor.isNil`, and nothing
+  ## in this tree ever nils or disposes that field — `initMonacoForEditor`
+  ## returns early when it is already set — so after a GoldenLayout swap
+  ## orphaned the widget, the pointer still referred to it. Monaco's
+  ## `getValue()` does not throw on a widget whose model is gone; it returns
+  ## `''` (`codeEditorWidget.js`: `if (!this._modelData) { return ''; }`). So
+  ## the save read an empty string from a dead editor and wrote it over the
+  ## file. `getModel()` is the question that separates the two.
   for name, tab in data.services.editor.open:
     if tab.isNil:
       continue
+    var hasLiveModel = false
+    if not tab.monacoEditor.isNil:
+      try:
+        hasLiveModel = not tab.monacoEditor.toJs.getModel().isNil
+      except:
+        hasLiveModel = false
     result.add SaveTarget(
       name: $name,
       changed: tab.changed,
       untitled: tab.untitled,
-      editorReady: not tab.monacoEditor.isNil)
+      editorReady: hasLiveModel)
 
 proc dispatchSaveEffect(data: Data, effect: ReRecordEffect,
                         saveAs: bool): bool =
@@ -1819,11 +1835,43 @@ proc dispatchSaveEffect(data: Data, effect: ReRecordEffect,
   if tab.isNil or tab.monacoEditor.isNil:
     return false
   try:
-    tab.source = tab.monacoEditor.toJs.getValue().to(cstring)
+    let value = tab.monacoEditor.toJs.getValue().to(cstring)
+    # THE BUFFER'S OWN ACCOUNT OF WHETHER ANYONE CHANGED IT.
+    #
+    # `getVersionId()` starts at 1 for a freshly constructed model and rises on
+    # every edit, so it is the one fact that separates "the user emptied this
+    # file" from "this editor was rebuilt and never held the file". A mode
+    # transition destroys the editor's pane and another rebuilds it; the
+    # rebuilt instance answers `getValue()` with `""`, and until this guard the
+    # save wrote that through to storage and the user's work was gone after a
+    # reload. See `file_conflicts.classifyWrite`.
+    #
+    # `-1` when the model cannot be reached, which `classifyWrite` treats as
+    # unproven: a buffer that cannot answer must not be able to delete a file.
+    var edits = -1
+    try:
+      let model = tab.monacoEditor.toJs.getModel()
+      if not model.isNil:
+        edits = model.getVersionId().to(int)
+    except:
+      edits = -1
+    let verdict = classifyWrite(
+      BufferProvenance(contentLength: value.len, editsSinceLoad: edits))
+    if verdict == tvRefuseUnproven:
+      # NOT COUNTED AS DISPATCHED. The caller uses the count to decide whether
+      # anything can ever answer it, and nothing will answer a message that was
+      # never sent — reporting this as sent is how a re-record queue waits for
+      # ever.
+      cerror fmt"saveFiles: refused to truncate {name}"
+      data.viewsApi.errorMessage(cstring(refusalSentence($name)))
+      return false
+    tab.source = value
     if effect.kind == rreSaveUntitled:
-      ipc.send "CODETRACER::save-untitled", js{name: name, raw: tab.source, saveAs: true}
+      ipc.send "CODETRACER::save-untitled",
+        js{name: name, raw: tab.source, saveAs: true, bufferEdits: edits}
     else:
-      ipc.send "CODETRACER::save-file", js{name: name, raw: tab.source, saveAs: saveAs}
+      ipc.send "CODETRACER::save-file",
+        js{name: name, raw: tab.source, saveAs: saveAs, bufferEdits: edits}
     result = true
   except:
     # A single unreadable buffer must not stop the other saves, and must not
