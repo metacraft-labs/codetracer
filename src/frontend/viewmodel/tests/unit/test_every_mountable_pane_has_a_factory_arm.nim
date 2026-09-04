@@ -21,6 +21,14 @@
 ##     ERROR | calltrace.nim | tryMountIsoNimCalltrace: not ready after 200 retries, giving up
 ##     DEBUG | trace.nim     | IsoNim timeline panel: not ready after 200 retries, giving up
 ##
+## THOSE THREE LINES ARE A 2026-09 TRANSCRIPT AND NO LONGER EXIST IN THE
+## SOURCE — do not grep for them. Both the level and the wording were wrong and
+## have been corrected: the ERROR/"giving up" spelling asserted a terminal
+## failure that the factory arms below falsify, and they are now `cwarn` saying
+## which POLL was abandoned. `all three give-ups are audible, and none of them
+## claims the session` is where that is pinned. The transcript is kept because
+## it is the measurement this whole suite exists for.
+##
 ## The other 23 ended mid-poll between retry #20 and #110 with the container
 ## still absent. There is no retry margin to widen — the poll starts before the
 ## thing it polls for can exist — so the State, Call Trace and Timeline panes
@@ -62,7 +70,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 34
+const ExpectedAssertions = 42
+  ## 34 before the give-up test was widened from the timeline alone to all
+  ## three panes. The old test made 3 assertions; the new one makes 11 (three
+  ## per pane, plus the timeline's two `clog`-regression guards), so the count
+  ## went UP by 8. It is reconciled to the code and never the other way.
 
 const LayoutPath = "src/frontend/ui/layout.nim"
 
@@ -259,14 +271,46 @@ suite "the factory mounts every mountable pane":
                      "tryMountIsoNimTerminalOutputPanel"]:
       counted dispatchRegion(source).contains(procName & "()")
 
-  test "the timeline's give-up is logged as loudly as the other two":
-    # Not a dispatch property, and here anyway because it is the same defect
-    # seen from the logging side: the timeline failed in every session the
-    # other two failed in, and only its failure was invisible. `clog` at DEBUG,
-    # under a message that did not even name the proc, is why nobody reported
-    # a blank Timeline pane in 25 sessions of blank State and Call Trace panes.
+  test "all three give-ups are audible, and none of them claims the session":
+    # Not a dispatch property, and here anyway because it is this dispatch seen
+    # from the logging side — the arms above are what make the claim these
+    # lines used to print FALSE.
+    #
+    # TWO FAILURES ARE BEING HELD APART, AND THEY PULL IN OPPOSITE DIRECTIONS.
+    #
+    # Too quiet: the timeline announced its give-up with `clog` at DEBUG, under
+    # a message that did not name the proc. It failed in every session the
+    # other two failed in, and only its failure was invisible — 25 sessions of
+    # blank State and Call Trace panes, and nobody reported the blank Timeline.
+    #
+    # Too loud, and FALSE: all three then said ERROR and called the cap
+    # terminal — "never mounted for the rest of the session", "nothing calls
+    # the mount again". The factory arms this suite asserts are what falsify
+    # that. Each `tryMountIsoNim*` re-enters with a fresh retry counter, so the
+    # cap ends one ATTEMPT; the `*PanelIsLive` guards report mounted, never
+    # failed; and the losing pollers run BEFORE the container can exist, so
+    # they lose by construction. The lines fire in healthy sessions, which is
+    # why `ci/test/noir-replay-in-browser.sh` records them instead of asserting
+    # they are absent: "asserting no give-up would fail over a working
+    # product".
+    #
+    # A log that asserts terminal failure on every good run is how a real
+    # failure gets scrolled past, so WARN is the level that is both true and
+    # audible, and this test pins both walls.
+    for (path, procName) in [
+        ("src/frontend/ui/state.nim", "tryMountIsoNimStatePanel"),
+        ("src/frontend/ui/calltrace.nim", "tryMountIsoNimCalltrace"),
+        ("src/frontend/ui/trace.nim", "tryMountIsoNimTimelinePanel")]:
+      let source = readFile(path)
+      # Audible, and at the level that does not overclaim.
+      counted source.contains("cwarn \"[PIPELINE] " & procName &
+                              ": container absent after ")
+      # Never ERROR again. Matched on the call, not on prose: the surrounding
+      # comments discuss the old ERROR spelling on purpose.
+      counted not source.contains("cerror \"[PIPELINE] " & procName)
+      # And it says what actually ended, which is this poll and not the pane.
+      counted source.contains("abandoning THIS poll")
     let trace = readFile("src/frontend/ui/trace.nim")
-    counted trace.contains("cerror \"[PIPELINE] tryMountIsoNimTimelinePanel: not ready after 200 \"")
     counted trace.contains("tryMountIsoNimTimelinePanel: retry #")
     counted not trace.contains("clog \"IsoNim timeline panel: not ready")
 

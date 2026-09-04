@@ -341,9 +341,19 @@ proc remountDebugControls*() =
   ## while `enterTemplateEditMode` is still delivering — before GoldenLayout
   ## and the menu shell have drawn — so the host does not exist yet and the
   ## hundred ticks expire against an empty document. The sibling panels log the
-  ## same shape out loud (`tryMountIsoNimStatePanel: not ready after 200
-  ## retries, giving up`); this one gives up quietly because `isoNimDebugMounted`
-  ## stays `false` and no later event calls it again.
+  ## same shape out loud — `ui/state.nim`, `ui/calltrace.nim` and `ui/trace.nim`
+  ## each `cwarn` a "container absent after … retries" line — while this one
+  ## gives up quietly.
+  ##
+  ## AND THE SIMILARITY STOPS AT THE LOG LINE, WHICH IS WHY THIS PROC EXISTS.
+  ## Those three are recoverable and their warnings say so: `ui/layout.nim`'s
+  ## component factory calls each mount again once it has built the container,
+  ## and each call re-enters with a fresh retry counter, so a give-up there ends
+  ## one poll and not the pane. This one has no such later caller —
+  ## `isoNimDebugMounted` stays `false` and no event re-fires the mount — so for
+  ## the toolbar the exhausted budget really is the end, and the repair has to
+  ## be asked for explicitly. That asymmetry is the whole reason this proc is
+  ## here and the other three panes need nothing equivalent.
   ##
   ## So a caller that has just CHANGED the surface asks for the mount again.
   ##

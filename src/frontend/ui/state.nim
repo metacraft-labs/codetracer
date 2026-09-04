@@ -150,12 +150,36 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
       # exhausting the retry budget below is a failure.
       cdebug "[PIPELINE] tryMountIsoNimStatePanel: retry #" & $data.retryCount
     if data.retryCount > 200:
-      # Stays at ERROR: giving up here means the state panel is never
-      # mounted for the rest of the session — the container did not appear
-      # within ~2s.  Unlike the `retry #` line above (which is expected
-      # while GoldenLayout is still building the DOM), reaching the cap is
-      # a terminal failure with a permanently blank panel as its symptom.
-      cerror "[PIPELINE] tryMountIsoNimStatePanel: not ready after 200 retries, giving up"
+      # WARN, AND IT ENDS THIS POLL RATHER THAN THE SESSION.
+      #
+      # This said ERROR and called itself "a terminal failure with a
+      # permanently blank panel as its symptom". That is false, and
+      # `ui/layout.nim`'s component factory is what falsifies it: its
+      # `Content.State` arm calls `tryMountIsoNimStatePanel()` 200 ms after
+      # `mountComponentContainer` has built `#stateComponent-0`, which is the
+      # one moment the container is known to exist. That call re-enters with a
+      # FRESH `StateMountData(retryCount: 0)`, so the cap below is per-ATTEMPT
+      # and not per-session, and `statePanelIsLive()` is a mounted guard rather
+      # than a failed one — reaching the cap latches nothing.
+      #
+      # So what has happened here is that an EARLIER, redundant poll lost a
+      # race it was always going to lose: it started before the container
+      # could exist. The pane is mounted moments later by the factory arm, and
+      # a populated State pane above this line is the normal case, not a
+      # contradiction of it.
+      #
+      # The level is deliberate in both directions. It must not go back to
+      # `clog`/DEBUG — that is what hid the Timeline's identical give-up
+      # through 25 sessions. It must not stay at ERROR either: ERROR is for a
+      # capability the user has lost, this fires in healthy sessions, and an
+      # error that is printed on every good run is how a real one gets
+      # scrolled past. `ci/test/noir-replay-in-browser.sh` already records
+      # these give-ups rather than asserting their absence, for exactly this
+      # reason ("asserting no give-up would fail over a working product") —
+      # this line is now spelled the way that gate already reads it.
+      cwarn "[PIPELINE] tryMountIsoNimStatePanel: container absent after 200 " &
+        "retries; abandoning THIS poll — layout.nim's factory arm mounts the " &
+        "pane once its container exists"
       return
     setTimeoutWithArg(doMountStatePanel, 10, data)
     return

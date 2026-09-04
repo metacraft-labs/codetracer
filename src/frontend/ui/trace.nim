@@ -129,19 +129,30 @@ proc doMountTimelinePanel(data: TimelineMountData) {.cdecl.} =
     if data.retryCount > 200:
       # WAS `clog`, WHICH IS WHY NOBODY EVER REPORTED THIS PANE.
       #
-      # The State and Call Trace panes announce the identical give-up at
-      # ERROR; the timeline announced it at DEBUG, under a message that did
-      # not even name the proc that failed ("IsoNim timeline panel: not ready
-      # after 200 retries, giving up"). The three panes failed together in
-      # every desktop session examined and only two of the failures were
-      # visible, so the timeline was invisibly broken for as long as the other
-      # two were loudly broken.
+      # The State and Call Trace panes announce the identical give-up; the
+      # timeline announced it at DEBUG, under a message that did not even name
+      # the proc that failed ("IsoNim timeline panel: not ready after 200
+      # retries, giving up"). The three panes failed together in every desktop
+      # session examined and only two of the failures were visible, so the
+      # timeline was invisibly broken for as long as the other two were loudly
+      # broken. That is why this must never go back to `clog`/DEBUG.
       #
-      # Reaching this cap is terminal: nothing calls the mount again, so the
-      # Timeline pane stays blank for the rest of the session. An invisible
-      # failure is worse than a loud one.
-      cerror "[PIPELINE] tryMountIsoNimTimelinePanel: not ready after 200 " &
-        "retries, giving up"
+      # WARN AND NOT ERROR, AND IT ENDS THIS POLL RATHER THAN THE SESSION.
+      #
+      # This used to add "reaching this cap is terminal: nothing calls the
+      # mount again". That was true when it was written and `ui/layout.nim`
+      # made it false: the `Content.Timeline` arm is, in its own words, the
+      # timeline's FIRST caller on the component-registration path —
+      # `TimelineComponent` has no `register` method at all — and it runs
+      # after `mountComponentContainer`. It re-enters with a fresh
+      # `TimelineMountData(retryCount: 0)`, so the cap is per-attempt, and
+      # `timelinePanelIsLive()` is a mounted guard, not a failed one.
+      #
+      # The losing pollers are the two `initTimelineVM*` sites above. A
+      # populated Timeline pane after this line is the normal case.
+      cwarn "[PIPELINE] tryMountIsoNimTimelinePanel: container absent after " &
+        "200 retries; abandoning THIS poll — layout.nim's Timeline factory " &
+        "arm mounts the pane once its container exists"
       return
     setTimeoutWithArg(doMountTimelinePanel, 10, data)
     return

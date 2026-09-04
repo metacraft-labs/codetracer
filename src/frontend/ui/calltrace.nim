@@ -340,12 +340,24 @@ proc tryMountIsoNimCalltrace*() =
         cdebug "[PIPELINE] tryMountIsoNimCalltrace: retry #" & $calltraceRetryCount &
           ", container=nil"
       if calltraceRetryCount > 200:
-        # Stays at ERROR, for the same reason as the state panel's cap in
-        # `ui/state.nim`: reaching it means the calltrace panel is never
-        # mounted for the rest of the session.  The `retry #` line above is
-        # ordinary progress while GoldenLayout builds the DOM; this one is
-        # terminal.
-        cerror "[PIPELINE] tryMountIsoNimCalltrace: not ready after 200 retries, giving up"
+        # WARN, AND IT ENDS THIS POLL RATHER THAN THE SESSION — see the longer
+        # note on the same cap in `ui/state.nim`.
+        #
+        # This claimed the panel "is never mounted for the rest of the
+        # session". `ui/layout.nim`'s `Content.Calltrace` factory arm calls
+        # `tryMountIsoNimCalltrace()` after the container has been built, and
+        # that call declares its own `var calltraceRetryCount = 0`, so the cap
+        # is per-attempt; `calltracePanelIsLive()` reports mounted, not failed.
+        #
+        # Calltrace is the sharpest case, and `layout.nim` says why: its
+        # `register` method has ALWAYS made this call, but on the desktop
+        # `register` runs at component-construction time, which is EARLIER
+        # than the container by construction. The losing poll is therefore not
+        # bad luck — that window cannot be won, and widening the budget would
+        # not change it.
+        cwarn "[PIPELINE] tryMountIsoNimCalltrace: container absent after 200 " &
+          "retries; abandoning THIS poll — the register-time window closes " &
+          "before the container exists; layout.nim's factory arm mounts it"
         return
       discard setTimeout(proc() = doMount(), 10)
       return

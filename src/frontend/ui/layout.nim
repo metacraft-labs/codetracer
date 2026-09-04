@@ -2033,6 +2033,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         #   ERROR | calltrace.nim | tryMountIsoNimCalltrace: not ready after 200 retries, giving up
         #   DEBUG | trace.nim     | IsoNim timeline panel: not ready after 200 retries, giving up
         #
+        # A 2026-09 TRANSCRIPT, PRE-DATING THE ARMS BELOW. Do not grep the
+        # source for those three strings: the arms below made their claim
+        # false — a give-up ends one poll, because each mount re-enters with a
+        # fresh retry counter — and all three now `cwarn` that they abandoned
+        # THIS poll rather than the pane. The transcript stays because it is
+        # the measurement that put these arms here.
+        #
         # The other 23 ended mid-poll between retry #20 and #110 with the
         # container still absent. There is no retry margin to widen: the poll
         # starts before the thing it polls for can exist, so it is not a race

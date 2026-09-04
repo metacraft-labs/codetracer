@@ -109,10 +109,23 @@ page.on('console', (m) => {
   const t = m.text();
   consoleLines.push(t);
   // THE GIVE-UP, CAPTURED BY ITS OWN WORDS. `ui/state.nim`, `ui/calltrace.nim`
-  // and (since this change) `ui/trace.nim` all log "not ready after 200
-  // retries, giving up" when the poll exhausts its budget. Collecting the line
-  // means a blank pane can be attributed rather than merely observed.
-  if (t.includes('not ready after 200 retries') ||
+  // and `ui/trace.nim` all log a give-up when a mount poll exhausts its
+  // budget. Collecting the line means a blank pane can be attributed rather
+  // than merely observed.
+  //
+  // COLLECTED, NEVER ASSERTED, AND THE CURRENT WORDING SAYS WHY. These lines
+  // fire in HEALTHY sessions: the poll that loses starts before the container
+  // can exist, and `ui/layout.nim`'s factory arm mounts the pane moments
+  // later with a fresh retry counter. So a give-up here is not evidence of a
+  // blank pane — pair it with the child counts below, which are the actual
+  // verdict.
+  //
+  // Both spellings are matched on purpose. The lines now read "container
+  // absent after N retries"; they used to read "not ready after 200 retries,
+  // giving up" at ERROR, and a log from an older build is exactly what this
+  // probe is for.
+  if (t.includes('container absent after') ||
+      t.includes('not ready after 200 retries') ||
       t.includes('IsoNim timeline panel: not ready')) {
     report.giveUpLines.push(t.slice(0, 300));
   }
