@@ -35,6 +35,16 @@
  *     tab*.  A rectangle around the panel alone would satisfy a presence
  *     check and still leave the tab bare, so the path's bounding box must
  *     enclose the active strip tab as well.
+ *
+ *     This one is applied to the DOCKED outline too, not only the new one, and
+ *     it is what caught the right-hand strip.  `dockedWithTabPath` describes
+ *     the shape once for a left-hand tab and reflects it for the right; the
+ *     panel's own two edges are each other's reflection so they came out
+ *     right, but the tab is not, and it was being reflected onto the panel's
+ *     inner side — drawn into the layout instead of out to the strip.  A
+ *     presence check passes on that, and so does a look at the bottom edge,
+ *     where `mirror` is false.  Only asking whether the line reaches the tab
+ *     finds it.
  *  3. **Above the overlay.**  The defect was an outline that existed and was
  *     painted over.  Presence in the DOM is therefore not enough: the
  *     outline's computed `z-index` must exceed the overlay's.

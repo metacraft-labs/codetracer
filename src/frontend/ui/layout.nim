@@ -600,15 +600,37 @@ proc setupSelectedPanelOutline() =
       // edge instead, which is what the GL outline does for a first tab.
       function dockedWithTabPath(p, tb, rr, tr_, inset, side) {
         var mirror = (side === 'right');
+        // Reflection about the panel's own horizontal centre.  The traversal
+        // below is written once, for a tab on the panel's LEFT, and `px` turns
+        // it into the right-hand case on the way out.
         var px = function (x) { return mirror ? (p.left + p.right) - x : x; };
-        var sgn = mirror ? -1 : 1;
+        // Every coordinate below is therefore in reflected space, where the
+        // traversal always steps the same way; `px` alone does the flipping,
+        // so there is no second direction to carry.
+        var sgn = 1;
         var CV = mirror ? 0 : 1;   // convex corner sweep
         var CC = mirror ? 1 : 0;   // concave connector sweep
 
-        var L  = (mirror ? p.right : p.left)  + sgn * inset;   // panel inner edge
-        var R  = (mirror ? p.left  : p.right) - sgn * inset;   // panel outer edge
+        // In reflected space the panel's tab-side edge is always its left one
+        // and its far edge always its right, whichever strip it is docked
+        // against: `px` maps `p.left` back onto `p.right` for a right strip,
+        // because the panel's two edges are each other's reflection.
+        var L  = p.left + inset;    // the panel edge the tab attaches to
+        var R  = p.right - inset;   // the opposite edge
         var T  = p.top + inset, B = p.bottom - inset;
-        var TO = (mirror ? tb.right : tb.left) + sgn * inset;  // tab outer edge
+        // THE TAB IS NOT SYMMETRIC ABOUT THAT CENTRE, so unlike the panel's own
+        // two edges it cannot be reflected by reading the other end of it — it
+        // has to be reflected outright.
+        //
+        // This is the defect that was here.  `tb.right` was passed in
+        // unreflected and then sent through `px` anyway, which put the tab at
+        // its mirror image: hanging off the panel's INNER edge, into the
+        // layout, instead of out to the strip it belongs to.  The panel
+        // rectangle itself was traced correctly, so on the right-hand strip the
+        // outline read as a line going somewhere strange rather than as a line
+        // that was missing — and only on that one strip, since `mirror` is
+        // false for the left one and this expression collapses to `tb.left`.
+        var TO = (mirror ? (p.left + p.right) - tb.right : tb.left) + inset;
         var tT = tb.top + inset, tB = tb.bottom - inset;
 
         // Panel corners, and the two tab corners on its outer side.
