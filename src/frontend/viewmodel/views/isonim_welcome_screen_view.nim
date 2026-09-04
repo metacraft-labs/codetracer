@@ -35,6 +35,11 @@ from ../../../ct/version import CodeTracerVersionStr
 # adding an element. On the desktop the label is "" and this line is byte-for-
 # byte what it was.
 import ../platform/displayed_build_identity
+# WHAT THIS INSTANCE CALLS ITSELF. The heading used to read "CodeTracer IDE" —
+# a literal, and a name no other surface uses — on a screen that a Noir Studio
+# address reaches whenever the entry resolves to something other than a
+# template (`/projects`, an unknown path). See `displayed_product.nim`.
+import ../platform/displayed_product
 import ../store/types
 import ../viewmodels/welcome_screen_vm
 
@@ -43,11 +48,24 @@ const WelcomeScreenWrapperClass* = "welcome-screen-wrapper"
 const WelcomeScreenClass* = "welcome-screen"
 const WelcomeScreenLoadingClass* = "welcome-screen-loading"
 const WelcomeLoadingOverlayClass* = "welcome-screen-loading-overlay"
-const RecentFoldersEmptyText* = "Open a folder to start editing."
+const RecentFoldersEmptyText* = "Folders you open are listed here."
 const RecentFoldersFirstTimeText* =
-  "Open a folder to start editing code, or record a program to begin time-travel debugging."
-const RecentTracesEmptyText* =
-  "Record a program to create your first trace, or open an existing trace file."
+  "Open a folder to start editing. It will be listed here afterwards."
+const RecentTracesEmptyText* = "Traces you record are listed here."
+  ## THREE EMPTY-STATE LINES THAT NO LONGER RE-ANNOUNCE THE BUTTONS BELOW THEM.
+  ##
+  ## They read, in order: "Open a folder to start editing.", "Open a folder to
+  ## start editing code, or record a program to begin time-travel debugging.",
+  ## and "Record a program to create your first trace, or open an existing
+  ## trace file." Every verb in all three is the label of a button eight
+  ## millimetres further down the same screen — Open folder, Record new trace,
+  ## Open local trace — so the panels spent their only line repeating the row
+  ## that says it better, and said nothing about themselves.
+  ##
+  ## What a reader of an empty panel actually needs is what will appear in it.
+  ## The first-time line keeps one instruction, because on a first launch the
+  ## panel has never had anything in it and "afterwards" is the fact that makes
+  ## the empty panel make sense.
 
 type WelcomeScreenCallbacks* = object
   # M-REC-3: ``recordingId`` is a UUIDv7 recording-id string.
@@ -238,14 +256,14 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
               discard
             tdiv:
               tdiv: text "Welcome to"
-              tdiv: text "CodeTracer IDE"
+              tdiv: text displayedProductName()
           tdiv(class = "welcome-version"):
             text versionLineText(CodeTracerVersionStr, displayedBuildLabel())
         tdiv(class = "welcome-content"):
           tdiv(class = "welcome-left-panel"):
             tdiv(class = "recent-folders"):
               tdiv(class = "recent-folders-title"):
-                text "RECENT FOLDERS"
+                text "Recent folders"
               tdiv(class = "recent-folders-list"):
                 if folders.len > 0:
                   for folder in folders:
@@ -259,8 +277,6 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                 else:
                   tdiv(class = "empty-state-message"):
                     if firstTime:
-                      tdiv(class = "empty-state-welcome"):
-                        text "Welcome to CodeTracer!"
                       tdiv(class = "empty-state-text"):
                         text RecentFoldersFirstTimeText
                     else:
@@ -269,7 +285,7 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
           tdiv(class = "welcome-right-panel"):
             tdiv(class = "recent-traces"):
               tdiv(class = "recent-traces-title"):
-                text "RECENT TRACES"
+                text "Recent traces"
               tdiv(class = "recent-traces-list"):
                 if traces.len > 0:
                   for trace in traces:
@@ -574,14 +590,14 @@ when defined(js):
                 discard
               tdiv:
                 tdiv: text "Welcome to"
-                tdiv: text "CodeTracer IDE"
+                tdiv: text displayedProductName()
             tdiv(class = "welcome-version"):
               text versionLineText(CodeTracerVersionStr, displayedBuildLabel())
           tdiv(class = "welcome-content"):
             tdiv(class = "welcome-left-panel"):
               tdiv(class = "recent-folders"):
                 tdiv(class = "recent-folders-title"):
-                  text "RECENT FOLDERS"
+                  text "Recent folders"
                 tdiv(class = "recent-folders-list"):
                   if folders.len > 0:
                     for folder in folders:
@@ -595,8 +611,6 @@ when defined(js):
                   else:
                     tdiv(class = "empty-state-message"):
                       if firstTime:
-                        tdiv(class = "empty-state-welcome"):
-                          text "Welcome to CodeTracer!"
                         tdiv(class = "empty-state-text"):
                           text RecentFoldersFirstTimeText
                       else:
@@ -605,7 +619,7 @@ when defined(js):
             tdiv(class = "welcome-right-panel"):
               tdiv(class = "recent-traces"):
                 tdiv(class = "recent-traces-title"):
-                  text "RECENT TRACES"
+                  text "Recent traces"
                 tdiv(class = "recent-traces-list"):
                   if traces.len > 0:
                     for trace in traces:

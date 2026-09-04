@@ -215,7 +215,7 @@ const noirTemplateNargoInfoJson* = """{"programs":[{"package_name":"hello_noir",
   ## whatever `wasm_worker_browser.js` dispatches. Read them there.
 
 const noirTemplateConstraintProvenance* =
-  "measured at build time by the Noir compiler this page runs"
+  "Measured by compiling the project."
   ## Shown in the pane. A count with no provenance is a count a user cannot
   ## judge: "17" means one thing measured a second ago and another thing
   ## shipped in a bundle, and the pane must not make them look alike.
@@ -398,7 +398,7 @@ const noirDemoNargoInfoJson* = """{"programs":[{"package_name":"oracle_settlemen
   ## compiler answered and why it is not the one that measured the hello-world.
 
 const noirDemoConstraintProvenance* =
-  "measured at build time by the Noir compiler this page runs"
+  "Measured by compiling the project."
   ## The same sentence the hello-world carries, and it is the same claim: the
   ## number was produced by the wasm module the deploy publishes, not by a
   ## native `nargo` a visitor cannot see.
@@ -847,9 +847,9 @@ proc languagesWithoutTemplate*(): seq[string] =
   ## product has an entry point for have an initial template" — and the initial
   ## template is the one the BARE entry serves. A language whose `/demo`
   ## existed and whose `/noir` did not would still be the gap rule 0 is about.
-  for language in knownLanguageEntries:
-    if not templateFor(language, efBare).hasFiles:
-      result.add language
+  for row in knownLanguageEntries:
+    if not templateFor(row.entry, efBare).hasFiles:
+      result.add row.entry
 
 proc templatesWithoutConstraintCounts*(): seq[string] =
   ## The templates that would make the Constraints pane report an absence, as a

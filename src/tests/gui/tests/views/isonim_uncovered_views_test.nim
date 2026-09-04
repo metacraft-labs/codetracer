@@ -311,12 +311,12 @@ suite "IsoNim Event Log Filter Dropdown — structure":
   test "the enable toggle reflects filtersEnabled in label and data-checked":
     let r = MockRenderer()
     let on = renderFilterDropdownPanel(r, @[], @[], filtersEnabled = true)
-    check on.findByClass("ct-toggle-label").textContent == "ENABLED"
+    check on.findByClass("ct-toggle-label").textContent == "On"
     check on.findByClass("ct-toggle").attributes["data-checked"] == "true"
 
     let r2 = MockRenderer()
     let off = renderFilterDropdownPanel(r2, @[], @[], filtersEnabled = false)
-    check off.findByClass("ct-toggle-label").textContent == "DISABLED"
+    check off.findByClass("ct-toggle-label").textContent == "Off"
     check off.findByClass("ct-toggle").attributes["data-checked"] == "false"
 
 suite "IsoNim Event Log Filter Dropdown — events":

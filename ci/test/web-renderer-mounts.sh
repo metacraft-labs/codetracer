@@ -1156,6 +1156,7 @@ c_text="$(json control dom.visibleTextLength)"
 c_errs="$(json control pageErrors)"
 c_boot="$(json control bootLine)"
 c_renderer="$(json control rendererLine)"
+c_title="$(json control dom.title)"
 
 # NON-VACUITY FIRST. Everything after this reads `#dom-root`; if the probe
 # never found it, the rest are assertions about nothing.
@@ -1163,6 +1164,28 @@ if [ "${c_present}" = "true" ]; then
 	ck ok "the probe reached a document that has #dom-root, so the checks below have a subject"
 else
 	ck fail "the probe found no #dom-root — every DOM check below would be vacuous"
+fi
+
+# WHAT A BOOKMARK OF THIS PAGE WOULD BE CALLED.
+#
+# The gate had no assertion about the product's own name, and the entry
+# document shipped one literal `<title>` — `CodeTracer &mdash; Noir Studio` —
+# for every address the deployment serves. So the language-neutral root called
+# itself Noir Studio, `/noir` called itself CodeTracer, and every bookmark
+# taken anywhere carried both names at once. Nothing here could see it: a
+# title is not markup inside `#dom-root` and no check read it.
+#
+# It is asserted on the RENDERED title rather than on the served document,
+# because the served document cannot be right — one file answers three
+# addresses. `ui_js.startWebRenderer` resolves the entry and sets
+# `document.title` from `web_entry.productNameFor`, and this is that value.
+# Arm R makes the same assertion for `/noir` and arm O for the language host;
+# the three together are the whole claim, and arm S — which stubs the location
+# read to a constant `/` — is what shows arm R's able to fail.
+if [ "${c_title}" = "CodeTracer" ]; then
+	ck ok "the language-neutral root calls itself CodeTracer, so a bookmark of it is filed under the right product"
+else
+	ck fail "the language-neutral root's title is '${c_title}', not 'CodeTracer'"
 fi
 
 # THE ARTEFACT. Not "the file was served"; markup a user would see.
@@ -1415,6 +1438,7 @@ else
 	r_entries="$(json route dom.filesystemEntries)"
 	r_errs="$(json route pageErrors)"
 	r_renderer="$(json route rendererLine)"
+	r_title="$(json route dom.title)"
 	r_labels="$(python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -1428,6 +1452,21 @@ print(" ".join(d.get("dom", {}).get("entryLabels") or []))
 	else
 		ck fail "arm R: /noir produced no #dom-root — the rewrite did not reach the SPA and every check below would be vacuous"
 		dump_arm route
+	fi
+
+	# AND IT CALLS ITSELF THE RIGHT PRODUCT. `/noir` is Noir Studio, so the
+	# title a bookmark keeps must be Noir Studio and not the name of the
+	# desktop product it shares a renderer with. This is the address half of
+	# the control arm's check; arm O below is the host half.
+	#
+	# Arm S is its mutation twin at no extra cost: it stubs the location read
+	# to a constant `/`, which makes `productNameFor` answer the neutral name
+	# here, so this check reddens on exactly the build that made the route
+	# defect ship.
+	if [ "${r_title}" = "Noir Studio" ]; then
+		ck ok "arm R: /noir calls itself Noir Studio, so a bookmark of it is not filed under CodeTracer"
+	else
+		ck fail "arm R: /noir's title is '${r_title}', not 'Noir Studio'"
 	fi
 
 	# THE BUG REPORT, as one assertion. "I am taken immediately to the Welcome
@@ -2100,6 +2139,7 @@ if ! run_arm language-host configure_language_host "/" "${language_host}"; then
 	ck fail "arm O could not be measured (second half)"
 	ck fail "arm O could not be measured (third half)"
 	ck fail "arm O could not be measured (fourth half)"
+	ck fail "arm O could not be measured (the title half)"
 else
 	o_origin="$(json language-host dom.origin)"
 	o_welcome="$(json language-host dom.welcomeScreenRoots)"
@@ -2107,6 +2147,7 @@ else
 	o_entries="$(json language-host dom.filesystemEntries)"
 	o_visible="$(json language-host dom.entryLabelsVisible)"
 	o_renderer="$(json language-host rendererLine)"
+	o_title="$(json language-host dom.title)"
 
 	# NON-VACUITY, and it is specific to this arm: a `--host-resolver-rules`
 	# that silently failed to apply would leave the page on `127.0.0.1`, where
@@ -2116,6 +2157,15 @@ else
 		ck ok "arm O: the page is on ${o_origin}, so this arm measured the second domain"
 	else
 		ck fail "arm O: the page reports origin '${o_origin}', not http://${language_host} — the host mapping did not apply and the surface check below would be about the wrong host"
+	fi
+
+	# THE HOST HALF of the naming claim. `noirstudio.dev/` has no `/noir` in
+	# it — the language comes from the ORIGIN — so a build that read the path
+	# and not the descriptor would pass arm R and fail here.
+	if [ "${o_title}" = "Noir Studio" ]; then
+		ck ok "arm O: / on the language host calls itself Noir Studio, so the name follows the origin and not only the path"
+	else
+		ck fail "arm O: / on the language host has title '${o_title}', not 'Noir Studio'"
 	fi
 
 	if [ "${o_welcome}" = "0" ] && [ "${o_fs}" = "1" ] &&
@@ -2780,7 +2830,17 @@ echo
 #     confirming an absence: a dispatch refused SYNCHRONOUSLY left the slot
 #     spinning for the full two-minute deadline, because `runTestFromGutter`
 #     armed the spinner on the line after the hook that had already settled.
-expect_count 86
+# 86 -> 89, and the three are one subject: WHAT THE PRODUCT CALLS ITSELF.
+#
+# The entry document carried one literal `<title>` for the three addresses the
+# deployment serves, so `ide.codetracer.com/` called itself Noir Studio and
+# `noirstudio.dev` and `/noir` both led with CodeTracer. Every bookmark taken
+# anywhere on the deployment carried the wrong product name, and this gate —
+# which asserts the DOM thoroughly — had no check that could see a title at
+# all. One per address: the neutral root (control), the path (arm R) and the
+# origin (arm O), because a build can get any one of the three right while
+# reading the wrong input for the other two.
+expect_count 89
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

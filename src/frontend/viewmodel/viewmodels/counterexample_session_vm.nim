@@ -113,9 +113,8 @@ const
     ## test can confuse it with `file:line:column`. Asserted character by
     ## character in the suite.
 
-  NoSnapPosReason* = "the prover recorded values at this program point but no " &
-    "source position: the snapshot-to-span map is built inside `vir` and does " &
-    "not cross the `venir` boundary"
+  NoSnapPosReason* = "the prover recorded values here but not which line " &
+    "they belong to"
     ## The one reason that applies to every step of every model this campaign
     ## has produced.
 
@@ -269,9 +268,8 @@ type
 
 const
   SolverDerivedProvenance* =
-    "Solver counterexample — not a recorded execution. These values are the " &
-    "SMT solver's own model of the verification query; no run of this program " &
-    "produced them."
+    "These values come from the prover, not from a run. Nothing executed " &
+    "this program to produce them."
     ## Deliverable 5's sentence. It is a constant so the two renderers and the
     ## tests cannot drift, and so that deleting it is a compile error rather
     ## than a quieter panel.

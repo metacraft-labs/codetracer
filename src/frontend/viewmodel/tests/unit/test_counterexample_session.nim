@@ -669,7 +669,7 @@ suite "VN-M5 a counterexample is visibly a solver's, never a recording":
     ck nodesWithAttributeValue(node, "data-ct-counterexample-recorded",
                                "true").len == 0
     ck nodesWithAttribute(node, "data-ct-counterexample-provenance").len == 1
-    ck renderedText(node).contains("not a recorded execution")
+    ck renderedText(node).contains("not from a run")
     ck renderedText(node).contains(SolverDerivedProvenance)
     ck allAttributeText(node).contains("diagnostic only")
     for row in model.rows:

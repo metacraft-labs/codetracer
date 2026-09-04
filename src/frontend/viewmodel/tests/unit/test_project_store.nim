@@ -131,7 +131,7 @@ suite "the store's shape and its version — §4.5":
     let opened = awaitOutcome(
       openStore(volume.asVolume, "tab-a", true, true, t0))
     check not opened.ok
-    check "not a CodeTracer store descriptor" in opened.error.message
+    check "not a CodeTracer project" in opened.error.message
     check volume.writeCount == before
 
   test "an older store is migrated forward rather than refused":
@@ -278,8 +278,14 @@ suite "durability is three tiers, not a boolean — §4.1, §4.2":
     check report.tiers[dtWorkingTree].available
     check not report.tiers[dtCommittedHistory].available
     check report.tiers[dtExport].available
-    check "NS5" in report.tiers[dtCommittedHistory].unavailableBecause
-    check "unrecoverable" in report.tiers[dtCommittedHistory].unavailableBecause
+    # THE SENTENCE'S SUBJECT, not the milestone that owns it. This checked
+    # for "NS5" — a roadmap code that could only pass while it was in the text
+    # a user reads — and for "unrecoverable", which named the state without
+    # naming the way out. What the middle tier must say is which capability is
+    # missing and what to do instead, and that is what is checked now.
+    check "no version control" in report.tiers[dtCommittedHistory].unavailableBecause
+    check "An export is the only way back" in
+      report.tiers[dtCommittedHistory].unavailableBecause
     check strongestAvailableTier(report) == dtExport
 
   test "export is available even when the working tree is not":
@@ -553,7 +559,7 @@ suite "test_committed_history_survives_a_corrupted_working_tree — §4.1":
     check recovered.value == ""     # truncated, and NOT recovered
 
     check not reopened.value.durability.tiers[dtCommittedHistory].available
-    check "NS5" in
+    check "no version control" in
       reopened.value.durability.tiers[dtCommittedHistory].unavailableBecause
 
   test "the export tier IS reachable, which is the recovery point that exists":

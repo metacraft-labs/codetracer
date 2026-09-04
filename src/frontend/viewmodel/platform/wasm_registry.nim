@@ -233,8 +233,8 @@ proc refusal*(resolution: WasmResolution): PlatformError =
     # still named — a user who typed it should see it — but the sentence is
     # about the build.
     platformError(pkNotSupported,
-      "this build ships no wasm toolchain modules, so `" & resolution.command &
-      "` — or anything else — cannot run in the tab.",
+      "this page was published without a compiler, so `" &
+      resolution.command & "` — or anything else — cannot run here.",
       detail = "empty wasm module registry")
   of wrPathQualified:
     platformError(pkNotSupported,

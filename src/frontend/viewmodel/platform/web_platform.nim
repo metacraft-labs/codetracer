@@ -506,18 +506,16 @@ proc buildVcs(web: WebPlatform; profile: PlatformProfile): VcsFacade =
   unavailableVcs(profile)
 
 const webNoModulesLoaded* =
-  "this deployment ships no wasm toolchain modules, so nothing can be run in " &
-  "the tab: compiling and running tests need the Noir modules, which a " &
-  "deployment loads with the application bundle"
+  "this page was published without the Noir compiler, so nothing here can " &
+  "be compiled, run or tested"
   ## NS3. Not "the feature is missing" but "this build has no modules", which
   ## is a different and more useful thing to read: the same code with a
   ## populated registry runs, and the sentence tells a deployer which half is
   ## theirs.
 
 const webVcsPending* =
-  "version control is sequenced after launch (NS5): a browser tab has no git " &
-  "binary and the in-tab engine is not built yet, so there is no history " &
-  "pane, no commit and no diff — your work leaves with you as an archive export"
+  "there is no version control in the browser yet: no history, no commits " &
+  "and no diffs. Export the project to take your work with you"
 
 proc buildClipboard(web: WebPlatform;
                     profile: PlatformProfile): ClipboardFacade =

@@ -132,7 +132,7 @@ proc renderFilterDropdownPanel*(r: MockRenderer;
   ## Returns the outer .dropdown-container element; children can be moved
   ## into a stable host via mountFilterDropdownInto.
   let checkedAttr = if filtersEnabled: "true" else: "false"
-  let toggleLabel = if filtersEnabled: "ENABLED" else: "DISABLED"
+  let toggleLabel = if filtersEnabled: "On" else: "Off"
   ui(r):
     tdiv(class = "dropdown-container"):
       tdiv(class = "toggle-buttons"):
@@ -214,7 +214,7 @@ when defined(js):
     ## Returns the outer .dropdown-container element; children are moved
     ## into the stable host container by mountFilterDropdownInto.
     let checkedAttr = if filtersEnabled: "true" else: "false"
-    let toggleLabel = if filtersEnabled: "ENABLED" else: "DISABLED"
+    let toggleLabel = if filtersEnabled: "On" else: "Off"
     ui(r):
       tdiv(class = "dropdown-container"):
         tdiv(class = "toggle-buttons"):

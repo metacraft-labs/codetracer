@@ -248,15 +248,66 @@ proc inlinePayload*(fragment: string): string =
 # The path
 # ---------------------------------------------------------------------------
 
-const knownLanguageEntries* = ["noir"]
+type
+  LanguageEntry* = object
+    ## One row of rule 0's array: a language this product has an entry point
+    ## for, and THE NAME THE PRODUCT GOES BY at that entry point.
+    ##
+    ## The second field is new, and the row is why it is here rather than in a
+    ## table beside it. `ide.codetracer.com/noir` and `noirstudio.dev` are Noir
+    ## Studio; `ide.codetracer.com/` is CodeTracer. That is not a second fact
+    ## about the deployment — it is the same fact `languageEntry` already
+    ## decides, which is why the name hangs off the row that decides it. A
+    ## separate `productNames` list would be a second place a language appears,
+    ## and the array's whole claim below is that there is only one.
+    entry*: string
+    productName*: string
+
+const neutralProductName* = "CodeTracer"
+  ## What the product is called where no language entry point is in play: the
+  ## desktop application, and the language-neutral web root.
+  ##
+  ## Not `""`. A surface that must name the product always has a name to use,
+  ## so no caller needs a branch for "no product", and the one place a wrong
+  ## name can come from is this constant and the rows above it.
+
+const knownLanguageEntries*: array[1, LanguageEntry] = [
+  LanguageEntry(entry: "noir", productName: "Noir Studio")]
   ## Rule 0. A second language is one more entry in this array and no change
   ## anywhere else — which is the property the rule exists to buy, and is
   ## checkable because the array is the only place a language appears.
+  ##
+  ## IT IS AN ARRAY OF OBJECTS RATHER THAN OF STRINGS, and the type change is
+  ## the fix rather than a refactor around it. The product's name was a literal
+  ## in `web_deployment.renderEntryDocument` — one `<title>` for every address
+  ## the deployment serves — so `ide.codetracer.com/` called itself Noir Studio
+  ## and every bookmark taken there carried the other product's name. A second
+  ## literal anywhere else would have the same failure mode, and only a type
+  ## change forces the sites that name the product to come back through here.
 
 proc isLanguageEntry(segment: string): bool =
-  for entry in knownLanguageEntries:
-    if entry == segment: return true
+  for row in knownLanguageEntries:
+    if row.entry == segment: return true
   false
+
+proc productNameFor*(languageEntry: string): string =
+  ## What to call the product at this entry point. Total, and never empty.
+  ##
+  ## Takes the resolved `languageEntry` and not a path or an origin, so it is
+  ## downstream of `classifyPath` and `languageForOrigin` rather than a third
+  ## opinion about which product an address is. Both spellings of Noir Studio —
+  ## the host whose root means Noir, and the `/noir` prefix on the neutral host
+  ## — arrive here as the same string, because that is what `languageEntry`
+  ## already means.
+  ##
+  ## An unknown language answers the neutral name rather than raising: a
+  ## descriptor that names a language this build does not have is already
+  ## dropped at the boundary by `parseDeploymentDescriptor`, and a title is the
+  ## wrong place to discover it.
+  if languageEntry.len == 0: return neutralProductName
+  for row in knownLanguageEntries:
+    if row.entry == languageEntry: return row.productName
+  neutralProductName
 
 proc classifyPath*(path: string; hostLanguage = ""
                   ): tuple[form: EntryForm, language, locator: string] =

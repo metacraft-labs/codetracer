@@ -626,7 +626,7 @@ suite "IsoNim Status Shell — structure":
     let messages = findAllByClass(panel, "notification-message")
 
     check findByClass(panel, "status-notification-header").textContent ==
-      "NOTIFICATIONS:"
+      "Notifications"
     check messages.len == 2
     check messages[0].textContent == "second"
     check messages[1].textContent == "first"
@@ -8799,7 +8799,7 @@ suite "IsoNim Request Panel — detail panel":
       check content != nil
       let title = findByClass(content, "request-detail-section-title")
       check title != nil
-      check "TIMING" in title.textContent
+      check "Timing" in title.textContent
       check "65ms" in title.textContent
 
       dispose()
@@ -10651,12 +10651,18 @@ suite "IsoNim Welcome Screen — welcome mode":
       let r = MockRenderer()
 
       let panel = renderWelcomeScreenPanel(r, vm)
-      check "Welcome to CodeTracer!" in panel.textContent
+      # THE FIRST-TIME BRANCH IS STILL THE SUBJECT, and the assertion had to
+      # change subject because the thing it named is gone. It checked for
+      # "Welcome to CodeTracer!" — a second welcome, in the empty panel, under
+      # a heading that had just said the same words. What distinguishes the two
+      # branches now is which empty-state line they render, so that is what
+      # this asserts; a branch that fell through would still redden it.
+      check RecentFoldersFirstTimeText in panel.textContent
       check RecentTracesEmptyText in panel.textContent
 
       vm.setRecentTraces(@[makeWelcomeTrace(1, "/bin/ct")])
       vm.setRecentFolders(@[])
-      check "Welcome to CodeTracer!" notin panel.textContent
+      check RecentFoldersFirstTimeText notin panel.textContent
       check RecentFoldersEmptyText in panel.textContent
 
       dispose()

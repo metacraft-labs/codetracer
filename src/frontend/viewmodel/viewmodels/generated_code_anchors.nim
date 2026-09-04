@@ -362,7 +362,7 @@ proc suspended(reason: string): SyncDecision =
 
 proc disabled(): SyncDecision =
   SyncDecision(outcome: soDisabled, anchorIndex: NoAnchor,
-    reason: "synchronisation is off")
+    reason: "source syncing is off")
 
 proc decideFor(anchors: seq[MappingAnchor]; index: int): SyncDecision =
   ## Shared tail of both directions: an anchor was found, so decide whether
@@ -370,10 +370,10 @@ proc decideFor(anchors: seq[MappingAnchor]; index: int): SyncDecision =
   let a = anchors[index]
   if not claimsUserSource(a.fidelity):
     return suspended("no source mapping here (" & label(a.fidelity) &
-      "); synchronisation suspended")
+      "), so these panes are not kept in step")
   if a.sources.len == 0:
-    return suspended("anchor claims " & label(a.fidelity) &
-      " but carries no source; synchronisation suspended")
+    return suspended("the mapping here claims " & label(a.fidelity) &
+      " and names no source, so these panes are not kept in step")
   aligned(index)
 
 proc anchorIndexAtRow*(anchors: seq[MappingAnchor]; row: int): int =
@@ -402,8 +402,7 @@ proc syncFromGenerated*(anchors: seq[MappingAnchor]; row: int;
     if a.covers(row):
       return decideFor(anchors, i)
   suspended("generated row " & $row &
-    " lies between anchors; synchronisation suspended rather than " &
-    "interpolated")
+    " has no source mapped to it, so these panes are not kept in step")
 
 proc syncFromSource*(anchors: seq[MappingAnchor]; path: string; line: int;
                      settings: SyncSettings = DefaultSyncSettings):
@@ -420,7 +419,7 @@ proc syncFromSource*(anchors: seq[MappingAnchor]; path: string; line: int;
       if r.covers(path, line):
         return decideFor(anchors, i)
   suspended(path & ":" & $line &
-    " has no anchor; synchronisation suspended rather than interpolated")
+    " has no generated code mapped to it, so these panes are not kept in step")
 
 proc counterpartSources*(anchors: seq[MappingAnchor];
                          decision: SyncDecision): seq[SourceRegion] =

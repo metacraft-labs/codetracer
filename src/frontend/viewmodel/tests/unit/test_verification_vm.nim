@@ -277,7 +277,7 @@ suite "VN-M3 test_an_unsupported_construct_is_not_reported_as_a_failed_proof":
     check finding.kind == vfkLimitation
     check finding.construct == "function types (lambdas, function values)"
     check finding.message.contains("does not support")
-    check finding.detail.contains("not a failed proof")
+    check finding.detail.contains("says nothing either way")
 
   test "it is never an unproven obligation — not in the report, the editor, or the pane":
     let vm = finishedVM(UnsupportedLambdaOutput, 101)
@@ -301,8 +301,15 @@ suite "VN-M3 test_an_unsupported_construct_is_not_reported_as_a_failed_proof":
 
     # 4. And the pane says *why* in words, not only in a status enum, because
     #    four statuses cannot carry six outcomes.
-    check summary.rows[0].output.contains("unsupported construct")
-    check summary.rows[0].output.contains("not a failed proof")
+    #
+    #    THE SECOND CHECK CHANGED SUBJECT AND NOT REQUIREMENT. It read
+    #    `"not a failed proof"` — the row's own hedge, a denial of a verdict
+    #    nobody had reached, and the shape of copy this sweep removed. What
+    #    must survive is that the row says the PROVER stopped rather than that
+    #    the program failed, so the check now names the positive statement
+    #    that carries it.
+    check summary.rows[0].output.contains("unsupported")
+    check summary.rows[0].output.contains("the prover cannot handle")
 
   test "the rendered panel says 'verifier limitation' in words":
     let vm = finishedVM(UnsupportedLambdaOutput, 101)

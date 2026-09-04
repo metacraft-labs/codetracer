@@ -285,7 +285,7 @@ template renderStatusShellImpl(
           span(id = "location-status"):
             if model.base.showFinished:
               span(class = "finished"):
-                text "FINISHED"
+                text "Finished"
             elif model.base.locationText.len > 0:
               span(
                   class = "location-path status-inline",
@@ -304,7 +304,7 @@ template renderStatusShellImpl(
       if model.showNotifications:
         tdiv(id = "notifications-container"):
           tdiv(class = "status-notification-header"):
-            text "NOTIFICATIONS:"
+            text "Notifications"
           for modelIndex in 0 ..< model.notificationHistory.len:
             var notification = model.notificationHistory[modelIndex]
             let notificationIndex = notification.index
@@ -334,7 +334,7 @@ template renderStatusShellImpl(
       if model.showBugReport:
         tdiv(id = "bug-report-container"):
           tdiv(class = "bug-report-header"):
-            text "BUG REPORT"
+            text "Report a problem"
           tdiv(class = "status-bug-report-form"):
             tdiv(class = "status-bug-report-textarea"):
               tdiv(class = "bug-report-text"):
@@ -347,12 +347,13 @@ template renderStatusShellImpl(
                 textarea(id = "bug-report-description"):
                   discard
             tdiv(class = "bug-report-button-container"):
-              text "logs will be sent automatically\n(internal release: can include sensitive info!)"
+              text "Your logs are attached. They can contain file " &
+                   "paths and source code from this session."
               button(
                   class = "bug-report-button",
                   onclick = proc() =
                     callbacks.invokeSendBugReport("", "")):
-                text "Send logs and report"
+                text "Send report"
 
 proc renderStatusShell*(
     r: MockRenderer;

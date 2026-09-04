@@ -20,8 +20,10 @@ test.describe("noir example — basic layout", () => {
 
   test("we can access the browser window, not just dev tools", async ({ ctPage }) => {
     const title = await ctPage.title();
-    // In browser mode the page title includes the trace name (e.g.
-    // "CodeTracer | Trace 42: noir_example"), so use toContain instead of toBe.
+    // The page title names the open program and then the product — e.g.
+    // "noir_example — CodeTracer" — so use toContain instead of toBe. The
+    // product half is what a bookmark files this under, and on the desktop it
+    // is always CodeTracer; the web build resolves it from the address.
     expect(title).toContain("CodeTracer");
     await ctPage.focus("div");
   });

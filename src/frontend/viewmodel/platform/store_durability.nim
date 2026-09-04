@@ -76,9 +76,9 @@ type
 
 const
   committedHistoryPending* =
-    "version control is sequenced after launch (NS5), so there is no recovery " &
-    "point inside the store yet: a bad edit or a deleted file is unrecoverable " &
-    "unless the project was exported"
+    "there is no version control in the browser yet, so a bad edit or a " &
+    "deleted file cannot be undone from a commit. An export is the only way " &
+    "back"
     ## §4.1 again, and it is a quotation rather than a paraphrase on purpose.
     ## The day the git engine lands, this string is deleted and the tier turns
     ## available; nothing else in the product changes, which is the test that
@@ -90,8 +90,8 @@ proc workingTreeState(condition: StorageCondition): TierState =
     TierState(
       tier: dtWorkingTree,
       available: false,
-      survives: "nothing — this session's files live in the tab's memory",
-      mechanism: "an in-memory store",
+      survives: "nothing — this session's files are only in this tab",
+      mechanism: "this tab's memory",
       unavailableBecause:
         "this browser has no origin-private filesystem available (private " &
         "browsing, or an engine that does not provide one), so closing the " &
@@ -101,7 +101,7 @@ proc workingTreeState(condition: StorageCondition): TierState =
       tier: dtWorkingTree,
       available: true,
       survives: "reload, tab close and crash",
-      mechanism: "OPFS — best effort, and evictable",
+      mechanism: "your browser's own storage, which it may reclaim",
       unavailableBecause: "")
 
 proc committedHistoryState(): TierState =
@@ -109,7 +109,7 @@ proc committedHistoryState(): TierState =
     tier: dtCommittedHistory,
     available: false,
     survives: "a bad edit, a deleted file, a corrupted working tree",
-    mechanism: "the git object store, in the same OPFS",
+    mechanism: "commits, kept beside the files",
     unavailableBecause: committedHistoryPending)
 
 proc exportState(): TierState =
@@ -120,7 +120,7 @@ proc exportState(): TierState =
     tier: dtExport,
     available: true,
     survives: "eviction, a cleared origin, a different browser or device",
-    mechanism: "an archive of the working tree",
+    mechanism: "an archive you download",
     unavailableBecause: "")
 
 proc announcementFor(condition: StorageCondition): string =

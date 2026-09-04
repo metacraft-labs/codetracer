@@ -25,9 +25,9 @@
 ##       div.request-col-id           text "#"
 ##       div.request-col-method       text "method"
 ##       div.request-col-url          text "URL"
-##       div.request-col-status       text "STATUS"
-##       div.request-col-duration     text "DURATION"
-##       div.request-col-size         text "SIZE"
+##       div.request-col-status       text "Status"
+##       div.request-col-duration     text "Duration"
+##       div.request-col-size         text "Size"
 ##     div.request-table-body
 ##       div.request-row[.selected]   (one per filtered request)
 ##         div.request-col-id         text "<zero-padded id>"
@@ -392,7 +392,7 @@ proc renderDetailContentMock(r: MockRenderer; req: RequestRecord;
     ui(r):
       tdiv(class = "request-detail-timing"):
         tdiv(class = "request-detail-section-title"):
-          text "TIMING (" & durationText(req) & ")"
+          text "Timing (" & durationText(req) & ")"
         tdiv(class = "request-timing-row"):
           span(class = "request-timing-label"): text "Total"
           span(class = "request-timing-value"): text durationText(req)
@@ -400,7 +400,7 @@ proc renderDetailContentMock(r: MockRenderer; req: RequestRecord;
     ui(r):
       tdiv(class = "request-detail-response"):
         tdiv(class = "request-detail-section-title"):
-          text "RESPONSE"
+          text "Response"
         tdiv(class = "request-detail-row"):
           span(class = "request-detail-key"): text "Size"
           span(class = "request-detail-value"): text formatSize(req.responseSize)
@@ -516,11 +516,11 @@ proc renderRequestPanel*(r: MockRenderer; vm: RequestPanelVM): MockNode =
         tdiv(class = "request-col-url"):
           text "URL"
         tdiv(class = "request-col-status"):
-          text "STATUS"
+          text "Status"
         tdiv(class = "request-col-duration"):
-          text "DURATION"
+          text "Duration"
         tdiv(class = "request-col-size"):
-          text "SIZE"
+          text "Size"
       tdiv(ref = bodyContainer, class = "request-table-body"):
         discard
       # Detail panel host — empty when no row is selected, populated reactively
@@ -670,7 +670,7 @@ when defined(js):
       ui(r):
         tdiv(class = "request-detail-timing"):
           tdiv(class = "request-detail-section-title"):
-            text "TIMING (" & durationText(req) & ")"
+            text "Timing (" & durationText(req) & ")"
           tdiv(class = "request-timing-row"):
             span(class = "request-timing-label"): text "Total"
             span(class = "request-timing-value"): text durationText(req)
@@ -678,7 +678,7 @@ when defined(js):
       ui(r):
         tdiv(class = "request-detail-response"):
           tdiv(class = "request-detail-section-title"):
-            text "RESPONSE"
+            text "Response"
           tdiv(class = "request-detail-row"):
             span(class = "request-detail-key"): text "Size"
             span(class = "request-detail-value"): text formatSize(req.responseSize)
@@ -770,11 +770,11 @@ when defined(js):
           tdiv(class = "request-col-url"):
             text "URL"
           tdiv(class = "request-col-status"):
-            text "STATUS"
+            text "Status"
           tdiv(class = "request-col-duration"):
-            text "DURATION"
+            text "Duration"
           tdiv(class = "request-col-size"):
-            text "SIZE"
+            text "Size"
         tdiv(ref = bodyContainer, class = "request-table-body"):
           discard
         # Detail panel host — empty when no row is selected, populated reactively

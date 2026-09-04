@@ -29,6 +29,7 @@ import ../../platform/web_platform
 import ../../platform/web_entry
 import ../../platform/web_deployment
 import ../../platform/displayed_build_identity
+import ../../platform/displayed_product
 import ../../platform/noir_template
 import ../../platform/archive
 
@@ -379,8 +380,15 @@ suite "capability and refusal never disagree — the web profile":
     let p = web.platform
     check not p.can(capVcsRead)
     check not p.can(capVcsWrite)
-    check "NS5" in p.degradedBehaviour(capVcsRead)
-    check "no git binary" in p.degradedBehaviour(capVcsRead)
+    # WHAT THE USER IS TOLD, not which milestone owns it. This asserted
+    # `"NS5" in ...` — a check that could only pass while the sentence shown to
+    # a user carried a roadmap code — and `"no git binary"`, which named the
+    # missing implementation rather than the missing capability. Both are the
+    # copy fault the sentence was rewritten to remove, frozen into the gate
+    # that would have caught the rewrite. What must survive is that the
+    # absence is NAMED and that the reader is told what to do instead.
+    check "no version control" in p.degradedBehaviour(capVcsRead)
+    check "Export the project" in p.degradedBehaviour(capVcsRead)
     check awaitOutcome(p.vcs.status(".")).error.kind == pkNotSupported
     check awaitOutcome(p.vcs.commit(".", "m", "a", "e")).error.kind ==
       pkNotSupported
@@ -1586,6 +1594,66 @@ suite "the language is an entry point, not a namespace — §1b.0 rule 0":
 # `ci/test/web-renderer-mounts.sh` (arms R and S), because it cannot be made
 # here.
 
+suite "what the product calls itself at an address":
+  ## THE DEFECT: `renderEntryDocument` emitted one literal `<title>` —
+  ## `CodeTracer &mdash; Noir Studio` — and the deployment serves that one
+  ## document at `ide.codetracer.com/`, at `/noir` and at `noirstudio.dev`
+  ## alike. So every bookmark taken anywhere on the deployment carried both
+  ## product names, and the language-neutral root carried the wrong one.
+  ##
+  ## These are over the two pure functions the fix is made of. That the PAGE
+  ## then shows them is a DOM assertion, in `ci/test/web-renderer-mounts.sh`'s
+  ## title arm, because it cannot be made here.
+
+  test "the neutral root and the desktop are CodeTracer":
+    check productNameFor("") == "CodeTracer"
+    check productNameFor("") == neutralProductName
+    # The desktop pushes nothing, so this is also what `traceLoaded` composes
+    # with on an Electron build.
+    check displayedProductName() == "CodeTracer"
+
+  test "both spellings of the Noir entry point are Noir Studio":
+    ## `ide.codetracer.com/noir` reaches `productNameFor` through the PATH and
+    ## `noirstudio.dev/` reaches it through the HOST, and `classifyPath` folds
+    ## the two into one `languageEntry` before either gets here — which is why
+    ## there is one call and not two.
+    check classifyPath("/noir").language == "noir"
+    check classifyPath("/", hostLanguage = "noir").language == "noir"
+    check productNameFor(classifyPath("/noir").language) == "Noir Studio"
+    check productNameFor(classifyPath("/", hostLanguage = "noir").language) ==
+      "Noir Studio"
+
+  test "every language the product has an entry point for has a name":
+    ## Rule 0's shape, applied to the name. Adding a language to
+    ## `knownLanguageEntries` without naming its product would give that
+    ## address the neutral name silently — the same class of half-wiring as a
+    ## language with no template, one field over.
+    check knownLanguageEntries.len > 0
+    for row in knownLanguageEntries:
+      check row.productName.len > 0
+      check productNameFor(row.entry) == row.productName
+      check productNameFor(row.entry) != neutralProductName
+
+  test "a language this build does not have gets the neutral name, not an empty one":
+    check productNameFor("cairo") == neutralProductName
+
+  test "the pushed name is what a session title is composed with":
+    setDisplayedProductName("Noir Studio")
+    check displayedProductName() == "Noir Studio"
+    check sessionDocumentTitle("main.nr", displayedProductName()) ==
+      "main.nr — Noir Studio"
+    # An empty push is refused, so no caller can blank the title.
+    setDisplayedProductName("")
+    check displayedProductName() == "Noir Studio"
+    setDisplayedProductName(neutralProductName)
+    check sessionDocumentTitle("hello", displayedProductName()) ==
+      "hello — CodeTracer"
+
+  test "a session with no program is the product's name alone":
+    ## Never an empty title and never a dangling separator: a bookmark of a
+    ## page with nothing open must still say what the page is.
+    check sessionDocumentTitle("", "CodeTracer") == "CodeTracer"
+
 suite "the bundled template a language entry selects":
   test "rule 0: every known language entry has a template, and none is empty":
     ## The agreement rule 0 needs and `knownLanguageEntries` cannot state
@@ -1596,7 +1664,8 @@ suite "the bundled template a language entry selects":
     check languagesWithoutTemplate().len == 0
     # NON-VACUITY: the check above is also true of an empty language list.
     check knownLanguageEntries.len > 0
-    for language in knownLanguageEntries:
+    for row in knownLanguageEntries:
+      let language = row.entry
       # `efBare` because rule 0 asks about the INITIAL template — the one the
       # bare entry point serves. A language whose `/demo` existed and whose
       # `/noir` did not would still be the gap this rule is about, which is

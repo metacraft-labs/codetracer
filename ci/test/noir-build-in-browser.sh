@@ -740,7 +740,7 @@ elif ! probe nomodules "${nomodules}" /noir shortcut; then
 else
 	n_wasm="$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1])).get("wasmRequests",[])))' "${cache}/nomodules.json")"
 	n_starts="$(count_matching nomodules workerMessages '"kind":"start"')"
-	n_refused="$(count_matching nomodules buildPanePainted 'no wasm toolchain modules')"
+	n_refused="$(count_matching nomodules buildPanePainted 'published without the Noir compiler')"
 	n_success="$(count_matching nomodules buildPanePainted 'compiled hello_noir')"
 	n_painted="$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1])).get("buildPanePainted",[])))' "${cache}/nomodules.json")"
 
@@ -755,7 +755,7 @@ else
 		ck fail "arm 4 posted ${n_starts} start message(s) over an empty registry"
 	fi
 	if [ "${n_refused:-0}" -ge 1 ]; then
-		ck ok "the pane says WHY: 'this deployment ships no wasm toolchain modules'"
+		ck ok "the pane says WHY: 'this page was published without the Noir compiler'"
 	else
 		ck fail "the pane painted ${n_painted} row(s), none of which explains the absence"
 	fi

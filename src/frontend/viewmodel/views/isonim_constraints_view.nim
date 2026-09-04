@@ -147,9 +147,7 @@ proc listingNoticeFor*(report: ConstraintReport): string =
   # what had just failed to produce a listing.
   if report.listingAbsence.len > 0:
     return report.listingAbsence
-  "These are totals, not the generated code: they come from `nargo info`, " &
-    "which reports how many opcodes a circuit has and does not print them. " &
-    "Build the project to see the compiler's own listing here."
+  "Totals only. Build the project to see the generated opcodes themselves."
 
 proc containerClass*(report: ConstraintReport): string =
   ## `stale` beside the base class, so CSS can dim the rows while the headline

@@ -520,9 +520,8 @@ proc paintCompileResult(producer: NoirBuildProducer;
   ## Everything a decoded `VfsResponse` says, painted.
   if not response.decoded:
     producer.note(
-      "the Noir compiler answered with something this build could not " &
-      "decode as a compile result. That is a protocol fault, not a fault in " &
-      "your program: nothing about it has been established.")
+      "the Noir compiler's answer could not be read. Nothing has been " &
+      "established about your program — this is a fault here, not in it.")
     if response.raw.len > 0:
       producer.emit(response.raw[0 ..< min(response.raw.len, 400)],
                     isStdout = false, severity = blsError)
@@ -542,9 +541,8 @@ proc paintCompileResult(producer: NoirBuildProducer;
       # asks for. Reaching it means the request was not the one this module
       # composed.
       producer.note(
-        "the compiler reported success and produced no artifact. This build " &
-        "only ever asks for `program` or `debug`, both of which compile, so " &
-        "the request that was sent is not the one this build composes.")
+        "the compiler reported success and produced nothing to run. This " &
+        "is a fault here, not in your program.")
       return npvFaulted
     let warningCount = response.warnings.len
     producer.note(
@@ -609,9 +607,8 @@ proc paintTestResult(producer: NoirBuildProducer;
   ## poorer surface would be building a worse copy of a pane that works.
   if not response.decoded:
     producer.note(
-      "the Noir toolchain answered with something this build could not " &
-      "decode as a test result. That is a protocol fault, not a fault in " &
-      "your tests: nothing about them has been established.")
+      "the Noir toolchain's answer could not be read. Nothing has been " &
+      "established about your tests — this is a fault here, not in them.")
     if response.raw.len > 0:
       producer.emit(response.raw[0 .. min(response.raw.high, 400)],
                     isStdout = false, severity = blsError)
@@ -768,8 +765,8 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
       # as such, because a caller that went on to trace `null` would fail one
       # layer down with a message naming the tracer.
       producer.note(
-        "the toolchain reported the test compiled and produced no artifact " &
-        "to record. That is a protocol fault, not a fault in your test.")
+        "the toolchain reported the test compiled and produced nothing to " &
+        "record. This is a fault here, not in your test.")
       producer.lastVerdict = npvFaulted
     else:
       producer.artifact = response.artifact
@@ -801,8 +798,8 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
       # failure this campaign keeps meeting.
       producer.note(
         "traced " & $summary.events & " event(s) and " & $summary.steps &
-        " step(s) — a trace with no steps is not one you can step through. " &
-        "An artifact compiled without instrumentation produces exactly this.")
+        " step(s). A trace with no steps cannot be stepped through, which " &
+        "is what a build without debug information produces.")
       producer.lastVerdict = npvFaulted
     else:
       producer.note(
@@ -880,10 +877,10 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
           # tab would destroy the session the user asked to keep beside this
           # one, which is the entire reason they asked for a new tab.
           producer.note(
-            "a NEW session tab was asked for and this build holds one live " &
-            "session at a time, so nothing was opened. Ask again without the " &
-            "new-tab option to replace the current session; the rows above " &
-            "are what the trace contains.")
+            "only one session can be open at a time, so nothing was opened " &
+            "in a new tab. Run again without the new-tab option to replace " &
+            "the current session; the rows above are what the trace " &
+            "contains.")
         elif refusal.len > 0:
           producer.note("a replay session could not be started: " & refusal)
         else:

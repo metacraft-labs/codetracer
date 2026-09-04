@@ -66,6 +66,11 @@ import
   types, lang, utils, renderer, config, dap, edit_mode,
   viewmodel/store/replay_data_store,
   viewmodel/viewmodels/video_player_vm,
+  # WHAT THIS INSTANCE CALLS ITSELF, and the one composer of the document
+  # title. Imported by BOTH arms deliberately: `traceLoaded` sets the title and
+  # is compiled for the desktop and the web, and a literal product name there
+  # is exactly the defect this replaced. See the module's header.
+  viewmodel/platform/displayed_product,
   ../common/ct_logging,
   property_test / test,
   event_helpers,
@@ -3182,7 +3187,17 @@ proc onTraceLoaded(
   if not data.ui.menu.isNil:
     data.ui.menu.requestMenuRender()
 
-  dom.document.title = cstring(fmt"CodeTracer | Trace {data.trace.recordingId}: {data.trace.program}")
+  # THE NAME COMES FROM THE INSTANCE, not from this line. `displayedProductName`
+  # is "CodeTracer" on the desktop and on the language-neutral web root, and
+  # "Noir Studio" on the addresses that are Noir Studio — the same distinction
+  # `languageEntry` already makes. The literal that used to be here made every
+  # bookmark of a Noir Studio session say CodeTracer.
+  #
+  # `baseName`, matching the menu's own root label two lines up: the two name
+  # the same session and disagreeing about how would be a defect nobody reads
+  # as one.
+  dom.document.title = cstring(
+    sessionDocumentTitle($baseName(data.trace.program), displayedProductName()))
 
   for i, file in data.save.files:
     data.save.fileMap[file.path] = i
@@ -5489,7 +5504,11 @@ when defined(ctWeb) and not defined(ctInExtension):
   import ui/web_project_store
   import ui/web_project_persistence
   from viewmodel/platform/web_entry import
-    EntryResolution, EntryVerdict, evTemplate, entryPath, entryPathOnHost
+    EntryResolution, EntryVerdict, evTemplate, entryPath, entryPathOnHost,
+    # WHICH PRODUCT THIS ADDRESS IS. Web-only, because only a served page has
+    # an address to be a product of; the desktop keeps `displayed_product`'s
+    # default, which is the same constant this resolves to for the neutral root.
+    productNameFor
   # The revision this page was served as, for the surfaces that show it.
   # Web-only alongside `web_entry_surface`, for the same reason: only a served
   # deployment has a descriptor to read.
@@ -5799,6 +5818,29 @@ when defined(ctWeb) and not defined(ctInExtension):
       # deployment serves.
       let entry = web_entry_surface.currentRendererEntry()
       let hostLanguage = web_entry_surface.currentRendererHostLanguage()
+
+      # WHICH PRODUCT THIS PAGE IS, named here because this is the first line
+      # that knows.
+      #
+      # The served document cannot know. `renderRewriteConfig` points every
+      # prefix at one file and the deployment serves that one file to
+      # `ide.codetracer.com/`, to `ide.codetracer.com/noir` and to
+      # `noirstudio.dev` alike — so its `<title>` is a single string for three
+      # addresses, and it used to be a string that named both products at once.
+      # It now names the deployment's own canonical root, which is right for
+      # that root and is what the language hosts correct here.
+      #
+      # `entry.languageEntry`, so both spellings of Noir Studio arrive as one:
+      # `currentRendererEntry` already folded the host's language and the
+      # path's into that field, and re-deriving either here would be the second
+      # `classifyPath` `web_entry.nim`'s header forbids.
+      #
+      # Setting `document.title` rather than only pushing the name: a visitor
+      # who never opens a recording still bookmarks the page, and until this
+      # line ran that bookmark carried the generated document's string.
+      let product = productNameFor(entry.languageEntry)
+      setDisplayedProductName(product)
+      dom.document.title = cstring(product)
       # `entry.form` and not a path test: which template an address serves is
       # `templateFor`'s decision, and re-deriving "is this the demo" here would
       # be the second `classifyPath` `web_entry.nim`'s header forbids. It must

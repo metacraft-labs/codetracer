@@ -213,8 +213,8 @@ proc decodeStoreMetadata*(text: string): StoreMetadata =
       if v >= 0: result.lastOpenedAtMs = v
 
 const refusalAdvice =
-  "; open it with a newer CodeTracer, or export the project from the build " &
-  "that wrote it. This build has changed nothing"
+  ". Open it with a newer CodeTracer, or export it from the version that " &
+  "saved it. Nothing here has been changed"
 
 proc decideStoreOpen*(present: bool; text: string; nowMs: int64
                      ): StoreOpenDecision =
@@ -237,18 +237,16 @@ proc decideStoreOpen*(present: bool; text: string; nowMs: int64
       verdict: sovRefuseUnreadable,
       foundVersion: 0,
       explanation:
-        "there is something at '" & storeMetadataPath & "' in this browser's " &
-        "storage that is not a CodeTracer store descriptor, so nothing here " &
-        "will be read or overwritten")
+        "this browser's storage holds something that is not a CodeTracer " &
+        "project, so nothing here will be read or changed")
 
   if found > storeSchemaVersion:
     return StoreOpenDecision(
       verdict: sovRefuseFuture,
       foundVersion: found,
       explanation:
-        "this store was written by a newer version of CodeTracer (store " &
-        "schema " & formatInt(found.int64) & "; this build understands " &
-        formatInt(storeSchemaVersion.int64) & ")" & refusalAdvice)
+        "this project was saved by a newer version of CodeTracer than " &
+        "this one" & refusalAdvice)
 
   var metadata = decodeStoreMetadata(text)
   metadata.lastOpenedAtMs = nowMs

@@ -403,8 +403,13 @@ suite "what the BUILD pane shows":
     let producer = fixture()
     let verdict = runTestPhase(producer, "{\"ok\":true}", exitCode = 0)
     counted verdict == npvFaulted
-    counted "protocol fault" in paneText(producer)
-    counted "not a fault in your tests" in paneText(producer)
+    # THE SUBJECT MOVED WITH THE COPY. "protocol fault" was the pane's own
+    # word for this state, addressed to whoever wrote the protocol; what a
+    # reader needs is that nothing was learned about their tests. The check
+    # follows the sentence rather than pinning the jargon it replaced.
+    counted "could not be read" in paneText(producer)
+    counted "Nothing has been established about your tests" in
+      paneText(producer)
 
   test "a new run does not show the previous one's verdicts":
     let producer = fixture()
@@ -643,8 +648,8 @@ suite "recording a test, which is what running one means":
                            exitCode = 0)
     counted verdict == npvFaulted
     counted producer.artifact.isNil
-    counted "protocol fault" in paneText(producer)
-    counted "not a fault in your test" in paneText(producer)
+    counted "produced nothing to record" in paneText(producer)
+    counted "not in your test" in paneText(producer)
 
   test "a refused recording names the test rather than the project":
     let producer = fixture()

@@ -323,9 +323,9 @@ proc buildProposal*(kind: ProjectKind): CommandProposal {.noSideEffect.} =
            "and a command that fails on a clean clone is worse than none. " &
            "Configure the project and the Build button turns on.")
   of pkJavascript:
-    unsure("a `package.json` declares its build in `scripts.build`, which is a " &
-           "declaration rather than a convention — CodeTracer runs what the " &
-           "project declared and invents no npm command of its own.")
+    unsure("this project's package.json declares no build script, and " &
+           "there is no npm command that is right for every project without " &
+           "one. Add scripts.build and the Build button turns on.")
   of pkNim:
     unsure("`nimble build` needs a `bin:` entry the manifest may not declare, " &
            "and a bare `nim c` needs a main module no marker names.")
@@ -334,11 +334,11 @@ proc buildProposal*(kind: ProjectKind): CommandProposal {.noSideEffect.} =
            "`sui move build` and Aptos with `aptos move compile`. Choosing " &
            "would be wrong for half of all Move projects.")
   of pkLeo:
-    unsure("the Leo CLI has changed shape across releases, so no single build " &
-           "command is safe to propose. ⟨unverified⟩")
+    unsure("the Leo command line has changed across releases, so no single " &
+           "build command works for every Leo project.")
   of pkAda:
-    unsure("`alr build` is likely, and was not verified against a current " &
-           "Alire. Listed so the gap is visible rather than filled.")
+    unsure("Ada projects here are built with Alire, and this one's build " &
+           "command could not be established.")
   of pkMake:
     unsure("a `Makefile`'s default target is not guaranteed to build, and a " &
            "`Makefile` beside a `CMakeLists.txt` is usually a wrapper.")
@@ -346,9 +346,8 @@ proc buildProposal*(kind: ProjectKind): CommandProposal {.noSideEffect.} =
     unsure("Circom compiles per file with output flags, and no marker names " &
            "the entry circuit.")
   of pkMasm, pkTolk, pkCadence:
-    unsure("a recorder entry exists for this language, and its build " &
-           "convention was not verified. Listed so the gap is visible rather " &
-           "than filled. ⟨unverified⟩")
+    unsure("this language can be recorded, but no build command for it " &
+           "could be established.")
 
   of pkPython:
     noBuildStep("Python projects usually have no build step; use Run.")
@@ -739,7 +738,7 @@ proc conventionalTooltip(proposal: CommandProposal; marker: string): string =
   for arg in proposal.args:
     line.add ' '
     line.add arg
-  line & " — inferred from `" & marker & "`; CodeTracer is guessing"
+  line & " — inferred from " & marker
 
 proc declaredButton(action: TopbarAction; selection: BuildSelection;
                     profile: PlatformProfile;

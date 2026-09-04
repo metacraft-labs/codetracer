@@ -458,12 +458,12 @@ proc limitationFinding(output, construct: string): VerificationFinding =
   ## (`expr_to_vir/types.rs:56:13`), never a Noir one, and pointing the
   ## developer's gutter at a line of Verno's own source — or guessing at a
   ## line of theirs — would be worse than saying where it cannot point.
-  let named = if construct.len > 0: construct else: "a construct Verno does not implement"
+  let named = if construct.len > 0: construct else: "something in this code"
   VerificationFinding(
     kind: vfkLimitation,
-    message: "Verno does not support " & named,
-    detail: "This is a limitation of the verifier, not a failed proof. " &
-      "The program may well be correct; Verno cannot say either way.",
+    message: "The verifier does not support " & named,
+    detail: "The verifier cannot check this, so it says nothing either way " &
+      "about whether your program is correct.",
     construct: construct,
     hasLocation: false,
     excerpt: output.strip(),
@@ -645,10 +645,10 @@ proc outcomeLabel*(outcome: VerificationOutcome): string =
   case outcome
   of voProved: "proved"
   of voNotProved: "not proved"
-  of voTimedOut: "timed out (solver budget exhausted, not a failed proof)"
-  of voUnsupported: "unsupported construct (a limitation of the verifier, not a failed proof)"
-  of voNoSolver: "no solver available (nothing was proved or disproved)"
-  of voPipelineError: "pipeline error (Verno failed before the solver)"
+  of voTimedOut: "timed out — the prover ran out of budget"
+  of voUnsupported: "unsupported — the prover cannot handle something here"
+  of voNoSolver: "no prover available"
+  of voPipelineError: "failed before reaching the prover"
 
 proc findingTitle*(finding: VerificationFinding; index: int): string =
   case finding.kind

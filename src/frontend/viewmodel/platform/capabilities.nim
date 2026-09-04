@@ -281,12 +281,10 @@ let desktopProfile* = PlatformProfile(
   capabilities: desktopCapabilities,
   degradations: @[
     DegradationRule(capability: capShareLink, behaviour:
-      "there is no link to share: a desktop project is a directory, so the " &
-      "equivalent action is an archive export"),
+      "a project here is a folder on your disk. Export it as an archive to " &
+      "send it somewhere"),
     DegradationRule(capability: capNativeMenuBar, behaviour:
-      "the window has no OS menu bar to mirror into, so the menu is drawn in " &
-      "the page — which is what Windows and Linux windows already do; only " &
-      "the macOS instantiation adds this capability"),
+      "the menu is drawn inside the window rather than in a system menu bar"),
   ])
 
 let webProfile* = PlatformProfile(
@@ -296,55 +294,48 @@ let webProfile* = PlatformProfile(
   degradations: @[
     # -- filesystem -------------------------------------------------------
     DegradationRule(capability: capFilesystemWatch, behaviour:
-      "no external process can change the project store, so nothing needs " &
-      "watching; edits made in the tab notify the store directly and the " &
-      "'file changed on disk' banner never appears"),
+      "nothing outside this tab can change your files, so they are never " &
+      "reloaded underneath you"),
     DegradationRule(capability: capFilesystemArbitraryPaths, behaviour:
-      "paths are relative to the project store and an absolute path outside " &
-      "it is refused; opening work from elsewhere goes through the import " &
-      "path (upload or a shared link) rather than a path box"),
+      "files live inside the open project. To work on something from " &
+      "elsewhere, upload it or open a shared link"),
     # -- process ----------------------------------------------------------
     DegradationRule(capability: capProcessArbitraryPrograms, behaviour:
-      "declared commands run as wasm modules in a worker; a project script " &
-      "with no wasm build is reported as unavailable by name, with the " &
-      "command shown, rather than failing silently mid-run"),
+      "only the commands this page ships can be run here. Anything else is " &
+      "refused by name, before it starts, rather than failing part-way"),
     DegradationRule(capability: capProcessGracefulSignal, behaviour:
-      "cancelling terminates the worker, which is abrupt but complete; a " &
-      "cancelled run therefore establishes nothing and produces no report"),
+      "cancelling stops a run immediately, and a cancelled run produces no " &
+      "result"),
     DegradationRule(capability: capProcessInteractiveStdin, behaviour:
-      "a run's input must be supplied before it starts; a command that " &
-      "prompts mid-run cannot be answered and is reported as needing input"),
+      "a run's input has to be given before it starts. Nothing can be typed " &
+      "into a run that is already going"),
     DegradationRule(capability: capProcessTerminal, behaviour:
-      "output is a scrollback pane rather than a pty: colours survive, but " &
-      "cursor addressing, resizing and interactive TUIs do not"),
+      "output appears in a scrolling pane rather than a terminal. Colours " &
+      "survive; full-screen terminal programs do not"),
     # -- vcs --------------------------------------------------------------
     DegradationRule(capability: capVcsRemote, behaviour:
-      "fetch and push need a peer that speaks git over a CORS-permitting " &
-      "endpoint; until one is configured, history is local and leaving with " &
-      "your work means the archive export"),
+      "there is nowhere to fetch from or push to yet, so history stays in " &
+      "this browser. Export the project to take it with you"),
     # -- settings ---------------------------------------------------------
     DegradationRule(capability: capSecretStore, behaviour:
-      "no secret is ever stored: deployment is signed by the user's own " &
-      "wallet, per request, and a key pasted into the product would be a " &
-      "promise the platform cannot keep (Noir-Studio.md §8)"),
+      "nothing is ever kept as a secret here. Deployments are signed with " &
+      "your own wallet, one request at a time, so no key is ever pasted in"),
     # -- clipboard --------------------------------------------------------
     DegradationRule(capability: capClipboardRead, behaviour:
-      "reading the clipboard needs a permission the product does not ask " &
-      "for; paste is handled by the browser's own paste event on the focused " &
-      "editor, so the Paste menu item is absent rather than inert"),
+      "paste with the keyboard or with your browser's own menu. There is no " &
+      "Paste item here"),
     # -- shell ------------------------------------------------------------
     DegradationRule(capability: capRevealInFileManager, behaviour:
-      "there is no enclosing file manager; 'Reveal' selects the entry in the " &
-      "project tree instead"),
+      "Reveal selects the file in the project tree; there is no file " &
+      "manager to open it in"),
     DegradationRule(capability: capWindowControls, behaviour:
-      "the browser owns the window frame, so the caption bar renders without " &
-      "minimise/maximise/close and reclaims the space for tabs"),
+      "your browser owns the window frame, so there are no minimise, " &
+      "maximise or close buttons here"),
     DegradationRule(capability: capNativeMenuBar, behaviour:
-      "the in-page menu is the only menu; there is no OS menu bar to mirror " &
-      "it into, and the macOS-only application menu is absent"),
+      "the menu in the page is the only menu"),
     DegradationRule(capability: capMultiWindow, behaviour:
-      "a second window is a second tab with its own session; panels cannot " &
-      "be torn off into an OS window"),
+      "a second window is a second browser tab with its own session. Panels " &
+      "cannot be dragged out into one"),
   ])
 
 let containerProfile* = PlatformProfile(

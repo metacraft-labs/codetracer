@@ -124,14 +124,13 @@ proc mappingNotice*(vm: LowLevelCodeVM): string =
   ## because an artefact with no debug info and a producer whose output was
   ## rejected both leave the anchor list empty and must not look the same.
   if not vm.syncSettings.val.enabled:
-    return "synchronisation is off"
+    return "source syncing is off"
   if vm.anchorsRejected.val:
-    let defects = vm.anchorDefects.val
-    return "the mapping for this artefact was refused (" & $defects.len &
-      (if defects.len == 1: " defect); " else: " defects); ") &
-      "synchronisation suspended"
+    return "the source mapping here could not be used, so these panes " &
+      "are not kept in step"
   if not vm.hasAnchors.val and vm.instructions.val.len > 0:
-    return "no source mapping for this artefact; synchronisation suspended"
+    return "there is no source mapping here, so these panes are not kept " &
+      "in step"
   ""
 
 proc noticeClass*(vm: LowLevelCodeVM): string =
