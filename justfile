@@ -894,6 +894,15 @@ test-gui-visible *args: build-once build-siblings
 # `src/build-debug/frontend/styles` currently holds, so RUN `just build-once`
 # FIRST after editing any `.styl` or you are grading the previous build. CI
 # gets this right by construction: it runs after the package is built.
+#
+# ITS STATIC SIBLING IS `just test-css-token-resolution`, and the two ask
+# different questions of the same stylesheets. These three ask whether a
+# resolved colour is READABLE, which needs a rendered page. That one asks
+# whether the value resolved AT ALL — Stylus emits an unknown identifier
+# verbatim, so `color: colors-ui-text-accent` compiles clean and the browser
+# drops it. That is a static property of the compiled CSS, so it needs no
+# browser and no build: it compiles the stylesheets itself and is therefore
+# free of the "grading the previous build" hazard above.
 test-css-contrast-guards *args:
   #!/usr/bin/env bash
   set -e

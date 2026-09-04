@@ -44,6 +44,18 @@
 # package (nix/packages/default.nix), so they resolve in ``result/`` as well as
 # in a local tup ``src/build-debug``.
 #
+# THE STATIC SIBLING IS ``ci/test/css-token-resolution.sh``, and it is a
+# separate step on purpose. These three ask whether a resolved colour is
+# READABLE, which needs a rendered page and therefore a built stylesheet, which
+# is why this wrapper runs after the package is built. That one asks whether
+# the value RESOLVED AT ALL -- Stylus emits an unknown identifier verbatim, so
+# ``color: colors-ui-text-accent`` compiles clean, reaches the browser as an
+# invalid value and is dropped. That is a static property of the compiled CSS:
+# it needs no browser, no display and no build, it compiles the stylesheets
+# itself in about thirty seconds, and so it runs in ``viewmodel-tests``, long
+# before anything here. Folding it in here would make a check that can run
+# first run last.
+#
 # Environment:
 #   CODETRACER_CI_PLATFORM  -- "nixos" or "macos" (default: "nixos")
 #   CODETRACER_E2E_CT_PATH  -- path to the ct binary (overridable)
