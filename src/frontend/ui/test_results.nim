@@ -25,6 +25,9 @@
 
 import
   ui_imports,
+  # A MOUNT LATCH THAT DIES WITH ITS CONTAINER. See the module header for why
+  # `isoNimTestResultsMountedIds` alone cannot answer this after a mode swap.
+  isonim_panel_mount,
   ../[ types, communication ]
 
 from ../viewmodel/viewmodels/test_results_vm import
@@ -64,14 +67,16 @@ when defined(js):
     if testResultsComponentRef.isNil:
       return
     let componentId = testResultsComponentRef.id
-    if isoNimTestResultsMountedIds.hasKey(componentId):
-      return
-
+    # THE LATCH IS ASKED OF THE CONTAINER, NOT OF THE ID, and the question can
+    # only be asked once the container has been found — so there is no early
+    # return here any more. `isoNimTestResultsMountedIds` is kept as the record
+    # of which ids this module has ever mounted, and `unregister` still clears
+    # it, but it no longer decides: a mode swap destroys the container while
+    # `layout.nim` suppresses `itemDestroyed`, so `unregister` never runs and
+    # the id latch outlives the mount it describes. See `ui/isonim_panel_mount.nim`.
     let key = cstring("testResultsComponent-" & $componentId)
     var retryCount = 0
     proc doMount() =
-      if isoNimTestResultsMountedIds.hasKey(componentId):
-        return
       retryCount += 1
       let container = dom_api.getElementById(dom_api.document, key)
       if dom_api.isNodeNil(dom_api.Node(container)):
@@ -81,6 +86,11 @@ when defined(js):
         discard setTimeout(proc() = doMount(), 10)
         return
 
+      if not isoNimPanelNeedsMount(
+          idLatchSaysMounted = isoNimTestResultsMountedIds.hasKey(componentId),
+          containerCarriesMark = isoNimPanelContainerIsMounted(container)):
+        return
+
       let containerNode = dom_api.Node(container)
       while not dom_api.isNodeNil(containerNode.firstChild):
         discard dom_api.removeChild(containerNode, containerNode.firstChild)
@@ -88,6 +98,7 @@ when defined(js):
       isoNimTestResultsMountedIds[componentId] = true
       try:
         mountIsoNimTestResultsPanel(container, testResultsVMInstance)
+        markIsoNimPanelContainerMounted(container)
       except:
         cerror "tryMountIsoNimTestResultsPanel: mount EXCEPTION: " &
           getCurrentExceptionMsg()

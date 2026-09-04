@@ -429,6 +429,13 @@ while [ "${trip}" -le "${trips}" ]; do
 	f_editable="$(leg "${control}" "trip-${trip}-edit" '.anyEditable')"
 	f_src_editable="$(leg "${control}" "trip-${trip}-edit" '.activeSourceEditorEditable')"
 	f_run="$(leg "${control}" "trip-${trip}-edit" '.runButtonPresent')"
+	# THE SIDEBAR PANES AFTER THE RETURN, ONE VARIABLE EACH. Read before the
+	# Run too, so each assertion below is a comparison against a baseline this
+	# run recorded rather than against a number someone expected.
+	b_files="$(num "$(leg "${control}" "trip-${trip}-edit" '.filesEntries')")"
+	b_vcs="$(num "$(leg "${control}" "trip-${trip}-edit" '.vcsEntries')")"
+	b_tests="$(num "$(leg "${control}" "trip-${trip}-edit" '.testsEntries')")"
+	p_files="$(num "$(leg "${control}" "edit-initial" '.filesEntries')")"
 	m_present="$(jq -r --argjson t "${trip}" \
 		'[.markerPresentPerLeg[] | select(.trip == $t)] | first | .present' <"${control}")"
 
@@ -489,6 +496,29 @@ while [ "${trip}" -le "${trips}" ]; do
 		"trip ${trip}: and THE ACTIVE SOURCE EDITOR is writable (readOnly=$(leg "${control}" "trip-${trip}-edit" '.activeSourceEditorReadOnly')) — not merely some editor on the page"
 	ck "$([ "${f_run}" = true ] && echo ok || echo no)" \
 		"trip ${trip}: and Run is back on the topbar, so the next trip has a gesture"
+
+	# THE SIDEBAR PANES STILL HOLD SOMETHING — one assertion per pane, by name.
+	#
+	# Reported: "when I enter debug mode and then hit the Stop button, the FILES,
+	# VCS and TESTS panels become empty." They were MOUNTED and empty, so
+	# nothing that checks for the container can see this; these count the rows
+	# each pane's own view renders.
+	#
+	# NEVER COLLAPSED INTO ONE CHECK. "the sidebar has content" is an
+	# existential over three unlike panes and cannot fail for its own reason —
+	# FILES alone would answer for VCS, which is exactly how `anyEditable` let a
+	# tracepoint editor answer for the source editor two assertions above.
+	#
+	# FILES is compared against what this same page had BEFORE the Run, so the
+	# claim is "the return did not lose the tree", not "the tree has at least
+	# one entry" — a number a broken pane could reach by rendering a placeholder.
+	ck "$([ "${p_files}" -gt 0 ] && [ "${b_files}" -ge "${p_files}" ] &&
+		echo ok || echo no)" \
+		"trip ${trip}: and FILES still lists its files after Stop (${b_files} entries; ${p_files} before the Run) — the pane came back with its tree, not merely mounted"
+	ck "$([ "${b_vcs}" -gt 0 ] && echo ok || echo no)" \
+		"trip ${trip}: and VCS still lists its commits after Stop (${b_vcs} rows)"
+	ck "$([ "${b_tests}" -gt 0 ] && echo ok || echo no)" \
+		"trip ${trip}: and TESTS still lists its tests after Stop (${b_tests} rows)"
 	ck "$([ "${m_present}" = true ] && echo ok || echo no)" \
 		"trip ${trip}: and the user's edit is STILL THERE"
 

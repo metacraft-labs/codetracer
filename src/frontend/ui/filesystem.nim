@@ -37,6 +37,8 @@
 
 import
   ui_imports,
+  # A MOUNT LATCH THAT DIES WITH ITS CONTAINER.
+  isonim_panel_mount,
   ../[ types, communication ],
   tables,
   sets,
@@ -500,15 +502,16 @@ when defined(js):
     let componentId = filesystemComponentRef.id
     let sessionIndex = data.activeSessionIndex
     let mountKey = cstring($sessionIndex & ":" & $componentId)
-    if isoNimFilesystemMountedIds.hasKey(mountKey):
-      return
-
+    # THE LATCH IS ASKED OF THE CONTAINER, NOT OF THE KEY, so the check moves
+    # inside `doMount` where a container exists to ask. `swapLayout` destroys
+    # this pane's host and builds a fresh one with the same id, while
+    # `layout.nim` suppresses `itemDestroyed` for the swap — so nothing clears
+    # a key-based latch and the pane came back mounted and empty. See
+    # `ui/isonim_panel_mount.nim`.
     let keyedId = cstring("filesystemComponent-" & $componentId)
     let legacyId = cstring"filesystemComponent"
     var retryCount = 0
     proc doMount() =
-      if isoNimFilesystemMountedIds.hasKey(mountKey):
-        return
       retryCount += 1
       let container = findFilesystemMountContainer(
         keyedId,
@@ -521,6 +524,11 @@ when defined(js):
         discard setTimeout(proc() = doMount(), 10)
         return
 
+      if not isoNimPanelNeedsMount(
+          idLatchSaysMounted = isoNimFilesystemMountedIds.hasKey(mountKey),
+          containerCarriesMark = isoNimPanelContainerIsMounted(container)):
+        return
+
       # Replace any prior content (Karax may have planted a stub
       # element before the IsoNim mount fires).
       let containerNode = dom_api.Node(container)
@@ -529,6 +537,7 @@ when defined(js):
 
       try:
         mountIsoNimFilesystemPanel(container, filesystemVMInstance)
+        markIsoNimPanelContainerMounted(container)
         isoNimFilesystemMountedIds[mountKey] = true
       except:
         if isoNimFilesystemMountedIds.hasKey(mountKey):

@@ -158,6 +158,48 @@ const snapshotScript = () => {
     '#eventLogComponent-0', '#traceComponent-0',
   ];
 
+  // THE SIDEBAR PANES, ASKED WHETHER THEY HOLD ANYTHING — one field each.
+  //
+  // Reported: "when I enter debug mode and then hit the Stop button, the FILES,
+  // VCS and TESTS panels become empty." MOUNTED AND EMPTY is the failure, so a
+  // selector match is not the measurement: every one of these containers is
+  // present in both modes and was present throughout the reported failure. What
+  // changed is that they held no rows.
+  //
+  // Recorded per pane and never summed. "The sidebar has content" is an
+  // existential over three unlike things and cannot fail for its own reason —
+  // FILES alone would answer for VCS, exactly as `anyEditable` above let a
+  // tracepoint editor answer for the source editor. Three fields, three
+  // assertions, three failure messages that name a pane.
+  const paneRowCount = (containerSelector, rowSelector) => {
+    const host = document.querySelector(containerSelector);
+    if (!host) return 'absent';
+    return host.querySelectorAll(rowSelector).length;
+  };
+
+  // Each row selector is the one the pane's own IsoNim view emits, so a count
+  // above zero means the view mounted AND rendered, which is the pair that came
+  // apart: the mount latch survived a container the layout swap destroyed, so
+  // the view never re-mounted into the fresh, empty host.
+  const filesEntries = paneRowCount('#filesystemComponent-0', 'a.jstree-anchor');
+  const testsEntries = paneRowCount('#testResultsComponent-0',
+    '.test-results-row, .isonim-test-row, li');
+  let vcsEntries = paneRowCount('#vcsComponent-0', '.vcs-commit, .isonim-vcs-commit, li');
+  if (vcsEntries === 'absent') {
+    // The component id is capitalised inconsistently in the layout config; the
+    // pane's own mount helper tries both, so the probe must too.
+    vcsEntries = paneRowCount('#vCSComponent-0', '.vcs-commit, .isonim-vcs-commit, li');
+  }
+
+  // The mark `ui/isonim_panel_mount.nim` writes onto a container it has mounted
+  // a view into. Recorded so a failure can distinguish "the view never mounted"
+  // from "the view mounted and rendered nothing" — the first is this defect,
+  // the second would be a different one.
+  const paneMounted = (sel) => {
+    const host = document.querySelector(sel);
+    return host ? host.getAttribute('data-ct-isonim-mounted') === '1' : 'absent';
+  };
+
   return {
     hostPresent: !!host,
     hostChildren,
@@ -182,6 +224,14 @@ const snapshotScript = () => {
     allReadOnly: readOnlyFlags.length > 0 && readOnlyFlags.every((f) => f === true),
     domEditors: document.querySelectorAll('.monaco-editor').length,
     debugPanesPresent: debugPaneSelectors.filter((s) => document.querySelector(s)),
+    // One field per pane, by name. See `paneRowCount` above for why this is
+    // never collapsed into a single "the sidebar is populated" boolean.
+    filesEntries,
+    vcsEntries,
+    testsEntries,
+    filesMounted: paneMounted('#filesystemComponent-0'),
+    vcsMounted: paneMounted('#vcsComponent-0'),
+    testsMounted: paneMounted('#testResultsComponent-0'),
   };
 };
 

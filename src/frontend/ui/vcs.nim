@@ -25,6 +25,8 @@ import
 
 import git_cli
 import agent_activity
+# A MOUNT LATCH THAT DIES WITH ITS CONTAINER.
+import isonim_panel_mount
 import ../viewmodel/viewmodels/vcs_vm
 import ../viewmodel/viewmodels/review_entry
 from ../viewmodel/viewmodels/review_session import
@@ -941,9 +943,15 @@ proc startReviewForTraceDiff*(data: Data; diff: Diff; title: string;
 
 proc tryMountIsoNimVCSPanel*(componentId: int) =
   when defined(js):
-    if isoNimVCSMountedIds.hasKey(componentId) and
-       isoNimVCSMountedIds[componentId]:
-      return
+    # THE LATCH IS ASKED OF THE CONTAINER, NOT OF THE ID, and so it is asked
+    # further down, once `container` has been resolved.
+    #
+    # This pane was the airtight case: `isoNimVCSMountedIds` was written in one
+    # place and deleted in NO place in the whole tree — `VCSComponent` has
+    # neither a `register` nor an `unregister` method — so once VCS had mounted,
+    # every later `tryMount` for that id returned immediately, for the life of
+    # the page. A mode swap destroys the host and builds an empty one with the
+    # same id, and the pane never came back. See `ui/isonim_panel_mount.nim`.
     if not vcsComponentRefs.hasKey(componentId):
       return
     let component = vcsComponentRefs[componentId]
@@ -955,6 +963,12 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
     if container.isNil:
       container = document.getElementById(cstring(fmt"vCSComponent-{componentId}"))
     if container.isNil:
+      return
+    if not isoNimPanelNeedsMount(
+        idLatchSaysMounted = isoNimVCSMountedIds.hasKey(componentId) and
+                             isoNimVCSMountedIds[componentId],
+        containerCarriesMark = isoNimPanelContainerIsMounted(
+          cast[isonim_dom_api.Element](container))):
       return
     component.syncLegacyVCSIntoVM()
     let callbacks = VCSCallbacks(
@@ -1037,6 +1051,7 @@ proc tryMountIsoNimVCSPanel*(componentId: int) =
     )
     mountIsoNimVCSPanel(cast[isonim_dom_api.Element](container), vm,
                         callbacks)
+    markIsoNimPanelContainerMounted(cast[isonim_dom_api.Element](container))
     isoNimVCSMountedIds[componentId] = true
   else:
     discard
