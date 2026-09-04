@@ -477,6 +477,14 @@ proc noirOracleDemo*(): ProjectTemplate =
   ## passes did we pay for" is a thing the calltrace SHOWS rather than a bound
   ## a reader has to evaluate in their head.
   ##
+  ## ## And this argument is ALSO a file the visitor can read
+  ##
+  ## Everything above is a Nim doc comment. `README.md` below carries the same
+  ## account — what the circuit proves, that the tests pass, that the answer is
+  ## wrong anyway — without naming the file or the constant, because a reader
+  ## who is told where to look never opens a pane. See the note beside it for
+  ## what it deliberately omits.
+  ##
   ## ## Plain Noir, deliberately
   ##
   ## No aztec-nr. The circuit is a price-feed settlement — private publisher
@@ -495,6 +503,104 @@ proc noirOracleDemo*(): ProjectTemplate =
     # the demo settles and can silently repair the bug — the arithmetic that
     # makes it bite is in the test's expectations, not only here.
     files: @[
+      # THE ONLY PLACE THE DEMO'S REASON FOR EXISTING IS VISIBLE TO A VISITOR.
+      #
+      # Everything above this line is a Nim comment, so the argument for what
+      # this project is and why its tests passing is the interesting part was
+      # readable by contributors and by nobody else. The README is that
+      # argument, in the reader's own register, in a file the file tree shows.
+      #
+      # WHAT IT MUST NOT SAY. The demo's whole design turns on the bug being
+      # invisible to reading — a wrong claim in a comment, attached to a real
+      # and correct pressure — so a README naming the file or the constant
+      # destroys the artefact it is introducing. It names the SYMPTOM instead:
+      # Run refuses, and the price the circuit settles at is not the price the
+      # round published. That is what the visitor sees the moment they press
+      # Run, so stating it spoils nothing and saves the first minute.
+      #
+      # NO NUMBERS IN IT, deliberately. The settled and published prices are
+      # both pinned by `ci/test/noir-demo-template.sh`, so quoting them would
+      # be accurate today; but the note on the bytes below says editing a price
+      # here can silently repair the bug, and prose carrying the old figures is
+      # the one thing that would survive such an edit looking correct. "Eight
+      # tests" IS quoted, because that gate asserts `8 passed, 0 failed` in two
+      # separate arms and a change to it is a red suite.
+      #
+      # IT IS NOT THE FILE OPEN ON ARRIVAL, and `entryFile` is not what decides
+      # that — measured rather than assumed. `noirDemoEntryFile` has no reader
+      # outside the tests; `edit_mode.chooseInitialEditPath` picks the tab by
+      # scoring paths, and `src/main.nr` scores 50 (a preferred extension, the
+      # `main` stem, a `/src/` segment) against this file's 20. So the demo
+      # still opens on the circuit, which is the right first frame — the
+      # product is a debugger and Run is the designed first action — and the
+      # README is one click away, first in the tree.
+      #
+      # IT RENDERS AS PLAIN TEXT. `lang.fromPath` has no `md` row, so Monaco is
+      # handed the language id `unknown` and falls back to plaintext, exactly
+      # as it already does for `Nargo.toml` and `Prover.toml`. Markdown reads
+      # fine unhighlighted, which is the whole point of the format, so this is
+      # written to be read as text: no tables, no nested emphasis, and the
+      # headings carry their own words. Do not add a renderer for it.
+      #
+      # It also goes into the compiler's virtual filesystem, like every other
+      # file `templateVfsEntries` sends — nargo reads `Nargo.toml` and
+      # `src/*.nr` and ignores the rest, so it is inert there.
+      TemplateFile(
+        path: "README.md",
+        content: """# oracle_settlement
+
+A settlement round for an ETH/USD price feed, in plain Noir.
+
+Seven publishers each sign a price and the time they signed it. Those prices
+and those times are the circuit's private inputs; the settlement time and the
+price the feed published are its public ones. The circuit proves that the
+published price is the median of the reports that were still fresh at that
+moment, and that every one of them sits inside the deviation band around it —
+without revealing which publisher said what. That last clause is the reason
+this is a circuit: a verifier can check the round was honest without learning
+anybody's quote.
+
+## What it is for
+
+A hello-world is there to be edited in the first ten seconds. This project is
+there to be debugged.
+
+It ships a circuit that reads correctly, eight tests that all pass, and one
+wrong answer that none of those tests catch. Press Run and the round in
+`Prover.toml` is refused: the price the circuit settles at is not the price
+that round published. Both are ordinary ETH prices, so the output does not say
+which of the two is the mistake.
+
+That is the ordinary shape of a bug that reaches production. Not a typo — a
+claim that is true of every case somebody thought to test, and false of the
+case that arrived. Reading the source is what let it through; watching it run
+is what finds it.
+
+## The files
+
+- `src/main.nr` — the round's inputs, and the one assertion the proof is about.
+- `src/config.nr` — the feed's parameters: how many publishers, the quorum, the
+  staleness window, the deviation band.
+- `src/report.nr` — a single report: its age, whether it is fresh, how far it
+  sits from the settled price.
+- `src/sort.nr` — putting a round's prices in order, which is what taking a
+  median needs.
+- `src/aggregate.nr` — the round itself: drop the stale reports, take the
+  median, check the band.
+- `src/tests.nr` — the round-level tests: a full round, stale publishers, a
+  sort, three refusals.
+- `Prover.toml` — the round Run settles: seven prices and seven signing times.
+
+## Where to start
+
+Run the tests and watch them pass. Then run the round in `Prover.toml` and step
+through it — the reports that survive the staleness check, the order they end
+up in, the value that comes back as the median.
+
+A circuit run is deterministic, so the whole of it is recorded. You can walk
+forward from the inputs or backward from the refusal, and the values are there
+either way.
+"""),
       TemplateFile(
         path: "Nargo.toml",
         content: """[package]

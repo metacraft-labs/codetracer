@@ -197,22 +197,58 @@ else
 	ck fail "both templates report package '${demo_package}' — /noir/demo is serving the starter"
 fi
 
-if [ "${demo_files}" -eq 8 ]; then
-	ck ok "the demo ships 8 files"
+# NINE SINCE THE README LANDED: six modules, two manifests, and the one file
+# that tells a visitor what the project is for. It was eight until then, and
+# the number is asserted rather than derived so that dropping a module and
+# adding a note cannot come out even.
+if [ "${demo_files}" -eq 9 ]; then
+	ck ok "the demo ships 9 files"
 else
-	ck fail "the demo ships ${demo_files} files, not 8"
+	ck fail "the demo ships ${demo_files} files, not 9"
 fi
 
 # Files the STARTER does not have. A demo that had merely been renamed would
 # pass the two checks above and fail this one.
 missing=""
-for f in src/sort.nr src/aggregate.nr src/report.nr src/config.nr Prover.toml; do
+for f in src/sort.nr src/aggregate.nr src/report.nr src/config.nr Prover.toml README.md; do
 	[ -f "${arm_dir}/${f}" ] || missing="${missing} ${f}"
 done
 if [ -z "${missing}" ]; then
-	ck ok "the demo carries src/{sort,aggregate,report,config}.nr and Prover.toml"
+	ck ok "the demo carries src/{sort,aggregate,report,config}.nr, Prover.toml and README.md"
 else
 	ck fail "the demo is missing:${missing}"
+fi
+
+# THE README MUST NOT GIVE THE BUG AWAY, and that is a property a gate can
+# hold. The demo's design is that the bug is invisible to reading — a wrong
+# claim in a comment — so a README that named the constant, or the algorithm
+# whose bound is wrong, would turn a debugging exercise into a paragraph.
+# Checked as an absence, because the failure mode is somebody helpfully adding
+# a pointer later.
+#
+# `sort.nr` IS ALLOWED and is not an oversight. The README tours all seven
+# files a visitor sees, one line each, and omitting the one the bug is in
+# would point at it by its absence more loudly than naming it.
+leaked=""
+for token in SETTLE_PASSES bubble; do
+	if grep -qi -- "${token}" "${arm_dir}/README.md"; then
+		leaked="${leaked} ${token}"
+	fi
+done
+if [ -z "${leaked}" ]; then
+	ck ok "README.md names neither the constant the bug lives in nor the algorithm around it"
+else
+	ck fail "README.md gives the bug away; it mentions:${leaked}"
+fi
+
+# NON-VACUITY for the check above: an empty or absent README would pass it.
+# The README has to actually make the demo's claim — that the tests pass and
+# the answer is wrong anyway — or there is nothing being protected.
+if grep -q 'eight tests that all pass' "${arm_dir}/README.md" &&
+	grep -q 'is not the price' "${arm_dir}/README.md"; then
+	ck ok "README.md states that the tests pass and that the settled price is wrong anyway"
+else
+	ck fail "README.md no longer states the demo's premise; the previous check is vacuous"
 fi
 
 if [ ! -f "${starter_dir}/src/sort.nr" ]; then
@@ -467,11 +503,14 @@ else
 fi
 echo
 
-# 20 = arm D's 8 + arm T's 4 + arm R's 4 + arm F's 3 + arm S's 1. Arm F writes
+# 22 = arm D's 10 + arm T's 4 + arm R's 4 + arm F's 3 + arm S's 1. Arm F writes
 # three either way: its repair-failed branch reports the two it could not run
 # as failures rather than skipping them, so the count does not move when the
 # line it patches goes missing.
-expect_count $((20 + arm_a_checks + arm_w_checks))
+#
+# Arm D was 8 until the README landed; the two it gained are the pair that
+# checks the README makes the demo's claim without giving the bug away.
+expect_count $((22 + arm_a_checks + arm_w_checks))
 
 if [ "${failures}" -eq 0 ]; then
 	printf 'RESULT: PASSED — %d assertion(s).\n' "${checks}"

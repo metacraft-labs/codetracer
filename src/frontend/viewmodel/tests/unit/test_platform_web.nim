@@ -1857,9 +1857,25 @@ suite "the demo entry serves the demo and not the starter":
     check starter.name == noirTemplateName
     check demo.name != starter.name
 
-    # Eight files: two manifests and six modules. A count, because "the demo
-    # has files" is true of the starter too.
-    check demo.templateFileCount == 8
+    # Nine files: two manifests, six modules, and the README that says what
+    # the project is for. A count, because "the demo has files" is true of the
+    # starter too.
+    check demo.templateFileCount == 9
+
+    # THE ONLY SURFACE THE DEMO'S REASON FOR EXISTING REACHES A VISITOR ON.
+    # The argument was a Nim doc comment and nothing else for as long as the
+    # demo existed, which made it readable by contributors and by nobody who
+    # arrives at the route. Asserted on its claim rather than its presence: an
+    # empty README.md would satisfy a file-count check and say nothing.
+    let readme = demo.fileContent("README.md")
+    check "eight tests that all pass" in readme
+    check "is not the price" in readme
+    # AND IT MUST NOT GIVE THE BUG AWAY. `SETTLE_PASSES` is the false claim the
+    # whole demo is built around; a README that named it would leave a visitor
+    # with nothing to debug. `sort.nr` is allowed — the README tours all seven
+    # files a visitor sees, and skipping that one would point at it louder.
+    check "SETTLE_PASSES" notin readme
+    check "bubble" notin readme
 
     # THE SOURCES THEMSELVES, in both directions. `mod sort;` and
     # `mod aggregate;` are the demo's own modules — the bubble-pass circuit and
@@ -1922,7 +1938,16 @@ suite "the demo entry serves the demo and not the starter":
     # starter's, so a `templateFor` serving the wrong project fails here too.
     var modules = 0
     var manifests = 0
+    var prose = 0
     for file in tmpl.files:
+      if file.path.endsWith(".md"):
+        # `README.md`: what the project is for, for the visitor rather than
+        # for nargo. Counted APART from the manifests rather than folded in
+        # with them, so "a module went missing and a note was added" cannot
+        # come out even on either tally.
+        check not file.path.contains("/")
+        inc prose
+        continue
       if not file.path.endsWith(".nr"):
         # `Nargo.toml` and `Prover.toml`: package metadata, not crate sources.
         check not file.path.contains("/")
@@ -1935,6 +1960,7 @@ suite "the demo entry serves the demo and not the starter":
       inc modules
     check modules == 5
     check manifests == 2
+    check prose == 1
 
   test "every template declares what its circuit costs, and the two disagree":
     ## The half-wiring one layer along from rule 0's: a template nobody
