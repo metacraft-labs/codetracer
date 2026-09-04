@@ -252,15 +252,22 @@ async function stepOver(editor: EditorPane): Promise<void> {
       dapApi.sendCtRequest(/* DapNext */ 22, { threadId: 1 });
       return;
     }
-    // Fallback for harnesses that surface `stepForward` on the
-    // debugger service directly (also a DAP `next` dispatcher).
-    const stepFwd = w?.data?.services?.debugger?.stepForward;
-    if (typeof stepFwd === "function") {
-      stepFwd.call(w.data.services.debugger);
-      return;
-    }
+    // There used to be a `services.debugger.stepForward` fallback here.  It
+    // was unreachable twice over: `stepForward` is not declared on
+    // `DebuggerService` at all (the name exists only on `HeadlessDebugSession`
+    // and the ViewModels — e.g.
+    // src/frontend/viewmodel/headless_session.nim:237), and it is not among
+    // the methods `installM5ColumnAwareServiceMethods` attaches to the live
+    // service instance (src/frontend/ui_js.nim:4963-4977 installs
+    // addColumnBreakpoint, addColumnTracepoint, stepOverStatement,
+    // stepBackStatement, setActiveSourceView, installSourceViewForTest —
+    // and `sendCtRequest` on the DapApi, which is the branch above).
+    // So `typeof stepFwd === "function"` was always false and control always
+    // reached this throw.
     throw new Error(
-      "Neither dapApi.sendCtRequest nor services.debugger.stepForward is reachable; cannot drive the M3 step",
+      "data.dapApi.sendCtRequest is not a function; the M3 DAP pipeline is " +
+        "not reachable and the step cannot be driven. It is installed by " +
+        "installM5ColumnAwareServiceMethods() in src/frontend/ui_js.nim.",
     );
   });
 }

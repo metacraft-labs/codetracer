@@ -20,6 +20,11 @@ import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
+import {
+  ViewInstructions,
+  ViewTargetSource,
+  openAlternativeView,
+} from "../../lib/alternative-views";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,164 +96,23 @@ function parseRrTicks(raw: string): number {
 }
 
 /**
- * Opens the C code view (ViewTargetSource) for a Nim trace.
- * Returns true if the switch succeeded.
- */
-async function switchToTargetSourceView(
-  page: import("@playwright/test").Page,
-): Promise<boolean> {
-  return await page.evaluate(() => {
-    const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const data = w.data;
-    if (!data) return false;
-
-    const session = data.sessions?.[data.activeSessionIndex];
-    if (!session) return false;
-
-    const cPath = session.services?.debugger?.cLocation?.path;
-    if (!cPath || cPath.length === 0) return false;
-
-    if (typeof data.openTab === "function") {
-      data.openTab(cPath, 1); // 1 = ViewTargetSource
-      data.ui.openViewOnCompleteMove[1] = true;
-      return true;
-    }
-
-    return false;
-  });
-}
-
-/**
- * Probes whether the current debugger frame exposes enough information for the
- * assembly (ViewInstructions) view to be opened.  The Nim production renderer
- * constructs the assembly tab name via the Nim proc
- * `asmName(location) = "<path>:<functionName>"`.  That proc is a free Nim
- * function, so `cLocation.asmName` from `page.evaluate` is always `undefined`
- * — we reconstruct the string from the underlying fields.
+ * Waits for the sourcemap to be loaded.  Returns whether it arrived.
  *
- * Returns `{ ok, reason, asmName }` so callers can `test.skip(...)` with a
- * meaningful message instead of waiting for a retry loop to throw.
- */
-async function probeInstructionsAvailability(
-  page: import("@playwright/test").Page,
-): Promise<{ ok: boolean; reason: string; asmName: string }> {
-  return await page.evaluate(() => {
-    const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const data = w.data;
-    if (!data) return { ok: false, reason: "window.data not initialised", asmName: "" };
-
-    const session = data.sessions?.[data.activeSessionIndex];
-    if (!session) return { ok: false, reason: "no active session", asmName: "" };
-
-    const cLoc = session.services?.debugger?.cLocation;
-    const loc = session.services?.debugger?.location;
-
-    const composeAsmName = (l: any): string => { // eslint-disable-line @typescript-eslint/no-explicit-any
-      if (!l) return "";
-      const path = typeof l.path === "string" ? l.path : "";
-      const fn = typeof l.functionName === "string" ? l.functionName : "";
-      if (path.length === 0 || fn.length === 0) return "";
-      return `${path}:${fn}`;
-    };
-
-    const asmName = composeAsmName(cLoc) || composeAsmName(loc);
-    if (asmName.length === 0) {
-      const cPath = cLoc?.path ?? "(none)";
-      const cFn = cLoc?.functionName ?? "(none)";
-      return {
-        ok: false,
-        reason: `cLocation incomplete: path=${cPath} functionName=${cFn}`,
-        asmName: "",
-      };
-    }
-
-    if (typeof data.openTab !== "function") {
-      return { ok: false, reason: "data.openTab not exposed to JS", asmName };
-    }
-
-    return { ok: true, reason: "", asmName };
-  });
-}
-
-/**
- * Opens the assembly/instructions view (ViewInstructions) for a Nim trace.
- * Returns true if the switch succeeded.  Use `probeInstructionsAvailability`
- * first when a clean skip-with-reason is preferable to a thrown retry.
- */
-async function switchToInstructionsView(
-  page: import("@playwright/test").Page,
-): Promise<boolean> {
-  const probe = await probeInstructionsAvailability(page);
-  if (!probe.ok) return false;
-  return await page.evaluate((asmName: string) => {
-    const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const data = w.data;
-    if (!data || typeof data.openTab !== "function") return false;
-    data.openTab(asmName, 2); // 2 = ViewInstructions
-    if (data.ui?.openViewOnCompleteMove) {
-      data.ui.openViewOnCompleteMove[2] = true;
-    }
-    return true;
-  }, probe.asmName);
-}
-
-/**
- * Switches back to the default Nim source view (ViewSource).
- * Opens the .nim file tab if available, or uses openViewOnCompleteMove[0].
- */
-async function switchToNimSourceView(
-  page: import("@playwright/test").Page,
-): Promise<boolean> {
-  return await page.evaluate(() => {
-    const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const data = w.data;
-    if (!data) return false;
-
-    const session = data.sessions?.[data.activeSessionIndex];
-    if (!session) return false;
-
-    const nimPath = session.services?.debugger?.location?.path;
-    if (!nimPath || nimPath.length === 0) return false;
-
-    if (typeof data.openTab === "function") {
-      data.openTab(nimPath, 0); // 0 = ViewSource
-      data.ui.openViewOnCompleteMove[0] = true;
-      return true;
-    }
-
-    return false;
-  });
-}
-
-/**
- * Checks whether the sourcemap data has been loaded for the current session.
- */
-async function isSourcemapLoaded(
-  page: import("@playwright/test").Page,
-): Promise<boolean> {
-  return await page.evaluate(() => {
-    const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const data = w.data;
-    if (!data) return false;
-
-    const session = data.sessions?.[data.activeSessionIndex];
-    if (!session) return false;
-
-    const sm = session.sourcemap;
-    return sm != null && sm.loaded === true;
-  });
-}
-
-/**
- * Waits for the sourcemap to be loaded, with a generous timeout.
- * Returns true if loaded, false if not available.
+ * This is a *diagnostic*, not a gate: the C and assembly views are opened
+ * through `openAlternativeView`, which reports the precise missing
+ * precondition itself.  Waiting here just gives the backend time to deliver
+ * the sourcemap before we look at `cLocation`.
  */
 async function waitForSourcemap(
   page: import("@playwright/test").Page,
 ): Promise<boolean> {
   try {
     await retry(
-      async () => isSourcemapLoaded(page),
+      async () =>
+        page.evaluate(() => {
+          const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          return w.data?.sourcemap?.loaded === true;
+        }),
       { maxAttempts: 30, delayMs: 1000 },
     );
     return true;
@@ -290,33 +154,18 @@ test.describe("SteppingThroughViews", () => {
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
     await waitForNimEditorReady(layout, ctPage);
 
-    // Wait for sourcemap — required for C view.
-    const smAvailable = await waitForSourcemap(ctPage);
-    if (!smAvailable) {
-      test.skip(
-        true,
-        "Sourcemap not available: trace was likely recorded without --sourcemap:on. " +
-        "Skipping C view stepping test.",
-      );
-      return;
-    }
+    // Give the backend a chance to deliver the sourcemap before we read
+    // `cLocation`.  Not a gate: `openAlternativeView` reports the precise
+    // missing precondition (including sourcemap state) if the view can't open.
+    await waitForSourcemap(ctPage);
 
-    // Switch to C view (ViewTargetSource).
-    let switched = false;
-    await retry(
-      async () => {
-        switched = await switchToTargetSourceView(ctPage);
-        return switched;
-      },
-      { maxAttempts: 10, delayMs: 1000 },
-    );
-    if (!switched) {
-      test.skip(
-        true,
-        "C location path not available from the debugger. Cannot test C view stepping.",
-      );
-      return;
-    }
+    // Switch to C view (ViewTargetSource).  Throws with a diagnostic if the
+    // view cannot be opened — see `lib/alternative-views.ts` for why this is a
+    // failure rather than a skip.
+    await openAlternativeView(ctPage, ViewTargetSource, async () => {
+      await ctPage.locator("#next-image").click();
+      await waitForReadyStatus(ctPage);
+    });
     await waitForReadyStatus(ctPage);
 
     // Record the current C line from the status bar.
@@ -351,24 +200,12 @@ test.describe("SteppingThroughViews", () => {
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
     await waitForNimEditorReady(layout, ctPage);
 
-    const smAvailable = await waitForSourcemap(ctPage);
-    if (!smAvailable) {
-      test.skip(true, "Sourcemap not available. Skipping reverse C stepping test.");
-      return;
-    }
+    await waitForSourcemap(ctPage);
 
-    let switched = false;
-    await retry(
-      async () => {
-        switched = await switchToTargetSourceView(ctPage);
-        return switched;
-      },
-      { maxAttempts: 10, delayMs: 1000 },
-    );
-    if (!switched) {
-      test.skip(true, "C location path not available. Cannot test reverse C stepping.");
-      return;
-    }
+    await openAlternativeView(ctPage, ViewTargetSource, async () => {
+      await ctPage.locator("#next-image").click();
+      await waitForReadyStatus(ctPage);
+    });
     await waitForReadyStatus(ctPage);
 
     // Step forward a few times to establish a position we can step back from.
@@ -406,53 +243,27 @@ test.describe("SteppingThroughViews", () => {
     }
   });
 
-  // SKIP-GUARD (option (b) per isonim-migration handoff TODO 5.2(e)):
-  // The Nim assembly-view tests previously failed because the
-  // `switchToInstructionsView` retry exhausted its 10 attempts and the
-  // intended `test.skip(...)` inside the body never ran (the retry
-  // helper throws before the skip can land).
+  // This test used to be permanently skipped and never ran a single
+  // assertion.  `probeInstructionsAvailability` ended with
+  // `if (typeof data.openTab !== "function") return { ok: false, ... }`, and
+  // `data.openTab` is a free Nim proc that is never a JS function
+  // (src/frontend/utils.nim:1848), so the probe returned `ok: false`
+  // unconditionally and `test.skip(!probe.ok)` always fired.
   //
-  // The underlying gap is that the test reads `cLocation.asmName`
-  // expecting a string field, but `asmName` in Nim is a free proc
-  // (`asmName(loc) = path:functionName` —
-  // `src/common/common_types/utils/text_representation.nim`).  The
-  // production renderer calls the proc directly from Nim, so the
-  // assembly view works for users; only the test-side property access
-  // was broken.  We now reconstruct `path:functionName` ourselves
-  // (see `probeInstructionsAvailability`) and skip cleanly when the
-  // probe reports the data isn't reaching the frontend on this
-  // particular trace (e.g. when the Nim sourcemap was not loaded or
-  // when `data.openTab` is not exposed to the JS evaluation context).
-  //
-  // TODO: re-enable the body of the test once the underlying assembly
-  // dispatch on Nim frames is verified end-to-end.  When the probe
-  // returns ok this test will exercise the assembly stepping path.
+  // It now opens the assembly view through the live
+  // `data.ui.openViewOnCompleteMove` path and fails loudly if that does not
+  // work.  See `lib/alternative-views.ts` for the full argument.
   test("step forward in assembly view", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
 
-    // Treat editor-ready timeout as a clean skip — the Nim record-and-launch
-    // pipeline has flaked under sweep load.
-    try {
-      await waitForNimEditorReady(layout, ctPage);
-    } catch (e) {
-      test.skip(true, `Nim editor never became ready: ${e instanceof Error ? e.message : e}`);
-      return;
-    }
+    await waitForNimEditorReady(layout, ctPage);
+    await waitForSourcemap(ctPage);
 
-    // Probe the assembly-view availability up-front and skip cleanly with
-    // a meaningful reason if the data isn't there for this trace.
-    const probe = await probeInstructionsAvailability(ctPage);
-    test.skip(
-      !probe.ok,
-      `Assembly view not available for this Nim trace: ${probe.reason}`,
-    );
-
-    const switched = await switchToInstructionsView(ctPage);
-    if (!switched) {
-      test.skip(true, "switchToInstructionsView failed despite probe success");
-      return;
-    }
+    await openAlternativeView(ctPage, ViewInstructions, async () => {
+      await ctPage.locator("#next-image").click();
+      await waitForReadyStatus(ctPage);
+    });
     await waitForReadyStatus(ctPage);
 
     // Record the current position. In assembly view the status bar still
@@ -478,30 +289,19 @@ test.describe("SteppingThroughViews", () => {
     expect(positionChanged).toBe(true);
   });
 
-  // SKIP-GUARD (option (b) per isonim-migration handoff TODO 5.2(e)) —
-  // see "step forward in assembly view" above for the full rationale.
+  // Was permanently skipped for the same reason as "step forward in assembly
+  // view" above; same disposition.
   test("step backward in assembly view", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
 
-    try {
-      await waitForNimEditorReady(layout, ctPage);
-    } catch (e) {
-      test.skip(true, `Nim editor never became ready: ${e instanceof Error ? e.message : e}`);
-      return;
-    }
+    await waitForNimEditorReady(layout, ctPage);
+    await waitForSourcemap(ctPage);
 
-    const probe = await probeInstructionsAvailability(ctPage);
-    test.skip(
-      !probe.ok,
-      `Assembly view not available for this Nim trace: ${probe.reason}`,
-    );
-
-    const switched = await switchToInstructionsView(ctPage);
-    if (!switched) {
-      test.skip(true, "switchToInstructionsView failed despite probe success");
-      return;
-    }
+    await openAlternativeView(ctPage, ViewInstructions, async () => {
+      await ctPage.locator("#next-image").click();
+      await waitForReadyStatus(ctPage);
+    });
     await waitForReadyStatus(ctPage);
 
     // Step forward a few times first.

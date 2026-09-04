@@ -24,33 +24,26 @@ test.describe("generate faithful webp animations", () => {
       await layout.waitForTraceLoaded();
       await layout.waitForEditorLoaded();
 
-      // Switch to inline flow mode using robust evaluation
+      // Switch to inline flow mode.
+      //
+      // This used to walk the whole `d.ui.componentMapping` tree looking for
+      // any object with a callable `switchFlowUI` property.  It never found
+      // one: `switchFlowUI` is a free Nim proc
+      // (`proc switchFlowUI*(self: FlowComponent, flowUI: FlowUI)`,
+      // src/frontend/ui/flow.nim:1985), and Nim's JS backend emits procs as
+      // free functions taking `self` as the first parameter rather than
+      // attaching them to the object (src/frontend/ui_js.nim:4881-4890).
+      // `candidate.switchFlowUI` was therefore always `undefined` and the
+      // traversal was a no-op.
+      //
+      // The two config writes below are plain field assignments and *do*
+      // take effect, so they are what actually selected inline flow all
+      // along.
       await ctPage.evaluate(() => {
         const d = (window as any).data;
         if (!d) return;
         d.config.flow.ui = "inline";
         d.config.flow.realFlowUI = 1; // FlowInline
-        const switchFlowUI = (value: unknown) => {
-          if (typeof value !== "object" || value === null) return;
-          const candidate = value as { switchFlowUI?: unknown };
-          if (typeof candidate.switchFlowUI === "function") {
-            candidate.switchFlowUI(1);
-          }
-        };
-        // Trigger redraw
-        if (d.ui && d.ui.componentMapping) {
-            for (const group of d.ui.componentMapping) {
-                if (!group) continue;
-                for (const comp of Object.values(group)) {
-                    if (!comp) continue;
-                    // Switch UI for any component that supports it
-                    for (const key of Object.keys(comp)) {
-                        switchFlowUI((comp as Record<string, unknown>)[key]);
-                    }
-                    switchFlowUI(comp);
-                }
-            }
-        }
       });
       await ctPage.waitForTimeout(2000);
 

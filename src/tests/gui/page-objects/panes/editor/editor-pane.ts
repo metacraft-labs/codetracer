@@ -544,21 +544,18 @@ export class EditorPane {
             }
           }
 
-          if (
-            editorService.active === path &&
-            typeof editorService.activeTabInfo === "function"
-          ) {
-            const activeTab = editorService.activeTabInfo();
-            if (
-              activeTab &&
-              typeof activeTab.viewLine === "number" &&
-              Number.isFinite(activeTab.viewLine) &&
-              activeTab.viewLine > 0
-            ) {
-              return activeTab.viewLine;
-            }
-          }
-
+          // NOTE: there used to be a third fallback here that called
+          // `editorService.activeTabInfo()`.  It was unreachable:
+          // `activeTabInfo` is a free Nim proc
+          // (`proc activeTabInfo*(self: EditorService): TabInfo`,
+          // src/frontend/services/editor_service.nim:180), and Nim's JS
+          // backend emits procs as free functions taking `self` as the first
+          // parameter instead of attaching them to the object
+          // (src/frontend/ui_js.nim:4881-4890), so
+          // `typeof editorService.activeTabInfo === "function"` was always
+          // false.  Removing it changes no behaviour: the two live fallbacks
+          // above (`tab.viewLine` and `monacoEditor.getPosition()`) already
+          // read the same tab, and control fell through to `null` regardless.
           return null;
         },
         { path: this.filePath },

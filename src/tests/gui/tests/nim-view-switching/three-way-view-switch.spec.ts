@@ -21,6 +21,11 @@ import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
+import {
+  ViewInstructions,
+  ViewTargetSource,
+  openAlternativeView,
+} from "../../lib/alternative-views";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,126 +69,6 @@ async function waitForReadyStatus(
 }
 
 /**
- * Opens the C code view (ViewTargetSource) for a Nim trace by invoking the
- * frontend's openTargetSource function via page.evaluate.
- *
- * This reads data.services.debugger.cLocation.path from the global `data`
- * object and calls the compiled openTargetSource function. If the cLocation
- * path is not available (e.g., sourcemap not loaded), it returns false.
- */
-async function switchToTargetSourceView(
-  page: import("@playwright/test").Page,
-): Promise<boolean> {
-  return await page.evaluate(() => {
-    const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const data = w.data;
-    if (!data) return false;
-
-    const session = data.sessions?.[data.activeSessionIndex];
-    if (!session) return false;
-
-    const cPath = session.services?.debugger?.cLocation?.path;
-    if (!cPath || cPath.length === 0) return false;
-
-    // Use the openTab API to open the C file in ViewTargetSource mode (view 1).
-    // openTab is the underlying function used by openTargetSource.
-    if (typeof data.openTab === "function") {
-      data.openTab(cPath, 1); // 1 = ViewTargetSource
-      data.ui.openViewOnCompleteMove[1] = true;
-      return true;
-    }
-
-    return false;
-  });
-}
-
-/**
- * Probes whether the current debugger frame exposes enough information for the
- * assembly (ViewInstructions) view to be opened.
- *
- * Background: the Nim production renderer constructs the assembly tab name via
- * the Nim proc `asmName(location) = "<path>:<functionName>"` (see
- * `src/common/common_types/utils/text_representation.nim`).  That proc is a
- * free Nim function, so it is *not* a property on the JS-side `cLocation`
- * object — calling `cLocation.asmName` from `page.evaluate` always yields
- * `undefined`.  The real production path
- * (`renderer.openAlternativeView` / Nim editor click handlers) calls the proc
- * directly from Nim and works correctly; only our test-side property access
- * was broken.  We reconstruct the same string here from the underlying
- * fields, which mirrors what the renderer actually emits.
- *
- * Returns `{ ok, reason, asmName }` so the caller can decide whether to
- * `test.skip(...)` cleanly with a meaningful message rather than waiting for
- * the retry loop to throw.
- */
-async function probeInstructionsAvailability(
-  page: import("@playwright/test").Page,
-): Promise<{ ok: boolean; reason: string; asmName: string }> {
-  return await page.evaluate(() => {
-    const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const data = w.data;
-    if (!data) return { ok: false, reason: "window.data not initialised", asmName: "" };
-
-    const session = data.sessions?.[data.activeSessionIndex];
-    if (!session) return { ok: false, reason: "no active session", asmName: "" };
-
-    const cLoc = session.services?.debugger?.cLocation;
-    const loc = session.services?.debugger?.location;
-
-    const composeAsmName = (l: any): string => { // eslint-disable-line @typescript-eslint/no-explicit-any
-      if (!l) return "";
-      const path = typeof l.path === "string" ? l.path : "";
-      const fn = typeof l.functionName === "string" ? l.functionName : "";
-      if (path.length === 0 || fn.length === 0) return "";
-      return `${path}:${fn}`;
-    };
-
-    // Prefer cLocation (Nim's generated-C frame); fall back to the high-level
-    // location for the C/C++/Rust/Go path even though those tests are not
-    // exercised here — keeps the helper general.
-    const asmName = composeAsmName(cLoc) || composeAsmName(loc);
-    if (asmName.length === 0) {
-      const cPath = cLoc?.path ?? "(none)";
-      const cFn = cLoc?.functionName ?? "(none)";
-      return {
-        ok: false,
-        reason: `cLocation incomplete: path=${cPath} functionName=${cFn}`,
-        asmName: "",
-      };
-    }
-
-    if (typeof data.openTab !== "function") {
-      return { ok: false, reason: "data.openTab not exposed to JS", asmName };
-    }
-
-    return { ok: true, reason: "", asmName };
-  });
-}
-
-/**
- * Opens the assembly/instructions view (ViewInstructions) for a Nim trace.
- *
- * Returns `false` if the underlying state is missing — callers that want a
- * graceful skip should use `probeInstructionsAvailability` first.
- */
-async function switchToInstructionsView(
-  page: import("@playwright/test").Page,
-): Promise<boolean> {
-  const probe = await probeInstructionsAvailability(page);
-  if (!probe.ok) return false;
-  return await page.evaluate((asmName: string) => {
-    const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const data = w.data;
-    if (!data || typeof data.openTab !== "function") return false;
-    data.openTab(asmName, 2); // 2 = ViewInstructions
-    if (data.ui?.openViewOnCompleteMove) {
-      data.ui.openViewOnCompleteMove[2] = true;
-    }
-    return true;
-  }, probe.asmName);
-}
-
-/**
  * Reads the text content of the currently active editor's Monaco instance.
  * Returns the full text or an empty string if not available.
  */
@@ -209,23 +94,62 @@ async function getActiveEditorContent(
 }
 
 /**
- * Checks whether the sourcemap data has been loaded for the current session.
- * Returns true if the sourcemap is loaded and contains C-to-Nim mappings.
+ * Reads the debugger's high-level (Nim) and generated-C positions in one shot.
+ *
+ * All four reads are plain fields on `DebuggerService`
+ * (`location*`/`cLocation*: Location`, src/frontend/types.nim:306-308),
+ * reachable from JS through the session-forwarding `services` accessor
+ * installed on `window.data` (src/frontend/types.nim:2519+).  No Nim proc is
+ * called, so nothing here depends on method-style dispatch.
  */
-async function isSourcemapLoaded(
+async function readDebuggerPosition(
   page: import("@playwright/test").Page,
-): Promise<boolean> {
+): Promise<{
+  path: string;
+  line: number;
+  rrTicks: number;
+  cPath: string;
+  cLine: number;
+}> {
   return await page.evaluate(() => {
     const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    const data = w.data;
-    if (!data) return false;
-
-    const session = data.sessions?.[data.activeSessionIndex];
-    if (!session) return false;
-
-    const sm = session.sourcemap;
-    return sm != null && sm.loaded === true;
+    const dbg = w.data?.services?.debugger;
+    const str = (v: unknown): string => (typeof v === "string" ? v : "");
+    const num = (v: unknown): number => (typeof v === "number" ? v : -1);
+    return {
+      path: str(dbg?.location?.path),
+      line: num(dbg?.location?.line),
+      rrTicks: num(dbg?.location?.rrTicks),
+      cPath: str(dbg?.cLocation?.path),
+      cLine: num(dbg?.cLocation?.line),
+    };
   });
+}
+
+/**
+ * Waits for the Nim-to-C sourcemap to be loaded for the current session.
+ * Returns whether it arrived.
+ *
+ * This is a *diagnostic wait*, not a skip gate: the alternative views are
+ * opened through `openAlternativeView`, which names the precise missing
+ * precondition (sourcemap state included) when it cannot open a view.
+ */
+async function waitForSourcemap(
+  page: import("@playwright/test").Page,
+): Promise<boolean> {
+  try {
+    await retry(
+      async () =>
+        page.evaluate(() => {
+          const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          return w.data?.sourcemap?.loaded === true;
+        }),
+      { maxAttempts: 20, delayMs: 1000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -276,46 +200,21 @@ test.describe("NimViewSwitching", () => {
     );
     await waitForReadyStatus(ctPage);
 
-    // Check whether the sourcemap is available. If not, this trace was
-    // recorded without --sourcemap:on or without the patched Nim compiler.
-    const smLoaded = await isSourcemapLoaded(ctPage);
-    if (!smLoaded) {
-      // The sourcemap may not be loaded yet if the backend hasn't sent it.
-      // Wait a bit and re-check before skipping.
-      let smAvailable = false;
-      try {
-        await retry(
-          async () => {
-            smAvailable = await isSourcemapLoaded(ctPage);
-            return smAvailable;
-          },
-          { maxAttempts: 20, delayMs: 1000 },
-        );
-      } catch {
-        // Sourcemap never loaded.
-      }
-      if (!smAvailable) {
-        test.skip(
-          true,
-          "Sourcemap not available: trace was likely recorded without --sourcemap:on " +
-          "or without the patched Nim compiler. Skipping C view test.",
-        );
-        return;
-      }
-    }
+    // Give the backend a chance to deliver the sourcemap.  This is a wait,
+    // not a gate: if the C view cannot be opened, `openAlternativeView`
+    // reports exactly which precondition was missing (sourcemap included).
+    //
+    // The old skip reason here was also MISLEADING — it blamed "C location
+    // path not available from the debugger", when the actual cause was that
+    // `data.openTab` is never a JS function, so the switch helper returned
+    // false regardless of what the debugger had resolved.
+    await waitForSourcemap(ctPage);
 
     // Trigger the switch to ViewTargetSource (C code view).
-    const switched = await switchToTargetSourceView(ctPage);
-    if (!switched) {
-      // If cLocation.path is not available, the debugger may not have
-      // resolved the C-level location yet. Skip gracefully.
-      test.skip(
-        true,
-        "C location path not available from the debugger. The trace may not " +
-        "support ViewTargetSource for this program.",
-      );
-      return;
-    }
+    await openAlternativeView(ctPage, ViewTargetSource, async () => {
+      await layout.clickNextButton();
+      await waitForReadyStatus(ctPage);
+    });
 
     // Wait for a new editor tab to appear with a .c file.
     let cEditorFound = false;
@@ -362,21 +261,18 @@ test.describe("NimViewSwitching", () => {
     expect(statusPath).toMatch(/\.(c|h)$/);
   });
 
-  // SKIP-GUARD (option (b) per isonim-migration handoff TODO 5.2(e)):
-  // The previous implementation exhausted its 10 retries because the
-  // test read `cLocation.asmName` expecting a JS field, but `asmName`
-  // is a free Nim proc (`asmName(loc) = path:functionName` —
-  // `src/common/common_types/utils/text_representation.nim`).  The
-  // production renderer calls the proc directly from Nim, so the
-  // assembly view works for users; only the test-side property access
-  // was broken.  We now reconstruct `path:functionName` ourselves
-  // (`probeInstructionsAvailability`) and skip cleanly with a
-  // meaningful reason when the probe reports the data isn't reaching
-  // the frontend on this particular trace.
+  // This test was permanently skipped and never ran an assertion:
+  // `probeInstructionsAvailability` ended with `if (typeof data.openTab !==
+  // "function") return { ok: false, ... }`, and `data.openTab` is a free Nim
+  // proc (src/frontend/utils.nim:1848) that is never a JS function, so the
+  // probe returned `ok: false` unconditionally and `test.skip(!probe.ok)`
+  // always fired.
   //
-  // TODO: re-enable the body assertions once the underlying assembly
-  // dispatch on Nim frames is verified end-to-end and the probe
-  // succeeds reliably on the recorded `nim_sudoku_solver` trace.
+  // Note the old comment's claim that "only the test-side property access was
+  // broken" was half right: reconstructing `asmName` did not help, because the
+  // very next line in the probe still required `data.openTab`.  Opening now
+  // goes through the live `data.ui.openViewOnCompleteMove` path, where Nim
+  // computes `asmName` itself — see `lib/alternative-views.ts`.
   test("switch to assembly view shows disassembly", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
@@ -390,20 +286,12 @@ test.describe("NimViewSwitching", () => {
       { maxAttempts: 60, delayMs: 1000 },
     );
     await waitForReadyStatus(ctPage);
+    await waitForSourcemap(ctPage);
 
-    // Probe up-front for assembly-view availability and skip cleanly with
-    // a meaningful reason if the data isn't reaching the frontend.
-    const probe = await probeInstructionsAvailability(ctPage);
-    test.skip(
-      !probe.ok,
-      `Assembly view not available for this Nim trace: ${probe.reason}`,
-    );
-
-    const switched = await switchToInstructionsView(ctPage);
-    if (!switched) {
-      test.skip(true, "switchToInstructionsView failed despite probe success");
-      return;
-    }
+    await openAlternativeView(ctPage, ViewInstructions, async () => {
+      await layout.clickNextButton();
+      await waitForReadyStatus(ctPage);
+    });
 
     // Wait for an editor tab with assembly content to appear.
     // Assembly tabs don't have a .s extension; they're named after the function
@@ -427,48 +315,33 @@ test.describe("NimViewSwitching", () => {
     expect(asmContent.length).toBeGreaterThan(0);
   });
 
-  // SKIP-GUARD (option (b) per isonim-migration handoff TODO 5.2(e)):
-  // this test does not directly exercise the assembly view, but in
-  // practice it has shared the same flaky failure mode as the
-  // assembly-view tests under full-sweep load — the suite-level Nim
-  // record-and-launch can produce a status bar whose initial path
-  // isn't the Nim source, or the post-step path may be empty before
-  // the renderer settles.  We add up-front skip guards instead of
-  // hard-asserting, so a temporarily-unstable trace skips cleanly
-  // rather than failing the suite.
+  // The two up-front `test.skip` guards this test used to carry are gone.
+  // They were justified as flake tolerance, but they turned "the Nim trace
+  // never loaded" and "the status bar never showed a Nim file" — the suite's
+  // own preconditions, which the three sibling tests in this file assert
+  // rather than skip on — into passes.  Combined with the dead
+  // `switchToTargetSourceView` below, this test could report success having
+  // checked nothing at all.  Both are now hard failures, consistent with
+  // "Nim source view shows .nim file" directly above.
   test("view synchronization - stepping updates views consistently", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
 
     // Wait for the editor and debugger to be ready with a .nim file.
-    try {
-      await retry(
-        async () => {
-          const editors = await layout.editorTabs(true);
-          return editors.some((e) => e.fileName.endsWith(".nim"));
-        },
-        { maxAttempts: 60, delayMs: 1000 },
-      );
-      await waitForReadyStatus(ctPage);
-    } catch (e) {
-      test.skip(true, `Nim editor never became ready: ${e instanceof Error ? e.message : e}`);
-      return;
-    }
+    await retry(
+      async () => {
+        const editors = await layout.editorTabs(true);
+        return editors.some((e) => e.fileName.endsWith(".nim"));
+      },
+      { maxAttempts: 60, delayMs: 1000 },
+    );
+    await waitForReadyStatus(ctPage);
 
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
 
-    // Record the initial Nim source line from the status bar.  Skip
-    // cleanly if the status bar hasn't settled to a `.nim` path —
-    // happens occasionally under sweep load when the Nim trace setup
-    // was still mid-rebuild when the sweep clock started.
+    // Record the initial Nim source line from the status bar.
     const initialLocation = await statusBar.location();
-    if (!initialLocation.path.includes(".nim")) {
-      test.skip(
-        true,
-        `Initial status bar path is not a Nim file: ${initialLocation.path}`,
-      );
-      return;
-    }
+    expect(initialLocation.path).toContain(".nim");
 
     // Step forward (next/step-over) to advance the execution position.
     // Use `clickNextButton` so the layout-manager `lm_header` /
@@ -484,60 +357,76 @@ test.describe("NimViewSwitching", () => {
     const afterStepLocation = await statusBar.location();
     expect(afterStepLocation.path).toContain(".nim");
 
-    // Now check that the C view (if available) shows a corresponding location.
-    // We switch to C view and verify it shows a valid C file path.
-    const smLoaded = await isSourcemapLoaded(ctPage);
-    if (!smLoaded) {
-      // Without sourcemap, we can only verify the Nim view stays consistent.
-      // Step back to confirm the line is at the stepped position.
-      const currentLocation = await statusBar.location();
-      expect(currentLocation.path).toContain(".nim");
-      return;
-    }
+    // ---------------------------------------------------------------------
+    // The actual synchronization claim.
+    //
+    // Everything above only ever asserted that the Nim view was still the Nim
+    // view.  The part that gave this test its name lived inside
+    // `if (switchedToC) { ... }`, and `switchedToC` was the return value of a
+    // helper gated on `typeof data.openTab === "function"` — permanently
+    // false.  So the C view was never opened and *nothing* about
+    // synchronization was ever checked.
+    //
+    // With the C view now openable, we can assert what the name claims:
+    // the Nim view and the C view are two projections of ONE execution
+    // position, so (1) they are open at the same time, (2) a step advances
+    // the shared position and refreshes the C projection with it, and
+    // (3) merely switching between the tabs does not move the debugger.
+    // ---------------------------------------------------------------------
+    await waitForSourcemap(ctPage);
 
-    const switchedToC = await switchToTargetSourceView(ctPage);
-    if (switchedToC) {
-      // Wait for the C editor to load and verify it shows a .c file.
-      await retry(
-        async () => {
-          const editors = await layout.editorTabs(true);
-          return editors.some((e) =>
-            e.fileName.endsWith(".c") || e.fileName.endsWith(".h"),
-          );
-        },
-        { maxAttempts: 20, delayMs: 1000 },
+    await openAlternativeView(ctPage, ViewTargetSource, async () => {
+      await layout.clickNextButton();
+      await waitForReadyStatus(ctPage);
+    });
+
+    // (1) Both projections are open simultaneously.
+    const tabsWithC = await layout.editorTabs(true);
+    expect(tabsWithC.some((e) => e.fileName.endsWith(".nim"))).toBe(true);
+    expect(
+      tabsWithC.some(
+        (e) => e.fileName.endsWith(".c") || e.fileName.endsWith(".h"),
+      ),
+    ).toBe(true);
+
+    // (2) A step advances the shared position, and the C projection tracks it.
+    const beforeStep = await readDebuggerPosition(ctPage);
+    await layout.clickNextButton();
+    await waitForReadyStatus(ctPage);
+    const afterStep = await readDebuggerPosition(ctPage);
+
+    expect(afterStep.rrTicks).not.toBe(beforeStep.rrTicks);
+    // The C projection must describe a real generated-C position, not a stale
+    // or empty one — this is what "views update consistently" means.
+    expect(afterStep.cPath).toMatch(/\.(c|h)$/);
+    expect(afterStep.cLine).toBeGreaterThan(0);
+    // And the high-level projection must still be the Nim source.
+    expect(afterStep.path).toContain(".nim");
+    expect(afterStep.line).toBeGreaterThan(0);
+
+    // (3) Switching views is a presentation change, not a navigation: the
+    // debugger position must be identical before and after clicking back to
+    // the Nim tab.
+    const editorsForSwitchBack = await layout.editorTabs(true);
+    const nimEditor = editorsForSwitchBack.find((e) =>
+      e.fileName.endsWith(".nim"),
+    );
+    if (!nimEditor) {
+      throw new Error(
+        "The .nim editor tab disappeared after opening the C view; cannot " +
+          "check that switching views preserves the debugger position.",
       );
-
-      // The status bar should now reflect the C file location.
-      let cLocation: { path: string; line: number } | null = null;
-      try {
-        await retry(
-          async () => {
-            cLocation = await statusBar.location();
-            return cLocation.path.match(/\.(c|h)$/) !== null;
-          },
-          { maxAttempts: 10, delayMs: 500 },
-        );
-      } catch {
-        // Status bar may still show the Nim path if the C view hasn't
-        // fully activated yet. This is acceptable -- the key assertion
-        // is that the editor tab with C code was opened.
-      }
     }
+    await nimEditor.tabButton().click();
+    await waitForReadyStatus(ctPage);
 
-    // Switch back to the Nim source view by clicking the .nim editor tab.
-    const editors = await layout.editorTabs(true);
-    const nimEditor = editors.find((e) => e.fileName.endsWith(".nim"));
-    if (nimEditor) {
-      await nimEditor.tabButton().click();
+    const afterSwitchBack = await readDebuggerPosition(ctPage);
+    expect(afterSwitchBack.rrTicks).toBe(afterStep.rrTicks);
+    expect(afterSwitchBack.line).toBe(afterStep.line);
+    expect(afterSwitchBack.path).toContain(".nim");
 
-      // Verify the Nim line is still at (or near) the stepped position.
-      // The line should not have reverted to the initial position.
-      const finalLocation = await statusBar.location();
-      expect(finalLocation.path).toContain(".nim");
-      // The debugger position should reflect the stepped state. We can't
-      // predict the exact line, but it should be a valid positive number.
-      expect(finalLocation.line).toBeGreaterThan(0);
-    }
+    const finalLocation = await statusBar.location();
+    expect(finalLocation.path).toContain(".nim");
+    expect(finalLocation.line).toBeGreaterThan(0);
   });
 });
