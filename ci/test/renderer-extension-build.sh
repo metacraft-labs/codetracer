@@ -170,7 +170,7 @@ for recipe in build-ui-js build-ui-js-hmr; do
 		continue
 	fi
 	for flag in "-d:ctInExtension" "src/frontend/ui_js.nim"; do
-		if printf '%s\n' "${body}" | grep -qF -- "${flag}"; then
+		if grep -qF -- "${flag}" <<<"${body}"; then
 			ok "${recipe}: still passes ${flag}"
 		else
 			bad "${recipe}: no longer passes ${flag} — either restore it, or delete this gate and say why the configuration stopped existing"
@@ -181,7 +181,7 @@ for recipe in build-ui-js build-ui-js-hmr; do
 	# above `build-ui-js` carries the measurement. Caught here as well as by the
 	# duplicate count in step 2, because the count says WHAT is wrong and this
 	# says WHY.
-	if printf '%s\n' "${body}" | grep -qF -- "--hotCodeReloading:on"; then
+	if grep -qF -- "--hotCodeReloading:on" <<<"${body}"; then
 		bad "${recipe}: passes --hotCodeReloading:on again — it makes jsgen name routines with idOrSig and collide across modules; see the note above build-ui-js in justfile"
 	else
 		ok "${recipe}: does not pass --hotCodeReloading:on"

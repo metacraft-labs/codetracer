@@ -1,0 +1,24 @@
+# Sites that still pipe a producer into `grep -q` under `pipefail`, with why
+# each is still here. See ci/test/grep-q-pipefail-gate.sh for the defect.
+#
+# THIS FILE FAILS IN BOTH DIRECTIONS. A recorded site that is still there is
+# reported and tolerated. A recorded site that has been FIXED fails the gate by
+# name and demands its line be deleted — so an entry cannot outlive the defect
+# it records, and nobody has to remember to clean up after fixing one. Same
+# rule, and the same reason, as ci/test/shell-gate-coverage.known-dark.txt.
+#
+# It is NOT an exemption list. Every line here is a defect that will misreport
+# a successful match as a failure; the only thing an entry buys is time.
+#
+# Format: `<path><TAB><the offending line, trimmed>`. `#` comments and blank
+# lines are ignored. Line numbers are deliberately not part of the key.
+
+# These four were left alone for one reason only: at the time this gate was
+# written both files were being edited by concurrent work, and rewriting a line
+# underneath somebody else's diff costs more than the defect does. Neither is
+# in a false-GREEN position — each reads as a spurious failure, which is loud.
+# Fix them with the here-string form and delete these lines.
+ci/test/shell-gate-coverage.sh	if head -n "${MARKER_SCAN_LINES}" "${g}" 2>/dev/null | grep -qF "${MARKER}"; then
+ci/test/build-once-workspace-test.sh	printf '%s\n' "$job_code" | grep -qE 'just build-once|scripts/build-once\.sh' || continue
+ci/test/build-once-workspace-test.sh	if printf '%s\n' "$job_body" | grep -q "actions/$comp"; then
+ci/test/build-once-workspace-test.sh	elif printf '%s' "$out" | grep -q "required sibling repo(s) are missing"; then

@@ -184,7 +184,7 @@ caller_with() {
 
 # caller_secrets_inherit FILE -> exit 0 when the caller passes `secrets: inherit`.
 caller_secrets_inherit() {
-	strip_cr "$1" | grep -qE '^[[:space:]]*secrets:[[:space:]]*inherit[[:space:]]*$'
+	grep -qE '^[[:space:]]*secrets:[[:space:]]*inherit[[:space:]]*$' <<<"$(strip_cr "$1")"
 }
 
 # caller_recorders FILE -> every recorder repo this caller can ask for, one per
@@ -316,8 +316,8 @@ fi
 # The two env entries the simulation depends on must actually be the ones CI
 # supplies, or the simulation is feeding the script values it would never get.
 env_block="$(plan_env_block "$REUSABLE")"
-if printf '%s\n' "$env_block" | grep -qF 'SELF_SHA: '"$EXPR_OPEN"' github.sha }}' &&
-	printf '%s\n' "$env_block" | grep -qF 'RECORDER_REPO: '"$EXPR_OPEN"' inputs.recorder-repo }}'; then
+if grep -qF 'SELF_SHA: '"$EXPR_OPEN"' github.sha }}' <<<"$env_block" &&
+	grep -qF 'RECORDER_REPO: '"$EXPR_OPEN"' inputs.recorder-repo }}' <<<"$env_block"; then
 	ok "the planner reads github.sha and inputs.recorder-repo through env:, as simulated"
 else
 	fail "the planner reads github.sha and inputs.recorder-repo through env:" \
@@ -554,7 +554,7 @@ else
 fi
 
 run_plan "metacraft-labs/codetracer-beam-recorder" "codetracer-python-recorder"
-if [ "$_plan_rc" -ne 0 ] && printf '%s' "$_plan_out" | grep -q 'is neither codetracer'; then
+if [ "$_plan_rc" -ne 0 ] && grep -q 'is neither codetracer' <<<"$_plan_out"; then
 	ok "a caller that is none of the four repos is refused, by name"
 else
 	fail "a caller that is none of the four repos is refused" \
@@ -589,7 +589,7 @@ check_contract() {
 
 	while IFS= read -r name; do
 		[ -z "$name" ] && continue
-		if ! printf '%s\n' "$declared" | grep -qx -- "$name"; then
+		if ! grep -qx -- "$name" <<<"$declared"; then
 			echo "$label: passes 'with: $name', which the reusable workflow does not declare"
 			bad=1
 		fi
@@ -603,7 +603,7 @@ check_contract() {
 
 	while IFS= read -r name; do
 		[ -z "$name" ] && continue
-		if ! printf '%s\n' "$passed" | grep -qx -- "$name"; then
+		if ! grep -qx -- "$name" <<<"$passed"; then
 			echo "$label: does not pass required input '$name'"
 			bad=1
 		fi
@@ -714,7 +714,7 @@ fi
 uncovered=()
 for sib in $(printf '%s' "$EMITTED_SIBLINGS" | tr ' ' '\n' | sort -u); do
 	[ "$sib" = "codetracer" ] && continue
-	printf '%s\n' "$clone_entries" | grep -qx -- "$sib" || uncovered+=("$sib")
+	grep -qx -- "$sib" <<<"$clone_entries" || uncovered+=("$sib")
 done
 if [ "${#uncovered[@]}" -eq 0 ] && [ -n "$EMITTED_SIBLINGS" ]; then
 	ok "every sibling the workflow can emit is declared in the clone-list"
@@ -738,7 +738,7 @@ check_call_sites() {
 		n="${n%%:*}"
 		# `siblings:` may appear up to ~40 lines below the `uses:` (the
 		# action takes many other inputs first).
-		if ! strip_cr "$f" | sed -n "${n},$((n + 40))p" | grep -q '^ *siblings:'; then
+		if ! grep -q '^ *siblings:' <<<"$(strip_cr "$f" | sed -n "${n},$((n + 40))p")"; then
 			echo "$f:$n"
 			bad=1
 		fi
@@ -869,8 +869,8 @@ run_direnv_step() {
 
 dv_out="$(run_direnv_step shell-fails)"
 if [ "${dv_out%%|*}" != 0 ] &&
-	printf '%s' "$dv_out" | grep -q 'FAILED TO BUILD' &&
-	! printf '%s' "$dv_out" | grep -q 'direnv is not on PATH'; then
+	grep -q 'FAILED TO BUILD' <<<"$dv_out" &&
+	! grep -q 'direnv is not on PATH' <<<"$dv_out"; then
 	ok "a ci shell that will not build is reported as a shell build failure, not a missing direnv"
 else
 	fail "a ci shell that will not build is reported as a shell build failure, not a missing direnv" \
@@ -879,8 +879,8 @@ fi
 
 dv_out="$(run_direnv_step no-direnv)"
 if [ "${dv_out%%|*}" != 0 ] &&
-	printf '%s' "$dv_out" | grep -q 'direnv is not on PATH inside it' &&
-	! printf '%s' "$dv_out" | grep -q 'FAILED TO BUILD'; then
+	grep -q 'direnv is not on PATH inside it' <<<"$dv_out" &&
+	! grep -q 'FAILED TO BUILD' <<<"$dv_out"; then
 	ok "a shell that builds but lacks direnv is reported as a missing direnv"
 else
 	fail "a shell that builds but lacks direnv is reported as a missing direnv" \
@@ -889,9 +889,9 @@ fi
 
 dv_out="$(run_direnv_step ok)"
 if [ "${dv_out%%|*}" = 0 ] &&
-	printf '%s' "$dv_out" | grep -q 'direnv allow: .*/codetracer-launcher' &&
-	printf '%s' "$dv_out" | grep -q 'direnv allow: .*/codetracer-ruby-recorder' &&
-	printf '%s' "$dv_out" | grep -q 'no .envrc in .*/codetracer-trace-format-nim'; then
+	grep -q 'direnv allow: .*/codetracer-launcher' <<<"$dv_out" &&
+	grep -q 'direnv allow: .*/codetracer-ruby-recorder' <<<"$dv_out" &&
+	grep -q 'no .envrc in .*/codetracer-trace-format-nim' <<<"$dv_out"; then
 	ok "a healthy shell allows every sibling that has a .envrc and says so for the one that does not"
 else
 	fail "a healthy shell allows every sibling that has a .envrc and says so for the one that does not" \
@@ -982,7 +982,7 @@ awk '
 ' "$MUT/reusable.yml" >"$MUT/m5-reusable.yml"
 cp "$DESKTOP_EDGE" "$MUT/m5.yml"
 sed -i 's/^      recorder-lang: /      launcher-ref: dev\n      recorder-lang: /' "$MUT/m5.yml"
-if ! wf_inputs "$MUT/m5-reusable.yml" | grep -q '^launcher-ref'; then
+if ! grep -q '^launcher-ref' <<<"$(wf_inputs "$MUT/m5-reusable.yml")"; then
 	mut_bad+=("M5 was not applied (the reintroduced input is not parsed as declared)")
 fi
 check_contract "$MUT/m5-reusable.yml" "$MUT/m5.yml" "M5" >/dev/null 2>&1 &&
@@ -1038,7 +1038,7 @@ else
 	run_plan "metacraft-labs/codetracer-launcher" "codetracer-python-recorder"
 	m9_out="$(plan_case_violations "M9" "codetracer-launcher")"
 	PLAN="$PLAN_SAVED"
-	printf '%s' "$m9_out" | grep -q 'IS IN ITS OWN SIBLING LIST' ||
+	grep -q 'IS IN ITS OWN SIBLING LIST' <<<"$m9_out" ||
 		mut_bad+=("M9 SURVIVED: the trigger was emitted as its own sibling and the trigger rule did not fire (got: ${m9_out:-<nothing>})")
 fi
 
@@ -1066,13 +1066,13 @@ awk '
 	{ print }
 ' "$MUT/caller.yml" >"$MUT/m11-caller.yml"
 m11_recs="$(caller_recorders "$MUT/m11-caller.yml")"
-if ! printf '%s\n' "$m11_recs" | grep -qx 'codetracer-beam-recorder'; then
+if ! grep -qx 'codetracer-beam-recorder' <<<"$m11_recs"; then
 	mut_bad+=("M11 was not applied (the added matrix row is not derived as a recorder)")
 else
 	m11_uncovered=0
 	while IFS= read -r rec; do
 		[ -z "$rec" ] && continue
-		printf '%s\n' "$clone_entries" | grep -qx -- "$rec" || m11_uncovered=1
+		grep -qx -- "$rec" <<<"$clone_entries" || m11_uncovered=1
 	done <<<"$m11_recs"
 	[ "$m11_uncovered" -eq 1 ] ||
 		mut_bad+=("M11 SURVIVED: a recorder added to a fan-out matrix but absent from the clone-list was not detected")
@@ -1118,7 +1118,7 @@ else
 	run_plan "metacraft-labs/codetracer" "codetracer-python-recorder"
 	m13_out="$(plan_case_violations "M13" "codetracer")"
 	PLAN="$PLAN_SAVED"
-	printf '%s' "$m13_out" | grep -q 'carries an explicit ref' ||
+	grep -q 'carries an explicit ref' <<<"$m13_out" ||
 		mut_bad+=("M13 SURVIVED: the planner emitted '<name>=<ref>' entries and the explicit-ref rule did not fire (got: ${m13_out:-<nothing>})")
 fi
 

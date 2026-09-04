@@ -254,7 +254,7 @@ fi
 command -v cargo >/dev/null 2>&1 || missing+=("- cargo not on PATH (the Rust toolchain builds the WASM tier)")
 command -v node >/dev/null 2>&1 || missing+=("- node not on PATH")
 if command -v rustc >/dev/null 2>&1; then
-	rustc --print target-list 2>/dev/null | grep -qx 'wasm32-unknown-unknown' ||
+	grep -qx 'wasm32-unknown-unknown' <<<"$(rustc --print target-list 2>/dev/null)" ||
 		missing+=("- rustc cannot target wasm32-unknown-unknown (rustup target add wasm32-unknown-unknown)")
 else
 	missing+=("- rustc not on PATH")

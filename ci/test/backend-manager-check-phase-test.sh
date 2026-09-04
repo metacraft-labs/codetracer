@@ -289,7 +289,19 @@ expect_killed() { # label, phase_file, expected-message-substring, [env...]
 		fail "$label" "MUTATION SURVIVED: the phase passed with the defect present."
 		return
 	fi
-	if ! printf '%s' "$out" | grep -qF "$needle"; then
+	# HERE-STRING, NOT `printf ... | grep -q`. Under the `set -o pipefail` at
+	# the top of this file that pairing reports NO MATCH FOR A NEEDLE THAT IS
+	# PRESENT once the haystack reaches 64 KiB: `grep -q` exits on the first
+	# match, `printf` is still writing, takes EPIPE, and the pipeline adopts
+	# its 141. See ci/test/grep-q-pipefail-gate.sh for the measurement.
+	#
+	# The stub cargo's output is about 1.3 KB today, so this was latent rather
+	# than live and should not be described as a failure that happened. It is
+	# rewritten anyway because the stub models a crate whose real log is not
+	# small, because this suite runs inside `lint-bash` and so gates every
+	# build, and because of what the sibling site at "the unsatisfiable target
+	# does not run in this lane" does when it goes: see the note there.
+	if ! grep -qF "$needle" <<<"$out"; then
 		fail "$label" "died (exit $rc) but not on the expected guard; wanted: $needle"
 		printf '%s\n' "$out" | sed 's/^/        | /' >&2
 		return
@@ -320,7 +332,17 @@ expect_pass "checkPhase succeeds against a crate whose rr suite cannot run" \
 	"$CHECK_PHASE_FILE"
 
 out="$(run_phase "$CHECK_PHASE_FILE")"
-if printf '%s' "$out" | grep -q "Running tests/$EXCLUDED_TARGET.rs"; then
+# The same here-string rule as in `expect_killed`, and this is the site where
+# the direction matters: the condition is INVERTED — a match is the failure —
+# so once the cargo log crosses 64 KiB an EPIPE "no match" reports the excluded
+# target as absent from the lane whether or not it ran, and reports it as a
+# PASS. Nothing downstream notices a check that stopped being able to say no.
+#
+# That it can say no was demonstrated rather than assumed: with the phase
+# mutated so `excludedTarget` names a different real target — putting
+# tests/real_recording_integration.rs back into the lane — this line reports
+# FAIL and the suite goes 6 passed / 6 failed; restored, 12 passed / 0 failed.
+if grep -q "Running tests/$EXCLUDED_TARGET.rs" <<<"$out"; then
 	fail "the unsatisfiable target does not run in this lane" \
 		"tests/$EXCLUDED_TARGET.rs still ran"
 else
@@ -332,9 +354,9 @@ fi
 # switching the tests off".
 missing=""
 for t in dive_in_url_fetch_test mcp_origin_test meta_dat_metadata_loading; do
-	printf '%s' "$out" | grep -q "Running tests/$t.rs" || missing="$missing $t"
+	grep -q "Running tests/$t.rs" <<<"$out" || missing="$missing $t"
 done
-printf '%s' "$out" | grep -q "Running unittests src/main.rs" || missing="$missing bins"
+grep -q "Running unittests src/main.rs" <<<"$out" || missing="$missing bins"
 if [ -n "$missing" ]; then
 	fail "every OTHER target still runs in this lane" "not run:$missing"
 else

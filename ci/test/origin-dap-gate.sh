@@ -32,7 +32,7 @@ expect_rejected() {
 	status=$?
 	set -e
 	[ "$status" -ne 0 ] || fail "selector '$selector' unexpectedly succeeded"
-	printf '%s\n' "$output" | grep -Fq "$fragment" ||
+	grep -Fq "$fragment" <<<"$output" ||
 		fail "selector '$selector' did not report '$fragment': $output"
 }
 
@@ -69,7 +69,7 @@ required_route_error="$(CT_TEST_LANGS=ruby CT_ORIGIN_DAP_REQUIRED=1 "$GATE" --pl
 required_route_status=$?
 set -e
 [ "$required_route_status" -ne 0 ] || fail "required mode accepted a non-Python route"
-printf '%s\n' "$required_route_error" | grep -Fq "strict Python-only" ||
+grep -Fq "strict Python-only" <<<"$required_route_error" ||
 	fail "required non-Python route reported the wrong error"
 
 # Keep the active Windows workflow aligned with the same router contract. A
@@ -100,7 +100,7 @@ windows_nightly="$(workflow_job origin-dap-windows-nightly)"
 # Every PowerShell step in the required job must therefore use the compatible
 # GitHub Actions shell name; retaining even one `pwsh` step only moves the same
 # command-not-found failure later in the job.
-if printf '%s\n' "$windows_per_pr" | grep -Fq 'shell: pwsh'; then
+if grep -Fq 'shell: pwsh' <<<"$windows_per_pr"; then
 	fail "Windows per-PR origin-DAP job must not require unavailable PowerShell Core"
 fi
 [ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 8 ] ||
@@ -117,7 +117,7 @@ if printf '%s\n%s\n' "$windows_per_pr" "$windows_nightly" |
 	grep -Eiq 'python[[:space:]]*\+[[:space:]]*rust|python,rust|full matrix|all languages|MCP/CLI smoke'; then
 	fail "Windows origin-DAP jobs retain a rejected selector or a false coverage claim"
 fi
-if printf '%s\n' "$windows_per_pr" | grep -Eiq 'choco(latey)?([.]exe)?([[:space:]]|$)'; then
+if grep -Eiq 'choco(latey)?([.]exe)?([[:space:]]|$)' <<<"$windows_per_pr"; then
 	fail "Windows per-PR origin-DAP job must not depend on Chocolatey"
 fi
 
@@ -194,7 +194,7 @@ required_gate_step="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Run requi
 printf '%s\n' "$git_bootstrap" |
 	grep -Fq 'CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}' ||
 	fail "Windows Git bootstrap must be tied to the immutable workflow revision"
-printf '%s\n' "$git_bootstrap" | grep -Fq "'^[0-9a-f]{40}$'" ||
+grep -Fq "'^[0-9a-f]{40}$'" <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must validate the immutable revision"
 printf '%s\n' "$git_bootstrap" |
 	grep -Fq 'https://raw.githubusercontent.com/metacraft-labs/codetracer/' ||
@@ -203,12 +203,12 @@ printf '%s\n' "$git_bootstrap" |
 printf '%s\n' "$git_bootstrap" |
 	grep -Fq '"$revision/ci/ensure-git-for-checkout.ps1"' ||
 	fail "Windows Git bootstrap helper URL must contain the validated revision"
-printf '%s\n' "$git_bootstrap" | grep -Fq '/ci/ensure-git-for-checkout.ps1' ||
+grep -Fq '/ci/ensure-git-for-checkout.ps1' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must retrieve the tested helper path"
 # shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" | grep -Fq '& $bootstrapScript' ||
+grep -Fq '& $bootstrapScript' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must invoke the downloaded tested helper"
-printf '%s\n' "$git_bootstrap" | grep -Fq 'Invoke-WebRequest' ||
+grep -Fq 'Invoke-WebRequest' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must retrieve the helper before checkout"
 # The installation token is reserved for authenticated checkout and later
 # private recorder fetches. The public immutable helper fetch must not receive
@@ -224,7 +224,7 @@ fi
 printf '%s\n' "$git_bootstrap" |
 	grep -Fq 'Remove-Item -LiteralPath $bootstrapScript' ||
 	fail "Windows Git bootstrap must clean the downloaded helper"
-if printf '%s\n' "$git_bootstrap" | grep -Fq 'choco.exe'; then
+if grep -Fq 'choco.exe' <<<"$git_bootstrap"; then
 	fail "Windows Git bootstrap must not require an absent package manager"
 fi
 
@@ -294,11 +294,11 @@ done
 [ "$(printf '%s\n' "$checkout_step" |
 	grep -cE 'token: \$\{\{ steps\.[A-Za-z0-9_-]+\.outputs\.token \}\}$')" -eq 1 ] ||
 	fail "Windows checkout must retain the generated CI token"
-printf '%s\n' "$required_gate_step" | grep -Fq 'run: just test-origin-dap' ||
+grep -Fq 'run: just test-origin-dap' <<<"$required_gate_step" ||
 	fail "Windows required gate must still run the strict origin-DAP router"
 [ "$(printf '%s\n' "$required_gate_step" | grep -c 'shell: bash$')" -eq 1 ] ||
 	fail "Windows required gate must still run under Git Bash"
-if printf '%s\n' "$required_gate_step" | grep -Eq 'continue-on-error:|CT_ORIGIN_DAP_REQUIRED: "0"'; then
+if grep -Eq 'continue-on-error:|CT_ORIGIN_DAP_REQUIRED: "0"' <<<"$required_gate_step"; then
 	fail "Windows required origin-DAP gate must not tolerate failure or skips"
 fi
 
@@ -370,7 +370,7 @@ required_skip="$(
 required_skip_status=$?
 set -e
 [ "$required_skip_status" -ne 0 ] || fail "required mode accepted a SKIPPED sentinel"
-printf '%s\n' "$required_skip" | grep -Fq "emitted a SKIPPED sentinel" ||
+grep -Fq "emitted a SKIPPED sentinel" <<<"$required_skip" ||
 	fail "required skip reported the wrong failure"
 if printf '%s\n' "$required_skip" |
 	grep -Fq "origin-DAP required summary: expected=7 executed=7 skipped=0"; then
@@ -385,7 +385,7 @@ optional_skip="$(
 		ORIGIN_DAP_CARGO_BIN="$fake_cargo" \
 		"$GATE" 2>&1
 )"
-printf '%s\n' "$optional_skip" | grep -Fq "Selected Value Origin Tracking DAP suites passed." ||
+grep -Fq "Selected Value Origin Tracking DAP suites passed." <<<"$optional_skip" ||
 	fail "developer-optional mode no longer accepts an intentional skip"
 
 # The real required gate invokes this contract test while

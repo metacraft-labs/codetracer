@@ -545,7 +545,7 @@ ckeq "$(j c report.statusContracts)" '["Counter"]' "and it still holds the contr
 # offset the session started from.
 root="$(j c report.statusRoot)"
 if [ "${root}" != '"811c9dc5"' ] &&
-	printf '%s' "${root}" | grep -Eq '^"[0-9a-f]{8}"$'; then
+	grep -Eq '^"[0-9a-f]{8}"$' <<<"${root}"; then
 	ck ok "the state root moved off its seed (${root}) — the ops were folded in"
 else
 	ck fail "the state root moved off its seed, got ${root}"

@@ -66,7 +66,7 @@ run_help() {
 	fi
 
 	for needle in "${expectations[@]}"; do
-		if ! printf '%s' "$output" | grep -qi -- "$needle"; then
+		if ! grep -qi -- "$needle" <<<"$output"; then
 			echo "FAIL: $name (expected to find '$needle' in --help output)"
 			printf '%s\n' "$output" | head -20
 			FAIL=$((FAIL + 1))
@@ -111,7 +111,7 @@ run_help "ct doctor help" \
 echo ""
 echo "=== ct doctor python (probe behavior) ==="
 DOCTOR_OUTPUT=$("$CT" doctor python 2>&1 || true)
-if printf '%s' "$DOCTOR_OUTPUT" | grep -qE '^\s*(PASS|FAIL)\s+python'; then
+if grep -qE '^\s*(PASS|FAIL)\s+python' <<<"$DOCTOR_OUTPUT"; then
 	echo "PASS: ct doctor python reports PASS or FAIL for the python probe"
 	PASS=$((PASS + 1))
 else

@@ -71,7 +71,7 @@ require_bin() {
 require_bin cargo "the Rust toolchain builds the WASM tier"
 require_bin node "runs the static server and the headless driver"
 
-if ! rustc --print target-list 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
+if ! grep -qx 'wasm32-unknown-unknown' <<<"$(rustc --print target-list 2>/dev/null)"; then
 	missing+=("- rustc cannot target wasm32-unknown-unknown")
 fi
 

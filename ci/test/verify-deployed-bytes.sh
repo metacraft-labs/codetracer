@@ -153,7 +153,7 @@ for row in list(d.get("modules", [])) + list(d.get("assets", [])):
 ')"
 required_ids=(wasm-worker)
 for required_id in "${required_ids[@]}"; do
-	if printf '%s\n' "$declared_ids" | grep -qx "$required_id"; then
+	if grep -qx "$required_id" <<<"$declared_ids"; then
 		echo "ok: the descriptor declares \`$required_id\`"
 	else
 		echo "the served descriptor declares no \`$required_id\` — every /assets/ check below would be checking the fixed skeleton only" >&2
@@ -294,7 +294,7 @@ while IFS=$'\t' read -r path _ _; do
 	case "$path" in /assets/*) ;; *) continue ;; esac
 	asset_paths_seen=$((asset_paths_seen + 1))
 	name="${path##*/}"
-	if printf '%s' "$name" | grep -qE '\.[0-9a-fA-F]{6,}\.'; then
+	if grep -qE '\.[0-9a-fA-F]{6,}\.' <<<"$name"; then
 		hashed=1
 		hashed_seen=$((hashed_seen + 1))
 	else
@@ -360,7 +360,7 @@ while IFS=$'\t' read -r path _ _; do
 			continue
 		fi
 
-		if printf '%s' "$cc" | grep -qi 'immutable'; then
+		if grep -qi 'immutable' <<<"$cc"; then
 			if [ "$hashed" -eq 1 ]; then
 				printf '  ok: %-52s %s\n' "$host$path" "${cc:-<none>}"
 			else

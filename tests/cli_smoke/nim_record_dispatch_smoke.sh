@@ -106,7 +106,7 @@ run_record() {
 		FAIL=$((FAIL + 1))
 		return
 	fi
-	if ! printf '%s' "$out" | grep -q '^recordingId:'; then
+	if ! grep -q '^recordingId:' <<<"$out"; then
 		echo "FAIL: $label (no recordingId marker in output)"
 		printf '%s\n' "$out" | tail -20
 		FAIL=$((FAIL + 1))

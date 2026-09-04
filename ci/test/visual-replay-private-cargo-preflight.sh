@@ -370,7 +370,7 @@ if [[ ${CODETRACER_VISUAL_REPLAY_CLEAN_CARGO_HOME:-} != "true" ||
 	exit 1
 fi
 if [[ -d $CARGO_HOME/git/db ]] &&
-	find "$CARGO_HOME/git/db" -mindepth 1 -print -quit | grep -q .; then
+	[[ -n $(find "$CARGO_HOME/git/db" -mindepth 1 -print -quit) ]]; then
 	echo "Visual replay CI Cargo home already contains a Git dependency cache." >&2
 	exit 1
 fi

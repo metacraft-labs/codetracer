@@ -58,7 +58,7 @@ expect() {
 	fi
 	local needle
 	for needle in "$@"; do
-		if ! printf '%s\n' "${output}" | grep -qF -- "${needle}"; then
+		if ! grep -qF -- "${needle}" <<<"${output}"; then
 			ok=0
 			echo "  [FAILED] ${name}: output did not mention '${needle}'"
 		fi
@@ -195,7 +195,7 @@ git -C "${tree}" add -A 2>/dev/null
 out="$(bash "${guard}" --root "${tree}" --lane-files-from "${work}/lanes" 2>&1)"
 expect "a helper that only mentions the words is not swept in" \
 	1 1 "${out}"
-if printf '%s\n' "${out}" | grep -qF 'src/misnamed/helper.nim'; then
+if grep -qF 'src/misnamed/helper.nim' <<<"${out}"; then
 	echo "  [FAILED] helper.nim was wrongly classified as a test"
 	failures=$((failures + 1))
 fi

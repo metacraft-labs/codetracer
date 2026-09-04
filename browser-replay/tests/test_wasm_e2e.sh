@@ -56,7 +56,7 @@ if [ "$STATUS" = "200" ]; then
 else
 	fail "db_backend_bg.wasm not served (HTTP $STATUS)"
 fi
-if echo "$CONTENT_TYPE" | grep -qi "wasm"; then
+if grep -qi "wasm" <<<"$CONTENT_TYPE"; then
 	pass "WASM content-type correct"
 else
 	# application/octet-stream is also acceptable

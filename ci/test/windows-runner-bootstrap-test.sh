@@ -905,7 +905,7 @@ else
 		"superproject's."
 fi
 
-if printf '%s\n' "$bootstrap_code" | grep -qF -- "$LONGPATHS_SET_FORM"; then
+if grep -qF -- "$LONGPATHS_SET_FORM" <<<"$bootstrap_code"; then
 	ok "the bootstrap enables core.longpaths in the system scope"
 else
 	fail "the bootstrap enables core.longpaths in the system scope" \
@@ -917,7 +917,7 @@ else
 		"update is where codetracer crosses that line."
 fi
 
-if printf '%s\n' "$bootstrap_code" | grep -qF -- "$LONGPATHS_GET_FORM"; then
+if grep -qF -- "$LONGPATHS_GET_FORM" <<<"$bootstrap_code"; then
 	ok "the bootstrap reads the system core.longpaths value back"
 else
 	fail "the bootstrap reads the system core.longpaths value back" \
@@ -952,8 +952,8 @@ else
 		"present, or (worse, after a needle edit) find nothing to complain about."
 fi
 
-if printf '%s\n' "$longpaths_body" | grep -qF -- "$LONGPATHS_READBACK_GUARD" &&
-	printf '%s\n' "$longpaths_body" | grep -q 'throw'; then
+if grep -qF -- "$LONGPATHS_READBACK_GUARD" <<<"$longpaths_body" &&
+	grep -q 'throw' <<<"$longpaths_body"; then
 	ok "$LONGPATHS_FUNCTION fails the step when the read-back is not 'true'"
 else
 	fail "$LONGPATHS_FUNCTION fails the step when the read-back is not 'true'" \
@@ -962,7 +962,7 @@ else
 		"as not reading it: the step goes green and the checkout still fails."
 fi
 
-if printf '%s\n' "$longpaths_body" | grep -q 'SilentlyContinue'; then
+if grep -q 'SilentlyContinue' <<<"$longpaths_body"; then
 	fail "$LONGPATHS_FUNCTION does not swallow a failed configuration write" \
 		"it contains 'SilentlyContinue'. This step exists to fail loudly at the" \
 		"top of the job instead of quietly at the checkout; suppressing the error" \
@@ -996,7 +996,7 @@ fi
 
 # ...and that seam has to lead to the real function. Its default is what runs
 # when nothing is injected, which is every case except the tests.
-if printf '%s\n' "$entry_body" | grep -qF -- "$BOOTSTRAP_ENTRY_SEAM_DEFAULT"; then
+if grep -qF -- "$BOOTSTRAP_ENTRY_SEAM_DEFAULT" <<<"$entry_body"; then
 	ok "$BOOTSTRAP_ENTRY_FUNCTION's opt-in seam defaults to $LONGPATHS_FUNCTION"
 else
 	fail "$BOOTSTRAP_ENTRY_FUNCTION's opt-in seam defaults to $LONGPATHS_FUNCTION" \

@@ -121,7 +121,7 @@ assert_nonzero() {
 # assert_contains NAME NEEDLE OUTPUT
 assert_contains() {
 	local name="$1" needle="$2" output="$3"
-	if printf '%s\n' "${output}" | grep -qF -- "${needle}"; then
+	if grep -qF -- "${needle}" <<<"${output}"; then
 		pass "${name}"
 	else
 		fail "${name}: output did not contain '${needle}'" "${output}"
@@ -131,7 +131,7 @@ assert_contains() {
 # assert_lacks NAME NEEDLE OUTPUT
 assert_lacks() {
 	local name="$1" needle="$2" output="$3"
-	if printf '%s\n' "${output}" | grep -qF -- "${needle}"; then
+	if grep -qF -- "${needle}" <<<"${output}"; then
 		fail "${name}: output unexpectedly contained '${needle}'" "${output}"
 	else
 		pass "${name}"
@@ -407,7 +407,7 @@ check_lint_script() {
 
 	local missing=() step
 	for step in ${declared[@]+"${declared[@]}"}; do
-		if ! printf '%s\n' "${out}" | grep -qF -- "${step}"; then
+		if ! grep -qF -- "${step}" <<<"${out}"; then
 			missing+=("${step}")
 		fi
 	done

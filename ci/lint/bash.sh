@@ -47,6 +47,30 @@ lint_step "tools this stage invokes are present" \
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh
 
+# THE ONE DEFECT SHELLCHECK DOES NOT HAVE A CODE FOR, and this repository has
+# now paid for it in both directions. `producer | grep -q PAT` under `pipefail`
+# returns a SUCCESSFUL MATCH AS A FAILURE: `grep -q` exits on the first match,
+# the producer takes EPIPE, and the pipeline adopts its 141. Whether it happens
+# depends on whether the producer finished first, so it presents as flakiness.
+#
+# It made `ci/test/shell-gate-coverage.sh` report three unreachable gates on
+# `dev` that were reachable, failing `lint-nim` and every build behind it; and
+# it made `ci/test/noir-build-mutations.sh` report a RED baseline as green, so
+# 27 mutation arms ran against a broken product while claiming coverage. It was
+# fixed once, at one site out of roughly a hundred and thirty, and nothing
+# stopped the next one being written — which is the whole argument for a lint
+# rather than another fix.
+#
+# It runs first among the guards because it is the cheapest thing here (a git
+# ls-files and a grep, no nix, no network, well under a second) and because a
+# repository-wide textual rule is exactly what a reader wants to see resolved
+# before anything expensive starts. Its own Step 0 runs the detector against a
+# fixture carrying one of each shape and fails if any planted defect is missed
+# or any correct form is flagged, so a green run is evidence the scan still
+# works rather than evidence the regex still parses.
+lint_step "contract suite: no producer is piped into 'grep -q' under pipefail" \
+	bash ci/test/grep-q-pipefail-gate.sh
+
 lint_step "shellcheck: AppImage scripts" \
 	shellcheck appimage-scripts/*.sh
 

@@ -79,7 +79,7 @@ echo
 # ---------------------------------------------------------------------------
 stage "${work}/base"
 base_out="$(run_guard "${work}/base")"
-if printf '%s' "${base_out}" | grep -q 'RESULT: OK'; then
+if grep -q 'RESULT: OK' <<<"${base_out}"; then
 	ok "CONTROL: a fully-wired synthetic tree is green"
 else
 	bad "CONTROL: the synthetic tree is already red — no arm can demonstrate anything"
@@ -92,7 +92,7 @@ fi
 
 # The control also has to prove the two INDIRECT paths resolved, or the arms
 # below would be measuring a guard that only ever sees direct references.
-if printf '%s' "${base_out}" | grep -q '12 reachable'; then
+if grep -q '12 reachable' <<<"${base_out}"; then
 	ok "CONTROL: all 12 gates resolved, including the dispatcher and transitive ones"
 else
 	bad "CONTROL: the walk did not reach all 12 — the indirect paths are not being followed"
@@ -110,11 +110,11 @@ arm() {
 	}
 	local out
 	out="$(run_guard "${work}/arm")"
-	if printf '%s' "${out}" | grep -q 'RESULT: OK'; then
+	if grep -q 'RESULT: OK' <<<"${out}"; then
 		bad "${name}: SURVIVED — the guard is still green with the defect in place"
 		return
 	fi
-	if printf '%s' "${out}" | grep -qF -- "${expect}"; then
+	if grep -qF -- "${expect}" <<<"${out}"; then
 		ok "${name}: killed"
 	else
 		bad "${name}: went red, but not for its own reason (wanted: ${expect})"

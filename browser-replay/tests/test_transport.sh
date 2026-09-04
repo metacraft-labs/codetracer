@@ -94,7 +94,7 @@ fi
 # Test 6: CORS headers present
 CORS=$(curl -sk -D - -o /dev/null "$META_URL" 2>&1 |
 	grep -i "access-control-allow-origin" | head -1)
-if echo "$CORS" | grep -q "\*"; then
+if grep -q "\*" <<<"$CORS"; then
 	pass "CORS headers present on trace files"
 else
 	fail "CORS missing on trace files: $CORS"

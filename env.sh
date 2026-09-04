@@ -506,7 +506,7 @@ if [[ ${WINDOWS_DIY_ENSURE_TTD:-1} == "1" ]]; then
 fi
 if [[ ${WINDOWS_DIY_ENSURE_DOTNET:-1} == "1" ]]; then
 	dotnet_sdks=$("$DOTNET_ROOT/dotnet.exe" --list-sdks 2>/dev/null | tr -d '\r' || true)
-	if ! printf '%s\n' "$dotnet_sdks" | grep -Eq "^${DOTNET_SDK_VERSION//./\\.}[[:space:]]"; then
+	if ! grep -Eq "^${DOTNET_SDK_VERSION//./\\.}[[:space:]]" <<<"$dotnet_sdks"; then
 		allow_feature_rollforward="${WINDOWS_DIY_DOTNET_ROLL_FORWARD_FEATURE:-1}"
 		effective_dotnet_sdk=""
 		if [[ $allow_feature_rollforward == "1" || $allow_feature_rollforward == "true" || $allow_feature_rollforward == "yes" || $allow_feature_rollforward == "on" ]]; then

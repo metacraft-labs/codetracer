@@ -1,0 +1,32 @@
+# The fixture ci/test/grep-q-pipefail-gate.sh runs its detector against before it
+# is allowed to scan the repository. A detector that has stopped matching finds
+# nothing and reports a clean tree, which is the same class of defect this gate
+# exists to catch -- so every HIT row must be reported and every MISS row must
+# not be, and the gate exits before scanning anything if that is not true.
+#
+# Format: HIT<TAB>line   or   MISS<TAB>line. Anything else is ignored, so the
+# verdict travels WITH the case and adding one cannot silently weaken the
+# check the way a separate list of line numbers could.
+
+# -- the defect, in every shape it is actually written in this repository --
+HIT	printf '%s' "$hay" | grep -q needle
+HIT	printf '%s\n' "$hay" | grep -qF -- "$needle"
+HIT	describe_commands | grep -qx -- "$entry"
+HIT	head -n 40 "$f" | grep -F -q "$needle"
+HIT	strip "$f" | sed -n '1,9p' | grep -Eiq 'x|y'
+HIT		| grep --quiet needle
+HIT	cat "$f" | grep --silent needle
+
+# -- correct code that must NOT be flagged --
+# a logical OR in front of a grep that reads a FILE: no pipe, no EPIPE
+MISS	this_is_ok || grep -q needle "$a_real_file"
+# the fix itself, in both forms
+MISS	grep -q needle <<<"$hay"
+MISS	grep -q needle <<<"$(describe_commands)"
+# consumers that read to EOF cannot break the pipe
+MISS	printf '%s' "$hay" | grep -c needle
+MISS	printf '%s' "$hay" | grep -o 'id="[^"]*"'
+# prose describing the defect, which several files in this repo contain
+MISS	# printf '%s' "$hay" | grep -q needle
+# the line the multi-line HIT above continues from
+MISS	cmd \

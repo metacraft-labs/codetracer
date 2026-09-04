@@ -780,7 +780,7 @@ if [ "${facade_ok}" -eq 1 ]; then
 		pattern="${entry%%;*}"
 		reason="${entry#*;}"
 		for item in "${sdk_closure[@]}" "${sdk_externals[@]}"; do
-			if printf '%s' "${item}" | grep -qE "${pattern}"; then
+			if grep -qE "${pattern}" <<<"${item}"; then
 				ui_path_exempt "${pattern}" "${item}" && continue
 				render_violations=$((render_violations + 1))
 				violation_detail "${item} — ${reason}"

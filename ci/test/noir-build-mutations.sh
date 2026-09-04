@@ -24,6 +24,55 @@
 # arm asserts that the file actually CHANGED before it runs anything, and a
 # no-op patch is a HARD FAILURE, not a skip.
 #
+# EVERY MATCH BELOW IS A HERE-STRING, NEVER `printf ... | grep -q`, AND THAT IS
+# A CORRECTNESS FIX RATHER THAN A STYLE ONE.
+#
+# `grep -q` exits the instant it matches. If the haystack is bigger than a pipe
+# buffer — measured at exactly 64 KiB, see ci/test/grep-q-pipefail-gate.sh — the
+# producer is still writing, takes EPIPE, and dies of SIGPIPE; with the
+# `set -o pipefail` below the pipeline adopts that failure and reports 141.
+# A SUCCESSFUL MATCH IS THEREFORE RETURNED AS "NO MATCH".
+#
+# In this file that has teeth in both directions:
+#
+#   * The BASELINE gate on line ~94 asks "is this suite already red?". When the
+#     output crosses 64 KiB the gate answers "not red", the `COMPILE-FAILED`
+#     arm below it does not match either, and control falls into the `else`
+#     branch, which counts `[OK]` lines with `grep -c` — a counter reads to
+#     EOF, so THAT one works, finds the green cases a partly-red suite still
+#     has, and prints "N case(s) green". A red baseline reported as a green
+#     one, in the one check without which all 27 arms below are vacuous.
+#
+#   * Inside an arm the same pairing fails the other way: line ~162 was
+#     `if ! ... | grep -q '\[FAILED\]'`, so EPIPE reads as "no red case" and the
+#     arm reports SURVIVED against a mutation it actually killed. Line ~168 was
+#     worse still — `grep -F '[FAILED]' | grep -qF "$expected"` gives the MIDDLE
+#     grep the SIGPIPE, and the arm reports MISS.
+#
+# HOW BIG ARE THESE SUITES, ACTUALLY. Measured, because the answer decides
+# whether the paragraph above describes something happening today or something
+# waiting to: `test_noir_build_marshalling` prints 1,537 bytes green and 2,764
+# bytes with two cases genuinely red (product mutated: `of "warning":
+# ndsWarning` -> `ndsError`). That is two orders of magnitude below the
+# threshold, so THIS SITE WAS LATENT, NOT LIVE, and nobody should read the
+# rewrite as a fix for a failure that had already happened here.
+#
+# It is still the site worth fixing first, for the reason that has nothing to
+# do with likelihood: of the ~130 in this repository this is the one whose
+# EPIPE answer is the GREEN one, in the gate that licenses everything below it.
+# The suites grow; 56 test cases across the three of them are 4 KB of output
+# now, and a failure dump on a collection compare is not a bounded thing. The
+# day it crosses 64 KiB this script starts reporting 27 arms of coverage over a
+# broken baseline and says nothing at all. Demonstrated in that state against a
+# stub `nim` whose suite fails its second case and then prints 1.6 MB: before
+# the fix, three red suites reported "6 case(s) green" and the arms ran; after,
+# all three report "is already red" and the script stops.
+#
+# A here-string has no pipe to break, so there is no EPIPE and no pipefail
+# interaction. Where two greps have to compose, the intermediate result is
+# captured into a variable first — a pipe whose consumer is `grep -q` is the
+# defect, wherever the producer came from.
+#
 # Usage:  bash ci/test/noir-build-mutations.sh
 # Exit:   0 every arm killed its own case, 1 otherwise, 2 could not run.
 
@@ -91,14 +140,14 @@ for pair in "${MARSHALLING}:marshalling" "${PRODUCER_TEST}:producer" "${WORKER_T
 	suite="${pair%%:*}"
 	label="${pair##*:}"
 	output="$(run_suite "${suite}" "baseline-${label}")"
-	if printf '%s' "${output}" | grep -q '\[FAILED\]'; then
+	if grep -q '\[FAILED\]' <<<"${output}"; then
 		bad "baseline: ${suite} is already red"
 		baseline_ok=0
-	elif printf '%s' "${output}" | grep -q 'COMPILE-FAILED'; then
+	elif grep -q 'COMPILE-FAILED' <<<"${output}"; then
 		bad "baseline: ${suite} does not compile"
 		baseline_ok=0
 	else
-		ok_count="$(printf '%s' "${output}" | grep -c '\[OK\]')"
+		ok_count="$(grep -c '\[OK\]' <<<"${output}" || true)"
 		if [ "${ok_count}" -lt 5 ]; then
 			bad "baseline: ${suite} reported ${ok_count} case(s), which is implausibly few"
 			baseline_ok=0
@@ -152,29 +201,36 @@ arm() {
 	output="$(run_suite "${suite}" "arm-${arms}")"
 	cp "${backup}" "${file}"
 
-	if printf '%s' "${output}" | grep -q 'COMPILE-FAILED'; then
+	if grep -q 'COMPILE-FAILED' <<<"${output}"; then
 		bad "arm ${arms} (${name}): the mutated product does not compile, so the"
 		echo "         check was not exercised. A mutation must produce a WRONG"
 		echo "         program, not an invalid one."
 		return
 	fi
 
-	if ! printf '%s' "${output}" | grep -q '\[FAILED\]'; then
+	# The red cases are extracted ONCE, into a variable. Composing this as
+	# `grep -F '[FAILED]' <<<"$output" | grep -qF "$expected"` would put the
+	# defect back: the `grep -q` still terminates a pipe early, and the
+	# upstream `grep -F` still dies of SIGPIPE.
+	local red
+	red="$(grep -F '[FAILED]' <<<"${output}" || true)"
+
+	if [ -z "${red}" ]; then
 		bad "arm ${arms} (${name}): SURVIVED — the suite is green over a broken product."
 		echo "         Nothing covers: ${expected}"
 		return
 	fi
 
-	if printf '%s' "${output}" | grep -F '[FAILED]' | grep -qF "${expected}"; then
+	if grep -qF "${expected}" <<<"${red}"; then
 		local also
-		also="$(printf '%s' "${output}" | grep -cF '[FAILED]')"
+		also="$(grep -c . <<<"${red}" || true)"
 		killed=$((killed + 1))
 		ok "arm ${arms} (${name}): reddened its own case — ${expected} (${also} case(s) red in total)"
 	else
 		bad "arm ${arms} (${name}): MISS — something went red, but not the case this arm covers."
 		echo "         expected red: ${expected}"
 		echo "         actually red:"
-		printf '%s' "${output}" | grep -F '[FAILED]' | sed 's/^/           /'
+		while IFS= read -r line; do echo "           ${line}"; done <<<"${red}"
 	fi
 }
 

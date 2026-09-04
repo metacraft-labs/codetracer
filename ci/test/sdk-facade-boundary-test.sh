@@ -94,13 +94,13 @@ assert_fires() {
 		bad "${desc}" "guard exited 0; expected a failure" "${output}"
 		return
 	fi
-	if ! printf '%s' "${output}" | grep -q "VIOLATION ${check}"; then
+	if ! grep -q "VIOLATION ${check}" <<<"${output}"; then
 		bad "${desc}" "no 'VIOLATION ${check}' line in the output" "${output}"
 		return
 	fi
 	for needle in "$@"; do
 		[ -n "${needle}" ] || continue
-		if ! printf '%s' "${output}" | grep -qF "${needle}"; then
+		if ! grep -qF "${needle}" <<<"${output}"; then
 			bad "${desc}" "output did not name '${needle}'" "${output}"
 			return
 		fi

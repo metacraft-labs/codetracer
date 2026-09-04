@@ -355,7 +355,7 @@ validate_fixture() {
 		# Single quotes are the point: the fixture stores the placeholder
 		# `${CODETRACER_COMPONENT_DIR}` literally and the driver expands it
 		# later, per scenario, to the bundle it staged.
-		fx_list "$s.expect.stdout-contains" | grep -qF '${CODETRACER_COMPONENT_DIR}' ||
+		grep -qF '${CODETRACER_COMPONENT_DIR}' <<<"$(fx_list "$s.expect.stdout-contains")" ||
 			fixture_error "record scenario '$id' has no 'expect.stdout-contains' entry naming \${CODETRACER_COMPONENT_DIR}.
   That entry is this gate's ONLY proof of hop 1: the launcher exports
   CODETRACER_COMPONENT_DIR immediately before execv()ing the component and

@@ -1003,7 +1003,7 @@ jobs:
             fail=1
           fi
           for required_path in index.html ui.js; do
-            if ! cut -f1 "$manifest" | grep -qxF "$required_path"; then
+            if ! grep -qxF "$required_path" <<<"$(cut -f1 "$manifest")"; then
               echo "  the publish manifest does not contain '$required_path' — it is not describing a deployment of this product" >&2
               fail=1
             fi
@@ -1176,7 +1176,7 @@ jobs:
             # A digest in the name is the only thing that makes `immutable`
             # true. Mirrors `assetIsContentAddressed` in web_deployment.nim.
             base_name="${rel##*/}"
-            if printf '%s' "$base_name" | grep -qE '\.[0-9a-fA-F]{6,}\.'; then
+            if grep -qE '\.[0-9a-fA-F]{6,}\.' <<<"$base_name"; then
               hashed=1
               hashed_seen=$((hashed_seen + 1))
             else
@@ -1234,7 +1234,7 @@ jobs:
                 fail=1
                 continue
               fi
-              if printf '%s' "$cc" | grep -qi 'immutable'; then
+              if grep -qi 'immutable' <<<"$cc"; then
                 if [ "$hashed" -eq 1 ]; then
                   echo "  ok: $base/$rel -> ${cc:-<none>}"
                 else
@@ -1322,7 +1322,16 @@ jobs:
           # bytes before upload.
           doc="$(curl -fsSL --retry 5 --retry-delay 4 --retry-all-errors \
                    https://web-codetracer.pages.dev/ || true)"
-          if printf '%s' "$doc" | grep -q 'id="codetracer-deployment"'; then
+          # HERE-STRINGS, NOT `printf ... | grep -q ...`. `grep -q` exits on
+          # its first match, `printf` takes EPIPE, and `pipefail` reports 141 --
+          # a successful match returned as a failure -- once the haystack
+          # reaches 64 KiB. See ci/test/grep-q-pipefail-gate.sh for the
+          # measurement. `$doc` is the served index.html, whose size is not
+          # measured from here and is not fixed by anything in this repo, which
+          # is the whole argument: a check that is correct at 60 KB and silently
+          # inverts at 64 KB is not a check anyone should have to size.
+          # The `grep -o` below is safe as a pipe: it reads to EOF.
+          if grep -q 'id="codetracer-deployment"' <<<"$doc"; then
             echo "  ok: the served page carries its deployment descriptor"
             printf '%s' "$doc" | grep -o '"id":"[^"]*","url":"[^"]*"' | sed 's/^/    /'
           else
@@ -1339,9 +1348,13 @@ jobs:
           # Build button would ever have known, which is how 19 MB of working
           # compiler stayed unreachable through a fully green deploy.
           nim_bundles=0
-          printf '%s' "$doc" | grep -q 'src="/ui.js"' && nim_bundles=$((nim_bundles + 1))
-          printf '%s' "$doc" | grep -q 'src="/web.js"' && nim_bundles=$((nim_bundles + 1))
-          if [ "$nim_bundles" -eq 1 ] && printf '%s' "$doc" | grep -q 'src="/ui.js"'; then
+          # `if` rather than `grep ... && count++`: this step runs under
+          # `shell: bash`, which is `-eo pipefail`, and an AND-list whose last
+          # command is not reached fails the LIST -- so the ordinary, expected
+          # answer "there is no /web.js" would have killed the step.
+          if grep -q 'src="/ui.js"' <<<"$doc"; then nim_bundles=$((nim_bundles + 1)); fi
+          if grep -q 'src="/web.js"' <<<"$doc"; then nim_bundles=$((nim_bundles + 1)); fi
+          if [ "$nim_bundles" -eq 1 ] && grep -q 'src="/ui.js"' <<<"$doc"; then
             echo "  ok: the served page references exactly one Nim bundle, and it is /ui.js"
           elif [ "$nim_bundles" -eq 0 ]; then
             echo "  the served page references no Nim bundle — it can never boot" >&2
