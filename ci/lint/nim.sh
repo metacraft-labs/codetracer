@@ -111,10 +111,19 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 # one and took the tree to 1229. The fix was to drop the `*` — the export nobody
 # outside could use — and not to raise this number a fourth time.
 #
-# WHEN YOU DELETE OR WIRE A SYMBOL, LOWER THIS NUMBER. Nothing forces that yet:
+# WHEN YOU DELETE OR WIRE A SYMBOL, LOWER THIS NUMBER — AND SINCE 2026-09-04
+# THE GUARD MAKES YOU. That paragraph used to end "Nothing forces that yet:
 # unlike the shell-gate inventory next door, `--max` is a `>` and not an `=`, so
-# slack accumulates silently under it. That is the script's contract, not this
-# line's, and changing it belongs in a diff that says so.
+# slack accumulates silently under it", and it was describing live slack rather
+# than a hypothetical: the backlog had been brought down to 1223 by deleting
+# dead entry points while this line still said 1228, so FIVE new unreached
+# exports could have landed without reddening anything.
+#
+# `--max` is now an equality. Fewer findings than the number fails as "lower it
+# to what you measured", the same rule and very nearly the same sentence the
+# shell-gate inventory uses for its own ceiling. 1223 is this tree's exact
+# count, measured on 2026-09-04 after the three raises above and the deletions
+# that followed them.
 
 # THE PROSE GUARD. Three sentences name this threshold and all three drifted off
 # it; the cheapest permanent fix is to make a raise that does not touch them
@@ -187,11 +196,19 @@ assert_reachability_prose_agrees() {
 lint_step "reachability prose guard: contract suite" \
 	bash ci/test/reachability-prose-guard-test.sh
 
+# THE THRESHOLD ITSELF, WHICH NOTHING TESTED UNTIL 2026-09-04. The suite above
+# tests the SENTENCES that describe the ceiling; this one tests the ceiling. The
+# gap is how `--max` stayed a `>` while the paragraph below described the slack
+# that produced, in the present tense, for as long as it was true. Four synthetic
+# unreached exports, no Nim toolchain, milliseconds.
+lint_step "reachability ratchet: contract suite (equality, both directions)" \
+	bash ci/test/reachability-ratchet-test.sh
+
 lint_step "frontend reachability: the ratchet's prose agrees with its threshold" \
 	assert_reachability_prose_agrees
 
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1228 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1228 bash ci/test/frontend-reachability.sh
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1223 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1223 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

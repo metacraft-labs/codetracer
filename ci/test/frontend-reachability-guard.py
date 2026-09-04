@@ -683,8 +683,40 @@ def main() -> int:
             encoding="utf-8",
         )
 
+    # THE RATCHET IS AN EQUALITY, NOT A CEILING WITH ROOM UNDER IT.
+    #
+    # This was `>` alone, and `ci/lint/nim.sh` recorded the consequence in its own
+    # words: "WHEN YOU DELETE OR WIRE A SYMBOL, LOWER THIS NUMBER. Nothing forces
+    # that yet ... so slack accumulates silently under it." It did. The ceiling was
+    # raised 1224 -> 1226 -> 1228 in twenty-nine minutes on 2026-09-04, the backlog
+    # was then brought DOWN to 1223 by deleting dead entry points, and nobody
+    # lowered the ceiling — leaving five free slots. Five new unreached exports
+    # could have landed without this lane saying a word, which is precisely the
+    # budget the shell-gate inventory next door refuses to grant:
+    #
+    #     "Not `<=`: slack under a ceiling is a budget for new dark gates, and the
+    #      cheapest way to make this guard green has always been to append a line."
+    #
+    # Both directions are deliberate, and the DOWNWARD one is the whole point. A
+    # raise already had to be written down; a fall did not, so a fall was where the
+    # slack came from. Now clearing findings forces the number down in the same
+    # diff, and `assert_reachability_prose_agrees` forces the three sentences that
+    # describe it to move too.
     if args.max is not None and len(counted) > args.max:
         print(f"RATCHET: {len(counted)} findings exceeds the recorded ceiling of {args.max}.")
+        print(f"         {len(counted) - args.max} more than the tree is allowed to carry.")
+        print("         Wire or delete the new one; do not raise the ceiling by reflex.")
+        exit_code = max(exit_code, 1)
+    elif args.max is not None and len(counted) < args.max:
+        slack = args.max - len(counted)
+        print(f"RATCHET SLACK: {len(counted)} findings, ceiling is still {args.max}.")
+        print(f"         Lower it to {len(counted)}, in this diff. A ceiling with {slack} "
+              "slot(s) under")
+        print("         it is a budget: that many unreached exports can land without this")
+        print("         lane noticing, and the ratchet only ratchets if it tightens.")
+        print("         Three sentences name this threshold — the setter and step label in")
+        print("         ci/lint/nim.sh and the header of ci/test/frontend-reachability.sh.")
+        print("         All three must move together or the prose guard fails.")
         exit_code = max(exit_code, 1)
     elif args.enforce and counted:
         print(f"ENFORCE: {len(counted)} exported symbols have no cross-module product reader.")
