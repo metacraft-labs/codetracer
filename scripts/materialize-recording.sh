@@ -325,23 +325,68 @@ key_inputs() {
 CACHE_ROOT="${CT_RECORDINGS_DIR:-$REPO_ROOT/target/test-recordings}"
 readonly CACHE_ROOT
 
-if [ -n "${CT_RECORDINGS_DIR:-}" ]; then
-	# Explicitly configured hand-off: use what is there, verify it is
-	# actually there, and never record.
-	provided="$CACHE_ROOT/$FIXTURE"
-	[ -f "$provided/.complete" ] ||
-		die "CT_RECORDINGS_DIR is set but $provided holds no completed recording for '$FIXTURE'"
-	printf '%s\n' "$provided"
-	exit 0
-fi
-
 # Captured once: the same text is hashed into the key and recorded in
 # `.complete`, so a cache directory always states exactly what it was
 # made from.
+#
+# Computed BEFORE the hand-off branch below, which used to skip it. Every input
+# `key_inputs` reads is already a hard prerequisite of this script — the block
+# above exits 1 without `ct-instrument`, `record-web`, `rustc` or `node` no
+# matter which branch is taken — so the key costs nothing extra on the hand-off
+# path and is the only thing that can tell a handed-down recording from a
+# handed-down recording of something else.
 KEY_INPUTS="$(key_inputs)"
 readonly KEY_INPUTS
 KEY="$(printf '%s\n' "$KEY_INPUTS" | sha_of_stdin | cut -c1-32)"
 readonly KEY
+
+if [ -n "${CT_RECORDINGS_DIR:-}" ]; then
+	# Explicitly configured hand-off: use what is there, and CHECK IT IS A
+	# RECORDING OF THIS TREE.
+	#
+	# This branch used to ask only `[ -f "$provided/.complete" ]` — existence
+	# standing in for freshness, in the one script in this repository whose
+	# entire header argues that a recording is worthless unless it was made by
+	# the pipeline about to be tested. The exemption granted elsewhere for an
+	# explicitly-configured hand-off does not apply here, because the answer is
+	# already written down: `.complete` CARRIES the key and the full key-input
+	# text (see where it is written, below), and the current key is computed
+	# above. Nothing had to be guessed and nothing was compared.
+	#
+	# On a mismatch it prints the two input lists side by side rather than just
+	# the two digests, because "the key differs" is unactionable and "rustc
+	# differs" is a five-second fix. The remedy is to re-record in the stage
+	# that produces the hand-off, or to unset CT_RECORDINGS_DIR and let this
+	# script record from the tree it is looking at.
+	provided="$CACHE_ROOT/$FIXTURE"
+	[ -f "$provided/.complete" ] ||
+		die "CT_RECORDINGS_DIR is set but $provided holds no completed recording for '$FIXTURE'"
+
+	provided_key="$(awk -F'\t' '$1 == "key" { print $2; exit }' "$provided/.complete")"
+	if [ "$provided_key" != "$KEY" ]; then
+		{
+			echo "materialize-recording: the recording handed down in CT_RECORDINGS_DIR was not made from this tree."
+			echo "    fixture:  $FIXTURE"
+			echo "    at:       $provided"
+			echo "    made by:  ${provided_key:-<no key recorded>}"
+			echo "    needed:   $KEY"
+			echo
+			echo "  what it was made from:"
+			sed -n 's/^/    /p' "$provided/.complete"
+			echo
+			echo "  what this tree needs:"
+			printf '%s\n' "$KEY_INPUTS" | sed -n 's/^/    /p'
+			echo
+			echo "  Re-record it in the stage that produces the hand-off, or unset"
+			echo "  CT_RECORDINGS_DIR so this script records from the tree under test."
+		} >&2
+		exit 1
+	fi
+
+	printf '%s\n' "$provided"
+	exit 0
+fi
+
 OUT_DIR="$CACHE_ROOT/$FIXTURE/$KEY"
 readonly OUT_DIR
 
