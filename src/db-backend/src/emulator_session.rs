@@ -1881,6 +1881,7 @@ impl ReplaySession for EmulatorReplaySession {
                     typ: int_type.clone(),
                 },
                 address: NO_ADDRESS,
+                is_watch: false,
             });
         }
         Ok(out)

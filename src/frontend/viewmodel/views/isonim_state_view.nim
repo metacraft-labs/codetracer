@@ -72,6 +72,23 @@ proc tabLabel(tab: StateTab): string =
   of stGlobals: "Globals"
   of stWatches: "Watches"
 
+proc emptyOverlayText(tab: StateTab): string =
+  ## What an empty pane says, per tab.
+  ##
+  ## Every tab used to say "No local variables are present in the current
+  ## point of execution." — including the Watches tab, where it is simply
+  ## untrue: an empty Watches tab means the user has not added a watch
+  ## yet, and telling them about locals gives no hint that the input above
+  ## is the thing to use. An empty state that cannot say WHICH emptiness
+  ## it is describing is the failure this pane keeps producing.
+  case tab
+  of stLocals:
+    "No local variables are present in the current point of execution."
+  of stGlobals:
+    "No global variables are present in the current point of execution."
+  of stWatches:
+    "No watch expressions yet — type one above to evaluate it at this step."
+
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
 
@@ -784,7 +801,7 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
       tdiv(class = "value-components-container"):
         tdiv(class = "empty-overlay",
              display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
-          text "No local variables are present in the current point of execution."
+          text emptyOverlayText(vm.activeTab.val)
         tdiv(ref = rowContainer):
           discard
 
@@ -836,6 +853,22 @@ when defined(js):
     let panel = ui(r):
       tdiv(id = "stateComponent-0",
            class = "component-container active-state state-component isonim-state"):
+        # THE TAB BAR. It was in the MockRenderer's panel above and NOT
+        # here, which meant the three tabs existed in headless tests and
+        # in no shipping product: `stWatches` could only be reached by a
+        # test calling `vm.selectTab`, so the watch input right below was
+        # an input whose answers had nowhere to appear. Same markup and
+        # the same handlers as the Mock panel, so both renderers agree.
+        tdiv(class = "state-tabs"):
+          button(class = tabClass(vm, stLocals),
+                 onclick = onSelectTab(vm, stLocals)):
+            text tabLabel(stLocals)
+          button(class = tabClass(vm, stGlobals),
+                 onclick = onSelectTab(vm, stGlobals)):
+            text tabLabel(stGlobals)
+          button(class = tabClass(vm, stWatches),
+                 onclick = onSelectTab(vm, stWatches)):
+            text tabLabel(stWatches)
         # Code-state-line: rendered before the watch input so that the
         # Playwright `#code-state-line-0` lookup finds the populated
         # element (with text "<line> | <source>") matching the legacy
@@ -860,7 +893,7 @@ when defined(js):
         tdiv(class = "value-components-container"):
           tdiv(class = "empty-overlay",
                display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
-            text "No local variables are present in the current point of execution."
+            text emptyOverlayText(vm.activeTab.val)
           tdiv(ref = rowContainer):
             discard
 

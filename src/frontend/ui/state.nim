@@ -384,6 +384,28 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
   stateVMStore = store
   stateVMInstance = createStateVM(store)
   stateVMInstance.onToggleHistory = stateHistoryBridge
+  # WATCHES: re-issue the request whose response this module renders.
+  #
+  # The watch input form calls `StateVM.addWatch`, but the reply the
+  # product actually paints comes from `StateComponent.loadLocals` ->
+  # `CtLoadLocalsResponse` -> `registerLocals`. Without this bridge the
+  # two never met: `loadLocals` read `StateComponent.watchExpressions`,
+  # which only the call-site-less `submitWatchExpression` wrote, so a
+  # typed watch reached no answered request. `loadLocals` now reads the
+  # ViewModel's list (below), and this makes a change to it re-ask.
+  stateVMInstance.onWatchesChangedProc = proc(expressions: seq[string]) =
+    # `componentMapping` is an `array[Content, JsAssoc[int, Component]]`,
+    # so the per-content map can be nil before the State pane mounts and
+    # the id lookup can miss. Both are ordinary during start-up, hence the
+    # guards rather than an assertion.
+    if data.isNil or data.ui.componentMapping[Content.State].isNil:
+      return
+    if not data.ui.componentMapping[Content.State].hasKey(0):
+      return
+    let component = data.stateComponent(0)
+    if component.isNil:
+      return
+    component.loadLocals()
   # Create the companion OriginChainVM and wire the bridges so the
   # State Pane row renderer can dispatch ``ct/originChain`` requests
   # through the same VM the side-panel uses (M4 deliverable §3.2.1 +
@@ -544,17 +566,34 @@ proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   if stateVMStore.isNil:
     return
   var vmLocals = newVariableSeq()
+  # WATCH ANSWERS TRAVEL IN THE SAME LIST and are separated here.
+  #
+  # There is no `evaluate` route: `ct/load-locals` answers both, and the
+  # backend marks a watch row with `value.isWatch` (see
+  # `db-backend/src/watch_expression.rs`). They go into their own signal
+  # rather than staying mixed into the locals for two reasons — a watch
+  # may name the same thing as a local, and a REFUSED watch is an `Error`
+  # value carrying its reason, which belongs in the Watches tab and not
+  # in a list of the step's locals.
+  var vmWatches = newVariableSeq()
   for v in legacyLocals:
     let hasChild = (if v.value.isNil: false else: v.value.elements.len > 0 or v.value.kind in {TypeKind.Pointer, TypeKind.Ref} or v.value.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
-    vmLocals.add(makeVariable(
+    let row = makeVariable(
       name = $v.expression,
       value = valueDisplayText(v.value),
       typeName = valueDisplayType(v.value),
       hasChildren = hasChild,
       children = toVariableChildren(v.value),
-    ))
+    )
+    if not v.value.isNil and v.value.isWatch:
+      vmWatches.add(row)
+    else:
+      vmLocals.add(row)
   stateVMStore.updateLocals(vmLocals)
-  cdebug fmt"[PIPELINE] syncStoreLocals: synced {vmLocals.len} locals into store"
+  # WRITTEN EVEN WHEN EMPTY. A step whose watch stopped resolving must
+  # clear the previous answer rather than leave a stale one on screen.
+  stateVMStore.updateWatches(vmWatches)
+  cdebug fmt"[PIPELINE] syncStoreLocals: synced {vmLocals.len} locals and {vmWatches.len} watch result(s) into store"
 
 proc lookupSourceLine(path: cstring; line: int): string =
   ## Look up the source code at `<path>:<line>` from the editor cache.
@@ -710,6 +749,26 @@ proc redrawDynamically*(self: StateComponent) =
 
 const LOCALS_RR_DEPTH_LIMIT: int = 7
 
+proc activeWatchExpressions(self: StateComponent): seq[cstring] =
+  ## The watch expressions to ask the backend for.
+  ##
+  ## THE VIEWMODEL IS THE SOURCE OF TRUTH, because it is what the watch
+  ## input form writes: `wireWatchInputForm` (`isonim_state_view.nim`)
+  ## calls `StateVM.addWatch`, and the collaboration layer edits the same
+  ## signal. `StateComponent.watchExpressions` is only written by
+  ## `submitWatchExpression`, which has no call sites anywhere in the
+  ## repo — so reading it alone meant this request never carried anything
+  ## a user typed.
+  ##
+  ## The component's own list is still honoured as a fallback so the
+  ## legacy path keeps working on hosts that never build a StateVM.
+  if not stateVMInstance.isNil:
+    result = @[]
+    for expression in stateVMInstance.watchExpressions.val:
+      result.add(cstring(expression))
+  else:
+    result = self.watchExpressions
+
 proc loadLocals*(self: StateComponent) =
   let countBudget = 3000
   let minCountLimit = 50
@@ -718,7 +777,7 @@ proc loadLocals*(self: StateComponent) =
     countBudget: countBudget,
     minCountLimit: minCountLimit,
     depthLimit: LOCALS_RR_DEPTH_LIMIT,
-    watchExpressions: self.watchExpressions,
+    watchExpressions: self.activeWatchExpressions(),
     lang: toLangFromFilename(self.location.path),
   )
   self.api.emit(CtLoadLocals, arguments)

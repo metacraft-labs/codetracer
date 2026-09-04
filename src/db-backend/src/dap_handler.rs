@@ -1039,7 +1039,11 @@ impl Handler {
         let (file, line, col) = self.current_step_location();
         let mut locals: Vec<Variable> = Vec::with_capacity(locals_with_records.len());
         for l in locals_with_records.iter() {
-            let origin_summary = if self.trace_kind == TraceKind::Materialized {
+            // NOT FOR A WATCH. Origin tracking is keyed on a recorded
+            // variable id, and a watch expression (`p.x`, or a refused
+            // `x + y`) is not a binding — asking for its origin summary
+            // spends the eager-summary budget on a name that cannot resolve.
+            let origin_summary = if self.trace_kind == TraceKind::Materialized && !l.is_watch {
                 Some(self.build_origin_summary_for_local(&l.expression))
             } else {
                 None
@@ -1050,10 +1054,21 @@ impl Handler {
             // to look up by the recorded (minified) name — origin
             // tracking is keyed on the recorded variable id, not the
             // rendered name.
-            let (display, _original) = self.resolve_variable_name_at(&l.expression, &file, line, col);
+            // A WATCH KEEPS THE TEXT THE USER TYPED. `resolve_variable_name_at`
+            // maps a recorded (possibly minified) binding to its user-facing
+            // name; applying it to a watch would rename the row out from under
+            // the person who typed it — and, for a refused watch, would look up
+            // a rename for an expression that is not a binding at all.
+            let (display, _original) = if l.is_watch {
+                (l.expression.clone(), l.expression.clone())
+            } else {
+                self.resolve_variable_name_at(&l.expression, &file, line, col)
+            };
+            let mut value = to_ct_value(&l.value);
+            value.is_watch = l.is_watch;
             locals.push(Variable {
                 expression: display,
-                value: to_ct_value(&l.value),
+                value,
                 address: l.address,
                 origin_summary,
             });

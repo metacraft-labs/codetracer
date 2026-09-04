@@ -160,6 +160,10 @@ mod value;
 // modules directly rather than through the lib, so it needs its own
 // declaration.
 mod wall_clock;
+// Watch-expression evaluation, used by `db.rs`. Declared here for the same
+// reason `wall_clock` is: the binary compiles the modules directly rather
+// than through the lib.
+mod watch_expression;
 
 use crate::paths::{CODETRACER_PATHS, gc_stale_run_dirs, run_dir_for};
 

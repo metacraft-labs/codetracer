@@ -366,6 +366,16 @@ pub struct VariableWithRecord {
     pub expression: String,
     pub value: ValueRecordWithType,
     pub address: i64,
+    /// True when this row is the answer to a user-entered watch
+    /// expression rather than a local the recorder wrote for this step.
+    ///
+    /// Watches ride the `ct/load-locals` response (there is no separate
+    /// `evaluate` route — see `watch_expression.rs`), so without this flag
+    /// the pane cannot tell a watch from a local and the Watches tab has
+    /// nothing to select on. `#[serde(default)]` keeps older payloads
+    /// deserialising as "not a watch".
+    #[serde(default)]
+    pub is_watch: bool,
 }
 
 // pub struct ValueRecordAndType {

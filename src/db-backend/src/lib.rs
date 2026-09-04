@@ -45,6 +45,13 @@ pub mod vfs;
 // them; see the module header and `tests/wall_clock_sweep_test.rs`.
 pub mod wall_clock;
 
+// User-entered watch expressions, evaluated against a recorded step.
+// Deliberately free of tree-sitter: the browser engine is built
+// `--no-default-features`, where `tracepoint_interpreter` is a stub that
+// answers `vec![]`, so an evaluator built on it would work on the desktop
+// and silently answer nothing in a browser. See the module header.
+pub mod watch_expression;
+
 pub mod bench_matrix_report;
 pub mod calltrace;
 // M25 — Correlation markers (tracepoint-based; no protocol shims).

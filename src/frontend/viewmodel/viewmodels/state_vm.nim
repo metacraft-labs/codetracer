@@ -172,6 +172,21 @@ type
     onShowOriginProc*: proc(expression: string; location: store_types.Location)
       ## Optional bridge invoked by `onShowOrigin` — installed by
       ## `state.nim` to forward into `OriginChainVM.onShowOrigin`.
+    onWatchesChangedProc*: proc(expressions: seq[string])
+      ## Optional bridge invoked whenever the watch list changes, so the
+      ## host can re-issue the locals request that carries them.
+      ##
+      ## THIS EXISTS BECAUSE THE TYPED EXPRESSION AND THE ANSWERED
+      ## REQUEST WERE ON DIFFERENT OBJECTS. The watch input form calls
+      ## `addWatch`, which updates this ViewModel; the request whose
+      ## response the product actually renders is issued by the legacy
+      ## `StateComponent.loadLocals`, which read `StateComponent.watch-
+      ## Expressions` — a field only the call-site-less
+      ## `submitWatchExpression` ever wrote. So a user could type a watch,
+      ## watch it land in the ViewModel, and have it reach no request that
+      ## anything listened to. The host installs this to close that gap.
+      ## Nil on hosts (headless, storybook) that drive the request
+      ## themselves.
     lastContextMenu*: Signal[seq[OriginContextMenuEntry]]
       ## Renderer-agnostic mirror of the most recently dispatched
       ## right-click context menu (M4 deliverable §3.1 "right-click
@@ -524,10 +539,16 @@ proc createStateVM*(store: ReplayDataStore;
       of stGlobals:
         store.locals.globals.val
       of stWatches:
-        # Watches are evaluated server-side and returned as part of
-        # the locals response. For now, return an empty seq; watch
-        # results will be populated when the backend supports them.
-        newSeq[store_types.Variable]()
+        # Watches are evaluated server-side and returned as part of the
+        # locals response, split out of it by `value.isWatch` into
+        # `store.locals.watches`.
+        #
+        # This arm used to be `newSeq[store_types.Variable]()` — a literal
+        # empty list — with a comment promising it would be filled in
+        # "when the backend supports them". It has therefore been unable
+        # to show anything at all, whatever the backend answered, for as
+        # long as the tab has existed.
+        store.locals.watches.val
 
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
@@ -577,6 +598,13 @@ proc createStateVM*(store: ReplayDataStore;
       let watches = watchExpressions.val
       if not mayIssueBackendCommands(runtimeRole):
         return
+      # THE HOST BRIDGE FIRST. On the shipping frontends the request whose
+      # response is rendered is issued by the legacy `StateComponent`, and
+      # this is what tells it the watch list changed. Reading
+      # `watchExpressions.val` above is what subscribes this effect to it,
+      # so adding or removing a watch re-runs both lines.
+      if not vm.onWatchesChangedProc.isNil:
+        vm.onWatchesChangedProc(watches)
       store.requestLocals(dbg.rrTicks, watchExpressions = watches)
 
     vm

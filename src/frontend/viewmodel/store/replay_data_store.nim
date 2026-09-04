@@ -16,7 +16,7 @@
 ##   # issue a command — signals update asynchronously
 ##   store.requestStep(sdForward)
 
-import std/[json, options, tables]
+import std/[json, options, strutils, tables]
 # Diagnostics go through `vm_log`, not the renderer's `lib/logging`: that
 # module reaches `dom`/`kdom` and would put a DOM shim in the Embed SDK's
 # package graph (CodeTracer-Embed-SDK.md §3.2). See vm_log.nim.
@@ -119,6 +119,17 @@ type
     ## Reactive state for the locals / globals panel.
     locals*: Signal[seq[Variable]]
     globals*: Signal[seq[Variable]]
+    watches*: Signal[seq[Variable]]
+      ## Answers to the user's watch expressions at the loaded step.
+      ##
+      ## Watches ride the `ct/load-locals` response — there is no separate
+      ## `evaluate` route — so they arrive interleaved with the locals and
+      ## are told apart by `value.isWatch`, which the backend sets. They
+      ## are kept in their OWN signal rather than filtered out of `locals`
+      ## at render time for two reasons: the Watches tab must be able to
+      ## show a watch whose expression equals a local's name, and a watch
+      ## that was REFUSED still has to be a row (its value is an `Error`
+      ## carrying the reason), which a locals list has no place for.
     loadingState*: Signal[LoadingState]
     loadedForRRTicks*: Signal[uint64]
       ## The rrTicks value that the currently loaded data corresponds to.
@@ -625,6 +636,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
       locals: LocalsStore(
         locals: createSignal(newSeq[Variable]()),
         globals: createSignal(newSeq[Variable]()),
+        watches: createSignal(newSeq[Variable]()),
         loadingState: createSignal(lsIdle),
         loadedForRRTicks: createSignal(0'u64),
         codeStateLine: createSignal(""),
@@ -684,7 +696,14 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   let key = "load-locals"
   # Include watch expressions in the dedup key so that adding a new
   # watch at the same rrTicks position still triggers a fresh request.
-  let argsStr = $rrTicks & "|" & $watchExpressions.len
+  #
+  # THE EXPRESSIONS THEMSELVES, not how many there are. Keying on the
+  # COUNT made the dedup blind to the most ordinary edit a user makes:
+  # replacing one watch with another — remove `total`, add `n` — leaves
+  # the count unchanged at the same step, so the request was suppressed
+  # and the pane went on showing the answer to an expression that had
+  # been deleted.
+  let argsStr = $rrTicks & "|" & watchExpressions.join("\x1f")
   if store.requestTracker.isDuplicate(key, argsStr):
     return
 
@@ -832,6 +851,19 @@ proc updateLocals*(store: ReplayDataStore;
     vmDebug "[PIPELINE] updateLocals: setting " & $variables.len & " variables"
   store.locals.locals.val = variables
   store.locals.loadingState.val = lsIdle
+
+proc updateWatches*(store: ReplayDataStore;
+                    watches: seq[Variable]) =
+  ## Replace the store's watch-results signal.
+  ##
+  ## Called from the same response that populates `updateLocals`, because
+  ## watches ride the `ct/load-locals` reply. Written UNCONDITIONALLY,
+  ## including with an empty seq: a step where a watch stops resolving must
+  ## clear the previous step's answer, or the pane keeps showing a stale
+  ## value that is no longer true of where the debugger is standing.
+  when defined(js):
+    vmDebug "[PIPELINE] updateWatches: setting " & $watches.len & " watch result(s)"
+  store.locals.watches.val = watches
 
 proc updateCodeStateLine*(store: ReplayDataStore;
                           line: int;

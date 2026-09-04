@@ -23,6 +23,7 @@ use crate::task::{
 };
 use crate::trace_reader::TraceReader;
 use crate::value::{Type, Value, ValueRecordWithType};
+use crate::watch_expression;
 
 pub(crate) const NEXT_INTERNAL_STEP_OVERS_LIMIT: usize = 1_000;
 
@@ -2442,6 +2443,7 @@ impl ReplaySession for MaterializedReplaySession {
                     .to_string(),
                 value: self.to_value_record_with_type(&v.value),
                 address: NO_ADDRESS,
+                is_watch: false,
             })
             .collect();
 
@@ -2461,15 +2463,10 @@ impl ReplaySession for MaterializedReplaySession {
                         .to_string(),
                     value: self.to_value_record_with_type(&value),
                     address: NO_ADDRESS,
+                    is_watch: false,
                 }
             })
             .collect();
-
-        // TODO: watches require tracepoint-like evaluate_expression or would duplicate locals
-        // for now don't evaluate/support them for db traces: just ignoring
-        if !arg.watch_expressions.is_empty() {
-            warn!("watch expressions not supported for db traces currently");
-        }
 
         // based on https://stackoverflow.com/a/56490417/438099
         let mut locals: Vec<VariableWithRecord> = full_value_locals.into_iter().chain(value_tracking_locals).collect();
@@ -2489,6 +2486,46 @@ impl ReplaySession for MaterializedReplaySession {
         locals.sort_by(|left, right| Ord::cmp(&left.expression, &right.expression));
         // for now just removing duplicated variables/expressions: even if storing different values
         locals.dedup_by(|a, b| a.expression == b.expression);
+
+        // USER-ENTERED WATCH EXPRESSIONS, evaluated against this step.
+        //
+        // This used to be a `warn!` that dropped the field on the floor —
+        // the request carried the expression, the response carried no row
+        // for it, and the pane had no way to tell "not evaluated" from "no
+        // such variable". Every watch now produces EXACTLY ONE row: either
+        // its value, or a `ValueRecord::Error` carrying the reason. There
+        // is no arm in which a watch silently produces nothing.
+        //
+        // APPENDED AFTER the sort and dedup above, deliberately. Watches
+        // are not locals: sorting them in would scatter them through the
+        // list in name order, and the dedup would delete a watch whose
+        // expression happens to equal a local's name — which is the most
+        // ordinary watch a user types.
+        //
+        // The base name is resolved against `locals` rather than by
+        // re-reading the trace, so a watch and the Locals tab can never
+        // disagree about the value at one step.
+        for expression in &arg.watch_expressions {
+            let value = match watch_expression::parse_watch_expression(expression) {
+                Err(reason) => watch_expression::refusal_value(&reason),
+                Ok(path) => match locals.iter().find(|local| local.expression == path.base) {
+                    None => watch_expression::refusal_value(&format!(
+                        "cannot evaluate `{}`: no variable named `{}` was recorded at this step",
+                        expression, path.base
+                    )),
+                    Some(base) => match watch_expression::navigate(&base.value, &path, expression) {
+                        Ok(found) => found.clone(),
+                        Err(reason) => watch_expression::refusal_value(&reason),
+                    },
+                },
+            };
+            locals.push(VariableWithRecord {
+                expression: expression.clone(),
+                value,
+                address: NO_ADDRESS,
+                is_watch: true,
+            });
+        }
 
         Ok(locals)
     }

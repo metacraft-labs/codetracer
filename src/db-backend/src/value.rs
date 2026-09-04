@@ -24,6 +24,15 @@ pub struct Value {
     pub active_variant: String,
     pub active_variant_value: Option<Box<Value>>,
     pub typ: Type,
+    /// True when this value is the answer to a user-entered watch
+    /// expression rather than a recorded local.
+    ///
+    /// Serialises as `isWatch`, which is the field the Nim `Value` has
+    /// declared (`common_types/language_features/value.nim`) and styled
+    /// (`.value-watch`) since before any backend wrote it. Watches ride the
+    /// `ct/load-locals` response, so this is what lets the State pane sort
+    /// a watch row out of the locals list.
+    pub is_watch: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
