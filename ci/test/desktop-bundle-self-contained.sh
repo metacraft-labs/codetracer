@@ -55,15 +55,33 @@
 #     - no symlink target mentions /nix/store
 #     - the bundle's `node_modules` is a real directory, not a link
 #     - the `bin/electron` launcher's exec target exists inside the bundle
+#     - EVERY Mach-O dependency load command resolves inside the bundle or in
+#       the dyld shared cache (ci/test/macho-closure.py)
 #     - the bundle's file count and byte size, as VALUES
+#
+# ## The second kind of escape
+#
+# A path can leave this bundle without ever being a symlink. The published
+# 2026-08-30 dmg had `Contents/MacOS/bin/ct_unwrapped` carrying
+#
+#     LC_LOAD_DYLIB  @executable_path/../Frameworks/libcrypto.3.dylib
+#
+# which, for a binary in `Contents/MacOS/bin`, names `Contents/MacOS/Frameworks`
+# — a directory that has never existed. All four native programs aborted in
+# dyld on every Mac, the builder's included, while every check in the list above
+# passed on that linkage, because a load command is a string in a Mach-O header
+# and not a file. Reading them is now part of this gate rather than a separate
+# opinion about it.
 #
 # ## What this does NOT claim
 #
-# It does not claim the application launches, and it says nothing about which
-# Electron version is bundled or what else ships beside it —
+# It does not claim the application launches — the JavaScript half can be
+# complete and correctly linked and still fail at runtime — and it says nothing
+# about which Electron version is bundled or what else ships beside it;
 # `ci/test/electron-supply-chain.sh` owns that question and takes the same
 # `.app` directory as its argument. This one answers exactly: "can every path in
-# this bundle be resolved by someone who has only this bundle?"
+# this bundle, in the filesystem AND in the load commands, be resolved by
+# someone who has only this bundle?"
 #
 # ## Usage
 #
@@ -398,6 +416,58 @@ print(os.path.normpath(os.path.join(os.path.dirname(base), rel)))
 		fi
 
 		# ---------------------------------------------------------------------
+		# Mach-O linkage.
+		#
+		# THE SECOND CLASS OF ESCAPE, and the one every check above is blind
+		# to: a dependency named in a LOAD COMMAND rather than in a symlink.
+		# `otool` appeared nowhere in this repository's gates before this
+		# check existed -- only in the build recipe that writes the load
+		# commands -- so nothing ever read back what that rewrite produced.
+		#
+		# It produced this, in the published 2026-08-30 dmg:
+		#
+		#   dyld[65642]: Library not loaded:
+		#       @executable_path/../Frameworks/libcrypto.3.dylib
+		#     Referenced from: .../Contents/MacOS/bin/ct_unwrapped
+		#     Reason: tried: '.../Contents/MacOS/Frameworks/libcrypto.3.dylib'
+		#       (no such file)
+		#
+		# All four native programs, dead before main(), on every Mac including
+		# the builder's. The dylib was present the whole time in
+		# `Contents/Frameworks`; `repro.nim` wrote `../` where the binaries'
+		# depth needs `../../`. Nothing above can see that, because
+		# `@executable_path/../Frameworks/libcrypto.3.dylib` is not a symlink,
+		# is not `node_modules`, is not the Electron launcher, and is not a
+		# file mode -- it is a string inside a Mach-O header.
+		#
+		# The reader is a separate file for the same reason
+		# `electron-supply-chain-closure.py` is: it is a parser, it is worth
+		# testing on its own, and the shell here should stay a verdict.
+		# ---------------------------------------------------------------------
+		banner "mach-o load commands"
+
+		# Tracked, not merely present, for the reason check 1 gives: a reader
+		# that only exists on the author's disk makes this whole section
+		# report PASSED on every machine that does not have it.
+		if [ ! -f "${REPO_ROOT}/ci/test/macho-closure.py" ]; then
+			echo "  ci/test/macho-closure.py is absent"
+			report FAILED "the Mach-O linkage reader is present"
+		elif git -C "${REPO_ROOT}" rev-parse --git-dir >/dev/null 2>&1 &&
+			! git -C "${REPO_ROOT}" ls-files --error-unmatch ci/test/macho-closure.py >/dev/null 2>&1; then
+			echo "  ci/test/macho-closure.py exists but is NOT tracked by git"
+			report FAILED "the Mach-O linkage reader is tracked"
+		else
+			macho_report="$(python3 "${REPO_ROOT}/ci/test/macho-closure.py" "${ROOT}" 2>&1)"
+			macho_rc=$?
+			indent "${macho_report}"
+			if [ "${macho_rc}" -eq 0 ]; then
+				report PASSED "every Mach-O dependency resolves inside the bundle or in the dyld shared cache"
+			else
+				report FAILED "the bundle has Mach-O load commands that do not resolve (dyld will abort these binaries)"
+			fi
+		fi
+
+		# ---------------------------------------------------------------------
 		# Values, so a reader can see the trade this bundle made.
 		# ---------------------------------------------------------------------
 		banner "bundle size"
@@ -436,7 +506,8 @@ echo "  failed: ${failures}"
 if [ "${failures}" -gt 0 ]; then
 	echo
 	echo "RESULT: FAILED (${failures}/${checks})"
-	echo "SCOPE: whether every path inside the desktop bundle resolves inside it."
+	echo "SCOPE: whether every path inside the desktop bundle resolves inside it,"
+	echo "       in the filesystem AND in the Mach-O load commands."
 	echo "       This is NOT a claim that the application launches, and NOT a"
 	echo "       statement about which Electron version is bundled."
 	exit 1
@@ -444,6 +515,7 @@ fi
 
 echo
 echo "RESULT: PASSED (${checks}/${checks})"
-echo "SCOPE: whether every path inside the desktop bundle resolves inside it."
+echo "SCOPE: whether every path inside the desktop bundle resolves inside it,"
+echo "       in the filesystem AND in the Mach-O load commands."
 echo "       This is NOT a claim that the application launches, and NOT a"
 echo "       statement about which Electron version is bundled."

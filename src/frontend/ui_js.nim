@@ -1518,6 +1518,42 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
       "; the workspace was left as it was"
     return
 
+  # THE EDITOR'S SHARE BELONGS TO A LAYOUT, NOT TO THE SESSION.
+  #
+  # `editorAreaPercent` is read once at boot (see its assignment further down
+  # this file) from the layout the session STARTS in — on noirstudio.dev that
+  # is the edit layout, whose top-level row declares `20%` Filesystem and
+  # `25%` NS9 and leaves `55` unclaimed for the editor. Storing that 55 in
+  # `data.ui` made a per-layout quantity look like a per-session one, and
+  # nothing recomputed it when a different layout was installed.
+  #
+  # `openNewLayoutContainer` (utils.nim) then forces the editor to `wanted`
+  # and rescales its siblings by `(100 - wanted) / others`, so the edit
+  # layout's 55 was being applied to the debug row. Measured on the deployed
+  # page, entering debug mode from `/`:
+  #
+  #     declared   FILES 20   replay 55            (the debug row sums to 75:
+  #     forced     editor 55                        edit mode's number)
+  #     others     75  ->  scale = 45/75 = 0.6
+  #     rendered   FILES 12.4%   editor 54.4%   right 32.6%
+  #
+  # That 12.4% is 179px at 1440, and three tabs of pin+close do not fit in it:
+  # VCS and TESTS rendered with their labels at LITERALLY zero width, as two
+  # anonymous pin/close pairs. It is the reported "the edit panels stay and the
+  # whole UI gets crammed", and the "pane at zero width" is those labels.
+  #
+  # Asking the ENTERING layout the same question the boot line asks makes the
+  # debug row answer `25` — the share its pruned NS9 column left — so the
+  # siblings scale by 75/75 and Filesystem keeps the 20% it declares.
+  #
+  # The degenerate answers are the safe ones, and both mean "do not interfere":
+  # `0` for a row already accounting for 100% — which is every `mlsSession`
+  # restore, because `saveLayout()` returns a config GoldenLayout has already
+  # renormalised, and re-forcing a width there would overwrite the arrangement
+  # the user left — and `-1` for a config the question is not well-defined
+  # over, which `max(0, ...)` folds into the same `0`.
+  data.ui.editorAreaPercent = max(0, unclaimedTopLevelPercent(resolution.config))
+
   # CONSTRUCT WHAT THE LAYOUT NAMES BEFORE HANDING IT OVER. GoldenLayout builds
   # containers, not components: a layout installed after startup names panes
   # `renderer.createUIComponents` never made, and they come up empty. Only the

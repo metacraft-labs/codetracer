@@ -171,6 +171,34 @@ button
   // without this, `:hover` flickers as the pointer crosses the glyph's edge.
   pointer-events: none
 
+  // THE HAIRLINES, WHICH THE HEIGHT ABOVE WAS QUIETLY SCALING.
+  //
+  // `1em` against the button's UA font-size is 13.328px, and these marks are
+  // drawn on a 16- or 17-unit grid, so a `stroke-width="1"` was reaching the
+  // screen at 16/13.328 -> **0.833px** on the square marks and 17/13.328 ->
+  // **0.784px** on the two `0 0 18 17` ones. Measured on the deployed page,
+  // both against `.edit-toolbar-mark`'s exact `1`:
+  //
+  //     .edit-toolbar-mark   box 16px      viewBox 16      stroke 1px
+  //     .ct-control-mark     box 13.328px  viewBox 16,17   stroke 0.833, 0.784px
+  //
+  // That is the reported "the two mark sets differ in stroke width", and it is
+  // also a difference WITHIN this set that the report did not have to notice:
+  // three stroke weights across one toolbar. A sub-pixel stroke cannot land on
+  // a pixel — it is spread across two at partial coverage — which is the
+  // blurring `.edit-toolbar-mark`'s comment says a hairline is exactly what is
+  // ruined by.
+  //
+  // `non-scaling-stroke` fixes the stroke in the viewport's coordinate system
+  // instead of the viewBox's, so `1` means one CSS pixel whichever grid the
+  // artwork was drawn on. Deliberately NOT fixed by changing `1em` to `1rem`:
+  // that would render every one of the twelve 20% larger, and the height rule
+  // above is load-bearing for a different reason — it reproduces the aspect
+  // ratio of the assets these replaced. The artwork keeps its size and its
+  // proportions; only the stroke stops being scaled with them.
+  path, line, polyline, polygon, circle, rect, ellipse
+    vector-effect: non-scaling-stroke
+
 #reset-operation-loading-image
   background-image: ct-images-reset-operation-loading
 

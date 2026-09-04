@@ -240,13 +240,20 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // ... and §10.3, which places the collapsed-strip icon zone
     // (`#auto-hide-collapsed-icon-zone`) in the same bar.
     //
-    // DO NOT hide `#status-base`'s children as a group.  A
-    // `> *:not(#auto-hide-bottom-strip) { display: none !important }` rule has
+    // DO NOT hide `#status-base`'s children as a group, IN ANY SPELLING —
+    // including ones that leave the box intact and only move it out of view.
+    // A `> *:not(#auto-hide-bottom-strip) { display: none !important }` rule has
     // been written here twice — b27da3947 "feat: Redesign of the status bar"
     // and, after it was removed, 51a3e820e "fix: UI regressions" — and both
-    // times it made the bar tabs-only.  The wish behind it is reasonable: a
-    // quieter footer.  The blanket form cannot deliver it, because every child
-    // of this bar is either required by the design or invisible in production
+    // times it made the bar tabs-only.  A third attempt, 00fd68b7f "fix: status
+    // bar styling", reached the same result with `position: absolute;
+    // left: -9999px` on `#file-info-status` and `.status-right`, and shipped
+    // undetected for two weeks because that is precisely the family the guards
+    // below document themselves as unable to see (they ask whether a region has
+    // a box, and an off-screen region has one).  The wish behind all three is
+    // reasonable: a quieter footer.  No such form can deliver it, because
+    // every child of this bar is either required by the design or invisible
+    // in production
     // already (enumerated on a live launch: `#auto-hide-collapsed-icon-zone`,
     // `#file-info-status`, `#auto-hide-bottom-strip`, `.test-movement` — which
     // renders only under `data.startOptions.inTest` — and `.status-right`).
@@ -457,8 +464,6 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       display: flex
 
     #file-info-status
-      position: absolute
-      left: -9999px
       margin-left: 0.6em
       display: flex
       align-items: center
@@ -482,8 +487,6 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       float: left
 
     .status-right
-      position: absolute
-      left: -9999px
       float: right
       width: auto
       display: flex

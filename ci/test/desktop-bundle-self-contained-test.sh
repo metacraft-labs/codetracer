@@ -87,6 +87,7 @@ make_fixture() {
 	cp "${REPO_ROOT}/ci/test/desktop-bundle-self-contained.sh" "${FIX}/repo/ci/test/"
 	cp "${REPO_ROOT}/scripts/stage-desktop-node-modules.py" "${FIX}/repo/scripts/"
 	cp "${REPO_ROOT}/ci/test/electron-supply-chain-closure.py" "${FIX}/repo/ci/test/"
+	cp "${REPO_ROOT}/ci/test/macho-closure.py" "${FIX}/repo/ci/test/"
 
 	# A repro.nim with the shape the guard greps, in its FIXED form.
 	cat >"${FIX}/repo/repro.nim" <<'EOF'
@@ -506,6 +507,168 @@ if printf '%s' "${RELINK_OUT}" | grep -q 'Contents/MacOS/stray'; then
 else
 	fail "relink names the escape it could not fix" "${RELINK_OUT}"
 fi
+
+# -----------------------------------------------------------------------------
+# Mach-O load commands — the escape that is not a symlink.
+#
+# The fixtures are SYNTHESISED Mach-O headers, not compiled binaries: a header
+# plus the load commands under test, written byte by byte. Two reasons, both
+# load-bearing. A compiled fixture would need a Mach-O toolchain, and this suite
+# runs from `ci/lint/bash.sh` on the Linux hosts too — a fixture that can only be
+# built on a Mac would silently skip there, which is the "green because it
+# measured nothing" failure this whole file exists to prevent. And the defect is
+# a specific STRING in a specific load command, so writing that string directly
+# is the shortest path between the arm and the thing it asserts.
+# -----------------------------------------------------------------------------
+macho_writer() {
+	cat >"${FIX}/mkmacho.py" <<'PY'
+"""Write a minimal 64-bit Mach-O: header + load commands, no segments.
+
+Enough for a load-command reader, which is all that is under test here.
+usage: mkmacho.py <out> <filetype:exec|dylib> [id:<name>] [rpath:<p>] [dep:<n>] [weak:<n>]
+"""
+import struct
+import sys
+
+MH_MAGIC_64 = 0xFEEDFACF
+LC_REQ_DYLD = 0x80000000
+LC_ID_DYLIB, LC_LOAD_DYLIB = 0x0D, 0x0C
+LC_LOAD_WEAK_DYLIB = 0x18 | LC_REQ_DYLD
+LC_RPATH = 0x1C | LC_REQ_DYLD
+
+out, filetype = sys.argv[1], sys.argv[2]
+
+
+def dylib_cmd(cmd, name):
+    # cmd, cmdsize, name-offset, timestamp, current_ver, compat_ver = 24 bytes
+    raw = name.encode() + b"\x00"
+    pad = (-(24 + len(raw))) % 8
+    size = 24 + len(raw) + pad
+    return struct.pack("<IIIIII", cmd, size, 24, 0, 0, 0) + raw + b"\x00" * pad
+
+
+def rpath_cmd(path):
+    raw = path.encode() + b"\x00"
+    pad = (-(12 + len(raw))) % 8
+    size = 12 + len(raw) + pad
+    return struct.pack("<III", LC_RPATH, size, 12) + raw + b"\x00" * pad
+
+
+cmds = b""
+n = 0
+for arg in sys.argv[3:]:
+    kind, _, value = arg.partition(":")
+    if kind == "id":
+        cmds += dylib_cmd(LC_ID_DYLIB, value)
+    elif kind == "dep":
+        cmds += dylib_cmd(LC_LOAD_DYLIB, value)
+    elif kind == "weak":
+        cmds += dylib_cmd(LC_LOAD_WEAK_DYLIB, value)
+    elif kind == "rpath":
+        cmds += rpath_cmd(value)
+    else:
+        raise SystemExit(f"unknown fixture directive: {arg}")
+    n += 1
+
+ft = 2 if filetype == "exec" else 6
+header = struct.pack("<IiiIIII", MH_MAGIC_64, 0x0100000C, 0, ft, n, len(cmds), 0)
+with open(out, "wb") as fh:
+    fh.write(header + struct.pack("<I", 0) + cmds)
+PY
+}
+
+# A bundle shaped like the real .app: programs in Contents/MacOS/bin, libraries
+# in Contents/Frameworks. The DEPTH between those two is the whole defect.
+make_macho_bundle() {
+	# make_macho_bundle <dep-string-for-the-executable>
+	local app="${FIX}/MachO.app"
+	rm -rf "${app}"
+	mkdir -p "${app}/Contents/MacOS/bin" "${app}/Contents/Frameworks"
+	python3 "${FIX}/mkmacho.py" "${app}/Contents/Frameworks/libcrypto.3.dylib" \
+		dylib "id:@rpath/libcrypto.3.dylib" "dep:/usr/lib/libSystem.B.dylib"
+	python3 "${FIX}/mkmacho.py" "${app}/Contents/MacOS/bin/ct_unwrapped" \
+		exec "dep:$1" "dep:/usr/lib/libSystem.B.dylib"
+	chmod +x "${app}/Contents/MacOS/bin/ct_unwrapped"
+	echo "${app}"
+}
+
+echo
+echo "--- arm: a Mach-O load command one directory level too shallow"
+# THE DEFECT, reproduced exactly. `@executable_path` for a binary in
+# Contents/MacOS/bin is Contents/MacOS/bin, so `../Frameworks` is
+# Contents/MacOS/Frameworks — a directory that has never existed in any build.
+# The published 2026-08-30 dmg shipped this on all four native programs and
+# every one of them exited 134 in dyld.
+make_fixture
+macho_writer
+APP="$(make_macho_bundle '@executable_path/../Frameworks/libcrypto.3.dylib')"
+run_guard "${APP}"
+expect_line "FAILED: the bundle has Mach-O load commands that do not resolve" \
+	"a load command that resolves nowhere is refused"
+expect_line "@executable_path/../Frameworks/libcrypto.3.dylib" \
+	"the refusal quotes the offending load command"
+expect_line "Contents/MacOS/Frameworks/libcrypto.3.dylib" \
+	"the refusal shows the path it actually tried"
+
+echo
+echo "--- arm: the same bundle with the correct depth"
+make_fixture
+macho_writer
+APP="$(make_macho_bundle '@loader_path/../../Frameworks/libcrypto.3.dylib')"
+run_guard "${APP}"
+expect_line "PASSED: every Mach-O dependency resolves inside the bundle" \
+	"correct depth is accepted"
+
+echo
+echo "--- arm: an absolute /nix/store load command WHOSE TARGET EXISTS HERE"
+# The Mach-O twin of the symlink arm above, and the same trap: the builder and
+# `dmg-lib-check` are the same aarch64-darwin host, so a store path in a load
+# command is perfectly loadable there. Refusal must be about being OUTSIDE THE
+# BUNDLE, never about being broken on the machine running the check.
+make_fixture
+macho_writer
+APP="${FIX}/MachO.app"
+rm -rf "${APP}"
+mkdir -p "${APP}/Contents/MacOS/bin" "${APP}/Contents/Frameworks" "${FIX}/fake-store"
+python3 "${FIX}/mkmacho.py" "${FIX}/fake-store/libcrypto.3.dylib" dylib "id:@rpath/libcrypto.3.dylib"
+python3 "${FIX}/mkmacho.py" "${APP}/Contents/MacOS/bin/ct_unwrapped" \
+	exec "dep:${FIX}/fake-store/libcrypto.3.dylib"
+chmod +x "${APP}/Contents/MacOS/bin/ct_unwrapped"
+run_guard "${APP}"
+expect_line "FAILED: the bundle has Mach-O load commands that do not resolve" \
+	"an absolute dependency outside the bundle is refused even though it loads here"
+expect_line "[OUTSIDE]" "the refusal labels it as leaving the bundle"
+
+echo
+echo "--- arm: a bundled dylib's own LC_ID_DYLIB is not a dependency"
+# `install_name_tool -id @rpath/libfoo.dylib` is what repro.nim writes on every
+# bundled library, and there is no LC_RPATH anywhere in this bundle because the
+# consumers name the library by an explicit path. Counting the id as a
+# dependency would redden every correct build, and a gate that is red on correct
+# input gets switched off.
+make_fixture
+macho_writer
+APP="$(make_macho_bundle '@loader_path/../../Frameworks/libcrypto.3.dylib')"
+run_guard "${APP}"
+expect_no_line "@rpath/libcrypto.3.dylib" \
+	"the dylib's own install name is not reported as unresolvable"
+
+echo
+echo "--- arm: a weak dependency that is absent does not fail the bundle"
+# dyld tolerates a missing LC_LOAD_WEAK_DYLIB by design. Failing it would make
+# the gate assert something untrue about the runtime.
+make_fixture
+macho_writer
+APP="${FIX}/MachO.app"
+rm -rf "${APP}"
+mkdir -p "${APP}/Contents/MacOS/bin" "${APP}/Contents/Frameworks"
+python3 "${FIX}/mkmacho.py" "${APP}/Contents/MacOS/bin/ct_unwrapped" \
+	exec "weak:@loader_path/../../Frameworks/liboptional.dylib"
+chmod +x "${APP}/Contents/MacOS/bin/ct_unwrapped"
+run_guard "${APP}"
+expect_line "PASSED: every Mach-O dependency resolves inside the bundle" \
+	"an absent weak dependency is reported but not failed"
+expect_line "weak & absent     : 1" "the absent weak dependency is still counted"
 
 # -----------------------------------------------------------------------------
 echo
