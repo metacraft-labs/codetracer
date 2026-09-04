@@ -3692,6 +3692,22 @@ test-watch-expressions-in-browser *args:
   exec > >(tee test-logs/test-watch-expressions-in-browser.log) 2>&1
   bash ci/test/watch-expressions-in-browser.sh {{args}}
 
+# A recorded value reaches the State pane and is shown as the value it is.
+#
+# The sibling of `test-watch-expressions-in-browser`, over the same captured
+# `ct/load-locals` body and with the same three dependencies. Where that gate
+# asks whether the pane's tabs and inputs are REACHABLE, this one asks what
+# the pane SAYS a value is, and whether it ever asked for one.
+#
+# Needs Chromium and stylus from the dev shell; it EXITS 2 rather than
+# passing when either is absent. Pass a path to write a screenshot.
+test-state-values-in-browser *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-state-values-in-browser.log) 2>&1
+  bash ci/test/state-values-in-browser.sh {{args}}
+
 test-noir-replay-in-browser:
   #!/usr/bin/env bash
   set -euo pipefail

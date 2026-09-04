@@ -2686,6 +2686,31 @@ jobs:
         # attributable to different steps.
         run: nix develop .#devShells.x86_64-linux.default --command just test-watch-expressions-in-browser
 
+      - name: A recorded value reaches the State pane and is shown as the value it is
+        # The sibling of the step above, and it runs here for the same reasons:
+        # same captured `ct/load-locals` body, same three dependencies (`nim
+        # js`, stylus, Chromium), no engine on the page and none needed.
+        #
+        # WHAT IT ADDS THAT THE STEP ABOVE CANNOT SEE. That gate's probe builds
+        # its rows BY HAND out of the wire's JSON, so it reported the refusal's
+        # `msg` correctly while the product's own mapping turned the same row
+        # into the bare word "Error" — 24 green checks over a string the pane
+        # does not paint. This probe calls `ui/state.nim:localsToStoreRows`,
+        # the product's mapping, precisely so a wrong mapping is visible.
+        #
+        # It carries two mutation arms, each reproducing one half of the
+        # pre-fix product in the harness and reddening only its own half:
+        # arm V fills the value cell with `$v` (a four-line dump for a
+        # sequence, "<error>" for a record, "Error" for a refusal), arm O
+        # removes the tracker reset (the pane never asks and sits on
+        # "Loading..."). Measured on this branch before it was wired: 32 of
+        # 32, no skips.
+        #
+        # Like its neighbour it EXITS 2 when a dependency is missing, and in
+        # THIS lane that must be red: a shell that has stopped providing
+        # Chromium is a lane defect, not an absent optional capability.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-state-values-in-browser
+
       - name: A registered known failure signals when it goes green
         # The ledger `just test-vm` now consults, gated in both directions.
         #
