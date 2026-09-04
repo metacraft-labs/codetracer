@@ -147,7 +147,22 @@ proc clearViewZones*(self: EditorViewComponent) =
     for viewZone in self.viewZones:
       view.removeZone(viewZone)
 
-proc toggleMacroExpansion*(self: EditorViewComponent) =
+# NOT EXPORTED, AND THE MISSING `*` IS THE POINT. The only caller is the
+# `ALT+KeyE` entry of the `commands` table sixty lines below, in this module —
+# no other file has ever referenced this name. The `*` was an export nobody
+# outside could use, which is the shape `ci/test/frontend-reachability.sh`
+# counts and which `ci/lint/nim.sh` records the precedent for:
+# `layout.mountComponentContainer` carried the same meaningless `*`, and "the
+# fix was to drop the `*` ... and not to raise this number".
+#
+# It stayed uncounted only because nothing outside the module mentioned the
+# NAME either. `shortcut_bindings_test.nim` now does — the chord-collision
+# report names the action each claimant runs, and this is ALT+E's Monaco side —
+# which is exactly the transition that precedent describes: a test mentioning
+# the name moves an export from the uncounted "only its own module reaches it"
+# bucket into the counted "tested, and no product module reaches it" one. The
+# export was always empty; the test only made it visible.
+proc toggleMacroExpansion(self: EditorViewComponent) =
   if self.lastMouseMoveLine != -1:
     if self.expanded.hasKey(self.lastMouseMoveLine):
       self.expanded[self.lastMouseMoveLine].isExpanded = not self.expanded[self.lastMouseMoveLine].isExpanded
