@@ -561,10 +561,14 @@ jobs:
             # workspace lock still carries an io-mon rev that predates
             # depfile.nim, so a bare `io-mon` here can silently resolve to a
             # revision that cannot build `ct`.
+            # nim-stackable-hooks is SHA-pinned here (the main lane still says
+            # `=dev`) because ci-contract-suites ratchets the number of mutable
+            # branch-tip entries and that ceiling is only ever lowered. This is
+            # the `dev` tip as of 2026-08-29.
             io-mon=e2ee15afe8dd7f538ec2ce79af9a1aa512addce2
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
-            nim-stackable-hooks=dev
+            nim-stackable-hooks=d51b571a3d53f92a3200541e8267f7bb25d36c6c
             # Not in the workspace lock -- pinned to flake.lock's revs. See
             # "THE REMAINING TWO" above before changing either of these.
             isonim=9936c544925004bada019204b5b111f39d1a54bf
