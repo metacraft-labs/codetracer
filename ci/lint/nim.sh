@@ -203,8 +203,11 @@ lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1
 #
 # So the operation a developer invokes to see what their code compiled to gets
 # its own check, at --enforce, with no ceiling and no allow-list. It is proved
-# able to fail: against `origin/dev` at a861f5b7b it exits 1 on 18 of its 20
-# links, and its header records that measurement rather than a claim about it.
+# able to fail: against `origin/dev` at a861f5b7b it exits 1 on 22 of its 24
+# links, and its header records that measurement -- including WHICH four were
+# tested-but-unreached -- rather than a claim about it. The number lives in the
+# guard's own header too, which is the only place worth updating it; this
+# sentence is a pointer and will go stale if it is treated as the record.
 lint_step "Show Generated Code: the operation's chain is reached from production" \
 	python3 ci/test/generated-code-operation-guard.py
 
