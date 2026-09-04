@@ -136,6 +136,32 @@ assert_root_identical() {
 	assert_identical "$e" "$a" "$3"
 }
 
+# EVERY INPUT MUST COME FROM THE CASE, NOT FROM THE RUNNER.
+#
+# docs.sh derives its channel and pull-request number from GITHUB_EVENT_NAME /
+# GITHUB_REF / GITHUB_REF_NAME when DOCS_DEPLOY_* does not say otherwise. Under
+# GitHub Actions those are always exported, so on a `pull_request` run the
+# runner's own context silently replaced each case's inputs: docs.sh selected
+# the preview channel and took the PR number out of `refs/pull/<N>/merge`, and
+# the three assertions that exist to prove BAD INPUT IS REFUSED saw a perfectly
+# good deploy and reported an acceptance. The suite passed on `push` runs and
+# could not pass on any pull request -- it was measuring the runner.
+#
+# Scrubbed per-invocation rather than once at the top of the file, because
+# `env` applies -u before the KEY=VALUE arguments that follow it: a case that
+# deliberately sets GITHUB_EVENT_NAME (the event-derived case below) still wins.
+DOCS_ENV_SCRUB=(
+	-u GITHUB_EVENT_NAME
+	-u GITHUB_REF
+	-u GITHUB_REF_NAME
+	-u GITHUB_REPOSITORY
+	-u DOCS_DEPLOY_CHANNEL
+	-u DOCS_DEPLOY_PR
+	-u DOCS_DEPLOY_BRANCH
+	-u DOCS_DEPLOY_BASELINE
+	-u DOCS_DEPLOY_REMOTE
+)
+
 # Run docs.sh as a dry run against a baseline, leaving the staged tree behind.
 # Echoes nothing on success; the caller inspects $STAGE.
 STAGE=""
@@ -148,7 +174,7 @@ run_dry() {
 	local rc=0
 	(
 		cd "$TEST_ROOT/repo"
-		env DOCS_DEPLOY_DRY_RUN=1 DOCS_DEPLOY_SKIP_BUILD=1 \
+		env "${DOCS_ENV_SCRUB[@]}" DOCS_DEPLOY_DRY_RUN=1 DOCS_DEPLOY_SKIP_BUILD=1 \
 			DOCS_DEPLOY_STAGE_DIR="$STAGE" "$@" \
 			bash "$DOCS_SH"
 	) >"$TEST_ROOT/run.log" 2>&1 || rc=$?
@@ -170,7 +196,7 @@ assert_refused() {
 	local rc=0
 	(
 		cd "$TEST_ROOT/repo"
-		env DOCS_DEPLOY_DRY_RUN=1 DOCS_DEPLOY_SKIP_BUILD=1 "$@" bash "$DOCS_SH"
+		env "${DOCS_ENV_SCRUB[@]}" DOCS_DEPLOY_DRY_RUN=1 DOCS_DEPLOY_SKIP_BUILD=1 "$@" bash "$DOCS_SH"
 	) >"$TEST_ROOT/refuse.log" 2>&1 || rc=$?
 	if [ "$rc" = "0" ]; then
 		fail "$label: docs.sh accepted it (exit 0)"
@@ -421,7 +447,8 @@ REMOTE_URL="file://$BARE"
 run_real() {
 	(
 		cd "$TEST_ROOT/repo"
-		env DOCS_DEPLOY_SKIP_BUILD=1 DOCS_DEPLOY_REMOTE="$REMOTE_URL" "$@" bash "$DOCS_SH"
+		env "${DOCS_ENV_SCRUB[@]}" DOCS_DEPLOY_SKIP_BUILD=1 \
+			DOCS_DEPLOY_REMOTE="$REMOTE_URL" "$@" bash "$DOCS_SH"
 	) >"$TEST_ROOT/run.log" 2>&1
 }
 
