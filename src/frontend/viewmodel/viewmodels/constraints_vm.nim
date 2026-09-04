@@ -119,6 +119,59 @@ type
 proc setReport*(vm: ConstraintsVM; report: ConstraintReport) =
   vm.report.val = report
 
+proc noteCompileStarted*(vm: ConstraintsVM) =
+  ## A compile that will replace this report has been dispatched.
+  ##
+  ## THE STATE BETWEEN THE TWO THE PANE USED TO HAVE. `startWebRenderer` now
+  ## dispatches a compile as soon as the project is mounted, so a visitor who
+  ## lands and does nothing is looking at the bundled `nargo info` counts for
+  ## the seconds it takes to fetch 15 MB of compiler and run it. Without this
+  ## the pane spends those seconds telling them to "Build the project" — advice
+  ## for a build that is already running, and one `startNoirBuild` would refuse
+  ## with `reason=already-running` if they took it.
+  ##
+  ## THE COUNTS ARE NOT CLEARED, for `markStale`'s reason one state over: the
+  ## bundled totals are the best available answer to "how big is this circuit"
+  ## until a better one lands, and blanking the pane to announce that a better
+  ## one is coming trades information for a spinner.
+  ##
+  ## Idempotent by the guard, which matters because `dispatch` reaches this on
+  ## every compile including ones a user starts while the automatic one is
+  ## still settling.
+  var current = vm.report.val
+  if current.compiling:
+    return
+  current.compiling = true
+  vm.report.val = current
+
+proc noteCompileSettled*(vm: ConstraintsVM; listingAbsence: string = "") =
+  ## The compile ended, HOWEVER it ended.
+  ##
+  ## ON EVERY SETTLE AND NOT ONLY ON SUCCESS. A success arrives through
+  ## `setReport` with a whole new report, whose `compiling` is false by
+  ## construction, so this proc's real subject is the other three outcomes: a
+  ## refusal that never reached the worker, a compile the toolchain rejected,
+  ## and a fault. A pane that only cleared the flag on success would say
+  ## "compiling" for the rest of the session on a project that does not build —
+  ## announcing progress that stopped, which is the one thing worse than
+  ## announcing nothing.
+  ##
+  ## `listingAbsence` is how a FAILURE gets a sentence instead of a silence.
+  ## Passed only when there is no listing to show; a recompile that failed over
+  ## a listing an earlier compile produced leaves that listing alone, because
+  ## the rows on screen are still the rows some compile really generated and
+  ## `stale` is the flag that says they may no longer describe the source.
+  var current = vm.report.val
+  let hadFlag = current.compiling
+  let wantsAbsence = listingAbsence.len > 0 and not current.hasListing() and
+                     current.listingAbsence != listingAbsence
+  if not hadFlag and not wantsAbsence:
+    return
+  current.compiling = false
+  if wantsAbsence:
+    current.listingAbsence = listingAbsence
+  vm.report.val = current
+
 proc setAbsence*(vm: ConstraintsVM; reason: string) =
   vm.report.val = absentReport(reason)
 
@@ -150,6 +203,12 @@ proc noteListingUnavailable*(vm: ConstraintsVM; reason: string) =
     vm.report.val = absentReport(reason)
     return
   current.listingAbsence = reason
+  # THE COMPILE THAT SAID SO IS OVER. `noteCompileSettled` clears the flag a
+  # moment later on the same exit, so this is belt-and-braces in the live
+  # wiring — and it is not redundant for a caller that has only this one:
+  # a report carrying both `compiling` and a caption explaining why the
+  # listing never arrived describes two states at once.
+  current.compiling = false
   vm.report.val = current
 
 proc markStale*(vm: ConstraintsVM; stale: bool) =

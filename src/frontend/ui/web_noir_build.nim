@@ -163,6 +163,32 @@ var
     ## `listing` is ordinary rather than a fault: a compiler module older than
     ## `VfsResponse.acir_listing` answers without it, and the pane must then
     ## say it has no counts rather than show a number from somewhere else.
+  noirConstraintsCompileStarted*: proc()
+    ## Told at DISPATCH of a COMPILE, before the worker has answered.
+    ##
+    ## `noirTestRunStarted`'s shape, one pane over, and for the reason that
+    ## file gives: the pane needs the event, and the result stream cannot
+    ## supply it — a compile that is running has produced nothing yet, so there
+    ## is no message whose absence means "in flight" rather than "idle".
+    ##
+    ## COMPILE ONLY. `nbpTest`, `nbpTestRecord` and `nbpTrace` also run through
+    ## `dispatch` and none of them produces a constraint listing, so a pane
+    ## told about those would announce a compile and then never replace the
+    ## counts it promised to replace. That is why this is not
+    ## `BuildVM.isRunning`, which is true for all four.
+  noirConstraintsCompileSettled*: proc(listingAbsence: string)
+    ## Told when a COMPILE settles, however it settled — including a refusal
+    ## that never reached the worker.
+    ##
+    ## Paired with the above for `noirTestRunSettled`'s reason: a pane left in
+    ## flight over a run that is not would claim progress that stopped, and
+    ## unlike a disabled button that state never corrects itself.
+    ##
+    ## `listingAbsence` is a SENTENCE ON FAILURE and empty on success. The
+    ## caller states it rather than the pane inferring it, because only the
+    ## caller knows which of the failures happened: a refusal names the
+    ## capability the deployment lacks, and a rejected compile is the user's
+    ## program. A pane that guessed would print the reassuring guess.
   noirTestRunSink*: proc(response: NoirTestResponse; packageDir: string)
     ## Where a finished test run's verdicts go, besides the build pane.
     ##
@@ -203,6 +229,32 @@ var
   activeHandle: ProcessHandle
   activeIntent: NoirRunIntent
   activeInFlight = false
+  activeRevealsBuildPane = true
+    ## Whether the run in flight is allowed to bring the BUILD pane forward.
+    ##
+    ## TRUE FOR EVERY GESTURE, and false for exactly one caller:
+    ## `startNoirConstraintsCompile`, the compile the page runs by itself so
+    ## that a visitor who lands and does nothing still sees a listing.
+    ##
+    ## THIS FLAG IS THE DIFFERENCE BETWEEN THAT FEATURE AND A REGRESSION.
+    ## `dispatch` and `onPhaseExit` both call `ensureBuildPaneVisible`, and on
+    ## a browser layout the BUILD pane is a standalone auto-hide OVERLAY drawn
+    ## on top of the right-hand column — the column the CONSTRAINTS pane owns.
+    ## Measured on the live deployment: after Ctrl+B, `elementFromPoint` over
+    ## the CONSTRAINTS pane's centre returns `DIV.build-output-container` and
+    ## the opcode rows are underneath it until Escape is pressed. An automatic
+    ## compile that revealed the pane would therefore cover the listing it was
+    ## started to produce, on every page load, for every visitor — a worse
+    ## version of the defect it fixes.
+    ##
+    ## The output is NOT suppressed, only the reveal: the rows are painted into
+    ## the BUILD pane as usual and are there for anyone who opens it. What a
+    ## page does on its own account does not get to take the screen; what a
+    ## user asked for does.
+    ##
+    ## Restored to true on every gesture entry point rather than on settle, so
+    ## a run that never settles cannot leave a later gesture unable to show its
+    ## own output.
   lastStartCount = 0
     ## How many `start` messages this module has caused the worker to be sent.
     ##
@@ -343,6 +395,15 @@ proc ensureBuildPaneVisible() =
   ## idempotent (`isoNimBuildMounted` guards it), so calling it here costs
   ## nothing when the pane was already mounted and is the difference between a
   ## painted result and an empty container when it was not.
+  ##
+  ## SUPPRESSED FOR THE AUTOMATIC COMPILE, and only for that one — see
+  ## `activeRevealsBuildPane`, whose comment records what revealing it would
+  ## cover. The MOUNT still happens: a pane that is not shown must still be
+  ## able to paint, or the run's output would be lost rather than merely
+  ## unrevealed, and a user who then opened BUILD would find it empty.
+  if not activeRevealsBuildPane:
+    build_pane.tryMountIsoNimBuildPanel()
+    return
   if not data.isNil and not data.ui.layout.isNil:
     data.openLayoutTab(Content.Build)
   build_pane.autoRevealBuildPanel()
@@ -414,6 +475,24 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
   # `force_brillig` — GCL-D9: that artefact has no located ACIR opcodes at all,
   # so counting it would replace the program's constraints with a test's, and
   # a `debug` compile's listing is one row.
+  # THE CONSTRAINTS PANE STOPS SAYING "COMPILING", whatever the verdict was.
+  #
+  # BEFORE the sink below and before the phase chaining, so that every exit
+  # path out of this proc has already cleared it — `nriRun` returns early into
+  # `startTrace`, `nriTestRecord` returns early twice, and a settle placed
+  # after any of them would be skipped on exactly the runs that take longest.
+  #
+  # On success the sentence is empty and the sink replaces the whole report a
+  # line later; on a refusal or a rejected compile it is the pane's only
+  # account of what happened, because `noirConstraintsSink` does not fire at
+  # all on those and the pane would otherwise hold the bundled counts under a
+  # caption promising a listing that is no longer coming.
+  if phase == nbpCompile and not noirConstraintsCompileSettled.isNil:
+    noirConstraintsCompileSettled(
+      if verdict == npvSucceeded: ""
+      else: "The compile this page started did not finish, so the generated " &
+            "code cannot be shown. The BUILD pane has the compiler's output.")
+
   if phase == nbpCompile and verdict == npvSucceeded and
      not noirConstraintsSink.isNil:
     # THE PROVENANCE NAMES THE COMPILE, not the command that could produce one.
@@ -546,6 +625,17 @@ proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
   producer.beginPhase(phase, label, jsNowMs())
   ensureBuildPaneVisible()
 
+  # ANNOUNCED BEFORE THE SPAWN IS ATTEMPTED, not after it succeeds.
+  #
+  # The two refusal branches below both return, and both settle the pane by
+  # name; announcing first is what makes those settles meaningful instead of
+  # clearing a flag that was never set. It also covers the case the automatic
+  # compile makes ordinary — a deployment that shipped no wasm modules refuses
+  # at `capProcessSpawn` synchronously, and the pane must say "the compile did
+  # not start" rather than never having mentioned a compile at all.
+  if phase == nbpCompile and not noirConstraintsCompileStarted.isNil:
+    noirConstraintsCompileStarted()
+
   if not platform.can(capProcessSpawn):
     # The registry is empty, so `newWebPlatform` subtracted the capability and
     # attached `webNoModulesLoaded` as its degradation. That sentence names
@@ -554,6 +644,12 @@ proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
     discard producer.onRefusal(
       degradedBehaviour(platform.profile, capProcessSpawn))
     report($phase & "-refused", "reason=no-spawn")
+    if phase == nbpCompile and not noirConstraintsCompileSettled.isNil:
+      # THE DEPLOYMENT'S OWN SENTENCE, not one invented here. `webNoModulesLoaded`
+      # names the modules this page did not load, which is the true statement —
+      # a generic "the compile failed" would blame the project.
+      noirConstraintsCompileSettled(
+        degradedBehaviour(platform.profile, capProcessSpawn))
     return
 
   proc onOutput(chunk: ProcessOutputChunk) =
@@ -578,6 +674,8 @@ proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
     # describes nothing.
     discard producer.onRefusal($started.error)
     report($phase & "-refused", "reason=" & $started.error.kind)
+    if phase == nbpCompile and not noirConstraintsCompileSettled.isNil:
+      noirConstraintsCompileSettled($started.error)
     return
 
   activeHandle = started.value
@@ -603,6 +701,7 @@ proc startNoirBuild*(saved: seq[string] = @[]) =
   ## `data.saveFiles`, which lives in `renderer.nim`, and reaching it from here
   ## would put a renderer dependency into the module that talks to the wasm
   ## toolchain. `ui_js`'s web arm owns both and does it there.
+  activeRevealsBuildPane = true
   if activeInFlight:
     report("build-ignored", "reason=already-running")
     return
@@ -618,6 +717,72 @@ proc startNoirBuild*(saved: seq[string] = @[]) =
   dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
            $noirVfsRequest(templateVfsEntries(tmpl), tmpl.name, nbmProgram),
            savedFilesLabel("nargo compile", saved))
+
+proc startNoirConstraintsCompile*() =
+  ## The compile the PAGE runs, so that a visitor who lands and does nothing
+  ## still sees the generated code.
+  ##
+  ## ## Why this is not `startNoirBuild()`
+  ##
+  ## Two differences, and both are about it being the page's gesture rather
+  ## than the user's.
+  ##
+  ## **It does not bring the BUILD pane forward.** `dispatch` and `onPhaseExit`
+  ## both call `ensureBuildPaneVisible`, and on a browser layout that pane is a
+  ## standalone auto-hide OVERLAY drawn over the right-hand column — the column
+  ## CONSTRAINTS owns. Measured on the live deployment: after Ctrl+B,
+  ## `elementFromPoint` at the CONSTRAINTS pane's centre returns
+  ## `DIV.build-output-container`, and the probe has to press Escape before it
+  ## can read the rows. A compile that ran on every page load and revealed that
+  ## overlay would cover the listing it exists to produce. The output is still
+  ## painted into the pane; only the reveal is suppressed.
+  ##
+  ## **It yields to any gesture rather than competing with one.** The
+  ## `activeInFlight` check in `startNoirBuild` reports `already-running` and
+  ## drops the request, which is right for a user who pressed a key twice and
+  ## wrong as the only account of an automatic compile that never happened — so
+  ## this reports under its own name. A user who presses Ctrl+B while this is
+  ## in flight gets `build-ignored`, which is correct: the compile they would
+  ## have started is the one already running, and its result lands in the same
+  ## pane.
+  ##
+  ## ## What it does NOT do
+  ##
+  ## It does not save. Nothing is dirty at boot, and `saveThenCompile` exists
+  ## to close the window where an unsaved buffer is not in `currentProject()`;
+  ## there is no such window before the visitor has typed. Calling it here
+  ## would send `CODETRACER::save-file` for zero editors and defer this compile
+  ## by an extra macrotask for nothing.
+  ##
+  ## It does not retry. A refusal is reported to the pane through
+  ## `noirConstraintsCompileSettled`, which states it; a page that quietly
+  ## re-dispatched a compile the deployment cannot run would fetch nothing
+  ## repeatedly and say nothing about it.
+  activeRevealsBuildPane = false
+  if activeInFlight:
+    # NOT REACHABLE FROM THE BOOT PATH TODAY — this runs one macrotask after
+    # the mount, and the only other dispatcher is a gesture a user has not had
+    # time to make. Reported rather than asserted because the ordering that
+    # makes it unreachable is not this proc's to guarantee, and a silent return
+    # here would look exactly like a compile that ran.
+    report("constraints-compile-ignored", "reason=already-running")
+    activeRevealsBuildPane = true
+    return
+  let tmpl = currentProject()
+  if not tmpl.hasFiles:
+    report("constraints-compile-refused", "reason=no-project")
+    activeRevealsBuildPane = true
+    return
+  let producer = producerFor(tmpl)
+  if producer.isNil:
+    report("constraints-compile-refused", "reason=no-build-vm")
+    activeRevealsBuildPane = true
+    return
+  activeIntent = nriBuild
+  report("constraints-compile-started", "package=" & tmpl.name)
+  dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
+           $noirVfsRequest(templateVfsEntries(tmpl), tmpl.name, nbmProgram),
+           "nargo compile")
 
 proc startNoirRun*(saved: seq[string] = @[]) =
   ## RUN — compile for debugging, then trace.
@@ -664,6 +829,12 @@ proc startNoirRun*(saved: seq[string] = @[]) =
   ## `noir_build_producer`'s trace arm says so by name and leaves the counted
   ## rows as the answer. That is a deployment property, asked of the descriptor
   ## — not a property of this product.
+  # EVERY GESTURE RESTORES THE REVEAL, and it is restored on ENTRY rather
+  # than when the automatic compile settles. A run that never settles —
+  # a worker that dies, a page suspended mid-compile — would otherwise
+  # leave the flag down, and the next thing a user pressed would run with
+  # its output painted into a pane nothing brought forward.
+  activeRevealsBuildPane = true
   if activeInFlight:
     report("run-ignored", "reason=already-running")
     return
@@ -722,6 +893,12 @@ proc startNoirTests*(saved: seq[string] = @[]; only: seq[string] = @[]) =
   ## and asking for `debug` would run an INSTRUMENTED program, which is not the
   ## one the user tests locally; two runners disagreeing about the same suite
   ## is the single outcome this whole path exists to avoid.
+  # EVERY GESTURE RESTORES THE REVEAL, and it is restored on ENTRY rather
+  # than when the automatic compile settles. A run that never settles —
+  # a worker that dies, a page suspended mid-compile — would otherwise
+  # leave the flag down, and the next thing a user pressed would run with
+  # its output painted into a pane nothing brought forward.
+  activeRevealsBuildPane = true
   if activeInFlight:
     report("test-ignored", "reason=already-running")
     return
@@ -778,6 +955,12 @@ proc startNoirTestRecording*(selector: string;
   ## program from the one `nargo test` runs — so a session opened without the
   ## verdict would show an execution whose pass/fail nobody had established
   ## against the compile options a developer's own terminal uses.
+  # EVERY GESTURE RESTORES THE REVEAL, and it is restored on ENTRY rather
+  # than when the automatic compile settles. A run that never settles —
+  # a worker that dies, a page suspended mid-compile — would otherwise
+  # leave the flag down, and the next thing a user pressed would run with
+  # its output painted into a pane nothing brought forward.
+  activeRevealsBuildPane = true
   if activeInFlight:
     report("test-record-ignored", "reason=already-running")
     return

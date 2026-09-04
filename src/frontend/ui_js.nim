@@ -5872,6 +5872,31 @@ when defined(ctWeb) and not defined(ctInExtension):
               constraints.constraintsVMInstance.setReport(
                 reportFromAcirListing(listing, packageDir, provenance))
 
+          # THE THIRD STATE OF THE PANE, and the reason the automatic compile
+          # below is not just a call. Between the mount and the first answer
+          # the pane holds counts it is about to replace, and the caption it
+          # would otherwise show says "Build the project" — advice for a build
+          # that is already running, which `startNoirBuild` would refuse with
+          # `reason=already-running` if a reader took it.
+          #
+          # THE INSTANCE IS READ AT FIRE TIME, not captured, for the reason
+          # written out above `noirTestRunStarted`: `initConstraintsVM` may
+          # replace `constraintsVMInstance` after this line, and a callback
+          # holding the earlier ref would be writing into a view-model nothing
+          # renders.
+          web_noir_build.noirConstraintsCompileStarted = proc() =
+            constraints.initConstraintsVM()
+            if constraints.constraintsVMInstance.isNil:
+              return
+            constraints.constraintsVMInstance.noteCompileStarted()
+
+          web_noir_build.noirConstraintsCompileSettled =
+            proc(listingAbsence: string) =
+              if constraints.constraintsVMInstance.isNil:
+                return
+              constraints.constraintsVMInstance.noteCompileSettled(
+                listingAbsence)
+
           web_noir_build.noirTestRunSink =
             proc(response: NoirTestResponse; packageDir: string) =
               if test_results.testResultsVMInstance.isNil:
@@ -6253,6 +6278,76 @@ when defined(ctWeb) and not defined(ctInExtension):
         # from the user.
         Mousetrap.`bind`("ctrl+shift+e") do ():
           web_project_persistence.exportOpenProject()
+
+        # ------------------------------------------------------------------
+        # THE COMPILE NOBODY ASKED FOR, which is the point.
+        # ------------------------------------------------------------------
+        #
+        # ## The defect
+        #
+        # "The CONSTRAINTS panel shown BY DEFAULT still displays just counts
+        # instead of constraints/IR/bytecode listings." Measured on the live
+        # deployment (revision b6e28026) with a probe that performs NO gesture
+        # and waits twenty seconds: `opcodeRows: 0`, the function row reads
+        # `main`, the provenance reads "measured at build time", and the pane
+        # captions itself "Build the project to see the compiler's own listing
+        # here". One Ctrl+B later the same page reports 34 rows, `func 0` and
+        # "compiled in this tab". The listing worked; nothing started it.
+        #
+        # ## Why COMPILE ON LOAD and not lazy-on-first-view
+        #
+        # Lazy-on-first-view is the better instinct and it is the wrong shape
+        # HERE, for a reason that is a fact about this layout rather than a
+        # preference: the CONSTRAINTS pane is VISIBLE ON FIRST PAINT. It owns a
+        # 25% column of its own in `src/config/default_layout.json` (a stack
+        # with one component, not a background tab), `paneHomesForMode(EditMode)`
+        # nests TEST RESULTS into the FILES stack and deliberately leaves
+        # CONSTRAINTS its column, and the deployed probe confirms it:
+        # `paneVisible: true`, rect `[1200, 70, 396, 902]`, tab
+        # `CONSTRAINTS [active]`. "First view" and "load" are therefore the same
+        # instant, and a visibility observer would be machinery that fires on
+        # the same tick as this line while implying a deferral that never
+        # happens.
+        #
+        # It would earn its keep the moment CONSTRAINTS stops being visible by
+        # default — behind a tab, or hidden in a mode. That is the condition
+        # under which to write it, and it is not today's.
+        #
+        # ## What it costs, measured rather than assumed
+        #
+        # The compile runs in the wasm worker, so the main thread is not what
+        # pays; the page pays a 15 MB module fetch that would otherwise not
+        # happen until the visitor pressed Build. Measured end to end from this
+        # dispatch to the pane painting its rows, on the assembled bundle over
+        # a local server:
+        #
+        #     hello_noir (34 rows)   first compile ~2.9 s, of which ~2.5 s is
+        #                            fetching and instantiating the module
+        #     /noir/demo (829 rows)  first compile ~3.4 s
+        #
+        # The difference between the two projects is about half a second, so
+        # the cost is dominated by the module and not by the circuit — which is
+        # why 829 rows is not an argument for deferring and why a second, larger
+        # template would not change this decision.
+        #
+        # ## Deferred one macrotask, and not more than that
+        #
+        # `windowSetTimeout(_, 0)` yields to whatever the mount queued —
+        # `enterTemplateEditMode` delivers `CODETRACER::no-trace` synchronously
+        # and the layout's own work runs on timers behind it — so the first
+        # paint is not competing with this call. It is NOT `requestIdleCallback`:
+        # idle time on a page that is still fetching Monaco and the replay
+        # engine can be seconds away and is not bounded, and a visitor watching
+        # a pane that says "compiling" has a right to a compile that has
+        # actually been dispatched.
+        #
+        # `startNoirConstraintsCompile` and not `saveThenCompile`: nothing is
+        # dirty at boot, so there are no editors to save, and it is the variant
+        # that does NOT bring the BUILD overlay forward — see
+        # `web_noir_build.activeRevealsBuildPane` for what revealing it would
+        # cover, which is this pane.
+        discard windowSetTimeout(proc() =
+          web_noir_build.startNoirConstraintsCompile(), 0)
 
       if mounted:
         # The line names the ENTRY as well as the surface. Two builds — one

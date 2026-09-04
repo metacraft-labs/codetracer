@@ -124,6 +124,34 @@ type
       ## The sources changed after these counts were produced. A stale number
       ## is worse than no number if it is not labelled, because it looks
       ## exactly like a current one.
+    compiling*: bool
+      ## A compile that will replace this report is IN FLIGHT.
+      ##
+      ## THE THIRD STATE, and the reason it is a field rather than a spinner.
+      ## This pane's original defect was that its two states were "a number"
+      ## and "no number"; making the listing arrive without a gesture adds a
+      ## window — between the page mounting and the first compile answering —
+      ## in which the pane holds counts it is about to replace. Left unlabelled
+      ## that window reads as ABSENCE (the `nargo info` caption says "Build the
+      ## project", which is advice for a build that is already running), and a
+      ## reader who acted on it would press a key that is refused by
+      ## `startNoirBuild`'s `already-running` guard.
+      ##
+      ## So it is stated. `listingNoticeFor` says a compile is running instead
+      ## of telling the reader to start one, and `containerClass` adds
+      ## `compiling` so the rows can be styled without the sentence and the
+      ## styling ever disagreeing.
+      ##
+      ## NOT DERIVED FROM `BuildVM.isRunning`, which is the signal the BUILD
+      ## pane's ▶/■ read. That one is true for a `nargo test` and a `nargo
+      ## trace` as well, neither of which produces a constraint listing, so a
+      ## pane bound to it would announce a compile during a test run and then
+      ## never replace the counts it promised to replace. This field is set by
+      ## the COMPILE phase and by nothing else.
+      ##
+      ## Cleared by any settle, including a refusal — see
+      ## `constraints_vm.noteCompileSettled` for why a failure has to clear it
+      ## rather than leave the pane claiming progress that stopped.
     listingAbsence*: string
       ## Why this report has counts but no printed rows, when the reason is
       ## something the pane was TOLD rather than something it can infer.

@@ -4,7 +4,7 @@
 ##
 ## Structure, both renderers::
 ##
-##   div.component-container.constraints[.stale]
+##   div.component-container.constraints[.stale][.compiling]
 ##     div.constraints-headline    text "17 ACIR opcodes, 17 unconstrained"
 ##     div.constraints-listing-notice[.hidden]
 ##       text  why this report has totals and no rows
@@ -138,6 +138,21 @@ proc listingNoticeFor*(report: ConstraintReport): string =
     return ""
   if report.functions.len == 0:
     return ""
+  # PROGRESS OUTRANKS EVERY OTHER CAPTION, INCLUDING SILENCE.
+  #
+  # This branch is above the `hasListing` return on purpose. A recompile over
+  # a listing an earlier compile produced would otherwise say nothing at all
+  # while it ran, so the rows would sit there looking current until they were
+  # silently replaced — and `stale` already tells the reader those rows may not
+  # describe the source, without telling them anything is being done about it.
+  #
+  # It is above `listingAbsence` for the same reason in the other direction: a
+  # caption left over from the previous compile ("this build's compiler does
+  # not print a constraint listing") describes a finished attempt, and showing
+  # it during the next one would report the past as the present.
+  if report.compiling:
+    return "Compiling this project with the Noir compiler this page runs. " &
+      "The generated code will appear here when it finishes."
   if report.hasListing():
     return ""
   # WHAT THE PANE WAS TOLD BEATS WHAT IT CAN INFER. A compile that succeeded
@@ -159,10 +174,19 @@ proc containerClass*(report: ConstraintReport): string =
   ## part a reader without CSS still gets, and it is what the checks assert;
   ## this only exists so the dimming and the label cannot disagree about which
   ## state the pane is in.
-  if report.stale and report.absence.len == 0:
-    ConstraintsContainerClass & " stale"
-  else:
-    ConstraintsContainerClass
+  ##
+  ## `compiling` joins it rather than replacing it, and the two are independent
+  ## states: an edit marks the counts stale, and the compile that will refresh
+  ## them is what `compiling` announces, so a visitor who types and presses
+  ## Build is in both at once. A class that could only say one would have to
+  ## pick, and picking would drop the half the reader most needs.
+  if report.absence.len > 0:
+    return ConstraintsContainerClass
+  result = ConstraintsContainerClass
+  if report.stale:
+    result.add " stale"
+  if report.compiling:
+    result.add " compiling"
 
 # ---------------------------------------------------------------------------
 # Mock renderer
