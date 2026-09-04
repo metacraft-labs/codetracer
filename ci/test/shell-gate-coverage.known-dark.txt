@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 31
+# RECORDED-DARK-CEILING: 30
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -346,11 +346,31 @@ ci/test/noir-wasm-worker/transpile_route.mjs
 # have a driver to wire. Their only mentions are PROSE, which is the trap this
 # guard's `refs_in` exists to refuse.
 
-# Referenced by NOTHING AT ALL, not even a comment. It measures what
-# `ui/shortcuts.nim:318` buys by replacing `Mousetrap.prototype.stopCallback` —
-# a question about chord delivery that the two enumerated chord registries
-# cannot answer.
-ci/test/chord_stopcallback_probe.mjs
+# `ci/test/chord_stopcallback_probe.mjs` STOOD HERE AND ITS LINE IS GONE, and
+# the entry that stood here was WRONG IN THE DIRECTION THAT MATTERS. It read
+# "referenced by NOTHING AT ALL, not even a comment" — because the scan reads
+# `ci/` and `scripts/`, and the reference was in production source.
+# `src/frontend/ui/shortcuts.nim` names `ci/test/chord-and-pane-uniqueness.sh`
+# as "the gate" and this probe as one of the two "probes it drives", in the
+# present tense. That gate drove only `chord_double_fire_probe.mjs`. The claim
+# was not merely unbacked; it was false, in the file whose behaviour it
+# describes.
+#
+# It matters more than a stale sentence, because the same comment RECORDS THIS
+# PROBE'S READING and rests a decision on it: Monaco moved to the EditContext
+# API so the override "has expired" for the editor, and five untagged inputs
+# (`#fixed-search-include`, `#fixed-search-exclude`, `textarea.ime-text-area`,
+# `#fif-input`, `.request-filter-search`) are what stop it being deleted. Those
+# numbers were measured once, by hand, and nothing re-measured them.
+#
+# Part 3 of `chord-and-pane-uniqueness.sh` now does, and it DERIVES the expected
+# selectors from that comment rather than copying them, so the comment is the
+# single declaration and a product that drifts from it reddens here. Measured
+# before landing: 8 new assertions, all green, reproducing the recorded reading
+# exactly — `hasNativeEditContext: true`, `hasTextareaInputArea: false`,
+# `defaultWouldStop: false` for the focused element, five covered inputs and two
+# already tagged. Its instrument arm (a selector no page can carry) is required
+# to be reported MISSING, so the set comparison cannot be vacuous.
 
 # `ci/test/low_level_code_row_click_probe.mjs` STOOD HERE AND ITS LINE IS GONE.
 # It was named ONLY in a comment, at `ci/test/web-bundle-assets.sh:323`, which

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
-# chord-and-pane-uniqueness.sh — one press runs one action, and one pane id
-# names one node. Both asserted in a real browser tab, on the assembled bundle.
+# chord-and-pane-uniqueness.sh — one press runs one action, one pane id names
+# one node, and the `stopCallback` override still buys what the source says it
+# buys. All asserted in a real browser tab, on the assembled bundle.
 #
 # WHY THIS EXISTS
 # ---------------
 # Two hazards that currently do no visible harm, each for a reason that is not
-# a mechanism:
+# a mechanism — and, since Part 3, one recorded MEASUREMENT that a decision
+# rests on and nothing re-checked:
 #
 #   1. THE CHORD. `ui/shortcuts.nim:318` sets `Mousetrap.prototype.stopCallback`
 #      to a proc returning `false` for everything, which disables Mousetrap's
@@ -46,6 +48,16 @@
 #      with `getElementById` (first match wins) and `mountIsoNimErrors` has no
 #      disposal, so a remount can land in the other node and leave the first
 #      subtree live.
+#
+#   3. THE OVERRIDE'S JUSTIFICATION. `ui/shortcuts.nim` does not merely mention
+#      `ci/test/chord_stopcallback_probe.mjs` — it names THIS FILE as the gate
+#      that drives it, and records the probe's reading as the reason the line is
+#      neither deleted nor narrowed: Monaco has moved to the EditContext API and
+#      no longer needs it, and five untagged inputs still do. Nothing drove that
+#      probe. The claim was in production source, in the present tense, and was
+#      false; the probe was recorded in
+#      `ci/test/shell-gate-coverage.known-dark.txt` as referenced by NOTHING AT
+#      ALL. Part 3 makes the sentence true and re-measures the paragraph.
 #
 # THE SHAPE (Verification-Harness-Traps.md 4a/4c, and the house style set by
 # `web-renderer-mounts.sh`)
@@ -744,11 +756,206 @@ ck "$([ "${inst}" = "2" ] && echo ok || echo fail)" \
 	"arm CI: with a duplicate id deliberately planted the counter reports 2, so the checks above are not vacuous — got ${inst}"
 
 echo
+
+# ===========================================================================
+# PART 3 — WHAT THE stopCallback OVERRIDE STILL BUYS
+#
+# `ui/shortcuts.nim` names this file and TWO probes as the gate for the
+# override, in the present tense: "the gate is `ci/test/chord-and-pane-
+# uniqueness.sh` and the probes it drives are `ci/test/chord_double_fire_probe.mjs`
+# and `ci/test/chord_stopcallback_probe.mjs`". It drove only the first.
+# `chord_stopcallback_probe.mjs` was named nowhere that runs — it was recorded
+# in `ci/test/shell-gate-coverage.known-dark.txt` as referenced by NOTHING AT
+# ALL, and the sentence in `shortcuts.nim` is why that entry understated it:
+# the claim existed, in production source, and was false.
+#
+# WHAT IS ASSERTED, AND WHERE THE EXPECTED VALUES COME FROM. `shortcuts.nim`
+# does not merely mention the probe; it records the probe's READING and rests a
+# decision on it — "Monaco no longer needs this line at all", and "deleting it
+# would silently kill chords in those five". Those two sentences are the reason
+# the line is neither removed nor narrowed, and nothing re-measured them. So
+# the expected sets are DERIVED from that comment rather than copied into this
+# file: one declaration, and a product that drifts from it reddens here instead
+# of quietly invalidating the paragraph a future reader will trust. Same
+# convention as `action_ordinal` above, which derives an index from the enum
+# rather than writing the number down twice.
+# ===========================================================================
+echo "Part 3: the stopCallback override, and what it is still for"
+echo
+
+# `stopcallback_ledger buys|exempt` — the selectors `ui/shortcuts.nim` records,
+# one per line. Prints nothing and returns non-zero when the paragraph cannot
+# be found or comes back empty, so a reworded comment becomes a FAILED check
+# rather than an empty set matching an empty set.
+stopcallback_ledger() {
+	/usr/bin/python3 - "$1" <<'PY'
+import re
+import sys
+
+which = sys.argv[1]
+path = "src/frontend/ui/shortcuts.nim"
+src = open(path, encoding="utf-8").read()
+try:
+    start = src.index("WHAT IT STILL BUYS")
+    end = src.index("IT IS NOT A DOUBLE-DELIVERY HAZARD TODAY", start)
+except ValueError:
+    sys.stderr.write(
+        "the 'WHAT IT STILL BUYS' paragraph is gone from %s; this gate reads "
+        "its selector ledger from there\n" % path)
+    sys.exit(3)
+block = src[start:end]
+split = block.find("already exempt the intended way")
+if split < 0:
+    sys.stderr.write("the exempt-by-class sentence is gone from %s\n" % path)
+    sys.exit(3)
+half = block[:split] if which == "buys" else block[split:]
+# Backticked CSS selectors only: `#id`, `.class`, `tag.class`.
+found = [m for m in re.findall(r"`([#.][A-Za-z0-9_-]+|[a-z]+\.[A-Za-z0-9_-]+)`", half)]
+seen = []
+for f in found:
+    if f not in seen:
+        seen.append(f)
+if not seen:
+    sys.stderr.write("no selectors found in the %s half of the ledger\n" % which)
+    sys.exit(3)
+print("\n".join(seen))
+PY
+}
+
+if ! probe stopcallback ci/test/chord_stopcallback_probe.mjs /noir; then
+	ck fail "the stopCallback probe produced a report"
+	expect_count 37
+fi
+ck ok "the stopCallback probe produced a report"
+
+# THE PAGE HAS TO BE THE PRODUCT, AND THE CARET HAS TO BE IN MONACO, before any
+# reading below means anything. A probe that clicked nothing would report
+# `defaultWouldStop: false` for `document.body` and look identical to the
+# finding.
+pre="$(jq_py '
+import json,sys
+r=json.load(open(sys.argv[1]))["report"]
+d=json.load(open(sys.argv[1]))
+print("yes" if (r["monacoEditors"] > 0 and r["activeInsideMonaco"]
+                and not d["pageErrors"] and not d["loadError"]) else "no")
+print("monacoEditors=%s activeInsideMonaco=%s active=%s"
+      % (r["monacoEditors"], r["activeInsideMonaco"],
+         (r["activeElement"] or {}).get("cls")))
+' stopcallback)"
+ck "$([ "$(printf '%s' "${pre}" | head -1)" = "yes" ] && echo ok || echo fail)" \
+	"the tab is the product and the caret is inside Monaco"
+note "$(printf '%s' "${pre}" | tail -n +2)"
+
+# THE FACT THE "IT HAS EXPIRED" PARAGRAPH RESTS ON. Monaco used to take
+# keystrokes on `textarea.inputarea`, which the DEFAULT rule swallows; current
+# Chromium Monaco uses the EditContext API and focuses
+# `div.native-edit-context`, which it does not. If this ever flips back, the
+# override becomes load-bearing for the editor again and the whole paragraph in
+# `shortcuts.nim` is wrong.
+host="$(jq_py '
+import json,sys
+r=json.load(open(sys.argv[1]))["report"]
+ok = (r["hasNativeEditContext"] and not r["hasTextareaInputArea"]
+      and (r["activeElement"] or {}).get("defaultWouldStop") is False)
+print("yes" if ok else "no")
+print("hasNativeEditContext=%s hasTextareaInputArea=%s defaultWouldStop=%s"
+      % (r["hasNativeEditContext"], r["hasTextareaInputArea"],
+         (r["activeElement"] or {}).get("defaultWouldStop")))
+' stopcallback)"
+ck "$([ "$(printf '%s' "${host}" | head -1)" = "yes" ] && echo ok || echo fail)" \
+	"Monaco's input host is the EditContext div, which the DEFAULT rule would not stop"
+note "$(printf '%s' "${host}" | tail -n +2)"
+
+# WHAT THE OVERRIDE STILL BUYS, against the ledger in `shortcuts.nim`.
+#
+# An element that appears here and not in the comment is a new input nobody
+# tagged `mousetrap` — which is precisely the deliberate decision the comment
+# asks for ("a question worth answering deliberately ... rather than as a side
+# effect of a cleanup"), so it is a red and not a note. One that disappears
+# means the paragraph now over-states what the line is for.
+if ! stopcallback_ledger buys >"${cache}/ledger-buys.txt" 2>"${cache}/ledger.err"; then
+	ck fail "ui/shortcuts.nim still carries the selector ledger this gate reads"
+	note "$(head -2 "${cache}/ledger.err")"
+else
+	ck ok "ui/shortcuts.nim still carries the selector ledger this gate reads"
+fi
+
+match_selectors() {
+	## match_selectors <report-key> <ledger-file> — prints `yes`/`no` then a
+	## detail line. Matches `#id`, `.class` and `tag.class` against the probe's
+	## {tag, cls, id} triples.
+	/usr/bin/python3 - "${cache}/stopcallback.json" "$1" "$2" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1]))["report"]
+key, ledger_path = sys.argv[2], sys.argv[3]
+wanted = [l.strip() for l in open(ledger_path) if l.strip()]
+
+
+def describe(e):
+    return e["id"] and "#" + e["id"] or (
+        e["tag"].lower() + "." + (e["cls"].split() or [""])[0])
+
+
+def matches(sel, e):
+    if sel.startswith("#"):
+        return e["id"] == sel[1:]
+    if sel.startswith("."):
+        return sel[1:] in e["cls"].split()
+    tag, _, cls = sel.partition(".")
+    return e["tag"].lower() == tag and cls in e["cls"].split()
+
+
+found = report[key]
+unmatched_sel = [s for s in wanted if not any(matches(s, e) for e in found)]
+extra = [describe(e) for e in found
+         if not any(matches(s, e) for s in wanted)]
+print("yes" if (not unmatched_sel and not extra) else "no")
+bits = []
+if unmatched_sel:
+    bits.append("recorded but NOT on screen: " + ", ".join(unmatched_sel))
+if extra:
+    bits.append("on screen but NOT recorded in ui/shortcuts.nim: " + ", ".join(extra))
+if not bits:
+    bits.append("%d element(s), exactly the ledger: %s" % (len(found), ", ".join(wanted)))
+print("; ".join(bits))
+PY
+}
+
+buys="$(match_selectors blockedByDefault "${cache}/ledger-buys.txt")"
+ck "$([ "$(printf '%s' "${buys}" | head -1)" = "yes" ] && echo ok || echo fail)" \
+	"the inputs the override covers are exactly the ones ui/shortcuts.nim records"
+note "$(printf '%s' "${buys}" | tail -n +2)"
+
+if ! stopcallback_ledger exempt >"${cache}/ledger-exempt.txt" 2>>"${cache}/ledger.err"; then
+	ck fail "the exempt-by-class half of the ledger is still readable"
+	note "$(tail -2 "${cache}/ledger.err")"
+else
+	ck ok "the exempt-by-class half of the ledger is still readable"
+fi
+
+exempt="$(match_selectors exemptByClass "${cache}/ledger-exempt.txt")"
+ck "$([ "$(printf '%s' "${exempt}" | head -1)" = "yes" ] && echo ok || echo fail)" \
+	"the inputs already tagged \`mousetrap\` are exactly the ones recorded"
+note "$(printf '%s' "${exempt}" | tail -n +2)"
+
+# ARM SI — THE INSTRUMENT. Every check above compares a measured set against a
+# ledger, and a comparison that could only ever say "equal" would satisfy all of
+# them. A selector the page cannot contain must be REPORTED MISSING.
+printf '#a-selector-no-page-will-ever-carry\n' >"${cache}/ledger-instrument.txt"
+inst_sc="$(match_selectors blockedByDefault "${cache}/ledger-instrument.txt")"
+ck "$([ "$(printf '%s' "${inst_sc}" | head -1)" = "no" ] && echo ok || echo fail)" \
+	"arm SI: a selector no page carries is reported missing, so the two checks above are not vacuous"
+note "$(printf '%s' "${inst_sc}" | tail -n +2)"
+
+echo
 if [ "${failures}" -ne 0 ]; then
 	printf 'RESULT: FAILED — %d of %d check(s)\n' "${failures}" "${checks}"
-	expect_count 36
+	expect_count 44
 	exit 1
 fi
 printf '%d check(s), 0 failure(s)\n' "${checks}"
-expect_count 36
-echo "RESULT: OK — one press runs one action, and one pane id names one node"
+expect_count 44
+echo "RESULT: OK — one press runs one action, one pane id names one node, and"
+echo "            the stopCallback override still buys what the source says"
