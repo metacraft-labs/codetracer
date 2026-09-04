@@ -1,100 +1,202 @@
-# Gates in ci/test/ that no CI root can reach, with why each is still here.
+# Gates that no CI lane can reach, with why each is still here.
 #
 # THIS FILE FAILS IN BOTH DIRECTIONS. A listed gate that stays dark is reported
 # and does not fail the run. A listed gate that BECOMES REACHABLE fails the run,
 # by name, demanding its line be deleted — so an entry cannot outlive the hole
 # it records, and nobody has to remember to clean up after wiring one.
 #
-# It is not an exemption list. `NOT-A-CI-GATE:` in a gate's own header is the
+# AND IT CAN NO LONGER GROW QUIETLY. The directive below is the list's own
+# length, and `shell-gate-coverage.sh` fails unless the number of entries EQUALS
+# it. Not `<=`: slack under a ceiling is a budget for new dark gates, and the
+# cheapest way to make this guard green has always been to append a line.
+# Recording a new hole now means editing this number upward in the same diff,
+# where a reviewer sees it; wiring one up means editing it downward, which the
+# both-directions rule already forces in the same commit.
+#
+# RECORDED-DARK-CEILING: 22
+#
+# It is not an exemption list. `NOT-A-CI-GATE:` in a file's own header is the
 # exemption, and it means "this is not a gate" — a claim about the file, made in
-# the file, that a reviewer can disagree with. This file means the opposite:
-# these ARE gates, they SHOULD run, and today nothing runs them.
+# the file, that a reviewer can disagree with. Nine scripts under `scripts/` say
+# that about themselves: developer setup, a PATH diagnostic, a stylus generator
+# and six documentation-capture tools. This file means the opposite: these ARE
+# gates, they SHOULD run, and today nothing runs them. (One entry — the
+# `ci/lib/` library at the bottom — is neither, and says so on its own line.)
 #
-# THE FIRST DRAFT OF THIS FILE HAD TWELVE ENTRIES AND EIGHT WERE WRONG.
-# The guard that produced them was missing `ci/lint/*.sh` from its roots, and
-# those four dispatchers are where a good deal of CI actually lives — `nim.sh`
-# and `bash.sh` between them reach thirty gates that no workflow names directly.
-# Eight gates were reported dark that CI runs on every push. The both-directions
-# rule then evicted all eight the moment the roots were fixed, by name, without
-# anyone re-auditing the list. That is what the rule is for, and it is the second
-# time in two days it has removed its own entries.
+# ENTRIES ARE REPO-RELATIVE PATHS, NOT BASENAMES, since 2026-09-04: the guard's
+# scan was widened from `ci/test/ -maxdepth 1` to every `*.sh` under `ci/` and
+# `scripts/`, and that made basenames ambiguous — `nix.sh` is both
+# `ci/build/nix.sh` and `ci/lint/nix.sh`.
 #
-# Measured on dev @ 03aa7274, 2026-09-01, by ci/test/shell-gate-coverage.sh:
-# five of sixty-three.
+# ---------------------------------------------------------------------------
+# WHAT THE 2026-09-04 REMEASUREMENT CHANGED, AND WHY THE LIST GREW BY FOURTEEN
+# ---------------------------------------------------------------------------
+# The previous count — 96 found, 88 reachable, 8 recorded dark, 0 UNRECORDED —
+# was green, and the green was the finding. Two things made it a fiction:
 #
-# Wiring them is deliberately NOT done here. Each needs an owner who knows what
+#   * THE JUSTFILE WAS A CI ROOT. Every gate named by any of 208 `just` recipes
+#     counted as reached, whether or not a lane calls that recipe. `just` is a
+#     developer entry point; 57 of its recipes are reachable from a workflow and
+#     151 are not. Thirteen gates were credited to recipes in the second group.
+#   * THE SCAN WAS ONE DIRECTORY. `ci/verdict/`, `ci/runner/`, `ci/lib/`,
+#     `ci/build/`, `ci/deploy/`, `ci/reprobuild/` and all of `scripts/` were
+#     outside the universe of the check whose job is to find dark gates.
+#
+# Honest figures, same tree, same day: 161 found, 130 reachable, 9 declared
+# not-a-gate, 22 recorded dark, 0 UNRECORDED.
+#
+# TWO ENTRIES EVICTED THEMSELVES, which is the both-directions rule working
+# rather than a decision anyone made. `cross-process-gate.sh` and
+# `origin-dap-gate.sh` are reached by `just test-cross-process` and
+# `just test-origin-dap`, both called directly by `codetracer.yml`. The old
+# scan could not see it because it stopped at basenames in the justfile.
+#
+# AND ONE CLAIM WAS REFUTED. An audit listed `sibling-backend-path-test.sh`
+# among the gates running in no lane. It is not: `codetracer.yml` runs
+# `ci/test/non-gui.sh`, which runs `just test`, which depends on
+# `test-sibling-backend-path`, which runs it. Four hops through two kinds of
+# node — which is the whole reason reachability is walked and not grepped.
+#
+# Wiring these is deliberately NOT done here. Each needs an owner who knows what
 # it costs to run, what it needs on the runner, and whether it passes today — and
-# a guard author quietly adding five unknown jobs to CI would be making five
-# decisions that are not theirs. What is done here is making the number
+# a guard author quietly adding twenty-two unknown jobs to CI would be making
+# twenty-two decisions that are not theirs. What is done here is making the number
 # impossible to lose.
 #
-# Format: one basename per line. `#` comments and blank lines ignored.
+# Format: one repo-relative path per line. `#` comments and blank lines ignored.
 
-# Has a 500-line self-test beside it (`cross-process-gate-test.sh`, which IS
-# reachable). The contract suite for a gate runs; the gate does not.
-cross-process-gate.sh
+# =============================================================================
+# WIRED TO A `just` RECIPE THAT NO WORKFLOW CALLS
+# =============================================================================
+# Fifteen: the thirteen the old scan credited to the justfile, plus the two under
+# scripts/ that the old scan could not see at all. Each has a recipe, each recipe
+# is real and probably works when a person types it, and no lane types it. Named
+# with the recipe that is their only caller.
+
+# `just test-noir-build-mutations` — the mutation arms for the pane below.
+ci/test/noir-build-mutations.sh
+
+# `just test-noir-build-in-browser` — drives a real browser against a built
+# frontend. Its own prose points at `constraints-listing-browser.sh` as the
+# pane's other browser gate; both are dark, which is how documentation can
+# describe a thing as covered while nothing runs it.
+ci/test/noir-build-in-browser.sh
+
+# `just test-noir-replay-in-browser`.
+ci/test/noir-replay-in-browser.sh
+
+# `just test-noir-mode-roundtrip`.
+ci/test/noir-mode-roundtrip.sh
+
+# `just test-noir-edit-persists`.
+ci/test/noir-edit-persists.sh
+
+# `just test-build-error-navigation`.
+ci/test/build-error-navigation-in-browser.sh
+
+# `just test-build-error-nav-mutations` — the mutation arms for the gate above.
+# A mutation suite for a gate nothing runs is two layers of unrun work.
+ci/test/build-error-nav-mutations.sh
+
+# `just test-desktop-component` — verifies the component bundle that
+# `scripts/build-desktop-component.sh` assembles and the `ct` launcher fronts.
+ci/test/desktop-component-bundle.sh
+
+# `just test-desktop-capabilities` — asserts the launcher's capability file
+# declares exactly the extensions the core can record. A mismatch here is a
+# `ct record foo.py` that routes nowhere.
+ci/test/desktop-capabilities-dispatch.sh
+
+# `just test-record-smoke` — `ct record` for every supported language, through
+# the same path end users hit.
+#
+# WORTH READING TWICE, BECAUSE IT IS THE NEAR-MISS THIS GUARD EXISTS FOR:
+# `codetracer.yml` DOES run `just test-cli-record`. That is a DIFFERENT recipe —
+# it runs `ci/lib/run-nim-test-lane.sh cli-record` — and there is no
+# `ci/test/cli-record.sh`. Two recipes, similar names, one in a lane and one
+# not, and the file whose name says "cli record smoke test" is the one that
+# never runs. A reader scanning the workflow for `cli-record` finds a hit and
+# stops.
+ci/test/cli-record-smoke.sh
+
+# `just test-python-recorder`.
+ci/test/python-recorder-smoke.sh
+
+# `just test-shortcut-shadow-spec-agreement` — the permitted-shadow table in
+# `GUI/Keyboard-Shortcuts-System.md` against the one in the product. Pure text
+# comparison, no toolchain, and still in no lane.
+ci/test/shortcut-shadow-spec-agreement.sh
+
+# `just test-wasm-worker-session` — a wasm-worker session alive in a real tab
+# over the assembled publish tree.
+ci/test/wasm-worker-session.sh
+
+# `just test-codetracer-agentic-headless-matrix` and
+# `just test-codetracer-agentic-regression-gate`. It reaches into a sibling
+# (`agent-harbor`) for the scenario side, which is a runner cost, and neither
+# recipe is in a lane. Came into view only when the scan was widened past
+# `ci/test/`; it has never been recorded before.
+scripts/test-codetracer-agentic-headless.sh
+
+# `just test-e2e-agentic-worktree` — the GUI E2E tests for the worktree-isolated
+# agentic workflow. Same sibling dependency, same absence from any lane.
+scripts/test-agentic-worktree-gui.sh
+
+# =============================================================================
+# DARK BEFORE THE REMEASUREMENT, AND STILL DARK
+# =============================================================================
 
 # The JS-backend frontend lane's runner.
-frontend-js.sh
-
-# `scripts/test-origin-dap.sh` references it, and that script is itself reached
-# by no root — so the reference does not make it reachable. This is exactly the
-# case a mention-based scan gets wrong and a reachability walk does not.
-origin-dap-gate.sh
+ci/test/frontend-js.sh
 
 # The worker-backend wasm end-to-end gate.
-worker-backend-wasm-e2e.sh
+ci/test/worker-backend-wasm-e2e.sh
 
 # `ui-tests-db.sh` is wired and this is not, though the two are siblings.
-ui-tests.sh
-
-# --- added 2026-09-03, while clearing lint-bash's shellcheck backlog ---------
-#
-# Three gates were UNRECORDED dark, which is what had `shell-gate-coverage.sh`
-# — and therefore `lint-nim`, and therefore `dmg-build` — red. The third,
-# `frontend-reachability.sh`, is not listed here because it was WIRED instead:
-# it is pure python3, under five seconds, report-only by design, and
-# `ci/lint/nim.sh` now runs it. These two could not be given the same answer.
+# `.gitlab-ci.yml` names it, and the GitLab pipeline is deliberately not a root
+# — see the note in shell-gate-coverage.sh's roots section.
+ci/test/ui-tests.sh
 
 # Builds the WEB arm with `nim js` and drives it in Chromium, reading the
 # painted DOM. Both halves are the cost: a Nim toolchain and a Chromium that
 # CAN RENDER TEXT — its own header records the 2026-08-31 run where a nix
 # Chromium with no fonts laid every string out with zero glyphs and blocked a
 # deploy over a DOM that was correct. No job owns browser gates on the linux
-# lanes today (`web-renderer-mounts.sh`, its nearest sibling, runs only inside
-# the deploy-web workflow, against a deployed page rather than a `file://`
-# fixture). Wiring it means choosing that job and its runner image, and
+# lanes today. Wiring it means choosing that job and its runner image, and
 # answering "does it pass today" first — neither of which is decided here.
-low-level-code-browser.sh
+ci/test/low-level-code-browser.sh
 
 # Runs against LIVE hosts: it fetches the deployment descriptor from
 # `web-codetracer.pages.dev` and compares every declared host's bytes against
-# the origin's. The deploy workflow says what it is for in as many words —
-# "this block is also the harness a human runs by hand after a cache purge
-# (ci/test/verify-deployed-bytes.sh)" — and the deploy lane's own step already
-# asks the same question against the `site/` tree it just built, which is the
-# form that has a build to compare with. What has no owner is the POST-PURGE
-# run, which by definition happens outside a deploy. Wiring it would mean
-# adding a network-dependent job on a schedule or a workflow_dispatch to the
-# production deploy workflow; that is the deploy lane's call, not this one's.
+# the origin's. The deploy lane's own step already asks the same question
+# against the `site/` tree it just built; what has no owner is the POST-PURGE
+# run, which by definition happens outside a deploy.
 #
 # WORTH SAYING PLAINLY: this gate has never executed in CI. Any confidence in
 # its verdicts comes from runs somebody did by hand.
-verify-deployed-bytes.sh
+ci/test/verify-deployed-bytes.sh
 
-# Added by 2bf98864, which wired it into nothing. It is modelled on
-# `low-level-code-browser.sh` -- listed above for the same reason -- and like
-# that one it drives a real browser against a built frontend, so it carries a
-# runner cost and a set of preconditions that its author is better placed to
-# judge than a guard is. Two other files already point AT it as the pane's
-# browser gate (`noir-build-in-browser.sh:429`, `noir_build_probe.mjs:119`),
-# which is how prose can describe a gate as covering something while nothing
-# runs it.
+# Added by 2bf98864, which wired it into nothing. Like `low-level-code-browser.sh`
+# above it drives a real browser against a built frontend, so it carries a runner
+# cost and a set of preconditions its author is better placed to judge than a
+# guard is.
+ci/test/constraints-listing-browser.sh
+
+# =============================================================================
+# NOT A GATE, AND NOT AN EXEMPTION EITHER
+# =============================================================================
+
+# A LIBRARY, listed here rather than marked `NOT-A-CI-GATE:` — and the
+# distinction is the point. It resolves a bundle's copy of an asset whose name
+# carries a content digest, and it is dark for one reason only: all five scripts
+# that `source` it are dark (`wasm-worker-session.sh`, `noir-replay-in-browser.sh`,
+# `noir-mode-roundtrip.sh`, `noir-build-in-browser.sh`,
+# `build-error-navigation-in-browser.sh`). Wire any one of them and this lights
+# up on its own — at which point the both-directions rule deletes this line.
 #
-# Registering it here rather than wiring it, per this file's own rule. Note it
-# was NOT the whole of the failure that sent people looking: run 33784363822
-# reported THREE dark gates on `dev`, and the other two -- `origin-dap-gate.sh`
-# and `python-version-alignment-test.sh` -- were reachable all along, reported
-# dark by an EPIPE race in the guard's own `in_set`. See the note at
-# shell-gate-coverage.sh:108. This is the one that was real.
-constraints-listing-browser.sh
+# A `NOT-A-CI-GATE:` marker here would be a landmine for exactly that reason:
+# the guard fails a file that is reachable AND declares it is not a gate, so the
+# marker would have to be removed by whoever wires a consumer, and they would
+# have no reason to expect it. `visual-replay-gate-lib.sh` is the same shape and
+# carries no marker, because its consumer is live.
+ci/lib/published-asset.sh

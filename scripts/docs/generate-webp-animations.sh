@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: documentation asset conversion.
+#
+# Playwright recordings to WebP for the book. No caller in the tree.
 
 set -euo pipefail
 

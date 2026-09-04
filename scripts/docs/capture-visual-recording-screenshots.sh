@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: documentation asset capture.
+#
+# Driven by two `just` recipes and by repro.nim, when a person
+# regenerates the book's images.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
