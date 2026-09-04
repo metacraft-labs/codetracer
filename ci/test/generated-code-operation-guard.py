@@ -48,12 +48,19 @@ enough — the guard reads only ``src/frontend``::
     ci/test/generated-code-operation-guard.py --root /tmp/before
 
 MEASURED against ``origin/dev`` at ``a861f5b7bd04a27a379135a5bc850d09d0f257a7``:
-**exit 1, 17 of 19 links broken** — two TEST-ONLY (``produceAnchors``,
-``readArtefactJson``, each reached only by ``test_noir_anchor_producer.nim``
-and ``test_noir_generated_listing.nim``) and fifteen MISSING.  On the tree
-that wires them: **exit 0, 0 broken**.
+**exit 1, 22 of 24 links broken** — eighteen MISSING and FOUR TEST-ONLY, and
+the four are the finding rather than the arithmetic::
 
-TWO OF THE NINETEEN DO NOT GO RED ON THAT TREE, and saying which is the point
+    produceAnchors      noir_anchor_producer.nim
+    readArtefactJson    noir_anchor_producer.nim
+    setAnchors          low_level_code_vm.nim
+    syncFromSourceLine  low_level_code_vm.nim
+
+A producer that read a real compiler artefact and a pane that could anchor to
+it, both correct, both tested, and reachable only from their own suites.  On
+the tree that wires them: **exit 0, 0 broken**.
+
+TWO OF THE TWENTY-FOUR DO NOT GO RED ON THAT TREE, and saying which is the point
 of writing the measurement down rather than the count:
 
 * ``syncFromSource`` is reached, by ``low_level_code_vm.syncFromSourceLine``
@@ -195,6 +202,31 @@ CHAIN: tuple[Link, ...] = (
          "tab activation goes nowhere"),
     Link("noirGeneratedCodeSink", "ui/web_noir_build.nim",
          "a successful compile never publishes its artefact to the operation"),
+
+    # --- The surface that actually paints -----------------------------------
+    #
+    # THESE FIVE ARE THE HALF A CALLER-COUNT CHECK USUALLY MISSES. Everything
+    # above can be reached and the user can still be shown an empty document:
+    # the operation would compute a correct listing, anchor it correctly, and
+    # hand it to nothing. `openTab(name, ViewInstructions)` did exactly that in
+    # the first draft of this feature — the instructions view is fed by
+    # `CtLoadAsmFunction` and knows nothing about a compile artefact, so the
+    # tab opened blank.
+    Link("showGeneratedListing", "ui/low_level_code.nim",
+         "the listing is computed and handed to nothing — the operation opens "
+         "a surface the user finds empty"),
+    Link("setAnchors", "viewmodel/viewmodels/low_level_code_vm.nim",
+         "the painted rows carry no mapping, so every fidelity badge and every "
+         "sync state describes an empty anchor set"),
+    Link("syncFromSourceLine", "viewmodel/viewmodels/low_level_code_vm.nim",
+         "the pane holds a correct mapping and points at nothing: the listing "
+         "opens at row zero however far down the file the cursor was"),
+    Link("rebaseSources", "viewmodel/viewmodels/generated_code_anchors.nim",
+         "the anchors keep the compiler's spelling of every source path and "
+         "the cursor is in the editor's, so no line ever aligns"),
+    Link("rendererPathFor", "viewmodel/viewmodels/noir_build_producer.nim",
+         "there is no conversion between the two spellings for the rebase to "
+         "apply"),
 )
 
 

@@ -40,7 +40,11 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/low_level_code_vm import
   LowLevelCodeVM, createLowLevelCodeVM, NO_ACTIVE_OFFSET,
   setInstructions, setActiveOffset, setAddress, setErrorMessage,
-  setNoirProject, clearInstructions, loadAsmFor, jumpToInstruction
+  setNoirProject, clearInstructions, loadAsmFor, jumpToInstruction,
+  setAnchors, clearAnchors, syncFromSourceLine, rowsFor
+
+from ../viewmodel/viewmodels/generated_code_anchors import
+  MappingAnchor, ArtefactSupport, SyncDecision, SyncOutcome, soAligned
 when defined(js):
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_low_level_code_view import
@@ -359,6 +363,56 @@ method onCompleteMove*(self: LowLevelCodeComponent, response: MoveState) {.async
 # ---------------------------------------------------------------------------
 # VM bootstrap
 # ---------------------------------------------------------------------------
+
+proc showGeneratedListing*(rows: seq[LowLevelInstruction];
+                           anchors: seq[MappingAnchor];
+                           support: ArtefactSupport;
+                           sourcePath: string; sourceLine: int;
+                           notice: string): bool {.discardable.} =
+  ## Paint a generated-code listing into THIS pane, anchored to a cursor.
+  ##
+  ## `Generated-Code-Listing.md` §7 asks for an editor TAB and this is a PANE,
+  ## which is a divergence and is recorded as one rather than glossed: the pane
+  ## is the surface that exists and already renders every row's fidelity badge
+  ## (GCL-A7), the three not-aligned states (GCL-A8) and the sync toggle's
+  ## visible state, all asserted in `test_low_level_code_view_anchors.nim`.
+  ## Opening a tab that renders NOTHING, in order to match the spec's noun,
+  ## would have been the worse divergence — a surface a user opens and finds
+  ## empty is the failure this whole thread is closing, and `openTab(name,
+  ## ViewInstructions)` would have produced exactly that, since the
+  ## instructions view is fed by `CtLoadAsmFunction` and knows nothing about a
+  ## compile artefact.
+  ##
+  ## Returns whether the ANCHORS were installed. False is a real answer and not
+  ## an error: `setAnchors` refuses a set that `validate` rejects, and it
+  ## refuses it wholesale, because a pane showing the valid half of a mapping
+  ## it knows to be broken makes the same confident-wrong-answer error over
+  ## fewer rows. The rows are painted either way — a listing whose mapping was
+  ## refused is still the compiler's own output, and §5's rule is that it says
+  ## so rather than disappearing.
+  if lowLevelCodeVMInstance.isNil:
+    return false
+  lowLevelCodeVMInstance.setInstructions(rows)
+  lowLevelCodeVMInstance.setErrorMessage(notice)
+  lowLevelCodeVMInstance.setNoirProject(true)
+  lowLevelCodeVMInstance.setActiveOffset(NO_ACTIVE_OFFSET)
+  lowLevelCodeVMInstance.clearAnchors()
+  if anchors.len == 0:
+    return false
+  if not lowLevelCodeVMInstance.setAnchors(anchors, support):
+    return false
+  # THE CURSOR IS WHAT THE PANE IS NOW SHOWING. Without this the pane holds a
+  # correct mapping and points at nothing — the listing would open at row zero
+  # regardless of where the developer asked from, which is GCL-D10's
+  # whole-project reading reintroduced one layer down.
+  let decision = lowLevelCodeVMInstance.syncFromSourceLine(sourcePath, sourceLine)
+  if decision.outcome == soAligned:
+    # `rowsFor` rather than reaching into the signal: the VM owns its anchors,
+    # and it already has the accessor the view uses.
+    let (first, _) = lowLevelCodeVMInstance.rowsFor(decision)
+    if first >= 0 and first < rows.len:
+      lowLevelCodeVMInstance.setActiveOffset(rows[first].offset)
+  true
 
 proc initLowLevelCodeVMWithStore*(store: ReplayDataStore) =
   ## Initialise (or replace) the parallel ``LowLevelCodeVM`` using an
