@@ -131,6 +131,30 @@ lint_step "shellcheck: DeepReview design-review harness" \
 lint_step "contract suite: DeepReview design-review harness" \
 	bash tools/visual-review/deepreview-harness-test.sh
 
+# THE STALE-CAPTURE SWEEP (GOAL #100). Scripts that decide whether an artefact
+# may be reused, published or trusted by asking only whether a path EXISTS, when
+# what they need is that it is CURRENT. `scripts/docs/` and `browser-replay/` are
+# not under ci/, so the glob at the top reaches neither; `ci/setup-rr-backend.sh`
+# it does reach, but only because of the `globstar` note above.
+lint_step "shellcheck: stale-artefact guards" \
+	shellcheck \
+	scripts/docs/capture-visual-recording-screenshots.sh \
+	scripts/docs/generate-webp-animations.sh \
+	scripts/storybook-deps.sh \
+	browser-replay/setup-certs.sh \
+	ci/test/stale-artefact-guards-test.sh
+
+# Executed here, and not only linted, for the reason the whole sweep exists: a
+# freshness guard that has never been SEEN to refuse a stale artefact is
+# indistinguishable from one that cannot. The suite stales a real binary, a real
+# storybook corpus, a real git checkout, a real certificate and a real video
+# directory in throwaway trees and asserts each guard says no. It needs bash,
+# git, node, openssl and coreutils — no nix, no dev shell, no network, no
+# Playwright and no Electron — so it belongs on this stock lint runner rather
+# than behind any of the heavy lanes whose artefacts it is about.
+lint_step "contract suite: existence is not freshness" \
+	bash ci/test/stale-artefact-guards-test.sh
+
 # scripts/test-flake-pin-alignment.sh is the static guard on the `runquota` /
 # `reprobuild` lockstep. It is not under ci/, so the glob at the top does not
 # reach it.

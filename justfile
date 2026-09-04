@@ -596,17 +596,15 @@ build-storybook-components:
 # a permanent red that no one could act on. `npm ci` from the committed
 # `package-lock.json` takes ~17s and is idempotent, so the guard below is a
 # no-op on a warm checkout.
+#
+# THE WARM-CHECKOUT GUARD ASKED THE WRONG QUESTION and the body now lives in
+# `scripts/storybook-deps.sh`, which explains why and can be executed against a
+# synthetic tree by `ci/test/stale-artefact-guards-test.sh`. In short: `[ -x
+# node_modules/.bin/storybook ]` is existence, and what this needs is that the
+# installed tree matches `package-lock.json` -- so a lockfile change was never
+# installed on any machine that had run this once.
 storybook-deps:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  cd storybook
-  if [ -x node_modules/.bin/storybook ]; then
-    exit 0
-  fi
-  npm ci --no-audit --no-fund
-  # `npm ci` exits 0 on a lockfile that installs nothing useful, so assert the
-  # binary the `npm run` scripts below actually invoke.
-  test -x node_modules/.bin/storybook
+  bash scripts/storybook-deps.sh
 
 storybook: build-storybook-components storybook-deps
   cd storybook && npm run storybook

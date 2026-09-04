@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# NOT-A-CI-GATE: documentation asset capture.
+# Documentation asset capture, not a check on the product. It no longer
+# carries the not-a-CI-gate marker because its stale-sibling refusals ARE exercised
+# from CI by `ci/test/stale-artefact-guards-test.sh`, and
+# `shell-gate-coverage.sh` fails a file that is both reachable and declared
+# unwired.
 #
 # Driven by two `just` recipes and by repro.nim, when a person
 # regenerates the book's images.
@@ -8,6 +12,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 WORKSPACE_ROOT="$(cd -- "${REPO_ROOT}/.." && pwd)"
+
+# Read by the sourced library below, which prefixes every diagnostic with it.
+# shellcheck disable=SC2034
+CTDR_LABEL="capture-visual-recording-screenshots"
+# shellcheck source=scripts/docs/deep-review-capture-lib.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/deep-review-capture-lib.sh"
 VISUAL_REPLAY_REPO="${VISUAL_REPLAY_REPO:-${WORKSPACE_ROOT}/codetracer-visual-replay}"
 NATIVE_RECORDER_REPO="${NATIVE_RECORDER_REPO:-${WORKSPACE_ROOT}/codetracer-native-recorder}"
 NATIVE_TEST_PROGRAMS_REPO="${NATIVE_TEST_PROGRAMS_REPO:-${WORKSPACE_ROOT}/codetracer-native-test-programs}"
@@ -18,17 +29,26 @@ TRACE_PATH="${CODETRACER_REAL_VISUAL_TRACE:-}"
 OUTPUT_DIR="${CODETRACER_BOOK_SCREENSHOT_DIR:-${REPO_ROOT}/docs/book/src/generated/visual_recordings}"
 CAPTURE_ATTEMPTS="${CODETRACER_BOOK_SCREENSHOT_TRACE_ATTEMPTS:-3}"
 
-if [[ ! -x ${CT_MCR} ]]; then
-	echo "Missing executable MCR command: ${CT_MCR}" >&2
-	echo "Set CODETRACER_CT_MCR_CMD or build codetracer-native-recorder." >&2
-	exit 1
-fi
+# EXECUTABILITY IS NOT CURRENCY.
+#
+# These two guards used to be `[[ ! -x ... ]]`, which asks whether SOMETHING was
+# built, never whether it was built from the sources that are on disk now. The
+# images this script writes go straight into the book
+# (`docs/book/src/generated/visual_recordings`), so a recorder or a player older
+# than its own sources publishes pictures of an old product and nothing in the
+# picture says so.
+#
+# The source list is the sibling's own `git ls-files` rather than a pattern
+# guessed from here — see `ctdr_require_sibling_binary_not_stale`. That is what
+# unblocks a fix that was reported and skipped once already, on the (correct)
+# grounds that neither sibling's layout is this repository's to assume.
+ctdr_require_sibling_binary_not_stale "the MCR command (ct_cli)" \
+	"${CT_MCR}" "${NATIVE_RECORDER_REPO}" \
+	"Set CODETRACER_CT_MCR_CMD or build codetracer-native-recorder."
 
-if [[ ! -x ${GFX_PLAYER} ]]; then
-	echo "Missing executable visual replay player: ${GFX_PLAYER}" >&2
-	echo "Set CODETRACER_CT_GFX_PLAYER_CMD or build codetracer-visual-replay." >&2
-	exit 1
-fi
+ctdr_require_sibling_binary_not_stale "the visual replay player (ct_gfx_player)" \
+	"${GFX_PLAYER}" "${VISUAL_REPLAY_REPO}" \
+	"Set CODETRACER_CT_GFX_PLAYER_CMD or build codetracer-visual-replay."
 
 run_capture() {
 	local trace_path="$1"
@@ -61,11 +81,13 @@ if [[ -n ${TRACE_PATH} ]]; then
 	run_capture "${TRACE_PATH}"
 else
 	GL_SCENE="${NATIVE_TEST_PROGRAMS_REPO}/gl/gl_scene"
-	if [[ ! -x ${GL_SCENE} ]]; then
-		echo "Missing GL scene fixture: ${GL_SCENE}" >&2
-		echo "Set CODETRACER_REAL_VISUAL_TRACE to an existing visual .ct trace or build codetracer-native-test-programs." >&2
-		exit 1
-	fi
+	# The same axis again, and this one is the SUBJECT of the recording rather
+	# than a tool used to make it: every frame in the published images is a
+	# frame `gl_scene` drew. A binary older than `gl/gl_scene.c` photographs a
+	# scene the repository no longer contains.
+	ctdr_require_sibling_binary_not_stale "the GL scene fixture (gl_scene)" \
+		"${GL_SCENE}" "${NATIVE_TEST_PROGRAMS_REPO}" \
+		"Set CODETRACER_REAL_VISUAL_TRACE to an existing visual .ct trace or build codetracer-native-test-programs."
 
 	TMP_ROOT="${TMPDIR:-/tmp}/ct-book-visual-recording"
 	rm -rf "${TMP_ROOT}"

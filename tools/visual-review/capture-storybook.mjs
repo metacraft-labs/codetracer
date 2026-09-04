@@ -6,6 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
+import { requireFreshStorybookStatic } from "./storybook-freshness.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
 const storybookDir = join(repoRoot, "storybook");
@@ -224,9 +226,10 @@ async function main() {
     mkdirSync(dumpDir, { recursive: true });
   }
 
-  if (!existsSync(staticDir)) {
-    throw new Error("Missing storybook/storybook-static. Run without --no-build first.");
-  }
+  // EXISTENCE IS NOT FRESHNESS: this replaced an `existsSync(staticDir)` whose
+  // own message ("Run without --no-build first") named the condition it could
+  // not detect. See tools/visual-review/storybook-freshness.mjs.
+  requireFreshStorybookStatic(repoRoot);
 
   const allViews = {
     ...loadStorybookViews(),
