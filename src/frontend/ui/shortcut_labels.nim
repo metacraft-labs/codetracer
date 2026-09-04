@@ -505,3 +505,226 @@ proc hardBindShadowedActions*(config: Config): seq[(cstring, ClientAction)] =
       let shadowed: ClientAction = config.shortcutMap.shortcutActions[chord]
       let entry: (cstring, ClientAction) = (chord, shadowed)
       result.add(entry)
+
+# ---------------------------------------------------------------------------
+# THE THIRD REGISTRY: MONACO'S OWN `commands` TABLE
+# ---------------------------------------------------------------------------
+#
+# There were two enumerated claimants on a keyboard chord in this repository
+# and a guard that walked both: the YAML table (`conflictList` sees a collision
+# between two of its entries) and `hardBoundChords` above (every
+# `Mousetrap.bind("...")` literal, checked against the source by
+# `shortcut_bindings_test.nim`).
+#
+# `ui/editor.nim`'s `commands` table is a THIRD, and until this constant
+# existed nothing enumerated it. `delegateShortcuts` walks that table and calls
+# `monacoEditor.addCommand` for every entry, on every Monaco instance, in every
+# build. A chord claimed there is invisible to both existing guards: it never
+# passed through the YAML, so `conflictList` cannot see it, and it is not a
+# `Mousetrap.bind` literal, so the hard-bind extractor cannot either.
+#
+# THE COST OF THE INVISIBILITY IS ON THE RECORD TWICE, in this file's own
+# history. `CTRL+E` was a `commands` entry that made one key run two different
+# actions — `switchEdit` outside the editor, toggle-read-only inside it — and
+# `ui/editor.nim` still carries the post-mortem where the entry stood. And
+# `ui_js.nim`'s web Run binding was written under the comment "RUN has no
+# configured chord, so it gets one that nothing else binds": its author checked
+# the two registries that were enumerable and concluded `CTRL+Enter` was free.
+# It was not. `commands` had claimed it all along.
+#
+# So the table is enumerated here, in the same shape and for the same reason
+# `hardBoundChords` is: hand-maintained, and guarded against going stale by
+# `shortcut_bindings_test.nim`, which `staticRead`s `ui/editor.nim`, extracts
+# every literal key of the `commands` table and requires the two lists to name
+# the same chords in both directions.
+
+proc canonicalChord*(chord: string): string =
+  ## One chord, in the ONE spelling every registry can be compared in.
+  ##
+  ## THE SPELLING MISMATCH IS THE HAZARD A NAIVE GUARD DIES OF. The three
+  ## registries write the same key three ways, because each is written for a
+  ## different consumer:
+  ##
+  ##   * the YAML / `shortcutActions` — `CTRL+E`, `CTRL+PageUp`, and
+  ##     `CTRL+KeyS` for the one entry that predates the convention;
+  ##   * `Mousetrap.bind` — lower case, `alt+e`, upper-cased on extraction;
+  ##   * `ui/editor.nim`'s `commands` — Monaco's own `KeyCode` member names,
+  ##     `ALT+KeyE`, `CTRL+Digit3`, because `ui/shortcuts.nim`'s `shortcut()`
+  ##     looks the final token up in `monaco.KeyCode` directly.
+  ##
+  ## String equality across those three answers "no collision" for every
+  ## single-letter and digit chord in the product — which is to say it answers
+  ## "no collision" for `ALT+KeyE` vs `ALT+E`, the collision that is live right
+  ## now. Every comparison must go through here first.
+  ##
+  ## The transform is `shortcut()`'s, read backwards: that proc turns a
+  ## one-character final token into `Key<X>`, so this turns `Key<X>` back into
+  ## `<X>`, and `Digit<N>` — which the `CTRL+1..9` loop builds — into `<N>`.
+  ## Everything else is upper-cased and left alone.
+  var tokens: seq[string] = @[]
+  for token in chord.split('+'):
+    tokens.add(token.strip().toUpperAscii)
+  if tokens.len > 0:
+    let last = tokens[^1]
+    if last.len == 4 and last.startsWith("KEY"):
+      tokens[^1] = last[3 .. 3]
+    elif last.len > 5 and last.startsWith("DIGIT"):
+      tokens[^1] = last[5 .. ^1]
+  result = tokens.join("+")
+
+const MONACO_COMMAND_CHORDS*: seq[cstring] =
+  @[
+    # `ui/editor.nim`'s `commands`, in `canonicalChord` spelling, in source
+    # order. The Monaco spelling each one is written in there is in brackets.
+    cstring"ALT+I",       # `ALT+KeyI`  — switchFlowUI(FlowInline)
+    # THE SURVIVING INSTANCE OF THE `CTRL+E` BUG, three lines above the comment
+    # that diagnoses it. See `KNOWN_MONACO_SEMANTIC_COLLISIONS` below.
+    cstring"ALT+E",       # `ALT+KeyE`  — toggleMacroExpansion
+    cstring"ALT+T",       # `ALT+KeyT`  — runTracepoints
+    cstring"CTRL+ENTER",  # `CTRL+Enter` — runTracepoints
+    cstring"CTRL+S",      # `CTRL+KeyS` — update / saveFiles
+    cstring"CTRL+F5",     # `CTRL+F5`   — toggleMode
+    cstring"CTRL+F8",     # `CTRL+F8`   — editorLineJump(SmartJump)
+    cstring"CTRL+F10",    # `CTRL+F10`  — editorLineJump(ForwardJump), run to cursor
+    cstring"CTRL+F11",    # `CTRL+F11`  — sourceCallJump(SmartJump)
+  ]
+  ## Every chord `ui/editor.nim`'s `commands` table claims as a STRING LITERAL.
+  ##
+  ## `CTRL+1` .. `CTRL+9` ARE DELIBERATELY ABSENT, for the same reason the nine
+  ## `CTRL+<n>` Mousetrap binds are absent from `hardBoundChords`: they are
+  ## installed by `for i in 1 .. 9: commands[cstring("CTRL+Digit" & $i)] = ...`,
+  ## a loop over a range with no literal to extract. The guard skips
+  ## non-literals rather than pretending to cover them, and says so.
+  ##
+  ## `CTRL+E` IS ABSENT BECAUSE IT WAS REMOVED, and the guard asserts its
+  ## absence rather than merely omitting it — that is the fix being pinned, not
+  ## an oversight being inherited.
+
+const PERMITTED_MONACO_DOUBLE_CLAIMS*: seq[(cstring, cstring)] =
+  @[
+    # `ui_js.nim`'s `configure`: `Mousetrap.bind("ctrl+f5") do (): data.toggleMode()`.
+    # `commands`: `if not data.functions.toggleMode.isNil: data.functions.toggleMode(data)`.
+    # One action, reached two ways. The bodies do not MATCH textually — which
+    # is exactly why this table is written by hand and not derived from the
+    # source: a source-text comparison calls this a semantic collision and
+    # reports a false positive, and a guard with three false positives is a
+    # guard somebody switches off.
+    (cstring"CTRL+F5", cstring"toggle Debug/Edit mode"),
+    # `ui_js.nim`: `data.update()`. `commands`: `data.functions.update(data, false)`,
+    # falling back to `data.saveFiles`. Same action, same fallback target.
+    (cstring"CTRL+S", cstring"save / update the open editors"),
+  ]
+  ## The chords TWO registries claim FOR THE SAME ACTION.
+  ##
+  ## THESE ARE CORRECT, NOT TOLERATED, and the distinction matters because the
+  ## obvious "fix" — deleting one of the two claims — breaks the key. Monaco
+  ## stops keydown propagation before the bubble phase Mousetrap listens on
+  ## (measured; see the `CTRL+B` entry in `MONACO_SHORTCUTS_WHITELIST` above),
+  ## so the `commands` entry is the ONLY path with the caret in the editor and
+  ## the `Mousetrap.bind` is the only path outside it. Both claims are load
+  ## bearing; what makes them benign is that they run the same action, so a
+  ## user cannot tell which one answered.
+  ##
+  ## `CTRL+1` .. `CTRL+9` are a third member of this family — `commands` and
+  ## `ui/shortcuts.nim` both route them to `onCtrlNumber(i)` — and are absent
+  ## for the reason given on `MONACO_COMMAND_CHORDS`: neither side is a literal,
+  ## so no guard can see either, and listing them here would claim a coverage
+  ## that does not exist.
+
+const KNOWN_MONACO_SEMANTIC_COLLISIONS*: seq[(cstring, cstring, cstring)] =
+  @[
+    # ALT+E — TWO DIFFERENT ACTIONS, AND THE SPEC ASKS FOR BOTH.
+    #
+    # `codetracer-specs` `GUI/Keyboard-Shortcuts-System.md` gives this chord to
+    # "Focus event log" in its Layer-1 hardcoded-bindings table AND to "Toggle
+    # macro expansion" in its Layer-2 Monaco-commands list, in the same
+    # document, without noticing. So the product's behaviour — focus the event
+    # log with the caret outside the editor, toggle macro expansion with it
+    # inside — is what BOTH tables literally ask for, and no source-level fact
+    # settles which claimant should lose.
+    #
+    # WHICH ONE SHOULD WIN, recorded so the decision is not re-derived: the
+    # global bind. `ALT+E` is one of three siblings (`ALT+C` focus calltrace,
+    # `ALT+V` focus editor view) that form an enumerated, uncontested family,
+    # while `toggleMacroExpansion` has no `ClientAction`, no menu item, no
+    # tooltip, is unrebindable, and no-ops unless the mouse has already hovered
+    # a line (`lastMouseMoveLine != -1`).
+    #
+    # WHY IT IS NOT FIXED IN THE COMMIT THAT ADDS THIS TABLE: deleting the
+    # `commands` entry deletes the ONLY way to invoke macro expansion —
+    # `editor.nim:216` is its single call site — and moving it to a free chord
+    # is a product decision this change has no measurement to make. The finding
+    # is counted here rather than quietly resolved either way.
+    #
+    # RETIRES WHEN: `toggleMacroExpansion` gets its own chord or a context-menu
+    # entry and the `ALT+KeyE` line in `commands` is deleted. The guard then
+    # fails on THIS TABLE — an entry naming a collision that no longer exists —
+    # so the row cannot be left behind as a lie.
+    (cstring"ALT+E",
+     cstring"ui/editor.nim `commands`: e.toggleMacroExpansion()",
+     cstring"ui/shortcuts.nim `Mousetrap.bind alt+e`: data.focusEventLog()"),
+    # CTRL+ENTER — TWO DIFFERENT ACTIONS, IN ONE BUILD ONLY.
+    #
+    # `commands` runs `runTracepoints(data)` in every build, and `trace.nim`
+    # advertises that in three places a user reads: `RUN_TRACE_MESSAGE`, the
+    # tracepoint tooltip "Run tracepoints (Ctrl+Enter)", and the results
+    # overlay. On the desktop that is the only claim and it is correct.
+    #
+    # `ui_js.nim`'s `Mousetrap.bind("ctrl+enter") do (): saveThenCompile(runAfter = true)`
+    # sits inside `when defined(ctWeb) and not defined(ctInExtension)`, so the
+    # collision exists ONLY in the Noir web studio — and there it is the bad
+    # kind. Its own comment reads "RUN has no configured chord, so it gets one
+    # that nothing else binds", which was written against the two registries
+    # that were enumerable; this one was not, and the premise is false.
+    #
+    # WHAT THE USER GETS, following the propagation fact measured for `CTRL+B`
+    # above: with the caret in Monaco the global bind never fires, so in an
+    # editor-first product Ctrl+Enter dispatches `runTracepoints` — which in
+    # the web studio has no trace and no tracepoint service and returns at
+    # `trace.nim`'s "services not yet initialized, skipping". The Run gesture
+    # is dead exactly where it is meant to be used, silently.
+    #
+    # WHICH ONE SHOULD WIN, per build: the web studio's Run in `ctWeb`, and
+    # `runTracepoints` everywhere else. That is not a claim either side can be
+    # deleted to satisfy — it needs `commands` to become build-aware, or the
+    # web Run to be delegated through Monaco instead of through Mousetrap.
+    # Landing that without a `ctWeb` browser measurement is how the `ALT+F8`
+    # double-fire and the `ctrl+b` dead-bind were introduced, so it is named
+    # here and left to the change that can measure it.
+    #
+    # RETIRES WHEN: the web Run reaches the editor. The guard fails on this
+    # table the moment the collision stops being observable.
+    (cstring"CTRL+ENTER",
+     cstring"ui/editor.nim `commands`: runTracepoints(data)",
+     cstring"ui_js.nim (ctWeb only) `Mousetrap.bind ctrl+enter`: saveThenCompile(runAfter = true)"),
+  ]
+  ## The chords TWO registries claim FOR DIFFERENT ACTIONS: chord, the Monaco
+  ## claimant, the other claimant.
+  ##
+  ## THESE ARE DEFECTS THAT ARE COUNTED, NOT DEFECTS THAT ARE BLESSED. Each row
+  ## carries who should win and what retires it, and
+  ## `shortcut_bindings_test.nim` requires every row to be OBSERVED — a row
+  ## describing a collision that has been fixed fails as loudly as a collision
+  ## that has no row. The list is the reason the guard can be green on today's
+  ## tree without the finding being deleted.
+
+proc monacoChordCollisions*(config: Config): seq[(cstring, cstring)] =
+  ## Every chord `ui/editor.nim`'s `commands` table claims that ANOTHER
+  ## registry also claims, paired with the other claimant's name.
+  ##
+  ## THE CLASSIFICATION IS NOT HERE, and it cannot be. This proc reports the
+  ## structural fact — two registries name one chord — because that is the part
+  ## derivable from data. Whether the two claimants run the SAME action is a
+  ## question about two proc bodies that do not match textually even when the
+  ## answer is yes (`CTRL+F5` is `data.toggleMode()` on one side and
+  ## `data.functions.toggleMode(data)` on the other), so it is answered by the
+  ## two hand-written tables above and enforced as a total, disjoint partition
+  ## of what this returns.
+  if config.isNil:
+    return @[]
+  for chord in MONACO_COMMAND_CHORDS:
+    if chord in hardBoundChords:
+      result.add((chord, cstring"hardBoundChords (a `Mousetrap.bind` literal)"))
+    elif config.shortcutMap.shortcutActions.hasKey(chord):
+      let claimed: ClientAction = config.shortcutMap.shortcutActions[chord]
+      result.add((chord, cstring("default_config.yaml: " & $claimed)))

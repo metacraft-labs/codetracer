@@ -53,7 +53,14 @@ import ../types
 import ../lib/jslib
 from ../ui/shortcut_labels import
   MONACO_SHORTCUTS_WHITELIST, hardBoundChords, hardBindShadowedActions,
-  PERMITTED_HARD_BIND_SHADOWS
+  PERMITTED_HARD_BIND_SHADOWS,
+  # THE THIRD REGISTRY. `MONACO_COMMAND_CHORDS` enumerates `ui/editor.nim`'s
+  # `commands` table, `canonicalChord` is what makes its Monaco spelling
+  # comparable with the other two registries' spellings, and the two
+  # classification tables are what stop the collision report being three false
+  # positives and one real one.
+  canonicalChord, MONACO_COMMAND_CHORDS, monacoChordCollisions,
+  PERMITTED_MONACO_DOUBLE_CLAIMS, KNOWN_MONACO_SEMANTIC_COLLISIONS
 
 var countedAssertions = 0
 
@@ -61,7 +68,26 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 107
+const ExpectedAssertions = 152
+  ## RAISED FROM 107 BY 45, DELIBERATELY, and the 45 is derived from the two new
+  ## cases rather than read off a run.
+  ##
+  ## +27 for enumerating Monaco's `commands` table: 1 sizing the extraction, 3
+  ## on `canonicalChord` (the normalizer every comparison depends on), 1 that
+  ## the Monaco spelling did NOT survive normalization, 9 source-literal-in-
+  ## registry checks, 9 registry-entry-in-source checks, and 4 discriminating
+  ## negatives. The two 9s are the count of literal keys in the `commands`
+  ## table, so adding or removing a Monaco command moves this number —
+  ## deliberately, which is the whole reason the registry is walked.
+  ##
+  ## +18 for the collision rule: 3 sizing checks (the collision set and both
+  ## classification tables), 1 per COLLISION asserting it is classified exactly
+  ## once (there are four, so this number moves the day a claim is added or
+  ## fixed), 1 per row of each classification table asserting the row is still
+  ## OBSERVED (2 + 2), 2 naming the semantic defects individually, 2 asserting
+  ## the other claimant still exists, and 3 on the instrument that proves the
+  ## detector can answer NO.
+  ##
   ## 31 before the two Stop cases below; +5 for the binding pin and +20 for the
   ## Monaco-delegation family (9 non-vacuity checks, 10 membership checks and
   ## the total) — 56.
@@ -425,6 +451,209 @@ suite "shipped shortcut bindings":
     counted cstring"CTRL+B" in hardBoundChords
     counted config.shortcutMap.shortcutActions[cstring"CTRL+B"] ==
       ClientAction.build
+
+  test "Monaco's `commands` table is a WALKED registry, not an invisible one":
+    ## THE THIRD CLAIMANT, ENUMERATED — the counterpart of the hard-bound
+    ## registry's guard above, for the one registry nothing walked.
+    ##
+    ## `ui/editor.nim`'s `commands` table is handed to `monacoEditor.addCommand`
+    ## by `delegateShortcuts`, on every Monaco instance, in every build. It
+    ## never passes through the YAML, so `conflictList` cannot see it, and it
+    ## contains no `Mousetrap.bind` literal, so the extractor above cannot
+    ## either. A chord claimed there contradicting one of the other two
+    ## registries produced NO warning anywhere — which is how `CTRL+E` came to
+    ## mean two different things (see the post-mortem where it stood, in
+    ## `ui/editor.nim`) and how `ui_js.nim`'s web Run came to be written under
+    ## the false premise that `CTRL+Enter` "nothing else binds".
+    ##
+    ## ## WHAT THIS GUARD DOES NOT COVER — read this before trusting its scope
+    ##
+    ## It covers the STRING LITERALS of the `commands` table and nothing else.
+    ## Three claimants are outside it, and each is outside it for a reason no
+    ## `staticRead` extractor can fix:
+    ##
+    ## 1. `CTRL+1` .. `CTRL+9`. Installed by `for i in 1 .. 9:
+    ##    commands[cstring("CTRL+Digit" & $i)] = ...` — a loop over a range,
+    ##    with no literal chord to extract, and its Mousetrap counterpart
+    ##    (`ui/shortcuts.nim`, `Mousetrap.bind("CTRL+" & $i)`) is the same shape
+    ##    on the other side. Both are invisible here. They are also the third
+    ##    member of the benign family: both route to `onCtrlNumber(i)`.
+    ## 2. `data.keyPlugins`. `loadKeyPlugins` calls `addCommand` for every entry
+    ##    of a RUNTIME map, populated after the bundle is built. There is no
+    ##    compile-time set of those chords at all, so a key plugin can collide
+    ##    with anything in any of the three registries and no static check can
+    ##    know.
+    ## 3. The macOS second registration. `KeyMod.CtrlCmd` is COMMAND on a Mac
+    ##    (`isMacPlatform`), and `delegateShortcut` registers a `WinCtrl` form
+    ##    alongside it, so one `CTRL+...` literal here is two live chords there.
+    ##    This guard counts the literal, not the registrations.
+    ##
+    ## There is no `KeyMod.X | KeyCode.Y` literal anywhere in the tree, so
+    ## nothing else escapes by that route — the whole table goes through
+    ## `ui/shortcuts.nim`'s `shortcut()`, which parses these strings.
+    const editorSource = staticRead("../ui/editor.nim")
+
+    proc commandsTableKeys(source: string): seq[string] =
+      ## Every literal key of the `commands` table, canonicalised.
+      ##
+      ## BOUNDED TO THE TABLE, not grepped over the file: `cstring"..."` occurs
+      ## all over `editor.nim` (`createContextKey(cstring"readOnly")`, the
+      ## `cstring""` fallbacks inside these very proc bodies), and a file-wide
+      ## match would report identifiers as chords. So the walk starts at the
+      ## table's own `var commands = JsAssoc[` line and stops at its closing
+      ## brace, and a key is a line that BEGINS with `cstring"` and whose
+      ## closing quote is followed by `:`.
+      ##
+      ## Commented-out entries are skipped — the table carries two (`ALT+P`,
+      ## `ALT+M`, both `switchFlowUI` sketches) and a disabled entry claims
+      ## nothing.
+      const marker = "cstring\""
+      var inTable = false
+      for rawLine in source.splitLines():
+        let line = rawLine.strip()
+        if not inTable:
+          if line.startsWith("var commands = JsAssoc["):
+            inTable = true
+          continue
+        if line == "}":
+          break
+        if line.startsWith("#"):
+          continue
+        if not line.startsWith(marker):
+          continue
+        let closeQuote = line.find('"', marker.len)
+        if closeQuote < 0:
+          continue
+        if closeQuote + 1 >= line.len or line[closeQuote + 1] != ':':
+          continue
+        result.add(canonicalChord(line[marker.len ..< closeQuote]))
+
+    let found = commandsTableKeys(editorSource)
+    checkpoint("Monaco `commands` chords: " & found.join(", "))
+
+    # NON-VACUITY FIRST, and here it is doing double duty: an extractor that
+    # never found the table's opening line returns an empty seq, which would
+    # satisfy every membership check below AND make the collision test that
+    # follows report nothing at all — a guard that proves the collisions are
+    # gone by having stopped looking. The count is pinned, so an entry added to
+    # or removed from the table has to be accounted for deliberately.
+    counted found.len == 9
+
+    # THE NORMALIZER, ASSERTED BEFORE ANYTHING DEPENDS ON IT. Without this the
+    # containments below are satisfiable by a `canonicalChord` that is the
+    # identity — which would agree with a `MONACO_COMMAND_CHORDS` written in
+    # Monaco spelling and be unable to see a single cross-registry collision,
+    # because `ALT+KeyE` never equals `ALT+E`.
+    counted canonicalChord("ALT+KeyE") == "ALT+E"
+    counted canonicalChord("CTRL+Digit3") == "CTRL+3"
+    counted canonicalChord("CTRL+Enter") == "CTRL+ENTER"
+    counted "ALT+KeyE" notin found
+
+    for chord in found:
+      checkpoint("Monaco command chord: " & chord)
+      counted cstring(chord) in MONACO_COMMAND_CHORDS
+
+    # THE OTHER DIRECTION: the registry claims nothing the table does not bind.
+    # Without it a chord deleted from `commands` — which is how the `CTRL+E`
+    # defect was fixed — could be left behind here, forbidding a key that is
+    # actually free and keeping a retired collision on the books.
+    for chord in MONACO_COMMAND_CHORDS:
+      checkpoint("registry entry: " & $chord)
+      counted ($chord) in found
+
+    # THE DISCRIMINATING NEGATIVES, so the two containments are not both
+    # satisfied by an extractor that returns the registry.
+    counted "CTRL+F8" in found            # bound in the table, and only there
+    counted "CTRL+E" notin found          # REMOVED — the fix, pinned
+    counted "ALT+P" notin found           # commented out, so it claims nothing
+    counted "CTRL+3" notin found          # the `CTRL+Digit` loop is NOT covered
+
+  test "a chord two registries claim is NAMED, and classified before it is allowed":
+    ## THE POINT OF ENUMERATING THE TABLE ABOVE.
+    ##
+    ## A collision between Monaco's `commands` and either of the other two
+    ## registries is not resolved by a warning anywhere — `Mousetrap.bind`
+    ## replaces, `addCommand` registers on a surface that stops propagation, and
+    ## which of the two answers a keypress depends on where the caret is. So the
+    ## user-visible failure is "one key does two different things depending on
+    ## focus", which is exactly the bug `ui/editor.nim`'s `CTRL+E` post-mortem
+    ## describes.
+    ##
+    ## WHY THERE ARE TWO CLASSIFICATION TABLES RATHER THAN A PASS/FAIL. Two
+    ## registries claiming one chord is CORRECT when they run the same action:
+    ## Monaco eats the key with the caret inside the editor and Mousetrap
+    ## answers it outside, so both claims are load bearing and deleting either
+    ## breaks the key in one focus context. Reporting those as defects would
+    ## make this guard mostly false positives on the day it landed, which is how
+    ## a guard gets switched off. So `PERMITTED_MONACO_DOUBLE_CLAIMS` names the
+    ## same-action pairs and `KNOWN_MONACO_SEMANTIC_COLLISIONS` names the
+    ## different-action ones, each with who should win and what retires it, and
+    ## the two must TOTALLY and DISJOINTLY partition what the detector returns.
+    ##
+    ## A NEW COLLISION IS IN NEITHER TABLE AND FAILS HERE. A FIXED ONE LEAVES
+    ## THE DETECTOR'S OUTPUT AND FAILS HERE TOO, as an unobserved row — so
+    ## neither adding a claim nor fixing one can be done silently.
+    let collisions = monacoChordCollisions(config)
+    var collisionChords: seq[string] = @[]
+    for (chord, other) in collisions:
+      collisionChords.add($chord)
+      checkpoint("COLLISION " & $chord &
+        " — ui/editor.nim `commands` vs " & $other)
+
+    # THE COUNTS FIRST. An empty collision list satisfies "every collision is
+    # classified" perfectly, and an empty classification table satisfies "every
+    # classified chord is observed". Both sides are sized.
+    counted collisions.len == 4
+    counted PERMITTED_MONACO_DOUBLE_CLAIMS.len == 2
+    counted KNOWN_MONACO_SEMANTIC_COLLISIONS.len == 2
+
+    # TOTAL AND DISJOINT. `!=` on two bools is xor: a collision in neither table
+    # is unclassified and fails, and one in both is a contradiction — the same
+    # chord asserted to run one action and two — and fails as well.
+    for (chord, other) in collisions:
+      var benign = false
+      for (permitted, _) in PERMITTED_MONACO_DOUBLE_CLAIMS:
+        if permitted == chord:
+          benign = true
+      var semantic = false
+      for (known, _, _) in KNOWN_MONACO_SEMANTIC_COLLISIONS:
+        if known == chord:
+          semantic = true
+      checkpoint($chord & ": benign=" & $benign & " semantic=" & $semantic)
+      counted benign != semantic
+
+    # NO STALE ROW IN EITHER TABLE. This is the half that makes a FIX land:
+    # remove the `ALT+KeyE` claim and this reddens on the row that describes
+    # it, so the finding cannot be resolved in the source and left standing as
+    # a permanent allowance here.
+    for (chord, _) in PERMITTED_MONACO_DOUBLE_CLAIMS:
+      checkpoint("permitted double-claim: " & $chord)
+      counted ($chord) in collisionChords
+    for (chord, monacoSide, otherSide) in KNOWN_MONACO_SEMANTIC_COLLISIONS:
+      checkpoint("known semantic collision: " & $chord & " — " &
+        $monacoSide & "  VS  " & $otherSide)
+      counted ($chord) in collisionChords
+
+    # THE TWO SEMANTIC DEFECTS, NAMED INDIVIDUALLY, so a re-introduction or a
+    # fix says WHICH. The loop above is silent about which chords are in the
+    # table; these are not.
+    counted "ALT+E" in collisionChords
+    counted "CTRL+ENTER" in collisionChords
+
+    # AND THE OTHER HALF OF EACH — that the OTHER claimant really exists. A row
+    # in the semantic table would otherwise survive the deletion of the
+    # `Mousetrap.bind` it names, describing a collision with a claimant that is
+    # gone.
+    counted cstring"ALT+E" in hardBoundChords
+    counted cstring"CTRL+ENTER" in hardBoundChords
+
+    # THE INSTRUMENT. `monacoChordCollisions` must be able to say NO, or every
+    # assertion above is satisfied by a proc that returns its whole input —
+    # which would report the six uncontested Monaco chords as collisions and be
+    # indistinguishable from a real finding.
+    counted "CTRL+F8" notin collisionChords
+    counted "ALT+I" notin collisionChords
+    counted "CTRL+F11" notin collisionChords
 
   test "shortcut_bindings_assertion_count_is_measured":
     checkpoint("counted assertions: " & $countedAssertions)
