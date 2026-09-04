@@ -3433,12 +3433,54 @@ proc monacoEditorAdoptInto(editor: MonacoEditor; host: js) {.importjs:
   "requestAnimationFrame(relayout); })(#, #)".}
   ## Move an existing Monaco instance into `host` and re-measure it.
   ##
-  ## THE SIZE HAS TO COME FROM THE HOST, not from the editor. Monaco writes an
-  ## explicit width and height onto its own DOM node, so a bare `layout()`
-  ## re-measures the node it just sized and keeps whatever geometry it had
-  ## while detached — measured as a 5x5 editor showing two lines inside an
-  ## 880x902 pane. Once more on the next frame because the pane a layout swap
-  ## has just created has not been through a browser layout pass yet.
+  ## WHAT MOVES IS THE VIEW, NOT THE CONTAINER. Monaco has two roots and they
+  ## are not interchangeable:
+  ##
+  ##   `getContainerDomNode()` -> `_domElement`, the node handed to
+  ##       `monaco.editor.create`.
+  ##   `getDomNode()` -> `_modelData.view.domNode.domNode`, the inner
+  ##       `.monaco-editor` view node, which `browser/view.js` sizes with
+  ##       `setWidth(layoutInfo.width)` / `setHeight(layoutInfo.height)`.
+  ##
+  ## THE SIZE HAS TO COME FROM THE HOST, not from a bare `layout()` — but NOT
+  ## for the reason this comment used to give. It said Monaco "re-measures the
+  ## node it just sized"; that is wrong, and it matters, because the next
+  ## person reasons from it. A bare `layout()` means "re-measure
+  ## `getContainerDomNode()`", and after this move that is `_domElement`, left
+  ## behind DETACHED. A detached element's `clientWidth`/`clientHeight` are 0,
+  ## and `ElementSizeObserver.measureReferenceDomElement` clamps a zero with
+  ## `Math.max(5, ...)` — which is where the 5 comes from in the measured "5x5
+  ## editor showing two lines inside an 880x902 pane". Read from the bundled
+  ## Monaco 0.54.0, `browser/config/elementSizeObserver.js`.
+  ##
+  ## Once more on the next frame because the pane a layout swap has just
+  ## created has not been through a browser layout pass yet.
+  ##
+  ## ORPHANING `_domElement` HAS A SECOND CONSEQUENCE, AND IT IS AN OPEN
+  ## DEFECT. `automaticLayout: true` is a `ResizeObserver` on `_domElement` and
+  ## on nothing else: `browser/config/editorConfiguration.js` calls
+  ## `startObserving()` once, in the constructor, and `stopObserving()` only
+  ## from `dispose()`, while `layout(dimension)` merely forwards to
+  ## `observeContainer(dimension)` — so an explicit dimension never disables
+  ## it, and re-pointing it is not possible. But a detached element's
+  ## `contentRect` is 0x0 and never changes, so after this move the observer is
+  ## still "on" and watching an orphan, and the editor stops following its pane.
+  ##
+  ## Reported against noirstudio.dev as "resizing the panel that holds the
+  ## Monaco editor doesn't resize the actual editor, the scrollbar stays in
+  ## place. This is in debug mode" — debug mode only, because edit mode
+  ## CONSTRUCTS, so its `_domElement` is the live host. Measured in a real tab:
+  ## the pane went 396px -> 576px with the editor still 396px and its overview
+  ## ruler 182px inside the pane's right edge, while the same drag in edit mode
+  ## gave 871 -> 691 with the editor following exactly. At that moment the
+  ## renderer's `#editorComponent-0` host measured 576px too — only Monaco's
+  ## view node still carried an inline `width: 396px`.
+  ##
+  ## `ci/test/editor-resize-follows-pane.sh` is the gate for it and is RED on
+  ## purpose. The contrast that makes the diagnosis certain: the auto-hide
+  ## reparenting in `ui/layout.nim` and `ui/auto_hide.nim` moves the GL
+  ## container HOLDING the component, so container and view travel together and
+  ## the observer's subject survives. Only this proc separates them.
 
 proc monacoEditorSetReadOnly(editor: MonacoEditor; readOnly: bool) {.importjs:
   "#.updateOptions({ readOnly: # })".}

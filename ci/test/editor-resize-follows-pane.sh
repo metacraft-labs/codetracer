@@ -56,23 +56,47 @@
 # measurement happens. Picking the drag distance from the pane's slack would
 # remove the noise.
 #
-# A FIX HAS NOT LANDED WITH IT. Three shapes were tried and each was measured
-# NOT to run on the path that matters, so none is in the tree:
+# A FIX HAS NOT LANDED WITH IT. Four shapes were tried and each was measured
+# NOT to work, so none is in the tree:
 #
 #   * re-hosting Monaco's CONTAINER instead of its view, so the observer keeps a
 #     live subject — the renderer rebuilds `#editorComponent-N` in `doMount` via
 #     `replaceWithIsoNimEditorPanel` and throws the container straight back out;
 #   * a ResizeObserver installed from `monacoEditorAdoptInto` — the renderer
 #     carries the view across itself, so the view is never detached,
-#     `reattachMonacoIfDetached` returns early, and on the debug transition it is
-#     not reached at all;
-#   * the same observer installed from `createMonacoEditor` and then from
-#     `editor.nim` module scope — neither executed in the page. `nim js` emits
-#     the code (it is in the built `ui.js`, in the module-init section), the
-#     renderer itself initialises (`window.__ctRedrawAll` is a function, eight
-#     `__ct*` globals are present), no page error is raised, and yet the marker
-#     it sets is absent from both `window` and `document.documentElement`. That
-#     is unexplained and is where the next person should start.
+#     `reattachMonacoIfDetached` returns early, and on the debug transition it
+#     is not reached at all;
+#   * a global ResizeObserver over `.lm_content`, installed at `editor.nim`
+#     module scope, relayouting the editors inside the pane that reported;
+#   * the same, made unconditional (relayout EVERY editor on any resize), also
+#     watching each editor's current host and reconciling again on the next
+#     frame and at +120ms/+400ms.
+#
+# THE LAST TWO WORK IN ONE SCENARIO AND NOT IN ANOTHER, ON THE SAME BUILD, and
+# that discrepancy is the thread to pull. Driven directly — boot, enter debug,
+# drag — the editor followed the pane 396 -> 576 and the observer's own counters
+# showed it firing and relayouting once. Driven by THIS gate, which performs two
+# edit-mode drags BEFORE entering debug, the identical drag leaves the editor at
+# 396. The relayout simply never runs in the second case.
+#
+# WHAT IS RULED OUT, so nobody re-runs it:
+#   * Nim module init. It DOES run. `{.emit.}` markers and an `importjs` proc
+#     call placed at `editor.nim` module scope all fired, as did one at
+#     `ui_js.nim` module scope. An earlier "module init does not execute"
+#     reading was an artefact of a multi-line `{.importjs: """..."""}` string;
+#     the single-line `"..." & "..."` form works.
+#   * The observer not being installed. Instrumented at every guard, it reaches
+#     `done`, and observes 5 panes in edit mode and 17 after the transition.
+#   * The host not tracking the pane. Measured at the moment of failure, the
+#     pane was 576px AND `#editorComponent-0` was 576px; only Monaco's view node
+#     still carried an inline `width: 396px`.
+#
+# THE NEXT THING TO CHECK is which editor object the relayout iterates.
+# `monaco.editor.getEditors()` is Monaco's own registry, while this gate and the
+# product resolve the editor through `data.ui.editors[active].monacoEditor`. If
+# a mode transition preceded by edit-mode drags leaves the active instance out
+# of that registry, a relayout that loops the registry would never touch it,
+# which fits every observation above.
 #
 # The 5x5 that a previous change in this area left behind shares the root cause:
 # a bare `layout()` means "re-measure `_domElement`", the detached one, so Monaco
