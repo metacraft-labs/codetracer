@@ -4950,8 +4950,7 @@ jobs:
       # ``./ci/test/ui-tests-db.sh`` below). just / nim / cargo / node /
       # Playwright all come from ``nix develop .``; the former open-coded brew
       # install just / setup-python / dtolnay rust-toolchain steps are gone.
-      - name: Provision dependency siblings from repro.lock (macOS)
-        if: matrix.platform == 'macos'
+      - name: Provision dependency siblings from repro.lock
         # codetracer's ``config.nims`` adds ``../isonim/src`` and the four
         # nim-* sibling sources to the Nim search path.  Without them the
         # frontend build aborts with ``cannot open file:
@@ -4959,6 +4958,23 @@ jobs:
         # the Linux jobs already use.  ``Setup dev env`` above carries
         # ``env-flavor: nix``, so the dev shell this action reaches ``repro``
         # through is available by now.
+        #
+        # NO LONGER GATED TO macOS, and the comment above is why: the nixos leg
+        # needs the same five sources for the same reason, and it was dying of
+        # the very error this step's own note quotes. Run 33809372477, job
+        # 100828216515 (test-ui-tests, nixos eph-linux-x64-g2):
+        #
+        #     src/frontend/storybook_components.nim(11, 19)
+        #     Error: cannot open file: isonim/core/async_compat
+        #     error: Recipe `build-storybook-components` failed ...
+        #     error: Recipe `test-gui-prebuilt` failed with exit code 1
+        #
+        # The `siblings:` block in `Setup dev env` above carries
+        # trace-format, trace-format-nim, native-recorder, nim-stackable-hooks,
+        # visual-replay, native-backend and runquota -- and no isonim, because
+        # isonim is not resolvable from the workspace lock (the `codetracer`
+        # project in metacraft-manifests does not declare it). repro.lock is
+        # what answers for it, which is exactly what this action reads.
         uses: ./.github/actions/provision-repro-lock-siblings
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
