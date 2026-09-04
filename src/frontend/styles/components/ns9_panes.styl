@@ -18,6 +18,14 @@ ns9-row-padding = 2px 8px
 // dropped, and every row hover in these two panes silently did nothing. A
 // misspelling that compiles is the shape a token lint exists to catch; there is
 // no such lint over `src/frontend/styles`, so it is named here instead.
+//
+// THERE IS NOW: `ci/test/css-token-resolution.sh` compiles every shipped
+// stylesheet and fails the build on an identifier that resolves to nothing. It
+// found a second one in this very rule — the body colour below said
+// `colors-ui-text-default-label`, which is not a token either, so these two
+// panes had no text colour and painted in whatever they inherited.
+// `colors-ui-text-primary-label` is the label tier the sibling panes use:
+// #c8c8c8 on the #282828 these panes sit on, measured at 8.81:1.
 
 .test-results,
 .constraints
@@ -28,7 +36,7 @@ ns9-row-padding = 2px 8px
   font-family: "SpaceGrotesk" !important
   font-style: normal
   font-weight: 400
-  color: colors-ui-text-default-label
+  color: colors-ui-text-primary-label
 
   &:focus
     outline: 0px

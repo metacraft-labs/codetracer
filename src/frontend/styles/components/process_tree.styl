@@ -37,7 +37,7 @@
   height: 100%
   overflow-y: auto
   background-color: colors-ui-surface-base-canvas
-  border-right: 1px solid colors-ui-border-base
+  border-right: 1px solid colors-ui-border-secondary
   font-size: 0.8rem
   user-select: none
 
@@ -48,6 +48,35 @@
   font-weight: bold
   opacity: 0.6
 
+// Four of this pane's colours named variables that do not exist
+// (`colors-ui-border-base`, `colors-ui-surface-base-hover`,
+// `colors-ui-surface-base-selected`, `colors-ui-text-accent`), so Stylus
+// emitted them verbatim and the browser dropped all four: the pane had no
+// right-hand edge, rows did not respond to hover, and the active process was
+// indistinguishable from the rest. `ci/test/css-token-resolution.sh` is what
+// now notices that shape.
+//
+// The replacements are the tokens the rest of this sheet already uses for
+// these three states rather than newly chosen colours:
+//
+//   hover     colors-ui-surface-base-card              #262626 — the same
+//             token ns9_panes.styl uses for a row hover, so the two sibling
+//             panes respond identically.
+//   active    colors-ui-surface-primary-secondary-hover #333333 — the house
+//             selected-row background, 11 other rules deep. Chosen over
+//             #262626/#282828 because the active row has to be told apart
+//             from the hovered one WHILE the pointer is on it.
+//   rail      colors-ui-border-action                  #6366f1 — the
+//             interactive/brand border.
+//
+// The rail measures 2.83:1 against the active row's #333333 and 3.86:1
+// against the pane's #1b1b1b canvas. The first is short of the 3:1 WCAG
+// 1.4.11 asks of a UI graphic, and it is recorded here rather than papered
+// over: no `colors-ui-*` token on the brand ramp clears 3:1 on #333333
+// (indigo-600 manages 2.01:1, and this indigo-500 is the brightest of them),
+// so clearing it would mean spending a raw ramp colour where the design
+// system expects a semantic one. Selection is carried by the row background
+// as well as the rail, so the rail is not the sole indicator.
 .ct-process-tree-entry
   display: flex
   flex-direction: column
@@ -56,11 +85,11 @@
   border-left: 2px solid transparent
 
   &:hover
-    background-color: colors-ui-surface-base-hover
+    background-color: colors-ui-surface-base-card
 
   &.active
-    border-left-color: colors-ui-text-accent
-    background-color: colors-ui-surface-base-selected
+    border-left-color: colors-ui-border-action
+    background-color: colors-ui-surface-primary-secondary-hover
 
 .ct-process-tree-role
   font-weight: bold

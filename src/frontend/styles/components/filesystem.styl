@@ -5,6 +5,11 @@
   flex-direction: column
   justify-content: space-between
 
+// The tree's body colour said `colors-ui-text-default-label`, which is not a
+// token — so the declaration was dropped and the file tree inherited its
+// colour from the pane. `colors-ui-text-primary-label` is the label tier:
+// #c8c8c8, 8.81:1 on the #282828 the pane paints and 7.55:1 on the #333333 a
+// hovered row paints.
 .filesystem
   font-family: "SpaceGrotesk" !important
   // font-size: 14px !important
@@ -16,7 +21,7 @@
   height: -webkit-fill-available
   // overflow-y: scroll
   // background-color: colors-ui-surface-base-panel
-  color: colors-ui-text-default-label
+  color: colors-ui-text-primary-label
   // margin-left: 2px
 
   &:focus

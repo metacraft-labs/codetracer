@@ -23,15 +23,34 @@ input
     background: colors-ui-surface-input-default
     color: colors-ui-text-primary-body !important
 
+  // `colors-ui-text-primary-disabled` AND NOT `colors-ui-text-disabled-default`,
+  // which is what this said and which is not a token — so the declaration was
+  // dropped and a disabled input's text stayed at the enabled `#c8c8c8` set
+  // above, on the disabled background. Nothing marked it as disabled but the
+  // cursor.
+  //
+  // #727272 on #282828 is 3.06:1. Below the 4.5:1 of WCAG 1.4.3, and
+  // deliberately so: 1.4.3 exempts text that is part of an inactive component,
+  // and being visibly dimmer than live text is the whole signal here.
   &:disabled
     border: 0.0625rem solid colors-ui-border-disabled
     background: colors-ui-surface-primary-disabled
-    color: colors-ui-text-disabled-default !important
+    color: colors-ui-text-primary-disabled !important
     pointer-events: none
     cursor: not-allowed
 
+  // `colors-ui-text-primary-label-subtle` — #919191, which is 4.68:1 on the
+  // lightest surface an empty input sits on (#282828, the form and command
+  // palette fields) and 5.79:1 on the darkest (#151515, the search fields).
+  // The name this rule carried, `colors-ui-text-default-placeholder`, resolved
+  // to nothing, so every placeholder in the app painted in the enabled input
+  // colour and read as typed text.
+  //
+  // The subtler `colors-ui-text-primary-caption-subtle` was the other
+  // candidate and is rejected on measurement: #727272 gives 3.06:1 on
+  // #282828, which is disabled-text contrast for text a user is meant to read.
   &::placeholder
-    color: colors-ui-text-default-placeholder
+    color: colors-ui-text-primary-label-subtle
 
   &:hover::placeholder,
   &:focus-visible::placeholder,
@@ -39,7 +58,7 @@ input
     color: colors-ui-text-primary-body
 
   &:disabled::placeholder
-    color: colors-ui-text-disabled-default !important
+    color: colors-ui-text-primary-disabled !important
 
 
 .ct-input-search-image

@@ -34,7 +34,7 @@ LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
     cursor: row-resize
 
   &:hover
-    background: colors-ui-border-interactive-default !important
+    background: colors-ui-border-action !important
 
 .lm_stack
   overflow: hidden !important
@@ -60,6 +60,13 @@ LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
   background: #444444;
   z-index: 11
 
+// EVERY PANE TAB IN THE APP TAKES ITS COLOUR FROM HERE, and the name this
+// rule used — `colors-ui-text-default-tab` — is not a token. Stylus emitted it
+// verbatim, the browser dropped the declaration, and the tab strip painted in
+// whatever GoldenLayout's own stylesheet left behind.
+//
+// `colors-ui-text-primary-label` is the label tier, which is what a tab is:
+// #c8c8c8 on this rule's own #282828 background, measured at 8.81:1.
 .lm_tab
   font-family: "SpaceGrotesk" !important
   font-size: inherit !important
@@ -68,7 +75,7 @@ LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
   letter-spacing: -0.14px !important
   //height: 25px !important
   background-color: colors-ui-surface-base-panel !important
-  color: colors-ui-text-default-tab !important
+  color: colors-ui-text-primary-label !important
   margin: 0 !important
   border: 0 !important
   // margin-top: 2px !important
