@@ -5894,6 +5894,64 @@ when defined(ctWeb) and not defined(ctInExtension):
           # and they do.
           test_results.testResultsVMInstance.setRunTests(
             proc() = web_noir_build.startNoirTests())
+
+          # THE TWO PER-ROW CONTROLS, pointed at the two things they mean.
+          #
+          # They are installed TOGETHER and as three procs, because the pane
+          # decides between them and the host must be able to honour whichever
+          # it picks. Installing only the recorder would leave `⏵` disabled with
+          # "No host in this build can open a recording" on every row — a
+          # correct sentence about a wiring gap, which is not the same as a
+          # correct product.
+          #
+          # `refresh` passes `openWhenDone = false`: it makes the recording and
+          # leaves the reader in the pane. `recordAndOpen` passes the default,
+          # which is the editor's Run-test behaviour — verdict, artefact, trace,
+          # session.
+          #
+          # `openExisting` calls a proc that DISPATCHES NOTHING. That is the
+          # affordance the user asked for by name ("this is not necessarily a
+          # re-run") and the reason it is a separate host entry point rather
+          # than a flag on the recorder: a flag could be got wrong and still
+          # look right, whereas a proc with no `dispatch` in it cannot re-run a
+          # test by accident.
+          test_results.testResultsVMInstance.setRowActions(
+            refresh = proc(testId, selector: string) =
+              web_noir_build.startNoirTestRecording(
+                selector, newSessionTab = false, openWhenDone = false),
+            openExisting = proc(testId, selector: string) =
+              let refusal = web_noir_build.openRetainedTestRecording(selector)
+              if refusal.len > 0 and
+                 not test_results.testResultsVMInstance.isNil:
+                # SAID, NOT SWALLOWED. The pane offered this control believing
+                # a recording was there; if the host disagrees the user is owed
+                # the sentence rather than a click that did nothing.
+                #
+                # `noteRowActionRefusal` and NOT `setRunAbsence` — see its
+                # header. One control failing must not grey out three others,
+                # and a transient refusal must not become a standing claim
+                # about what this deployment can do.
+                test_results.testResultsVMInstance.noteRowActionRefusal(
+                  refusal),
+            recordAndOpen = proc(testId, selector: string) =
+              web_noir_build.startNoirTestRecording(
+                selector, newSessionTab = false, openWhenDone = true))
+
+          # AND THE PANE IS TOLD WHICH RECORDING NOW EXISTS.
+          #
+          # Without this the two controls above would be permanently in their
+          # no-recording mode: `⏵` would say "record and open" over tests that
+          # had just been recorded, and the fast path — the whole point of the
+          # request — would never be reachable. `recordingId` is what the pane
+          # paints into `data-ct-recording-id`, so this line is also what makes
+          # "did that click re-execute?" a question a check can answer.
+          web_noir_build.noirTestRecordingSink =
+            proc(selector, recordingId, recordedAtText: string) =
+              if test_results.testResultsVMInstance.isNil:
+                return
+              test_results.testResultsVMInstance.rememberRecordingForSelector(
+                selector, recordingId, recordedAtText)
+
           web_noir_build.noirTestRunStarted = proc() =
             if not test_results.testResultsVMInstance.isNil:
               test_results.testResultsVMInstance.beginRun()
