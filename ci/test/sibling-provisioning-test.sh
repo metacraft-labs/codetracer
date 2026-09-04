@@ -205,19 +205,32 @@ echo "siblings: entries pin a reproducible revision"
 #             for the IsoNim family with `repro develop`, which supplies exact
 #             SHAs from repro.lock. Converted by deletion, not by pinning.
 #
-#   62 -> 53  io-mon, nim-shm-queue, nim-shm-gset and nim-stackable-hooks are
-#             all flake INPUTS of this repo, so a rev for each already exists
-#             in flake.lock and is what the `ci` dev shell and reprobuild
-#             compile against. Their sibling checkouts said `=dev`, which is a
-#             different thing that merely usually agrees -- one pin spelled in
-#             two places, with nothing keeping the two spellings equal. They
-#             now name the flake.lock rev, so the checkout and the shell are
-#             the same revision by construction.
+#   62 -> 56  io-mon, nim-shm-queue and nim-shm-gset are flake INPUTS of this
+#             repo, so a rev for each already exists in flake.lock and is what
+#             the `ci` dev shell and reprobuild compile against. Their sibling
+#             checkouts said `=dev`, which is a different thing that merely
+#             usually agrees -- one pin spelled in two places, with nothing
+#             keeping the two spellings equal. They now name the flake.lock
+#             rev, so the checkout and the shell are the same revision by
+#             construction.
+#
+# nim-stackable-hooks was DELIBERATELY NOT CONVERTED, and the reason is a
+# defect worth someone's attention: flake.lock locks that one repo at TWO
+# DIFFERENT revisions --
+#
+#     node nim-stackable-hooks       171980881be3910fde4e320d5a2a503e7fd00045
+#     node nim-stackable-hooks-src   41ab1b987aba67e8bcc34a5945ac33e17b6418ed
+#
+# -- so "the rev flake.lock pins" is not a well-defined thing to pin the
+# sibling checkout to, and choosing either would be a guess dressed as a
+# reproducibility improvement. It stays `=dev`, exactly as it was before, until
+# the two nodes are reconciled. (io-mon also has two nodes, `io-mon` and
+# `io-mon-src`, but they agree, so it converts without ambiguity.)
 #
 # The ceiling had been exceeded (67 > 59) on `dev` for some time without ever
 # being reported, because this suite ran inside `ci-verdict` behind steps that
 # aborted first, and no `Codetracer CI` run on `dev` reached it.
-readonly BRANCH_TIP_CEILING=53
+readonly BRANCH_TIP_CEILING=56
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops

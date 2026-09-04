@@ -133,6 +133,39 @@ for repo in $(printf '%s\n' "$flake_list" "$workflow_list" | cut -f1 | sort -u);
 
 	if [ "$fref" = "$wref" ]; then
 		pass "$repo: both name '$fref'"
+	elif printf '%s' "$wref" | grep -qE '^[0-9a-f]{40}$'; then
+		# The workflow pins a COMMIT while flake.nix tracks a branch. That is
+		# not the disagreement this suite exists to catch -- it is the stronger
+		# form of agreement, PROVIDED the commit is the one flake.lock has
+		# locked that input to. "Same branch name" only means the two will
+		# usually resolve alike; "same 40-hex rev" means the sibling checkout
+		# and the shell the Nix lane builds are the same tree, by construction.
+		#
+		# So the branch comparison is replaced by a rev comparison rather than
+		# waived. A SHA that is NOT the locked rev is a real defect and is
+		# reported as one -- otherwise this branch would turn "pin it to a
+		# commit" into a way to opt out of the contract, which is the failure
+		# mode this whole file is written against.
+		locked=$(python3 - "$repo" <<'PY' 2>/dev/null || true
+import json,sys
+repo=sys.argv[1]
+try: nodes=json.load(open("flake.lock"))["nodes"]
+except Exception: sys.exit(0)
+for v in nodes.values():
+    l=v.get("locked",{})
+    if l.get("repo")==repo and l.get("rev"):
+        print(l["rev"]); break
+PY
+		)
+		if [ -z "$locked" ]; then
+			fail "$repo: the workflow pins a commit that flake.lock cannot corroborate" \
+				"the workflow says '$wref', but flake.lock has no locked rev for a metacraft-labs/$repo input. A pin nothing can check is not a pin."
+		elif [ "$locked" = "$wref" ]; then
+			pass "$repo: the workflow pins $wref, which is exactly the rev flake.lock locks (flake.nix tracks '$fref')"
+		else
+			fail "$repo: the workflow pins a different commit than flake.lock locks" \
+				"the workflow says '$wref', flake.lock locks '$locked' (flake.nix tracks '$fref'). The Nix lane builds the locked rev; every cross-repo lane builds the workflow's."
+		fi
 	else
 		fail "$repo: flake.nix and the workflow name different branches" \
 			"flake.nix says '$(printf '%s' "$fref" | tr '\n' ' ')', the workflow says '$(printf '%s' "$wref" | tr '\n' ' ')'. The Nix lane builds the first; every cross-repo lane builds the second."

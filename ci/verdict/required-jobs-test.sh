@@ -50,7 +50,16 @@ tmp_dir="$(mktemp -d)"
 # which is what protects against exactly that, is never reached. CI's bash 5
 # is unaffected, so this was invisible there -- a self-test that cannot fail,
 # in the one script the rest of this pipeline is read through.
-trap 'rc=$?; rm -rf "${tmp_dir}"; exit "${rc}"' EXIT
+# A function rather than an inline `trap 'rc=$?; ...'`: shellcheck cannot see
+# an assignment inside the single-quoted trap string and reports SC2154 ("rc is
+# referenced but not assigned"), which fails `lint-bash` -- the lane that gates
+# every build in this repository.
+_cleanup() {
+	local rc=$?
+	rm -rf "${tmp_dir}"
+	exit "${rc}"
+}
+trap _cleanup EXIT
 
 pass_count=0
 
