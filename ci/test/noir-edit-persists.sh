@@ -230,7 +230,45 @@ else
 	ck fail "the studio did not come back after the reload"
 fi
 
-# THE HEADLINE. Exact equality: what came back is what was saved.
+# ---------------------------------------------------------------------------
+# THE DEBUG SESSION IN BETWEEN — the leg the data-loss report needs.
+#
+# Reported: "when I enter a debug sesion and hit the Stop button, the contents
+# of some files become empty. What's worse is that this seems to be persisted
+# even after I refresh the tab."
+#
+# The reload assertions below were already here and were already green, because
+# nothing above them ever left Edit mode. The defect needs the mode transition:
+# a layout swap orphans a Monaco widget, nothing nils `tabInfo.monacoEditor`,
+# and `getValue()` on a widget whose model is gone returns '' rather than
+# throwing — so the next save wrote an empty file through to OPFS.
+#
+# THE CONTROL FIRST. If the debug leg did not run, the reload assertions are
+# measuring the old, weaker sequence and must not be read as covering this.
+if [ "$(jbool "${cache}/control.json" debugLegAttempted)" = "1" ]; then
+	ck ok "a debug session was entered between the edit and the reload"
+else
+	ck fail "the Run button was not reachable, so this run did NOT exercise the reported sequence — the reload checks below prove nothing about it"
+fi
+
+if [ "$(jbool "${cache}/control.json" debugLegEnteredDebug)" = "1" ] &&
+	[ "$(jbool "${cache}/control.json" debugLegReturnedToEdit)" = "1" ]; then
+	ck ok "and Stop returned the workspace to Edit mode"
+else
+	ck fail "the Run/Stop round trip did not complete: $(jget "${cache}/control.json" debugLegError)"
+fi
+
+# THE BYTES, BEFORE THE RELOAD. This separates "lost in memory" from "lost in
+# storage" — the two need different fixes and a single after-reload check
+# cannot tell them apart.
+if [ "$(jbool "${cache}/control.json" markerAfterStop)" = "1" ]; then
+	ck ok "the editor still holds the edit after Stop, before any reload ($(jget "${cache}/control.json" contentAfterStopLength) bytes)"
+else
+	ck fail "after Stop the editor no longer holds the edit ($(jget "${cache}/control.json" contentAfterStopLength) bytes, $(jget "${cache}/control.json" emptyModelsAfterStop) empty model(s)) — the loss is in memory, not in storage"
+fi
+
+# THE HEADLINE. Exact equality: what came back is what was saved — now across a
+# Run and a Stop as well as a reload.
 if [ "$(jbool "${cache}/control.json" markerAfterReload)" = "1" ]; then
 	ck ok "the edit is still there after a reload that destroyed every JS value"
 else

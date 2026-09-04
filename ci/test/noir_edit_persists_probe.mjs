@@ -426,6 +426,85 @@ try {
     logs.some((l) => l.includes('no host for CODETRACER::save-file') &&
                      !l.includes('save-file-error'));
 
+  // -- A DEBUG SESSION, IN BETWEEN --------------------------------------
+  //
+  // Reported: "when I enter a debug sesion and hit the Stop button, the
+  // contents of some files become empty. What's worse is that this seems to be
+  // persisted even after I refresh the tab. It's cleared only when I clear the
+  // browser data for the web-site."
+  //
+  // WITHOUT THIS LEG THE GATE CANNOT SEE IT. Everything above types, saves and
+  // reloads without ever leaving Edit mode, and the defect needs the mode
+  // transition: a GoldenLayout swap orphans a Monaco widget, nothing ever nils
+  // `tabInfo.monacoEditor`, and Monaco's `getValue()` answers `''` for a widget
+  // whose model is gone rather than throwing. The next save — and Run itself
+  // saves, unconditionally — then wrote that empty string through to OPFS,
+  // where the reload read it back.
+  //
+  // Recorded as its own fields rather than folded into the reload check, so a
+  // failure says whether the bytes were lost at the Run, at the Stop, or in
+  // storage.
+  out.debugLegAttempted = false;
+  out.debugLegEnteredDebug = false;
+  out.debugLegReturnedToEdit = false;
+  out.contentAfterStop = null;
+  try {
+    const runButton = await page.$('#run-image');
+    if (runButton) {
+      out.debugLegAttempted = true;
+      await runButton.click();
+      await page.waitForSelector('.isonim-debug-controls', { timeout: 180000 });
+      out.debugLegEnteredDebug = true;
+      await page.waitForTimeout(1500);
+
+      await page.click('#stop-image');
+      await page.waitForSelector('.edit-mode-toolbar', { timeout: 180000 });
+      await page.waitForSelector('.view-line', { timeout: 60000 });
+      out.debugLegReturnedToEdit = true;
+      await page.waitForTimeout(2000);
+
+      // What the editor holds now, BEFORE the reload. If the bytes are already
+      // gone here the loss happened in memory; if they are here and gone after
+      // the reload it happened in the store.
+      out.contentAfterStop = await page.evaluate(() => {
+        const vals = window.monaco.editor.getModels().map((m) => m.getValue());
+        const nonEmpty = vals.filter((v) => v.length > 0);
+        return {
+          models: vals.length,
+          empty: vals.length - nonEmpty.length,
+          longest: nonEmpty.length > 0
+            ? nonEmpty.reduce((a, b) => (a.length >= b.length ? a : b))
+            : '',
+        };
+      });
+
+      // Flattened for the shell, which reads top-level keys only. The LONGEST
+      // non-empty model rather than a count: a count of models is satisfied by
+      // three empty ones, which is exactly the state under test.
+      out.contentAfterStopLength = out.contentAfterStop.longest.length;
+      out.markerAfterStop = out.contentAfterStop.longest.includes(MARKER);
+      out.emptyModelsAfterStop = out.contentAfterStop.empty;
+
+      // A SECOND SAVE AFTER THE TRANSITION, deliberately. This is the gesture
+      // that actually wrote the empty string: the orphaned widget is only read
+      // when something asks it to save, and pressing Ctrl+S here is the
+      // cheapest way to ask. Without it the gate would pass on a build where
+      // the wipe is merely deferred to the user's next save.
+      await page.click('.monaco-editor');
+      await page.keyboard.press('Control+S');
+      await page.waitForTimeout(2500);
+    }
+  } catch (err) {
+    out.debugLegError = String((err && err.message) || err).slice(0, 300);
+  }
+
+  // Refusals the truncation guard raised, if any. A refusal is the product
+  // WORKING — it is what stops the wipe — so it is recorded rather than
+  // treated as an error, and the gate reports it alongside the round trip.
+  out.truncationRefusals = logs
+    .filter((l) => /refused to truncate|Refused to save an empty/.test(l))
+    .slice(0, 10);
+
   // THE RELOAD — every byte of JS state is destroyed here.
   await page.reload({ waitUntil: 'load' });
   await waitForEditMode(page);
