@@ -171,8 +171,26 @@ mkShell {
     # the wrong directory. The fallback reproduces the old behaviour exactly.
     ROOT_PATH=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 
-    # Install pre-commit hooks automatically.
-    ${preCommit.installationScript}
+    # Install pre-commit hooks automatically -- but NOT from a linked worktree
+    # that would be reinstalling on another checkout's behalf.
+    #
+    # git-hooks.nix's installationScript writes `core.hooksPath` with `git config
+    # --local`, which IS NOT PER-WORKTREE here, and it first `pre-commit
+    # uninstall`s nine hook types and blanks that key before reinstalling. Run
+    # from a worktree it therefore tears down and rebuilds the hooks every OTHER
+    # worktree is relying on, mid-flight. The decision and its full rationale
+    # live in the script below so they can be tested directly; it prints its
+    # reason on stderr either way, and never writes to the repository.
+    if bash "$ROOT_PATH/ci/dev/should-install-git-hooks.sh"; then
+      ${preCommit.installationScript}
+    fi
+
+    # The config symlink is per-worktree and mutates nothing shared, so it is
+    # created unconditionally -- including on the skip path above, where the
+    # installer never runs. Without it the shared hooks fire in a worktree that
+    # has no `.pre-commit-config.yaml` and abort with "No .pre-commit-config.yaml
+    # file was found", which is exactly what a worktree entering this shell used
+    # to get.
     ln -sf ${preCommit.settings.configFile} "$ROOT_PATH/.pre-commit-config.yaml"
 
     export RUST_LOG=info
