@@ -902,14 +902,49 @@ fn test_eager_mode_indicator_renders_current_trace_mode() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 9a + 9b — Playwright SKIP stubs.
+// Test 9a + 9b — Playwright hand-off stubs.
 //
-// The M5 / M21 Playwright suite covers the in-browser rendering of the
-// eager origin badges; the SKIP stubs here document the test names so
-// the milestone's verification table stays honest. They self-skip when
-// the `ct` binary at `src/build-debug/bin/ct` (per CLAUDE.md
-// "Running Playwright e2e tests") is not on the dev shell.
+// These two stubs render nothing themselves; they stand in for browser
+// tests that were supposed to live in `tsc-ui-tests/`. Previously they
+// printed a SKIP sentinel on both branches and passed unconditionally,
+// so the milestone's verification table cited a browser test that had
+// never been written. They now fail instead, because that is still true.
+// See `codetracer-specs/Testing/Silent-Self-Pass-Audit-2026-08-23.md`.
+//
+// They still self-skip when the `ct` binary at `src/build-debug/bin/ct`
+// (per CLAUDE.md "Running Playwright e2e tests") is absent, because
+// without it the e2e lane cannot run at all.
 // ---------------------------------------------------------------------------
+
+/// Fail loudly: this stub hands off to Playwright coverage that has never
+/// been written.
+///
+/// Reaching this point means the e2e lane's prerequisite (`ct`) is
+/// present, so the stub was selected to run. It previously printed a SKIP
+/// sentinel and returned, which reported success for a browser test that
+/// does not exist — the M21 verification row it represents is backed by
+/// nothing executable.
+///
+/// Deliberately *not* implemented as a grep for a spec title: a broad
+/// "some spec mentions origin and eager" probe matches
+/// `macro_expansion/semantic-tokens.spec.ts` ("initialised eagerly") and
+/// `multi-replay/m24-session-toml-load.spec.ts`
+/// (`correlation_index_mode = "eager"`), neither of which renders an
+/// origin badge. That probe would pass vacuously and recreate the very
+/// defect this change removes.
+fn missing_playwright_coverage(test_name: &str, what: &str) -> ! {
+    panic!(
+        "MISSING PLAYWRIGHT COVERAGE: `{test_name}` is a hand-off stub for a browser test that \
+         was never written.\n\
+         It claims the run is driven by `tsc-ui-tests/`; as of 2026-09-05 that directory holds a \
+         single unrelated spec (`tests/elixir/elixir_trace_smoke.spec.ts`) and no spec under \
+         `src/tests/gui/` covers {what}.\n\
+         Either write the Playwright spec and have this stub assert against it, or delete this \
+         stub together with the M21 verification row it backs. Do not restore the unconditional \
+         SKIP — it reported success for coverage that does not exist.\n\
+         Tracked in `codetracer-specs/Testing/Known-Test-Failures.md`."
+    );
+}
 
 fn ct_binary_available() -> bool {
     // The same path pattern the just-test-e2e target consumes.
@@ -927,11 +962,14 @@ fn e2e_history_popover_renders_origins_eager_on_omniscient_trace() {
         eprintln!("SKIPPED: ct binary not on PATH (M5 Playwright discipline)");
         return;
     }
-    // When the `ct` binary is available the actual end-to-end run is
-    // driven by `tsc-ui-tests/`; the in-Rust shim documents the test
-    // name and the SKIP contract so this file's verification table
-    // matches the milestone exactly.
-    eprintln!("SKIPPED: Playwright run is driven by tsc-ui-tests/ — see just test-e2e");
+    // The actual end-to-end run is driven by the Playwright suite (see
+    // `just test-e2e`). This stub's only job is to fail if that suite
+    // does not in fact cover the history-popover eager-origin
+    // rendering.
+    missing_playwright_coverage(
+        "e2e_history_popover_renders_origins_eager_on_omniscient_trace",
+        "eager origin rendering in the history popover",
+    );
 }
 
 #[test]
@@ -940,5 +978,8 @@ fn e2e_omniscience_flow_renders_origins_eager_on_omniscient_trace() {
         eprintln!("SKIPPED: ct binary not on PATH (M5 Playwright discipline)");
         return;
     }
-    eprintln!("SKIPPED: Playwright run is driven by tsc-ui-tests/ — see just test-e2e");
+    missing_playwright_coverage(
+        "e2e_omniscience_flow_renders_origins_eager_on_omniscient_trace",
+        "eager origin rendering in the omniscience flow",
+    );
 }
