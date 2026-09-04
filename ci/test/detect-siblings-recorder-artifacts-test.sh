@@ -118,6 +118,9 @@ out=""
 ruby_on_path=""
 run_detect() {
 	local ws="$1" raw
+	# shellcheck disable=SC2016  # $1/$2/$PATH belong to the INNER shell; they
+	# are supplied as positional arguments after `_` precisely so the detector
+	# is sourced with a clean environment rather than an interpolated string.
 	raw="$(env -u CODETRACER_REPO_ROOT_PATH -u CODETRACER_PYTHON_INTERPRETER \
 		-u RUBY_RECORDER_ROOT -u DETECT_SIBLINGS_QUIET \
 		bash -c '

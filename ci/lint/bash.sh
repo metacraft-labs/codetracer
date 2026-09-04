@@ -351,4 +351,14 @@ lint_step "contract suite: recorder probes track the built artefact" \
 lint_step "contract suite: a job that clones a recorder builds it" \
 	bash ci/test/recorder-clone-implies-build-test.sh
 
+# The self-hosted runner defect register (ci/runner/README.md). A document is
+# not usually a lint target, but this one makes checkable claims -- "gate X
+# runs", "commit Y fixed it", "there are seven of these" -- and it was written
+# because the list previously lived in one person's head and got recounted as
+# five. Unchecked prose decays faster than code: the assertion gets corrected
+# and the sentence describing it does not. Only existence and counts are
+# asserted, never line numbers, which drift honestly.
+lint_step "contract suite: the runner defect register still cites real things" \
+	bash ci/test/runner-register-citations-test.sh
+
 lint_summary
