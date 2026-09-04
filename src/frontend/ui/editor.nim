@@ -3419,26 +3419,122 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
   if not self.api.isNil:
     self.api.emit(InternalLastCompleteMove, EmptyArg())
 
+# WRITE `importjs` BODIES AS CONCATENATED SINGLE-LINE STRINGS, the
+# `"..." & "..."` form every proc below uses. NOT as a multi-line triple-quoted
+# `{.importjs: """ ... """.}`, however much more readable that is.
+#
+# Measured, chasing the resize defect this cluster is about: the SAME
+# JavaScript, in the multi-line form, did not run — while the emitted `ui.js`
+# visibly contained it, at module-init scope, with no page error and the
+# renderer otherwise initialising normally. Rewritten as concatenated
+# single-line strings it ran immediately, confirmed by markers at every guard.
+#
+# This has the same shape as the char-code-array trap: the source looks right,
+# the emitted output looks present, and a text search over the bundle proves
+# nothing about whether it executes. Verify JS-side behaviour by observing an
+# effect in the page, never by grepping the bundle. It cost an earlier attempt
+# at the fix below three cycles, and it is why that attempt was recorded as
+# "measured not to work" when it had in fact never executed.
+
 proc monacoEditorIsAttached(editor: MonacoEditor): bool {.importjs:
   "(function(e){ var n = e && e.getDomNode && e.getDomNode(); " &
   "return !!(n && n.isConnected); })(#)".}
   ## Whether this Monaco instance's DOM node is still in the document.
+  ##
+  ## The VIEW node is the right subject, and since `monacoEditorAdoptInto`
+  ## carries the container and the view together it is also a faithful one:
+  ## the two can no longer be in different documents, so "the view is
+  ## detached" and "this instance needs re-hosting" mean the same thing.
 
 proc monacoEditorAdoptInto(editor: MonacoEditor; host: js) {.importjs:
-  "(function(e,h){ var n = e && e.getDomNode && e.getDomNode(); " &
-  "if (!n || !h) return; h.appendChild(n); " &
+  "(function(e,h){ if (!e || !h) return; " &
+  "var c = e.getContainerDomNode ? e.getContainerDomNode() : null; " &
+  "var n = e.getDomNode ? e.getDomNode() : null; " &
+  "var moved = (c && n && c.contains(n)) ? c : n; " &
+  "if (!moved || moved === h || moved.contains(h)) return; " &
+  "if (moved === c && moved.parentNode !== h) { " &
+  "c.removeAttribute('id'); c.removeAttribute('data-isonim-editor-host'); " &
+  "c.className = 'ct-monaco-container'; " &
+  "c.style.width = '100%'; c.style.height = '100%'; } " &
+  "if (moved.parentNode !== h) h.appendChild(moved); " &
   "var relayout = function(){ try { e.layout({ width: h.clientWidth, " &
   "height: h.clientHeight }); } catch (x) {} }; relayout(); " &
   "if (typeof requestAnimationFrame === 'function') " &
   "requestAnimationFrame(relayout); })(#, #)".}
   ## Move an existing Monaco instance into `host` and re-measure it.
   ##
-  ## THE SIZE HAS TO COME FROM THE HOST, not from the editor. Monaco writes an
-  ## explicit width and height onto its own DOM node, so a bare `layout()`
-  ## re-measures the node it just sized and keeps whatever geometry it had
-  ## while detached — measured as a 5x5 editor showing two lines inside an
-  ## 880x902 pane. Once more on the next frame because the pane a layout swap
-  ## has just created has not been through a browser layout pass yet.
+  ## THE CONTAINER MOVES, NOT JUST THE VIEW, and that is the whole of the fix
+  ## for "resizing the panel that holds the Monaco editor doesn't resize the
+  ## actual editor; the scrollbar stays in place. This is in debug mode."
+  ##
+  ## Monaco has two roots and they are not interchangeable:
+  ##
+  ##   `getContainerDomNode()` -> `_domElement`, the node handed to
+  ##       `monaco.editor.create`.
+  ##   `getDomNode()` -> `_modelData.view.domNode.domNode`, the inner
+  ##       `.monaco-editor` view node, which `browser/view.js` sizes with
+  ##       `setWidth(layoutInfo.width)` / `setHeight(layoutInfo.height)`.
+  ##
+  ## `automaticLayout: true` is a `ResizeObserver` ON `_domElement` AND ON
+  ## NOTHING ELSE. `browser/config/editorConfiguration.js` calls
+  ## `startObserving()` once, in the constructor, and `stopObserving()` only
+  ## from `dispose()`; `layout(dimension)` merely forwards to
+  ## `observeContainer(dimension)`, so an explicit dimension never disables it
+  ## and it cannot be re-pointed at another element afterwards. Read from the
+  ## bundled Monaco 0.54.0.
+  ##
+  ## This proc used to move `getDomNode()` alone, leaving `_domElement`
+  ## behind in the pane the layout rebuild had just destroyed. A detached
+  ## element's `contentRect` is 0x0 and never changes again, so the observer
+  ## stayed "on" while watching an orphan and the editor stopped following its
+  ## pane for the rest of that instance's life. Debug mode only, because edit
+  ## mode CONSTRUCTS — there `_domElement` is the live host.
+  ##
+  ## Measured on the assembled bundle, dragging the divider beside the editor
+  ## (`ci/test/editor-resize-follows-pane.sh`):
+  ##
+  ##   before  debug: pane 396 -> 576, editor 396 -> 396, overview ruler
+  ##                  182px inside the pane's right edge, layoutInfo off by
+  ##                  -180px, `getContainerDomNode().isConnected` false
+  ##   after   debug: pane 396 -> 576, editor 396 -> 576, ruler 2px from the
+  ##                  edge, layoutInfo off by 0px, container connected
+  ##
+  ## Edit mode was 871 -> 691 -> 871 with the editor following exactly both
+  ## before and after; it is the control arm and it must not change.
+  ##
+  ## MOVING THE CONTAINER IS A SUPERSET OF MOVING THE VIEW — the view is a
+  ## child of the container — so nothing that used to arrive in `host`
+  ## stops arriving. What is added is the observer's subject.
+  ##
+  ## THE MOVED CONTAINER IS NEUTRALISED FIRST, and it has to be. It is the
+  ## PREVIOUS `#editorComponent-{id}` isonim panel, carrying that id, the
+  ## `editor code-editor tab` classes and `data-isonim-editor-host`; `host` is
+  ## the new panel carrying exactly the same ones. Nesting them unaltered
+  ## would put a duplicate id in the document and apply `.code-editor`'s
+  ## `width: 31.25em` (500px) a second time, inside a pane that is often
+  ## narrower than that. Stripped to a classless full-size wrapper it is
+  ## invisible to CSS and to `getElementById`, and every product selector over
+  ## this subtree is a DESCENDANT one — `#editorComponent-{id} .monaco-editor
+  ## .view-overlays` and its siblings in `flow.nim` — so an extra level
+  ## between them changes no match.
+  ##
+  ## THE EXPLICIT `layout()` STAYS. The size has to come from the host: a
+  ## `ResizeObserver` does not fire for a node that was already its current
+  ## size when it was inserted, and the pane a layout swap has just created has
+  ## not been through a browser layout pass yet, hence the second call on the
+  ## next frame. A bare `layout()` would re-measure the container, which is
+  ## correct now but was not before this change — when it read 0 and
+  ## `ElementSizeObserver.measureReferenceDomElement` clamped it with
+  ## `Math.max(5, ...)`, which is where the "5x5 editor showing two lines
+  ## inside an 880x902 pane" came from. The gate asserts that floor is never
+  ## reached, so a fix that traded one report for the other fails there.
+  ##
+  ## RE-ADOPTING IS SAFE AND INSTALLS NOTHING. Container and view now travel
+  ## together, so a later re-host detaches both, `monacoEditorIsAttached`
+  ## reports false on the view, and this proc runs again and moves the same
+  ## container onward. No observer is registered here, so there is nothing to
+  ## leak across repeats; the guards above make a second call into `host` a
+  ## no-op followed by a re-measure.
 
 proc monacoEditorSetReadOnly(editor: MonacoEditor; readOnly: bool) {.importjs:
   "#.updateOptions({ readOnly: # })".}

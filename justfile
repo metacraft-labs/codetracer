@@ -3364,6 +3364,41 @@ test-editor-context-menu-modes:
   exec > >(tee test-logs/test-editor-context-menu-modes.log) 2>&1
   bash ci/test/editor-context-menu-modes.sh
 
+# THE EDITOR FOLLOWS ITS PANE WHEN THE PANE IS RESIZED — both modes, both
+# directions, across two entries into Debug mode, by dragging the divider with
+# the mouse.
+#
+# The third gate over the same re-host as the two above, and it exists because
+# neither of them can see this failure: one reads the font option, the other
+# reads menu entries, and both pass on an editor frozen at the size debug mode
+# left it. Reported against noirstudio.dev as "resizing the panel that holds the
+# Monaco editor doesn't seem to resize the actual editor, the scrollbar stays in
+# place, this is in debug mode".
+#
+# THE CHECK THAT CANNOT PASS WHILE THE DEFECT IS PRESENT is that Monaco's
+# CONTAINER — `getContainerDomNode()`, the one element `automaticLayout`'s
+# ResizeObserver watches and the only one it will ever watch — is still in the
+# document. The geometry checks alone are not enough, and this gate has the
+# measurement to prove it: on the pre-fix tree the two `debug/shrink` legs
+# returned the pane to the width the editor was frozen at, so "the editor fills
+# its pane" and "layoutInfo matches" both went GREEN on a completely broken
+# product. The container reading went red in all four debug legs.
+#
+# It also keeps the 5x5 covered: Monaco clamps a zero measurement with
+# `Math.max(5, ...)`, and a 5x5 editor inside an 880x902 pane is what an earlier
+# change in this area left behind. Both are asserted in the same run so neither
+# can be fixed by breaking the other.
+#
+# Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
+# otherwise. CT_RESIZE_GATE_TREE serves an already-built tree as-is, which is
+# what the control run above was measured with.
+test-editor-resize-follows-pane:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-editor-resize-follows-pane.log) 2>&1
+  bash ci/test/editor-resize-follows-pane.sh
+
 # THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
 # which said in its own words: "no CI recipe produces a web bundle, so
 # `test_one_codebase_two_platforms` is unasserted, and nothing calls the web

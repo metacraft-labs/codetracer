@@ -740,6 +740,41 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/jump-follow-in-browser.sh
           '
 
+      - name: Prove the editor still follows its pane when the pane is resized
+        # THE THIRD GATE OVER THE SAME RE-HOST, and it is here because neither
+        # of the other two can see this failure. Reported against
+        # noirstudio.dev: "resizing the panel that holds the Monaco editor
+        # doesn't seem to resize the actual editor, the scrollbar stays in
+        # place, this is in debug mode".
+        #
+        # `automaticLayout: true` is a ResizeObserver on Monaco's
+        # `getContainerDomNode()` and on nothing else — started once in the
+        # constructor, never re-pointed. Entering Debug mode re-hosts the
+        # editor, and until this landed that move carried the VIEW into the new
+        # pane while leaving the container behind, detached. A detached
+        # element's contentRect is 0x0 forever, so the observer stayed "on"
+        # watching an orphan and the editor stopped following its pane for the
+        # rest of its life. Edit mode is unaffected because it CONSTRUCTS.
+        #
+        # THE CONTAINER READING IS THE ONE THAT CANNOT PASS VACUOUSLY. Measured
+        # on the pre-fix tree with this exact gate: 10 of 52 checks red — but
+        # the two `debug/shrink` legs returned the pane to the width the editor
+        # was frozen at, so their geometry checks went GREEN on a broken
+        # product. `getContainerDomNode().isConnected` went red in all four
+        # debug legs. The gate drags in both directions across TWO entries into
+        # Debug mode, because a fix that only reconciled the first adoption
+        # passes everything else.
+        #
+        # Same refusal rule as the two steps above: no replay engine, no
+        # session, no Debug mode — it says the reported case went unmeasured
+        # rather than reporting zero failures over an empty list.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_WEB_BUNDLE_DIR="$(pwd)/studio-bundle"
+            direnv exec "$(pwd)" bash ci/test/editor-resize-follows-pane.sh
+          '
+
       - name: Upload what the pre-publish browser saw and reported
         # BOTH FORMS. This step shipped sixteen PNGs and no JSON, which made a
         # DOM failure undiagnosable by construction: the run-control check
