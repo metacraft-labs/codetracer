@@ -248,7 +248,7 @@ fi
 if [ "$(jbool "${cache}/control.json" debugLegAttempted)" = "1" ]; then
 	ck ok "a debug session was entered between the edit and the reload"
 else
-	ck fail "the Run button was not reachable, so this run did NOT exercise the reported sequence — the reload checks below prove nothing about it"
+	ck fail "the Run button was not reachable, so this run did NOT exercise the reported sequence — the reload checks below prove nothing about it. The toolbar held: $(jget "${cache}/control.json" editToolbarButtons)"
 fi
 
 if [ "$(jbool "${cache}/control.json" debugLegEnteredDebug)" = "1" ] &&

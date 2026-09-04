@@ -457,6 +457,19 @@ try {
     const runButton = await page
       .waitForSelector('#run-image', { timeout: 30000 })
       .catch(() => null);
+    // WHAT WAS THERE INSTEAD. "The Run button was not reachable" is a fact
+    // about one selector and gives the next reader nothing to act on; the
+    // toolbar's actual contents say whether the control is missing, renamed, or
+    // on a surface that never mounted. Recorded whether or not Run was found,
+    // so a passing run also carries the baseline.
+    out.editToolbarButtons = await page.evaluate(() => {
+      const panel = document.querySelector('[data-topbar-surface]');
+      return {
+        surface: panel ? panel.getAttribute('data-topbar-surface') : null,
+        ids: Array.from(document.querySelectorAll('[id$="-image"]'))
+          .map((e) => e.id),
+      };
+    });
     if (runButton) {
       out.debugLegAttempted = true;
       await runButton.click();
