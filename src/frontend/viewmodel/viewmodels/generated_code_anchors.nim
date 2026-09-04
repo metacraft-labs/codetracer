@@ -370,10 +370,12 @@ proc decideFor(anchors: seq[MappingAnchor]; index: int): SyncDecision =
   let a = anchors[index]
   if not claimsUserSource(a.fidelity):
     return suspended("no source mapping here (" & label(a.fidelity) &
-      "), so these panes are not kept in step")
+      ") — synchronisation is suspended rather than interpolated to a " &
+      "nearby anchor")
   if a.sources.len == 0:
     return suspended("the mapping here claims " & label(a.fidelity) &
-      " and names no source, so these panes are not kept in step")
+      " and names no source — synchronisation is suspended rather than " &
+      "interpolated to a nearby anchor")
   aligned(index)
 
 proc anchorIndexAtRow*(anchors: seq[MappingAnchor]; row: int): int =
@@ -402,7 +404,8 @@ proc syncFromGenerated*(anchors: seq[MappingAnchor]; row: int;
     if a.covers(row):
       return decideFor(anchors, i)
   suspended("generated row " & $row &
-    " has no source mapped to it, so these panes are not kept in step")
+    " has no source mapped to it — synchronisation is suspended here " &
+    "rather than interpolated to the nearest anchor")
 
 proc syncFromSource*(anchors: seq[MappingAnchor]; path: string; line: int;
                      settings: SyncSettings = DefaultSyncSettings):
@@ -419,7 +422,47 @@ proc syncFromSource*(anchors: seq[MappingAnchor]; path: string; line: int;
       if r.covers(path, line):
         return decideFor(anchors, i)
   suspended(path & ":" & $line &
-    " has no generated code mapped to it, so these panes are not kept in step")
+    " has no anchor over it, so no generated code is mapped to it — " &
+    "synchronisation is suspended here rather than interpolated to the " &
+    "nearest anchor")
+
+proc anchorsFromSource*(anchors: seq[MappingAnchor]; path: string;
+                        line: int): seq[int] =
+  ## EVERY anchor a source position produced, in row order — not the first.
+  ##
+  ## `syncFromSource` above answers "where should the follower go", and to do
+  ## that it has to pick one. This answers "how many places did this line
+  ## become", and the two are different questions: one source position is
+  ## compiled into as many places as the compiler chose — a generic
+  ## monomorphised, a template expanded at several call sites, a function
+  ## inlined at several, an unrolled loop body — and §4.2 makes that
+  ## multiplicity first-class rather than resolving it by picking one.
+  ##
+  ## WHY THIS IS NOT A REFINEMENT OF `syncFromSource`. §13.1's second
+  ## requirement is that a producer supply "a source→generated query that
+  ## returns an ordered sequence, not a single result", because *a query that
+  ## returns the first is not a narrower version of the right answer — it is an
+  ## answer that cannot be corrected by the caller, because the caller cannot
+  ## see what was dropped*. A surface built only on `syncFromSource` shows one
+  ## range and gives the reader no way to tell that three existed. That is the
+  ## silent-drop failure §4.2 exists to prevent, and it is invisible by
+  ## construction, which is why the count has to come from somewhere else.
+  ##
+  ## Anchors that claim no user source are excluded, for the same reason
+  ## `syncFromSource` skips them: an unmapped anchor names no source and so
+  ## cannot be one of the places THIS line became.
+  ##
+  ## The order is the anchor order the producer emitted, which for a listing is
+  ## generated-row order. GCL-D26 requires a *descriptor* order once
+  ## descriptors exist; until a producer supplies them this is the honest
+  ## available order and callers must not persist an index into it.
+  for i, a in anchors:
+    if not claimsUserSource(a.fidelity):
+      continue
+    for r in a.sources:
+      if r.covers(path, line):
+        result.add i
+        break
 
 proc counterpartSources*(anchors: seq[MappingAnchor];
                          decision: SyncDecision): seq[SourceRegion] =

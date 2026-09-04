@@ -193,6 +193,21 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1228 + allow-list hygiene)" \
 	env CT_REACHABILITY_MAX=1228 bash ci/test/frontend-reachability.sh
 
+# ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
+#
+# The ratchet is the right instrument for a 1228-finding backlog and the wrong
+# one for a specific feature: a chain that breaks INSIDE the ceiling reddens
+# nothing, and the Show Generated Code chain was inside it — `produceAnchors`
+# and `readArtefactJson` were reported as unreached, in report mode, exiting 0,
+# among twelve hundred other lines.
+#
+# So the operation a developer invokes to see what their code compiled to gets
+# its own check, at --enforce, with no ceiling and no allow-list. It is proved
+# able to fail: against `origin/dev` at a861f5b7b it exits 1 on 18 of its 20
+# links, and its header records that measurement rather than a claim about it.
+lint_step "Show Generated Code: the operation's chain is reached from production" \
+	python3 ci/test/generated-code-operation-guard.py
+
 # The Embed SDK's boundary, in both directions: a consumer may reach the SDK
 # only through `codetracer_embed`, and the SDK's own import graph carries no
 # rendering and no chain concept. CodeTracer-Embed-SDK.md §3.2 says in as many
