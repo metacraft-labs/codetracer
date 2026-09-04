@@ -1,0 +1,42 @@
+# Ratchet ceilings for the legacy SCREAMING_CASE arm of
+# ci/test/css-token-resolution-guard.py. One line per compiled stylesheet.
+#
+# WHAT IS BEING COUNTED
+# ---------------------
+# Declarations in the COMPILED stylesheet whose value contains a bare
+# SCREAMING_CASE identifier — a Stylus palette variable that did not resolve
+# and that Stylus therefore emitted verbatim. No legal CSS value has that
+# shape, so every one of these is a declaration the browser drops.
+#
+# They exist because `codetracer.styl` uses palette variables that not every
+# palette defines. `default_dark_theme.styl` is missing 23 of them and
+# `default_white_theme.styl` 34; the light build carries more because it is
+# the younger palette. `BACKGROUND_NEIGHBOUR_COLOR`, for instance, is assigned
+# in default_white_theme.styl and default_black_theme.styl and in neither of
+# the two builds that ship it, so `#repl-history .repl-input-history` has no
+# background in either.
+#
+# WHY A CEILING RATHER THAN A GATE
+# --------------------------------
+# Clearing these means choosing a colour for 57 surfaces, which is a different
+# piece of work from installing the guard, and a guard that reddens CI on the
+# day it lands is a guard that is disabled on the day it lands. So the number
+# is recorded instead, and it only turns one way.
+#
+# THE RATCHET FAILS IN BOTH DIRECTIONS
+# ------------------------------------
+# Above the ceiling: a palette has lost a variable — fix the palette.
+# Below the ceiling: lower the number here in the same commit that fixed the
+# rule. A ceiling left above reality is room for a regression to hide in, and
+# a stale ceiling is how a ratchet quietly becomes a rubber stamp.
+#
+# To retire this file entirely, clear the backlog and run with
+# CT_CSS_TOKEN_ENFORCE_LEGACY=1.
+#
+# Measured on fix/unresolved-style-tokens off dev 558739ef3.
+
+default_dark_theme_electron.css = 23
+default_dark_theme_extension.css = 23
+default_white_theme_electron.css = 34
+loader.css = 0
+subwindow.css = 0

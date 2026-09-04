@@ -2448,6 +2448,32 @@ jobs:
         # knowing before reading the lane's report.
         run: bash ci/test/test-lane-report-test.sh
 
+      - name: Assert the style-variable guard can observe its own failures
+        # Same reasoning as the two steps above, for a guard whose entire
+        # claim is that it sees something no human and no compiler sees. Its
+        # eleven arms feed it defects it must report and legal CSS it must
+        # not, and include the two instrument checks that stop an empty
+        # stylesheet or an unreadable Tupfile scoring as a pass — which is not
+        # hypothetical, `default_white_theme.styl` compiles to zero bytes.
+        #
+        # Hermetic and sub-second on synthetic fixtures, so it runs BEFORE the
+        # guard itself: if the guard has lost the ability to report, that is
+        # worth knowing before reading its verdict.
+        run: bash ci/test/css-token-resolution-test.sh
+
+      - name: Every style variable in every shipped stylesheet resolves
+        # Stylus emits an unresolved identifier verbatim rather than failing,
+        # so `color: colors-ui-text-accent` compiles clean and reaches the
+        # browser as an invalid value the browser drops. Three shipped
+        # defects have had that cause and all three were found by a person
+        # looking at the screen.
+        #
+        # In the dev shell because it compiles the shipped stylesheets with
+        # `stylus` and reads the OUTPUT — the failure mode is source and
+        # output disagreeing silently, so the source is the wrong thing to
+        # read.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-css-token-resolution
+
       - name: Enforce the platform facade's host-free build (NS1)
         # Noir-Studio.milestones.org NS1: "A build configuration that **does
         # not link the host modules**, so a direct call fails to compile" and

@@ -2982,6 +2982,37 @@ test-hostfree:
   exec > >(tee test-logs/test-hostfree.log) 2>&1
   bash ci/test/hostfree-build.sh
 
+# Stylus emits an identifier it cannot resolve VERBATIM instead of failing, so
+# `color: colors-ui-text-accent` compiles clean, reaches the browser as an
+# invalid value, is dropped, and the element inherits whatever is behind it.
+# The page renders — it is merely the wrong colour — and nothing reports it.
+#
+# Three shipped defects in this repo have had exactly that cause: buttons that
+# painted blank, the FiraCode rules rendering in a serif face, and the build
+# output panel where two text tiers had no colour and painted at 1.05:1. All
+# three were found by a person looking at the screen. This is the check that
+# was missing, and `components/ns9_panes.styl` already asks for it in prose.
+#
+# It compiles the stylesheets the Tupfile ships and reads the OUTPUT: the
+# failure mode IS source and output disagreeing silently, so a source-level
+# check could only re-implement Stylus and would be wrong exactly where it
+# matters. Needs `stylus`, so it runs in the dev shell; ~30s.
+test-css-token-resolution:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-css-token-resolution.log) 2>&1
+  bash ci/test/css-token-resolution.sh
+
+# The guard above, shown failing. Eleven arms: five defects it must report,
+# four legal constructs it must not, and the two instrument checks that stop
+# an empty stylesheet or an unreadable Tupfile scoring as a pass. Hermetic
+# and sub-second — synthetic fixtures in a scratch directory, nothing in the
+# worktree is touched — except the last arm, which runs the real pipeline
+# over the real tree and needs `stylus` (it skips without it).
+test-css-token-resolution-contract:
+  bash ci/test/css-token-resolution-test.sh
+
 # The thirteen `test_collab_*.nim` suites, split by what they need.  The unit
 # half is pure Nim and cheap; the integration/soak half opens real localhost
 # sockets and links the GPUI shim, so it is a separate recipe rather than a
