@@ -39,21 +39,32 @@
 # there. It needs the Noir wasm modules and the replay engine to be in the
 # bundle; without them the leg reports why.
 #
-# TWO DEFECTS CURRENTLY STAND IN FRONT OF IT, and the gate NAMES them rather
-# than passing over them or failing for them (both reproduce identically on a
-# bundle built from the pre-fix tree, so neither belongs to this change):
+# AN EMPTY DEBUG MENU IS A FAILURE HERE, and it did not used to be.
 #
-#   1. The mode toggle loses the editor. `switchToDebug` leaves the workspace
-#      with no editor pane and no filesystem tree — `[id^=editorComponent-]`
-#      count 0, `getDomNode().isConnected === false` — with "layout: component
-#      clear EditorView/0 raised a Defect and was skipped" in the console.
-#   2. After a Run there is an editor and no menu. The session mounts, the debug
-#      controls mount, source is painted, and a right-click on it leaves
-#      `contextmenu` NOT defaultPrevented and shows zero rows: CodeTracer's
-#      handler does not run, so the BROWSER's menu is what the user gets.
+# The Debug half used to run only when the leg reached a session AND the menu
+# already had three or more rows, so a menu with ZERO rows — the reported "in
+# Debug mode there is no context menu at all" — took the not-measured arm and
+# the gate printed `RESULT: OK` with a note. Measured on 86fbb1285, with the
+# Noir wasm and the replay engine supplied: `leg: yes; entries: 0`, on a real
+# session with the debug controls mounted and 14 non-blank code lines on
+# screen. The number was printed and asserted by nothing.
 #
-# So the Debug half is asserted on the desktop instead, where a Run produces a
-# real session with source on screen:
+# The row count is now a CHECK, and the not-measured arm covers only the one
+# thing that genuinely cannot be measured: no session was reached at all.
+#
+# AND WHAT THE POINTER HIT IS ASKED SEPARATELY, because a row count cannot name
+# the cause. Measured on the same build: entering Debug mode through Run leaves
+# the BUILD auto-hide overlay open, and `#auto-hide-backdrop` — transparent,
+# `position: fixed`, z-index 98, click-to-dismiss — is 1440x900 over the entire
+# workspace. `elementFromPoint` at the click point answered
+# `div#auto-hide-backdrop` while the editor beneath it was 474x802 and
+# `isConnected`. So Monaco never received the event, nothing called
+# `preventDefault`, and the user got the browser's own menu; the backdrop
+# listens for `click` alone, so the right-click did not even dismiss it.
+# The editor and the menu were never the defect, which is why `[debug/reach]`
+# is its own check.
+#
+# The Debug half is also asserted by the GUI suite:
 # `src/tests/gui/tests/editor/editor_context_menu_is_mode_dependent.spec.ts`.
 #
 # Usage:  bash ci/test/editor-context-menu-modes.sh
@@ -581,15 +592,77 @@ t = (d.get('legs') or {}).get('debugViaToggle') or {}
 print('viewLines=%s editorContainers=%s monacoDomConnected=%s' % (
     t.get('viewLines'), t.get('editorContainers'), t.get('monacoDomConnected')))")"
 
-if [ "${debug_opened}" = "yes" ] && [ "${debug_count:-0}" -ge 3 ]; then
+# WHAT WAS UNDER THE POINTER when the Debug leg right-clicked. A menu that
+# never appeared has two causes the row count cannot tell apart — the handler
+# ran and built nothing, or the gesture never reached the editor — and only
+# this reading distinguishes them.
+debug_cover="$(py "
+import json
+d = json.load(open('${cache}/report.json'))
+c = ((d.get('legs') or {}).get('debug') or {}).get('cover') or {}
+b = c.get('backdrop') or {}
+v = c.get('editorView') or {}
+print('hit=%s insideEditor=%s editorView=%sx%s connected=%s overlay=%r backdrop=%s %sx%s' % (
+    c.get('hit'), c.get('hitIsInsideEditor'), v.get('w'), v.get('h'),
+    v.get('isConnected'), c.get('overlayClasses'),
+    b.get('display'), b.get('w'), b.get('h')))")"
+debug_hit_inside="$(py "
+import json
+d = json.load(open('${cache}/report.json'))
+c = ((d.get('legs') or {}).get('debug') or {}).get('cover') or {}
+print('yes' if c.get('hitIsInsideEditor') else 'no')")"
+
+# THE SUBJECT EXISTS AS SOON AS THE LEG OPENED, and that is the whole of the
+# condition now.
+#
+# It used to be `opened == yes AND entries >= 3`, and the second half was a
+# hole this gate fell through for two rounds: an EMPTY Debug menu — the exact
+# defect the gate is for — took the `else` arm and was reported as "the Debug
+# half was not measured", i.e. as a green run with a note. Measured on a bundle
+# carrying the Noir wasm and the replay engine (build 86fbb1285): the Run leg
+# reached a real session, `debugControlsMounted` true, 14 non-blank code lines
+# on screen, and `entries: 0` — printed in the note, asserted by nothing, gate
+# `RESULT: OK`.
+#
+# "The leg could not reach a session" and "the leg reached one and the menu was
+# empty" are different facts and only the first is unmeasurable. The count is
+# now a CHECK rather than a precondition of the checks, so zero is red.
+if [ "${debug_opened}" = "yes" ]; then
 	debug_names="$(names_of debug | paste -sd, -)"
 	# THE LINE IS NAMED IN THE PASS. An empty menu on a blank line reads exactly
 	# like "the Debug entries are missing", and that is what this leg reported
 	# the first time it ran — `.view-line` exists for blank lines too, and a
 	# click past the end of one gives Monaco no position at all. Both legs'
 	# lines are printed so a reader can see they are code, and the same code.
-	ck ok "[debug/subject] the Debug-mode menu has ${debug_count} entries on" \
-		"'${debug_line}' (the Edit leg clicked '${edit_line}'): ${debug_names}"
+	if [ "${debug_count:-0}" -ge 3 ]; then
+		ck ok "[debug/subject] the Debug-mode menu has ${debug_count} entries on" \
+			"'${debug_line}' (the Edit leg clicked '${edit_line}'): ${debug_names}"
+	else
+		ck fail "[debug/subject] the Debug-mode menu came up with" \
+			"${debug_count:-0} entr(ies) on '${debug_line}', which is the" \
+			'reported "in Debug mode there is no context menu at all".' \
+			"Under the pointer: ${debug_cover}"
+	fi
+	# THE GESTURE HAS TO REACH THE EDITOR, and this is asked of the hit test
+	# rather than of the menu.
+	#
+	# Measured on 86fbb1285: entering Debug mode through Run leaves the BUILD
+	# auto-hide overlay open (`#auto-hide-overlay` keeps `visible`), and
+	# `#auto-hide-backdrop` — transparent, `position: fixed`, z-index 98 — is
+	# then 1440x900 over the whole workspace. `elementFromPoint` at the click
+	# point returned `div#auto-hide-backdrop` while the editor underneath was
+	# 474x802 and `isConnected`, so Monaco never saw the event, nothing called
+	# `preventDefault`, and the user got the BROWSER's menu. The backdrop
+	# listens for `click` alone, so the right-click did not even dismiss it.
+	#
+	# Asserted separately from the row count because it is a different failure
+	# with a different fix, and because a row count cannot name it.
+	if [ "${debug_hit_inside}" = "yes" ]; then
+		ck ok "[debug/reach] the right-click lands inside the editor's view node"
+	else
+		ck fail "[debug/reach] the right-click never reached the editor —" \
+			"something is lying over the pane: ${debug_cover}"
+	fi
 	for entry in "Jump to line" "Run to Cursor" "Jump backward to line" "Copy"; do
 		if has_entry debug "${entry}"; then
 			ck ok "[debug/present] '${entry}'"
@@ -605,7 +678,9 @@ if [ "${debug_opened}" = "yes" ] && [ "${debug_count:-0}" -ge 3 ]; then
 			ck ok "[debug/absent] '${entry}'"
 		fi
 	done
-	debug_checks=8
+	# 1 subject + 1 reach + 4 present + 3 absent. Raised from 8 with the
+	# `[debug/reach]` check above.
+	debug_checks=9
 else
 	# NOT A CHECK, AND NOT SILENCE EITHER.
 	#
@@ -624,32 +699,28 @@ else
 	echo "  NOTE: THE DEBUG HALF WAS NOT MEASURED ON THIS SURFACE."
 	note "leg: ${debug_opened}; entries: ${debug_count:-0}; line: '${debug_line}'"
 	note ""
-	note "TWO SEPARATE DEFECTS STAND BETWEEN THIS GATE AND THE DEBUG MENU, and"
-	note "neither is about the menu's contents:"
+	note "NO REPLAY SESSION WAS REACHED, so there was no Debug editor to"
+	note "right-click. This arm is ONLY for that: a leg that DID reach a session"
+	note "is asserted above, empty menu included, because an empty menu is the"
+	note "defect and not an absence of subject."
 	note ""
-	note '  1. THE MODE TOGGLE LOSES THE EDITOR. switchToDebug leaves the'
-	note "     workspace with no editor pane and no filesystem tree —"
-	note "     ${toggle_state} — with"
-	note "     'layout: component clear EditorView/0 raised a Defect and was"
-	note "     skipped' (ui_js.nim) in the console. So that route has nothing to"
-	note "     right-click at all."
+	note "Run needs the Noir compiler and tracer and the replay engine in the"
+	note "bundle. Supply them and this half is measured:"
+	note "  CT_NOIR_WASM_COMPILER  path to noir_wasm.wasm"
+	note "  CT_NOIR_WASM_TRACER    path to noir_tracer_wasm.wasm"
+	note "  CT_REPLAY_ENGINE_DIR   a wasm-pack pkg/ with db_backend{.js,_bg.wasm}"
 	note ""
-	note "  2. AFTER A RUN THERE IS AN EDITOR AND NO MENU. The session mounts,"
-	note "     the debug controls mount, source is painted — and a right-click on"
-	note '     that source leaves contextmenu NOT defaultPrevented and shows'
-	note "     zero rows. CodeTracer's handler does not run, which means the"
-	note "     BROWSER's own menu is what a user gets. Reproduced identically on"
-	note "     a bundle built from the pre-fix tree, so it is not this change."
-	note "     Suspect: the editor for a replay session is adopted into its host"
-	note "     ('editor: re-attached monaco for ... into #editorComponent-0',"
-	note "     ui/editor.nim) rather than constructed, and the Monaco-level"
-	note "     gesture handlers are registered by the construction path."
+	note "What the MODE TOGGLE does, recorded so the two routes are not confused"
+	note "— it is a separate defect and not about the menu's contents:"
+	note "  switchToDebug leaves the workspace with no editor pane and no"
+	note "  filesystem tree — ${toggle_state}."
 	note ""
-	note "The eight per-entry Debug checks that had no subject:"
+	note "The nine per-entry Debug checks that had no subject:"
+	note "  subject, reach"
 	note "  present: Jump to line, Run to Cursor, Jump backward to line, Copy"
 	note "  absent:  Cut, Paste, Replace"
 	note ""
-	note "The Debug half is asserted on the desktop instead, where a Run produces"
+	note "The Debug half is also asserted by the GUI suite, where a Run produces"
 	note "a real session with source on screen:"
 	note "  src/tests/gui/tests/editor/editor_context_menu_is_mode_dependent.spec.ts"
 	echo

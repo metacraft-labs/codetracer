@@ -181,6 +181,53 @@ async function openMenuOnLine(page, lineIndex) {
   if (!box) return { opened: false, reason: '.view-line has no box' };
   const x = box.x + Math.min(12, Math.max(2, box.width / 3));
   const y = box.y + box.height / 2;
+
+  // WHAT IS ACTUALLY UNDER THE POINTER, asked of the hit test before the
+  // click rather than inferred from the empty menu afterwards.
+  //
+  // A right-click that produces no menu has two very different causes and the
+  // row count cannot tell them apart: the handler ran and built nothing, or
+  // the gesture never reached the editor because something is lying over it.
+  // The second is what was measured in Debug mode — `#auto-hide-backdrop`, a
+  // transparent full-viewport layer (z-index 98) that `#auto-hide-overlay`
+  // leaves up — and a probe that only counted rows reported it as a menu
+  // defect for two rounds. `elementFromPoint` at the exact click point is the
+  // same question the browser asks when it routes the event.
+  const cover = await page.evaluate(({ px, py }) => {
+    const describe = (n) => {
+      if (!n) return null;
+      const cls = typeof n.className === 'string' ? n.className : '';
+      return n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') +
+        (cls ? '.' + cls.trim().split(/\s+/).join('.') : '');
+    };
+    const hit = document.elementFromPoint(Math.round(px), Math.round(py));
+    const overlay = document.getElementById('auto-hide-overlay');
+    const backdrop = document.getElementById('auto-hide-backdrop');
+    const m = window.monaco;
+    const ed = (m && m.editor && m.editor.getEditors) ? m.editor.getEditors()[0] : null;
+    const view = ed && ed.getDomNode ? ed.getDomNode() : null;
+    return {
+      hit: describe(hit),
+      // The pane is the editor's when the hit test lands INSIDE Monaco's view
+      // node. Anything else means the click cannot reach the editor at all.
+      hitIsInsideEditor: !!(view && hit && view.contains(hit)),
+      // `clientWidth`/`clientHeight` and `isConnected`, never a Monaco
+      // self-report: Monaco answers a plausible one-line visible range for a
+      // DETACHED pane, so a caret check passes on a fully broken product.
+      editorView: view
+        ? { w: view.clientWidth, h: view.clientHeight, isConnected: view.isConnected }
+        : null,
+      overlayClasses: overlay ? overlay.className : null,
+      backdrop: backdrop
+        ? {
+            display: window.getComputedStyle(backdrop).display,
+            w: backdrop.clientWidth,
+            h: backdrop.clientHeight,
+          }
+        : null,
+    };
+  }, { px: x, py: y });
+
   await page.mouse.move(x, y);
   await page.mouse.click(x, y, { button: 'right' });
   await settle(page, 500);
@@ -190,6 +237,7 @@ async function openMenuOnLine(page, lineIndex) {
     lineText: chosen.text.slice(0, 80),
     lineIndex,
     candidateCount: candidates.length,
+    cover,
     menu,
   };
 }
