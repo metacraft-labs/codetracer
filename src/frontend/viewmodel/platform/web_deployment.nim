@@ -292,6 +292,12 @@ proc contentAddressedStem*(path: string): string =
       return dir & kept.join(".")
   path
 
+proc isBundledAssetPath*(path: string): bool
+  ## Forward-declared: the answer is a list of path constants declared further
+  ## down this file, and `cacheClassFor` is the reason they need naming. The
+  ## implementation is beside those constants, where a new bundled asset is
+  ## added.
+
 proc cacheClassFor*(path: string): CacheClass =
   ## The class a CDN must apply, from the path alone.
   ##
@@ -318,6 +324,25 @@ proc cacheClassFor*(path: string): CacheClass =
     # under a year-long `immutable` is what pinned a 36-hour-old wasm worker on
     # both custom domains through a successful deploy; see `ccMutableAsset`.
     return if assetIsContentAddressed(path): ccStaticAsset else: ccMutableAsset
+  # THE BUNDLED ASSETS, WHICH ARE `/assets/*`'s PROBLEM AT THE ROOT OF THE SITE.
+  #
+  # `ui.js`, the third-party bundle and the two stylesheets are stable-named and
+  # NOT content-addressed — the digest campaign stopped at the `/assets/`
+  # boundary, because their URLs are compile-time constants in the entry
+  # document rather than descriptor-declared values. So they are exactly what
+  # `ccMutableAsset` is for, and until this line they reached it through
+  # nothing: no rule named them, the only rule that could match was the `/*`
+  # catch-all, and the deploy STRIPS that row before upload (Pages merges every
+  # matching rule, so a catch-all defeats `immutable` on `/assets/*`).
+  #
+  # What they fell through to is the Cloudflare zone default. Measured
+  # 2026-09-02 and recorded in `ci/test/verify-deployed-bytes.sh`: the custom
+  # domains edge-cache `.js` and REWRITE its browser TTL to 14400. That is the
+  # four hours `mutableAssetHeader`'s own comment already names as the header
+  # "which `/ui.js` carries" — a stale renderer against a fresh entry document,
+  # for up to four hours after every deploy, with no purge in the pipeline.
+  if isBundledAssetPath(path):
+    return ccMutableAsset
   let classified = classifyPath(path)
   case classified.form
   of efSnapshot: ccImmutable
@@ -585,6 +610,7 @@ const
   rendererThemeStylesPath* = "frontend/styles/default_dark_theme_electron.css"
   rendererLoaderStylesPath* = "frontend/styles/loader.css"
   thirdPartyBundlePath* = "public/dist/frontend_bundle.js"
+
   wasmWorkerAssetId* = "wasm-worker"
     ## Exported because three places must agree on it: `webRuntimeAssets`,
     ## the assembly step's descriptor row, and `host/web_browser.nim`'s
@@ -624,6 +650,40 @@ const
   replayWorkerModuleId* = "replay-worker"
   replayEngineWasmPath* = staticAssetPrefix[1 .. ^1] & "db_backend_bg.wasm"
   replayEngineGluePath* = staticAssetPrefix[1 .. ^1] & "db_backend.js"
+
+const bundledAssetPaths* = [
+  rendererBundlePath,
+  thirdPartyBundlePath,
+  rendererThemeStylesPath,
+  rendererLoaderStylesPath,
+]
+  ## Every `damBundled` asset: stable-named, linked from the entry document by
+  ## a compile-time constant, and NOT content-addressed.
+  ##
+  ## Written as one list because the cache class is a property of the whole
+  ## group and was previously a property of none of them. `webRuntimeAssets`
+  ## below declares the same four with `mode: damBundled`, and
+  ## `test_platform_web` asserts the two agree — so adding a bundled asset
+  ## there without adding it here is a failure by name rather than one more
+  ## file quietly inheriting the CDN's four hours.
+  ##
+  ## The right long-term answer is to digest them, which needs their URLs moved
+  ## out of the entry-document template and into the deployment descriptor —
+  ## the indirection `486646bd6` built for `/assets/` and stopped short of
+  ## doing for the renderer. Until then `max-age=0, must-revalidate` makes the
+  ## staleness window one conditional request wide instead of four hours.
+
+proc isBundledAssetPath*(path: string): bool =
+  ## Is `path` one of the bundled assets, with or without a leading `/`?
+  ##
+  ## Both spellings, because both are real: `webRuntimeAssets` stores publish
+  ## paths without the slash (`ui.js`) and `cacheClassFor` is asked about URLs
+  ## with one (`/ui.js`).
+  let bare = if path.len > 0 and path[0] == '/': path[1 .. ^1] else: path
+  for candidate in bundledAssetPaths:
+    if bare == candidate:
+      return true
+  false
 
 proc webRuntimeAssets*(): seq[RuntimeAsset] =
   ## Everything a web deployment serves, in delivery order.
@@ -791,9 +851,30 @@ proc deploymentContractWithAssetClass(origin: string;
               headerValue: immutableHeader),
     CacheRule(pattern: staticAssetPrefix & "*",
               class: assetClass,
-              headerValue: headerFor(assetClass)),
-    CacheRule(pattern: "/*", class: ccEntryDocument,
-              headerValue: entryDocumentHeader)]
+              headerValue: headerFor(assetClass))]
+  # The bundled assets, each by its exact path, BEFORE the catch-all.
+  #
+  # They must be their own rows rather than relying on `/*`, because the deploy
+  # deletes the `/*` row before upload — Pages merges every matching rule, so a
+  # catch-all `Cache-Control` prepends a 60s `max-age` onto `/assets/*` and
+  # defeats `immutable`. That deletion is correct and it left these four
+  # matching NOTHING in the published `_headers`, which is how they came to
+  # inherit the zone default's four hours. The stripping step drops the literal
+  # `/*` only, so these rows survive it.
+  #
+  # SAFE ON A HOST THAT MERGES RATHER THAN PICKS, which Pages does — it applies
+  # EVERY matching rule and concatenates the values, which is how a `/*` row
+  # once put two `max-age`s on a wasm module and undid its `immutable`. These
+  # four are EXACT PATHS and overlap none of `/assets/*`, `/s/*` or
+  # `/p/*/current.json`, so each matches exactly one rule under either
+  # discipline: first-match hosts read them before the catch-all because they
+  # are emitted first, and merging hosts have nothing to merge them with.
+  for bundled in bundledAssetPaths:
+    result.caches.add CacheRule(pattern: "/" & bundled,
+                                class: ccMutableAsset,
+                                headerValue: headerFor(ccMutableAsset))
+  result.caches.add CacheRule(pattern: "/*", class: ccEntryDocument,
+                              headerValue: entryDocumentHeader)
   result.writeSurfaces = @[
     WriteSurface(
       name: "publish a snapshot",

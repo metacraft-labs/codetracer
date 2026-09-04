@@ -579,6 +579,64 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     check "/s/*" in rendered
     check "/p/*" in rendered
 
+  test "every bundled asset carries a cache rule, and it is not the CDN's":
+    ## `ui.js` was served un-digested with NOTHING in `_headers` naming it.
+    ##
+    ## The digest campaign stopped at the `/assets/` boundary: a bundled
+    ## asset's URL is a compile-time constant in the entry document, not a
+    ## descriptor-declared value, so `web-bundle-assets.sh`'s rename loop —
+    ## filtered on the `assets/` prefix — skips all four. Un-digested is
+    ## survivable; un-digested with a long cache is not.
+    ##
+    ## And the only rule that could have matched them was `/*`, which the
+    ## deploy DELETES before upload for a good reason of its own (Pages merges
+    ## every matching rule, so a catch-all defeats `immutable` on `/assets/*`).
+    ## So they matched nothing and took the Cloudflare zone default, measured
+    ## at a 14400s browser TTL on the custom domains — the four hours
+    ## `mutableAssetHeader`'s own comment names as the header "which `/ui.js`
+    ## carries". A client could run the previous renderer against a fresh entry
+    ## document for four hours after a deploy, and there is no purge in the
+    ## pipeline.
+    let contract = deploymentContract("https://ide.example.test",
+                                      publishedDeployment(digestOfBuildOne))
+    let rendered = renderCacheConfig(contract)
+    # Not vacuous: there are bundled assets to grade.
+    check bundledAssetPaths.len == 4
+    for bundled in bundledAssetPaths:
+      # Un-digested, which is WHY the header has to be the mutable one.
+      check not assetIsContentAddressed(bundled)
+      check cacheClassFor("/" & bundled) == ccMutableAsset
+      # Named in the emitted config by its own path, so it does not depend on
+      # the catch-all the deploy removes.
+      check ("/" & bundled) in rendered
+    # The header itself, as a value. `max-age=0` and not merely
+    # `must-revalidate`: the latter governs an ALREADY-stale entry and would
+    # leave the four-hour window open.
+    check headerFor(ccMutableAsset) == "public, max-age=0, must-revalidate"
+    check "max-age=31536000" notin headerFor(ccMutableAsset)
+    # CONTROL: a digested asset must NOT be pulled into this class — it has
+    # earned `immutable`, and the round trip would be pure waste.
+    let hashed = contentAddressedPath("assets/wasm-worker.js", digestOfBuildOne)
+    check assetIsContentAddressed(hashed)
+    check cacheClassFor("/" & hashed) == ccStaticAsset
+    check not isBundledAssetPath(hashed)
+
+  test "the bundled list and the runtime asset table cannot drift":
+    ## Two declarations of the same four files: `bundledAssetPaths` (which
+    ## decides the cache class) and `webRuntimeAssets`' `damBundled` rows
+    ## (which decide what is published). A file added to one and not the other
+    ## is either published with no cache rule — the defect above, exactly — or
+    ## given a rule and never shipped.
+    var declared: seq[string] = @[]
+    for asset in webRuntimeAssets():
+      if asset.mode == damBundled:
+        declared.add asset.path
+    check declared.len == bundledAssetPaths.len
+    for path in declared:
+      check isBundledAssetPath(path)
+    for bundled in bundledAssetPaths:
+      check bundled in declared
+
   test "every cache class is reachable from a real address":
     ## Review found two that were not. `cacheClassFor` answered
     ## `ccEntryDocument` for everything under `/p/` and for `/assets/`, so
