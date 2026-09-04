@@ -121,7 +121,7 @@ echo
 # ---------------------------------------------------------------------------
 stage "${work}/base"
 base_out="$(run_guard "${work}/base")"
-if printf '%s' "${base_out}" | grep -q 'RESULT: OK'; then
+if grep -q 'RESULT: OK' <<<"${base_out}"; then
 	ok "CONTROL: a fully-wired synthetic tree is green"
 else
 	bad "CONTROL: the synthetic tree is already red — no arm can demonstrate anything"
@@ -135,7 +135,7 @@ fi
 # The control also has to prove the INDIRECT paths resolved, or the arms below
 # would be measuring a guard that only ever sees direct references. Fourteen:
 # twelve gates, the dispatcher, and the tool under scripts/.
-if printf '%s' "${base_out}" | grep -q '14 reachable'; then
+if grep -q '14 reachable' <<<"${base_out}"; then
 	ok "CONTROL: all 14 scripts resolved — direct, via-recipe, transitive, and outside ci/test/"
 else
 	bad "CONTROL: the walk did not reach all 14 — an indirect path is not being followed"
@@ -145,7 +145,7 @@ fi
 # AND THAT THE RECIPE EDGE IS LOAD-BEARING RATHER THAN DECORATIVE. If the guard
 # reached ci/lint/sh.sh some other way, arm 7 below would prove nothing: it
 # would be removing an edge that was never carrying anything.
-if printf '%s' "${base_out}" | grep -qF 'reaches 1 of 2 recipe(s)'; then
+if grep -qF 'reaches 1 of 2 recipe(s)' <<<"${base_out}"; then
 	ok "CONTROL: exactly one recipe is reachable, so the recipe edge is the only way in"
 else
 	bad "CONTROL: the reachable-recipe count is not 1 — the recipe edge is not what it appears"
@@ -163,11 +163,11 @@ arm() {
 	}
 	local out
 	out="$(run_guard "${work}/arm")"
-	if printf '%s' "${out}" | grep -q 'RESULT: OK'; then
+	if grep -q 'RESULT: OK' <<<"${out}"; then
 		bad "${name}: SURVIVED — the guard is still green with the defect in place"
 		return
 	fi
-	if printf '%s' "${out}" | grep -qF -- "${expect}"; then
+	if grep -qF -- "${expect}" <<<"${out}"; then
 		ok "${name}: killed"
 	else
 		bad "${name}: went red, but not for its own reason (wanted: ${expect})"
