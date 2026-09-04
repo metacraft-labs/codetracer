@@ -18,4 +18,3 @@
 # underneath somebody else's diff costs more than the defect does. Neither is
 # in a false-GREEN position — each reads as a spurious failure, which is loud.
 # Fix them with the here-string form and delete these lines.
-ci/test/shell-gate-coverage.sh	if head -n "${MARKER_SCAN_LINES}" "${g}" 2>/dev/null | grep -qF "${MARKER}"; then
