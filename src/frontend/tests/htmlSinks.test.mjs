@@ -396,12 +396,33 @@ assertEqual(checkedOutput, HOSTILE_OUTPUT_COUNT,
 describe('S. Source scan — the sinks stay written this way');
 
 const SCAN_EXTENSIONS = new Set(['.nim', '.js', '.mjs', '.ts']);
+
+// BUILD OUTPUT IS NOT SOURCE. `src/build-*/` and any `dist/` are produced by
+// `just build-once` and are git-ignored (`.gitignore` carries `build-*/` and
+// `dist/`). They hold `frontend_bundle.js`, `ui.js` and the vendored chunks —
+// the COMPILED form of the very sources scanned below — so every pattern this
+// section asserts about is found a second time, in a generated file, and
+// reported as though someone had written it that way.
+//
+// Without this the section passes only on a tree that has NEVER been built and
+// fails on every tree that has, which is the sequence AGENTS.md and CI both
+// prescribe. Same defect, same fix as `monacoMarkdownSanitizer.test.mjs`.
+const isGeneratedDir = (name) =>
+  name === 'node_modules' || name === 'dist' || name.startsWith('build-');
+
 const scanned = [];
+/** Generated directories skipped above, so the skip itself can be asserted. */
+const skippedGenerated = [];
 (function walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    if (entry.name.startsWith('.')) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) { walk(full); continue; }
+    if (entry.isDirectory()) {
+      if (isGeneratedDir(entry.name)) { skippedGenerated.push(path.relative(REPO, full)); continue; }
+      walk(full);
+      continue;
+    }
+    if (isGeneratedDir(entry.name)) continue;
     if (!SCAN_EXTENSIONS.has(path.extname(entry.name))) continue;
     const rel = path.relative(REPO, full);
     if (rel === SELF) continue;  // this file quotes the patterns on purpose
@@ -413,6 +434,25 @@ const scanned = [];
 console.log(`  \x1b[2mfiles scanned: ${scanned.length}\x1b[0m`);
 assert(scanned.length >= 900,
   `the scan reached the source tree (${scanned.length} files)`);
+
+// Trap 4b: the exclusion must not become a way to scan nothing, and must not
+// silently stop excluding. Both directions are asserted; the second only when
+// there IS build output, so this stays honest on a clean checkout too.
+assert(!scanned.some((rel) => rel.split(path.sep).some(isGeneratedDir)),
+  'no generated directory survived the scan filter');
+
+// Stated as ONE unconditional assertion, not an `if` around one: this suite
+// reconciles its total assertion count at the end, so an assertion that runs
+// only on a built tree would make that total depend on whether anyone had run
+// `just build-once` — reintroducing, in the counter, exactly the build-state
+// dependence this fix removes from the scan.
+const builtDirs = ['src/build-debug', 'src/public/dist']
+  .filter((rel) => fs.existsSync(path.join(REPO, rel)));
+console.log(`  \x1b[2mbuild output present: ${builtDirs.length > 0 ? builtDirs.join(', ') : '(none)'}; generated dirs skipped: ${skippedGenerated.length}\x1b[0m`);
+assert(builtDirs.length === 0 || skippedGenerated.length > 0,
+  builtDirs.length === 0
+    ? 'no build output in this tree, so there was nothing for the scan to skip'
+    : `this tree HAS build output, so the scan must have skipped some (skipped ${skippedGenerated.length})`);
 
 const sources = new Map(
   scanned.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]));
@@ -887,7 +927,13 @@ assertEqual(shippedMatchesAcross(/"nodeIntegration": true/g),
 
 // ---------------------------------------------------------------------------
 
-const EXPECTED_ASSERTIONS = 158;
+// 158 -> 160 on 2026-09-05, for the two guards added to the source scan above:
+// "no generated directory survived the scan filter" and, when the tree has
+// build output, "the scan must have skipped some". The number goes UP because
+// the suite gained two contracts; it is raised here, in the same diff, rather
+// than the reconciliation being relaxed — this check caught the edit, which is
+// exactly what it is for.
+const EXPECTED_ASSERTIONS = 160;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.
