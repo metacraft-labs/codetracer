@@ -461,7 +461,8 @@ proc setupSelectedPanelOutline() =
       // (see golden_layout.styl) instead: that resolves to pixels, where a
       // custom property would come back as its raw `em`.
       function connectorRadius() {
-        var probe = document.querySelector('.ct-selected-outline path, .ct-docked-outline path');
+        var probe = document.querySelector(
+          '.ct-selected-outline path, .ct-docked-outline path, .ct-overlay-outline path');
         if (probe !== null) {
           var v = parseFloat(window.getComputedStyle(probe).borderTopLeftRadius);
           if (isFinite(v) && v > 0) { return v; }
@@ -477,6 +478,24 @@ proc setupSelectedPanelOutline() =
       }
 
       function update() {
+        // Exactly one outline is on screen at a time, and this is the order of
+        // precedence: the slide-in overlay first, then a selected docked panel,
+        // then the GoldenLayout stack.
+        //
+        // The overlay comes first because it is on top of everything else and
+        // is only ever on screen while the user is pointing at it.  Nothing
+        // clears `ct-docked-focused` or GL's `.lm_focused` when the overlay
+        // opens — the strip tab that opens it is inside neither a
+        // `.auto-hide-docked` nor an `.lm_stack`, so the click-to-focus
+        // listener below does not fire — which means without this branch the
+        // overlay's outline and the outline of whatever was focused before it
+        // would both be drawn.  That is the same clash the docked branch
+        // already exists to prevent, one level up.
+        if (updateOverlayOutline()) {
+          clearOutlines(null); removeDockedOutline(); return;
+        }
+        removeOverlayOutline();
+
         // A selected docked panel is outlined by `updateDockedOutline` below.
         // It lives outside the GoldenLayout tree, so GL keeps its own
         // `.lm_focused` while that is so, and drawing the stack outline as well
@@ -780,6 +799,154 @@ proc setupSelectedPanelOutline() =
           : dockedWithTabPath(p, tb, rr, radii(tab), inset, side));
       }
 
+      // ---------------------------------------------------------------------
+      // The same outline once more, for the slide-in overlay.
+      //
+      // Reported as: *"There is still a glitch with borders of the active tab
+      // in the auto hidden panels positioned in the status bar.  The borders
+      // display properly when I dock a panel, but not when it's focused in
+      // auto-hide mode."*
+      //
+      // An open overlay is the docked case in every respect that matters here:
+      // a panel flush against a strip, with one tab in that strip jutting out
+      // of it, and the tab already painting the connector curves that join the
+      // two into a single shape (`.auto-hide-strip-tab.active`'s `::before` /
+      // `::after` box-shadows).  The app was drawing the FILL of that shape and
+      // not its edge.  So this reuses the docked path builders unchanged rather
+      // than describing the shape a second time — the reported defect is two
+      // renderings of one panel disagreeing, and a second copy of the geometry
+      // is how they would disagree again.
+      //
+      // WHEN: whenever the overlay is `.visible`, with no focus test.
+      //
+      // The overlay has a pinned/preview distinction (`pinnedOpen` in
+      // `ui/auto_hide.nim`) and it is deliberately NOT used here.  In the
+      // shipped app a strip tab's CLICK docks the panel and its HOVER opens the
+      // overlay (the strip callbacks' `onSelect` is `showDockedPanel`,
+      // `onHoverEnter` is `showOverlayPreview`), so the ordinary way to reach
+      // the overlay — the way the report describes — leaves `pinnedOpen` false
+      // throughout.  Keyed on it, this border would not appear in the case it
+      // was written for.
+      //
+      // Unconditional is also the truthful rule.  The overlay is dismissed by
+      // the pointer leaving it, by a backdrop click, or by Escape, so it is
+      // never on screen unattended; visible and in-use are the same state.  And
+      // the tab is `.active` for exactly as long, so the line and the curves it
+      // continues appear and disappear together.
+      // ---------------------------------------------------------------------
+      var OVERLAY_OUTLINE_CLASS = 'ct-overlay-outline';
+
+      function removeOverlayOutline() {
+        var old = document.querySelectorAll('.' + OVERLAY_OUTLINE_CLASS);
+        for (var i = 0; i < old.length; i++) { old[i].remove(); }
+      }
+
+      // Returns whether it drew, so `update` can tell "the overlay owns the
+      // outline" from "fall through to the docked and stack cases".
+      function updateOverlayOutline() {
+        var overlay = document.getElementById('auto-hide-overlay');
+        if (overlay === null || !overlay.classList.contains('visible')) {
+          return false;
+        }
+
+        // The BODY, not the overlay.
+        //
+        // The outer element spans the resize handle as well, and the handle is
+        // the divider between this panel and the GL content — the same thing
+        // `updateDockedOutline` trims off a docked container's rect above, for
+        // the same reason.  Here the trim is already done in the paint: the
+        // body carries a margin on the handle's side (`auto_hide.styl`), so it
+        // is the box the user sees as the panel.  It is also the box that is
+        // actually rounded — `#auto-hide-overlay` deliberately has no
+        // `overflow: hidden`, so that the handle keeps right-angle corners —
+        // so reading the radii off it is what makes the line follow the paint.
+        var body = document.getElementById('auto-hide-overlay-body');
+        if (body === null) { removeOverlayOutline(); return false; }
+
+        var pr = body.getBoundingClientRect();
+        if (pr.width < 1 || pr.height < 1) { removeOverlayOutline(); return false; }
+        var p = { left: pr.left, top: pr.top, right: pr.right, bottom: pr.bottom };
+
+        var side = overlay.classList.contains('auto-hide-overlay-right') ? 'right'
+                 : overlay.classList.contains('auto-hide-overlay-bottom') ? 'bottom'
+                 : overlay.classList.contains('auto-hide-overlay-left') ? 'left'
+                 : null;
+        // No edge class means the overlay is mid-teardown: `hideOverlay` drops
+        // all three before it drops `visible`.  There is no shape to draw.
+        if (side === null) { removeOverlayOutline(); return false; }
+
+        // Alongside the overlay in `#root-container`, for the reason given on
+        // the docked outline: parked on the body it would be measured against
+        // root-container's own z-index rather than against the overlay's.
+        var host = document.getElementById('root-container') || document.body;
+
+        // REUSED, not rebuilt each pass.
+        //
+        // `schedule` is driven by a MutationObserver watching the whole body
+        // for childList changes, so an outline that removes and re-appends
+        // itself every pass is a mutation that schedules the next pass: a
+        // rAF loop that never settles, running for as long as the panel is on
+        // screen.  Writing `d` / `viewBox` / `width` / `height` into an element
+        // that is already in place mutates nothing the observer watches (its
+        // `attributeFilter` is `class` alone), so a steady overlay costs one
+        // update and then nothing.
+        var svg = host.querySelector(':scope > .' + OVERLAY_OUTLINE_CLASS);
+        if (svg === null) {
+          svg = document.createElementNS(SVG_NS, 'svg');
+          svg.setAttribute('class', OVERLAY_OUTLINE_CLASS);
+          svg.appendChild(document.createElementNS(SVG_NS, 'path'));
+          host.appendChild(svg);
+        }
+        // Any stray left elsewhere by an earlier build or an earlier host.
+        var strays = document.querySelectorAll('.' + OVERLAY_OUTLINE_CLASS);
+        for (var si = 0; si < strays.length; si++) {
+          if (strays[si] !== svg) { strays[si].remove(); }
+        }
+        var path = svg.firstChild;
+
+        var w = window.innerWidth, h = window.innerHeight;
+        svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+        svg.setAttribute('width', w);
+        svg.setAttribute('height', h);
+
+        var strokeWidth = parseFloat(window.getComputedStyle(path).strokeWidth) || 1;
+        var inset = strokeWidth / 2;
+        var rr = radii(body);
+
+        var stripSel = side === 'bottom' ? '#auto-hide-bottom-strip'
+                                         : '#auto-hide-strip-' + side;
+
+        // By title, not by `.active` — the same trap the docked outline
+        // documents.  A tab is `active` when its panel is docked OR when it is
+        // the one being previewed, so while a preview is open two tabs carry
+        // the class; the overlay's tab is the one whose label matches the
+        // title the overlay was opened with.
+        var titleEl = document.getElementById('auto-hide-overlay-title');
+        var wanted = titleEl === null ? '' : titleEl.textContent.trim();
+        var tab = null;
+        if (wanted !== '') {
+          var candidates = document.querySelectorAll(stripSel + ' .auto-hide-strip-tab');
+          for (var ti = 0; ti < candidates.length; ti++) {
+            if (candidates[ti].textContent.trim() === wanted) { tab = candidates[ti]; break; }
+          }
+        }
+        if (tab === null) {
+          // No tab found: an overlay opened by a command rather than from a
+          // strip, or a collapsed strip. The panel alone is still a shape.
+          path.setAttribute('d', dockedPanelOnlyPath(p, rr, inset));
+          return true;
+        }
+        var tb = tab.getBoundingClientRect();
+        if (tb.width < 1 || tb.height < 1) {
+          path.setAttribute('d', dockedPanelOnlyPath(p, rr, inset));
+          return true;
+        }
+        path.setAttribute('d', side === 'bottom'
+          ? dockedWithTabPathBottom(p, tb, rr, radii(tab), inset)
+          : dockedWithTabPath(p, tb, rr, radii(tab), inset, side));
+        return true;
+      }
+
       var pending = false;
       function schedule() {
         if (pending) { return; }
@@ -799,10 +966,18 @@ proc setupSelectedPanelOutline() =
 
       // Dragging a docked panel's resize grip changes its width through inline
       // style, which the class-filtered observer above never sees.
+      //
+      // The overlay is dragged by its own grip and sized the same way — through
+      // inline `width` / `height` on `#auto-hide-overlay`, written by the same
+      // per-panel stored size — so its outline would otherwise stay where the
+      // panel used to end.  Observing the body rather than the overlay: the body
+      // is the box the outline is measured from, and it tracks the overlay.
       if (typeof ResizeObserver !== 'undefined') {
         var ro = new ResizeObserver(schedule);
         var docks = document.querySelectorAll('.auto-hide-docked');
         for (var di = 0; di < docks.length; di++) { ro.observe(docks[di]); }
+        var overlayBody = document.getElementById('auto-hide-overlay-body');
+        if (overlayBody !== null) { ro.observe(overlayBody); }
       }
 
       schedule();

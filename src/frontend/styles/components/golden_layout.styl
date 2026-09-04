@@ -337,11 +337,17 @@ SELECTED_PANEL_BORDER_COLOR = colors-ui-border-primary
   z-index: 6
   overflow: visible
 
-// Both outlines — the one around a GL stack and the one around a docked
-// auto-hide panel and its strip tab (`.ct-docked-outline`, positioned in
-// auto_hide.styl) — are the same line, so they are stroked from one rule.
+// All three outlines — the one around a GL stack, the one around a docked
+// auto-hide panel and its strip tab, and the one around the slide-in overlay
+// and its strip tab (`.ct-docked-outline` / `.ct-overlay-outline`, positioned
+// in auto_hide.styl) — are the same line, so they are stroked from one rule.
+//
+// One rule rather than three is the point: the reported defect was an
+// auto-hide panel whose border did not match the same panel docked, and a
+// second declaration of the same line is how they drift apart again.
 .ct-selected-outline,
-.ct-docked-outline
+.ct-docked-outline,
+.ct-overlay-outline
   path
     fill: none
     stroke: SELECTED_PANEL_BORDER_COLOR

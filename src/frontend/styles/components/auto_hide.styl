@@ -146,6 +146,34 @@
   z-index: 202
   overflow: visible
 
+// ---------------------------------------------------------------------------
+// The same outline again, for the slide-in overlay.
+//
+// Reported as: *"the borders of the active tab in the auto hidden panels
+// positioned in the status bar ... display properly when I dock a panel, but
+// not when it's focused in auto-hide mode."*  Docked, the line is
+// `.ct-docked-outline` at 202 over a panel at 101.  In auto-hide the overlay
+// sits at 203 — above that outline, deliberately (see the note on
+// `#auto-hide-overlay`) — and carries `border: none`, so nothing was drawn.
+//
+// The fix is not to lower the overlay.  That z-index is load-bearing: a docked
+// panel and the overlay are both 101, so no value sits between the panel and
+// the outline that traces it, and the overlay has to clear both.  What the
+// overlay lacked was an outline of its OWN, which belongs above it rather than
+// under it — this is the line around the overlay, not around something the
+// overlay covers.  Hence 204: one above the overlay it traces, and the only
+// element in this file that sits higher.
+//
+// It is stroked from the same rule as the other two (`golden_layout.styl`), so
+// all three carry one colour and one weight from one pair of tokens.
+.ct-overlay-outline
+  position: fixed
+  top: 0
+  left: 0
+  pointer-events: none
+  z-index: 204
+  overflow: visible
+
 #auto-hide-docked-left-content,
 #auto-hide-docked-right-content
   flex: 1
@@ -741,8 +769,19 @@
 // The body carries the panel background and clips content to rounded corners.
 // The resize handle is outside the body (absolute in the outer overlay) so it
 // keeps right-angle corners and is not affected by this overflow:hidden.
-// box-shadow provides a subtle 1px outline that makes the rounded edges visible
-// even when the panel and the content behind it share similar dark colours.
+//
+// `box-shadow: none`, and the sentence that used to be here said the opposite —
+// that a shadow "provides a subtle 1px outline that makes the rounded edges
+// visible".  It had not for some time; the declaration was turned off and the
+// prose describing it was not.  Anyone reading this block while chasing the
+// missing auto-hide border would have been told there was already an outline
+// here.  There is not: the line around this panel is `.ct-overlay-outline`, a
+// stroked path above the overlay, for the reasons given on that rule.
+//
+// This element is nonetheless what the outline is MEASURED from — it is the
+// box the user reads as the panel (the resize handle sits outside it, past the
+// margin below) and the box that is actually rounded, since the outer overlay
+// deliberately has no overflow:hidden.
 #auto-hide-overlay-body
   background-color: colors-ui-surface-base-panel
   border-radius: 0.36em
