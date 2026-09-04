@@ -895,19 +895,63 @@ function Ensure-GoldenLayoutAsset {
   }
 }
 
+# Normalise a PATH segment for COMPARISON ONLY. Windows path comparison is
+# case-insensitive, and `C:\foo`, `C:\foo\` and ` C:\foo ` all name the same
+# directory. The normalised form is never what gets written to PATH -- only the
+# caller's original spelling is -- so this cannot corrupt an entry.
+function Get-PathEntryComparisonKey {
+  param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$Value)
+  if ($null -eq $Value) { return "" }
+  return $Value.Trim().TrimEnd('\', '/').ToLowerInvariant()
+}
+
+# Prepend directories to PATH, IDEMPOTENTLY.
+#
+# Prepending must be idempotent because activation is not once-per-machine: a
+# second `. .\env.ps1` in the same session, a nested script that activates
+# again, or a long-lived agent shell that re-enters the dev shell all re-run
+# this. An unbounded per-activation prepend then grows PATH without limit.
+#
+# That is not a cosmetic problem. Anything that resolves through cmd.exe
+# truncates PATH at 8191 characters, and the truncation does not report itself
+# as a truncation -- it reports a missing tool or a failed link. Two separate
+# families of phantom diagnosis on this host have already been traced back to
+# exactly that: one written up as product link defects, one as a missing
+# `tailwindcss` package. Neither was real; both were PATH overflow.
+#
+# So an entry already on PATH is MOVED to the front rather than added again:
+# the caller's intent is precedence, and precedence is achieved by moving.
+# Segments that match nothing being prepended are preserved verbatim, empty
+# segments included, so this is a pure dedup with no other effect on PATH.
 function Prepend-PathEntries {
   param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][AllowEmptyCollection()][string[]]$Entries)
   $existing = [Environment]::GetEnvironmentVariable("PATH")
   $prefix = @()
+  $prefixKeys = @{}
   foreach ($entry in $Entries) {
     if ($null -eq $entry) { continue }
     $entryPath = [string]$entry
     if ([string]::IsNullOrWhiteSpace($entryPath)) { continue }
     if (-not (Test-Path -LiteralPath $entryPath)) { continue }
+    $key = Get-PathEntryComparisonKey -Value $entryPath
+    if ($key.Length -eq 0) { continue }
+    # The same directory named twice in one call is added once.
+    if ($prefixKeys.ContainsKey($key)) { continue }
+    $prefixKeys[$key] = $true
     $prefix += $entryPath
   }
   if ($prefix.Count -eq 0) { return }
-  [Environment]::SetEnvironmentVariable("PATH", (($prefix -join ";") + ";" + $existing), "Process")
+
+  $kept = @()
+  foreach ($segment in ($existing -split ";")) {
+    # Preserve empty/whitespace segments verbatim: dropping them would make
+    # this function rewrite parts of PATH it was never asked to touch.
+    if ([string]::IsNullOrWhiteSpace($segment)) { $kept += $segment; continue }
+    if ($prefixKeys.ContainsKey((Get-PathEntryComparisonKey -Value $segment))) { continue }
+    $kept += $segment
+  }
+
+  [Environment]::SetEnvironmentVariable("PATH", ((@($prefix) + @($kept)) -join ";"), "Process")
 }
 
 function Resolve-GitBashBinDir {
@@ -1110,7 +1154,10 @@ if (Test-Path -LiteralPath (Join-Path $ioMonRoot "io_mon.nimble")) {
   $ioMonSnoopExe = Join-Path $ioMonRoot "build\bin\io-mon.exe"
   if (Test-Path -LiteralPath $ioMonSnoopExe) {
     Set-EnvDefault -Name "IO_MON" -Value $ioMonSnoopExe
-    $env:PATH = (Join-Path $ioMonRoot "build\bin") + [IO.Path]::PathSeparator + $env:PATH
+    # Through Prepend-PathEntries, never by hand: a raw prepend here re-added
+    # io-mon's bin directory on EVERY activation, with no dedup, which is
+    # precisely the unbounded growth that helper exists to prevent.
+    Prepend-PathEntries -Entries @((Join-Path $ioMonRoot "build\bin"))
   }
   $ioMonShimDll = Join-Path $ioMonRoot "build\lib\librepro_monitor_shim.dll"
   if (Test-Path -LiteralPath $ioMonShimDll) {
