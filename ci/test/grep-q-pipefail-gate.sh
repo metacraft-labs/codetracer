@@ -65,6 +65,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 2
 
 INVENTORY="ci/test/grep-q-pipefail.known-remaining.txt"
 
+# The detector's own test cases, kept in a `.txt` and not in a here-doc inside
+# this file. That is not tidiness: this script is one of the files the scan
+# below covers, and an inline fixture made the gate report its own test data as
+# seven violations the moment it was committed. The fixture must live somewhere
+# the scan does not look.
+FIXTURE_FILE="ci/test/grep-q-pipefail-gate.fixture.txt"
+
 # A producer piped into a grep whose flags ask it to exit on first match.
 #
 # `(^|[^|])` is what keeps `a || grep -q x file` — a logical OR in front of a
@@ -101,56 +108,66 @@ echo
 # A scanner whose regex has rotted finds nothing and reports a clean repository.
 # That is the same class of defect this gate exists to catch, so the detector is
 # run against a fixture carrying one of each shape before it is trusted with the
-# real tree: every POSITIVE line must be found, and every NEGATIVE line must
-# not be. This is the part that makes a green run mean something.
+# real tree: every HIT row must be found and every MISS row must not be. This
+# is the part that makes a green run mean something.
+#
+# The verdict travels with the case (`HIT<TAB>line`) rather than sitting in a
+# separate list of line numbers here, so adding a case cannot leave it
+# unasserted and reordering the fixture cannot silently retarget an assertion.
 # ---------------------------------------------------------------------------
 echo "Step 0: the detector fires on the defect and stays quiet on the fix"
+
+if [ ! -f "${FIXTURE_FILE}" ]; then
+	bad "${FIXTURE_FILE} is missing — the detector cannot be checked, so nothing below is evidence"
+	echo
+	echo "RESULT: FAILED — no fixture"
+	exit 1
+fi
 
 fixture="$(mktemp)" || exit 2
 trap 'rm -f "${fixture}"' EXIT
 
-cat >"${fixture}" <<'FIXTURE'
-printf '%s' "$hay" | grep -q needle
-printf '%s\n' "$hay" | grep -qF -- "$needle"
-describe_commands | grep -qx -- "$entry"
-head -n 40 "$f" | grep -F -q "$needle"
-strip "$f" | sed -n '1,9p' | grep -Eiq 'x|y'
-cmd \
-	| grep --quiet needle
-this_is_ok || grep -q needle "$a_real_file"
-grep -q needle <<<"$hay"
-grep -q needle <<<"$(describe_commands)"
-printf '%s' "$hay" | grep -c needle
-printf '%s' "$hay" | grep -o 'id="[^"]*"'
-# printf '%s' "$hay" | grep -q needle
-FIXTURE
+# Column 2 of every HIT/MISS row, in order, is the file the detector is run
+# against; the row's line number in that file is its index here.
+cases="$(grep -E '^(HIT|MISS)	' "${FIXTURE_FILE}" || true)"
+case_count="$(grep -c . <<<"${cases}" || true)"
+cut -f2- <<<"${cases}" >"${fixture}"
 
-# Line numbers in the fixture above. POSITIVE lines must be reported; every
-# other line must not be. Kept as literal numbers so that editing the fixture
-# without editing this list is a failure rather than a silent weakening.
-fixture_positive="1 2 3 4 5 7"
-fixture_lines=12
+# A fixture that lost its cases would make every assertion below vacuous, and
+# this gate is precisely the one that must not pass vacuously.
+if [ "${case_count}" -lt 10 ]; then
+	bad "${FIXTURE_FILE} yields only ${case_count} case(s); it is supposed to carry both verdicts and every shape"
+	echo
+	echo "RESULT: FAILED — the fixture proves nothing"
+	exit 1
+fi
 
 fixture_hits="$(scan_file "${fixture}" | cut -f1)"
 detector_ok=1
-for n in ${fixture_positive}; do
-	if ! grep -qx "${n}" <<<"${fixture_hits}"; then
-		bad "the detector MISSED fixture line ${n} — it would not catch this defect"
+hits_expected=0
+n=0
+while IFS= read -r row; do
+	n=$((n + 1))
+	[ -n "${row}" ] || continue
+	verdict="${row%%	*}"
+	text="${row#*	}"
+	if grep -qx "${n}" <<<"${fixture_hits}"; then fired=1; else fired=0; fi
+	if [ "${verdict}" = "HIT" ]; then
+		hits_expected=$((hits_expected + 1))
+		if [ "${fired}" -eq 0 ]; then
+			bad "the detector MISSED a planted defect — it would not catch this:"
+			echo "             ${text}"
+			detector_ok=0
+		fi
+	elif [ "${fired}" -eq 1 ]; then
+		bad "the detector FIRED on correct code:"
+		echo "             ${text}"
 		detector_ok=0
 	fi
-done
-for n in $(seq 1 "${fixture_lines}"); do
-	case " ${fixture_positive} " in
-	*" ${n} "*) continue ;;
-	esac
-	if grep -qx "${n}" <<<"${fixture_hits}"; then
-		bad "the detector FIRED on fixture line ${n}, which is correct code"
-		detector_ok=0
-	fi
-done
+done <<<"${cases}"
 
 if [ "${detector_ok}" -eq 1 ]; then
-	ok "the detector found all $(printf '%s' "${fixture_positive}" | wc -w | tr -d ' ') planted defects and none of the correct forms"
+	ok "the detector found all ${hits_expected} planted defect(s) and none of the $((case_count - hits_expected)) correct form(s)"
 else
 	echo
 	echo "RESULT: FAILED — the detector does not work, so the scan below means nothing"
