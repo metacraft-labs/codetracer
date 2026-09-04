@@ -81,7 +81,8 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Fail if the PREVIOUS coverage run never ran
+      - name: Fail if the PREVIOUS coverage run never ran, and yield if it is still running
+        id: guard
         # THE GUARD ON THIS MECHANISM, AND IT HAS TO LIVE OUT HERE.
         #
         # The failure this whole workflow exists to escape is a run that is
@@ -131,10 +132,46 @@ jobs:
             exit 1
           fi
           if [ "${prev_status}" != "completed" ]; then
-            echo "::notice::Coverage run ${prev_id} is still ${prev_status} with ${njobs} jobs; a full suite needs 12-18h, so overlap with the 24h clock is expected."
+            # DO NOT DISPATCH OVER A LIVE COVERAGE RUN. This is the whole
+            # reason this step has an output.
+            #
+            # `coverage-<ref>` protects a coverage run from PUSH runs, which is
+            # what it was built for and what it demonstrably does. It does NOT
+            # protect a coverage run from another COVERAGE dispatch: both land
+            # in the same group, and GitHub permits one pending run per group,
+            # so the newer dispatch evicts the older one.
+            #
+            # `cancel-in-progress: false` does not save it, for the same reason
+            # it does not save a mainline push run: it protects a run that has
+            # STARTED, and on this fleet a coverage run's RUN-LEVEL status stays
+            # `queued` for its entire life, because the eph-win-x64 jobs sit
+            # unstarted for ~15h. A run that is never `in_progress` is always
+            # evictable, so the setting is inert here.
+            #
+            # Measured, not theorised: coverage run 33784363822 had produced 43
+            # jobs and dev's first full inventory in 24+ commits (11 success, 13
+            # failure, 13 skipped) when it was cancelled 42 SECONDS after a
+            # second dispatch was created -- mid-execution, with
+            # `cancel-in-progress: false` set.
+            #
+            # So the clock yields to the run already in flight. Skipping a tick
+            # costs one day of latency; dispatching costs the entire verdict the
+            # previous 12-18h were spent producing, and would do so on every
+            # tick that overlaps -- which, at a 24h clock over a 12-18h suite,
+            # is most of them once the queue lengthens.
+            echo "::notice::Coverage run ${prev_id} is still ${prev_status} with ${njobs} jobs. NOT dispatching: a second dispatch shares the coverage-dev group and would evict it. A full suite needs 12-18h against a 24h clock, so this overlap is expected; the next tick will dispatch."
+            echo "should_dispatch=false" >>"${GITHUB_OUTPUT}"
+            exit 0
           fi
+          echo "should_dispatch=true" >>"${GITHUB_OUTPUT}"
 
       - name: Dispatch Codetracer CI against the current dev tip
+        # Skipped when the guard above found a coverage run still in flight.
+        # `steps.guard.outputs.should_dispatch` is unset on the first-tick and
+        # no-previous-run paths, which `exit 0` before writing it -- so compare
+        # against 'false' rather than requiring 'true', or the very first tick
+        # would never dispatch.
+        if: steps.guard.outputs.should_dispatch != 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
