@@ -135,8 +135,38 @@ Types live in `src/db-backend/src/task.rs` unless noted.
 | `countBudget` | `i64` | Budget for value expansion. |
 | `minCountLimit` | `i64` | Minimum expansion limit. |
 | `lang` | `Lang` | Language enum. |
-| `watchExpressions` | `Vec<String>` | Watch expressions. |
+| `watchExpressions` | `Vec<String>` | User-entered watch expressions. See below. |
 | `depthLimit` | `i64` | `-1` means no depth limit. |
+
+#### Watch expressions
+
+There is no separate `evaluate` route — watches ride this request, and each
+one produces **exactly one** row in `locals`, marked with `value.isWatch`.
+There is no arm in which a watch produces nothing: a watch that cannot be
+answered comes back as a `Value` of kind `Error` whose `msg` is the reason,
+which every frontend already renders as the row's text.
+
+What can be evaluated against a recording is *navigation of recorded
+values*, not computation:
+
+| Expression | Meaning |
+| --- | --- |
+| `total` | a name recorded at this step |
+| `p.x` | a named field of a recorded struct |
+| `xs[2]` | a positional element of a recorded sequence, tuple or struct |
+| `board[1].row` | any chain of the two |
+
+Anything else is refused with a stated reason. `x + y` is refused because
+the sum was never recorded and a replay cannot compute it. Indices must be
+literal; a reference is followed transparently.
+
+Watch rows are appended **after** the locals are sorted and deduplicated,
+so a watch naming the same thing as a local yields two rows — the local and
+the watch answer — rather than one of them replacing the other.
+
+Implementation: `src/db-backend/src/watch_expression.rs`. It deliberately
+does not use `tracepoint_interpreter`, which is gated behind the
+`syntax-highlight` feature that the browser (wasm) engine is built without.
 
 ### CtLoadLocalsResponseBody
 
@@ -151,6 +181,9 @@ Types live in `src/db-backend/src/task.rs` unless noted.
 | `expression` | `String` |
 | `value` | `Value` |
 | `address` | `i64` |
+
+`Value.isWatch` is `true` when the row answers a `watchExpressions` entry
+rather than reporting a recorded local.
 
 ### CtLoadFlowArguments
 
