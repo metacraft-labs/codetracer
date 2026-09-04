@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: a library for documentation tooling.
+#
+# The shared machinery behind the two DeepReview capture scripts. Its
+# other consumer, tools/visual-review/capture-deepreview-views.sh, is a
+# design-review harness -- also not a gate.
 # Shared machinery for photographing a real `ct review` session.
 #
 # Two consumers, with different purposes and deliberately different fixtures:

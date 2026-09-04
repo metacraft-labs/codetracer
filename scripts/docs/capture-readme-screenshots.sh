@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: documentation asset capture.
+#
+# Nothing in the tree calls it -- not even a `just` recipe. That is a
+# fact about how the README images get refreshed, not a hole in CI.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

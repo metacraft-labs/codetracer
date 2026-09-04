@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: one-time developer machine setup.
+#
+# Run as `just developer-setup`; it grants a workstation the BPF
+# capabilities bpftrace needs. It asserts nothing and has no verdict.
 # scripts/developer-setup.sh — One-time developer machine setup for CodeTracer
 #
 # Usage:

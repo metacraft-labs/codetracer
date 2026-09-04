@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: documentation asset capture.
+#
+# It drives Playwright to re-record the README animations, for a person
+# refreshing the README.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

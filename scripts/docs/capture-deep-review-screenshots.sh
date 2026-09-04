@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: documentation asset capture.
+#
+# The two frozen `ct review` images the book quotes line for line. Its
+# fixture is deliberately frozen, which is the opposite of what a gate
+# wants from a fixture.
 # Capture the DeepReview screenshots the book serves from
 # `/assets/img/deep_review/`.
 #

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: a code generator, not a check on one.
+#
+# Design tokens in, stylus out, into src/frontend/styles/generated/.
+# Whether that output is stale is a real question and a good gate to
+# have -- but it is a question ABOUT this script, not one it answers.
 set -euo pipefail
 
 ROOT_DIR="${1:-.}"

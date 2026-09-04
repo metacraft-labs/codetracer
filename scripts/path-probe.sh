@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# NOT-A-CI-GATE: a diagnostic, not a check.
+#
+# It prints SHELL, PATH, TUP, TUP_DIR and `command -v tup`, and asserts
+# none of them. A person reads its output while debugging a build.
 set -eu
 
 echo "=== path-probe.sh ==="

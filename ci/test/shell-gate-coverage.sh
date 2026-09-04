@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
 #
-# shell-gate-coverage.sh — fail, BY NAME, on any gate in ci/test/ that no CI
-# workflow can reach.
+# shell-gate-coverage.sh — fail, BY NAME, on any shell gate under ci/ or
+# scripts/ that no CI WORKFLOW LANE can reach.
+#
+# WHAT WAS WRONG WITH THIS FILE ON 2026-09-04, WHICH IS THE SHORT VERSION OF
+# EVERYTHING BELOW
+# -----------------------------------------------------------------------
+# It printed `96 found, 88 reachable, 8 recorded dark, 0 UNRECORDED dark` and
+# exited 0, and the green WAS the finding. Two blind spots:
+#
+#   (a) THE JUSTFILE WAS A ROOT. A gate named by any `just` recipe counted as
+#       reached — including the 151 of 208 recipes that no lane calls. Thirteen
+#       gates were covered by nothing but a recipe a person types.
+#   (b) THE SCAN WAS `ci/test` AT `-maxdepth 1`. `ci/verdict/`, `ci/runner/`,
+#       `ci/lib/`, `ci/build/`, `ci/deploy/`, `ci/reprobuild/` and all of
+#       `scripts/` were outside the universe of the check that exists to find
+#       dark gates.
+#
+# Same tree, same day, honestly measured: 161 found, 130 reachable, 9 declared
+# not-a-gate, 22 recorded dark. Nothing was fixed to get from 88/96 to 130/161;
+# the earlier number was simply about a smaller question than it claimed.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -10,28 +28,35 @@
 # nothing anywhere said so. It fixed that, and it is scoped — in its own first
 # line — to "any test-shaped **Nim** file".
 #
-# `ci/test/` holds 58 shell gates. Nothing measured those. Measured on `dev` on
-# 2026-09-01, four were referenced by no workflow, no justfile recipe, and no
-# other gate:
+# The shell gates were measured by nothing until this file, and its own first
+# run on 2026-09-01 named four that no workflow, no recipe and no other gate
+# referenced. A guard that stops at a file extension leaves a hole exactly the
+# shape of everything it does not cover, and the whole argument of the Nim guard
+# applies here unchanged: work goes into a gate, the gate goes into the tree, and
+# nothing runs it. The same sentence turned out to apply to this file's own
+# scope, twice over, which is what (a) and (b) above record.
 #
-#     cross-process-gate.sh          (with its own 500-line self-test beside it)
-#     frontend-js.sh
-#     origin-dap-gate.sh
-#     worker-backend-wasm-e2e.sh
+# REACHABILITY, NOT MENTION — AND A LANE, NOT AN ENTRY POINT
+# -----------------------------------------------------------
+# A gate is covered when a CI WORKFLOW LANE can reach it: named in a workflow, or
+# in a `just` recipe SOME LANE CALLS, or in another script that is itself
+# reachable. Three distinctions, each of which the naive rule gets wrong:
 #
-# Same generator, one directory over. A guard that stops at a file extension
-# leaves a hole exactly the shape of everything it does not cover, and the whole
-# argument of the Nim guard applies here unchanged: work goes into a gate, the
-# gate goes into the tree, and nothing runs it.
+#   * TRANSITIVITY. `visual-replay-gate-lib.sh` is sourced only by
+#     `visual-replay-gate.sh`, and would look covered by a rule that merely asked
+#     "is this name mentioned anywhere in ci/". If the gate that names it is
+#     itself dark, so is it. `ci/lib/published-asset.sh` is the live instance:
+#     five scripts source it and all five are dark.
+#   * DIRECTION. Transitivity has to be walked from the ROOTS OUTWARD, not
+#     assumed from a file's presence. Seeding from the justfile is the version of
+#     this error that was here: it credits the whole justfile at once.
+#   * PROSE. A comment naming a gate is not a wire. See `refs_in`.
 #
-# REACHABILITY, NOT MENTION
-# -------------------------
-# A gate is covered when a CI ROOT can reach it: named in a workflow, or in the
-# justfile, or in another gate that is itself reachable. The transitive step
-# matters and the naive rule gets it wrong — `visual-replay-gate-lib.sh` is
-# sourced only by `visual-replay-gate.sh`, and would look covered by a rule that
-# merely asked "is this name mentioned anywhere in ci/". If the gate that names
-# it is itself dark, so is it, and a mention-based rule reports both as fine.
+# The walk therefore has TWO KINDS OF NODE — scripts and `just` recipes — and
+# crosses between them in both directions. That is not over-engineering; it is
+# the only thing that gets `ci/test/sibling-backend-path-test.sh` right, which is
+# reached as `codetracer.yml` -> `ci/test/non-gui.sh` -> `just test` ->
+# `test-sibling-backend-path`, four hops alternating between the two.
 #
 # THE ESCAPE HATCH IS THE NIM GUARD'S, SPELLED THE SAME WAY
 # ---------------------------------------------------------
@@ -45,11 +70,19 @@
 #
 # AND THE OTHER DIRECTION
 # -----------------------
-# ROT: a workflow or recipe naming a `ci/test/*.sh` that does not exist. The Nim
-# guard checks this because a lane named a deleted file for months and simply ran
-# one fewer test than it claimed. A workflow step that invokes a missing script
-# fails loudly at run time — but only if that workflow runs, and a step guarded
-# by an `if:` may not for months.
+# ROT: a workflow or lint dispatcher naming a `ci/` or `scripts/` script that
+# does not exist. The Nim guard checks this because a lane named a deleted file
+# for months and simply ran one fewer test than it claimed. A workflow step that
+# invokes a missing script fails loudly at run time — but only if that workflow
+# runs, and a step guarded by an `if:` may not for months.
+#
+# AND A THIRD DIRECTION, ADDED 2026-09-04
+# ---------------------------------------
+# The recorded-dark inventory declares its own length, and this guard fails
+# unless the number of entries EQUALS it. An exception list that can grow quietly
+# stops being read, and appending a line was always the cheapest way to make this
+# file green. See the inventory's header for why it is an equality and not a
+# ceiling with slack.
 #
 # Usage:
 #   ci/test/shell-gate-coverage.sh
@@ -420,22 +453,27 @@ cut -f1 "${tmp}/bodies" | sort -u >"${tmp}/recipe-names"
 absorb() {
 	local r
 	cat >"${tmp}/refs"
-	for r in $(grep '^S ' "${tmp}/refs" | cut -c3- | resolve | sort -u); do
+	grep '^S ' "${tmp}/refs" | cut -c3- | resolve | sort -u >"${tmp}/refs.s"
+	grep '^J ' "${tmp}/refs" | cut -c3- | sort -u >"${tmp}/refs.j"
+	while read -r r; do
+		[ -n "${r}" ] || continue
 		grep -Fxq -- "${r}" "${tmp}/reached" && continue
 		printf '%s\n' "${r}" >>"${tmp}/reached"
 		printf '%s\n' "${r}" >>"${tmp}/fq"
-	done
-	for r in $(grep '^J ' "${tmp}/refs" | cut -c3- | sort -u); do
+	done <"${tmp}/refs.s"
+	while read -r r; do
+		[ -n "${r}" ] || continue
 		if grep -Fxq -- "${r}" "${tmp}/recipe-names"; then
 			grep -Fxq -- "${r}" "${tmp}/rreached" && continue
 			printf '%s\n' "${r}" >>"${tmp}/rreached"
 			printf '%s\n' "${r}" >>"${tmp}/rq"
 		else
-			# `just <name>` for a recipe the justfile does not define. Reported in
-			# step 4 as rot: it is a step that dies at run time, if it ever runs.
+			# `just <name>` for a recipe THIS justfile does not define. Recorded
+			# but not reported: see step 4 for why it cannot be treated as rot.
+			# What matters here is that it confers no reachability.
 			printf '%s\n' "${r}" >>"${tmp}/missing-recipes"
 		fi
-	done
+	done <"${tmp}/refs.j"
 }
 
 printf '%s\n' "${roots}" | grep -v '^$' | refs_in | absorb
@@ -656,7 +694,9 @@ if [ "${failures}" -gt 0 ]; then
 	echo "RESULT: FAILED — ${failures} check(s)"
 	exit 1
 fi
-echo "  Every shell gate in ci/test/ can be reached by CI, or says why it cannot."
+echo "  Every shell script under ci/ and scripts/ is reached by a workflow lane,"
+echo "  declares in its own header that it is not a gate, or is recorded as dark"
+echo "  with a reason, in a list that can only shrink."
 echo "  NOT claimed: that any of them passes, or that a reachable gate is actually"
 echo "  RUN — a step behind a false \`if:\` is reachable and never executes. This"
 echo "  guard measures the graph, which is strictly less than the schedule."
