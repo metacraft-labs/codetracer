@@ -2644,6 +2644,26 @@ jobs:
         # exactly its own check.
         run: nix develop .#devShells.x86_64-linux.default --command just test-menu-and-context-menu
 
+      - name: Editor context menu is the mode's
+        # The CONTENT of the editor's right-click menu, entry by entry, per
+        # mode. The gate above asserts that exactly one menu appears and that
+        # its hint row is inert -- and passes unchanged on a menu whose whole
+        # content is replay commands offered in Edit mode, which is what was
+        # reported against noirstudio.dev. It never reads an entry name.
+        #
+        # So this one names each entry and asserts both directions: the
+        # commands of the mode are present, and the commands of the other mode
+        # are ABSENT rather than greyed out. "The menu differs between the
+        # modes" cannot fail for its own reason and is not what is asked.
+        #
+        # Placed beside the other browser gates so all of them read the same
+        # assembled bundle. The Debug half is NOT measured here and the gate
+        # says so in its result rather than passing over it: switching /noir to
+        # Debug mode currently leaves the workspace with no editor pane, so
+        # there is nothing to right-click. That half is asserted on the desktop
+        # by src/tests/gui/tests/editor/editor_context_menu_is_mode_dependent.spec.ts.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-editor-context-menu-modes
+
       - name: Renderer host-reach budget (NS1 residual 1)
         # The migration that stands between the web bundle and a rendered pane,
         # as a ratchet rather than a plan. Fails when a module gains a host

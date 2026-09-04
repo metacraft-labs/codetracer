@@ -3304,6 +3304,23 @@ test-menu-and-context-menu:
   exec > >(tee test-logs/test-menu-and-context-menu.log) 2>&1
   bash ci/test/menu-and-context-menu-in-browser.sh
 
+# THE EDITOR'S CONTEXT MENU IS THE MODE'S — the CONTENT, entry by entry.
+#
+# Beside the recipe above deliberately, and reading the same assembled bundle.
+# That gate asserts exactly ONE menu appears on a right-click and that its hint
+# row is inert; every one of its checks passes on a menu whose entire content is
+# replay commands offered in Edit mode, because it never reads an entry name.
+# This one names each entry and says present or absent, per mode.
+#
+# Reuses an assembled bundle when CT_WEB_BUNDLE_DIR is set; assembles one
+# otherwise.
+test-editor-context-menu-modes:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-editor-context-menu-modes.log) 2>&1
+  bash ci/test/editor-context-menu-modes.sh
+
 # THE SECOND BUILD — Noir-Studio.milestones.org NS2's largest unfinished item,
 # which said in its own words: "no CI recipe produces a web bundle, so
 # `test_one_codebase_two_platforms` is unasserted, and nothing calls the web

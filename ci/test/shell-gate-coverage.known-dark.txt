@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 25
+# RECORDED-DARK-CEILING: 24
 #
 # It is not an exemption list. `NOT-A-CI-GATE:` in a file's own header is the
 # exemption, and it means "this is not a gate" — a claim about the file, made in
@@ -201,26 +201,12 @@ ci/test/constraints-listing-browser.sh
 # carries no marker, because its consumer is live.
 ci/lib/published-asset.sh
 
-# ADDED 2026-09-04, and it is a REGRESSION rather than an inherited gap.
-#
-# `ci/test/editor-context-menu-modes.sh` arrived in 0d76e11dc
-# ("fix(editor): the right-click menu is the mode's, and it had only the
-# debugger's") with no justfile recipe and no workflow step -- `grep -rn
-# editor-context-menu-modes` finds only the file itself. It is a browser probe
-# in the shape of `web-renderer-mounts.sh`, whose consumer is a `just` recipe
-# invoked from the `viewmodel-tests` job; this one has neither half.
-#
-# It is recorded rather than wired because wiring an unexercised browser gate
-# blind is how a lane acquires a red nobody planned for -- but recording it is
-# not accepting it. It is owed a recipe and a step by whoever added it, and the
-# ceiling above went 22 -> 23 in this diff precisely so that debt is visible to
-# a reviewer instead of being absorbed silently.
-ci/test/editor-context-menu-modes.sh
-
 # --- added 2026-09-04, with M0's browser seekable-container gate -------------
 #
-# Ceiling raised 23 -> 24 in this diff, deliberately and in the open, per the
-# rule above.
+# Ceiling raised when this entry was added, deliberately and in the open, per
+# the rule above; it came back down by one because
+# `ci/test/editor-context-menu-modes.sh` was WIRED rather than left recorded and
+# left this list, which is the both-directions rule working as intended.
 #
 # Drives the REAL `wasm32-unknown-unknown` engine over split-stream `.ct`
 # containers it writes on the spot, which is the only way to check what it
