@@ -1027,10 +1027,61 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Every eph-win-x64 job must BOUND itself.
+#
+# Omitting `timeout-minutes` does not mean "no limit", it means GitHub's
+# DEFAULT limit of 360 minutes, and this lane has already paid that in full.
+# In run 33880354195 (2026-09-04) `windows-rust-components` sat in `Setup dev
+# env` from 14:37:32 to 20:05:35 and `origin-DAP (materialized Python,
+# Windows)` sat in `Setup db-backend siblings` from 14:20:59 to 20:05:50.
+# Neither failed; both were terminated by that default six hours in, having
+# produced no verdict -- and because this workflow's concurrency group is
+# per-branch, they held `Codetracer CI-dev` `in_progress` for the whole window
+# and starved every later push to `dev` behind a job that was never going to
+# report.
+#
+# So the assertion is not "a timeout exists" but "a timeout exists AND is
+# genuinely lower than the default it replaces". A job that sets 360 has
+# written the failure mode down rather than fixed it, and is failed here by
+# name.
+# ---------------------------------------------------------------------------
+echo
+echo "${WINDOWS_RUNNER_LABEL} jobs bound their own runtime"
+
+readonly GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES=360
+
+job_timeout_minutes() {
+	awk -v want="$1" '
+		/^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+			name = $1
+			sub(/:$/, "", name)
+			in_job = (name == want)
+			next
+		}
+		in_job && /^    timeout-minutes:[[:space:]]*[0-9]+[[:space:]]*$/ {
+			print $2
+			exit
+		}
+	' "$WORKFLOW"
+}
+
+for job in "${windows_jobs[@]+"${windows_jobs[@]}"}"; do
+	timeout_value="$(job_timeout_minutes "$job")"
+	if [ -z "$timeout_value" ]; then
+		fail "$job declares timeout-minutes" 			"without it the job inherits GitHub's ${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default," 			"which is the six hours this job already spent holding the branch's" 			"concurrency group in run 33880354195 without ever reporting."
+	elif [ "$timeout_value" -ge "$GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES" ]; then
+		fail "$job bounds itself below GitHub's default" 			"timeout-minutes: $timeout_value is not lower than the" 			"${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default it is supposed to replace," 			"so this job can still starve the concurrency group for six hours."
+	else
+		ok "$job bounds itself (timeout-minutes: $timeout_value)"
+	fi
+done
+
+# ---------------------------------------------------------------------------
 # Self-accounting: a contract that is deleted or short-circuited must not leave
 # this script reporting success on fewer checks than it claims. Four fixed
 # assertions (script exists, script provisions bash, job set non-empty, WSL
-# stub-step set non-empty), six per Windows job, two per WSL stub step, four
+# stub-step set non-empty), SEVEN per Windows job (six bootstrap/WSL contracts
+# plus the timeout-minutes bound), two per WSL stub step, four
 # fixed dev-env-flavor assertions (site count, no matrix-hidden Windows leg,
 # one direct, one via composite), two per dev-env site, and ten fixed
 # long-path assertions (code-line floor, system-scope line count, the write
@@ -1039,7 +1090,7 @@ fi
 # jobs that run the bootstrap).
 # ---------------------------------------------------------------------------
 echo
-expected_assertions=$((4 + 6 * ${#windows_jobs[@]} + 2 * ${#wsl_stub_jobs[@]} + \
+expected_assertions=$((4 + 7 * ${#windows_jobs[@]} + 2 * ${#wsl_stub_jobs[@]} + \
 	4 + 2 * ${#dev_env_sites[@]} + 10))
 if [ "$assertions" -ne "$expected_assertions" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$expected_assertions"

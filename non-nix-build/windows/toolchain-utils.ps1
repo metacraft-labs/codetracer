@@ -1,6 +1,42 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# HOW LONG A SINGLE TOOLCHAIN DOWNLOAD MAY BLOCK BEFORE IT IS A FAILURE.
+#
+# `Invoke-WebRequest` has NO default timeout: `-TimeoutSec` unset means
+# infinite, and under `pwsh` (HttpClient) the value covers the whole transfer,
+# body included -- not just the response headers. Every toolchain in this file
+# is fetched through `Download-File` / `Download-String`, so before this
+# constant existed a single stalled socket parked the ENTIRE Windows dev-env
+# bootstrap forever. `Invoke-WithRetry` did not help: it bounds the number of
+# attempts (4), never the duration of one, so 4 x infinite is still infinite.
+#
+# This is not theoretical. On 2026-09-04 run 33880354195, `windows-rust-components`
+# sat in `Setup dev env` from 14:37:32 to 20:05:35 and `origin-DAP (materialized
+# Python, Windows)` sat in `Setup db-backend siblings` from 14:20:59 to
+# 20:05:50 -- both released only by GitHub's DEFAULT 360-minute job timeout,
+# because neither job sets `timeout-minutes` either. For those six hours they
+# held the `Codetracer CI-dev` concurrency group `in_progress`, which is what
+# starved every other verdict on the branch.
+#
+# The value has to clear the largest asset this bootstrap pulls: the WinDbg
+# msixbundle in ensure-ttd.ps1 is ~767 MB, so a total-transfer budget of a few
+# minutes would convert a slow link into a spurious red. 30 minutes is ~0.4 MB/s
+# sustained for that asset -- far below any healthy runner, far above a socket
+# that has stopped moving. Override for a genuinely slow network with
+# WINDOWS_DIY_DOWNLOAD_TIMEOUT_SECONDS; 0 restores the old infinite behaviour
+# and is deliberately spelled as an opt-in rather than left as the default.
+function Get-DownloadTimeoutSeconds {
+  $raw = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_DOWNLOAD_TIMEOUT_SECONDS")
+  if ([string]::IsNullOrWhiteSpace($raw)) { return 1800 }
+
+  $parsed = 0
+  if (-not [int]::TryParse($raw.Trim(), [ref]$parsed) -or $parsed -lt 0) {
+    throw "WINDOWS_DIY_DOWNLOAD_TIMEOUT_SECONDS must be a non-negative integer (got '$raw')."
+  }
+  return $parsed
+}
+
 function Invoke-WithRetry {
   param(
     [Parameter(Mandatory = $true)]
@@ -88,16 +124,29 @@ function Download-File {
     [Parameter(Mandatory = $true)][string]$OutFile
   )
 
+  $timeoutSeconds = Get-DownloadTimeoutSeconds
   Invoke-WithRetry -Script {
-    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+    # A zero timeout is git's/PowerShell's "wait forever"; only pass the
+    # parameter when the operator has NOT asked for that, so the opt-out is a
+    # real opt-out rather than `-TimeoutSec 0` meaning something subtly else.
+    if ($timeoutSeconds -gt 0) {
+      Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec $timeoutSeconds
+    } else {
+      Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+    }
   } | Out-Null
 }
 
 function Download-String {
   param([Parameter(Mandatory = $true)][string]$Url)
 
+  $timeoutSeconds = Get-DownloadTimeoutSeconds
   $content = Invoke-WithRetry -Script {
-    (Invoke-WebRequest -Uri $Url -UseBasicParsing).Content
+    if ($timeoutSeconds -gt 0) {
+      (Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $timeoutSeconds).Content
+    } else {
+      (Invoke-WebRequest -Uri $Url -UseBasicParsing).Content
+    }
   }
 
   if ($content -is [byte[]]) {

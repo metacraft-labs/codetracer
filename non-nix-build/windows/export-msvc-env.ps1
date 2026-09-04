@@ -4,14 +4,46 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# WHY EVERY BAIL-OUT BELOW ANNOUNCES ITSELF ON STDERR.
+#
+# This script's entire contract is "print KEY=VALUE lines describing an MSVC
+# environment". Every way it can fail to do that was a bare `exit 0`: no
+# message, no non-zero status, nothing on stderr. A setup script whose one job
+# is to provide something, reporting success when it provided nothing, is the
+# worst available outcome -- the caller cannot distinguish "there is no MSVC
+# here" from "MSVC is configured", and the truth surfaces much later as a link
+# error against an empty LIB.
+#
+# The exit status is deliberately still 0. Two of the four callers
+# (`env.ps1`, `env.sh`) treat an empty blob as "no MSVC on this machine and
+# that is fine" -- they run on developer workstations and in Git-Bash where a
+# missing Visual Studio is normal -- so making absence fatal here would break
+# them. What changes is that absence is now SAID, by reason, exactly once, on a
+# stream that does not pollute the KEY=VALUE stdout the callers parse.
+#
+# The one caller that must treat absence as fatal already does, and correctly:
+# `windows-named-pipe-tests` in .github/workflows/codetracer.yml throws when
+# `LIB` is missing from the emitted blob, because on `eph-win-x64` the MSVC
+# toolchain is part of the base image contract. That check is the right shape
+# and is left alone -- this only ensures its log says WHY, instead of leaving
+# the operator to guess which of the five bail-outs fired.
+function Exit-NoMsvcEnvironment {
+  param([Parameter(Mandatory = $true)][string]$Reason)
+
+  [Console]::Error.WriteLine("export-msvc-env.ps1: no MSVC environment exported: $Reason")
+  exit 0
+}
+
 $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
 if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
-  exit 0
+  Exit-NoMsvcEnvironment ("the ProgramFiles(x86) environment variable is unset " +
+    "or empty, so the Visual Studio Installer's location cannot be derived.")
 }
 
 $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio/Installer/vswhere.exe"
 if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
-  exit 0
+  Exit-NoMsvcEnvironment ("vswhere.exe was not found at '$vswhere'; no Visual " +
+    "Studio Installer is present on this machine.")
 }
 
 $arch = ((Get-CimInstance Win32_ComputerSystem).SystemType).ToLowerInvariant()
@@ -23,7 +55,9 @@ if ([string]::IsNullOrWhiteSpace($installPath) -and $requires -ne "Microsoft.Vis
   $installPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Select-Object -First 1)
 }
 if ([string]::IsNullOrWhiteSpace($installPath)) {
-  exit 0
+  Exit-NoMsvcEnvironment ("vswhere.exe reported no Visual Studio installation " +
+    "carrying '$requires'. Visual Studio may be installed without the C++ " +
+    "build tools workload.")
 }
 
 $targetArch = if ($isArm64) { "arm64" } else { "x64" }
@@ -41,7 +75,8 @@ foreach ($hostCandidate in $hostCandidates) {
 
 $vcvarsall = Join-Path $installPath "VC/Auxiliary/Build/vcvarsall.bat"
 if (-not (Test-Path -LiteralPath $vcvarsall -PathType Leaf)) {
-  exit 0
+  Exit-NoMsvcEnvironment ("the Visual Studio installation at '$installPath' has " +
+    "no VC/Auxiliary/Build/vcvarsall.bat, so its environment cannot be captured.")
 }
 
 $vcArch = if ($isArm64) { "arm64" } else { "amd64" }
@@ -94,7 +129,13 @@ try {
   $env:PATH = $callerPath
 }
 if ($cmdExit -ne 0) {
-  exit 0
+  # The overwhelmingly likely cause is the 8191-character cmd.exe limit
+  # documented above ("The input line is too long."), which this script already
+  # mitigates by handing cmd a minimal PATH -- so if it fires anyway, say so
+  # rather than letting it look like "no Visual Studio installed".
+  Exit-NoMsvcEnvironment ("'$vcvarsall $vcArch' exited with code $cmdExit, so no " +
+    "environment was captured. If the output mentioned 'The input line is too " +
+    "long', an oversized environment variable defeated the cmd.exe round-trip.")
 }
 
 $capturedEnv = @{}

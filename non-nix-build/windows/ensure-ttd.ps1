@@ -199,8 +199,24 @@ function Install-TtdViaMsixBundle {
     Write-Host "Downloading WinDbg msixbundle from $BundleUrl ..."
     $progressPreference = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
+    # This is the single largest asset the Windows bootstrap fetches (~767 MB)
+    # AND it is the FIRST bootstrap step env.ps1 runs, so an untimed request
+    # here stalls the whole dev-env setup before any other toolchain is even
+    # attempted -- see the header of toolchain-utils.ps1 for the six-hour CI
+    # hangs this produced. This script is deliberately sourceable standalone
+    # (it does not dot-source toolchain-utils.ps1), so fall back to the same
+    # default when the shared helper is not in scope.
+    $ttdTimeoutSeconds =
+      if (Get-Command Get-DownloadTimeoutSeconds -ErrorAction SilentlyContinue) {
+        Get-DownloadTimeoutSeconds
+      } else { 1800 }
     try {
-      Invoke-WebRequest -Uri $BundleUrl -OutFile $bundlePath -UseBasicParsing
+      if ($ttdTimeoutSeconds -gt 0) {
+        Invoke-WebRequest -Uri $BundleUrl -OutFile $bundlePath -UseBasicParsing `
+          -TimeoutSec $ttdTimeoutSeconds
+      } else {
+        Invoke-WebRequest -Uri $BundleUrl -OutFile $bundlePath -UseBasicParsing
+      }
     } finally {
       $ProgressPreference = $progressPreference
     }

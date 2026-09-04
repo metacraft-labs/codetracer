@@ -275,6 +275,12 @@ jobs:
   # eph-win-x64 job stops opening with the bootstrap.
   windows-bootstrap-smoke:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    # See the timeout-minutes rationale on windows-rust-components: an omitted
+    # value is GitHub's 360-minute default, and any eph-win-x64 job that reaches
+    # it holds this workflow's per-branch concurrency group for six hours. This
+    # job does static validation only (no setup-dev-env, no toolchain download)
+    # and has been completing in ~8 minutes, so its budget is much tighter.
+    timeout-minutes: 30
     steps:
       - name: Ensure Git and Git Bash are on PATH
         shell: powershell
@@ -524,6 +530,10 @@ jobs:
   origin-dap-windows:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (materialized Python, Windows)
+    # See the timeout-minutes rationale on windows-rust-components. This is the
+    # other job that reaches `setup-dev-env` with the `windows-diy` flavor, and
+    # it hung for the same six hours in the same run for the same reason.
+    timeout-minutes: 75
     steps:
       # See the eph-win-x64 note at the top of this file. This is where the
       # bootstrap started, and for a long time it was the only job that had it.
@@ -698,6 +708,12 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (nightly routed materialized matrix, Windows)
+    # See the timeout-minutes rationale on windows-rust-components. This job is
+    # schedule/dispatch-gated so it has never run on this runner class, but it
+    # reaches setup-dev-env exactly as its non-nightly sibling does and would
+    # hang identically; it gets the same budget rather than the 360-minute
+    # default it would otherwise inherit the first time it is triggered.
+    timeout-minutes: 75
     steps:
       # See the eph-win-x64 note at the top of this file. This job is
       # schedule/dispatch-gated, so it has never run on the migrated runner
@@ -887,6 +903,11 @@ jobs:
 
   windows-named-pipe-tests:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    # See the timeout-minutes rationale on windows-rust-components. This job
+    # does not call setup-dev-env and currently fails fast (~8 min) at
+    # "Provision MSVC build environment", but it must not be able to inherit the
+    # 360-minute default if that step ever starts blocking instead of throwing.
+    timeout-minutes: 45
     steps:
       # See the eph-win-x64 note at the top of this file. Without this,
       # `dtolnay/rust-toolchain@stable` dies in its own `shell: bash` step
@@ -988,6 +1009,32 @@ jobs:
 
   windows-rust-components:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    # WHY EVERY eph-win-x64 JOB NOW CARRIES AN EXPLICIT timeout-minutes.
+    #
+    # Omitting it does not mean "no limit", it means GitHub's DEFAULT limit,
+    # which is 360 minutes. That default is the six-hour figure observed on
+    # this lane, and it is worth being exact about what it cost: in run
+    # 33880354195 this job entered `Setup dev env` at 14:37:32 and was still in
+    # it at 20:05:35, and `origin-DAP (materialized Python, Windows)` entered
+    # `Setup db-backend siblings` at 14:20:59 and was still in it at 20:05:50.
+    # Neither FAILED -- both were terminated by the 360-minute default, six
+    # hours after starting, having produced no verdict. `windows-bootstrap-smoke`
+    # (8 min) and `windows-named-pipe-tests` (8 min) on the same runner class in
+    # the same run were unaffected, because neither calls `setup-dev-env`.
+    #
+    # The damage is not the wasted runner. `concurrency.group` for this workflow
+    # is per-branch, so for those six hours the `Codetracer CI-dev` group stayed
+    # `in_progress` and every later push to `dev` queued behind a job that was
+    # never going to report. A bounded failure is strictly better than an
+    # unbounded non-answer: it frees the group, and it names the step that hung.
+    #
+    # 75 minutes is chosen against measurement, not taste. The cold-cache cost of
+    # this step is real -- `eph-win-x64` is EPHEMERAL (every job gets a fresh
+    # `garm-*` VM, so `Get-DefaultInstallRoot`'s "persists across jobs" cache
+    # never hits) and env.ps1 provisions ~22 toolchains from scratch, the largest
+    # being a ~767 MB WinDbg msixbundle. This must not turn a slow-but-working
+    # bootstrap red, so it sits well above that and well under 360.
+    timeout-minutes: 75
     steps:
       # See the eph-win-x64 note at the top of this file. This job checks out
       # with `submodules: recursive`, which actions/checkout can only honour
@@ -1202,6 +1249,13 @@ jobs:
   windows-headless-test:
     runs-on: eph-win-x64  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: test (headless DAP, Windows)
+    # See the timeout-minutes rationale on windows-rust-components. This job has
+    # been `skipped` behind windows-rust-components throughout, so it has never
+    # reported -- which is precisely why it must not reach the 360-minute
+    # default the moment that dependency starts passing. It runs setup-dev-env
+    # (windows-diy) and then builds ct-mcr, so it gets a larger budget than the
+    # bootstrap-only jobs.
+    timeout-minutes: 90
     needs:
       - windows-rust-components
     steps:
