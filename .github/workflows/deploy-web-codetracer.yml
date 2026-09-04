@@ -807,6 +807,58 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/editor-resize-follows-pane.sh
           '
 
+      - name: Prove the EDIT-MODE TOOLBAR survives the mode round trip
+        # THE GATE FOR THE TOPBAR ITSELF, and it is being wired rather than
+        # written: `ci/test/noir-mode-roundtrip.sh` has existed, complete, with
+        # a control arm and a mutation arm, and no workflow has ever called it.
+        # It was recorded in `ci/test/shell-gate-coverage.known-dark.txt` under
+        # "WIRED TO A `just` RECIPE THAT NO WORKFLOW CALLS" — and that file's
+        # own rule says an UNWIRED gate "lands wired or it does not land", so
+        # the entry should never have been written. Its line is deleted in this
+        # commit and the RECORDED-DARK-CEILING comes down with it.
+        #
+        # WHY IT BELONGS IN *THIS* JOB rather than in `codetracer.yml`. The
+        # gate's preconditions refuse a tree with no Noir compiler and no
+        # replay engine — it exits 2 rather than measuring a Run that could
+        # never reach a replay. This is the only job that has both, already
+        # assembled at `studio-bundle/`, which is exactly why the four browser
+        # gates above run here too. So it was never BLOCKED; the step was
+        # simply not written.
+        #
+        # WHAT IT ASSERTS THAT THE FOUR ABOVE DO NOT. Every one of them loads
+        # the page in ONE mode. This gate's subject is the TRANSITION: it reads
+        # `data-topbar-surface` and `data-button-count` off the panel root at
+        # every leg, presses the real Run button, asserts the topbar became
+        # `debugger-controls` with Build GONE, presses the real Stop button,
+        # and asserts the topbar came back to `edit-commands` with Build and
+        # Run on it — three round trips, because per Mode-Transitions.md §6 the
+        # failure mode is a slot that is right once and empty afterwards.
+        #
+        # A VIEW-MODEL TEST WOULD HAVE PASSED THROUGHOUT. The toolbar's model
+        # is 1103 lines and tested on two backends, and for most of its life it
+        # was imported by nothing outside its own suites — a correct capability
+        # nothing reached. What separates the two is a DOM in a real browser on
+        # a BUILT bundle, which is what this runs.
+        #
+        # TWO OF ITS ASSERTIONS COULD NOT PASS UNTIL THIS COMMIT, and being
+        # dark is why nobody knew. FILES asked for `#filesystemComponent-0`,
+        # an id the IsoNim view has never emitted, so the pane read `absent`;
+        # VCS asserted `> 0` commit rows against a template that is not a git
+        # repository and never becomes one. Both are corrected in the probe and
+        # the shell here, and both were verified against the DEPLOYED bundle
+        # before this step was added — FILES now reads 12 rows and VCS reads a
+        # painted `no-repo` body.
+        #
+        # Same refusal rule as the steps above: no replay engine, no session,
+        # no Debug mode — it exits 2 and says the case went unmeasured rather
+        # than reporting zero failures over an empty list.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_WEB_BUNDLE_DIR="$(pwd)/studio-bundle"
+            direnv exec "$(pwd)" bash ci/test/noir-mode-roundtrip.sh
+          '
+
       - name: Upload what the pre-publish browser saw and reported
         # BOTH FORMS. This step shipped sixteen PNGs and no JSON, which made a
         # DOM failure undiagnosable by construction: the run-control check

@@ -434,6 +434,7 @@ while [ "${trip}" -le "${trips}" ]; do
 	# run recorded rather than against a number someone expected.
 	b_files="$(num "$(leg "${control}" "trip-${trip}-edit" '.filesEntries')")"
 	b_vcs="$(num "$(leg "${control}" "trip-${trip}-edit" '.vcsEntries')")"
+	b_vcsbody="$(leg "${control}" "trip-${trip}-edit" '.vcsBody')"
 	b_tests="$(num "$(leg "${control}" "trip-${trip}-edit" '.testsEntries')")"
 	p_files="$(num "$(leg "${control}" "edit-initial" '.filesEntries')")"
 	m_present="$(jq -r --argjson t "${trip}" \
@@ -515,8 +516,26 @@ while [ "${trip}" -le "${trips}" ]; do
 	ck "$([ "${p_files}" -gt 0 ] && [ "${b_files}" -ge "${p_files}" ] &&
 		echo ok || echo no)" \
 		"trip ${trip}: and FILES still lists its files after Stop (${b_files} entries; ${p_files} before the Run) — the pane came back with its tree, not merely mounted"
-	ck "$([ "${b_vcs}" -gt 0 ] && echo ok || echo no)" \
-		"trip ${trip}: and VCS still lists its commits after Stop (${b_vcs} rows)"
+	# VCS IS ASKED FOR A BODY, NOT FOR COMMITS, and the difference is the
+	# difference between an assertion this gate can satisfy and one it cannot.
+	#
+	# The subject here is a TEMPLATE unpacked into a VFS. It is not a git
+	# repository and never becomes one, so the pane's correct answer is the
+	# `.vcs-no-repo` empty state and `.vcs-commit` is zero in every healthy web
+	# build — permanently. `[ "${b_vcs}" -gt 0 ]` was therefore unsatisfiable
+	# by any product, which is one of the two reasons this gate has never run
+	# green; the other was FILES' stale `#filesystemComponent-0`.
+	#
+	# Weakening is exactly what must not happen here, so the assertion is not
+	# dropped but RE-AIMED at the reported defect. That report was "the VCS
+	# panel becomes EMPTY after Stop", and an emptied host is distinguishable
+	# from a rendered no-repo state: the latter painted a body. `no-body` and
+	# `absent` are the failures; `no-repo` and `commits` are both a pane that
+	# came back. The row count is still printed, so a fixture WITH history
+	# still says how much it listed.
+	ck "$([ "${b_vcsbody}" = "no-repo" ] || [ "${b_vcsbody}" = "commits" ] &&
+		echo ok || echo no)" \
+		"trip ${trip}: and VCS still paints a body after Stop (${b_vcsbody}, ${b_vcs} commit rows) — the pane came back, not merely its container"
 	ck "$([ "${b_tests}" -gt 0 ] && echo ok || echo no)" \
 		"trip ${trip}: and TESTS still lists its tests after Stop (${b_tests} rows)"
 	ck "$([ "${m_present}" = true ] && echo ok || echo no)" \
@@ -640,8 +659,23 @@ ck "$([ "${a_back}" = false ] && echo ok || echo no)" \
 # ---------------------------------------------------------------------------
 echo
 echo "${checks} check(s), ${failures} failure(s)"
-# 8 baseline + 14 per trip + 3 menu-bar gesture + 1 page-errors + 4 arm
-expect_count $((8 + 14 * trips + 3 + 1 + 4))
+# 8 baseline + 18 per trip + 3 menu-bar gesture + 1 page-errors + 4 arm
+#
+# EIGHTEEN, NOT FOURTEEN, and the four that were missing are the reason to say
+# so here. The per-trip block grew by the three sidebar-pane assertions (FILES,
+# VCS, TESTS) and the "the user's edit is STILL THERE" marker check, and this
+# arithmetic was never updated — so the gate's own tally guard failed every run
+# with "34 assertion(s) ran, 30 were written", at any value of `trips`. It was
+# never noticed because no workflow called this gate; it is called now, from
+# `deploy-web-codetracer.yml`, so the number has to be true.
+#
+# CORRECTED UPWARD, TO MATCH THE CODE. The count is a statement about how many
+# `ck` calls the script contains — `grep -c '^\tck '` over the loop body is 18
+# and over everything outside it is 16 — so the tally was the thing that was
+# wrong, not the assertions. Editing the guard DOWN to meet a short tally is
+# the failure this guard exists to catch, and it would have cemented the four
+# checks' silence rather than reporting it.
+expect_count $((8 + 18 * trips + 3 + 1 + 4))
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — Run enters the debugger, Stop comes back, ${trips} times, and the edit survives"
 	exit 0

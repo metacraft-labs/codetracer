@@ -181,7 +181,23 @@ const snapshotScript = () => {
   // above zero means the view mounted AND rendered, which is the pair that came
   // apart: the mount latch survived a container the layout swap destroyed, so
   // the view never re-mounted into the fresh, empty host.
-  const filesEntries = paneRowCount('#filesystemComponent-0', 'a.jstree-anchor');
+  //
+  // FILES IS MATCHED BY PREFIX, and the exact id is why this gate could never
+  // have passed. `viewmodel/views/isonim_filesystem_view.nim:442` emits
+  // `id = "filesystemComponent"` with NO `-0`; only the legacy Karax path used
+  // `filesystemComponent-{id}` (`ui/filesystem.nim:511-512` tries the keyed id
+  // and then falls back to the bare one). This probe asked for
+  // `#filesystemComponent-0`, got no host, and reported `filesEntries:
+  // 'absent'` — which `noir-mode-roundtrip.sh`'s `num()` turns into -1 and
+  // every `-gt 0` comparison then fails. Measured on the deployed build: the
+  // host is `#filesystemComponent`, it carries `data-ct-isonim-mounted="1"`,
+  // and it holds 12 `a.jstree-anchor` rows. The pane was never the problem.
+  //
+  // `[id^="filesystemComponent"]` is the form `jump_follow_probe.mjs:262` and
+  // `noir_demo_path_probe.mjs:221` already use, and `pane_children_probe.mjs`
+  // records having made exactly this correction — so this file was the last
+  // one holding the stale id.
+  const filesEntries = paneRowCount('[id^="filesystemComponent"]', 'a.jstree-anchor');
   const testsEntries = paneRowCount('#testResultsComponent-0',
     '.test-results-row, .isonim-test-row, li');
   let vcsEntries = paneRowCount('#vcsComponent-0', '.vcs-commit, .isonim-vcs-commit, li');
@@ -190,6 +206,29 @@ const snapshotScript = () => {
     // pane's own mount helper tries both, so the probe must too.
     vcsEntries = paneRowCount('#vCSComponent-0', '.vcs-commit, .isonim-vcs-commit, li');
   }
+
+  // WHETHER VCS PAINTED A BODY AT ALL, which is a different question from how
+  // many commits it lists and is the one this gate can actually ask.
+  //
+  // The web fixture is a template unpacked into a VFS; it is NOT a git
+  // repository, so the pane's correct and permanent answer is the
+  // `.vcs-no-repo` empty state — zero `.vcs-commit` rows, forever. The
+  // assertion `vcsEntries > 0` therefore could not be satisfied by any healthy
+  // web build, which is the second reason this gate has never been green.
+  //
+  // The reported defect was "the VCS panel becomes EMPTY after Stop", and an
+  // emptied host and a rendered no-repo state are distinguishable: the latter
+  // has a body. So the subject here is the body, and the commit count stays
+  // beside it for the case where a fixture does have history.
+  const vcsBody = (() => {
+    const host = document.querySelector('#vcsComponent-0')
+      || document.querySelector('#vCSComponent-0');
+    if (!host) return 'absent';
+    const rendered = host.querySelector('.vcs-container, .vcs-panel-body');
+    if (!rendered) return 'no-body';
+    if (host.querySelector('.vcs-no-repo')) return 'no-repo';
+    return 'commits';
+  })();
 
   // The mark `ui/isonim_panel_mount.nim` writes onto a container it has mounted
   // a view into. Recorded so a failure can distinguish "the view never mounted"
@@ -228,8 +267,9 @@ const snapshotScript = () => {
     // never collapsed into a single "the sidebar is populated" boolean.
     filesEntries,
     vcsEntries,
+    vcsBody,
     testsEntries,
-    filesMounted: paneMounted('#filesystemComponent-0'),
+    filesMounted: paneMounted('[id^="filesystemComponent"]'),
     vcsMounted: paneMounted('#vcsComponent-0'),
     testsMounted: paneMounted('#testResultsComponent-0'),
   };
