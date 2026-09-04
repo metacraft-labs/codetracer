@@ -23,6 +23,14 @@
 #     ⏵  open          id UNCHANGED, a debugger opens
 #     ⇧⏵ refresh+open  id CHANGES,   a debugger opens
 #
+# AND THE RECORDING'S CLOCK MOVES WITH ITS ID, asserted separately. `recordedAt`
+# is published beside the id — on the row as `data-ct-recorded-at`, and on both
+# host log lines as `recordedAt=` — because a single string carrying the whole
+# claim is the trap. The id is minted per retention; the time is read off the
+# clock at the same instant; they are produced by different code at different
+# moments. An implementation that re-ran the test but derived the id from the
+# SELECTOR would leave every id arm green and is caught only by the clock.
+#
 # A harness that could not tell the middle row from the other two would certify
 # an implementation that re-ran the test every time — which is the one thing
 # the user said this feature is not.
@@ -41,8 +49,9 @@
 #
 # Usage:  bash ci/test/tests-pane-row-controls.sh
 # Env:    CT_WEB_BUNDLE_DIR   a bundle assembled by ci/test/web-bundle-assets.sh
-#                             (REQUIRED — this script does not build one, so
-#                             the same script can be pointed at a control tree)
+#                             Assembled here if unset, which is what lets this
+#                             run as a `just` recipe and a workflow step; set
+#                             it to point the same script at a control tree.
 #         CT_SHOT_DIR         where the probe writes its screenshots
 #         CT_PROBE_SETTLE_MS  how long to wait for the renderer to mount
 
@@ -70,15 +79,20 @@ ck() {
 	# ck <condition-as-exit-status> <message>
 	if [ "$1" = "0" ]; then ck_ok "$2"; else ck_fail "$2"; fi
 }
+skipped=0
+ck_skip() {
+	# NOT COUNTED AS A CHECK, and printed loudly.
+	#
+	# A skip that is tallied with the passes is how a gate reports a green it
+	# did not earn. These lines say what was not measured and why, and the
+	# summary repeats the count so a reader cannot mistake a half-run gate for
+	# a whole one.
+	skipped=$((skipped + 1))
+	printf '  [SKIPPED] %s\n' "$*"
+}
 
 echo "=== the TESTS pane's two per-row controls ==="
 echo
-
-if [ -z "${bundle}" ] || [ ! -f "${bundle}/index.html" ]; then
-	echo "CT_WEB_BUNDLE_DIR must point at an assembled bundle" >&2
-	echo "  (bash ci/test/web-bundle-assets.sh writes one)" >&2
-	exit 2
-fi
 
 command -v node >/dev/null 2>&1 || {
 	echo "node is not on PATH; run inside the dev shell" >&2
@@ -88,6 +102,30 @@ command -v node >/dev/null 2>&1 || {
 mkdir -p "${shot_dir}"
 cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/tests-pane-row-controls"
 mkdir -p "${cache}"
+
+# THE BUNDLE UNDER TEST, assembled here when none was handed in.
+#
+# This used to `exit 2` without `CT_WEB_BUNDLE_DIR`, and that is why the gate
+# landed dark: a script that cannot run without an env var nobody sets is not
+# reachable from a `just` recipe or a workflow step, and it spent its first day
+# on `shell-gate-coverage.known-dark.txt` for exactly that. `web-renderer-
+# mounts.sh` established the convention — reuse a bundle when given one, build
+# one otherwise — and it is the convention that makes a gate wireable.
+if [ -z "${bundle}" ]; then
+	bundle="${cache}/bundle"
+	echo "Assembling a bundle (CT_WEB_BUNDLE_DIR unset)..."
+	if ! CT_WEB_BUNDLE_DIR="${bundle}" bash ci/test/web-bundle-assets.sh \
+		>"${cache}/assemble.log" 2>&1; then
+		echo "  the bundle did not assemble; see ${cache}/assemble.log" >&2
+		tail -20 "${cache}/assemble.log" >&2
+		exit 1
+	fi
+	echo "  assembled at ${bundle}"
+fi
+if [ ! -s "${bundle}/index.html" ]; then
+	echo "no index.html in ${bundle}; nothing to load" >&2
+	exit 1
+fi
 
 # The same loopback server `web-renderer-mounts.sh` uses, and for its reasons:
 # port 0 so two arms cannot race, and the bundle's own `_redirects` applied so
@@ -259,6 +297,53 @@ shift_rows="$(j '(step("shift-with-no-recording").rows||[]).length')"
 ck "$([ -n "${shift_rows}" ] && [ "${collapsed:-0}" = "${shift_rows:-0}" ] && [ "${shift_rows:-0}" -gt 0 ] && echo 0 || echo 1)" \
 	"holding Shift over a never-recorded row changes nothing and does not claim to: ${collapsed:-0}/${shift_rows:-0}"
 
+# --- 3b. CAN THIS DEPLOYMENT RECORD AT ALL? ---------------------------------
+#
+# The Noir compiler, tracer and replay engine are OPTIONAL bundle assets. A
+# bundle assembled without them cannot run a test, cannot make a recording, and
+# therefore cannot move the id or the clock that every arm below compares. Those
+# arms would all redden, and NOT because a control is wrong.
+#
+# `web-bundle-assets.sh` set the convention for exactly these assets — skip that
+# part loudly and still check everything else — and the reason is in
+# `shell-gate-coverage.known-dark.txt`: a red that is always red stops being
+# read. Everything above this line is real and was measured on this bundle.
+#
+# THE ABSENCE IS ITSELF ASSERTED, so this branch is not a way of measuring
+# nothing. A deployment that cannot record must say so ON THE CONTROL, and a
+# disabled control that explains itself is a requirement of §9.1.1 rather than a
+# consolation prize. This is the only configuration in which that can be checked
+# against the real product, so it is checked here rather than skipped too.
+can_record="$(j 'step("deployment").canRecord')"
+run_absence="$(j 'step("deployment").refreshTitle')"
+if [ "${can_record}" != "true" ]; then
+	refresh_disabled="$(j 'step("deployment").refreshDisabled')"
+	ck "$([ "${refresh_disabled}" = "true" ] && echo 0 || echo 1)" \
+		"this deployment cannot run tests, and ⟳ is disabled rather than dead: disabled=${refresh_disabled}"
+	ck "$([ -n "${run_absence}" ] && echo 0 || echo 1)" \
+		"…and it states its own reason rather than rendering inert: \"${run_absence}\""
+
+	open_absence="$(j 'step("deployment").openTitle')"
+	case "${open_absence}" in
+	*"no recording"*)
+		ck_ok "…and ⏵ names BOTH absences — the deployment's and the row's: \"${open_absence}\""
+		;;
+	*)
+		ck_fail "⏵ does not tell the reader its row has no recording either: \"${open_absence}\""
+		;;
+	esac
+
+	echo
+	ck_skip "the ⟳ / ⏵ / ⇧⏵ recording arms: this bundle carries no Noir compiler,"
+	ck_skip "  so no recording can be made and the id/clock discriminator has"
+	ck_skip "  nothing to move. Set CT_NOIR_WASM_COMPILER, CT_NOIR_WASM_TRACER"
+	ck_skip "  and CT_REPLAY_ENGINE_DIR when assembling the bundle to measure them."
+	echo
+	echo "  ${checks} check(s), ${failures} failure(s), ${skipped} skipped"
+	[ "${failures}" -eq 0 ] || exit 1
+	exit 0
+fi
+
 # --- 4. ⟳ REFRESH: a recording is made, and NOTHING navigates ---------------
 refresh_retained="$(j 'step("after-refresh").retainedDelta')"
 ck "$([ "${refresh_retained:-0}" -ge 1 ] && echo 0 || echo 1)" \
@@ -331,6 +416,24 @@ unchanged="$(j 'step("after-open").recordingIdUnchanged')"
 ck "$([ "${unchanged}" = "true" ] && echo 0 || echo 1)" \
 	"…and the row never pointed at a different recording afterwards (now: '${id_after}')"
 
+# AND THE CLOCK SAYS THE SAME THING, for a reason the id cannot cover.
+#
+# The id is minted per retention in `web_noir_build`; the time is read off the
+# clock at the same instant. They are produced by different code at different
+# moments, so an implementation that re-ran the test but derived the id from
+# the SELECTOR — a plausible way to mint ids, and one that would leave every
+# id arm above green — moves the clock and is caught only here. One string
+# carrying the whole claim is the trap Verification-Harness-Traps.md names.
+entered_at="$(j 'step("after-open").enteredRecordedAt')"
+at_before="$(j 'step("after-open").atBefore')"
+same_moment="$(j 'step("after-open").enteredTheRecordingMadeAtTheSameMoment')"
+ck "$([ "${same_moment}" = "true" ] && echo 0 || echo 1)" \
+	"⏵ entered the recording made at the SAME MOMENT: the row carried '${at_before}' and the host opened one recorded at '${entered_at}' — a different time would mean a new execution behind an unchanged id"
+
+at_unchanged="$(j 'step("after-open").recordedAtUnchanged')"
+ck "$([ "${at_unchanged}" = "true" ] && echo 0 || echo 1)" \
+	"…and the row's own recordedAt never moved either, where the row survived to be read"
+
 open_retained="$(j 'step("after-open").retainedDelta')"
 ck "$([ "${open_retained:-1}" -eq 0 ] && echo 0 || echo 1)" \
 	"⏵ made NO new recording (test-recording-retained delta ${open_retained}) — the independent instrument agrees with the id"
@@ -372,6 +475,15 @@ shift_new="$(j 'step("after-shift-open").newestRetained')"
 ck "$([ "${shift_changed}" = "true" ] && echo 0 || echo 1)" \
 	"⇧⏵ produced a NEW recording: '${shift_before}' -> '${shift_new}' — the exact mirror of the arm above, where the id had to stay the same"
 
+# AND IT WAS RE-MADE, NOT RENAMED. The mirror of the open arm's clock check:
+# there both witnesses had to hold still, here both must move. An id that
+# changed while the clock did not would be a new name over the same execution.
+shift_at_changed="$(j 'step("after-shift-open").recordedAtChanged')"
+shift_at_before="$(j 'step("after-shift-open").atBefore')"
+shift_at_new="$(j 'step("after-shift-open").newestRetainedAt')"
+ck "$([ "${shift_at_changed}" = "true" ] && echo 0 || echo 1)" \
+	"⇧⏵ recorded at a NEW MOMENT: '${shift_at_before}' -> '${shift_at_new}' — an id that moved while the clock stood still would be a rename, not a re-run"
+
 # AND IT WENT THROUGH THE RECORDING PATH, NOT THE REPLAY-THE-OLD-ONE PATH.
 #
 # `test-recording-entered` is emitted ONLY by `openRetainedTestRecording` — the
@@ -397,7 +509,7 @@ shots="$(j '(r.shots||[]).length')"
 echo "  ${shots:-0} screenshot(s) in ${shot_dir}"
 echo "  report: ${report}"
 echo
-echo "${checks} check(s), ${failures} failure(s)"
+echo "${checks} check(s), ${failures} failure(s), ${skipped} skipped"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the pane offers two actions, and only one of them re-runs"
 	exit 0

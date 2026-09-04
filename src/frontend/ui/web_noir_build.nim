@@ -568,8 +568,22 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
           selector: activeRecordSelector, recordingId: recordingId,
           recordedAtText: recordedAt, rawMemoryTrace: producer.stdoutText,
           packageDir: producer.packageDir, projectRoot: producer.projectRoot)
+      # THE TIME IS LOGGED BESIDE THE ID, as a second witness to the same
+      # fact. A run happens at a moment and two runs cannot share one, so the
+      # clock is evidence about execution that does not pass through the id —
+      # an implementation that re-ran the test but derived the id from the
+      # selector would leave the id unchanged and be caught only here.
+      #
+      # QUOTED, because the time is not a token. `toLocaleTimeString()` returns
+      # "5:38:47 PM" — it contains a SPACE, and in recent Chrome the separator
+      # before the meridiem is U+202F rather than an ordinary one. A reader
+      # matching an unquoted field would capture "5:38:47", silently drop the
+      # meridiem, and then compare that truncation against the row's full
+      # string and never find them equal. A check that can only fail is as
+      # useless as one that can only pass.
       report("test-recording-retained",
-             "selector=" & activeRecordSelector & " recording=" & recordingId)
+             "selector=" & activeRecordSelector & " recording=" & recordingId &
+             " recordedAt=\"" & recordedAt & "\"")
       if not noirTestRecordingSink.isNil:
         noirTestRecordingSink(activeRecordSelector, recordingId, recordedAt)
     if not noirTestRunSettled.isNil:
@@ -923,6 +937,7 @@ proc openRetainedTestRecording*(selector: string;
     report("test-recording-" &
            (if outcome == rsoOpened: "entered" else: "not-entered"),
            "selector=" & selector & " recording=" & recording.recordingId &
+           " recordedAt=\"" & recording.recordedAtText & "\"" &
            " outcome=" & $outcome & " bytes=" & $recording.rawMemoryTrace.len)
     case outcome
     of rsoOpened:

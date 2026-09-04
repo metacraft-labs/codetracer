@@ -151,6 +151,9 @@ const readRows = async () =>
       return {
         testId: e.getAttribute('data-ct-test-id') || '',
         recordingId: e.getAttribute('data-ct-recording-id') || '',
+        // THE SECOND WITNESS. A run happens at a moment, so the clock is
+        // evidence about execution that does not pass through the id.
+        recordedAt: e.getAttribute('data-ct-recorded-at') || '',
         name: (q('.test-results-name') || {}).textContent || '',
         state: (typeof e.className === 'string' ? e.className : '')
           .replace('test-results-row', '').trim(),
@@ -230,6 +233,42 @@ try {
   note('initial', { rows: initial });
   await shot('01-tests-pane-initial');
 
+  // WHAT THIS DEPLOYMENT CAN ACTUALLY DO, taken from the pane's own words.
+  //
+  // The Noir compiler, the tracer and the replay engine are OPTIONAL bundle
+  // assets (`web_deployment.webRuntimeAssets`), and a bundle assembled without
+  // them cannot run a test, so it cannot make a recording, so the three
+  // gestures this program exists to tell apart have nothing to move. Every
+  // recording arm would fail — not because the controls are wrong, but because
+  // there is nothing for them to act on.
+  //
+  // Reported so the gate can SKIP those arms LOUDLY rather than redden, which
+  // is the convention `web-bundle-assets.sh` set for exactly these assets. A
+  // permanently red lane stops being read, and that is a worse outcome than a
+  // gate that says which half of itself it could reach.
+  //
+  // Taken from the PANE rather than from the filesystem: the product computes
+  // this in `noirTestRunAbsence` and paints it on the disabled control, so
+  // reading it here also proves the absence is one a user could discover.
+  const runAbsence = await page.evaluate(() => {
+    const el = document.querySelector('.test-results-absence');
+    const visible = el && !(el.className || '').includes('hidden');
+    return visible ? (el.textContent || '').trim() : '';
+  });
+  const refreshTitle = initial.length && initial[0].refresh
+    ? initial[0].refresh.title : '';
+  note('deployment', {
+    runAbsence,
+    refreshDisabled: !!(initial.length && initial[0].refresh &&
+      initial[0].refresh.disabled),
+    refreshTitle,
+    openTitle: initial.length && initial[0].open ? initial[0].open.title : '',
+    // ONE BOOLEAN the gate branches on. True when this bundle can be expected
+    // to produce a recording at all.
+    canRecord: !(runAbsence || (initial.length && initial[0].refresh &&
+      initial[0].refresh.disabled)),
+  });
+
   // -- THE ARMED TOOLTIP, BEFORE ANY RECORDING EXISTS ----------------------
   // Read here as well as after a recording, because the two states have
   // different honest labels and only one of them may say "open".
@@ -278,6 +317,7 @@ try {
 
   const recordedRow = refreshed.findIndex((r) => r.recordingId);
   const idAfterRefresh = recordedRow >= 0 ? refreshed[recordedRow].recordingId : '';
+  const atAfterRefresh = recordedRow >= 0 ? refreshed[recordedRow].recordedAt : '';
 
   // WAS THE NEXT CONTROL REACHABLE, and if not, what was on top of it? Both
   // are reported: the obstruction is a finding about the overlay, and the
@@ -350,6 +390,13 @@ try {
     const enteredIds = buildLog
       .filter((l) => l.includes('test-recording-entered'))
       .map((l) => (l.match(/recording=(\S+)/) || [])[1] || '');
+    // The same lines, read for the OTHER field. `recordedAt=` is emitted
+    // beside `recording=` by both `test-recording-retained` and
+    // `test-recording-entered`, so the two witnesses travel together and a
+    // check can require them to agree.
+    const enteredTimes = buildLog
+      .filter((l) => l.includes('test-recording-entered'))
+      .map((l) => (l.match(/recordedAt="([^"]*)"/) || [])[1] || '');
     note('after-open', {
       rows: rowsAfterOpen,
       idBefore: idAfterRefresh,
@@ -361,6 +408,17 @@ try {
       enteredTheExistingRecording:
         enteredIds[enteredIds.length - 1] === idAfterRefresh && !!idAfterRefresh,
       recordingIdUnchanged: !stillThere || stillThere.recordingId === idAfterRefresh,
+      // AND THE CLOCK IS THE SAME ONE. Read off the host's own `recordedAt=`
+      // field rather than the row, because entering a recording switches the
+      // workspace to Debug mode and re-mounts the pane — so a row attribute
+      // degrades to "the row is gone", which proves nothing either way. This
+      // fails for a reason the id cannot: a re-run that reused the id.
+      atBefore: atAfterRefresh,
+      enteredRecordedAt: enteredTimes[enteredTimes.length - 1] || '',
+      enteredTheRecordingMadeAtTheSameMoment:
+        !!atAfterRefresh &&
+        enteredTimes[enteredTimes.length - 1] === atAfterRefresh,
+      recordedAtUnchanged: !stillThere || stillThere.recordedAt === atAfterRefresh,
       retainedDelta: afterOpen.retained - beforeOpen.retained,
       enteredDelta: afterOpen.entered - beforeOpen.entered,
       debuggerOpened: await page.evaluate(() =>
@@ -438,6 +496,13 @@ try {
         .filter((l) => l.includes('test-recording-entered'))
         .map((l) => (l.match(/recording=(\S+)/) || [])[1] || '');
       const newestRetained = retainedIds[retainedIds.length - 1] || '';
+      // The clock, off the same lines — the mirror of the open arm's pair.
+      // There both witnesses had to hold still; here both must move.
+      const retainedTimes = buildLog
+        .filter((l) => l.includes('test-recording-retained'))
+        .map((l) => (l.match(/recordedAt="([^"]*)"/) || [])[1] || '');
+      const newestRetainedAt = retainedTimes[retainedTimes.length - 1] || '';
+      const atBeforeShift = rowsNow[idx].recordedAt;
       note('after-shift-open', {
         idBefore: idBeforeShift,
         idAfter: r ? r.recordingId : '(row re-mounted by the mode switch)',
@@ -445,6 +510,14 @@ try {
         lastEntered: enteredIds2[enteredIds2.length - 1] || '',
         recordingIdChanged: !!newestRetained && !!idBeforeShift &&
           newestRetained !== idBeforeShift,
+        atBefore: atBeforeShift,
+        newestRetainedAt,
+        // A RECORDING RE-MADE, not merely renamed. An id that changed while
+        // the clock stood still would be a new name over the same execution —
+        // which is the failure the id alone cannot see, and the reason this
+        // check reads two fields and not one.
+        recordedAtChanged: !!newestRetainedAt && !!atBeforeShift &&
+          newestRetainedAt !== atBeforeShift,
         // LANDED IN THE NEW ONE, not merely made it. "Recorded again" and
         // "opened what it recorded" are two claims and the shifted gesture
         // promises both.

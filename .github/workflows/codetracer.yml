@@ -2607,6 +2607,43 @@ jobs:
         # attributable to different steps.
         run: nix develop .#devShells.x86_64-linux.default --command just test-web-renderer-mounts
 
+      - name: A test row's two controls, and only one of them re-runs
+        # The TESTS pane's per-row ⟳ and ⏵, driven in a real browser.
+        #
+        # The step above asserts that the product MOUNTS. This asserts that one
+        # of its controls does the specific thing it promises and not the
+        # neighbouring thing that looks identical from outside: ⏵ must ENTER the
+        # recording a row already has, executing nothing, where ⟳ and ⇧⏵ must
+        # produce a new one. "The pane has buttons" cannot fail for its own
+        # reason; "pressing ⏵ left the recording's id and timestamp unchanged"
+        # can fail for exactly one.
+        #
+        # WHAT THIS LANE CAN AND CANNOT MEASURE, stated because a green here is
+        # not the whole gate. The Noir compiler and the replay engine are
+        # OPTIONAL bundle assets and this job does not build them, so no
+        # recording can be made and the id/clock discriminator has nothing to
+        # move. The gate detects that from the pane's own words and SKIPS those
+        # arms loudly rather than reddening — a permanently red lane stops being
+        # read, which is the failure `shell-gate-coverage.known-dark.txt` exists
+        # to prevent.
+        #
+        # What it does assert here is real and was previously unasserted: both
+        # controls exist on every row, are painted with a non-zero box, are
+        # never labelled "open the recording" when there is none, do not claim
+        # Shift changed something on a row where it changed nothing, and — in
+        # exactly this configuration and no other — that a control disabled
+        # because the deployment cannot compile STATES THAT REASON instead of
+        # rendering inert.
+        #
+        # The recording arms run in `deploy-web-codetracer.yml`, which builds
+        # the wasm modules and the replay engine and therefore can perform the
+        # three gestures. That step is where the deciding assertion lives.
+        #
+        # Placed immediately after the mount step so the two read the same
+        # bundle and a rendering regression and a behavioural one are
+        # attributable to different steps.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tests-pane-row-controls
+
       - name: A registered known failure signals when it goes green
         # The ledger `just test-vm` now consults, gated in both directions.
         #

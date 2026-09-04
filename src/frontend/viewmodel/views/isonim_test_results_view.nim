@@ -11,6 +11,7 @@
 ##     div.test-results-body
 ##       div.test-results-row[.not-run|.passed|.failed|…]   (one per test)
 ##                           data-ct-test-id data-ct-recording-id
+##                           data-ct-recorded-at
 ##         span.test-results-mark      "✓" / "✗" / "·" / …
 ##         span.test-results-name      "test_main"
 ##         span.test-results-where     "src/main.nr:13"
@@ -241,8 +242,20 @@ proc renderRowMock(r: MockRenderer; vm: TestResultsVM; row: TestResultsRow;
   # THE IDENTITIES, ON THE ROW. `data-ct-recording-id` is what lets a check
   # answer "did that click re-execute?" by comparing two strings — see
   # `TestResultsRow.recordingId`.
+  #
+  # AND THE TIME IS PUBLISHED BESIDE IT, as a SECOND witness to the same fact.
+  # The id alone would carry the claim on its own, and a single string carrying
+  # a claim is what Verification-Harness-Traps.md warns about: an implementation
+  # that re-ran the test but minted the id from the selector would leave the id
+  # unchanged and pass. The two are produced by different code at different
+  # moments — the id is minted per retention in `web_noir_build`, the time is
+  # read off the clock at the same instant — so "⏵ executed nothing" is
+  # asserted twice over, and an id that is stable for the wrong reason no
+  # longer certifies it. `recordedAtText` is emphatically NOT an identity and
+  # is not used as one (see `rememberRecording`); it is corroboration.
   r.setAttribute(node, "data-ct-test-id", row.testId)
   r.setAttribute(node, "data-ct-recording-id", row.recordingId)
+  r.setAttribute(node, "data-ct-recorded-at", row.recordedAtText)
   # THE FULL NAME AND THE FULL PATH, ON HOVER. This pane is a tab of a ~285px
   # panel and now carries two controls, so both text columns ellipsis — which
   # is the right trade only if the truncated text is still recoverable. The
@@ -405,6 +418,10 @@ when defined(js):
                             cstring(row.testId))
     isonim_dom.setAttribute(node, cstring"data-ct-recording-id",
                             cstring(row.recordingId))
+    # The mock renderer's twin, and for its reason: a second, independently
+    # produced witness that `⏵` executed nothing.
+    isonim_dom.setAttribute(node, cstring"data-ct-recorded-at",
+                            cstring(row.recordedAtText))
     isonim_dom.appendChild(isonim_dom.Node(node),
       isonim_dom.Node(webTextElement("span", stateMark(row.state),
                                      "test-results-mark")))

@@ -3269,6 +3269,33 @@ test-web-renderer-mounts:
   exec > >(tee test-logs/test-web-renderer-mounts.log) 2>&1
   bash ci/test/web-renderer-mounts.sh
 
+# A TEST ROW OFFERS TWO ACTIONS AND ONLY ONE OF THEM RE-RUNS.
+#
+# The TESTS pane's per-row `⟳` and `⏵`, driven in a real browser. The
+# assertion that carries the feature is not "the pane has buttons" — that
+# cannot fail for its own reason — but that the three gestures move the
+# recording's identity DIFFERENTLY: `⟳` changes it and does not navigate, `⏵`
+# leaves it alone and opens a debugger, `⇧⏵` changes it and opens one. A
+# harness that could not tell the middle case from the other two would certify
+# the re-run-every-time implementation the user explicitly ruled out.
+#
+# Two witnesses per gesture, produced by different code at different moments:
+# the recording's id, and the moment it was recorded. Both are published on
+# the row (`data-ct-recording-id`, `data-ct-recorded-at`) and on the host's own
+# log lines, so an id that is stable for the wrong reason — minted from the
+# selector, say — is caught by the clock rather than certified.
+#
+# It also hit-tests the controls, which is how it found them being covered
+# after a run by the BUILD overlay's click-to-dismiss backdrop.
+#
+# Assembles a bundle when CT_WEB_BUNDLE_DIR is unset.
+test-tests-pane-row-controls:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-tests-pane-row-controls.log) 2>&1
+  bash ci/test/tests-pane-row-controls.sh
+
 # ONE PRESS RUNS ONE ACTION, AND ONE PANE ID NAMES ONE NODE.
 #
 # Two latent defects that did no visible harm by luck rather than by design.

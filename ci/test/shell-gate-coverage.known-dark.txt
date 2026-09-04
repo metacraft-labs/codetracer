@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 24
+# RECORDED-DARK-CEILING: 23
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -34,10 +34,20 @@
 # is an escape hatch wearing a ratchet's clothes, and the ceiling above moved
 # three times in one day before this rule existed: 22 -> 23 -> 24 -> 25.
 #
-# It has since come back DOWN to 24, because bb376d63c gave
-# `editor-context-menu-modes.sh` its recipe and its step and deleted its line.
-# That is the whole mechanism working: the both-directions rule turned wiring
-# into the cheaper path, which is the only way a ratchet ratchets.
+# It has since come back DOWN, twice, and both descents were the rule working
+# rather than an exception to it: bb376d63c gave `editor-context-menu-modes.sh`
+# its recipe and its step and deleted its line (25 -> 24), and the change that
+# wired `tests-pane-row-controls.sh` did the same for it (24 -> 23). Neither
+# gate needed a capability CI lacked; both needed the two files nobody had
+# written. The both-directions rule turned wiring into the cheaper path, which
+# is the only way a ratchet ratchets.
+#
+# `tests-pane-row-controls.sh` also names the mechanical reason a gate lands
+# dark, which is worth more than the count: it required `CT_WEB_BUNDLE_DIR` and
+# exited 2 without it. A script that cannot run without an env var nobody sets
+# has no recipe it COULD have had. Assembling its own input when none is handed
+# in is what made it wireable, and is the convention `web-renderer-mounts.sh`
+# already followed.
 #
 # `shell-gate-coverage.sh` states this rule in its own failure output, at the
 # moment someone's unwired gate is reported, because that is where it is read.
@@ -255,23 +265,3 @@ ci/lib/published-asset.sh
 # milestone entry records the runs and their numbers rather than implying CI
 # did.
 ci/test/browser-seekable-container.sh
-
-# ADDED 2026-09-04. `ci/test/tests-pane-row-controls.sh` arrived in e617829b3
-# ("feat(tests pane): a row's two controls, and only one of them re-runs") with
-# no justfile recipe and no workflow step -- `grep -rn tests-pane-row-controls`
-# finds only the file itself.
-#
-# READ THE CEILING ABOVE AS A WARNING, NOT AS HEADROOM. It has moved three
-# times in a single day: 22 -> 23 (editor-context-menu-modes.sh, 0d76e11dc),
-# 23 -> 24 (066096566), 24 -> 25 (this entry). Every one of those was a gate
-# written to check something real, committed, and then reachable from nothing.
-#
-# A shrink-only list exists so that dark gates get FIXED rather than tolerated,
-# and three raises in a day is that list being used as an escape hatch instead.
-# The upstream fix is a rule at the point of authorship -- a new gate lands with
-# its recipe and its workflow step, or it does not land -- because recording is
-# cheap and wiring is not, and a ratchet only ratchets if raising it is harder
-# than doing the work. If the next entry here is added without that rule
-# changing, the honest move is to stop raising the ceiling and let the lane go
-# red.
-ci/test/tests-pane-row-controls.sh

@@ -164,11 +164,18 @@ proc finished(testId: string; status: TestResultStatus): TestEvent =
             status: some(status), durationMs: 2,
             trace: none(TraceMetadata), diagnostic: none(TestDiagnostic))
 
-proc recordingCreated(testId, recordingId: string): TestEvent =
+proc recordingCreated(testId, recordingId: string;
+                      recordedAt = "10:04:31"): TestEvent =
   ## The event a recorder emits when a trace exists. Used rather than calling
   ## `rememberRecording` directly wherever the point is that the PIPELINE
   ## carries the recording — a test that only ever poked the register would
   ## pass over a `ingestEvent` that dropped `event.trace` on the floor.
+  ##
+  ## THE TIME IS A PARAMETER because it is the SECOND discriminator. A run
+  ## happens at a moment; two runs cannot share one. So `⏵` must leave the
+  ## time alone and `⇧⏵` must move it, and a caller that wants to assert the
+  ## difference has to be able to say what the new moment was. It defaults so
+  ## the arms that do not care are unchanged.
   TestEvent(schemaVersion: TestEventSchemaVersion, kind: tekRecordingCreated,
             providerId: "noir-nargo", runId: "r1", testId: testId,
             status: none(TestResultStatus),
@@ -176,7 +183,7 @@ proc recordingCreated(testId, recordingId: string): TestEvent =
                                       recordingId: recordingId,
                                       path: "/traces/" & recordingId,
                                       backend: "noir-wasm",
-                                      metadata: {"recordedAt": "10:04:31"}
+                                      metadata: {"recordedAt": recordedAt}
                                         .toTable)),
             diagnostic: none(TestDiagnostic))
 
@@ -287,6 +294,11 @@ suite "the TESTS pane offers two different per-row actions":
       ck "passed" in row.attr("class")
       let idBefore = row.attr("data-ct-recording-id")
       ck idBefore == "rec-1"
+      # THE SECOND WITNESS, read at the same moment as the first. A run happens
+      # at a moment and two runs cannot share one, so the time is evidence
+      # about execution that does not pass through the id at all.
+      let atBefore = row.attr("data-ct-recorded-at")
+      ck atBefore == "10:04:31"
 
       let openBtn = openButtonOf(row)
       ck openBtn.attr("data-ct-open-mode") == "open-existing"
@@ -311,8 +323,18 @@ suite "the TESTS pane offers two different per-row actions":
       ck idAfter == idBefore
       ck idAfter == "rec-1"
 
+      # AND SO IS THE CLOCK. Asserted separately from the id because it fails
+      # for a different reason: an implementation that re-ran the test but
+      # derived the id from the selector — a plausible way to mint ids — would
+      # leave `idAfter == idBefore` true and this one false. One string
+      # carrying the claim alone is the trap; two produced by different code
+      # at different moments is not.
+      let atAfter = rowNamed(panel, "a").attr("data-ct-recorded-at")
+      ck atAfter == atBefore
+      ck atAfter == "10:04:31"
+
       dispose()
-    expectCount(12)
+    expectCount(15)
 
   test "row-state failed-with-recording: both controls are live on a red row":
     ## §9.1's "a red test is one click from a time-travel session". A failing
@@ -518,6 +540,8 @@ suite "the TESTS pane offers two different per-row actions":
       vm.ingestEvent(recordingCreated("a", "rec-old"))
       let idBefore = rowNamed(panel, "a").attr("data-ct-recording-id")
       ck idBefore == "rec-old"
+      let atBefore = rowNamed(panel, "a").attr("data-ct-recorded-at")
+      ck atBefore == "10:04:31"
 
       vm.setShiftHeld(true)
 
@@ -536,13 +560,21 @@ suite "the TESTS pane offers two different per-row actions":
 
       # …and the recording the host then produces replaces the old one, so the
       # row now points at a DIFFERENT recording.
-      vm.ingestEvent(recordingCreated("a", "rec-new"))
+      vm.ingestEvent(recordingCreated("a", "rec-new", "10:09:57"))
       let idAfter = rowNamed(panel, "a").attr("data-ct-recording-id")
       ck idAfter != idBefore
       ck idAfter == "rec-new"
 
+      # AND THE CLOCK MOVED WITH IT — the mirror of the open arm's pair. There
+      # both were required to hold still; here both are required to move, and
+      # a row whose id changed while its time did not would be a recording
+      # renamed rather than one re-made.
+      let atAfter = rowNamed(panel, "a").attr("data-ct-recorded-at")
+      ck atAfter != atBefore
+      ck atAfter == "10:09:57"
+
       dispose()
-    expectCount(10)
+    expectCount(13)
 
   test "shift-arm: with no recording Shift changes nothing, because there is nothing to reuse":
     ## THE PLEASING COLLAPSE, asserted rather than assumed. Plain and shifted

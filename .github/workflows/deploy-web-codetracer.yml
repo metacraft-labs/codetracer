@@ -674,6 +674,38 @@ jobs:
             direnv exec "$(pwd)" bash ci/test/web-renderer-mounts.sh
           '
 
+      - name: A test row's two controls, on a bundle that can actually record
+        # THE ONLY PLACE THIS FEATURE'S DECIDING ASSERTION CAN RUN.
+        #
+        # `just test-tests-pane-row-controls` runs on every push, but the
+        # bundle there carries no Noir compiler and no replay engine — both are
+        # optional assets — so nothing can be recorded, and the gate says so
+        # and SKIPS its recording arms rather than reddening. What it can check
+        # there it checks: the controls exist, are painted, are honestly
+        # labelled, and explain themselves when disabled.
+        #
+        # This job is different. It builds the wasm modules and the replay
+        # engine and exports them into the bundle two steps up, so here the
+        # three gestures can actually be performed and told apart:
+        #
+        #     ⟳   a NEW recording, and no navigation
+        #     ⏵   the EXISTING recording, id and clock UNCHANGED
+        #     ⇧⏵  a NEW recording, and it is landed in
+        #
+        # The middle line is the user's requirement — "enter an existing
+        # recording (this is not necessarily a re-run)" — and an assertion that
+        # cannot distinguish it from the other two would certify the re-run-
+        # every-time implementation the request rules out. Running it only
+        # where it can be measured is the difference between a check and a
+        # claim.
+        run: |
+          set -euo pipefail
+          nix develop .#ci --command bash -c '
+            export CT_WEB_BUNDLE_DIR="$(pwd)/studio-bundle"
+            export CT_SHOT_DIR="$(pwd)/tests-pane-shots"
+            direnv exec "$(pwd)" bash ci/test/tests-pane-row-controls.sh
+          '
+
       - name: Prove the /noir/demo demo path still works for a visitor
         # THE STEP ABOVE PROVES THE BUNDLE MOUNTS. This proves the worked
         # example is still worth opening, which is a different claim and is not
