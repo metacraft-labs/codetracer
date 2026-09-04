@@ -23,7 +23,7 @@
 # number was right and both looked plausible. Arms 1 and 5 are those two mistakes,
 # frozen.
 #
-# AND A THIRD, ADDED 2026-09-04, WHICH IS WHY THERE ARE NOW ELEVEN ARMS. The
+# AND A THIRD, ADDED 2026-09-04, WHICH IS WHY THERE WERE THEN ELEVEN ARMS. The
 # guard's steady state — `96 found, 88 reachable, 0 UNRECORDED dark`, green for
 # days — was also wrong, and this time in a way none of the six arms could
 # catch, because none of them was about the guard's SCOPE. Two blind spots: the
@@ -34,6 +34,22 @@
 # two, frozen. Arm 9 is the rule the widening needed to mean anything (a linter
 # reads a file; it does not run it), and arms 10 and 11 are the two directions
 # of the ratchet that stops the exception list absorbing the next hole.
+#
+# AND A FOURTH, LATER THE SAME DAY, WHICH IS WHY THERE ARE NOW THIRTEEN. With
+# the justfile-as-root fix already landed, the guard printed `143 reachable` and
+# `RESULT: OK` — and two of those 143 were credited by a mention rather than a
+# wire, which no arm could see because arms 5 and 9 only cover comments and
+# linters. Arm 12 is `resolve` reading `index() == 0` (not found) as a suffix
+# match whenever two same-basename paths are the same LENGTH; it credited
+# `ci/test/rust.sh`, an orphan referenced nowhere in the repository, to
+# `ci/lint/rust.sh`. Arm 13 is a `paths:` trigger filter read as a step; two such
+# entries in `beam-flow.yml` were the only references to a deprecated shim.
+#
+# Both were found by attributing every one of the 143 credits to the line that
+# made it, which is the measurement this file exists to make unnecessary next
+# time. Honest figures after: 172 found, 141 reachable, 10 declared not-a-gate,
+# 21 recorded dark — the dark inventory did NOT grow, because one gate was
+# deleted as dead and one declared not-a-gate in its own header.
 #
 # A NOTE ON WHAT AN ARM IS WORTH. Arm 7's mutation is deliberately generous: a
 # real recipe, in the real justfile, with a real `bash` invocation of a real
@@ -121,7 +137,7 @@ run_guard() { bash "${guard}" --root "$1" 2>&1; }
 # negative here reads as "this arm SURVIVED", which is a mutation test reporting
 # that the guard is broken when the guard is fine.
 
-echo "=== shell-gate-coverage selftest — eleven arms ==="
+echo "=== shell-gate-coverage selftest — thirteen arms ==="
 echo
 
 # ---------------------------------------------------------------------------
@@ -285,6 +301,49 @@ m_ceiling_slack() {
 }
 arm "11/a ceiling with slack under it is a budget" \
 	"lower it to 0" m_ceiling_slack
+
+# ---------------------------------------------------------------------------
+# ARMS 12-13 — the two ways the guard still over-credited on 2026-09-04, after
+# the justfile-as-root fix had already landed. Both are MENTION READ AS WIRE,
+# the same category as arms 5 and 9, and neither was visible as a wrong number:
+# the run said `143 reachable` and `RESULT: OK` with both defects in place.
+# ---------------------------------------------------------------------------
+
+# ARM 12 — TWO GATES, ONE BASENAME, EQUAL PATH LENGTH. `resolve` tested for a
+# suffix with `index(q, "/" tok) == length(q) - length(tok)`, and `index()`
+# returns 0 when it does not match — which is the SAME value the right-hand side
+# takes whenever the two paths are the same length. So `ci/lint/sh.sh` being
+# wired credited `ci/test/sh.sh`, which nothing references.
+#
+# This is not hypothetical: it is exactly how `ci/test/rust.sh` (15 chars) rode
+# in on `ci/lint/rust.sh` (15 chars) for as long as it existed. `ci/build/nix.sh`
+# (15) and `ci/lint/nix.sh` (14) differ in length, which is the only reason that
+# pair never showed it.
+#
+# The fixture is deliberately the tightest case: `ci/lint/sh.sh` is the wired
+# dispatcher the CONTROL already proves is the only way in, and `ci/test/sh.sh`
+# is its equal-length twin with no reference anywhere.
+m_equal_length_twin() {
+	printf '#!/usr/bin/env bash\necho x\n' >"${work}/arm/ci/test/sh.sh"
+}
+arm "12/an equal-length basename twin is not a wire" \
+	"ci/test/sh.sh is reachable from NO workflow lane" m_equal_length_twin
+
+# ARM 13 — A `paths:` FILTER IS A TRIGGER, NOT A STEP. Listing a script under
+# `on: push: paths:` decides whether the workflow STARTS when that file changes.
+# It never runs it. This is rule 3 one step further along than arm 9: a linter at
+# least opens the file.
+#
+# Measured on the real tree: two `paths:` entries in `beam-flow.yml` were the
+# only references to `ci/test/elixir-flow-cross-repo.sh` in the whole repository,
+# and they made a deprecated shim with no in-tree caller report as covered.
+m_paths_filter_only() {
+	printf '#!/usr/bin/env bash\necho x\n' >"${work}/arm/ci/test/only-watched.sh"
+	printf "      - 'ci/test/only-watched.sh'\n" \
+		>>"${work}/arm/.github/workflows/t.yml"
+}
+arm "13/a paths: trigger filter is not a wire" \
+	"ci/test/only-watched.sh is reachable from NO workflow lane" m_paths_filter_only
 
 echo
 echo "${checks} check(s), ${failures} failure(s)"

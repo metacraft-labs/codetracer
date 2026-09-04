@@ -309,6 +309,24 @@ refs_of_text() {
 		if (line ~ /^[ \t]*#/) return
 		# A linter reads; it does not run. See rule 3 in the header above.
 		if (line ~ /(^|[^A-Za-z0-9_-])(shellcheck|shfmt)([^A-Za-z0-9_-]|$)/) return
+		# A `paths:` TRIGGER FILTER NAMES A FILE TO WATCH, NOT ONE TO RUN — and
+		# it is rule 3 one more step along: `shellcheck x.sh` at least opens the
+		# file, while `- x.sh` under `on: push: paths:` only decides whether the
+		# workflow starts. Measured: `beam-flow.yml` lists
+		# `ci/test/elixir-flow-cross-repo.sh` in two `paths:` blocks and runs
+		# (No apostrophe anywhere in this comment: the awk program is
+		# single-quoted and one closes it, producing a bash syntax error forty
+		# lines further down, in code that is not wrong.)
+		#
+		# `beam-flow-cross-repo.sh` instead, so the ONLY reference to that shim
+		# reference in the entire repository was a trigger condition, and it
+		# counted as coverage.
+		#
+		# The shape matched is a YAML sequence item whose whole content is one
+		# unbroken token ending in `.sh`, optionally quoted. A real step is
+		# `- run: bash x.sh` or `- uses: ...` and always carries a space before
+		# the path, so it cannot match this.
+		if (line ~ /^[ \t]*-[ \t]*[^ \t]*\.sh[^ \t]*[ \t]*$/) return
 
 		n = split(line, arr, /[ \t]+/)
 		for (i = 1; i <= n; i++) {
@@ -423,7 +441,23 @@ resolve() {
 		if (tok ~ /\//)
 			for (i = 1; i <= n[b]; i++) {
 				q = p[b, i]
-				if (q == tok || index(q, "/" tok) == length(q) - length(tok)) {
+				# `index()` RETURNS 0 FOR "NOT FOUND", AND 0 IS ALSO A LEGITIMATE
+				# VALUE OF `length(q) - length(tok)` — WHENEVER THE TWO PATHS ARE
+				# THE SAME LENGTH. Without the `> 0` guard the suffix test reads
+				# `0 == 0` and every equal-length sibling of a basename is
+				# credited by its twin. Measured on this tree: `ci/lint/rust.sh`
+				# (15 chars) is invoked by `codetracer.yml`, and that invocation
+				# silently credited `ci/test/rust.sh` (15 chars), which is
+				# referenced by NOTHING in the repository — an orphan from the
+				# initial open-source release, superseded by the `test-rust`
+				# recipe and still naming `--bin db-backend`, a binary since
+				# renamed. The guard reported it covered for as long as it existed.
+				#
+				# `ci/build/nix.sh` (15) and `ci/lint/nix.sh` (14) differ in
+				# length, which is the only reason that pair never showed the bug.
+				if (q == tok ||
+					(index(q, "/" tok) > 0 &&
+						index(q, "/" tok) == length(q) - length(tok))) {
 					print q; found = 1
 				}
 			}
