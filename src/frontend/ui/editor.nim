@@ -12,6 +12,7 @@ import
 from welcome_screen import resetView
 from event_log import findTRNode
 from dom import createElement
+from mode_layouts import isEditingMode
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — wired in parallel with the legacy event-bus code.
@@ -1214,6 +1215,225 @@ proc runTest(self: EditorViewComponent, testName: cstring, path: cstring, line: 
   )
   self.data.runTests(options)
 
+# ---------------------------------------------------------------------------
+# THE EDIT-MODE HALF OF THE EDITOR'S CONTEXT MENU
+#
+# Reported against `noirstudio.dev`: "the right click menu content over the
+# editor area is not context dependent (Edit vs Debug). Most of the entries are
+# debug operations."  Both halves of that sentence were true and they had
+# different causes:
+#
+#   * every entry `createContextMenuItems` built was a replay operation and
+#     none of them was gated on the mode, so Edit mode offered ten commands
+#     with no session to act on; and
+#   * there were no editing entries AT ALL.  `contextmenu: false` on the Monaco
+#     options (`:1953`, `:2839`) switches off Monaco's own menu — that was the
+#     fix for the earlier "I see BOTH menus" report — and nothing replaced the
+#     commands it used to carry.  So the surviving menu was not the union of
+#     the two.  It was one of them, and it was the debugger's.
+#
+# What is NOT taken from Monaco is the decision about which rows exist: that is
+# `data.ui.mode`'s, the same signal a mode transition already owns its panels
+# with (`ui/mode_layouts.isEditingMode`).
+#
+# NO KEYBOARD HINTS ON THESE ROWS, deliberately.  Their chords are Monaco's
+# stock keybindings, not CodeTracer's, and `Editor-Pane.md` § Mouse Gestures
+# settles that this product must not print a chord it does not bind: "the
+# reader presses it, nothing happens, and there is no error to search for".
+# Ctrl+V in the Paste reason below is the exception that proves the rule —
+# that one is the BROWSER's own gesture, which is exactly why the row that
+# cannot offer Paste has to name it.
+# ---------------------------------------------------------------------------
+
+proc monacoActionIsSupported(editor: js; id: cstring): bool {.importjs:
+  "(function(e,i){ try { var a = e && e.getAction && e.getAction(i); " &
+  "if (!a) return false; " &
+  "return (typeof a.isSupported === 'function') ? !!a.isSupported() : true; } " &
+  "catch (x) { return false; } })(#, #)".}
+  ## Monaco's own verdict on whether a command can run here, and the reason
+  ## this menu can offer language commands without pretending.
+  ##
+  ## Two distinct answers are folded into one boolean on purpose:
+  ##
+  ##   * `getAction` returns NULL when the action is not in this build at all.
+  ##     Measured against the assembled web bundle: `editor.action.rename` and
+  ##     `editor.action.formatDocument` ARE there, and
+  ##     `editor.action.revealDefinition` and the clipboard trio are NOT —
+  ##     monaco-editor registers goto-symbol as a separate contribution and
+  ##     registers cut/copy/paste as commands rather than editor actions, so
+  ##     neither is reachable through `getAction` no matter what the editor's
+  ##     state is.  That is why the clipboard rows below are built by hand
+  ##     instead.
+  ##   * `isSupported()` evaluates the action's own precondition against the
+  ##     live context keys — `editorHasRenameProvider` for Rename Symbol,
+  ##     `editorHasDocumentFormattingProvider && !editorReadonly` for Format
+  ##     Document.  This is what makes "a file with no language server gets no
+  ##     Rename row" true by asking rather than by a table we maintain: #134
+  ##     already has three registries and this must not become a fourth.
+
+proc monacoRunAction(editor: js; id: cstring) {.importjs:
+  "(function(e,i){ try { e.focus(); var a = e && e.getAction && e.getAction(i); " &
+  "if (a) a.run(); } catch (x) { console.error('ct: menu action failed', i, x); } })(#, #)".}
+  ## `focus()` FIRST.  Clicking a menu row moves focus out of the editor, and
+  ## these actions are written against the FOCUSED editor's selection — `rename`
+  ## refuses outright without `editorTextFocus`.  Without this the rows would be
+  ## present, enabled, and inert, which is the defect class this change is about.
+
+# --- The clipboard, by hand -------------------------------------------------
+#
+# `getAction('editor.action.clipboardCopyAction')` is null in this build (see
+# above), so the three clipboard rows are implemented against the model and
+# `navigator.clipboard` rather than delegated.  The empty-selection behaviour
+# is Monaco's own `emptySelectionClipboard` default — copy/cut with no
+# selection takes the whole line — so the menu and the keyboard agree.
+
+proc clipboardCanWrite(): bool
+  {.importjs: "(!!(navigator.clipboard && navigator.clipboard.writeText))".}
+proc clipboardCanRead(): bool
+  {.importjs: "(!!(navigator.clipboard && navigator.clipboard.readText))".}
+  ## `readText` is the one that actually varies: Electron has it, Chromium has
+  ## it behind a permission prompt, and Firefox does not expose it to a page at
+  ## all.  Asked rather than inferred from a user-agent string.
+
+proc monacoClipboardCopy(editor: js) {.importjs:
+  "(function(e){ try { e.focus(); var m = e.getModel(); var s = e.getSelection(); " &
+  "if (!m || !s) return; " &
+  "var t = s.isEmpty() ? (m.getLineContent(s.startLineNumber) + '\\n') " &
+  ": m.getValueInRange(s); " &
+  "navigator.clipboard.writeText(t).catch(function(x){ " &
+  "console.error('ct: copy refused by the clipboard', x); }); } " &
+  "catch (x) { console.error('ct: copy failed', x); } })(#)".}
+
+proc monacoClipboardCut(editor: js) {.importjs:
+  "(function(e){ try { e.focus(); var m = e.getModel(); var s = e.getSelection(); " &
+  "if (!m || !s) return; " &
+  "var r = s.isEmpty() ? new monaco.Range(s.startLineNumber, 1, " &
+  "s.startLineNumber + 1, 1) : s; " &
+  "var t = m.getValueInRange(r); " &
+  "navigator.clipboard.writeText(t).then(function(){ " &
+  "e.executeEdits('ct-context-menu', [{ range: r, text: '', " &
+  "forceMoveMarkers: true }]); }).catch(function(x){ " &
+  "console.error('ct: cut refused by the clipboard', x); }); } " &
+  "catch (x) { console.error('ct: cut failed', x); } })(#)".}
+  ## THE DELETION WAITS FOR THE WRITE.  A cut that removed the text and then
+  ## failed to put it on the clipboard would be a delete, and the user asked
+  ## for a move.
+
+proc monacoClipboardPaste(editor: js) {.importjs:
+  "(function(e){ try { e.focus(); navigator.clipboard.readText().then(function(t){ " &
+  "var s = e.getSelection(); if (!s) return; " &
+  "e.executeEdits('ct-context-menu', [{ range: s, text: t, " &
+  "forceMoveMarkers: true }]); }).catch(function(x){ " &
+  "console.error('ct: the clipboard refused to be read', x); }); } " &
+  "catch (x) { console.error('ct: paste failed', x); } })(#)".}
+
+type
+  EditMenuEntry = object
+    ## One Monaco-backed row, and the rule for what to do when Monaco says its
+    ## command cannot run.
+    name: cstring
+    action: cstring
+    reason: cstring
+      ## Empty means HIDE the row when unsupported; non-empty means show it
+      ## DISABLED carrying this sentence.  The split is `Edit-Mode-Toolbar.md`
+      ## §8's, and it is the difference between "this verb does not apply to
+      ## this file" and "this verb applies and cannot run right now".
+
+const
+  EditModeActionEntries: array[5, EditMenuEntry] = [
+    # ALL FIVE HIDE RATHER THAN DISABLE when unsupported, because for every one
+    # of them "unsupported" means the language has no provider for it — the verb
+    # has not been refused, it was never on offer.  §8's own example: "a folder
+    # of notes gets no row of dead buttons".
+    EditMenuEntry(name: "Toggle Line Comment",
+      action: "editor.action.commentLine", reason: ""),
+    EditMenuEntry(name: "Format Document",
+      action: "editor.action.formatDocument", reason: ""),
+    EditMenuEntry(name: "Rename Symbol", action: "editor.action.rename",
+      reason: ""),
+    EditMenuEntry(name: "Find", action: "actions.find", reason: ""),
+    EditMenuEntry(name: "Replace",
+      action: "editor.action.startFindReplaceAction", reason: ""),
+  ]
+
+  DebugModeActionEntries: array[1, EditMenuEntry] = [
+    # FIND SURVIVES INTO DEBUG MODE and Replace does not, which is the whole of
+    # the rule: a user reading a recorded run searches the source constantly,
+    # and the editor they are reading it in is read-only.
+    EditMenuEntry(name: "Find", action: "actions.find", reason: ""),
+  ]
+
+proc monacoActionItem(self: EditorViewComponent,
+                      entry: EditMenuEntry): ContextMenuItem =
+  ## `nil` when the row must not exist at all, so every call site tests it.
+  if monacoActionIsSupported(self.monacoEditor.toJs, entry.action):
+    let id = entry.action
+    return ContextMenuItem(
+      name: entry.name,
+      hint: "",
+      handler: proc(e: Event) = monacoRunAction(self.monacoEditor.toJs, id))
+  if entry.reason.len > 0:
+    return ContextMenuItem(
+      name: entry.name,
+      hint: "",
+      handler: proc(e: Event) = discard,
+      disabled: true,
+      disabledReason: entry.reason)
+  return nil
+
+proc clipboardItems(self: EditorViewComponent;
+                    editing: bool): seq[ContextMenuItem] =
+  ## Cut / Copy / Paste, with the two axes that decide each row stated
+  ## separately: whether the SURFACE can do it at all, and whether the EDITOR
+  ## will accept the change.
+  ##
+  ## Copy is in both menus — a user reading a recording copies source out of it
+  ## constantly.  Cut and Paste are absent from the Debug menu rather than
+  ## disabled in it, because the Debug editor's read-onlyness is not a passing
+  ## condition a user could clear; it is what the mode is.
+  let writable = editing and not self.data.ui.readOnly and
+    not self.data.isReviewDatasetSession()
+
+  if editing:
+    if not clipboardCanWrite():
+      result.add ContextMenuItem(name: "Cut", hint: "",
+        handler: proc(e: Event) = discard, disabled: true,
+        disabledReason: "this page cannot reach the clipboard — press Ctrl+X")
+    elif not writable:
+      # REACHABLE INSIDE EDIT MODE, which is why this is a disabled row and not
+      # an absent one: `Ctrl+E` toggles editability independently of the mode
+      # (`ui_js.toggleReadOnly`, and `Mode-Transitions.md` §9
+      # `Mode.ReadOnlyDoesNotMoveMode` requires the two to be independent).  The
+      # verb applies here; it cannot run until the user clears that flag, and
+      # the row says which flag.
+      result.add ContextMenuItem(name: "Cut", hint: "",
+        handler: proc(e: Event) = discard, disabled: true,
+        disabledReason: "the editor is read-only — Ctrl+E makes it writable")
+    else:
+      result.add ContextMenuItem(name: "Cut", hint: "",
+        handler: proc(e: Event) = monacoClipboardCut(self.monacoEditor.toJs))
+
+  if clipboardCanWrite():
+    result.add ContextMenuItem(name: "Copy", hint: "",
+      handler: proc(e: Event) = monacoClipboardCopy(self.monacoEditor.toJs))
+  else:
+    result.add ContextMenuItem(name: "Copy", hint: "",
+      handler: proc(e: Event) = discard, disabled: true,
+      disabledReason: "this page cannot reach the clipboard — press Ctrl+C")
+
+  if editing:
+    if not clipboardCanRead():
+      result.add ContextMenuItem(name: "Paste", hint: "",
+        handler: proc(e: Event) = discard, disabled: true,
+        disabledReason: "your browser will not let a page read the clipboard — press Ctrl+V")
+    elif not writable:
+      result.add ContextMenuItem(name: "Paste", hint: "",
+        handler: proc(e: Event) = discard, disabled: true,
+        disabledReason: "the editor is read-only — Ctrl+E makes it writable")
+    else:
+      result.add ContextMenuItem(name: "Paste", hint: "",
+        handler: proc(e: Event) = monacoClipboardPaste(self.monacoEditor.toJs))
+
 # Fill contextMenu with ContextMenuItem variables and return it to be used in the context menu
 proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuItem] =
   # Editor context menu items
@@ -1224,7 +1444,6 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
   var toggleBreakpointState:      ContextMenuItem
   var deleteBreakpoints:          ContextMenuItem
   var deleteAllBreakpoints:       ContextMenuItem
-  var toggleBreakpoints:          ContextMenuItem
   var addDeleteTracepoint:        ContextMenuItem
   var toggleTracepoint:           ContextMenuItem
   var targetToken:                cstring
@@ -1240,6 +1459,19 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
   if ev.isNil or ev.target.isNil or ev.target.position.isNil:
     return contextMenu
 
+  # THE MODE OWNS THE MENU, and it is read here — once, at the moment the menu
+  # is built — rather than kept in a field that a mode transition would have to
+  # remember to update.  `applyModeLayout` already owns the panels this way
+  # ("a mode transition owns its panels"); a second mechanism for knowing the
+  # mode is a second thing that can be stale, and a stale one here shows the
+  # user the previous mode's commands.
+  #
+  # `isEditingMode` rather than `== EditMode`: `LayoutMode` has five members
+  # and three of them are editing modes.  Writing the comparison inline is what
+  # quietly files `QuickEditMode` under Debug, which is why that predicate
+  # exists (`ui/mode_layouts.nim:161`).
+  let editing = isEditingMode(self.data.ui.mode)
+
   var line = cast[int](ev.target.position.lineNumber)
   let path = tabInfo.name
 
@@ -1249,37 +1481,57 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     isAfterLineNil = ev.target.detail.afterLineNumber.isNil
 
   if isDetailNil or isAfterLineNil:
-    # Source Line Jump Menu Item
-    let sourceLine = ContextMenuItem(
-      name: "Jump to line",
-      hint: "&lt;Middle click on line&gt;, CTRL+&lt;click on line&gt;",
-      handler: proc(e: Event) =
-        self.editorLineJump(line, SmartJump)
-    )
-    # RUN TO CURSOR IS THIS ENTRY, and it is why it is named after the command
-    # rather than after the mechanism. `codetracer-specs`
-    # `GUI/Debugging-Features/Debugger-Controls.md` § "Running to a line"
-    # settles that Run to Cursor is a *behaviour of the line jump*, not a
-    # second command beside it — "naming the same capability twice, once per
-    # surface, is how a reader ends up searching for a command that was never
-    # built". `ForwardJump` is that behaviour, and until it was honoured by
-    # `Handler::find_step_for_jump` this entry did exactly what "Jump to line"
-    # did, which is how the capability came to look present and be absent.
-    let sourceLineForward = ContextMenuItem(
-      name: "Run to Cursor",
-      hint: "CTRL+F10",
-      handler: proc(e: Event) =
-        self.editorLineJump(line, ForwardJump)
-    )
-    let sourceLineBackward = ContextMenuItem(
-      name: "Jump backward to line",
-      hint: "",
-      handler: proc(e: Event) =
-        self.editorLineJump(line, BackwardJump)
-    )
-    contextMenu &= sourceLine
-    contextMenu &= sourceLineForward
-    contextMenu &= sourceLineBackward
+    if editing:
+      # THE EDITING COMMANDS, which is the half of the menu that has been
+      # missing since Monaco's own menu was switched off.  They lead because
+      # this is the mode the user is typing in.
+      contextMenu &= self.clipboardItems(editing = true)
+      for entry in EditModeActionEntries:
+        let item = self.monacoActionItem(entry)
+        if not item.isNil:
+          contextMenu &= item
+    else:
+      # A REPLAY SESSION IS WHAT THESE ACT ON, so they are absent without one
+      # rather than disabled.  `editorLineJump` asks the backend to move the
+      # session's position; in Edit mode there is no position and no session,
+      # and ten greyed-out rows saying so is still a menu about debugging.
+      contextMenu &= self.clipboardItems(editing = false)
+      for entry in DebugModeActionEntries:
+        let item = self.monacoActionItem(entry)
+        if not item.isNil:
+          contextMenu &= item
+
+      # Source Line Jump Menu Item
+      let sourceLine = ContextMenuItem(
+        name: "Jump to line",
+        hint: "<Middle click on line>, CTRL+<click on line>",
+        handler: proc(e: Event) =
+          self.editorLineJump(line, SmartJump)
+      )
+      # RUN TO CURSOR IS THIS ENTRY, and it is why it is named after the command
+      # rather than after the mechanism. `codetracer-specs`
+      # `GUI/Debugging-Features/Debugger-Controls.md` § "Running to a line"
+      # settles that Run to Cursor is a *behaviour of the line jump*, not a
+      # second command beside it — "naming the same capability twice, once per
+      # surface, is how a reader ends up searching for a command that was never
+      # built". `ForwardJump` is that behaviour, and until it was honoured by
+      # `Handler::find_step_for_jump` this entry did exactly what "Jump to line"
+      # did, which is how the capability came to look present and be absent.
+      let sourceLineForward = ContextMenuItem(
+        name: "Run to Cursor",
+        hint: "CTRL+F10",
+        handler: proc(e: Event) =
+          self.editorLineJump(line, ForwardJump)
+      )
+      let sourceLineBackward = ContextMenuItem(
+        name: "Jump backward to line",
+        hint: "",
+        handler: proc(e: Event) =
+          self.editorLineJump(line, BackwardJump)
+      )
+      contextMenu &= sourceLine
+      contextMenu &= sourceLineForward
+      contextMenu &= sourceLineBackward
 
     try:
       targetToken = self.getTokenFromPosition(ev.target.position)
@@ -1309,7 +1561,7 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
       if targetToken != "":
         callLine = ContextMenuItem(
           name: "Jump to call",
-          hint: "CTRL+ALT+&lt;click function name&gt;",
+          hint: "CTRL+ALT+<click function name>",
           handler: proc(e: Event) =
             self.sourceCallJump(self.name, line, targetToken, SmartJump)
         )
@@ -1330,7 +1582,7 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
 
         callLine = ContextMenuItem(
           name: "Jump to call",
-          hint: "CTRL+ALT+&lt;click function name&gt;",
+          hint: "CTRL+ALT+<click function name>",
           handler: handler
         )
         callLineForward = ContextMenuItem(
@@ -1347,7 +1599,7 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
 
       callLine = ContextMenuItem(
         name: "Jump to call",
-        hint: "CTRL+ALT+&lt;click function name&gt;",
+        hint: "CTRL+ALT+<click function name>",
         handler: handler
       )
       callLineForward = ContextMenuItem(
@@ -1361,15 +1613,30 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
         handler: handler
       )
 
-    contextMenu &= callLine
-    contextMenu &= callLineForward
-    contextMenu &= callLineBackward
+    # DEBUG-ONLY, for the same reason the line jumps are: `sourceCallJump`
+    # moves the replay position.  The items above are still CONSTRUCTED in Edit
+    # mode — the `try` that builds them also builds the both-mode
+    # "Re-record and replay this test" row, and splitting it would give the
+    # token resolution and its `AmbiguousFunctionCallException` two spellings.
+    # They are simply not appended.
+    if not editing:
+      contextMenu &= callLine
+      contextMenu &= callLineForward
+      contextMenu &= callLineBackward
 
+    # BREAKPOINTS ARE IN BOTH MENUS, and that is a decision rather than an
+    # omission.  `Mode-Transitions.md` §5 lists them among the things a
+    # transition preserves, with the reason: "they belong to the project, not
+    # to the session".  A developer who marks a line before recording is doing
+    # the ordinary thing, and the gutter already accepts that gesture in Edit
+    # mode — a context menu that refused it would disagree with the gutter
+    # beside it.
+    #
     # Delete/Add Breakpoint Menu Item
     if data.services.debugger.hasBreakpoint(path, line):
       toggleBreakpoint = ContextMenuItem(
         name: "Delete breakpoint",
-        hint: "&lt;click on the red dot&gt;",
+        hint: "<click on the red dot>",
         handler: proc(e: Event) =
           self.data.services.debugger.deleteBreakpoint(path, line)
           self.refreshEditorLine(line)
@@ -1398,7 +1665,7 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     else:
       toggleBreakpoint = ContextMenuItem(
         name: "Add breakpoint",
-        hint: "&lt;click line number gutter&gt;",
+        hint: "<click line number gutter>",
         handler: proc(e: Event) =
           data.services.debugger.addBreakpoint(path, line)
           self.refreshEditorLine(line)
@@ -1407,16 +1674,26 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     contextMenu &= toggleBreakpoint
 
     # Delete Breakpoints in file
-    if data.pointList.breakpoints.len > 0:
+    #
+    # "IN FILE" IS NOW TRUE OF BOTH HALVES OF THIS ENTRY.  It used to be true
+    # of neither: the row appeared whenever the PROJECT held a breakpoint, and
+    # its handler walked every breakpoint in the project passing `path` — this
+    # file's path — to `deleteBreakpoint`, so a breakpoint at line 40 of
+    # another file deleted whatever this file had at line 40 and left the other
+    # one standing.  It also called `pointList.breakpoints.delete(i, i)` while
+    # walking indices taken from a copy of that same seq, so after the first
+    # removal every index was off by one.
+    let breakpointsInFile = data.pointList.breakpoints.filterIt(it.path == path)
+    if breakpointsInFile.len > 0:
       deleteBreakpoints = ContextMenuItem(
         name: "Delete breakpoints in file",
         hint: "",
         handler: proc(e: Event) =
-          let breakpointsCopy = data.pointList.breakpoints
-          for i, b in breakpointsCopy:
+          # `deleteBreakpoint` maintains `pointList.breakpoints` itself, so the
+          # lines are collected FIRST and this loop never mutates what it reads.
+          for b in data.pointList.breakpoints.filterIt(it.path == path):
             data.services.debugger.deleteBreakpoint(path, b.line)
             self.refreshEditorLine(b.line)
-            data.pointList.breakpoints.delete(i, i)
       )
 
       contextMenu &= deleteBreakpoints
@@ -1433,75 +1710,90 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
 
       contextMenu &= deleteAllBreakpoints
 
-    # Delete/Add tracepoint field
-    if not self.traces[line].isNil:
-      addDeleteTracepoint = ContextMenuItem(
-        name: "Delete tracepoint",
-        hint: "",
-        handler: proc (e: Event) =
-          self.traces[line].closeTrace()
-      )
-
-      # Enable/Disable tracepoint
-      if self.traces[line].isDisabled:
-        toggleTracepoint = ContextMenuItem(
-          name: "Enable tracepoint",
+    # TRACEPOINTS AND THE SCRATCHPAD ARE DEBUG-ONLY, and unlike breakpoints
+    # they are not project state.  A tracepoint is an expression evaluated
+    # against a recorded trace (`toggleTrace` -> `updateExpansion`), and
+    # "Add value to scratchpad" reads `services.debugger.locals`, which is the
+    # frame the session is stopped in.  Neither has any referent before a
+    # recording exists, so neither is offered — a disabled "Add tracepoint"
+    # would be a row about debugging in a menu that is meant to be about
+    # editing.
+    if not editing:
+      # Delete/Add tracepoint field
+      if not self.traces[line].isNil:
+        addDeleteTracepoint = ContextMenuItem(
+          name: "Delete tracepoint",
           hint: "",
-          handler: proc(e: Event) =
-            self.toggleTrace(path, line)
-            self.traces[line].toggleTraceState()
-        )
-      else:
-        toggleTracepoint = ContextMenuItem(
-          name: "Disable tracepoint",
-          hint: "",
-          handler: proc(e: Event) =
-            self.traces[line].toggleTraceState()
-            self.toggleTrace(path, line)
+          handler: proc (e: Event) =
+            self.traces[line].closeTrace()
         )
 
-      contextMenu &= toggleTracepoint
-
-    # Add/Delete tracepoint field
-    else:
-      addDeleteTracepoint = ContextMenuItem(
-        name: "Add tracepoint",
-        hint: "Enter&lt;on line&gt;",
-        handler: proc(e: Event) =
-          self.toggleTrace(self.name, line)
-      )
-
-    contextMenu &= addDeleteTracepoint
-
-    # Add expression to Scratchpad
-    let key = &"{self.path}:{self.lastMouseMoveLine}"
-
-    if not data.services.debugger.expressionMap.isNil and data.services.debugger.expressionMap.hasKey(key):
-      for item in data.services.debugger.expressionMap[key]:
-        let startCol = cast[int](item.startCol)
-        var endCol = cast[int](item.endCol)
-        var expression: cstring
-        case item.kind:
-        of TkField:
-          expression = item.base
-
-        of TkIndex:
-          expression = item.collection
-          endCol -= 2
-
+        # Enable/Disable tracepoint
+        if self.traces[line].isDisabled:
+          toggleTracepoint = ContextMenuItem(
+            name: "Enable tracepoint",
+            hint: "",
+            handler: proc(e: Event) =
+              self.toggleTrace(path, line)
+              self.traces[line].toggleTraceState()
+          )
         else:
-          expression = item.expression
+          toggleTracepoint = ContextMenuItem(
+            name: "Disable tracepoint",
+            hint: "",
+            handler: proc(e: Event) =
+              self.traces[line].toggleTraceState()
+              self.toggleTrace(path, line)
+          )
 
-        if startCol <= self.lastMouseClickCol and self.lastMouseClickCol <= endCol:
-          for local in data.services.debugger.locals:
-            if local.expression == expression:
-              let baseValue = local.value
-              addToScratchpad = ContextMenuItem(name: "Add value to scratchpad", hint: "", handler: proc(e: Event) =
-                self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: baseValue))
-                self.data.redraw())
-              contextMenu &= addToScratchpad
-          break
+        contextMenu &= toggleTracepoint
+
+      # Add/Delete tracepoint field
+      else:
+        addDeleteTracepoint = ContextMenuItem(
+          name: "Add tracepoint",
+          hint: "Enter<on line>",
+          handler: proc(e: Event) =
+            self.toggleTrace(self.name, line)
+        )
+
+      contextMenu &= addDeleteTracepoint
+
+      # Add expression to Scratchpad
+      let key = &"{self.path}:{self.lastMouseMoveLine}"
+
+      if not data.services.debugger.expressionMap.isNil and data.services.debugger.expressionMap.hasKey(key):
+        for item in data.services.debugger.expressionMap[key]:
+          let startCol = cast[int](item.startCol)
+          var endCol = cast[int](item.endCol)
+          var expression: cstring
+          case item.kind:
+          of TkField:
+            expression = item.base
+
+          of TkIndex:
+            expression = item.collection
+            endCol -= 2
+
+          else:
+            expression = item.expression
+
+          if startCol <= self.lastMouseClickCol and self.lastMouseClickCol <= endCol:
+            for local in data.services.debugger.locals:
+              if local.expression == expression:
+                let baseValue = local.value
+                addToScratchpad = ContextMenuItem(name: "Add value to scratchpad", hint: "", handler: proc(e: Event) =
+                  self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: baseValue))
+                  self.data.redraw())
+                contextMenu &= addToScratchpad
+            break
   else:
+    # NO MODE GATE HERE, and it is not an oversight.  This arm is reached only
+    # when the right-click landed inside a tracepoint's results table
+    # (`ev.target.detail.afterLineNumber` is Monaco's view-zone id), and a view
+    # zone holding trace results cannot exist without a recording.  The arm is
+    # unreachable in Edit mode by construction rather than by a condition, so a
+    # condition here would be one nothing could ever make false.
     let className = cast[cstring](ev.target.element.className)
     if not ($className).startsWith("flow"):
       var datatable: js
@@ -1564,7 +1856,7 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
           # Add value to scratchpad
           addToScratchpad = ContextMenuItem(
             name: "Add value to scratchpad",
-            hint: "CTRL+&lt;click on value&gt;",
+            hint: "CTRL+<click on value>",
             handler: proc(e: Event) =
               self.api.openValueInScratchpad(
                 ValueWithExpression(
@@ -1589,6 +1881,12 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
       except:
         discard
 
+  # IN BOTH MENUS.  The two Nim entries below MAKE a recording rather than
+  # navigating one — they send an LSP request and open the resulting `.ct`
+  # trace in a new session tab — so they are the same class as Build and Run,
+  # which `Mode-Transitions.md` §8.3 keeps working in both modes for the same
+  # reason: "a developer who hits Build reflexively means it".
+  #
   # "Trace Macro Execution" action for Nim files (M11).
   # Available when the current file is a Nim source file and the cursor
   # is on a line that could contain a macro call.  Sends the LSP request

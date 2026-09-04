@@ -1539,7 +1539,7 @@ proc createContextMenuItems(self: FlowComponent, name: cstring, beforeValue: Val
 
   jumpToValue = ContextMenuItem(
     name: "Jump to value",
-    hint: "&lt;click on value&gt;",
+    hint: "<click on value>",
     handler: proc(e: Event) =
       self.jumpToLocalStep(stepCount)
   )
@@ -1548,7 +1548,7 @@ proc createContextMenuItems(self: FlowComponent, name: cstring, beforeValue: Val
 
   addToScratchpad = ContextMenuItem(
     name: "Add value to scratchpad",
-    hint: "CTRL+&lt;click on value&gt;",
+    hint: "CTRL+<click on value>",
     handler: proc(e: Event) =
       self.api.openValueInScratchpad(ValueWithExpression(expression: name, value: beforeValue))
       data.redraw()

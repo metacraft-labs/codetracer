@@ -290,8 +290,13 @@ probe() {
 		echo "  the static server did not start" >&2
 		return 2
 	fi
+	# `<cache>/<label>` is the screenshot prefix. Nothing below asserts on the
+	# images; they are what a human opens when a number is disputed, and a gate
+	# whose failure message can be checked against a picture is one people act
+	# on rather than argue with.
 	node ci/test/noir_build_probe.mjs \
-		"http://127.0.0.1:${port}${url_path}" "${gesture}" \
+		"http://127.0.0.1:${port}${url_path}" "${gesture}" 12000 \
+		"${cache}/${label}" \
 		>"${cache}/${label}.json" 2>"${cache}/${label}.err"
 	local rc=$?
 	stop_server
@@ -489,6 +494,66 @@ else
 	if [ "${c_cmain:-0}" -ge 1 ]; then
 		note "a row reads 'main', which is the compile-time nargo-info constant — the pane is showing the shipped number, not the module's listing"
 	fi
+fi
+
+# ---------------------------------------------------------------------------
+# ARM 1d — THE STORAGE TOAST IS NOT SITTING ON THE PANE.
+# ---------------------------------------------------------------------------
+#
+# WHAT WAS MEASURED, on the deployed site at revision b6e28026, with the
+# durability notice raised and nothing else on screen:
+#
+#     toast rect   [1126, 779, 466, 173]
+#     pane  rect   [1200,  66, 396, 902]
+#     intersection 67,816 px²   (the pane's full 392px width, 173px tall)
+#     elementFromPoint at the centre of the intersection -> .notification-message
+#
+# The toast is painted over the pane's rows. It is the one notice in the
+# product that is raised on a first visit and stays until dismissed, so this is
+# not a flash — it is the default first screen, and it covers exactly the
+# content a reader opened the pane for.
+#
+# AN AREA, NOT A BOOLEAN. `noticeVisible` and `paneVisible` were both true
+# throughout; only an intersection distinguishes two things being on screen
+# from one being on top of the other, and only a number can be held at zero.
+#
+# THE OTHER HALF OF THE REPORT IS ANSWERED HERE TOO, and the answer is that it
+# is not a defect. The notice was also described as clipped on its left edge —
+# `…ort project`, `…ected yet`. Asked of the element rather than of an image,
+# on the deployed site and here, `scrollWidth === clientWidth` for both the
+# toast and its `.notification-message`: the box is intact and the whole
+# sentence is laid out. The clipping was an artefact of cropping a screenshot
+# to the neighbouring PANE element, which cuts the toast at the pane's left
+# border. The assertion below keeps that from having to be rediscovered.
+c_toasts="$(json control notice.durabilityCount)"
+c_overlap="$(json control notice.maxOverlapPx)"
+
+if [ "${c_toasts:-0}" -eq 1 ]; then
+	ck ok "the storage notice is on screen exactly once"
+else
+	ck fail "the storage notice appears ${c_toasts} time(s); expected exactly 1"
+	note "stack: $(json control notice.hostRect)  toasts: $(json control notice.toastCount)"
+fi
+
+if [ "${c_overlap:-0}" -eq 0 ]; then
+	ck ok "and no toast overlaps the CONSTRAINTS pane (0 px of intersection)"
+else
+	ck fail "a toast covers ${c_overlap} px of the CONSTRAINTS pane — the listing is behind the notice"
+	note "toast: $(json control notice.durability)"
+	note "pane:  $(json control notice.paneRect)"
+fi
+
+c_clip="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+ts = d.get("notice", {}).get("durability", [])
+print(sum(1 for t in ts
+          if t.get("overflowsHorizontally") or t.get("messageOverflows")))
+' "${cache}/control.json" 2>/dev/null)"
+if [ "${c_clip:-0}" -eq 0 ]; then
+	ck ok "and its text is not horizontally clipped (scrollWidth == clientWidth)"
+else
+	ck fail "${c_clip} toast(s) overflow horizontally: the sentence really is being cut off"
 fi
 
 dump control
@@ -952,7 +1017,9 @@ echo "checks: ${checks}   failures: ${failures}"
 
 # THE COUNT ITSELF. A guard that returned early, an arm that was skipped, or a
 # `probe` that failed silently would otherwise reduce this gate to whatever ran.
-expected_checks=41
+# 41 + arm 1d's 3: the storage notice is raised exactly once, it overlaps the
+# CONSTRAINTS pane by zero pixels, and its text is not horizontally clipped.
+expected_checks=44
 if [ "${checks}" -ne "${expected_checks}" ]; then
 	echo "  ${checks} assertion(s) ran; this gate declares ${expected_checks}." >&2
 	echo "  An arm was skipped, or one was added without moving the number." >&2

@@ -212,7 +212,71 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   gap: NOTIFICATION_STACK_GAP
   position: fixed
   z-index: 100
-  right: 8px
+  // HORIZONTALLY CENTRED, and this replaces `right: 8px`.
+  //
+  // THE DEFECT, MEASURED rather than described. On the live deployment at
+  // revision b6e28026, with the durability notice raised and nothing else on
+  // screen: the toast's rect is `[1126, 779, 466, 173]`, the CONSTRAINTS
+  // pane's is `[1200, 66, 396, 902]`, and the two intersect over
+  // **67,816 px²** — the pane's full 392px width for 173px of its height.
+  // `elementFromPoint` at the centre of that intersection answers
+  // `DIV.notification-message`, so the toast is not merely adjacent to the
+  // pane's rows, it is painted over them.
+  //
+  // This is the one notice in the product that is raised on a first visit and
+  // stays until it is dismissed, so the overlap is not a flash: it is the
+  // default first screen, in every screenshot taken of it.
+  //
+  // WHAT THE SAME MEASUREMENT SAYS IS *NOT* WRONG, because the report also
+  // described the text as clipped on its left edge (`…ort project`,
+  // `…ected yet`). Asked of the element rather than of an image, on the
+  // deployed site: `scrollWidth === clientWidth` for both the toast and its
+  // `.notification-message`. The box is intact and the whole sentence is laid
+  // out. The clipping was an artefact of cropping a screenshot to the
+  // neighbouring PANE element, which cuts the toast at the pane's left border.
+  // There is no horizontal overflow here to fix, and
+  // `ci/test/noir_build_probe.mjs` now measures the property so the answer
+  // does not have to be rediscovered.
+  //
+  // NOT CAUSED BY THE PREVIOUS TWO FIXES, which is worth stating because all
+  // three touch this notice. 44abd587a moved this stack from `bottom: 38px` to
+  // `NOTIFICATION_STACK_BOTTOM` — the vertical axis, and nothing else.
+  // a0b9f8fb1 stopped the notice appearing three times, by fixing a component
+  // re-subscription in `configureMiddleware`; no CSS at all. `right: 8px` has
+  // been the anchor since the toasts were first placed (adc508550, March
+  // 2025), and the notice only started landing on a pane when 3850bd9b8 moved
+  // it out of its own body-level banner into this stack — that commit fixed a
+  // notice which covered the STATUS BAR by putting it where it covers a PANE.
+  //
+  // WHY CENTRE RATHER THAN THE OTHER CORNER. In this product's three-column
+  // edit layout the bottom corners belong to the two NARROW columns — FILES at
+  // 20% and the right-hand column at 25% — and both are lists whose content
+  // runs the full height of the pane, so a toast in either corner covers rows
+  // somebody is reading. The centre belongs to the editor, which is 55% wide
+  // and whose text is anchored to the TOP: the region a 466px toast occupies
+  // there is empty in the common case. Moving it to `left: 8px` would also
+  // collide with `.debug-notification`, which is already anchored there.
+  //
+  // WHAT THIS DOES NOT DO, stated because the next change to this area will
+  // want it. Centring removes the measured overlap with the right-hand column;
+  // it does not make a fixed-position toast structurally incapable of covering
+  // content, and a listing that opens as an EDITOR tab in a split view would
+  // sit under exactly this box. The durable fix is for the stack to occupy
+  // layout rather than float over it — `#root-container`'s
+  // `height: calc(100vh - …)` already reserves the status bar's height, and
+  // reserving the stack's would guarantee zero overlap in every layout. That
+  // relayouts GoldenLayout on every toast, so it is a design decision and not
+  // a CSS one, and it is not smuggled in here.
+  //
+  // `left: 50%` + `translateX(-50%)` rather than `margin: auto`, because the
+  // element is `position: fixed` with `width: fit-content` and no `right`, so
+  // there is no resolved free space for `auto` margins to divide.
+  //
+  // The transform is safe against `status-footer-contract.ts`'s off-screen
+  // guard: every one of its `FOOTER_REQUIRED_REGIONS` is inside `#status-base`
+  // and this element is a sibling of that bar, not a child of it.
+  left: 50%
+  transform: translateX(-50%)
 
 
 #status

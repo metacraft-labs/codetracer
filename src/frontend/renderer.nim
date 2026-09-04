@@ -1508,18 +1508,34 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
     # `viewmodel/views/context_menu_bridge.nim`.  A menu label is a label.
     labelEl.textContent = option.name
     cast[dom.Element](newElement).append(cast[dom.Element](labelEl))
-    newElement.onclick = proc(ev: Event) {.nimcall.} =
-      let targetId = $cast[kdom.Element](ev.toJs.currentTarget).id
-      if targetId.startsWith("menu-item-"):
-        let itemIndex = parseInt(targetId["menu-item-".len..^1])
-        if itemIndex >= 0 and itemIndex < contextMenuHandlers.len:
-          contextMenuHandlers[itemIndex](ev)
-      cast[kdom.Element](dom.document.getElementById("context-menu-container")).style.display = "none"
-    if option.hint != "":
+    # A DISABLED ROW IS NOT A ROW WITH A HANDLER THAT DECLINES.  The handler is
+    # not registered at all, `aria-disabled` says so to anything that is not
+    # looking at pixels, and `.ct-menu-item--disabled` carries
+    # `pointer-events: none` (`styles/components/menu_item.styl`) so the click
+    # cannot land on it in the first place.  Twin of this block:
+    # `viewmodel/views/context_menu_bridge.nim`.
+    if option.disabled:
+      newElement.classList.add("ct-menu-item--disabled")
+      newElement.setAttribute("aria-disabled", "true")
+    else:
+      newElement.onclick = proc(ev: Event) {.nimcall.} =
+        let targetId = $cast[kdom.Element](ev.toJs.currentTarget).id
+        if targetId.startsWith("menu-item-"):
+          let itemIndex = parseInt(targetId["menu-item-".len..^1])
+          if itemIndex >= 0 and itemIndex < contextMenuHandlers.len:
+            contextMenuHandlers[itemIndex](ev)
+        cast[kdom.Element](dom.document.getElementById("context-menu-container")).style.display = "none"
+    # THE REASON TAKES THE SUBLABEL SLOT when there is one, because a disabled
+    # row's shortcut is not what the reader needs and the reason is.  The row
+    # cannot be hovered, so a `title` would be unreachable.
+    let sublabel =
+      if option.disabled and option.disabledReason.len > 0: option.disabledReason
+      else: option.hint
+    if sublabel != "":
       let hint = kdom.document.createElement("span")
       hint.classList.add("ct-menu-item-sublabel")
       hint.id = cstring(fmt"menu-hint-{i}")
-      hint.textContent = option.hint
+      hint.textContent = sublabel
       cast[dom.Element](newElement).append(cast[dom.Element](hint))
     cast[dom.Element](itemContainer).append(cast[dom.Element](newElement))
     container.append(cast[dom.Element](itemContainer))

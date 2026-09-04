@@ -39,8 +39,13 @@ import { chromium } from 'playwright';
 const url = process.argv[2];
 const gesture = process.argv[3] || 'shortcut';   // shortcut | button | run
 const settleMs = Number(process.argv[4] || 12000);
+// Where to write `<prefix>-after-full.png` and `<prefix>-after-pane.png`.
+// Optional: every assertion over this report reads a number, and a screenshot
+// is what a human opens when a number is disputed. Nothing depends on it.
+const shotPrefix = process.argv[5] || '';
 if (!url) {
-  console.error('usage: noir_build_probe.mjs <url> [gesture] [settleMs]');
+  console.error(
+    'usage: noir_build_probe.mjs <url> [gesture] [settleMs] [shotPrefix]');
   process.exit(2);
 }
 
@@ -93,6 +98,13 @@ await page.addInitScript(() => {
 
 const report = {
   url, gesture,
+  // WHICH BUILD THIS MEASURED. Read from the page's own
+  // `#codetracer-deployment` block, so a verdict about "the deployed site"
+  // names the revision it was taken against instead of whatever happened to be
+  // live when somebody read the report. A local bundle carries the same block.
+  revision: '',
+  commit: '',
+  branch: '',
   loadError: '',
   gestureError: '',
   mounted: false,
@@ -107,6 +119,9 @@ const report = {
   stopButtonEnabled: false,
   headerText: '',
   constraints: {},
+  // The persistent-storage toast, and specifically whether it is sitting on
+  // top of a pane. See `noticeScript`.
+  notice: {},
   pageErrors: [],
   consoleLines: [],
 };
@@ -192,6 +207,114 @@ const constraintsScript = () => {
     firstOpcode: opcodes.length ? text(opcodes[0]) : '',
     lastOpcode: opcodes.length ? text(opcodes[opcodes.length - 1]) : '',
     provenance: text(pane.querySelector('.constraints-provenance')),
+  };
+};
+
+// THE PERSISTENT-STORAGE TOAST, AND WHAT IT IS SITTING ON.
+//
+// `#active-notifications` is a `position: fixed` stack above the status bar
+// that holds every toast the product raises. The durability notice — "Your
+// work is saved in this browser…" — is the one raised on a first visit that
+// STAYS UNTIL DISMISSED, so where it lands is not a flash. It is the default
+// first screen, for every visitor, until they close it.
+//
+// THE MEASUREMENT IS AN INTERSECTION IN PIXELS, NOT A BOOLEAN. On the
+// deployment this was written against, "the toast is visible" and "the pane is
+// visible" were both true while the toast covered the lower ~180px of the
+// pane's column: 67,816 px² of overlap, which is the pane's full 392px width
+// for 173px of its height. Only an area distinguishes two things being on
+// screen from one being on top of the other, and only a number is something a
+// gate can hold at zero.
+//
+// `elementFromPoint` is asked as well, at a point inside BOTH boxes, because
+// an intersection of rectangles is geometry and the question is about PAINT.
+// A toast that intersects the pane but is painted underneath it would be a
+// different and much smaller problem, and this is what tells them apart.
+//
+// THE PANE IS LOOKED UP BY CLASS AND MAY NOT EXIST. That is a real state
+// rather than a probe fault — the layout is being redesigned and this pane is
+// on its way out of the default — so an absent pane reports empty rects and
+// zero overlap instead of throwing. `hostRect` and `toastCount` still describe
+// the stack, so the toast's own geometry is reported either way.
+const noticeScript = () => {
+  const host = document.getElementById('active-notifications');
+  const text = (el) => el ? (el.innerText || el.textContent || '')
+    .replace(/\s+/g, ' ').trim() : '';
+  const toasts = host
+    ? Array.from(host.querySelectorAll('.status-notification'))
+    : [];
+  // Found by its own sentence and not by its position in the stack: any other
+  // toast raised in the same second would otherwise be measured instead of it.
+  const durability = toasts.filter(
+    (t) => text(t).includes('saved in this browser'));
+  const pane = document.querySelector('.component-container.constraints');
+  const paneBox = pane ? pane.getBoundingClientRect() : null;
+  const describe = (t) => {
+    const b = t.getBoundingClientRect();
+    const rect = [Math.round(b.x), Math.round(b.y),
+                  Math.round(b.width), Math.round(b.height)];
+    let overlapPx = 0;
+    let coversPaneAt = '';
+    if (paneBox && paneBox.width > 0 && paneBox.height > 0) {
+      const w = Math.max(0, Math.min(b.right, paneBox.right) -
+                            Math.max(b.x, paneBox.x));
+      const h = Math.max(0, Math.min(b.bottom, paneBox.bottom) -
+                            Math.max(b.y, paneBox.y));
+      overlapPx = Math.round(w * h);
+      if (overlapPx > 0) {
+        const cx = (Math.max(b.x, paneBox.x) +
+                    Math.min(b.right, paneBox.right)) / 2;
+        const cy = (Math.max(b.y, paneBox.y) +
+                    Math.min(b.bottom, paneBox.bottom)) / 2;
+        const top = document.elementFromPoint(cx, cy);
+        coversPaneAt = top
+          ? top.tagName + '.' + String(top.className || '').slice(0, 60)
+          : 'nothing-at-point';
+      }
+    }
+    return {
+      text: text(t).slice(0, 400),
+      rect,
+      // TRUNCATION, ASKED OF THE ELEMENT RATHER THAN OF AN IMAGE.
+      //
+      // The same report that described the overlap also described the toast as
+      // clipped on its left edge — the text reading `…ort project` and
+      // `…ected yet`. Both readings came from screenshots CROPPED TO THE PANE,
+      // which cut the toast at the pane's left border and produced exactly
+      // that appearance from an intact box.
+      //
+      // `scrollWidth > clientWidth` is the page's own answer to "is this text
+      // being cut off", and on the deployed site it is FALSE for both the
+      // toast and its message. There is no horizontal overflow here. This
+      // field exists so that answer does not have to be rediscovered from a
+      // screenshot the next time.
+      overflowsHorizontally: t.scrollWidth > t.clientWidth + 1,
+      messageOverflows: (() => {
+        const m = t.querySelector('.notification-message');
+        return !!m && m.scrollWidth > m.clientWidth + 1;
+      })(),
+      overlapPx,
+      coversPaneAt,
+    };
+  };
+  return {
+    hostPresent: !!host,
+    hostRect: host ? (() => {
+      const b = host.getBoundingClientRect();
+      return [Math.round(b.x), Math.round(b.y),
+              Math.round(b.width), Math.round(b.height)];
+    })() : [],
+    toastCount: toasts.length,
+    durabilityCount: durability.length,
+    paneRect: paneBox
+      ? [Math.round(paneBox.x), Math.round(paneBox.y),
+         Math.round(paneBox.width), Math.round(paneBox.height)]
+      : [],
+    durability: durability.map(describe),
+    // The whole stack's worst offender, so a toast this probe does not know
+    // by name cannot cover the pane unreported.
+    maxOverlapPx: toasts.reduce(
+      (acc, t) => Math.max(acc, describe(t).overlapPx), 0),
   };
 };
 
@@ -395,6 +518,33 @@ try {
     await page.waitForTimeout(750);
   } catch (e) { /* reported by constraints.paneVisible below */ }
   report.constraints = await page.evaluate(constraintsScript);
+  report.notice = await page.evaluate(noticeScript);
+
+  // WHICH BUILD THIS IS. The block is already in the document, so no request
+  // is made and no ordering is raced; a page carrying none reports the empty
+  // identity, which is a correct deployment rather than a failure.
+  const identity = await page.evaluate(() => {
+    const el = document.getElementById('codetracer-deployment');
+    if (!el) return null;
+    try {
+      const d = JSON.parse(el.textContent || '{}');
+      return { revision: d.revision || '', commit: d.commit || '',
+               branch: d.branch || '' };
+    } catch (e) { return null; }
+  });
+  if (identity) {
+    report.revision = identity.revision;
+    report.commit = identity.commit;
+    report.branch = identity.branch;
+  }
+
+  if (shotPrefix) {
+    await page.screenshot({ path: `${shotPrefix}-after-full.png` });
+    try {
+      const el = await page.$('.component-container.constraints');
+      if (el) await el.screenshot({ path: `${shotPrefix}-after-pane.png` });
+    } catch (e) { /* an absent pane is reported by `constraints.mounted` */ }
+  }
 
   report.workerMessages = await page.evaluate(
     () => (window.__ctWorkerMessages || []).slice());

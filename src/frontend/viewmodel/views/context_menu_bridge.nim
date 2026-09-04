@@ -48,19 +48,30 @@ when defined(js):
       # to: <title>" carries a window title.  None of them is markup.
       labelEl.textContent = option.name
       discard cast[dom.Element](item).append(cast[dom.Element](labelEl))
-      item.onclick = proc(ev: kdom.Event) {.nimcall.} =
-        let targetId = $ev.currentTargetId()
-        if targetId.startsWith("menu-item-"):
-          let itemIndex = parseInt(targetId["menu-item-".len..^1])
-          if itemIndex >= 0 and itemIndex < contextMenuHandlers.len:
-            contextMenuHandlers[itemIndex](ev)
-        hideContextMenu()
+      # Twin of the same block in `renderer.showContextMenu`, which carries the
+      # reasoning.  The two implementations of this menu have to stay
+      # indistinguishable, or the surface a user right-clicks decides whether a
+      # disabled row is clickable.
+      if option.disabled:
+        item.classList.add(cstring"ct-menu-item--disabled")
+        item.setAttribute(cstring"aria-disabled", cstring"true")
+      else:
+        item.onclick = proc(ev: kdom.Event) {.nimcall.} =
+          let targetId = $ev.currentTargetId()
+          if targetId.startsWith("menu-item-"):
+            let itemIndex = parseInt(targetId["menu-item-".len..^1])
+            if itemIndex >= 0 and itemIndex < contextMenuHandlers.len:
+              contextMenuHandlers[itemIndex](ev)
+          hideContextMenu()
 
-      if option.hint.len > 0:
+      let sublabel =
+        if option.disabled and option.disabledReason.len > 0: option.disabledReason
+        else: option.hint
+      if sublabel.len > 0:
         let hint = kdom.document.createElement(cstring"span")
         hint.classList.add(cstring"ct-menu-item-sublabel")
         hint.id = cstring(fmt"menu-hint-{i}")
-        hint.textContent = option.hint
+        hint.textContent = sublabel
         discard cast[dom.Element](item).append(cast[dom.Element](hint))
 
       discard cast[dom.Element](itemContainer).append(cast[dom.Element](item))
