@@ -28,29 +28,45 @@
 # A CORRECTNESS FIX RATHER THAN A STYLE ONE.
 #
 # `grep -q` exits the instant it matches. If the haystack is bigger than a pipe
-# buffer the producer is still writing, takes EPIPE, and dies of SIGPIPE; with
-# the `set -o pipefail` below the pipeline adopts that failure and reports 141.
+# buffer — measured at exactly 64 KiB, see ci/test/grep-q-pipefail-gate.sh — the
+# producer is still writing, takes EPIPE, and dies of SIGPIPE; with the
+# `set -o pipefail` below the pipeline adopts that failure and reports 141.
 # A SUCCESSFUL MATCH IS THEREFORE RETURNED AS "NO MATCH".
 #
-# In this file that had teeth in both directions, and the first one is the
-# reason this script needed rewriting rather than tidying:
+# In this file that has teeth in both directions:
 #
-#   * The BASELINE gate on line ~94 asked "is this suite already red?". A red
-#     Nim suite prints a failure dump, so its output is LARGE and its first
-#     `[FAILED]` sits near the top — the exact shape that takes EPIPE. The gate
-#     answered "not red", the `COMPILE-FAILED` arm below it did not match
-#     either, and control fell into the `else` branch, which counts `[OK]`
-#     lines with `grep -c` — a counter reads to EOF, so THAT one worked, found
-#     the green cases a partly-red suite still has, and printed "N case(s)
-#     green". A genuinely red baseline was reported as a green one, and the
-#     whole point of the baseline is that without it all 27 arms below are
-#     vacuous. That is a FALSE GREEN in the one check that guards the rest.
+#   * The BASELINE gate on line ~94 asks "is this suite already red?". When the
+#     output crosses 64 KiB the gate answers "not red", the `COMPILE-FAILED`
+#     arm below it does not match either, and control falls into the `else`
+#     branch, which counts `[OK]` lines with `grep -c` — a counter reads to
+#     EOF, so THAT one works, finds the green cases a partly-red suite still
+#     has, and prints "N case(s) green". A red baseline reported as a green
+#     one, in the one check without which all 27 arms below are vacuous.
 #
-#   * Inside an arm the same pairing fails the other way: line ~162 is
+#   * Inside an arm the same pairing fails the other way: line ~162 was
 #     `if ! ... | grep -q '\[FAILED\]'`, so EPIPE reads as "no red case" and the
 #     arm reports SURVIVED against a mutation it actually killed. Line ~168 was
 #     worse still — `grep -F '[FAILED]' | grep -qF "$expected"` gives the MIDDLE
 #     grep the SIGPIPE, and the arm reports MISS.
+#
+# HOW BIG ARE THESE SUITES, ACTUALLY. Measured, because the answer decides
+# whether the paragraph above describes something happening today or something
+# waiting to: `test_noir_build_marshalling` prints 1,537 bytes green and 2,764
+# bytes with two cases genuinely red (product mutated: `of "warning":
+# ndsWarning` -> `ndsError`). That is two orders of magnitude below the
+# threshold, so THIS SITE WAS LATENT, NOT LIVE, and nobody should read the
+# rewrite as a fix for a failure that had already happened here.
+#
+# It is still the site worth fixing first, for the reason that has nothing to
+# do with likelihood: of the ~130 in this repository this is the one whose
+# EPIPE answer is the GREEN one, in the gate that licenses everything below it.
+# The suites grow; 56 test cases across the three of them are 4 KB of output
+# now, and a failure dump on a collection compare is not a bounded thing. The
+# day it crosses 64 KiB this script starts reporting 27 arms of coverage over a
+# broken baseline and says nothing at all. Demonstrated in that state against a
+# stub `nim` whose suite fails its second case and then prints 1.6 MB: before
+# the fix, three red suites reported "6 case(s) green" and the arms ran; after,
+# all three report "is already red" and the script stops.
 #
 # A here-string has no pipe to break, so there is no EPIPE and no pipefail
 # interaction. Where two greps have to compose, the intermediate result is

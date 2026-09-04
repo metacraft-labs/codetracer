@@ -12,9 +12,29 @@
 #
 #     printf '%s' "$haystack" | grep -q needle
 #
-# RETURNS A SUCCESSFUL MATCH AS A FAILURE. It is a race — it depends on whether
-# the producer finishes before the consumer exits — so it does not fail the
-# same way twice, and it gets diagnosed as flakiness.
+# RETURNS A SUCCESSFUL MATCH AS A FAILURE.
+#
+# THE THRESHOLD, MEASURED RATHER THAN ASSUMED, because it decides whether any
+# given site is failing today or merely waiting to. With the needle on line 1:
+#
+#     8/16/32/48/56/60/61/62/63 KB -> sees the needle
+#     64/96/256 KB                 -> MISSES it, pipeline exit 141
+#
+# 64 KiB, the pipe buffer, exactly. Two consequences worth stating plainly:
+#
+#   * BELOW 64 KiB THE CONSTRUCTION IS CORRECT. Most sites in this repository
+#     are below it today. They are latent, not live, and anyone auditing this
+#     work should not be told otherwise.
+#   * The needle must also be found EARLY. `grep` reads to the end of a line
+#     before it can match, so a single 128 KB line with no newline does not
+#     trigger it; a 64 KB log whose first line matches does, every time.
+#
+# Latent is still worth fixing, and the reason is the direction of the error
+# rather than its likelihood. Where the condition is inverted — where a MATCH
+# is the failure, as in `if <found the thing that must not be here>; then fail`
+# — the EPIPE answer is the PASSING one. The day such a site crosses 64 KiB it
+# starts reporting a clean result and nothing anywhere says so. A false red
+# announces itself; a false green is found by accident or not at all.
 #
 # WHY A LINT AND NOT JUST A FIX
 # -----------------------------

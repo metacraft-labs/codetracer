@@ -414,13 +414,18 @@ note "written to catch. So the check above is run against a planted violation."
 plant 'proc ns1QualifiedViolation*(p: string): bool =
   ## Planted by ci/test/hostfree-build.sh and removed again.
   os.fileExists(p)'
-# HERE-STRING, NOT `strip_comments ... | grep -qE ...`. `${VICTIM}` is a whole
-# Nim module, so the stripped text is far larger than a pipe buffer: `grep -q`
-# exits on the first match, `strip_comments` takes EPIPE, and under the
-# `set -o pipefail` at the top of this file the pipeline reports 141 for a
-# match that succeeded. Both arms of this scenario were exposed, and the second
-# one (below) inverts into a FALSE GREEN: it reports "the check ignores a local
-# named 'files'" whenever the EPIPE race is won, whatever the regex does.
+# HERE-STRING, NOT `strip_comments ... | grep -qE ...`. `grep -q` exits on the
+# first match, `strip_comments` takes EPIPE, and under the `set -o pipefail` at
+# the top of this file the pipeline reports 141 for a match that SUCCEEDED —
+# once the haystack reaches 64 KiB. See ci/test/grep-q-pipefail-gate.sh for the
+# measurement.
+#
+# `${VICTIM}` is 25 KB today, so this is latent, not live. It is rewritten
+# because the second arm below inverts: it reports "the check ignores a local
+# named 'files'" from its ELSE branch, so on the day this module reaches 64 KB
+# that arm starts passing whatever the regex does, and a scenario whose whole
+# purpose is "the check can actually fail" would be the thing that stopped
+# being able to.
 if grep -qE "${QUALIFIED_RE}" <<<"$(strip_comments "${VICTIM}")"; then
 	ok "the qualified-call check detects a planted os.fileExists"
 else

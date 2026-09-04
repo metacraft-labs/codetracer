@@ -1322,12 +1322,15 @@ jobs:
           # bytes before upload.
           doc="$(curl -fsSL --retry 5 --retry-delay 4 --retry-all-errors \
                    https://web-codetracer.pages.dev/ || true)"
-          # HERE-STRINGS, NOT `printf ... | grep -q ...`. `$doc` is a whole
-          # served HTML page, far bigger than a pipe buffer, so `grep -q`'s
-          # exit-on-first-match kills `printf` with SIGPIPE and `pipefail`
-          # reports 141 -- a page that DOES carry the descriptor read as one
-          # that does not, and this step failed the deploy over it. The
-          # `grep -o` below is safe as a pipe: it reads to EOF.
+          # HERE-STRINGS, NOT `printf ... | grep -q ...`. `grep -q` exits on
+          # its first match, `printf` takes EPIPE, and `pipefail` reports 141 --
+          # a successful match returned as a failure -- once the haystack
+          # reaches 64 KiB. See ci/test/grep-q-pipefail-gate.sh for the
+          # measurement. `$doc` is the served index.html, whose size is not
+          # measured from here and is not fixed by anything in this repo, which
+          # is the whole argument: a check that is correct at 60 KB and silently
+          # inverts at 64 KB is not a check anyone should have to size.
+          # The `grep -o` below is safe as a pipe: it reads to EOF.
           if grep -q 'id="codetracer-deployment"' <<<"$doc"; then
             echo "  ok: the served page carries its deployment descriptor"
             printf '%s' "$doc" | grep -o '"id":"[^"]*","url":"[^"]*"' | sed 's/^/    /'
