@@ -5181,6 +5181,42 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-ruby-recorder
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Clone codetracer-js-recorder sibling
+        # NOT gated to macOS, unlike the two clones above, and not for symmetry
+        # -- the suite below needs this on both legs and neither leg has it.
+        #
+        # `test-ui-tests` died here on 2026-09-03, run 33809372477, job
+        # 100828216608 (macos, aarch64-darwin):
+        #
+        #     Error: codetracer-js-recorder not found; set
+        #     CODETRACER_JS_RECORDER_PATH or build the sibling repo
+        #     (npm run build).
+        #     Error: could not record the cross-process demo from this tree
+        #     (scripts/materialize-recording.sh exited 1).
+        #
+        # repeated for every recording the Playwright suite materialises. Those
+        # recordings are PRODUCED, not committed, so there is no stale copy to
+        # fall back on and the whole DB-based lane fails at its first fixture.
+        #
+        # `viewmodel-tests` clones this same sibling (see the step of the same
+        # name in that job) precisely because its recorder-gated suites cannot
+        # resolve `../codetracer-js-recorder/packages/cli/dist/index.js`
+        # otherwise. This job runs `ci/test/ui-tests-db.sh`, which reaches the
+        # same materialiser, and simply never had the step. The nixos leg's
+        # `siblings:` block does not carry it either -- that leg fails earlier,
+        # in the storybook build, so its need for the recorder has never been
+        # reached, let alone reported.
+        #
+        # `dev` is that repo's default branch and `main` trails it, which is
+        # the ref `viewmodel-tests` settled on for the same reason.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Run TypeScript Playwright UI tests (DB-based only)
         run: ./ci/test/ui-tests-db.sh
         env:
