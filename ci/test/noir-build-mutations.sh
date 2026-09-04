@@ -24,6 +24,39 @@
 # arm asserts that the file actually CHANGED before it runs anything, and a
 # no-op patch is a HARD FAILURE, not a skip.
 #
+# EVERY MATCH BELOW IS A HERE-STRING, NEVER `printf ... | grep -q`, AND THAT IS
+# A CORRECTNESS FIX RATHER THAN A STYLE ONE.
+#
+# `grep -q` exits the instant it matches. If the haystack is bigger than a pipe
+# buffer the producer is still writing, takes EPIPE, and dies of SIGPIPE; with
+# the `set -o pipefail` below the pipeline adopts that failure and reports 141.
+# A SUCCESSFUL MATCH IS THEREFORE RETURNED AS "NO MATCH".
+#
+# In this file that had teeth in both directions, and the first one is the
+# reason this script needed rewriting rather than tidying:
+#
+#   * The BASELINE gate on line ~94 asked "is this suite already red?". A red
+#     Nim suite prints a failure dump, so its output is LARGE and its first
+#     `[FAILED]` sits near the top — the exact shape that takes EPIPE. The gate
+#     answered "not red", the `COMPILE-FAILED` arm below it did not match
+#     either, and control fell into the `else` branch, which counts `[OK]`
+#     lines with `grep -c` — a counter reads to EOF, so THAT one worked, found
+#     the green cases a partly-red suite still has, and printed "N case(s)
+#     green". A genuinely red baseline was reported as a green one, and the
+#     whole point of the baseline is that without it all 27 arms below are
+#     vacuous. That is a FALSE GREEN in the one check that guards the rest.
+#
+#   * Inside an arm the same pairing fails the other way: line ~162 is
+#     `if ! ... | grep -q '\[FAILED\]'`, so EPIPE reads as "no red case" and the
+#     arm reports SURVIVED against a mutation it actually killed. Line ~168 was
+#     worse still — `grep -F '[FAILED]' | grep -qF "$expected"` gives the MIDDLE
+#     grep the SIGPIPE, and the arm reports MISS.
+#
+# A here-string has no pipe to break, so there is no EPIPE and no pipefail
+# interaction. Where two greps have to compose, the intermediate result is
+# captured into a variable first — a pipe whose consumer is `grep -q` is the
+# defect, wherever the producer came from.
+#
 # Usage:  bash ci/test/noir-build-mutations.sh
 # Exit:   0 every arm killed its own case, 1 otherwise, 2 could not run.
 
@@ -91,14 +124,14 @@ for pair in "${MARSHALLING}:marshalling" "${PRODUCER_TEST}:producer" "${WORKER_T
 	suite="${pair%%:*}"
 	label="${pair##*:}"
 	output="$(run_suite "${suite}" "baseline-${label}")"
-	if printf '%s' "${output}" | grep -q '\[FAILED\]'; then
+	if grep -q '\[FAILED\]' <<<"${output}"; then
 		bad "baseline: ${suite} is already red"
 		baseline_ok=0
-	elif printf '%s' "${output}" | grep -q 'COMPILE-FAILED'; then
+	elif grep -q 'COMPILE-FAILED' <<<"${output}"; then
 		bad "baseline: ${suite} does not compile"
 		baseline_ok=0
 	else
-		ok_count="$(printf '%s' "${output}" | grep -c '\[OK\]')"
+		ok_count="$(grep -c '\[OK\]' <<<"${output}" || true)"
 		if [ "${ok_count}" -lt 5 ]; then
 			bad "baseline: ${suite} reported ${ok_count} case(s), which is implausibly few"
 			baseline_ok=0
@@ -152,29 +185,36 @@ arm() {
 	output="$(run_suite "${suite}" "arm-${arms}")"
 	cp "${backup}" "${file}"
 
-	if printf '%s' "${output}" | grep -q 'COMPILE-FAILED'; then
+	if grep -q 'COMPILE-FAILED' <<<"${output}"; then
 		bad "arm ${arms} (${name}): the mutated product does not compile, so the"
 		echo "         check was not exercised. A mutation must produce a WRONG"
 		echo "         program, not an invalid one."
 		return
 	fi
 
-	if ! printf '%s' "${output}" | grep -q '\[FAILED\]'; then
+	# The red cases are extracted ONCE, into a variable. Composing this as
+	# `grep -F '[FAILED]' <<<"$output" | grep -qF "$expected"` would put the
+	# defect back: the `grep -q` still terminates a pipe early, and the
+	# upstream `grep -F` still dies of SIGPIPE.
+	local red
+	red="$(grep -F '[FAILED]' <<<"${output}" || true)"
+
+	if [ -z "${red}" ]; then
 		bad "arm ${arms} (${name}): SURVIVED — the suite is green over a broken product."
 		echo "         Nothing covers: ${expected}"
 		return
 	fi
 
-	if printf '%s' "${output}" | grep -F '[FAILED]' | grep -qF "${expected}"; then
+	if grep -qF "${expected}" <<<"${red}"; then
 		local also
-		also="$(printf '%s' "${output}" | grep -cF '[FAILED]')"
+		also="$(grep -c . <<<"${red}" || true)"
 		killed=$((killed + 1))
 		ok "arm ${arms} (${name}): reddened its own case — ${expected} (${also} case(s) red in total)"
 	else
 		bad "arm ${arms} (${name}): MISS — something went red, but not the case this arm covers."
 		echo "         expected red: ${expected}"
 		echo "         actually red:"
-		printf '%s' "${output}" | grep -F '[FAILED]' | sed 's/^/           /'
+		while IFS= read -r line; do echo "           ${line}"; done <<<"${red}"
 	fi
 }
 

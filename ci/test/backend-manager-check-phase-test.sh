@@ -289,7 +289,14 @@ expect_killed() { # label, phase_file, expected-message-substring, [env...]
 		fail "$label" "MUTATION SURVIVED: the phase passed with the defect present."
 		return
 	fi
-	if ! printf '%s' "$out" | grep -qF "$needle"; then
+	# HERE-STRING, NOT `printf ... | grep -q`. Under the `set -o pipefail`
+	# at the top of this file that pairing reports NO MATCH FOR A NEEDLE THAT
+	# IS PRESENT: `grep -q` exits on the first match, `printf` is still
+	# writing a cargo log that runs to tens of kilobytes, takes EPIPE, and the
+	# pipeline adopts its 141. Here that inverts a kill into "died on the
+	# wrong guard" — a mutation the guard DID catch reported as a suite
+	# failure, in a suite `ci/lint/bash.sh` runs on every build.
+	if ! grep -qF "$needle" <<<"$out"; then
 		fail "$label" "died (exit $rc) but not on the expected guard; wanted: $needle"
 		printf '%s\n' "$out" | sed 's/^/        | /' >&2
 		return
@@ -320,7 +327,11 @@ expect_pass "checkPhase succeeds against a crate whose rr suite cannot run" \
 	"$CHECK_PHASE_FILE"
 
 out="$(run_phase "$CHECK_PHASE_FILE")"
-if printf '%s' "$out" | grep -q "Running tests/$EXCLUDED_TARGET.rs"; then
+# The same here-string rule as in `expect_killed`, and this is the site where
+# it mattered most: the condition is INVERTED — a match is the failure — so an
+# EPIPE-induced "no match" reports the excluded target as absent from the lane
+# whether or not it ran. The check could not say no.
+if grep -q "Running tests/$EXCLUDED_TARGET.rs" <<<"$out"; then
 	fail "the unsatisfiable target does not run in this lane" \
 		"tests/$EXCLUDED_TARGET.rs still ran"
 else
@@ -332,9 +343,9 @@ fi
 # switching the tests off".
 missing=""
 for t in dive_in_url_fetch_test mcp_origin_test meta_dat_metadata_loading; do
-	printf '%s' "$out" | grep -q "Running tests/$t.rs" || missing="$missing $t"
+	grep -q "Running tests/$t.rs" <<<"$out" || missing="$missing $t"
 done
-printf '%s' "$out" | grep -q "Running unittests src/main.rs" || missing="$missing bins"
+grep -q "Running unittests src/main.rs" <<<"$out" || missing="$missing bins"
 if [ -n "$missing" ]; then
 	fail "every OTHER target still runs in this lane" "not run:$missing"
 else
