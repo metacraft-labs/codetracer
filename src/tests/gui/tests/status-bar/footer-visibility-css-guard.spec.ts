@@ -58,6 +58,16 @@
  * strengthening the predicate without re-deriving the list turns this file
  * red.  The narrative version lives above `footerVisibilityFailures`.
  *
+ * THE COLOUR HALF OF THAT BOUNDARY NOW HAS A GUARD OF ITS OWN, which is worth
+ * knowing before assuming a green run here means a readable footer.  This bar
+ * shipped every readout in the user-agent default BLACK on `#1b1b1b` —
+ * 1.22:1 — and passed this spec the whole time, correctly: the boxes were all
+ * present and all on screen.  `footer-contrast-guard.spec.ts` measures the
+ * painting instead, and the two colour-only entries in the MISSED list carry
+ * `caughtBy: "contrast"` for it to run.  The two specs are complements: this
+ * one asks whether the footer is THERE, that one asks whether it is READABLE,
+ * and the regression that prompted each was invisible to the other.
+ *
  * IT ALSO TRUSTS THE BUILD.  It reads whatever `src/build-debug` currently
  * holds, and cannot tell a fresh theme from a stale one — editing
  * `status_bar.styl` and running this spec WITHOUT `just build-once` reports

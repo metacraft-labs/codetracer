@@ -247,6 +247,28 @@ export const CAUGHT_HIDE_SPELLINGS: readonly HideSpelling[] = [
 export const SURVIVING_HIDE_SPELLINGS: readonly (HideSpelling & {
   /** Why a geometry probe cannot see this one, in one line. */
   readonly why: string;
+  /**
+   * A DIFFERENT guard that does catch this one, when there is one.
+   *
+   * Added when the colour-only entries stopped being a pure blind spot.
+   * `tests/status-bar/footer-contrast-guard.spec.ts` measures what every
+   * region of the bar is painted against what is behind it, which is exactly
+   * the instrument the two `why` lines below said was needed — so those two
+   * are no longer unseen by the suite, only unseen by THIS predicate.
+   *
+   * They stay in this list rather than moving to `CAUGHT_HIDE_SPELLINGS`,
+   * because that list is what `footerVisibilityFailures` rejects and it still
+   * does not reject these: a geometry probe cannot see a colour, and pretending
+   * otherwise would put a false entry in the one place this file is trusted to
+   * be literal. The honest shape is "missed here, caught there", said in data.
+   *
+   * `verify_it_closes_the_colour_half_of_the_blind_spot` in the contrast guard
+   * RUNS every entry marked `"contrast"` and fails if it is not caught, so this
+   * annotation cannot rot into a claim nothing checks — which is the exact
+   * failure mode that made this file's previous MISSED list a published route
+   * past the guard.
+   */
+  readonly caughtBy?: "contrast";
 })[] = [
   {
     name: "`clip-path: inset(100%)`",
@@ -281,6 +303,7 @@ export const SURVIVING_HIDE_SPELLINGS: readonly (HideSpelling & {
     name: "`color: transparent`",
     css: "#status-base > *:not(#auto-hide-bottom-strip) { color: transparent !important; }",
     why: "text colour is not geometry; the boxes keep their full size",
+    caughtBy: "contrast",
   },
   {
     name: "text drawn in the background colour",
@@ -288,6 +311,7 @@ export const SURVIVING_HIDE_SPELLINGS: readonly (HideSpelling & {
       "#status-base > *:not(#auto-hide-bottom-strip) " +
       "{ color: var(--colors-ui-surface-primary-default, #2c2c2c) !important; }",
     why: "requires comparing two computed colours against a contrast threshold, not a box",
+    caughtBy: "contrast",
   },
   {
     name: "occlusion by an overlay painted on top",
@@ -532,6 +556,16 @@ export async function probeFooterRegions(
  *            There is also a boundary case by construction: `overlapsViewport`
  *            asks for one pixel of overlap, so a region pushed almost entirely
  *            off the edge still passes.
+ *
+ *            MISSED HERE IS NO LONGER MISSED EVERYWHERE, for two of those
+ *            eight.  Colour-only invisibility is now measured by
+ *            `tests/status-bar/footer-contrast-guard.spec.ts`, which compares
+ *            what each region is painted against what is behind it — the very
+ *            instrument the entries' own `why` said was required.  They stay
+ *            in the MISSED list because THIS predicate still cannot see them
+ *            and this list is about this predicate; they carry
+ *            `caughtBy: "contrast"`, and that guard runs every entry so
+ *            annotated.  The other six remain uncovered by anything.
  *
  * The misses share one shape: the geometry is intact and correctly placed,
  * and only the *painting* is wrong, which `getBoundingClientRect` plus the

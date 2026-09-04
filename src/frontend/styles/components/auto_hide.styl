@@ -408,7 +408,27 @@
   font-size: inherit
   // font-weight: 600
   letter-spacing: -0.14px
-  color: colors-ui-text-primary-disabled
+  // AN IDLE TAB IS NOT A DISABLED ONE.
+  //
+  // This was `colors-ui-text-primary-disabled` (grey-400, `#727272`), which
+  // on the tab's own `colors-ui-surface-base-panel` (grey-700, `#282828`)
+  // measures **3.06:1** — under the 4.5:1 these labels need as normal text.
+  // Measured on the live page, not inferred: BUILD / PROBLEMS / FIND IN FILES
+  // / REQUESTS all computed `rgb(114, 114, 114)` on `rgb(40, 40, 40)`.
+  //
+  // The token was also saying something untrue. Every one of these tabs is
+  // clickable and selects a panel; "disabled" is the one state they are never
+  // in, and a disabled token is allowed to sit below the text threshold
+  // precisely because it marks something you cannot use.
+  //
+  // `colors-ui-text-primary-label-subtle` (grey-300, `#919191`) is the same
+  // token `#status-base` now sets for its own readouts, so an idle tab and
+  // the readouts beside it read at one ambient level — 4.68:1 here. It is
+  // chosen over the brighter `colors-ui-text-primary-caption` (grey-200,
+  // 7.11:1) to keep the idle/active distinction wide: `.active` below is
+  // `colors-ui-text-primary-label` (grey-150, 8.81:1), and the state cue is
+  // the GAP between the two, which a brighter idle value would close.
+  color: colors-ui-text-primary-label-subtle
   background-color: colors-ui-surface-base-panel
   border-radius: 0.36em
   cursor: pointer
@@ -818,6 +838,23 @@
 
 .collapsed-icon
   font-size: 14px
+  // The glyph needs its own colour, because the chip it sits on has its own
+  // background. `.collapsed-icon-zone.has-icons` paints `#3a5070`; the button
+  // declared no `color`, so it inherited — black before `#status-base`
+  // declared one (**2.56:1** on that blue), and grey-300 after, which is
+  // **2.60:1** and still under the 3:1 floor for a non-text control. The bar
+  // fix does not reach this one: inheriting a colour chosen for `#1b1b1b`
+  // onto a `#3a5070` chip is how it stayed dark either way.
+  //
+  // `colors-ui-icon-primary-default` (grey-100, `#dddddd`) is the design
+  // system's own default icon colour and gives 6.04:1 here, and 5.33:1
+  // against the `#4a6080` this lightens to on hover — so both resting and
+  // hover states clear the threshold, which is why the hover background did
+  // not have to move. It clears 4.5:1 as well, which matters because these
+  // are rendered as TEXT glyphs (`text icon.icon` in
+  // `isonim_auto_hide_collapsed_icons_view.nim`), not as background images,
+  // so the stricter text threshold is the honest one to hold them to.
+  color: colors-ui-icon-primary-default
   cursor: pointer
   padding: 1px 3px
   border-radius: 2px

@@ -847,6 +847,35 @@ test-gui-visible *args: build-once build-siblings
   esac
   just test-e2e {{args}}
 
+# Status-bar footer guards — the two BROWSER-ONLY specs, in seconds.
+#
+# Neither needs Electron, a recorded trace, a language recorder or a display:
+# both lay the footer's own markup out in a plain Playwright page carrying the
+# COMPILED theme stylesheet and measure what the user would see.
+#
+#   footer-visibility-css-guard  — is every required region THERE, and on screen
+#   footer-contrast-guard        — is what is there READABLE against its background
+#
+# The two are complements, and each was written after a regression the other
+# could not see: the footer shipped tabs-only three times (b27da3947,
+# 51a3e820e, 00fd68b7f) with the colours fine, and shipped every readout at
+# 1.22:1 — the user-agent default black on #1b1b1b — with the geometry fine.
+#
+# Deliberately NOT routed through `test-e2e`: that recipe demands $DISPLAY on
+# Linux, starts Xvfb via `test-gui-prebuilt`, and builds storybook, none of
+# which these two need. It is also not given `build-once` as a prereq, so it
+# stays usable as a fast local loop — the cost is that it reads whatever
+# `src/build-debug/frontend/styles` currently holds, so RUN `just build-once`
+# FIRST after editing any `.styl` or you are grading the previous build. CI
+# gets this right by construction: it runs after the package is built.
+test-status-bar-guards *args:
+  #!/usr/bin/env bash
+  set -e
+  cd src/tests/gui && \
+    npm install --no-audit --no-fund && \
+    npx playwright test tests/status-bar/footer-visibility-css-guard.spec.ts \
+                        tests/status-bar/footer-contrast-guard.spec.ts {{args}}
+
 # Run the MCR visual replay regression gate used by CI.
 test-visual-replay-gate:
   bash ci/test/visual-replay-gate.sh

@@ -5297,6 +5297,17 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
+      # The two browser-only footer guards, ahead of the full suite because
+      # they cost seconds and answer for the two regressions this bar has
+      # actually shipped: going tabs-only (b27da3947, 51a3e820e, 00fd68b7f)
+      # and painting its readouts at 1.22:1. Both previously surfaced -- when
+      # they surfaced at all -- as a suite-wide timeout an hour into the run,
+      # or as a user report two weeks after release. See ci/test/status-bar-guards.sh.
+      - name: Status bar footer guards (visibility + contrast)
+        run: ./ci/test/status-bar-guards.sh
+        env:
+          CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
+
       - name: Run TypeScript Playwright UI tests (DB-based only)
         run: ./ci/test/ui-tests-db.sh
         env:

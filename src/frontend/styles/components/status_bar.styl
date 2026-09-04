@@ -361,22 +361,79 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // `status-bar-footer-contract.spec.ts` pins the same contract against the
     // real Electron app.
     //
-    // What it does NOT catch, so you know what you are not covered against:
-    // rules that keep the box AT ITS PROPER COORDINATES and only change the
-    // painting — `clip-path: inset(100%)`, the legacy `clip: rect(0,0,0,0)`
-    // idiom, `filter: opacity(0)` or `filter: blur()`, an opacity just above
-    // zero, drawing text in the background colour, or covering the bar with an
-    // overlay.  Those pass both guards.  The list is not prose only: it is
-    // `SURVIVING_HIDE_SPELLINGS` in
+    // What those two do NOT catch, so you know what you are not covered
+    // against: rules that keep the box AT ITS PROPER COORDINATES and only
+    // change the painting — `clip-path: inset(100%)`, the legacy
+    // `clip: rect(0,0,0,0)` idiom, `filter: opacity(0)` or `filter: blur()`,
+    // an opacity just above zero, or covering the bar with an overlay.  The
+    // list is not prose only: it is `SURVIVING_HIDE_SPELLINGS` in
     // `src/tests/gui/page-objects/status-footer-contract.ts`, and the guard
     // runs it, so it cannot quietly go stale the way the previous one did.
     // Run the app and look at the footer before shipping anything in that
     // family.
     //
+    // ONE MEMBER OF THAT FAMILY IS NOW COVERED, by a third guard rather than
+    // by a stronger predicate in the first two.  Drawing the text in (or near)
+    // the background colour used to pass everything, and it was not
+    // hypothetical: this bar shipped its readouts in the user-agent default
+    // BLACK on `#1b1b1b` — 1.22:1 — and the only reason nobody reported it
+    // sooner is that `00fd68b7f` had them off-screen at the time.
+    // `src/tests/gui/tests/status-bar/footer-contrast-guard.spec.ts` measures
+    // what every region of this bar is painted against what is behind it, so
+    // colour-only invisibility now fails a check.  The two colour entries in
+    // `SURVIVING_HIDE_SPELLINGS` carry `caughtBy: "contrast"` and that guard
+    // runs them, so the hand-off between the two files is asserted rather
+    // than described.  Clipping, blurring and overlays remain uncovered.
+    //
     // NOTE the guard reads the COMPILED theme, so it only sees an edit to this
     // file after `just build-once`.
     bottom: 0
     background-color: colors-ui-surface-primary-default
+    // THE BAR DECLARES A TEXT COLOUR, because it declares a background.
+    //
+    // Reported from noirstudio.dev as *"the colors in the status bar are
+    // difficult to read"*, and measured in the running product rather than
+    // guessed: `body` (components/legacy.styl) sets `background-color` and no
+    // `color`, this bar set `background-color` and no `color`, and no
+    // ancestor in between sets one either — so every readout here inherited
+    // the USER-AGENT default, which is `canvastext`.  With no `color-scheme`
+    // declared anywhere that resolves to BLACK.  Read off the live page with
+    // `getComputedStyle`: `#status-base` is `rgb(0, 0, 0)` on
+    // `rgb(27, 27, 27)` — **1.22:1**, against a 4.5:1 requirement for normal
+    // text.  `.file-info-status-language` ("Noir"),
+    // `.file-info-status-encoding` ("UTF-8"), `#location-status`,
+    // `.location-path` and `.build-identity` all inherited it.  That is the
+    // complaint: not a colour chosen badly, a colour never chosen at all.
+    //
+    // It could not have been reported before now.  `00fd68b7f` had these
+    // readouts parked at `left: -9999px` from 2026-08-18 until `74879f32c`
+    // brought them back, so the black-on-near-black they had always been
+    // painted in was off-screen the whole time and nobody could see it.
+    //
+    // WHY THIS TOKEN.  `colors-ui-text-primary-label-subtle` (grey-300,
+    // `#919191`) is the QUIETEST token in the ramp that clears 4.5:1 on this
+    // surface — 5.47:1.  The next one down, grey-350 `#818181`, measures
+    // 4.42:1 and misses.  That matters here beyond arithmetic: this bar has
+    // been made tabs-only three times by people who wanted a quieter footer
+    // (see the note below), so raising its contrast is in tension with a real
+    // and recurring wish, and the answer is the dimmest legible value rather
+    // than the brightest available one.  It stays visibly below the attended
+    // level the bar already uses for an active tab
+    // (`colors-ui-text-primary-label`, grey-150, 10.29:1 here), so the
+    // readouts read as ambient rather than as something demanding attention.
+    //
+    // Declared on the bar rather than on each readout because the defect is a
+    // MISSING INHERITED VALUE, and its fix belongs at the root of the
+    // inheritance it was missing from — one declaration covers every current
+    // child and every child added later.  Descendants that own a colour
+    // (`#operation-status`, `.disconnected-status`, `#copy-path-image`, the
+    // strip tabs) are unaffected; all four were measured above threshold and
+    // are deliberately left alone.
+    //
+    // `src/tests/gui/tests/status-bar/footer-contrast-guard.spec.ts` measures
+    // this, and every other painted colour in the bar, against the compiled
+    // theme in a browser.
+    color: colors-ui-text-primary-label-subtle
     // THE BAR'S HEIGHT IS READ FROM A VALUE, and `#active-notifications`
     // reads the same one. These used to be `2em`/`0.25em` here and a bare
     // `38px` there, which is how the toast stack came to address a bar edge
@@ -448,6 +505,14 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       margin-bottom: 2px
       user-select: none
 
+    // ALSO DEAD, AND ALSO LEFT ALONE — see `.whitespace-set` below for the
+    // full reasoning. `colors-ui-border-primary` is grey-450 `#565656`, a
+    // BORDER token used as a text colour, which measures 2.35:1 on this bar.
+    // No `.nim`, `.ts`, `.js` or `.html` file in the tree emits
+    // `status-button-clicked`, or `status-button`, or `status-buttons`: the
+    // block that produced them is commented out in the pre-IsoNim history and
+    // was dropped entirely by `df4d3ef2f`. Recorded in the guard's
+    // `UNREACHABLE_SELECTORS` rather than repainted.
     .status-button-clicked
       background-color: colors-ui-surface-primary-secondary-hover
       color: colors-ui-border-primary
@@ -509,6 +574,34 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       color: colors-ui-text-warning-primary
       font-weight: 600
 
+    // DEAD, AND LEFT AT 1.51:1 DELIBERATELY — DO NOT "FIX" THE CONTRAST HERE.
+    //
+    // `colors-ui-border-secondary` is grey-600 `#3a3a3a`, which against this
+    // bar's `#1b1b1b` measures 1.51:1: the worst ratio in the file, and the
+    // obvious thing to bump when auditing the bar for legibility. It would be
+    // a bump to nothing. Nothing renders `.whitespace-set`. The markup was
+    // the Karax proc `editorWhitespaceOption`, deleted in `df4d3ef2f`, and it
+    // was ALREADY dead before that commit — in `df4d3ef2f^` the proc appears
+    // exactly once, at its own definition, with no call site anywhere. The
+    // backing `whitespace` field and its `increaseWhitespaceWidth` /
+    // `decreaseWhitespaceWidth` mutators (`types.nim`) are equally
+    // unreachable; their only callers were the deleted handlers.
+    //
+    // So the ratio is a fact about a rule that has never met a pixel. Raising
+    // it would make the bar no more legible and would cost a real design
+    // token spent on a selector the app cannot produce — and would leave a
+    // fixed number that reads, to the next auditor, as evidence the control
+    // is live. The same is true of `.whitespace-change`, `.whitespace-label`
+    // and `#file-info-status-editor-whitespace` below.
+    //
+    // The honest fix is deletion, and that is not smuggled in behind a
+    // contrast report: the whitespace controls are a FEATURE question (should
+    // the footer offer whitespace width at all), not a colour one. Until that
+    // is answered, this stays as it is, documented rather than adjusted.
+    // `footer-contrast-guard.spec.ts` records it in `UNREACHABLE_SELECTORS`
+    // with this reason, and asserts against the frontend sources that it is
+    // still unrendered — so if anyone ever wires it up, the guard fails and
+    // sends them here instead of letting 1.51:1 ship to a user.
     .whitespace-set
       width: 10px
       float: left
@@ -580,15 +673,29 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // nothing in Electron and the footer's box layout is untouched. It is the
     // one fact about the page a user cannot obtain from the page any other
     // way, so it is present rather than hidden, and quiet rather than loud:
-    // dimmed, `nowrap`, never a flex item that can push `.location-path` out
-    // of its ellipsis. The full 40-hex identity is in its `title`.
+    // `nowrap`, never a flex item that can push `.location-path` out of its
+    // ellipsis. The full 40-hex identity is in its `title`.
+    //
+    // IT IS QUIET BY BEING SMALL AND UNEMPHASISED, NOT BY BEING FADED.
+    // `opacity: 0.6` used to do the dimming, and it was the worst-contrast
+    // element in the whole bar: measured on the live page it composited the
+    // inherited black down to **1.14:1**, below even the 1.22:1 everything
+    // else inherited. Now that the bar declares a colour the multiplier would
+    // still take grey-300 down to roughly 2.9:1 — under the 4.5:1 this text
+    // needs — so it is removed rather than retuned.
+    //
+    // Removed rather than replaced with a dimmer token, because there is no
+    // dimmer one to replace it with: grey-300 is already the quietest step in
+    // the ramp that clears 4.5:1 on this surface. An opacity multiplier is
+    // also the wrong instrument for "quiet" — it makes the resulting contrast
+    // a function of two values instead of one, so the token no longer tells
+    // you what the user sees and the guard has to composite it back out.
     .build-identity
       display: inline-flex
       align-items: center
       flex: 0 0 auto
       white-space: nowrap
       margin-right: 8px
-      opacity: 0.6
       cursor: default
 
     #location-status
