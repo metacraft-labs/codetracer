@@ -849,9 +849,23 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     #        → ``onUpdatedTable``, which drops any response whose ``draw``
     #          is not the newest (``event_log.nim``'s ``self.drawId`` guard).
     #
-    # ``store.debugger`` is reassigned once per panel per CtCompleteMove and
-    # the signal does not compare values, so a single jump fires this effect
-    # several times and puts several draws in flight at once.  Whenever a
+    # ``store.debugger`` is reassigned once per panel per CtCompleteMove, and
+    # those writes are not all equal — each panel syncs the position it saw,
+    # so a single jump can fire this effect several times and put several
+    # draws in flight at once.
+    #
+    # THIS USED TO SAY "the signal does not compare values". THAT IS FALSE.
+    # IsoNim's ``writeSignal`` (isonim/core/signals.nim) returns early on
+    # ``state.value == value`` and ``DebuggerState`` is a plain object, so a
+    # byte-identical reassignment notifies nobody — measured at 145 identical
+    # writes re-running an effect exactly once, in
+    # ``src/tests/gui/tests/state/state_render_storm_test.nim``. The claim
+    # survived here and in ``flow_vm.nim`` long enough to be quoted into a bug
+    # brief as a measurement, and sent a fix one layer away from the defect.
+    # What is true is only the first sentence above: several DIFFERING writes,
+    # not a signal that fails to deduplicate.
+    #
+    # Whenever a
     # newer draw is issued before the previous reply lands, the previous reply
     # is discarded — and if the newest reply is the one that goes missing,
     # ``tableCallback`` is never invoked and DataTables is left holding no
