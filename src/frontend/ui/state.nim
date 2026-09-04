@@ -749,55 +749,35 @@ method register*(self: StateComponent, api: MediatorWithSubscribers) =
   # Initialize the parallel ViewModel instance (no-op if already created).
   initStateVM()
 
-  # AND MOUNT, HERE — BUT THIS IS NOT THE MOMENT THE CONTAINER EXISTS, AND
-  # THE MOUNT THAT MATTERS IS NOW IN `ui/layout.nim`'s COMPONENT FACTORY.
+  # THE MOUNT USED TO BE HERE, AND IT IS NOW IN `ui/layout.nim`'s COMPONENT
+  # FACTORY — the one site that knows `#stateComponent-0` exists, because it
+  # has just created it.
   #
-  # The paragraphs below were written from the Noir Studio measurement and are
-  # correct about that surface, where `register` does run after GoldenLayout
-  # has built the pane. They are NOT correct in general. On the Electron
-  # desktop `register` runs at component-CONSTRUCTION time — `createUIComponents`
-  # in `types.nim`, called from `onInit` — which is EARLIER than the container,
-  # not later. 25 desktop session logs (2026-09) show the container absent at
-  # retry #1 in every run, and `CalltraceComponent.register` has always made
-  # the equivalent call and still gave up at retry #200 on the desktop. So this
-  # call opened a second poll window ahead of the container rather than mounting
-  # at a moment the container is known to exist.
+  # `1cb7b9d6` added a `tryMountIsoNimStatePanel()` call at this point and it
+  # genuinely fixed the deployed Noir Studio, where `register` runs after
+  # GoldenLayout has built the pane. It cannot fix the Electron desktop, where
+  # `register` runs at component-CONSTRUCTION time — `createUIComponents` in
+  # `types.nim`, from `onInit` — which is EARLIER than the container, not
+  # later. 25 desktop session logs (2026-09) show the container absent at retry
+  # #1 in all 25, and `CalltraceComponent.register` has always made the
+  # equivalent call and still gave up at retry #200 in both runs that reached a
+  # verdict. A second poll window opened ahead of the container is still a poll
+  # that loses.
   #
-  # The site that knows is `layout.mountComponentContainer`'s dispatch, which
-  # now carries a `Content.State` arm. This call is KEPT as a cheap
-  # no-op-if-absent: on the web surface it is the earlier of the two and it is
-  # the one `1cb7b9d6` proved, and `statePanelIsLive` makes a second mount
-  # impossible rather than merely unlikely.
+  # THE CALL WAS REMOVED RATHER THAN LEFT AS A HARMLESS SECOND MECHANISM, and
+  # it was measured before it was removed. Three web bundles were assembled
+  # from this tree and driven through Run → replay by
+  # `ci/test/pane_children_probe.mjs`, reading `childElementCount` on
+  # `#stateComponent-0`:
   #
-  # `initStateVM` returns immediately when `stateVMInstance` is already set —
-  # which it always is by now, because `initStateVMWithStore` created it when
-  # the session store was installed. So the ONLY `tryMountIsoNimStatePanel`
-  # call this component had was that one, and it ran while the front end was
-  # still in edit mode, where `#stateComponent-0` does not exist: GoldenLayout
-  # has not built the replay layout yet. `doMountStatePanel` polls for the
-  # container 200 times at 10 ms, exhausts the budget in ~2 s, logs
-  # "not ready after 200 retries, giving up" and returns — and nothing calls
-  # it again. `register` runs LATER, when GoldenLayout has created the panel
-  # and registered the component into it, which is precisely when the mount
-  # can succeed, and it was the one caller that did not attempt it.
+  #   pre-fix (with this call, no factory arm)  state: 10 descendants
+  #   fixed   (with this call AND the arm)      state: 10 descendants
+  #   fixed   (arm only, THIS CALL DELETED)     state: 10 descendants
   #
-  # Measured on the deployed Noir Studio (noirstudio.dev, 2026-09-04): a
-  # recorded session had `#stateComponent-0` present, visible and EMPTY —
-  # `children.length == 0` — while the engine was answering `ct/load-locals`
-  # with `x` and `y` and `syncStoreLocals` was writing them into the store.
-  # Every layer below the panel was correct; the panel was never mounted, so
-  # the State pane stayed blank however far the visitor navigated. That is the
-  # report "the state panel stays empty as I navigate the noir recording".
-  #
-  # `CalltraceComponent.register` (`ui/calltrace.nim`) has always made this
-  # call and its panel mounts on the same page, from the same give-up, which
-  # is the difference the two panes' behaviour has been showing all along.
-  #
-  # Guarded exactly as calltrace's is: with no VM there is nothing to mount,
-  # and `tryMountIsoNimStatePanel` is idempotent — it returns early while
-  # `statePanelIsLive()` holds — so an already-mounted panel is untouched.
-  if stateVMInstance != nil:
-    tryMountIsoNimStatePanel()
+  # The factory arm alone mounts the pane, on the surface `1cb7b9d6` was proven
+  # on. Keeping both would have left two callers for one mount and no way to
+  # tell which one was doing the work — the state of affairs that let this
+  # defect survive in the first place.
 
   let stateComponent = self
   stateHistoryBridge = proc(expression: string) =
