@@ -6413,7 +6413,66 @@ when defined(ctWeb) and not defined(ctInExtension):
           # .Debug][0]` exists. Before `remountDebugControls`, so the panel
           # mounts over a bridge that is already live.
           debug.rewireDebugControlsBridgeForActiveSession(data)
-          debug.remountDebugControls())
+          debug.remountDebugControls()
+
+          # AND THE BUILD OVERLAY IS DISMISSED, BECAUSE THE SESSION IT WAS
+          # REPORTING ON IS NOW ON SCREEN.
+          #
+          # BUILD is auto-hidden on this surface, so `ensureBuildPaneVisible`
+          # (`ui/web_noir_build.nim`) reveals it through the auto-hide OVERLAY
+          # to show compiler output. Nothing on the web path ever dismissed it
+          # again: `autoDismissBuildPanel` had one caller, `build.onBuildCode`,
+          # which is the DESKTOP producer. `web_noir_build.nim`'s own header
+          # says "this is one pane with two producers, so it gets one
+          # behaviour" — it was given the reveal half and not the dismiss half.
+          #
+          # AN OPEN OVERLAY IS NOT A COSMETIC LEFTOVER. `#auto-hide-backdrop`
+          # is its click-to-dismiss layer: transparent, `position: fixed`,
+          # `top/left/right/bottom: 0`, z-index 98
+          # (`styles/components/auto_hide.styl`), shown by the sibling rule
+          # `#auto-hide-overlay.visible ~ #auto-hide-backdrop`. While it is up
+          # it is THE WHOLE VIEWPORT and every pointer gesture over the
+          # workspace lands on it instead of the pane underneath.
+          #
+          # Measured in a browser on the assembled bundle (86fbb1285, with the
+          # Noir wasm and the replay engine supplied), right-clicking the
+          # editor in the session this very block builds:
+          #
+          #   overlay 'auto-hide-overlay-bottom visible', title BUILD, 1432x280
+          #   backdrop display:block, 1440x900        <- the entire viewport
+          #   elementFromPoint(editor centre) = div#auto-hide-backdrop
+          #   the editor underneath: 474x802, isConnected true, 22 view-lines
+          #   -> `editor: onContextMenu fired` never logged, defaultPrevented
+          #      false, the menu had 0 rows against Edit mode's 7
+          #
+          # That is the reported "in Debug mode there is no context menu at
+          # all", and it is neither a menu defect nor an editor defect — the
+          # same Monaco instance builds 7 rows in Edit mode. The event never
+          # arrives.
+          #
+          # HERE, AND NOT IN `applyModeLayout`. Closing it on the mode
+          # transition was measured NOT to work: the overlay is revealed by
+          # the build, which is still running when `switchToDebug` is called
+          # forty lines up, so a transition-time dismiss fires before the
+          # thing it means to dismiss exists. The session mounting is the
+          # event that means "the build's output is no longer what the user is
+          # waiting for", and this is where that has just happened.
+          #
+          # `autoDismissBuildPanel` and not `hideOverlay`, so both producers
+          # dismiss the same way: it keeps the overlay up for 2s so a success
+          # is visible, and CANCELS if the user touches the overlay in that
+          # window (`pointerdown`/`keydown`), which is what makes this safe for
+          # someone reading compiler output. It is also a no-op unless BUILD is
+          # the active overlay, so a user who has an unrelated pane open keeps
+          # it.
+          #
+          # Reached through `ui/build`, which this module ALREADY imports.
+          # Adding `ui/auto_hide` to this file's import list to call
+          # `hideOverlay` directly was measured to regress Edit mode into
+          # showing the DEBUG menu — the originally reported defect, 22 gate
+          # failures against 6 — for the reason this file's own header gives
+          # about initialisation order. No import changes here.
+          build.autoDismissBuildPanel())
 
         # BUILD IS THE CONFIGURED ACTION, NOT A NEW CHORD.
         #
