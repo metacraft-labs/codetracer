@@ -906,6 +906,46 @@ proc findActiveRow(self: EventLogComponent, rrTicks: int, isEventJump: bool = fa
     if denseTable.autoScroll and isEventJump:
       scrollTable(denseTable, $(denseTable.activeRowIndex))
 
+proc refreshDimming*(self: EventLogComponent) =
+  ## Re-stamp `past` / `active` / `future` on every rendered row against the
+  ## debugger's current position. This is the WHOLE of what a move does to the
+  ## Event Log: the rows are static, so moving the reader can only move the
+  ## boundary between what has happened and what has not
+  ## (`GUI/Core-Panes/Event-Log-Pane.md` § "What a move changes, and what it
+  ## does not").
+  ##
+  ## IT HAS TO BE EXPLICIT, AND IT DID NOT USED TO BE. Re-stamping happened as
+  ## a side effect of the table being rebuilt on every move: `onUpdatedTable`
+  ## ends by calling `findActiveRow`, which re-classes every row. So the pane
+  ## got its dimming right by way of the very rebuild that was emptying it, and
+  ## removing the rebuild removed the only thing refreshing the classes.
+  ##
+  ## `findActiveRow` is not a substitute even now, because `onCompleteMove`
+  ## reaches it only on some paths — when the selected row lands outside the
+  ## visible window and `autoScroll` is on, the move goes through
+  ## `scrollOnMove`, which scrolls and never re-classes. Rows already rendered
+  ## then keep whatever they were stamped with at creation, which is how an
+  ## event BEFORE the current position stays dimmed after a jump forwards.
+  ##
+  ## Selection, focus and scrolling are deliberately not touched here. Those
+  ## are separate gestures with their own conditions; conflating them is what
+  ## left the dimming dependent on which branch a move happened to take.
+  if self.denseTable.isNil:
+    return
+  let context = self.denseTable.context
+  if context.isNil:
+    return
+  let rows = context.rows()
+  let indexes = rows.indexes()
+  let rowData = cast[seq[ProgramEvent]](rows.data())
+  for i, row in rowData:
+    let domNode = cast[Element](context.row(indexes[i]).node())
+    if not domNode.isNil:
+      domNode.classList.remove("past")
+      domNode.classList.remove("active")
+      domNode.classList.remove("future")
+      rowTimestamp(domNode, row, self.activeRowTicks)
+
 method onFocus*(self: EventLogComponent) {.async.} =
   self.focusItem()
 
@@ -1436,6 +1476,14 @@ method onUpdatedTable*(self: EventLogComponent, res: CtUpdatedTableResponseBody)
 
     self.loadEvents(mutData)
 
+    # UNTOUCHED HAZARD, NAMED SO IT IS NOT LOST: this call is unguarded, and
+    # `restart()` sets `self.tableCallback = nil`. A `ct/update-table` reply
+    # that lands after a restart therefore calls nil. It is a stale-reference
+    # bug of the same family as the four reported separately (a reference
+    # outliving the thing it describes), it is NOT the cause of the Event Log
+    # disappearing after a jump — that was the refetch-on-move above — and it
+    # was left alone deliberately rather than folded into a fix for a
+    # different defect.
     self.tableCallback(mutData.toJs)
     self.redraw()
 
@@ -1741,6 +1789,10 @@ method onCompleteMove*(self: EventLogComponent, response: MoveState) {.async.} =
 
   self.activeRowTicks = response.location.rrTicks
   self.lastJumpFireTime = currentTime
+  # The one thing a move owes this pane. Unconditional and ahead of every
+  # branch below, because the branches are about selection and scrolling and
+  # the dimming must not depend on which of them a given move happens to take.
+  self.refreshDimming()
   let liveRowAdded = self.addLiveDebuggerStopRow(response.location)
   let dt = self.denseTable
   if liveRowAdded and not dt.isNil and not dt.context.isNil:
