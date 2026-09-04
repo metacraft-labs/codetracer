@@ -463,23 +463,54 @@ proc initStateVM() =
   tryMountIsoNimStatePanel()
 
 proc valueDisplayText*(v: Value): string =
-  ## Rendered text representation matching what the legacy value row emitted
-  ## for atom values.
+  ## What the State pane's value cell says a recorded value IS.
   ##
-  ## Atomic kinds are stringified via ``$v`` (which dispatches into
-  ## ``common_types/utils/text_representation.text(value, depth)`` —
-  ## that pulls `value.i` for ``Int``, `value.f` for ``Float``,
-  ## ``"\"<text>\""`` for ``String``, etc.).  The legacy code relied on
-  ## the same proc, so the IsoNim view shows the exact same text the
-  ## Karax code did, including for languages whose recorder fills
-  ## ``value.i`` (wasm `i32`) but leaves ``value.text`` empty.
+  ## THERE ARE TWO RENDERINGS OF A `Value` AND THIS PANE HAD THE WRONG
+  ## ONE. `common_types/utils/text_representation.nim` defines both:
   ##
-  ## Compound kinds (Seq, Instance, etc.) come back here as the
-  ## composite text representation produced by ``$v``; the row's
-  ## "expanded" rendering still happens via the ``hasChildren`` flag
-  ## populated below.
+  ##   * `textRepr` — the value's own representation. A sequence is
+  ##     `@[100, 2000, 200, 14]`, a record is `Point(x:3,y:7)`, an enum is
+  ##     its NAME, and it is language-aware (`vec![...]` under Rust). This
+  ##     is what every other pane in the product paints: `ui/value.nim`'s
+  ##     `collapsedValueTextAndClass` feeds the Editor's inline view, Call
+  ##     Trace, Flow and Trace from it.
+  ##   * `text` / `$value` — a multi-line diagnostic DUMP *about* a value.
+  ##     The same sequence becomes the literal string
+  ##     `"Sequence(Seq [Field; 4]):\n  100\n  2000\n  200\n  14"`, and the
+  ##     same record becomes `"Instance(Point):\nx: 3\ny: 7"`.
+  ##
+  ## This proc used to be `$v`. So a recorded structure arrived at the
+  ## pane intact and was displayed as prose describing itself, inside the
+  ## single `span.value-expanded-text` that `isonim_state_view.nim` gives
+  ## the value cell — while the caret beside it already offered the real
+  ## children, built by `toVariableChildren` below. The reader was shown
+  ## the dump and the tree at once.
+  ##
+  ## AND `$v` LOSES REFUSALS OUTRIGHT. `text()`'s `case` has no `of Error`
+  ## branch, so an `Error` value falls through to `else: $value.kind` and
+  ## paints the bare word "Error". Watch refusals are `Error` values whose
+  ## `msg` IS the explanation — "cannot evaluate `initial_shield + 1`: `+`
+  ## would have to be computed, and a recording only holds the values that
+  ## were actually recorded" — and every one of them reached the user as
+  ## four characters saying nothing. `textRepr` has `of Error: $value.msg`.
+  ##
+  ## THE `$v` FALLBACK IS NOT DECORATION. `textReprDefault`'s `case` ends
+  ## in `else: ""`, so kinds it does not name — `Enum16`, `Enum32`,
+  ## `Literal`, `Slice`, `Any` — would render as an EMPTY cell. Blank rows
+  ## are exactly the regression this proc was last changed to remove (see
+  ## `syncStoreLocals` on `value.text`), so an empty result falls back to
+  ## the dump: something imperfect beats nothing.
+  ##
+  ## Atoms are unaffected, which is why this is safe. For `Int`, `Float`,
+  ## `Bool`, `String`, `Char`, `CString` and `FunctionKind` the two procs
+  ## are character-for-character identical — both read `value.i`,
+  ## `value.f`, `value.b` and so on per kind, which is the property the
+  ## wasm/db-trace fix depended on.
   if v.isNil:
     return ""
+  let structured = v.textRepr
+  if structured.len > 0:
+    return structured
   $v
 
 proc valueDisplayType*(v: Value): string =
@@ -550,6 +581,34 @@ proc toVariableChildren*(val: Value): seq[store_types.Variable] =
   else:
     discard
 
+proc localsToStoreRows*(legacyLocals: seq[Variable]): seq[store_types.Variable] =
+  ## Map one ``ct/load-locals`` response body onto the store's rows.
+  ##
+  ## SEPARATED FROM ``syncStoreLocals`` SO A TEST CAN CALL IT. The sync
+  ## proc needs the module-level ``stateVMStore``, which only exists once
+  ## the app has booted, so every probe that wanted to know what the State
+  ## pane *displays* had to re-implement this mapping by hand — and a
+  ## hand-written copy cannot notice when the real one is wrong. It did not
+  ## notice: `ci/test/watch_expressions_browser_probe.nim` read the refusal
+  ## straight out of the wire's ``msg`` field and painted it, while the
+  ## product's own mapping turned that same row into the bare word
+  ## "Error" (``text_representation.text`` has no ``of Error`` branch, so
+  ## ``$value`` fell through to ``$value.kind``). Twenty-four green checks
+  ## over a pane that shipped the wrong string.
+  ##
+  ## So: one mapping, exported, and the probes call it.
+  result = newVariableSeq()
+  for v in legacyLocals:
+    let hasChild = (if v.value.isNil: false else: v.value.elements.len > 0 or v.value.kind in {TypeKind.Pointer, TypeKind.Ref} or v.value.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
+    result.add(makeVariable(
+      name = $v.expression,
+      value = valueDisplayText(v.value),
+      typeName = valueDisplayType(v.value),
+      hasChildren = hasChild,
+      children = toVariableChildren(v.value),
+      isWatch = (not v.value.isNil and v.value.isWatch),
+    ))
+
 proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   ## Mirror the legacy locals into the ViewModel store so the
   ## StateVM's currentVariables memo sees the same data.
@@ -569,17 +628,7 @@ proc syncStoreLocals*(legacyLocals: seq[Variable]) =
   # (set by the backend — see `db-backend/src/watch_expression.rs`); the
   # split itself belongs to `applyLocalsResponse`, which is the one place
   # every host performs it.
-  var vmRows = newVariableSeq()
-  for v in legacyLocals:
-    let hasChild = (if v.value.isNil: false else: v.value.elements.len > 0 or v.value.kind in {TypeKind.Pointer, TypeKind.Ref} or v.value.kind in {TypeKind.Instance, TypeKind.Union, TypeKind.Tuple, TypeKind.TableKind, TypeKind.Variant})
-    vmRows.add(makeVariable(
-      name = $v.expression,
-      value = valueDisplayText(v.value),
-      typeName = valueDisplayType(v.value),
-      hasChildren = hasChild,
-      children = toVariableChildren(v.value),
-      isWatch = (not v.value.isNil and v.value.isWatch),
-    ))
+  let vmRows = localsToStoreRows(legacyLocals)
   stateVMStore.applyLocalsResponse(vmRows)
   cdebug fmt"[PIPELINE] syncStoreLocals: synced {vmRows.len} row(s) into store"
 
