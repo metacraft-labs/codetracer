@@ -1684,7 +1684,18 @@ package codeTracer:
           missingSibling = true
           break
         let full = if subPath.len > 0: repoRoot / subPath else: repoRoot
-        cfgLines.add("--path:\"" & full & "\"")
+        # Force forward slashes, for the same reason as ``buildDebugPath``:
+        # the value is interpolated into a file whose parser treats ``\`` as
+        # an escape introducer.  Here that parser is Nim's own cfg reader,
+        # which lexes the ``"..."`` as a string literal -- so on Windows
+        # ``--path:"M:\m\blocktracer\isonim-docs\src"`` dies at the first
+        # backslash pair with ``nim.cfg(1, 12) Error: invalid character
+        # constant`` (``\m``), or ``expected a hex digit`` under ``C:\Users``
+        # (``\U``).  That kills the whole ``docs-book`` action before the
+        # book is built.  ``nim`` accepts forward slashes in ``--path`` on
+        # Windows (``nim dump`` shows all nine registered), and POSIX repo
+        # paths carry no backslashes, so this is a no-op off Windows.
+        cfgLines.add("--path:\"" & full.replace('\\', '/') & "\"")
       if missingSibling:
         break docsBookIsonim
 
