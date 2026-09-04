@@ -160,7 +160,7 @@ echo
 echo "Step 0: the subject list is non-empty"
 echo "    A scan that found nothing reports perfect coverage of nothing."
 if [ "${gate_count}" -ge 10 ]; then
-	ok "found ${gate_count} shell gates under ${gate_dir}/"
+	ok "found ${gate_count} shell script(s) under${gate_find_dirs}/"
 else
 	bad "found only ${gate_count} gate(s) — the scan is broken, and every check below would be vacuous"
 	echo
@@ -312,51 +312,162 @@ refs_of_text() {
 }
 
 # ---------------------------------------------------------------------------
-echo "Step 2: reachability from the roots, following gate-to-gate references"
+# The justfile, read as a GRAPH rather than as a root.
 # ---------------------------------------------------------------------------
-reachable=""
-frontier="$(printf '%s\n' "${roots}" | names_in)"
-
-# Seed: only names that are actually gates in ci/test/.
-queue=""
-seeded=0
-while read -r n; do
-	[ -n "${n}" ] || continue
-	if [ -f "${gate_dir}/${n}" ] && ! in_set "${n}" "${reachable}"; then
-		reachable="${reachable}${n}
-"
-		queue="${queue}${n}
-"
-		seeded=$((seeded + 1))
-	fi
-done <<EOF
-${frontier}
-EOF
-
-if [ "${seeded}" -ge 1 ]; then
-	ok "the roots name ${seeded} gate(s) directly, so the walk has a starting point"
-else
-	bad "no root names any gate in ${gate_dir}/ — either CI runs none of them, or this scan cannot see them"
+# A recipe is reached when a workflow calls it, or when a reached recipe depends
+# on it, or when a reached script calls it. Only THEN does what it invokes count.
+#
+# Emitted as two flat, tab-separated tables rather than shell variables, because
+# bash 3.2 has no associative array and `just` has 208 recipes here.
+#
+#     ${tmp}/bodies   NAME <tab> one body line
+#     ${tmp}/deps     NAME <tab> one dependency name
+#
+# The header grammar this reads: an unindented line whose first token is the
+# recipe name, optional parameters, then `:` and optional dependencies. `:=` is
+# an assignment, not a recipe, and dependencies may carry `(args)` or be joined
+# by `&&` for post-dependencies — all stripped. The body is every following line
+# that is indented or blank, up to the next unindented non-blank line.
+tmp="$(mktemp -d)"
+trap 'rm -rf "${tmp}"' EXIT
+: >"${tmp}/bodies"
+: >"${tmp}/deps"
+justfile=""
+[ -f justfile ] && justfile="justfile"
+[ -z "${justfile}" ] && [ -f Justfile ] && justfile="Justfile"
+recipe_count=0
+if [ -n "${justfile}" ]; then
+	awk -v bodies="${tmp}/bodies" -v deps="${tmp}/deps" '
+	/^[ \t]/  { if (name != "") print name "\t" $0 >> bodies; next }
+	/^[ \t]*$/ { next }
+	{
+		name = ""
+		if ($0 !~ /:=/ && $0 ~ /^@?[A-Za-z0-9_][A-Za-z0-9_-]*([ \t][^:]*)?:/) {
+			hdr = $0
+			sub(/^@/, "", hdr)
+			split(hdr, h, ":")
+			split(h[1], hn, /[ \t]/)
+			name = hn[1]
+			if (name == "set" || name == "alias" || name == "export" ||
+				name == "import" || name == "mod") { name = ""; next }
+			d = substr(hdr, index(hdr, ":") + 1)
+			gsub(/\(/, " ", d); gsub(/\)/, " ", d); gsub(/&&/, " ", d)
+			gsub(/{{[^}]*}}/, " ", d)
+			nd = split(d, da, /[ \t]+/)
+			for (i = 1; i <= nd; i++)
+				if (da[i] ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*$/)
+					print name "\t" da[i] >> deps
+			print name "\t" >> bodies
+		}
+	}
+	' "${justfile}"
+	recipe_count="$(cut -f1 "${tmp}/bodies" | sort -u | grep -c . || true)"
 fi
 
-# Transitive closure: a reachable gate's own references are reachable.
-while [ -n "$(printf '%s\n' "${queue}" | grep -v '^$' || true)" ]; do
-	cur="$(printf '%s\n' "${queue}" | grep -v '^$' | head -1)"
-	queue="$(printf '%s\n' "${queue}" | grep -v '^$' | tail -n +2)"
-	while read -r n; do
-		[ -n "${n}" ] || continue
-		[ "${n}" = "${cur}" ] && continue
-		if [ -f "${gate_dir}/${n}" ] && ! in_set "${n}" "${reachable}"; then
-			reachable="${reachable}${n}
-"
-			queue="${queue}${n}
-"
+# ---------------------------------------------------------------------------
+echo "Step 2: reachability from the roots, through recipes and script-to-script"
+# ---------------------------------------------------------------------------
+note "the justfile defines ${recipe_count} recipe(s); a recipe counts only once a lane calls it"
+printf '%s\n' "${gates}" >"${tmp}/universe"
+# basename <tab> path, so a reference can be resolved without an assoc array.
+awk -F/ '{ print $NF "\t" $0 }' "${tmp}/universe" >"${tmp}/index"
+
+# `resolve` — reference tokens on stdin, universe paths on stdout.
+#
+# A token carrying a directory wins over a bare basename: `ci/lint/nix.sh`
+# resolves to that file alone, while a bare `nix.sh` cannot tell `ci/build/nix.sh`
+# from `ci/lint/nix.sh` and credits both. That is the false-POSITIVE direction
+# for exactly two basenames in this tree, and it is the safe one — a guard that
+# invents dark gates gets switched off.
+resolve() {
+	awk -F'\t' '
+	NR == FNR { n[$1]++; p[$1, n[$1]] = $2; next }
+	{
+		tok = $0; sub(/^\.\//, "", tok)
+		b = tok; sub(/.*\//, "", b)
+		if (!(b in n)) next
+		found = 0
+		if (tok ~ /\//)
+			for (i = 1; i <= n[b]; i++) {
+				q = p[b, i]
+				if (q == tok || index(q, "/" tok) == length(q) - length(tok)) {
+					print q; found = 1
+				}
+			}
+		if (!found) for (i = 1; i <= n[b]; i++) print p[b, i]
+	}
+	' "${tmp}/index" -
+}
+
+# `body_of RECIPE` / `deps_of RECIPE` — the two tables, read back.
+body_of() { awk -F'\t' -v r="$1" '$1 == r { print substr($0, length(r) + 2) }' "${tmp}/bodies"; }
+deps_of() { awk -F'\t' -v r="$1" '$1 == r { print $2 }' "${tmp}/deps"; }
+
+# TWO WORKLISTS, because the graph has two kinds of node. Files and recipes are
+# not interchangeable: a recipe's outgoing edges come from its body AND its
+# dependency list, a file's only from its text.
+: >"${tmp}/reached"
+: >"${tmp}/rreached"
+: >"${tmp}/fq"
+: >"${tmp}/rq"
+
+: >"${tmp}/missing-recipes"
+cut -f1 "${tmp}/bodies" | sort -u >"${tmp}/recipe-names"
+
+# `absorb` — reference lines (`S tok` / `J recipe`) on stdin; enqueue what is new.
+# One `resolve` per CALLER, not per token: resolving token-at-a-time made this a
+# few thousand awk processes and thirty seconds.
+absorb() {
+	local r
+	cat >"${tmp}/refs"
+	for r in $(grep '^S ' "${tmp}/refs" | cut -c3- | resolve | sort -u); do
+		grep -Fxq -- "${r}" "${tmp}/reached" && continue
+		printf '%s\n' "${r}" >>"${tmp}/reached"
+		printf '%s\n' "${r}" >>"${tmp}/fq"
+	done
+	for r in $(grep '^J ' "${tmp}/refs" | cut -c3- | sort -u); do
+		if grep -Fxq -- "${r}" "${tmp}/recipe-names"; then
+			grep -Fxq -- "${r}" "${tmp}/rreached" && continue
+			printf '%s\n' "${r}" >>"${tmp}/rreached"
+			printf '%s\n' "${r}" >>"${tmp}/rq"
+		else
+			# `just <name>` for a recipe the justfile does not define. Reported in
+			# step 4 as rot: it is a step that dies at run time, if it ever runs.
+			printf '%s\n' "${r}" >>"${tmp}/missing-recipes"
 		fi
-	done <<EOF
-$(printf '%s\n' "${gate_dir}/${cur}" | names_in)
-EOF
+	done
+}
+
+printf '%s\n' "${roots}" | grep -v '^$' | refs_in | absorb
+seeded="$(grep -c . "${tmp}/reached" || true)"
+seeded_recipes="$(grep -c . "${tmp}/rreached" || true)"
+
+if [ "${seeded}" -ge 1 ]; then
+	ok "the workflows name ${seeded} script(s) and ${seeded_recipes} recipe(s) directly"
+else
+	bad "no workflow names any script under ${gate_dirs} — either CI runs none of them, or this scan cannot see them"
+fi
+
+# Alternate between the two queues until both are empty.
+while [ -s "${tmp}/fq" ] || [ -s "${tmp}/rq" ]; do
+	if [ -s "${tmp}/fq" ]; then
+		cur="$(head -1 "${tmp}/fq")"
+		tail -n +2 "${tmp}/fq" >"${tmp}/fq.next" && mv "${tmp}/fq.next" "${tmp}/fq"
+		printf '%s\n' "${cur}" | refs_in | absorb
+	else
+		cur="$(head -1 "${tmp}/rq")"
+		tail -n +2 "${tmp}/rq" >"${tmp}/rq.next" && mv "${tmp}/rq.next" "${tmp}/rq"
+		{
+			body_of "${cur}" | refs_of_text
+			deps_of "${cur}" | sed 's/^/J /'
+		} | absorb
+	fi
 done
+
+reachable="$(sort -u "${tmp}/reached")"
 reachable_count="$(printf '%s\n' "${reachable}" | grep -c . || true)"
+reached_recipes="$(sort -u "${tmp}/rreached" | grep -c . || true)"
+note "a CI lane reaches ${reached_recipes} of ${recipe_count} recipe(s)"
 note "reachable after the transitive walk: ${reachable_count} of ${gate_count}"
 echo
 
@@ -365,12 +476,44 @@ echo "Step 3: every gate is reachable, or declares why it is not"
 # ---------------------------------------------------------------------------
 # The inventory of gates known to be dark. Read once; see the file's header for
 # why it exists and why it is not an exemption list.
-known_dark_file="${gate_dir}/shell-gate-coverage.known-dark.txt"
+known_dark_file="${gate_home}/shell-gate-coverage.known-dark.txt"
 known_dark=""
 if [ -f "${known_dark_file}" ]; then
 	known_dark="$(grep -vE '^[[:space:]]*(#|$)' "${known_dark_file}" || true)"
 fi
 known_dark_count="$(printf '%s\n' "${known_dark}" | grep -c . || true)"
+
+# THE CEILING, AND WHY IT IS AN EQUALITY.
+#
+# The inventory below is an exception list, and an exception list that can grow
+# quietly stops being read: the cheapest way to make this guard green has always
+# been to append a line, and nothing objected. The file now carries its own
+# length as a directive:
+#
+#     # RECORDED-DARK-CEILING: <n>
+#
+# and this guard fails unless the number of entries EQUALS it. Not `<=`. A
+# ceiling with slack under it is a budget for new dark gates, and the whole
+# argument for this file is that a hole must be impossible to add silently.
+#
+# Both directions are deliberate. Recording a NEW dark gate means editing the
+# ceiling upward in the same diff, where a reviewer sees it. WIRING one up means
+# editing it downward — and the resurrection check below already forces the line
+# to be deleted, so the ratchet tightens itself and cannot be left slack.
+ceiling=""
+if [ -f "${known_dark_file}" ]; then
+	ceiling="$(grep -E '^[[:space:]]*#[[:space:]]*RECORDED-DARK-CEILING:' "${known_dark_file}" |
+		head -1 | sed 's/.*RECORDED-DARK-CEILING:[[:space:]]*//' | tr -dc '0-9')"
+fi
+if [ -z "${ceiling}" ]; then
+	bad "${known_dark_file} declares no '# RECORDED-DARK-CEILING: <n>' — the list could grow unwatched"
+elif [ "${known_dark_count}" -gt "${ceiling}" ]; then
+	bad "${known_dark_file} records ${known_dark_count} gate(s), ceiling is ${ceiling} — a NEW dark gate was recorded; raise the ceiling in the same diff, deliberately"
+elif [ "${known_dark_count}" -lt "${ceiling}" ]; then
+	bad "${known_dark_file} records ${known_dark_count} gate(s), ceiling is still ${ceiling} — lower it to ${known_dark_count}; a ratchet with slack is a budget"
+else
+	ok "the recorded-dark inventory is at its ceiling of ${ceiling}: it can only shrink"
+fi
 # PRINTED, because it is not the same number as `listed_dark` below and the
 # difference is the interesting part: this counts INVENTORY LINES, while
 # `listed_dark` counts gates that are actually dark and recorded. They diverge
@@ -384,7 +527,8 @@ listed_dark=0
 resurrected=0
 declared=0
 for g in ${gates}; do
-	b="$(basename "${g}")"
+	# The repo-relative path IS the identity, in the inventory as in the walk.
+	b="${g}"
 	has_marker=0
 	if head -n "${MARKER_SCAN_LINES}" "${g}" 2>/dev/null | grep -qF "${MARKER}"; then
 		has_marker=1
@@ -429,13 +573,13 @@ for g in ${gates}; do
 	fi
 
 	dark=$((dark + 1))
-	bad "${g} is reachable from NO workflow, NO justfile recipe and NO other reachable gate"
+	bad "${g} is reachable from NO workflow lane, NO recipe a lane calls, and NO other reachable script"
 done
 
 # An inventory naming a gate that no longer exists is rot of the same kind.
 while read -r b; do
 	[ -n "${b}" ] || continue
-	if [ ! -f "${gate_dir}/${b}" ]; then
+	if [ ! -f "${b}" ]; then
 		bad "${known_dark_file} names ${b}, which does not exist"
 	fi
 done <<EOF
@@ -448,26 +592,59 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-echo "Step 4: no root names a gate that does not exist"
+echo "Step 4: nothing CI reaches names a script or a recipe that does not exist"
 echo "    A step invoking a missing script fails loudly — but only if that"
 echo "    workflow runs, and a step behind an \`if:\` may not for months."
 # ---------------------------------------------------------------------------
+# THE SUBJECT IS THE WORKFLOWS AND THE LINT DISPATCHERS, AND NOT EVERY REACHABLE
+# SCRIPT. Widening it to the whole reachable set was tried and produced five
+# findings, all five false, in two flavours that are worth naming because both
+# look exactly like rot:
+#
+#   * CONTRACT SUITES STAGE SYNTHETIC TREES. `shell-gate-coverage-test.sh`
+#     writes `ci/test/gate11.sh` and `ci/lint/sh.sh` into a mktemp directory;
+#     `python-version-alignment-test.sh` writes `ci/test/some-smoke.sh`. Reading
+#     a fixture's filename as CI's step list is the same category error this
+#     whole guard exists to name, one directory further in.
+#   * SIBLING REPOSITORIES HAVE THE SAME LAYOUT. `visual-replay-gate.sh` runs
+#     `./scripts/install-native-replay-companion.sh` inside a heredoc, after
+#     `cd "$VISUAL_REPLAY_REPO"`. The path is real; it is just not ours.
+#
+# `.github/workflows/*` and `ci/lint/*.sh` are where CI's step list is actually
+# written, and neither writes fixtures. That is the whole of the subject.
+#
+# NOT CHECKED, DELIBERATELY: `just <recipe>` against the recipes this justfile
+# defines. It was tried and every one of its twenty-odd findings was false. Half
+# were English — `just the`, `just an`, `just for`, `just continue` — and the
+# other half were siblings' recipes called after a `cd`: `just build-ct-mcr` and
+# `just build-extension` are codetracer-native-recorder's and
+# codetracer-ruby-recorder's. There is no way to tell those from a typo without
+# knowing which repository the shell is standing in, so this guard does not
+# pretend to. Unknown recipe names still do not confer reachability, which is
+# the half that can be answered.
 rot=0
 while read -r n; do
 	[ -n "${n}" ] || continue
-	# Only names that are CLAIMED to be in ci/test/ — a bare `build.sh` elsewhere
-	# in a workflow is not this guard's business.
-	if printf '%s\n' "${roots}" | grep -v '^$' | xargs grep -lF "ci/test/${n}" >/dev/null 2>&1; then
-		if [ ! -f "${gate_dir}/${n}" ]; then
-			rot=$((rot + 1))
-			bad "a CI root names ${gate_dir}/${n}, which does not exist"
-		fi
+	# Only tokens that CLAIM a path under the scanned trees: a bare `build.sh`
+	# in a workflow may be some other repository's, and is not this guard's
+	# business.
+	case "${n}" in
+	ci/*.sh | scripts/*.sh) ;;
+	*) continue ;;
+	esac
+	if [ ! -f "${n}" ]; then
+		rot=$((rot + 1))
+		bad "a CI-reachable file names ${n}, which does not exist"
 	fi
 done <<EOF
-$(printf '%s\n' "${roots}" | names_in)
+$({
+	printf '%s\n' "${roots}" | grep -v '^$'
+	printf '%s\n' "${reachable}" | grep -v '^$' | grep '^ci/lint/'
+} | refs_in | grep '^S ' | cut -c3- | sed 's#^\./##' | sort -u)
 EOF
+
 if [ "${rot}" -eq 0 ]; then
-	ok "every ${gate_dir}/*.sh a root names exists"
+	ok "every ci/ and scripts/ path a workflow or a lint dispatcher names exists"
 fi
 echo
 
