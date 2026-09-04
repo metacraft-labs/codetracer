@@ -1046,7 +1046,7 @@ fi
 # name.
 # ---------------------------------------------------------------------------
 echo
-echo "${WINDOWS_RUNNER_LABEL} jobs bound their own runtime"
+echo "Windows-runner jobs bound their own runtime"
 
 readonly GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES=360
 
@@ -1065,7 +1065,36 @@ job_timeout_minutes() {
 	' "$WORKFLOW"
 }
 
-for job in "${windows_jobs[@]+"${windows_jobs[@]}"}"; do
+# Derive this section's OWN job list rather than reusing $windows_jobs. That
+# array is scoped to the `eph-win-x64` CI label, and the job with the largest
+# unbounded blast radius is not on it: `windows-installer-build` runs on
+# `eph-win-x64-release`, runs the same env.ps1 bootstrap, and is additionally
+# gated on a branch that does not exist -- so it would go from never running to
+# running unbounded the moment that gate is repaired. Matching any `eph-win`
+# label keeps this check honest as new Windows scale sets are added.
+declare -a win_timeout_jobs=()
+while IFS= read -r line; do
+	win_timeout_jobs+=("$line")
+done < <(awk '
+	/^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+		name = $1
+		sub(/:$/, "", name)
+		next
+	}
+	/^    runs-on:[[:space:]]*eph-win/ {
+		if (name != "" && name != last) { print name; last = name }
+	}
+' "$WORKFLOW")
+
+if [ "${#win_timeout_jobs[@]}" -gt 0 ]; then
+	ok "the workflow declares Windows-runner jobs to bound (${#win_timeout_jobs[@]} of them)"
+else
+	fail "the workflow declares Windows-runner jobs to bound" \
+		"the runs-on extractor matched nothing, so every assertion below this" \
+		"line would vacuously pass over an empty list."
+fi
+
+for job in "${win_timeout_jobs[@]+"${win_timeout_jobs[@]}"}"; do
 	timeout_value="$(job_timeout_minutes "$job")"
 	if [ -z "$timeout_value" ]; then
 		fail "$job declares timeout-minutes" 			"without it the job inherits GitHub's ${GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES}-minute default," 			"which is the six hours this job already spent holding the branch's" 			"concurrency group in run 33880354195 without ever reporting."
@@ -1080,18 +1109,18 @@ done
 # Self-accounting: a contract that is deleted or short-circuited must not leave
 # this script reporting success on fewer checks than it claims. Four fixed
 # assertions (script exists, script provisions bash, job set non-empty, WSL
-# stub-step set non-empty), SEVEN per Windows job (six bootstrap/WSL contracts
-# plus the timeout-minutes bound), two per WSL stub step, four
+# stub-step set non-empty), six per Windows job, two per WSL stub step, four
 # fixed dev-env-flavor assertions (site count, no matrix-hidden Windows leg,
 # one direct, one via composite), two per dev-env site, and ten fixed
 # long-path assertions (code-line floor, system-scope line count, the write
 # form, the read-back form, the function-body floor, the read-back guard, no
 # suppression, ordering inside the entry point, the seam's default, and the
-# jobs that run the bootstrap).
+# jobs that run the bootstrap), plus the timeout section: one for its own
+# non-empty job list and one per Windows-runner job it bounds.
 # ---------------------------------------------------------------------------
 echo
-expected_assertions=$((4 + 7 * ${#windows_jobs[@]} + 2 * ${#wsl_stub_jobs[@]} + \
-	4 + 2 * ${#dev_env_sites[@]} + 10))
+expected_assertions=$((4 + 6 * ${#windows_jobs[@]} + 2 * ${#wsl_stub_jobs[@]} + \
+	4 + 2 * ${#dev_env_sites[@]} + 10 + 1 + ${#win_timeout_jobs[@]}))
 if [ "$assertions" -ne "$expected_assertions" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$expected_assertions"
 	failures=$((failures + 1))

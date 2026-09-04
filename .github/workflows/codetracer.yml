@@ -3662,6 +3662,24 @@ jobs:
     # while GARM is down it can hang/fail without ever blocking a release —
     # create-release simply skips the (absent) win artifact (see below).
     runs-on: eph-win-x64-release  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64-release (dedicated release scale set)
+    # See the timeout-minutes rationale on windows-rust-components. This job is
+    # on the release scale set rather than the CI one, but it runs the SAME
+    # env.ps1 bootstrap, so it has the same unbounded failure mode and would
+    # inherit the same 360-minute default. It is bounded here rather than when
+    # the `if:` below is repaired, so that repairing the gate is a one-line
+    # change that cannot also reintroduce an unbounded job.
+    timeout-minutes: 90
+    # DEAD GATE -- this job has never run. `refs/heads/main` does not exist in
+    # this repository: 702 remote refs, zero matches for `refs/heads/main`
+    # (`git ls-remote origin | grep -c 'refs/heads/main$'` -> 0). The branches
+    # are `dev` and `stable`. So the -win-x64 installer has never been built or
+    # published, and the comment above claiming parity with the AppImage/dmg is
+    # not accurate about the mechanism: `appimage-build` and `dmg-build` carry
+    # NO `if:` at all and publish `CodeTracer-<ref_name>-...` on every branch
+    # push. Matching them means DELETING this condition, not correcting the
+    # branch name -- but that starts publishing a Windows artefact, which is a
+    # release decision, so the gate is left in place and reported rather than
+    # flipped here.
     if: ${{ github.ref == 'refs/heads/main' }}
     steps:
       # See the eph-win-x64 note at the top of this file: actions/checkout needs
@@ -3781,6 +3799,10 @@ jobs:
     # AppImage/dmg (CodeTracer-main-amd64.AppImage etc.). Runs on Linux so gpg,
     # aws and the imported release key all come from the proven nix path.
     runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    # Bounded for the same reason as windows-installer-build above, and with the
+    # same dead `refs/heads/main` gate. This leg is signing + upload only, so it
+    # needs far less headroom than the build.
+    timeout-minutes: 30
     if: ${{ github.ref == 'refs/heads/main' }}
     needs: [ windows-installer-build ]
     steps:
