@@ -449,7 +449,14 @@ try {
   out.debugLegReturnedToEdit = false;
   out.contentAfterStop = null;
   try {
-    const runButton = await page.$('#run-image');
+    // WAITED FOR, not sampled. The edit toolbar mounts outside Karax's VDOM
+    // and a bare `$()` immediately after the save raced it — the first run of
+    // this leg reported "the Run button was not reachable" for that reason and
+    // skipped the whole sequence, which is a silent hole in the gate rather
+    // than a failure.
+    const runButton = await page
+      .waitForSelector('#run-image', { timeout: 30000 })
+      .catch(() => null);
     if (runButton) {
       out.debugLegAttempted = true;
       await runButton.click();
