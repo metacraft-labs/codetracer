@@ -335,6 +335,44 @@ ci/test/wasm_session_probe.mjs
 # This is the near-miss worth reading twice, and it is the same shape as the
 # `cli-record-smoke.sh` note above: a reader scanning for `noir-wasm-worker`
 # finds a hit in a live workflow and stops.
+#
+# BOTH ARE BLOCKED, NOT UNWIRED, AND THE MISSING CAPABILITY IS NAMED HERE
+# because the rule at the top of this file requires it and the entry above did
+# not. Measured 2026-09-05 by running each of them from a clean checkout:
+#
+#   $ node ci/test/noir-wasm-worker/host_mismatch.mjs
+#   SKIP: CT_AVM_WASM is not set. This is a skip, not a pass.        (exit 2)
+#   $ node ci/test/noir-wasm-worker/transpile_route.mjs
+#   SKIP: CT_NOIR_WASM_COMPILER is not set. This is a skip, not a pass. (exit 2)
+#
+# Both already SKIP LOUDLY and separate a skip from a pass, so wiring them is
+# not the problem; INPUT is. `deploy-web-codetracer.yml` is the one job that
+# builds Noir wasm, and `ci/deploy/build-noir-wasm.sh` builds exactly two
+# modules — `noir_wasm.wasm` and `noir_tracer_wasm.wasm`. Neither of these two
+# gates can run on those alone:
+#
+#   * `host_mismatch.mjs` needs `CT_AVM_WASM`, an Aztec AVM module whose whole
+#     point is that it imports its own linear memory as `env.memory` — the
+#     import shape that made the loader report `broken` about a module that was
+#     fine. NOTHING in this repository builds, fetches or pins an `avm.wasm`:
+#     `CT_AVM_WASM` appears in this file and in that probe, and nowhere else.
+#   * `transpile_route.mjs` needs `CT_AVM_TRANSPILER_WASM` (~5.2 MB, from
+#     `aztec-avm-runtime`'s `avm-transpiler-wasm`) AND `CT_JOIN_VFS`, a Noir
+#     package VFS fixture. `CT_AVM_TRANSPILER_WASM` is read by
+#     `web-bundle-assets.sh`, which SKIPS the transpiler asset because no lane
+#     sets it; `CT_JOIN_VFS` has no producer anywhere in the tree.
+#
+# WHAT WOULD MAKE THEM GREEN, in one change and not two: a deploy-lane step
+# that builds the AVM transpiler wasm from a pinned `aztec-avm-runtime` rev the
+# way `build-noir-wasm.sh` builds the Noir pair, vendors an `avm.wasm` beside
+# it, and writes the join VFS fixture — then three `export`s in the step that
+# already runs `noir-wasm-worker-e2e.sh`, and two `node` lines in that script.
+# The publish tree is the natural home for the first two, since the transpiler
+# is a declared (optional) bundle asset already.
+#
+# Until then they are the same shape as `browser-seekable-container.sh` above:
+# a gate wired to an input no job can produce fails on every run, and a red
+# that is always red stops being read.
 ci/test/noir-wasm-worker/host_mismatch.mjs
 ci/test/noir-wasm-worker/transpile_route.mjs
 

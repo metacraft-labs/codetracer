@@ -8,12 +8,27 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
+# Read by the sourced library below, which prefixes every diagnostic with it.
+# shellcheck disable=SC2034
+CTDR_LABEL="capture-readme-screenshots"
+# shellcheck source=scripts/docs/deep-review-capture-lib.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/deep-review-capture-lib.sh"
+
 # We use the absolute path for the trace to ensure it's found
 TRACE_PATH="${REPO_ROOT}/fibonacci-readme.ct"
 OUTPUT_DIR="${REPO_ROOT}"
 
+# THE BUILD TREE IS PHOTOGRAPHED AS IT STANDS. Same check, same reason, and the
+# same wording as `capture-deep-review-screenshots.sh`: the stylesheet the
+# window loads and the renderer bundle that draws every panel must be newer than
+# the sources they were built from, or these images document a CodeTracer that
+# no longer exists — on the README.
+ctdr_resolve_ct "${REPO_ROOT}"
+ctdr_require_fresh_build "${REPO_ROOT}"
+
 # Record the trace first
-"${REPO_ROOT}/src/build-debug/bin/ct" record -o "${TRACE_PATH}" -- python3 "${REPO_ROOT}/examples/fibonacci.py"
+"${CTDR_CT}" record -o "${TRACE_PATH}" -- python3 "${REPO_ROOT}/examples/fibonacci.py"
 
 echo "Capturing README animations using just test-e2e..."
 export CODETRACER_REAL_VISUAL_TRACE="${TRACE_PATH}"

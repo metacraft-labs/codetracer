@@ -103,6 +103,39 @@ ctdr_require_not_stale() {
 		"stale build: ${label} ('${artefact}') is older than its source '${newer}'. The capture photographs the build tree as-is, so this would produce images of an out-of-date CodeTracer. Rebuild with: just build-once"
 }
 
+# ctdr_require_trace_not_stale <label> <trace> <source...>
+#
+# THE SAME QUESTION AS `ctdr_require_not_stale`, ASKED OF A RECORDING.
+#
+# `ctdr_require_not_stale` takes `-f`, and a `.ct` trace is a DIRECTORY, so the
+# capture scripts that reuse a recording could not use it and asked the cheaper
+# question instead: does the path exist? `capture-readme-animations.sh` did
+# exactly that — when `ct record` failed it accepted whatever
+# `fibonacci-readme.ct` happened to be lying in the repository root and carried
+# on, which is EXISTENCE STANDING IN FOR FRESHNESS. That trace is never deleted,
+# so the fallback reliably finds one; it was recorded by some earlier `ct`, from
+# some earlier `examples/fibonacci.py`, and the animations produced from it are
+# published as pictures of the current product.
+#
+# Same comparison and the same conservatism as its sibling: a source newer than
+# the recording is a refusal, `find -newer` rather than timestamp arithmetic, and
+# a checkout that rewrites a file with identical bytes is enough to trip it —
+# because the remedy is to re-record and the alternative is an unreproducible
+# picture. `-e`, not `-f`, so it works on the directory a trace actually is.
+ctdr_require_trace_not_stale() {
+	local label="$1" trace="$2"
+	shift 2
+	[[ -e ${trace} ]] || ctdr_die \
+		"missing ${label} at '${trace}'. Nothing to reuse."
+	local source newer
+	for source in "$@"; do
+		[[ -e ${source} ]] || continue
+		newer="$(find "${source}" -newer "${trace}" -print -quit 2>/dev/null || true)"
+		[[ -z ${newer} ]] || ctdr_die \
+			"stale recording: ${label} ('${trace}') is older than '${newer}'. The capture would publish images of an out-of-date CodeTracer, or of a program that has since changed. Re-record it, or delete '${trace}' and run this again."
+	done
+}
+
 # ctdr_require_fresh_build <repo-root> [extra-stylesheet ...]
 #
 # The two artefacts checked are the two every picture is made of: the

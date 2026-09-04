@@ -8,19 +8,40 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
+# Read by the sourced library below, which prefixes every diagnostic with it.
+# shellcheck disable=SC2034
+CTDR_LABEL="capture-readme-animations"
+# shellcheck source=scripts/docs/deep-review-capture-lib.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/deep-review-capture-lib.sh"
+
 # We use the absolute path for the trace to ensure it's found
 TRACE_PATH="${REPO_ROOT}/fibonacci-readme.ct"
 OUTPUT_DIR="${REPO_ROOT}/test-results/readme-animations-review"
 
 mkdir -p "${OUTPUT_DIR}"
 
+# THIS SCRIPT PHOTOGRAPHS THE BUILD TREE; IT NEVER BUILDS ONE.
+#
+# So a checkout whose sources have moved on since the last `just build-once`
+# produces animations of an OLD CodeTracer, and nothing in the picture says so.
+# `capture-deep-review-screenshots.sh`, one file over, has asked this question
+# since it was written; these README captures never did, and they publish to the
+# most-read surface in the repository.
+ctdr_resolve_ct "${REPO_ROOT}"
+ctdr_require_fresh_build "${REPO_ROOT}"
+
 # Record the trace first
-if ! "${REPO_ROOT}/src/build-debug/bin/ct" record -o "${TRACE_PATH}" -- python3 "${REPO_ROOT}/examples/fibonacci.py"; then
+if ! "${CTDR_CT}" record -o "${TRACE_PATH}" -- python3 "${REPO_ROOT}/examples/fibonacci.py"; then
 	echo "Warning: Trace recording failed. Attempting to proceed with existing trace if present." >&2
-	if [[ ! -d ${TRACE_PATH} ]]; then
-		echo "Error: No trace found at ${TRACE_PATH}. Cannot proceed." >&2
-		exit 1
-	fi
+	# EXISTENCE IS NOT FRESHNESS, and this fallback was the clearest instance of
+	# the confusion in the tree: `fibonacci-readme.ct` is never deleted, so
+	# `[[ -d ]]` reliably found one — recorded by some earlier `ct`, from some
+	# earlier `examples/fibonacci.py` — and the run carried on and published it.
+	# The recording has to be newer than both things it is a recording OF.
+	ctdr_require_trace_not_stale "the README trace" "${TRACE_PATH}" \
+		"${REPO_ROOT}/examples/fibonacci.py" "${CTDR_CT}"
+	echo "Reusing the existing trace at ${TRACE_PATH}; it is newer than the program and the ct binary." >&2
 fi
 
 echo "Capturing README animations using just test-e2e..."

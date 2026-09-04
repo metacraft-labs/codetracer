@@ -62,6 +62,55 @@ if (!fs.existsSync(bookPage)) {
   throw new Error(`Book page does not exist: ${bookPage}. Run \`just build-docs\` first.`);
 }
 
+// EXISTENCE IS NOT FRESHNESS, and `docs/book/book/` is a BUILD OUTPUT that is
+// never cleaned. The check above passes on a page mdBook rendered weeks ago
+// from Markdown that has since changed, and the screenshot then goes into
+// `docs/book/src/generated/` — into the same book — as a picture of a page that
+// no longer reads that way. The remedy the message already names,
+// `just build-docs`, is exactly the thing whose absence goes undetected.
+//
+// So the rendered page must be newer than the source it was rendered from.
+// Same comparison and the same conservatism as `ctdr_require_not_stale` in
+// `scripts/docs/deep-review-capture-lib.sh`, which asks this of the build tree
+// for the DeepReview captures: a source that merely LOOKS newer is a refusal,
+// because the remedy is a rebuild and the alternative is a published picture
+// nobody can reproduce.
+//
+// Skipped when the page was supplied by hand (`CODETRACER_BOOK_PAGE`), because
+// then it is not necessarily this repository's book at all.
+if (!process.env.CODETRACER_BOOK_PAGE) {
+  const bookSrc = path.join(repoRoot, "docs", "book", "src");
+  if (fs.existsSync(bookSrc)) {
+    const renderedAt = fs.statSync(bookPage).mtimeMs;
+    // The generated tree this script WRITES INTO lives under `src/generated`,
+    // so it is excluded: its own output would otherwise be newer than the page
+    // on every second run and the check would refuse every time.
+    const generated = path.join(bookSrc, "generated");
+    let newest = null;
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (newest) return;
+        const full = path.join(dir, entry.name);
+        if (full === generated) continue;
+        if (entry.isDirectory()) { walk(full); continue; }
+        if (!entry.isFile()) continue;
+        if (fs.statSync(full).mtimeMs > renderedAt) {
+          newest = full;
+          return;
+        }
+      }
+    };
+    walk(bookSrc);
+    if (newest) {
+      throw new Error(
+        `Stale book: ${bookPage} is older than its source ${newest}.\n` +
+        "This screenshot would show a page the book no longer contains.\n" +
+        "Rebuild with `just build-docs`, then run this again.",
+      );
+    }
+  }
+}
+
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
 const executablePath = resolveChromiumExecutable();
