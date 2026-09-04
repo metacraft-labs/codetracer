@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 33
+# RECORDED-DARK-CEILING: 32
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -352,10 +352,24 @@ ci/test/noir-wasm-worker/transpile_route.mjs
 # cannot answer.
 ci/test/chord_stopcallback_probe.mjs
 
-# Named ONLY in a comment, at `ci/test/web-bundle-assets.sh:323`, which describes
-# it as the thing that "can assert what a click on the row does" — present tense,
-# about a probe nothing runs.
-ci/test/low_level_code_row_click_probe.mjs
+# `ci/test/low_level_code_row_click_probe.mjs` STOOD HERE AND ITS LINE IS GONE.
+# It was named ONLY in a comment, at `ci/test/web-bundle-assets.sh:323`, which
+# described it in the present tense as the thing that "can assert what a click
+# on the row does" — about a probe nothing ran.
+#
+# It was UNWIRED, not blocked, and the measurement says so rather than the
+# argument: `just build-storybook-components` produces its only input in ~2s
+# from `nim` and the sibling sources this repo's dev shell already carries, and
+# the browser leg takes ~5s against the Playwright Chromium the neighbouring
+# steps in `viewmodel-tests` already use. It went 10/10 on its first run.
+#
+# It is now `just test-low-level-code-row-click`, called by the
+# "A Low Level Code row click" step in `codetracer.yml`'s `viewmodel-tests`
+# job, immediately after the two browser steps that read the same class of
+# artefact. Proved able to fail in both directions before wiring: sending
+# `highLevelLine - 1` reddened exactly the line assertion and named
+# `{"path":"src/combat.nr","line":42}`; renaming the command without rebuilding
+# tripped the probe's own staleness gate with exit 2.
 
 # Named ONLY in comments, at `ci/test/editor-context-menu-modes.sh:17` and
 # `ci/test/editor_context_menu_modes_probe.mjs:33`.

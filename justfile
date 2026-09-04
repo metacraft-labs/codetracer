@@ -3269,6 +3269,45 @@ test-web-renderer-mounts:
   exec > >(tee test-logs/test-web-renderer-mounts.log) 2>&1
   bash ci/test/web-renderer-mounts.sh
 
+# A CLICK ON A LOW LEVEL CODE ROW, ON THE RENDER ARM THE BUNDLE SHIPS.
+#
+# `isonim_low_level_code_view.nim` has TWO row renderers.  The headless suites
+# drive `renderInstructionRowMock`, which binds `onclick = handler`; the web
+# bundle renders `renderInstructionRowWeb`, which binds through
+# `isonim_dom.addEventListener`.  A suite that only exercises the Mock arm can
+# be entirely green against a binding no user ever touches, which is the
+# divergent-arms hazard this repo has already shipped once.
+#
+# `ci/test/low_level_code_row_click_probe.mjs` closes that gap in real
+# Chromium: it clicks the row's CENTRE through a real hit test and asserts what
+# the click asked the backend for — the command, the path, and the LINE, which
+# is chosen so a payload of 43 can only come from the row actually clicked (row
+# 1 is line 42 and the active row is a third offset).
+#
+# WHY THIS RECIPE EXISTS AND WHY IT DEPENDS ON THE STORYBOOK BUNDLE. The probe
+# was named in a comment in `ci/test/web-bundle-assets.sh` — present tense,
+# about a probe nothing ran — and recorded dark in
+# `ci/test/shell-gate-coverage.known-dark.txt` for exactly that reason. It was
+# never BLOCKED: it needs `storybook/dist/components.js` and a Playwright
+# Chromium, both of which this repo's dev shell already has, and it needed the
+# two lines nobody had written.  `build-storybook-components` is its only
+# precondition, so it is a dependency rather than a sentence in a comment.
+#
+# NO SKIP ARMS, DELIBERATELY. Every input is built from source in the same
+# invocation; there is no optional asset whose absence could make an assertion
+# unmeasurable, so all ten checks are load-bearing on every run. The probe's own
+# staleness gate refuses a `components.js` built from different source (it
+# compares the command string `low_level_code_vm.nim` currently sends against
+# the bundle's bytes) and exits 2 rather than reporting on a tree nobody edited.
+#
+# Seconds, not minutes: the `nim js` is ~2s warm and the browser leg ~5s.
+test-low-level-code-row-click: build-storybook-components
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-low-level-code-row-click.log) 2>&1
+  node ci/test/low_level_code_row_click_probe.mjs
+
 # A TEST ROW OFFERS TWO ACTIONS AND ONLY ONE OF THEM RE-RUNS.
 #
 # The TESTS pane's per-row `⟳` and `⏵`, driven in a real browser. The

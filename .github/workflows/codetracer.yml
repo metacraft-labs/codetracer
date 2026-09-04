@@ -2698,6 +2698,51 @@ jobs:
         # attributable to different steps.
         run: nix develop .#devShells.x86_64-linux.default --command just test-tests-pane-row-controls
 
+      - name: A Low Level Code row click, on the render arm the bundle ships
+        # THE DIVERGENT-ARMS HAZARD, closed for one gesture.
+        #
+        # `isonim_low_level_code_view.nim` has TWO row renderers. The headless
+        # ViewModel suites above drive `renderInstructionRowMock`, which binds
+        # `onclick = handler`; the shipped bundle renders
+        # `renderInstructionRowWeb`, which binds through
+        # `isonim_dom.addEventListener`. They are different procs reaching the
+        # same closure, so every suite in this job can be green against a
+        # binding no user ever touches — the same shape as a lane compiled with
+        # a different define than the bundle that ships.
+        #
+        # `ci/test/low_level_code_row_click_probe.mjs` clicks the row's CENTRE
+        # in real Chromium, with a real hit test (Playwright refuses the click
+        # if another element would receive it), and asserts the COMMAND, the
+        # PATH and the LINE the click put on the wire. The line is the
+        # discriminator: the target row is line 43 where row 1 is 42 and the
+        # active row is a third offset, so the payload can only have come from
+        # the row actually clicked.
+        #
+        # WHY IT IS ONLY BEING RUN NOW. It was never blocked. Its only mention
+        # anywhere in the tree was a COMMENT in `ci/test/web-bundle-assets.sh`
+        # describing, in the present tense, what it "can assert" — and
+        # `shell-gate-coverage.known-dark.txt` recorded it among the three
+        # gates nothing referenced. It needs `storybook/dist/components.js` and
+        # a Playwright Chromium, both of which this job already has; it needed
+        # the recipe and this step.
+        #
+        # NO SKIP ARMS. Unlike the two steps above, every input is built from
+        # source in the same invocation, so all ten checks are load-bearing on
+        # every run and a shorter green summary is a failure rather than a
+        # smaller measurement. The probe also carries a staleness gate on
+        # CONTENT (not mtime — `nim js` does not rewrite a byte-identical
+        # output, so an mtime gate goes permanently red): it compares the
+        # command `low_level_code_vm.nim` currently sends against the bundle's
+        # bytes and exits 2 rather than reporting on a tree nobody edited.
+        #
+        # Measured locally at 10/10, and proved able to fail BOTH ways: sending
+        # `highLevelLine - 1` reddened exactly the line assertion, naming
+        # `{"path":"src/combat.nr","line":42}`; renaming the command without
+        # rebuilding tripped the staleness gate with exit 2.
+        #
+        # Seconds: ~2s for the `nim js` and ~5s for the browser leg.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-low-level-code-row-click
+
       - name: A typed watch expression, in a browser, showing a correct value
         # The STATE pane's Watches tab, opened by a click on the product's own
         # tab button and filled by keystrokes into its own `#watch-0`.
