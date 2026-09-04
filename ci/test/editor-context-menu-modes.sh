@@ -385,22 +385,107 @@ fi
 # ---------------------------------------------------------------------------
 # EVERY DISABLED ROW SAYS WHY, and no row prints a raw HTML entity.
 # ---------------------------------------------------------------------------
-mute="$(py "
+# THE DISABLED PATH, GIVEN A SUBJECT FIRST.
+#
+# The ordinary Edit-mode menu has no disabled row in it, so "every disabled row
+# carries a reason" asked of that leg is quantified over an empty set and cannot
+# fail. The probe therefore toggles read-only INSIDE Edit mode — the product's
+# own `Ctrl+E` command, deliberately independent of the mode — which is the
+# state where Cut and Paste are applicable and unavailable. That is the only
+# thing `disabled` is for.
+ro_state="$(py "
 import json
 d = json.load(open('${cache}/report.json'))
-rows = ((d.get('legs') or {}).get('edit') or {}).get('menu', {}).get('entries') or []
+s = (d.get('legs') or {}).get('readOnlyState') or {}
+print('yes' if s.get('uiReadOnly') else 'no')")"
+ro_rows="$(py "
+import json
+d = json.load(open('${cache}/report.json'))
+rows = ((d.get('legs') or {}).get('editReadOnly') or {}).get('menu', {}).get('entries') or []
+by = {r['name']: r for r in rows}
+def state(n):
+    r = by.get(n)
+    if r is None: return n + '=absent'
+    return n + '=' + ('disabled' if r.get('disabled') else 'enabled') + \
+        ':' + (r.get('sublabel') or '<no reason>')
+print(' | '.join(state(n) for n in
+                 ('Cut', 'Copy', 'Paste', 'Toggle Line Comment', 'Find',
+                  'Replace')))
 bad = [r['name'] for r in rows if r.get('disabled') and not r.get('sublabel')]
 print(','.join(bad) if bad else 'none')
 print(sum(1 for r in rows if r.get('disabled')))
+ok = all(by.get(n) is not None and by[n].get('disabled') and
+         'Ctrl+E' in (by[n].get('sublabel') or '')
+         for n in ('Cut', 'Paste', 'Toggle Line Comment', 'Replace'))
+ok = ok and by.get('Copy') is not None and not by['Copy'].get('disabled')
+ok = ok and by.get('Find') is not None and not by['Find'].get('disabled')
+reasons = {by[n]['sublabel'] for n in ('Cut', 'Paste', 'Toggle Line Comment',
+                                       'Replace') if n in by}
+print('yes' if ok and len(reasons) == 1 else 'no')
 ")"
-mute_names="$(printf '%s\n' "${mute}" | head -1)"
-disabled_n="$(printf '%s\n' "${mute}" | tail -1)"
-if [ "${mute_names}" = "none" ]; then
-	ck ok "[edit/reasons] every disabled row carries a reason" \
-		"(${disabled_n} disabled row(s) on this leg)"
+ro_summary="$(printf '%s\n' "${ro_rows}" | sed -n 1p)"
+# Line 2 is the per-leg reasonless list; it is folded into the cross-leg check
+# below rather than read here, so it is skipped rather than bound.
+ro_disabled_n="$(printf '%s\n' "${ro_rows}" | sed -n 3p)"
+ro_ok="$(printf '%s\n' "${ro_rows}" | sed -n 4p)"
+
+if [ "${ro_state}" = "yes" ] && [ "${ro_disabled_n:-0}" -ge 4 ]; then
+	ck ok "[disabled/instrument] read-only was toggled on inside Edit mode and" \
+		"${ro_disabled_n} row(s) went disabled, so the reason checks below are" \
+		"a measurement and not an empty set"
 else
-	ck fail "[edit/reasons] disabled with no reason: ${mute_names} —" \
+	ck fail "[disabled/instrument] read-only=${ro_state}," \
+		"${ro_disabled_n:-0} disabled row(s) — the disabled path has no subject" \
+		"and every check about it would pass vacuously. Rows: ${ro_summary}"
+fi
+
+if [ "${ro_ok}" = "yes" ]; then
+	ck ok "[disabled/state] every verb that read-onlyness alone blocks is" \
+		"DISABLED with ONE Ctrl+E sentence, and the two that it does not block" \
+		"are enabled: ${ro_summary}"
+else
+	ck fail "[disabled/state] expected Cut, Paste, Toggle Line Comment and" \
+		"Replace disabled with one identical Ctrl+E reason, and Copy and Find" \
+		"enabled. A verb that vanishes where its neighbour greys out answers" \
+		"the same question two ways. Got: ${ro_summary}"
+fi
+
+mute="$(py "
+import json
+d = json.load(open('${cache}/report.json'))
+bad = []
+for leg in ('edit', 'editAgain', 'editReadOnly'):
+    rows = ((d.get('legs') or {}).get(leg) or {}).get('menu', {}).get('entries') or []
+    bad += [leg + ':' + r['name'] for r in rows if r.get('disabled') and not r.get('sublabel')]
+print(','.join(bad) if bad else 'none')
+")"
+if [ "${mute}" = "none" ]; then
+	ck ok "[edit/reasons] every disabled row on every Edit leg carries a reason"
+else
+	ck fail "[edit/reasons] disabled with no reason: ${mute} —" \
 		"'an action whose absence cannot be explained is one whose absence was a guess'"
+fi
+
+# AND IT STILL TAKES NO CLICK. `.ct-menu-item--disabled` sets
+# `pointer-events: none`; the hit test at the row's own centre is what actually
+# decides it, so that is what is asked.
+ro_hit="$(py "
+import json
+d = json.load(open('${cache}/report.json'))
+rows = ((d.get('legs') or {}).get('editReadOnly') or {}).get('menu', {}).get('entries') or []
+bad = [r['name'] for r in rows if r.get('disabled') and r.get('hitIsSelf')]
+aria = [r['name'] for r in rows if r.get('disabled') and r.get('ariaDisabled') != 'true']
+print(','.join(bad) if bad else 'none')
+print(','.join(aria) if aria else 'none')
+")"
+ro_hit_bad="$(printf '%s\n' "${ro_hit}" | head -1)"
+ro_aria_bad="$(printf '%s\n' "${ro_hit}" | tail -1)"
+if [ "${ro_hit_bad}" = "none" ] && [ "${ro_aria_bad}" = "none" ]; then
+	ck ok "[disabled/inert] the disabled rows take no click at their own centre" \
+		"and declare aria-disabled"
+else
+	ck fail "[disabled/inert] clickable while disabled: ${ro_hit_bad};" \
+		"missing aria-disabled: ${ro_aria_bad}"
 fi
 
 entities="$(py "
@@ -516,7 +601,7 @@ fi
 # THE COUNT ITSELF, so a check skipped by an early `return` cannot read as a
 # pass. Raise this deliberately when adding one.
 # ---------------------------------------------------------------------------
-EXPECTED_CHECKS=$((25 + debug_checks))
+EXPECTED_CHECKS=$((28 + debug_checks))
 echo
 if [ "${checks}" -ne "${EXPECTED_CHECKS}" ]; then
 	echo "RESULT: FAILED — ${checks} check(s) ran, ${EXPECTED_CHECKS} expected."
