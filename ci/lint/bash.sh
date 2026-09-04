@@ -314,4 +314,14 @@ lint_step "contract suite: desktop bundle self-containment" \
 lint_step "contract suite: the read-only-leftovers sweep runs, finds, and fixes" \
 	bash ci/test/readonly-leftovers-sweep-test.sh
 
+# The dev shell's git-hooks guard. Registered here for the same reason as the
+# sweep above: the thing it protects is developer state on a shared checkout, so
+# it is never exercised by any other job, and an unrun guard is exactly the
+# defect it exists to catch. The suite builds real `git worktree` fixtures under
+# mktemp -- the bug is entirely about what `git rev-parse` reports in a linked
+# worktree, so a mock would encode the belief under test. Pure bash + git; no
+# nix, no network, no siblings.
+lint_step "contract suite: a worktree does not reinstall the shared git hooks" \
+	bash ci/test/git-hooks-worktree-test.sh
+
 lint_summary
