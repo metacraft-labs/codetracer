@@ -1338,6 +1338,21 @@ type
       ## DISABLED carrying this sentence.  The split is `Edit-Mode-Toolbar.md`
       ## §8's, and it is the difference between "this verb does not apply to
       ## this file" and "this verb applies and cannot run right now".
+    writableOnly: bool
+      ## Whether READ-ONLYNESS ALONE can explain `isSupported()` saying no.
+      ##
+      ## This exists because folding two causes into one boolean produced a
+      ## menu that answered the same question two ways.  With the editor made
+      ## read-only inside Edit mode, Cut and Paste greyed out and said why,
+      ## while Toggle Line Comment and Replace silently vanished — and all four
+      ## are the same case: the verb applies in this mode and cannot run until
+      ## the user clears one flag.
+      ##
+      ## Set only where Monaco's precondition is read-onlyness and NOTHING
+      ## else.  `formatDocument` and `rename` also require a provider, so an
+      ## unsupported one of those may be unsupported for a reason that has
+      ## nothing to do with the flag, and a row blaming `Ctrl+E` for a missing
+      ## language server would be a confident wrong answer.  Those keep hiding.
 
 const
   EditModeActionEntries: array[5, EditMenuEntry] = [
@@ -1346,14 +1361,15 @@ const
     # has not been refused, it was never on offer.  §8's own example: "a folder
     # of notes gets no row of dead buttons".
     EditMenuEntry(name: "Toggle Line Comment",
-      action: "editor.action.commentLine", reason: ""),
+      action: "editor.action.commentLine", reason: "", writableOnly: true),
     EditMenuEntry(name: "Format Document",
       action: "editor.action.formatDocument", reason: ""),
     EditMenuEntry(name: "Rename Symbol", action: "editor.action.rename",
       reason: ""),
     EditMenuEntry(name: "Find", action: "actions.find", reason: ""),
     EditMenuEntry(name: "Replace",
-      action: "editor.action.startFindReplaceAction", reason: ""),
+      action: "editor.action.startFindReplaceAction", reason: "",
+      writableOnly: true),
   ]
 
   DebugModeActionEntries: array[1, EditMenuEntry] = [
@@ -1363,9 +1379,30 @@ const
     EditMenuEntry(name: "Find", action: "actions.find", reason: ""),
   ]
 
+const ReadOnlyReason = cstring"the editor is read-only — Ctrl+E makes it writable"
+  ## ONE SENTENCE, ONE SPELLING.  Cut, Paste, Toggle Line Comment and Replace
+  ## all fail for this one reason, and four independently worded versions of it
+  ## is how a user comes to think they are four different situations.
+
 proc monacoActionItem(self: EditorViewComponent,
-                      entry: EditMenuEntry): ContextMenuItem =
+                      entry: EditMenuEntry;
+                      writable: bool): ContextMenuItem =
   ## `nil` when the row must not exist at all, so every call site tests it.
+  #
+  # WRITABILITY IS ASKED FIRST, AND IT OVERRULES MONACO.  Measured on the
+  # assembled bundle: with the editor read-only,
+  # `startFindReplaceAction.isSupported()` still answers TRUE — Monaco is happy
+  # to open its find widget and let its own replace buttons be the thing that
+  # refuses.  Offering Replace there is a dead affordance one level down, and
+  # deferring to `isSupported` would have shipped it. What the user needs is the
+  # flag's name, on the row they clicked.
+  if entry.writableOnly and not writable:
+    return ContextMenuItem(
+      name: entry.name,
+      hint: "",
+      handler: proc(e: Event) = discard,
+      disabled: true,
+      disabledReason: ReadOnlyReason)
   if monacoActionIsSupported(self.monacoEditor.toJs, entry.action):
     let id = entry.action
     return ContextMenuItem(
@@ -1381,6 +1418,12 @@ proc monacoActionItem(self: EditorViewComponent,
       disabledReason: entry.reason)
   return nil
 
+proc editorIsWritable(self: EditorViewComponent; editing: bool): bool =
+  ## Whether a change the user makes would be accepted.  Three facts, and all
+  ## three have to hold: the mode is an editing one, the independent read-only
+  ## flag is clear (`Ctrl+E`), and this is not a review dataset.
+  editing and not self.data.ui.readOnly and not self.data.isReviewDatasetSession()
+
 proc clipboardItems(self: EditorViewComponent;
                     editing: bool): seq[ContextMenuItem] =
   ## Cut / Copy / Paste, with the two axes that decide each row stated
@@ -1391,8 +1434,7 @@ proc clipboardItems(self: EditorViewComponent;
   ## constantly.  Cut and Paste are absent from the Debug menu rather than
   ## disabled in it, because the Debug editor's read-onlyness is not a passing
   ## condition a user could clear; it is what the mode is.
-  let writable = editing and not self.data.ui.readOnly and
-    not self.data.isReviewDatasetSession()
+  let writable = self.editorIsWritable(editing)
 
   if editing:
     if not clipboardCanWrite():
@@ -1408,7 +1450,7 @@ proc clipboardItems(self: EditorViewComponent;
       # the row says which flag.
       result.add ContextMenuItem(name: "Cut", hint: "",
         handler: proc(e: Event) = discard, disabled: true,
-        disabledReason: "the editor is read-only — Ctrl+E makes it writable")
+        disabledReason: ReadOnlyReason)
     else:
       result.add ContextMenuItem(name: "Cut", hint: "",
         handler: proc(e: Event) = monacoClipboardCut(self.monacoEditor.toJs))
@@ -1429,7 +1471,7 @@ proc clipboardItems(self: EditorViewComponent;
     elif not writable:
       result.add ContextMenuItem(name: "Paste", hint: "",
         handler: proc(e: Event) = discard, disabled: true,
-        disabledReason: "the editor is read-only — Ctrl+E makes it writable")
+        disabledReason: ReadOnlyReason)
     else:
       result.add ContextMenuItem(name: "Paste", hint: "",
         handler: proc(e: Event) = monacoClipboardPaste(self.monacoEditor.toJs))
@@ -1486,8 +1528,9 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
       # missing since Monaco's own menu was switched off.  They lead because
       # this is the mode the user is typing in.
       contextMenu &= self.clipboardItems(editing = true)
+      let writable = self.editorIsWritable(editing = true)
       for entry in EditModeActionEntries:
-        let item = self.monacoActionItem(entry)
+        let item = self.monacoActionItem(entry, writable)
         if not item.isNil:
           contextMenu &= item
     else:
@@ -1497,7 +1540,10 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
       # and ten greyed-out rows saying so is still a menu about debugging.
       contextMenu &= self.clipboardItems(editing = false)
       for entry in DebugModeActionEntries:
-        let item = self.monacoActionItem(entry)
+        # `writable = false`: the Debug editor is read-only by definition, and
+        # no entry in this list is `writableOnly`, so nothing is disabled on
+        # that account here.
+        let item = self.monacoActionItem(entry, writable = false)
         if not item.isNil:
           contextMenu &= item
 

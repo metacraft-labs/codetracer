@@ -229,6 +229,39 @@ async function openMenuOnLine(page, lineIndex) {
     report.legs.editAgainMode = await page.evaluate(modeScript);
     report.legs.editAgain = await openMenuOnLine(page, LINE);
     await page.screenshot({ path: outPath.replace(/\.json$/, '-edit-again.png') });
+
+    // ---- EDIT, READ-ONLY -------------------------------------------------
+    //
+    // THE DISABLED PATH NEEDS A SUBJECT. Without this leg every "disabled rows
+    // carry a reason" assertion is quantified over an empty set and cannot
+    // fail: the ordinary Edit-mode menu has no disabled row in it.
+    //
+    // Read-onlyness is toggled INSIDE Edit mode, through the product's own
+    // `toggleReadOnly` — the command `Ctrl+E` is bound to, and deliberately
+    // independent of the mode (`Mode-Transitions.md` §9
+    // `Mode.ReadOnlyDoesNotMoveMode`). That independence is exactly what makes
+    // Cut and Paste "applicable here, unavailable now" rather than
+    // inapplicable: the user can clear the flag, and the row has to say which
+    // flag it is.
+    await page.evaluate(() => {
+      const c = document.querySelector('#context-menu-container');
+      if (c) c.style.display = 'none';
+    });
+    report.toggleReadOnly = await page.evaluate(() => {
+      try {
+        window.data.functions.toggleReadOnly(window.data);
+        return 'ok';
+      } catch (e) {
+        return 'threw: ' + String((e && e.message) || e).slice(0, 200);
+      }
+    });
+    await settle(page, 1200);
+    report.legs.readOnlyState = await page.evaluate(() => ({
+      uiReadOnly: !!(window.data && window.data.ui && window.data.ui.readOnly),
+      mode: (window.data && window.data.ui) ? String(window.data.ui.mode) : null,
+    }));
+    report.legs.editReadOnly = await openMenuOnLine(page, LINE);
+    await page.screenshot({ path: outPath.replace(/\.json$/, '-edit-readonly.png') });
   } catch (e) {
     report.fatal = String((e && e.stack) || e).slice(0, 1500);
   } finally {
