@@ -311,3 +311,53 @@ proc padLeft*(s: string; width: int): string =
   if cells >= width:
     return s
   repeat(' ', width - cells) & s
+
+proc pathBaseName*(path: string): string =
+  ## The last component of a recorded path, splitting on BOTH separators.
+  ##
+  ## `std/os.extractFilename` is not used, for the reason
+  ## `ct/trace/ctfs_sources.safePayloadPath` was fixed for in CTUI-4: a recorded
+  ## path is whatever a recorder interned, a Windows recording carries
+  ## backslashes, and a splitter that knows only its own host's separator shows
+  ## the whole path as the "file name" on the other host. It also keeps
+  ## `std/os` out of a view.
+  ##
+  ## LIVES HERE RATHER THAN IN `source_pane.nim`, where CTUI-5 put it: CTUI-6's
+  ## `frame_item.nim` needs the same rule, and a second copy made every call
+  ## site that imported both modules ambiguous.
+  result = path
+  for i in countdown(path.high, 0):
+    if path[i] == '/' or path[i] == '\\':
+      return path[i + 1 .. ^1]
+
+proc cellWidthOf*(s: string): int =
+  ## How many terminal cells `s` occupies.
+  for r in runes(s):
+    result += max(1, displayWidth($r))
+
+proc cellSlice*(s: string; startCell, endCell: int): string =
+  ## The `[startCell, endCell)` CELLS of `s`.
+  ##
+  ## By cell rather than by byte or by rune, because a syntax span is expressed
+  ## in cells (see `app/syntax/highlighter.SyntaxSpan`) and a line may hold a
+  ## wide glyph. A wide glyph straddling the boundary is included when its
+  ## FIRST cell is inside, which keeps the slice's cell count right — dropping
+  ## it would shift everything after it left by two columns.
+  ##
+  ## LIVES HERE RATHER THAN IN `source_pane.nim`, WHERE CTUI-5 PUT IT: CTUI-6's
+  ## `frame_item.nim` needs the same cell arithmetic and must not import a pane
+  ## to get it. `source_pane` re-exports this module, so every CTUI-5 call site
+  ## resolves unchanged.
+  result = ""
+  var at = 0
+  for r in runes(s):
+    let w = max(1, displayWidth($r))
+    if at >= endCell:
+      break
+    if at >= startCell:
+      result.add $r
+    at += w
+
+proc truncateToCells*(s: string; cells: int): string =
+  ## `s` clipped to `cells` columns.
+  if cells <= 0: "" else: cellSlice(s, 0, cells)

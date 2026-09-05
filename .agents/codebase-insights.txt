@@ -3250,3 +3250,36 @@ commands.
     is why `SourceFetchStatus`'s consumers seed their result with
     `sfsProviderUnavailable`. `drainSourceCallbacks()` (or
     `async_compat.drainPlatformCallbacks`) is the pump.
+  * **No ViewModel owns the CALL STACK, and `CalltraceVM` is not it** (CTUI-6,
+    2026-09-06). DAP `stackTrace` is in `backend/dap_commands.nim`'s allow-list
+    and has no ViewModel caller — a grep over `src/frontend/viewmodel/` finds
+    two test files. `store/types.nim` has `CallLine` (a CALLTRACE row, with a
+    `depth`) and `DebuggerState` (one `Location`), and no frame type at all.
+    The two are different data: measured on `noir_space_ship`, a stop whose
+    `stackTrace` reports 4 frames returns 81 `ct/load-calltrace-section` rows,
+    most of them siblings and children of calls that already returned. A pane
+    that wants frames must convert the engine's own `stackTrace` body
+    (`tui/app/call_stack_binding.framesFromStackTrace`). What `CalltraceVM`
+    genuinely owns and is worth binding is the SELECTION: `selectEntry` writes
+    one signal and issues no backend command.
+  * **`EditorVM.activeFileName` is a MEMO over
+    `store.debugger.val.location.file`, not a settable "active tab".** So
+    `SourceVM`, whose `revision` derives from it, CANNOT be pointed at another
+    file: showing an outer stack frame's source needs its own
+    `SourceLineRequest` through `sdk/source_provider`, not a re-point. And
+    `SourceVM.executionLine` is a LINE with no file attached — a pane showing
+    another file must suppress the execution pointer or it marks a line that
+    never ran (`tui/app/call_stack_binding.sourcePaneModelForFrame`).
+  * **isonim-tui has no OSC 8 / hyperlink concept at all** (grep over
+    `isonim-tui/src/`, 2026-09-06): `Cell` carries no link id and `encodeAnsi`
+    emits SGR and runes only. A front-end that wants hyperlinks emits them
+    itself, INLINE with the frame — a second pass moves the cursor off the
+    frame barrier `dual_snap.waitForCompleteFrame` depends on, and OSC 8 is not
+    retroactive (libvterm fills the grid from the cursor at OPEN to the cursor
+    at CLOSE). See `tui/app/views/hyperlinks.nim`.
+  * **`waitForCompleteFrame` is not a barrier AFTER sending input to a snapshot
+    app.** The cursor is already parked on the bottom-right cell from the
+    previous frame, so the call returns immediately and the assertions read the
+    pre-input screen. The child must NAME the new frame — `testing/
+    test_app_runtime.nim` increments its step counter on any input-driven
+    repaint so the parent can wait for `<label>-stepN`.

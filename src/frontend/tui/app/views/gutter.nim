@@ -96,6 +96,18 @@ type
       ## when left unset; heatmap mode supplies the flame colour.
     mark*: GutterMark
     isExecutionLine*: bool
+    isInspectionLine*: bool
+      ## CTUI-6. This line is the one the CALL STACK pane's inspection cursor
+      ## selected — the call site of an outer frame — and the debugger is NOT
+      ## stopped here.
+      ##
+      ## A SECOND FLAG RATHER THAN A SECOND VALUE OF `isExecutionLine`, because
+      ## CTUI-6's contract is that the two cursors are distinct and are rendered
+      ## distinctly: a single flag with two meanings is exactly the conflation
+      ## the contract forbids, and the pointer field would have to guess.
+      ## `isExecutionLine` wins when both are true, which is the case where the
+      ## inspected frame IS the frame the debugger is stopped in and the two
+      ## cursors genuinely coincide.
     provenance*: GutterProvenance
     numberWidth*: int
       ## Cells reserved for the number field. `gutterWidth` is derived from
@@ -115,6 +127,15 @@ const
   BreakpointDisabledGlyph* = "○"
   TracepointGlyph* = "◆"
   ExecutionPointerGlyph* = "-->"
+  InspectionPointerGlyph* = " > "
+    ## CTUI-6's INSPECTION cursor in the source pane: the line an outer frame
+    ## selected in the call stack pane points at.
+    ##
+    ## Three cells, like the execution pointer, so the code column does not move
+    ## between them. A DIFFERENT GLYPH and a different colour, not a recolouring
+    ## of `-->`: a `regionText` read carries no colour at all, so a distinction
+    ## made only in the palette would be invisible to exactly the Tier-2 read
+    ## CTUI-6's verification gate asks for.
   NoPointerGlyph* = "   "
     ## Three spaces, so the code column does not move when the pointer leaves a
     ## line. A gutter that shrank on every line but one would make a step look
@@ -124,6 +145,16 @@ const
   BreakpointDisabledStyle* = CellStyle(fg: "bright_black")
   TracepointStyle* = CellStyle(fg: "cyan", bold: true)
   ExecutionPointerStyle* = CellStyle(fg: "bright_yellow", bold: true)
+  InspectionPointerStyle* = CellStyle(fg: "cyan", bold: true)
+    ## The same cyan and the same bold as `frame_item.InspectedFrameStyle`, so
+    ## the call stack pane's `>` and the source pane's ` > ` are visibly the one
+    ## cursor in two places.
+    ##
+    ## Cyan is also the TRACEPOINT's colour, and that collision is deliberate
+    ## rather than overlooked: the tracepoint lives in the mark cell at column
+    ## 0 and the inspection cursor in the pointer field, so no row can show two
+    ## cyan glyphs whose meaning a reader has to disambiguate by position alone
+    ## — they are different columns with different glyphs.
   VerifiedLineNumberStyle* = CellStyle(fg: "bright_black")
   UnverifiedLineNumberStyle* = CellStyle(fg: "yellow")
     ## THE PROVENANCE TINT. `savUnverified` source is rendered — CTUI-4's seam
@@ -176,10 +207,15 @@ proc initGutterLineSpec*(line: int; numberWidth: int;
                          mark = gmNone; isExecutionLine = false;
                          provenance = gpVerified;
                          numberText = "";
-                         numberStyle = DefaultCellStyle): GutterLineSpec =
+                         numberStyle = DefaultCellStyle;
+                         isInspectionLine = false): GutterLineSpec =
   ## A spec with the defaults every caller would otherwise repeat.
+  ##
+  ## `isInspectionLine` is LAST and defaults to false, so every CTUI-5 call site
+  ## builds exactly the spec it built before CTUI-6 existed.
   GutterLineSpec(line: line, numberText: numberText, numberStyle: numberStyle,
                  mark: mark, isExecutionLine: isExecutionLine,
+                 isInspectionLine: isInspectionLine,
                  provenance: provenance, numberWidth: numberWidth)
 
 proc gutterRow*(spec: GutterLineSpec): StyledRow =
@@ -205,9 +241,17 @@ proc gutterRow*(spec: GutterLineSpec): StyledRow =
   result.add StyledSpan(text: repeat(' ', GutterGapCells),
                         style: DefaultCellStyle)
 
+  # THE POINTER FIELD CARRIES AT MOST ONE CURSOR, and the execution pointer
+  # wins. The two coincide exactly when the inspected frame is the frame the
+  # debugger is stopped in, and on that line "the debugger is here" is the
+  # stronger claim; the call stack pane still shows both markers on that frame's
+  # row, so nothing is lost.
   if spec.isExecutionLine:
     result.add StyledSpan(text: ExecutionPointerGlyph,
                           style: ExecutionPointerStyle)
+  elif spec.isInspectionLine:
+    result.add StyledSpan(text: InspectionPointerGlyph,
+                          style: InspectionPointerStyle)
   else:
     result.add StyledSpan(text: NoPointerGlyph, style: DefaultCellStyle)
   result.add StyledSpan(text: repeat(' ', GutterGapCells),

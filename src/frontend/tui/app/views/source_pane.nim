@@ -69,8 +69,6 @@
 ## text it renders came from `SourceVM` through the binding, which got it from
 ## a real `SourceProvider`.
 
-import std/unicode
-
 import isonim_tui
 
 import ../layout/profile
@@ -108,6 +106,20 @@ type
       ## `executionLine`, never `EditorVM.cursorLine`. CTUI-4 measured the
       ## difference: a pane that followed the caret sat on line 1 for a whole
       ## session while the pointer walked off the bottom.
+    inspectionLine*: int
+      ## CTUI-6. The line the CALL STACK pane's inspection cursor selected, or 0
+      ## for none.
+      ##
+      ## ZERO BY DEFAULT, which is what keeps every CTUI-5 screen unchanged: a
+      ## model built without it renders precisely the pane CTUI-5 measured.
+      ##
+      ## It is a SEPARATE FIELD FROM `executionLine` because the two are
+      ## different questions and CTUI-6's contract is that they must not be
+      ## conflated. When an outer frame in ANOTHER FILE is inspected the binding
+      ## sets `executionLine` to 0 — the debugger is not stopped in the file on
+      ## screen, and drawing `-->` on a line of it would be the strongest form
+      ## of that conflation: a pane claiming the program is somewhere it has
+      ## never been.
     marks*: seq[(int, GutterMark)]
       ## Breakpoints and tracepoints on this file, by line.
     values*: seq[Annotation]
@@ -197,12 +209,16 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
                           values: seq[Annotation] = @[];
                           heat = LineHeat();
                           gutterMode = gutLineNumbers;
-                          degradedMessage = ""): SourcePaneModel =
+                          degradedMessage = "";
+                          inspectionLine = 0): SourcePaneModel =
+  ## `inspectionLine` is LAST and defaults to 0, so every CTUI-5 call site
+  ## builds exactly the model it built before CTUI-6 existed.
   SourcePaneModel(
     path: path, revisionLabel: revisionLabel, provenance: provenance,
     firstHeldLine: firstHeldLine, heldLines: heldLines,
     totalLineCount: totalLineCount, viewportTop: viewportTop,
-    executionLine: executionLine, marks: marks, values: values, heat: heat,
+    executionLine: executionLine, inspectionLine: inspectionLine,
+    marks: marks, values: values, heat: heat,
     gutterMode: gutterMode, degradedMessage: degradedMessage)
 
 # ---------------------------------------------------------------------------
@@ -253,45 +269,11 @@ proc paneGutterWidth*(model: SourcePaneModel): int =
 # Cell arithmetic over a line of text
 # ---------------------------------------------------------------------------
 
-proc pathBaseName*(path: string): string =
-  ## The last component of a recorded path, splitting on BOTH separators.
-  ##
-  ## `std/os.extractFilename` is not used, for the reason
-  ## `ct/trace/ctfs_sources.safePayloadPath` was fixed for in CTUI-4: a
-  ## recorded path is whatever a recorder interned, a Windows recording carries
-  ## backslashes, and a splitter that knows only its own host's separator shows
-  ## the whole path as the "file name" on the other host. Also keeps `std/os`
-  ## out of a view.
-  result = path
-  for i in countdown(path.high, 0):
-    if path[i] == '/' or path[i] == '\\':
-      return path[i + 1 .. ^1]
-
-proc cellWidthOf*(s: string): int =
-  for r in runes(s):
-    result += max(1, displayWidth($r))
-
-proc cellSlice*(s: string; startCell, endCell: int): string =
-  ## The `[startCell, endCell)` CELLS of `s`.
-  ##
-  ## By cell rather than by byte or by rune, because a syntax span is expressed
-  ## in cells (see `app/syntax/highlighter.SyntaxSpan`) and a line may hold a
-  ## wide glyph. A wide glyph straddling the boundary is included when its
-  ## FIRST cell is inside, which keeps the slice's cell count right — dropping
-  ## it would shift everything after it left by two columns.
-  result = ""
-  var at = 0
-  for r in runes(s):
-    let w = max(1, displayWidth($r))
-    if at >= endCell:
-      break
-    if at >= startCell:
-      result.add $r
-    at += w
-
-proc truncateToCells*(s: string; cells: int): string =
-  ## `s` clipped to `cells` columns.
-  if cells <= 0: "" else: cellSlice(s, 0, cells)
+# `cellWidthOf`, `cellSlice` and `truncateToCells` MOVED TO
+# `app/views/styled_row.nim` by CTUI-6, which needs the same cell arithmetic in
+# `frame_item.nim` and must not import a pane to get it. This module re-exports
+# `styled_row`, so every CTUI-5 call site — inside this file and in the suites —
+# resolves to exactly the same procedures.
 
 # ---------------------------------------------------------------------------
 # Painting
@@ -414,7 +396,8 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       numberWidth = numberWidth,
       mark = model.markFor(line),
       isExecutionLine = line == model.executionLine and line > 0,
-      provenance = model.provenance)
+      provenance = model.provenance,
+      isInspectionLine = line == model.inspectionLine and line > 0)
     if model.gutterMode == gutExecutionCounts:
       spec.numberText = model.heat.heatCountText(line)
       spec.numberStyle = model.heat.heatStyle(line)

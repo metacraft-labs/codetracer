@@ -44,12 +44,14 @@ import headless_app/layout_model
 import ../layout/profile
 import ../layout/project
 import ../syntax/highlighter
+import ./call_stack
 import ./header
 import ./source_pane
 import ./status_bar
 import ./styled_row
 
 export header, status_bar, profile, project, source_pane, styled_row
+export call_stack
 
 type
   ShellModel* = object
@@ -73,6 +75,16 @@ type
       ## a shell built with no session open paints exactly the title row it
       ## painted before this milestone. `app_shell.nim`'s cross-tier golden is
       ## therefore the same screen it was, and CTUI-3's suites still read it.
+    callStack*: CallStackModel
+      ## CTUI-6's call stack pane, as a value.
+      ##
+      ## EMPTY BY DEFAULT, on exactly the same rule as `source` above and for
+      ## exactly the same reason: `paintPane` delegates the `calltrace`
+      ## rectangle to `app/views/call_stack.nim` only when the model has
+      ## frames, so a shell with no session open paints the plain
+      ## `CALL STACK ────` title row CTUI-3 painted, `app_shell.nim`'s
+      ## cross-tier golden is unchanged, and every CTUI-3 and CTUI-5 assertion
+      ## that reads that row still reads it.
     highlighting*: HighlighterCache
       ## CTUI-5's risk mitigation, carried on the model rather than created per
       ## frame: "parse once per (path, generation) and cache the token spans".
@@ -241,6 +253,15 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
     discard paintSourcePane(
       g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
       model.source, model.highlighting)
+  # THE CALL STACK PANE OWNS ITS WHOLE RECTANGLE, title row included, on the
+  # same rule and for the same reason: its title carries the frame count and the
+  # thread the backend named, and a shell that painted a generic title first
+  # would show a 51-frame stack and a 4-frame one identically at the top.
+  elif region.pane == paneCalltrace and not model.callStack.isEmpty and
+       region.activeTab < 0:
+    discard paintCallStack(
+      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
+      model.callStack)
   elif region.activeTab >= 0 and region.tabs.len > 0:
     g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
   else:

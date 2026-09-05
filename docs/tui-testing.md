@@ -444,6 +444,35 @@ labels step 0 with the parent's own label and step *N* with `<label>-stepN`
 (`stepLabel`), so a parent driving F10 asks for the frame it wants BY NAME
 rather than by timing.
 
+### Driving a snapshot app with real input (CTUI-6)
+
+`runSnapshotApp` takes two optional callbacks, both `nil` for every CTUI-2,
+CTUI-3 and CTUI-5 app — which is why their byte streams are unchanged:
+
+* **`input: proc(token: string): bool`** receives one complete input token — a
+  plain byte, or a whole escape sequence — and answers whether to repaint. The
+  runtime does the framing (accumulate from `ESC [` to a final byte in
+  `0x40..0x7E`), so an app decodes a value instead of running a state machine.
+  That is what lets `app/input/call_stack_keys.decodeMouse` be asserted against
+  the exact bytes `TermAssert.sendMouseClick` writes, in the Tier-1 lane, with
+  no pty.
+* **`links: proc(cols, rows: int): seq[PaneHyperlink]`** says where OSC 8
+  hyperlinks go on the frame about to be painted. isonim-tui has no hyperlink
+  concept at all, so `app/views/hyperlinks.frameBytesWithHyperlinks` emits them
+  **inline with the frame**, walking the same buffer in the same order as
+  `encodeAnsi`. With no links its output is byte-identical to `frameBytes`, and
+  `tests/real_terminal/test_real_call_stack.nim` asserts exactly that.
+
+**An input-driven repaint increments the step counter**, so the new frame has a
+name. This is not cosmetic: `waitForCompleteFrame` cannot be the barrier after
+an input, because the cursor is *already* parked on the bottom-right cell from
+the previous frame and the call returns immediately. A parent that drove a click
+and then read the screen would read the frame from before its own click. The
+child labels the repaint `<label>-stepN` and the parent waits for that label.
+
+> **Rule: after sending input to a child, wait for a frame you can NAME.** The
+> cursor barrier proves *a* frame is complete, never that *your* frame is.
+
 ### Test-only flags on the snapshot runtime
 
 `testing/test_app_runtime.nim` parses three flags no shipped binary may know:
