@@ -501,10 +501,21 @@ pub struct CodeSnippet {
 /// of which exist below — so what comes back is a strict SUPERSET of
 /// what went out, by construction.
 ///
-/// Several viewmodels also send hand-written literals that borrow the
-/// name but not the shape: `calltrace_vm.nim:232` adds `codeGeneration`,
-/// `no_source_vm.nim:132` sends `{previousPath, action}`,
-/// `origin_chain_vm.nim:220` sends `{expression, location, stepId}`.
+/// Several viewmodels send hand-written literals rather than a
+/// serialized `Location`.  `calltrace_vm.nim`'s `ct/calltrace-jump`
+/// payload is Location-shaped and adds `codeGeneration` — an extra field,
+/// which is exactly what the absence of `deny_unknown_fields` permits.
+///
+/// TWO OTHERS USED TO BORROW THE NAME BUT NOT THE SHAPE, AND BOTH ARE
+/// FIXED (codetracer#698, 13938b75b): `no_source_vm.jumpBack` sent
+/// `{previousPath, action}` and `origin_chain_vm.onSeekToHop` sent
+/// `{expression, location: {…}, stepId}`.  Because this struct is
+/// `#[serde(default)]` at container level, neither was rejected — each
+/// deserialized to a fully zeroed `Location`, so every Jump-back and every
+/// origin-chain hop seeked to step 0 and answered `success`.  Both now
+/// send `path` / `line` / `rrTicks` / `highLevelPath` / `highLevelLine`.
+/// They are named here as the worked example of what the container-level
+/// default costs, NOT as an open inventory of drift.
 ///
 /// It is additionally deserialized from a NON-frontend source — the
 /// recreator's replay-query responses (`recreator_session.rs:683`, `:943`
