@@ -352,12 +352,40 @@ try {
     const baseName = (k) => String(k || '').split(/[\\/]/).pop();
     const activeBefore = baseName(caretBefore && caretBefore.activeKey);
     const activeAfter = baseName(caretAfter && caretAfter.activeKey);
-    const showsClickedFile = activeAfter === row.text;
+    const appShowsClickedFile = activeAfter === row.text;
+
+    // WHAT THE USER SEES, read independently of the application's own pointer.
+    //
+    // `data.services.editor.active` is assigned in exactly one place on this
+    // path -- layout.nim's `activeContentItemChanged` handler -- so a tab that
+    // comes to the front while that handler is not attached leaves the pointer
+    // stale and the SCREEN correct. The opposite is also possible. Those are
+    // two different defects with two different fixes, and a probe that reads
+    // only one of them cannot say which it is looking at.
+    //
+    // So the tab's own `lm_active` class is read too, scoped to the stack that
+    // actually holds it -- the same selector layout.nim uses.
+    const domTab = await page.evaluate((n) => {
+      const tabs = Array.from(document.querySelectorAll('.lm_tab'));
+      const tab = tabs.find((t) => ((t.querySelector('.lm_title') || {}).textContent || '').trim().endsWith(n));
+      if (!tab) return { present: false, active: false, activeInStack: null };
+      const stack = tab.closest('.lm_stack');
+      const activeEl = stack
+        ? stack.querySelector(':scope > .lm_header .lm_tab.lm_active .lm_title')
+        : null;
+      return {
+        present: true,
+        active: tab.classList.contains('lm_active'),
+        activeInStack: activeEl ? (activeEl.textContent || '').trim() : null,
+      };
+    }, row.text);
 
     let bucket;
     if (!sawClick) bucket = 'A: no document-level click at all';
     else if (!onRow) bucket = 'B: click arrived, target is NOT the tree row';
-    else if (!showsClickedFile) bucket = 'C: click arrived on the row, the file did not become active';
+    else if (!domTab.present) bucket = 'C1: click arrived on the row, no tab for the file exists';
+    else if (!domTab.active) bucket = 'C2: click arrived on the row, its tab never came to the front';
+    else if (!appShowsClickedFile) bucket = 'C3: the tab IS on screen, but services.editor.active stayed behind';
     else bucket = 'OK';
 
     return {
@@ -375,7 +403,10 @@ try {
       opened,
       activeBefore,
       activeAfter,
-      showsClickedFile,
+      appShowsClickedFile,
+      domTabPresent: domTab.present,
+      domTabActive: domTab.active,
+      domActiveInStack: domTab.activeInStack,
       bucket,
     };
   };

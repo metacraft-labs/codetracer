@@ -301,17 +301,28 @@ fi
 #
 # NON-VACUITY: a run that clicked nothing would satisfy "no bad clicks", so the
 # number of rows actually measured is part of the assertion.
+# THE SCREEN AND THE POINTER ARE REPORTED APART. A tab that never comes to the
+# front is what the user reported; a tab that IS on screen while
+# `services.editor.active` stayed behind is a different defect with a different
+# fix (layout.nim assigns that field from ONE `activeContentItemChanged`
+# handler). Both fail — neither is acceptable — but the message says which.
 measured="$(q 'len(d.get("treeClicksDebugMode", []))')"
-badclicks="$(q 'sum(1 for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C"))')"
 missed="$(q 'sum(1 for c in d.get("treeClicksDebugMode", []) if c.get("bucket","")[:1] in ("A","B"))')"
+notab="$(q 'sum(1 for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C1"))')"
+notfront="$(q 'sum(1 for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C2"))')"
+stale="$(q 'sum(1 for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C3"))')"
 if [ "${measured}" -lt 4 ]; then
 	ck fail "[tree-debug] only ${measured} file row(s) were clicked in Debug mode; this run cannot speak to the report"
 elif [ "${missed}" -gt 0 ]; then
 	ck fail "[tree-debug] ${missed} of ${measured} clicks never reached their row: $(q '[(c["row"], c["bucket"], c.get("elementFromPointBefore")) for c in d.get("treeClicksDebugMode", []) if c.get("bucket","")[:1] in ("A","B")]')"
-elif [ "${badclicks}" -gt 0 ]; then
-	ck fail "[tree-debug] ${badclicks} of ${measured} clicks reached the row and did NOT make their file active: $(q '[(c["row"], c.get("activeBefore"), c.get("activeAfter")) for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C")]')"
+elif [ "${notab}" -gt 0 ]; then
+	ck fail "[tree-debug] ${notab} of ${measured} clicks opened NO TAB AT ALL for their file: $(q '[c["row"] for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C1")]')"
+elif [ "${notfront}" -gt 0 ]; then
+	ck fail "[tree-debug] ${notfront} of ${measured} clicks left their tab BEHIND another one — this is the user-visible defect: $(q '[(c["row"], "stack shows " + str(c.get("domActiveInStack"))) for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C2")]')"
+elif [ "${stale}" -gt 0 ]; then
+	ck fail "[tree-debug] ${stale} of ${measured} tabs came to the front but services.editor.active stayed behind: $(q '[(c["row"], c.get("activeBefore"), c.get("activeAfter")) for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C3")]')"
 else
-	ck ok "[tree-debug] all ${measured} file-tree clicks made their file the active editor in Debug mode"
+	ck ok "[tree-debug] all ${measured} file-tree clicks brought their file to the front AND made it the active editor"
 fi
 
 # --- the console ------------------------------------------------------------
