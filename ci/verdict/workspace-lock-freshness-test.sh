@@ -76,9 +76,16 @@ if ! command -v git >/dev/null 2>&1; then
 	exit 3
 fi
 
-# The probe sibling the check hard-codes. A lock that does not name it is the
-# resolver's exit 4, which is a different report from "not locked".
+# The sibling every fixture lock pins. It is no longer hard-coded IN the check —
+# the check derives its declared set from `.github/sibling-repos` and the bare
+# entries of the `siblings:` blocks (see section 9) — so the fixtures declare it
+# explicitly, via the fixture declaration files below, and the sections before 9
+# are unchanged in meaning: exactly one declared repo, present in the lock.
 readonly PROBE_SIBLING="codetracer-trace-format"
+
+# The second repo every fixture lock pins. Section 9 uses it to build a lock
+# that carries EVERY declared repo without needing a third name.
+readonly SECOND_SIBLING="codetracer-native-backend"
 
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "${tmp_root}"' EXIT
@@ -114,12 +121,20 @@ done
 
 git_q() { git -c user.email=ci@example.invalid -c user.name=ci "$@"; }
 
-# write_lock <checkout> <sha> [--without-probe-sibling]
+# write_lock <checkout> <sha> [--without-probe-sibling | --malformed-revision]
 # A real reprobuild.workspace.lock.v1 document at the nested layout the
 # resolver reads: locks/<project>/<trigger-repo>/<sha>.toml
+#
+# `--without-probe-sibling` is a WELL-FORMED lock that simply does not pin
+# ${PROBE_SIBLING} — the resolver's exit 4, and the exact shape of the defect
+# section 9 is about. `--malformed-revision` is a lock that cannot be trusted at
+# all (a revision that is not a 40-hex SHA — the resolver's exit 5), which is
+# what section 5 needs and what exit 4 must NOT be confused with.
 write_lock() {
 	local root="$1" sha="$2" mode="${3-}"
 	local dir="${root}/locks/codetracer/codetracer"
+	local trace_rev="$REV_TRACE_FORMAT"
+	[ "$mode" = "--malformed-revision" ] && trace_rev="not-a-commit-id"
 	mkdir -p "$dir"
 	{
 		printf '%s\n' 'schema = "reprobuild.workspace.lock.v1"'
@@ -130,8 +145,8 @@ write_lock() {
 		printf '%s\n' 'created_by = "repro workspace lock"'
 		printf '%s\n' ''
 		printf '%s\n' '[[repo]]'
-		printf '%s\n' 'name = "codetracer-native-backend"'
-		printf '%s\n' 'path = "codetracer-native-backend"'
+		printf '%s\n' "name = \"${SECOND_SIBLING}\""
+		printf '%s\n' "path = \"${SECOND_SIBLING}\""
 		printf '%s\n' 'remote = "metacraft-labs"'
 		printf '%s\n' "revision = \"${REV_NATIVE_BACKEND}\""
 		printf '%s\n' 'branch = "dev"'
@@ -141,7 +156,7 @@ write_lock() {
 			printf '%s\n' "name = \"${PROBE_SIBLING}\""
 			printf '%s\n' "path = \"${PROBE_SIBLING}\""
 			printf '%s\n' 'remote = "metacraft-labs"'
-			printf '%s\n' "revision = \"${REV_TRACE_FORMAT}\""
+			printf '%s\n' "revision = \"${trace_rev}\""
 			printf '%s\n' 'branch = "main"'
 		fi
 	} >"${dir}/${sha}.toml"
@@ -196,6 +211,29 @@ if ! command -v timeout >/dev/null 2>&1; then
 	exit 3
 fi
 
+# --- fixture DECLARATION sites --------------------------------------------
+#
+# The check derives the sibling repos it probes from this repo's real
+# declarations (`.github/sibling-repos` plus the bare entries of the
+# `siblings:` blocks under `.github/workflows`). Pointed at those, every fixture
+# lock in this file would be missing nine or ten declared repos and every
+# section below would report the section-9 verdict instead of its own.
+#
+# So the sections that are not ABOUT the derivation declare exactly one repo —
+# ${PROBE_SIBLING}, which every fixture lock pins — and section 9 drives the
+# derivation from its own fixtures and from the real files. This mirrors
+# `--publisher-workflow`: the overridable input exists so a contract can state
+# the world it is testing, and there is a contract (9g) that the DEFAULTS still
+# point at the real declaration sites.
+DECL_DIR="${tmp_root}/declarations"
+mkdir -p "$DECL_DIR"
+DEFAULT_DECL_LIST="${DECL_DIR}/one-repo"
+printf '%s\n' "$PROBE_SIBLING" >"$DEFAULT_DECL_LIST"
+# An EMPTY workflow directory, so the default fixture declaration set is exactly
+# the one name in the list above and nothing leaks in from a stray `*.yml`.
+DEFAULT_DECL_WF="${DECL_DIR}/no-workflows"
+mkdir -p "$DEFAULT_DECL_WF"
+
 # run_check ... -> sets RC, OUT, ELAPSED
 #
 # DEFAULT --branch dev. Every fixture below this line except the branch-coverage
@@ -205,12 +243,21 @@ fi
 # "cause not determined", which is the correct answer to a question these
 # fixtures are not asking. The coverage contracts pass their own `--branch` and
 # `--publisher-workflow`, and this default steps aside when they do.
+#
+# DEFAULT --sibling-list / --workflow-dir, for the reason given just above. Each
+# steps aside independently when a fixture passes its own.
 run_check() {
-	local start end arg has_branch=0
+	local start end arg has_branch=0 has_list=0 has_wf=0
 	for arg in "$@"; do
-		[ "$arg" = "--branch" ] && has_branch=1
+		case "$arg" in
+		--branch) has_branch=1 ;;
+		--sibling-list) has_list=1 ;;
+		--workflow-dir) has_wf=1 ;;
+		esac
 	done
 	[ "$has_branch" -eq 0 ] && set -- "$@" --branch dev
+	[ "$has_list" -eq 0 ] && set -- "$@" --sibling-list "$DEFAULT_DECL_LIST"
+	[ "$has_wf" -eq 0 ] && set -- "$@" --workflow-dir "$DEFAULT_DECL_WF"
 	start="$(date +%s)"
 	OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" "$@" 2>&1)"
 	RC=$?
@@ -421,14 +468,23 @@ expect_contains "Newest commit touching locks/" "present"
 ok "the overall staleness line is still reported"
 
 # ---------------------------------------------------------------------------
-# 5. UNTRUSTED LOCK. Exit 4/5/6 from the resolver mean a lock EXISTS but cannot
-#    answer. That is not a publication stall, so waiting for one is wrong:
-#    it must be reported immediately and must not consume the window.
+# 5. UNTRUSTED LOCK. Exit 5/6 from the resolver mean a lock EXISTS but is
+#    malformed or self-contradictory. That is not a publication stall, so
+#    waiting for one is wrong: it must be reported immediately and must not
+#    consume the window.
+#
+#    THE FIXTURE IS A MALFORMED REVISION, not a missing entry. It used to be a
+#    lock with the probe sibling omitted, which is the resolver's exit 4 — and
+#    exit 4 is now a DIFFERENT verdict (section 9: the lock is fine, the
+#    declaration never reached it), with a different exit code and a different
+#    remedy. A fixture that conflated the two would let either verdict satisfy
+#    this contract, so it now uses a revision that is not a 40-hex commit id:
+#    unambiguously exit 5, unambiguously "cannot be trusted".
 # ---------------------------------------------------------------------------
 echo "untrusted: a lock that exists but cannot answer is not waited on"
 
 new_world untrusted
-write_lock "$PUB" "$SHA_UNDER_TEST" --without-probe-sibling >/dev/null
+write_lock "$PUB" "$SHA_UNDER_TEST" --malformed-revision >/dev/null
 git_q -C "$PUB" add -A
 git_q -C "$PUB" commit --quiet -m "Publish 1 workspace lock entry"
 git_q -C "$PUB" push --quiet origin HEAD:latest
@@ -686,6 +742,250 @@ expect_contains "$STALL_BANNER" "coverage/default-workflow"
 expect_not_contains "NOT DETERMINED" "coverage/default-workflow"
 ok "the DEFAULT --publisher-workflow resolves to this repo's real publish-workspace-lock.yml, and it covers 'cloud'"
 
+# ---------------------------------------------------------------------------
+# 9. A DECLARED REPO THAT NEVER REACHED THE LOCK.
+#
+# Declaring a sibling repo does not put it in a lock, and until these contracts
+# existed nothing noticed. Repos are DECLARED in two places in this repo — the
+# bare entries of the `siblings:` blocks in `.github/workflows/*.yml`, and the
+# names-only list `.github/sibling-repos` — while locks are PRODUCED elsewhere:
+# by a developer's pre-push hook, whose repo set is whatever that developer had
+# checked out, or by the server-side re-anchor in publish-workspace-lock.yml,
+# which copies every sibling pin verbatim from an older lock named only by
+# `source-sha`. NEITHER PRODUCER READS THE DECLARATIONS. So a newly declared
+# bare-name repo has no pin to copy, is absent from the next lock, and is absent
+# from every lock carried forward from that one — the hole sustains itself.
+#
+# It surfaced only at build time, as `resolve-sibling-rev: sibling '<name>' not
+# present in lock`, taking out every job that reached `clone-siblings`. That is
+# not hypothetical: isonim-tui, isonim-gpui, nim-termctl and nim-pty did exactly
+# this (ci/test/sibling-provisioning-test.sh).
+#
+# The only adjacent check was this one, and it probed ONE hard-coded name
+# (`codetracer-trace-format`) justified by a comment claiming that name was "in
+# every one of this repo's sibling lists" — which was false: `.github/sibling-
+# repos` does not contain it at all. A lock missing any OTHER declared repo
+# passed green.
+#
+# So: probe every DECLARED name, and DERIVE the declared set. The derivation is
+# the load-bearing half. A hard-coded list — even a correct one — drifts out of
+# agreement with the declarations silently, which is the same disease one layer
+# up: the check would go on passing for the very repo somebody had just added.
+# Contracts 9d/9e/9f/9g are therefore about the derivation, not just the verdict.
+# ---------------------------------------------------------------------------
+readonly MISSING_BANNER="DECLARED SIBLING REPOS ARE MISSING FROM THE WORKSPACE LOCK"
+readonly UNDECLARED_REPO="codetracer-launcher"
+
+decl_full="${DECL_DIR}/full"
+printf '%s\n%s\n' "$PROBE_SIBLING" "$SECOND_SIBLING" >"$decl_full"
+
+decl_with_missing="${DECL_DIR}/with-missing"
+printf '%s\n%s\n' "$PROBE_SIBLING" "$UNDECLARED_REPO" >"$decl_with_missing"
+
+new_world declared
+publish "$SHA_UNDER_TEST"
+snapshot declared
+
+# --- 9a. the healthy case ---------------------------------------------------
+echo "declared siblings: a lock carrying every declared repo passes"
+
+run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
+	--sibling-list "$decl_full" --workflow-dir "$DEFAULT_DECL_WF" \
+	--grace-seconds 30 --poll-seconds 5
+expect_rc 0 "declared/complete"
+expect_contains "Workspace lock present for ${SHA_UNDER_TEST}" "declared/complete"
+expect_contains "pins all 2 declared sibling repo(s)" "declared/complete"
+expect_not_contains "$MISSING_BANNER" "declared/complete"
+ok "a lock that pins every declared repo passes, and says how many it checked"
+
+# --- 9b. the defect ---------------------------------------------------------
+#
+# The decisive contract. Same lock, same commit, same everything — one more
+# DECLARED repo, which the lock does not pin. Before this section that was
+# green.
+echo "declared siblings: a lock missing one declared repo fails loudly and names it"
+
+run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
+	--sibling-list "$decl_with_missing" --workflow-dir "$DEFAULT_DECL_WF" \
+	--grace-seconds 30 --poll-seconds 5
+expect_rc 4 "declared/missing"
+expect_contains "$MISSING_BANNER" "declared/missing"
+expect_contains "$UNDECLARED_REPO" "declared/missing"
+ok "a declared repo absent from an existing lock is a failure that NAMES the repo"
+
+# Naming the repo without naming where it was declared sends the reader hunting
+# through fourteen workflow files for the entry to fix.
+expect_contains "declared in: ${decl_with_missing}" "declared/missing"
+ok "the report names the declaration site, so the entry to fix is not a search"
+
+expect_contains "REMEDY" "declared/missing"
+ok "the report carries a remedy, not just an accusation"
+
+# Waiting cannot add a repo to a lock that already exists, so this must not
+# spend the window — the same rule the untrusted verdict obeys.
+expect_elapsed_below 5 "declared/missing"
+ok "it does not spend the grace window on a condition waiting cannot fix"
+
+# --- 9c. the three verdicts are distinguishable -----------------------------
+#
+# A new failure that reads like an existing one is worth very little: the whole
+# point is that the remedies differ. "No lock at all" is the workspace/publisher
+# question; "a lock that cannot be parsed" is a data question; "a lock that is
+# fine but does not name a repo somebody declared" is a declaration question,
+# and only the third has the remedy this report prints.
+echo "declared siblings: the new verdict is distinct from the other two"
+
+expect_not_contains "$STALL_BANNER" "declared/missing"
+expect_not_contains "cannot be used" "declared/missing"
+ok "the missing-declared-repo verdict is neither the stall banner nor the untrusted one"
+
+# ...and the converse, measured rather than assumed: drive the other two
+# verdicts through the SAME declaration set and confirm each keeps its own exit
+# code and banner. Without this, a check that answered 4 for everything would
+# satisfy 9b.
+new_world declared_nolock
+snapshot declared_nolock
+run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
+	--sibling-list "$decl_with_missing" --workflow-dir "$DEFAULT_DECL_WF" \
+	--grace-seconds 4 --poll-seconds 2
+expect_rc 1 "declared/no-lock"
+expect_contains "$STALL_BANNER" "declared/no-lock"
+expect_not_contains "$MISSING_BANNER" "declared/no-lock"
+ok "no lock at all is still exit 1 and the STALL banner, not the missing-repo verdict"
+
+new_world declared_untrusted
+write_lock "$PUB" "$SHA_UNDER_TEST" --malformed-revision >/dev/null
+git_q -C "$PUB" add -A
+git_q -C "$PUB" commit --quiet -m "Publish 1 workspace lock entry"
+git_q -C "$PUB" push --quiet origin HEAD:latest
+snapshot declared_untrusted
+run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
+	--sibling-list "$decl_with_missing" --workflow-dir "$DEFAULT_DECL_WF" \
+	--grace-seconds 4 --poll-seconds 2
+expect_rc 1 "declared/untrusted"
+expect_contains "cannot be used" "declared/untrusted"
+expect_not_contains "$MISSING_BANNER" "declared/untrusted"
+ok "an unparseable lock is still exit 1 and 'cannot be used', not the missing-repo verdict"
+
+# --- 9d/9e/9f. the derivation actually reads the declarations ---------------
+#
+# These are the contracts that stop the set from quietly becoming a constant
+# again. Each drives the VERDICT from a declaration file, so a check that
+# ignored the declarations could not pass them.
+echo "declared siblings: the set is derived from the declaration sites"
+
+decl_wf="${DECL_DIR}/workflows"
+mkdir -p "$decl_wf"
+
+# A BARE entry resolves its revision FROM the lock, so it must be probed.
+# A `name=ref` entry bypasses the lock entirely, so probing it would be a
+# false alarm about a repo whose revision this lock was never asked for.
+cat >"${decl_wf}/mixed.yml" <<YAML
+jobs:
+  build:
+    steps:
+      - uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          siblings: |
+            ${PROBE_SIBLING}
+            declared-bare-in-workflow
+            pinned-by-ref=dev
+            sha-pinned=0123456789012345678901234567890123456789
+            # commented-out-repo
+YAML
+
+new_world derivation
+publish "$SHA_UNDER_TEST"
+snapshot derivation
+
+# 9d — declared ONLY in the sibling-repos list: probed.
+run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
+	--sibling-list "$decl_with_missing" --workflow-dir "$DEFAULT_DECL_WF" \
+	--grace-seconds 4 --poll-seconds 2
+expect_rc 4 "derivation/list-only"
+expect_contains "$UNDECLARED_REPO" "derivation/list-only"
+ok "a repo declared ONLY in the sibling-repos list is probed against the lock"
+
+# 9f — declared ONLY as a bare entry in a workflow: probed.
+#
+# The sibling list passed here carries its own `name=ref`, so this one run
+# exercises the BARE_NAME rule on BOTH parsers at once.
+decl_list_with_ref="${DECL_DIR}/one-repo-and-a-ref"
+printf '%s\n%s\n' "$PROBE_SIBLING" "list-pinned-by-ref=dev" >"$decl_list_with_ref"
+
+run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
+	--sibling-list "$decl_list_with_ref" --workflow-dir "$decl_wf" \
+	--grace-seconds 4 --poll-seconds 2
+expect_rc 4 "derivation/workflow-bare"
+expect_contains "declared-bare-in-workflow" "derivation/workflow-bare"
+expect_contains "mixed.yml" "derivation/workflow-bare"
+ok "a BARE \`siblings:\` entry in a workflow is probed, and the workflow is named"
+
+# 9e — the same block's `name=ref`, SHA-pinned and commented entries are NOT
+# probed, and neither is the `name=ref` in the sibling list. They are in the
+# same files, the same block and the same run as the bare entry above, so this
+# cannot pass by the derivation reading nothing.
+expect_not_contains "pinned-by-ref" "derivation/workflow-ref"
+expect_not_contains "sha-pinned" "derivation/workflow-ref"
+expect_not_contains "commented-out-repo" "derivation/workflow-ref"
+ok "a \`name=ref\` entry bypasses the lock and is NOT probed — nor is a commented one"
+
+# 9g — THE DEFAULTS. Everything above drives fixtures; if the defaults did not
+# point at this repo's real declaration sites the whole mechanism would be
+# decorative in CI. `--list-declared` prints the derived set and reads nothing
+# else, so this asserts the derivation against the files as they stand.
+echo "declared siblings: the DEFAULT derivation reads this repo's real declarations"
+
+OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" --list-declared 2>&1)"
+RC=$?
+expect_rc 0 "derivation/defaults"
+
+# Declared ONLY in .github/sibling-repos — the name the old hard-coded probe
+# could never have covered, and the reason its justifying comment was false.
+expect_contains "codetracer-launcher" "derivation/defaults"
+# Declared ONLY as a bare entry in a workflow (launcher-recorder-e2e.yml).
+expect_contains "nim-everywhere" "derivation/defaults"
+ok "the default set spans BOTH declaration sites, from the real files"
+
+# ...and stops at the declarations. `codetracer-native-backend` appears in this
+# repo's `siblings:` blocks only ever as `name=ref`, and `io-mon` only ever
+# SHA-pinned; neither resolves from the lock, so neither may be probed against
+# it. A derivation that swept every token in those blocks would fail here.
+expect_not_contains "codetracer-native-backend" "derivation/defaults"
+expect_not_contains "io-mon" "derivation/defaults"
+ok "names that are only ever \`=ref\` or SHA-pinned in the real workflows are excluded"
+
+# --- 9h. an empty declared set is refused, not passed -----------------------
+#
+# The failure mode this whole section exists to prevent, applied to itself: a
+# derivation that silently yields nothing would probe nothing and pass every
+# lock ever written, and would look exactly like a healthy check.
+echo "declared siblings: a derivation that yields nothing is refused, not green"
+
+empty_list="${DECL_DIR}/empty"
+: >"$empty_list"
+run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
+	--sibling-list "$empty_list" --workflow-dir "$DEFAULT_DECL_WF" \
+	--grace-seconds 4 --poll-seconds 2
+expect_rc 2 "derivation/empty"
+expect_contains "no declared sibling repos could be derived" "derivation/empty"
+expect_not_contains "Workspace lock present" "derivation/empty"
+ok "an empty declared set is a refusal (exit 2), never a vacuous pass"
+
+# EXPECTED_ASSERTIONS — the number of `ok` calls this file reaches on a clean
+# run, counted from the source rather than copied from a previous run's output.
+# A suite that dies part-way prints a partial tally that looks exactly like a
+# result; comparing against a number derived from the file is what tells the two
+# apart. If your count comes out LOWER than this, the suite stopped early or a
+# contract was deleted — find out which. Never lower this to make it match.
+readonly EXPECTED_ASSERTIONS=44
+
 echo
 echo "workspace-lock-freshness-test summary: executed=${pass_count} failed=0"
+if [ "$pass_count" -ne "$EXPECTED_ASSERTIONS" ]; then
+	echo "workspace-lock-freshness-test: FAIL: reached ${pass_count} assertions, expected ${EXPECTED_ASSERTIONS}." >&2
+	echo "  Either the suite stopped before its end, or contracts were added/removed" >&2
+	echo "  without updating EXPECTED_ASSERTIONS. A partial tally is not a pass." >&2
+	exit 1
+fi
 echo "workspace-lock-freshness-test: all contracts hold."
