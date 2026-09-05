@@ -1,0 +1,71 @@
+# A NARROW, MANUALLY-DISPATCHED PROBE OF THE WINDOWS BOOTSTRAP'S MSYS2 LEG.
+#
+# WHY THIS EXISTS RATHER THAN DISPATCHING `codetracer.yml`.
+#
+# The MSYS2 leg of `env.ps1` -- the base-tarball download, its SHA check, the
+# `tar` extraction and the `pacman` install -- is reachable only by actually
+# provisioning, so a change to how those operations are bounded cannot be
+# validated by any amount of local testing. It has to run on `eph-win-x64`.
+#
+# But `codetracer.yml` has no `workflow_dispatch` inputs, so dispatching it
+# starts the widest matrix in this repository, several jobs of which contend
+# for the same two Windows runner slots. That is a poor trade for exercising
+# one component, and on a lane whose known failure mode is a multi-hour hang it
+# is an actively bad one.
+#
+# `WINDOWS_DIY_ONLY=NIM` reduces the bootstrap to the single phase that reaches
+# `Ensure-Nim` -> `Ensure-TupMsys2BuildPrereqs`, which is exactly the code under
+# test and nothing else.
+#
+# THE TIMEOUT IS DELIBERATELY TIGHT. The point of this lane is to find out
+# QUICKLY whether the bounded download fires, succeeds, or is never reached. A
+# generous cap would reintroduce the thing being fixed: a job that tells you
+# nothing for hours. If the bounds work, a stall now surfaces as a real error in
+# minutes, so a run that needs more than 30 is itself the finding.
+#
+# `workflow_dispatch` only: this never triggers on push or pull_request, and it
+# consumes a Windows slot only when somebody asks for it.
+name: Windows MSYS2 provision check
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-msys2-provision-check-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  msys2-provision:
+    runs-on: eph-win-x64
+    timeout-minutes: 30
+    steps:
+      # `actions/checkout` needs a real git on PATH on these guests; without one
+      # it falls back to the REST API. This job does not need submodules, so a
+      # shallow default checkout is enough.
+      - uses: actions/checkout@v4
+
+      # Cheap and hermetic, and it runs the bounds' own tests on a REAL Windows
+      # host rather than only on Linux pwsh. If the negative tests behave
+      # differently here, that matters more than the provisioning result.
+      - name: Validate download and native-command bounds
+        shell: pwsh
+        timeout-minutes: 10
+        run: pwsh -File ci/test/download-stall-bound.ps1
+
+      - name: Provision only the NIM phase (reaches the MSYS2 leg)
+        shell: pwsh
+        timeout-minutes: 15
+        env:
+          WINDOWS_DIY_ONLY: NIM
+          # Keep the failure signal fast and specific. These are well under the
+          # shipped defaults on purpose: this lane is a probe, and a stall here
+          # should be reported in minutes rather than waited out.
+          CODETRACER_DOWNLOAD_STALL_SECONDS: "60"
+          CODETRACER_DOWNLOAD_TIMEOUT_SECONDS: "600"
+          CODETRACER_NATIVE_COMMAND_TIMEOUT_SECONDS: "600"
+        run: |
+          . ./env.ps1
+          Write-Host "NIM phase completed without hanging."
