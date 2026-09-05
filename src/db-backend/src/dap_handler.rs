@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
@@ -32,6 +32,19 @@ use crate::trace_reader::TraceReader;
 use crate::dap_types;
 // use crate::dap_types::Source;
 use crate::step_lines_loader::StepLinesLoader;
+
+/// The `Location.sourceGeneration` every materialized recording reports.
+///
+/// A `.ct` container holds exactly one revision of each recorded path, and the
+/// three places this engine builds a `Location` (`db.rs`, `event_db.rs`,
+/// `task.rs`) all set `source_generation: 0`. Naming that here, once, is what
+/// lets [`Handler::source`] tell a client WHICH revision it just served
+/// instead of leaving the client to assume it got the one it asked for.
+///
+/// When the engine grows per-generation source storage — the live-HCR case,
+/// where a patched generation's text is not in the container at all — this is
+/// the constant that stops being one.
+pub const RECORDED_SOURCE_GENERATION: i64 = 0;
 use crate::task::{self, Breakpoint, GlobalCallLineIndex, HistoryResult, StringAndValueTuple, TraceKind};
 use crate::task::{
     Action, Call, CallArgsUpdateResults, CallLine, CallLineContentKind, CallSearchArg, CallSearchResponseBody,
@@ -674,6 +687,43 @@ impl Handler {
             success: true,
             command: request.command.clone(),
             message: None,
+            body: serde_json::to_value(value)?,
+        });
+        self.dap_client.seq += 1;
+        Ok(sender.send(response)?)
+    }
+
+    /// Send a FAILED response that still carries a body.
+    ///
+    /// Returning an `Err` from a handler also reaches the client as
+    /// `success: false`, but with `body: {}` and a human-readable `message` and
+    /// nothing else — so a client can only distinguish one refusal from another
+    /// by matching on prose. When the refusal is a typed outcome the client has
+    /// to act on differently (`source`'s "there is no source anywhere for this
+    /// path", which is a different row in the client's degraded-state axis from
+    /// "this engine cannot answer `source` at all"), the discriminator belongs
+    /// in the body as a machine-readable field.
+    ///
+    /// DAP allows this: an error response's body is `{ error?: Message }`, and
+    /// members a client does not know are ignored by every conforming
+    /// implementation, exactly as with the `Source` extensions this engine
+    /// already sends.
+    pub fn respond_dap_failure<T: Serialize>(
+        &mut self,
+        request: dap::Request,
+        message: String,
+        value: T,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let response = DapMessage::Response(dap::Response {
+            base: dap::ProtocolMessage {
+                seq: self.dap_client.seq, // patched by `patch_message_seq` in `src/dap_server.rs`
+                type_: "response".to_string(),
+            },
+            request_seq: request.base.seq,
+            success: false,
+            command: request.command.clone(),
+            message: Some(message),
             body: serde_json::to_value(value)?,
         });
         self.dap_client.seq += 1;
@@ -3490,8 +3540,17 @@ impl Handler {
                 continue;
             };
             // Write to exactly the path the read side derives, so the write and
-            // read layouts can never drift.
-            let dest = crate::expr_loader::bundled_source_path(&root, Path::new(recorded_path));
+            // read layouts can never drift — and through the CONTAINED form of
+            // that mapping, because `recorded_path` is a string this process
+            // did not write. A container naming `res://../../.bashrc` would
+            // otherwise have `create_dir_all` + `write` place container-supplied
+            // bytes anywhere the replay process can reach. The read side refuses
+            // the same paths, so skipping here loses nothing that could have
+            // been served.
+            let Some(dest) = crate::expr_loader::contained_bundled_source_path(&root, Path::new(recorded_path)) else {
+                warn!("bundled-sources: refusing to extract {recorded_path}: it does not map inside the bundle root");
+                continue;
+            };
             if let Some(parent) = dest.parent()
                 && let Err(e) = std::fs::create_dir_all(parent)
             {
@@ -3585,7 +3644,17 @@ impl Handler {
                 );
                 continue;
             };
-            let dest = crate::expr_loader::bundled_source_path(&root, Path::new(recorded_path));
+            // Contained, for the same reason the native extraction is, and with
+            // the same answer — a VFS key is not a filesystem path, so nothing
+            // escapes here, but the read side
+            // (`expr_loader::contained_bundled_source_path`) refuses a `..` key
+            // and the two must not disagree about which views exist.
+            let Some(dest) = crate::expr_loader::contained_bundled_source_path(&root, Path::new(recorded_path)) else {
+                warn!(
+                    "bundled-sources(vfs): refusing to extract {recorded_path}: it does not map inside the bundle root"
+                );
+                continue;
+            };
             crate::vfs::vfs_write(dest.to_string_lossy().as_ref(), sv.content.clone());
             extracted += 1;
         }
@@ -3712,6 +3781,148 @@ impl Handler {
         &mut self,
     ) -> Option<crate::origin_metadata_indexer::OriginMetadataDecoder> {
         self.clone_origin_metadata_decoder()
+    }
+
+    /// DAP `source` — return the text of one recorded source file.
+    ///
+    /// <https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Source>
+    ///
+    /// # Why the engine answers this at all
+    ///
+    /// The desktop never needed it: Electron reads the file with node's `fs`
+    /// and hands it to Monaco. Every other front-end does need it — a terminal
+    /// UI has no Monaco, and a browser session driving this engine in a worker
+    /// has no filesystem at all — and until this arm existed `source` fell
+    /// through to `dap_command_to_step_action`, which answered
+    /// `command source not supported here`. So the whole DAP route to source
+    /// text was closed, and a client could only ever read files itself.
+    ///
+    /// # Resolution order, most authoritative first
+    ///
+    /// 1. the container's own bundled raw source views
+    ///    ([`Self::meta_dat_sources_root`]), which is the only copy that exists
+    ///    for a recording whose paths are virtual (`res://…`);
+    /// 2. the trace folder's `files/` payload — the self-contained copy `ct`
+    ///    unpacks from the container. It is the RECORDING's source, so it is
+    ///    preferred over the working tree, which may be any build at all;
+    /// 3. the recorded path itself, through [`crate::expr_loader::source_text`]
+    ///    (filesystem, then the VFS a host pushed in) — and only when the
+    ///    client allows it (`SourceArguments::allow_working_tree`).
+    ///
+    /// Steps 1 and 2 both go through
+    /// [`crate::expr_loader::resolve_bundled_source`], NOT through
+    /// [`crate::expr_loader::bundled_source_path`] alone. That distinction is
+    /// the whole of the preference above being real rather than stated: the
+    /// writer's exact mapping is only one of the two payload layouts this
+    /// workspace produces, and the Noir recorder writes the other one. With the
+    /// exact mapping alone, every Noir recording missed its own payload and
+    /// fell through to step 3 — measured on the `noir_space_ship` fixture: a
+    /// marker prepended to the trace's `files/src/main.nr` did not appear in
+    /// the served content, while the same experiment on `calc` (whose layout
+    /// the exact mapping does hit) did.
+    ///
+    /// # Both bundle roots are containment boundaries
+    ///
+    /// Steps 1 and 2 may only ever answer with a file that is genuinely inside
+    /// the root they were given. `resolve_bundled_source` enforces that (see
+    /// [`crate::expr_loader::is_within_bundle_root`]), and it has to, because
+    /// the recorded path is untrusted: it is whatever a container this process
+    /// did not write happened to intern. Without the check a recorded
+    /// `/../../secret.txt` resolved through the OS, was served, and was
+    /// labelled `sourceOrigin: "payload"` — the recording's own copy — to a
+    /// client that had explicitly set `allowWorkingTree: false` precisely
+    /// because it would not render anything less than that.
+    ///
+    /// # Every answer says where it came from
+    ///
+    /// The response carries [`dap_types::SourceOriginKind`]. A client that only
+    /// sees `success: true` cannot tell the recording's copy from a same-named
+    /// file that happens to sit on the replay host, so it cannot render the
+    /// second as unverified — and it cannot notice if a future change to the
+    /// resolution above silently reintroduces exactly the bug described in the
+    /// previous paragraph.
+    ///
+    /// # Failure is a failure response, not empty content
+    ///
+    /// A path with no reachable source is refused rather than answered
+    /// `content: ""`. An empty string is indistinguishable from a genuinely
+    /// empty file, and a client that rendered it would show a blank pane over
+    /// a working debugger — which is exactly the silent-blank failure the
+    /// client's own `SourceVM` refuses to produce one layer up. The refusal
+    /// carries `sourceOrigin: "unavailable"` so the client can separate it from
+    /// an engine that does not implement `source` at all.
+    pub fn source(
+        &mut self,
+        req: dap::Request,
+        args: dap_types::SourceArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let path = args.source.as_ref().and_then(|s| s.path.clone()).unwrap_or_default();
+        if path.is_empty() {
+            return Err("source requires source.path".into());
+        }
+        let requested = PathBuf::from(&path);
+        // Absent means yes, so a generic DAP client keeps today's behaviour.
+        let allow_working_tree = args.allow_working_tree.unwrap_or(true);
+
+        let mut resolved: Option<(String, dap_types::SourceOriginKind)> = None;
+        if let Some(root) = self.meta_dat_sources_root()
+            && let Some(bundled) = crate::expr_loader::resolve_bundled_source(&root, &requested)
+            && let Some(text) = crate::expr_loader::source_text(&bundled)
+        {
+            resolved = Some((text, dap_types::SourceOriginKind::Payload));
+        }
+        if resolved.is_none()
+            && let Some(trace_folder) = self.trace_folder.clone()
+            && let Some(bundled) = crate::expr_loader::resolve_bundled_source(&trace_folder.join("files"), &requested)
+            && let Some(text) = crate::expr_loader::source_text(&bundled)
+        {
+            resolved = Some((text, dap_types::SourceOriginKind::Payload));
+        }
+        if resolved.is_none()
+            && allow_working_tree
+            && let Some(text) = crate::expr_loader::source_text(&requested)
+        {
+            resolved = Some((text, dap_types::SourceOriginKind::WorkingTree));
+        }
+
+        match resolved {
+            Some((content, origin)) => {
+                self.respond_dap(
+                    req,
+                    dap_types::SourceResponseBody {
+                        content,
+                        mime_type: None,
+                        // Every `Location` this engine emits carries
+                        // `source_generation: 0` (`db.rs`, `event_db.rs`,
+                        // `task.rs`), because a materialized recording holds
+                        // exactly one revision of each path. Naming it here is
+                        // what lets a client asking for a LATER generation —
+                        // a live-HCR patch the container predates — get a
+                        // typed refusal instead of this text.
+                        source_generation: Some(RECORDED_SOURCE_GENERATION),
+                        source_digest: None,
+                        source_origin: Some(origin),
+                    },
+                    sender,
+                )?;
+                Ok(())
+            }
+            None => {
+                let message = if allow_working_tree {
+                    format!("no source available for {path}")
+                } else {
+                    format!("no recorded source available for {path}, and the working tree was not consulted")
+                };
+                self.respond_dap_failure(
+                    req,
+                    message,
+                    serde_json::json!({ "sourceOrigin": dap_types::SourceOriginKind::Unavailable }),
+                    sender,
+                )?;
+                Ok(())
+            }
+        }
     }
 
     /// M21 — dispatcher handler for `ct/originMode`. Returns the
@@ -6757,6 +6968,436 @@ mod tests {
         // Assert: Check that the Handler instance is correctly initialized
         assert_eq!(handler.step_id, StepId(0));
         assert!(!handler.breakpoints.is_empty());
+    }
+
+    /// Issue one DAP `source` request against `handler` and return the single
+    /// response it produced.
+    ///
+    /// A helper rather than four copies of the same twenty lines, and a
+    /// function rather than a macro because it asserts nothing: every
+    /// assertion stays in the test that owns it.
+    fn request_source(
+        handler: &mut Handler,
+        seq: i64,
+        path: &str,
+        allow_working_tree: Option<bool>,
+    ) -> Result<dap::Response, Box<dyn Error>> {
+        let (sender, receiver) = mpsc::channel();
+        handler.source(
+            dap::Request {
+                base: dap::ProtocolMessage {
+                    seq,
+                    type_: "request".to_string(),
+                },
+                command: "source".to_string(),
+                arguments: serde_json::Value::Null,
+            },
+            dap_types::SourceArguments {
+                source: Some(dap_types::Source {
+                    path: Some(path.to_string()),
+                    ..Default::default()
+                }),
+                source_reference: 0,
+                allow_working_tree,
+            },
+            sender,
+        )?;
+        match receiver.recv()? {
+            DapMessage::Response(response) => {
+                assert_eq!(response.command, "source");
+                Ok(response)
+            }
+            other => panic!("expected a response, got {other:?}"),
+        }
+    }
+
+    /// A `Handler` over `setup_db`, with `trace_folder` pointed at a scratch
+    /// directory that the caller owns and removes.
+    fn handler_over_trace_folder(root: &Path) -> Handler {
+        let db = setup_db();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.set_trace_folder(root);
+        handler
+    }
+
+    /// CTUI-4 — the DAP `source` arm serves the RECORDING's copy and names the
+    /// revision it served.
+    ///
+    /// Two properties, and the second is the one that matters:
+    ///
+    ///   1. the trace folder's `files/` payload is preferred over the working
+    ///      tree, so a replay host that happens to hold a DIFFERENT build of
+    ///      the same path does not silently win. Asserted by writing a payload
+    ///      whose text exists nowhere else and by naming a recorded path that
+    ///      does not exist on any machine;
+    ///   2. the response carries `sourceGeneration`. Without it a client cannot
+    ///      distinguish "the revision you asked for" from "the only revision I
+    ///      have", and `sdk/source_provider.nim`'s generation refusal — the
+    ///      thing that stops a pane rendering the wrong build — has nothing to
+    ///      compare against.
+    #[test]
+    fn source_serves_the_trace_payload_and_names_its_generation() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("ctui4-source-handler-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // An absolute recorded path that exists on no machine, so the only way
+        // this can succeed is through the payload written below.
+        let recorded = "/opt/ctui4/engine/only_in_the_payload.src";
+        let payload = root.join("files").join(recorded.trim_start_matches('/'));
+        std::fs::create_dir_all(payload.parent().expect("payload has a parent"))?;
+        std::fs::write(&payload, "first\nsecond\nthird\n")?;
+        let mut handler = handler_over_trace_folder(&root);
+
+        let response = request_source(&mut handler, 1, recorded, None)?;
+        assert!(response.success);
+        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(body.content, "first\nsecond\nthird\n");
+        assert_eq!(body.source_generation, Some(RECORDED_SOURCE_GENERATION));
+        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+
+        // A path with no payload and no file on disk is REFUSED, never answered
+        // `content: ""` — an empty string is indistinguishable from an empty
+        // file and would render as a blank source pane. The refusal names
+        // itself in the body so a client can tell it from an engine that cannot
+        // answer `source` at all.
+        let response = request_source(&mut handler, 2, "/opt/ctui4/engine/never_recorded.src", None)?;
+        assert!(!response.success);
+        assert_eq!(
+            response.body.get("sourceOrigin").and_then(|v| v.as_str()),
+            Some("unavailable")
+        );
+        assert!(response.body.get("content").is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// CTUI-4 — the payload wins over the working tree in BOTH layouts this
+    /// workspace produces, and the response says so.
+    ///
+    /// This is the marker experiment, made deterministic. The reviewer's
+    /// version of it prepended a marker to a fixture's `files/` payload and
+    /// asked whether the marker came back; that cannot distinguish "the payload
+    /// was read" from "the working tree happened to hold identical bytes",
+    /// which is exactly how the defect it found stayed invisible on
+    /// `noir_space_ship` (the working-tree copy and the recorded copy of
+    /// `src/main.nr` are byte-identical today). So here BOTH copies exist and
+    /// they DIFFER: the payload carries a marker, the file at the recorded
+    /// absolute path carries a different one, and the test can only pass by
+    /// reading the payload.
+    ///
+    /// Two layouts, because the workspace has two and the second is the one
+    /// that regressed:
+    ///
+    ///   * `calc`-style — `files/<absolute path with its root stripped>`, which
+    ///     is exactly [`crate::expr_loader::bundled_source_path`]'s answer;
+    ///   * `noir_space_ship`-style — `files/<project-relative path>`, which it
+    ///     is NOT. Before [`crate::expr_loader::resolve_bundled_source`] existed
+    ///     this arm fell through to the working tree and reported the fall-through
+    ///     as an ordinary success.
+    #[test]
+    fn source_prefers_the_recordings_copy_in_both_payload_layouts() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("ctui4-source-layouts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+
+        // The replay host's working tree: real files at the recorded absolute
+        // paths, holding a DIFFERENT build from the one that was recorded.
+        let worktree = root.join("worktree");
+        let noir_recorded = worktree.join("noir_space_ship").join("src").join("main.nr");
+        let calc_recorded = worktree.join("calc").join("main.py");
+        std::fs::create_dir_all(noir_recorded.parent().expect("has a parent"))?;
+        std::fs::create_dir_all(calc_recorded.parent().expect("has a parent"))?;
+        std::fs::write(&noir_recorded, "WORKING-TREE-NOIR\nmod shield;\n")?;
+        std::fs::write(&calc_recorded, "WORKING-TREE-CALC\nprint(1)\n")?;
+
+        // The recording's copies, one per layout.
+        let noir_payload = root.join("files").join("src").join("main.nr");
+        std::fs::create_dir_all(noir_payload.parent().expect("has a parent"))?;
+        std::fs::write(&noir_payload, "PAYLOAD-NOIR\nmod shield;\n")?;
+        let calc_payload = crate::expr_loader::bundled_source_path(&root.join("files"), &calc_recorded);
+        std::fs::create_dir_all(calc_payload.parent().expect("has a parent"))?;
+        std::fs::write(&calc_payload, "PAYLOAD-CALC\nprint(1)\n")?;
+
+        let mut handler = handler_over_trace_folder(&root);
+
+        // The project-relative layout — the regression this test exists for.
+        let response = request_source(&mut handler, 1, &noir_recorded.to_string_lossy(), None)?;
+        assert!(response.success);
+        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(body.content, "PAYLOAD-NOIR\nmod shield;\n");
+        assert!(!body.content.contains("WORKING-TREE-NOIR"));
+        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+
+        // The positive control: the layout the exact mapping already hit.
+        let response = request_source(&mut handler, 2, &calc_recorded.to_string_lossy(), None)?;
+        assert!(response.success);
+        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(body.content, "PAYLOAD-CALC\nprint(1)\n");
+        assert!(!body.content.contains("WORKING-TREE-CALC"));
+        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// CTUI-4 — a working-tree read is LABELLED as one, and a client can
+    /// decline it.
+    ///
+    /// This is the reviewer's demonstration 3 as a regression test: a
+    /// `noir_space_ship` session answered `success: true` for
+    /// `test-programs/calc/main.py`, a file that is in no way part of that
+    /// recording, and said nothing to distinguish that from serving the
+    /// recording's own source. Both halves are asserted:
+    ///
+    ///   * with the default (`allowWorkingTree` absent) the read still happens —
+    ///     the desktop has always worked that way — but the response carries
+    ///     `sourceOrigin: "working-tree"`, which is what lets the client render
+    ///     it as unverified instead of verified;
+    ///   * with `allowWorkingTree: false` the path is REFUSED, with
+    ///     `sourceOrigin: "unavailable"`, so a client that must not show
+    ///     unverifiable text gets the same answer the CTFS provider gives for
+    ///     the same question.
+    #[test]
+    fn source_labels_a_working_tree_read_and_can_refuse_it() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("ctui4-source-worktree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+
+        // A payload that carries ONE file, so the trace is a real recording
+        // with real bundled sources and the foreign path below is genuinely
+        // "not part of this recording" rather than "this trace has nothing".
+        let recorded = root.join("worktree").join("recorded.src");
+        std::fs::create_dir_all(recorded.parent().expect("has a parent"))?;
+        std::fs::write(&recorded, "recorded\n")?;
+        let payload = crate::expr_loader::bundled_source_path(&root.join("files"), &recorded);
+        std::fs::create_dir_all(payload.parent().expect("has a parent"))?;
+        std::fs::write(&payload, "recorded\n")?;
+
+        // The foreign file: on this machine, in no recording.
+        let foreign = root.join("worktree").join("belongs_to_no_recording.py");
+        std::fs::write(&foreign, "print('not part of this trace')\n")?;
+
+        let mut handler = handler_over_trace_folder(&root);
+
+        let response = request_source(&mut handler, 1, &foreign.to_string_lossy(), None)?;
+        assert!(response.success);
+        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(body.content, "print('not part of this trace')\n");
+        assert_eq!(
+            body.source_origin,
+            Some(dap_types::SourceOriginKind::WorkingTree),
+            "a read of the replay host's disk must never be reported as the recording's copy"
+        );
+
+        let response = request_source(&mut handler, 2, &foreign.to_string_lossy(), Some(false))?;
+        assert!(!response.success);
+        assert_eq!(
+            response.body.get("sourceOrigin").and_then(|v| v.as_str()),
+            Some("unavailable")
+        );
+
+        // Control: declining the working tree does NOT cost the recording's own
+        // file. Without this, the assertion above would also pass if
+        // `allowWorkingTree: false` simply broke `source` outright.
+        let response = request_source(&mut handler, 3, &recorded.to_string_lossy(), Some(false))?;
+        assert!(response.success);
+        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(body.content, "recorded\n");
+        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// CTUI-4 — the container's OWN bundled raw source views are step 1, and
+    /// step 1 is a real step.
+    ///
+    /// # Why this test had to exist
+    ///
+    /// [`Handler::source`]'s resolution order names three steps, and the other
+    /// two payload tests in this file both drive `handler_over_trace_folder`,
+    /// i.e. **step 2** — the trace folder's `files/`. Step 1, the
+    /// bundled-source-views root ([`Handler::meta_dat_sources_root`]), is the
+    /// step that actually answers on the `noir_space_ship` fixture (measured:
+    /// removing `files/` from a copy of that trace changed nothing, because the
+    /// extracted `srcviews` copy answers first), and it was exercised by no
+    /// test at all. Reverting step 1 alone to the unsearched
+    /// `bundled_source_path` mapping left every Rust test green.
+    ///
+    /// # The two arms, and what each one pins
+    ///
+    ///   * a PROJECT-RELATIVE view (`src/main.nr`) under a root that also has a
+    ///     `files/` payload holding DIFFERENT bytes at the exact mapping. Only
+    ///     step 1 going through [`crate::expr_loader::resolve_bundled_source`]
+    ///     can produce the srcviews text; the exact mapping alone falls through
+    ///     to step 2 and returns the other content. This is the arm the
+    ///     mutation reddens;
+    ///   * a Godot `res://` path, which exists on no filesystem anywhere. Step
+    ///     1's root is the ONLY thing that can answer it, so this arm fails if
+    ///     step 1 stops being consulted at all.
+    #[test]
+    fn source_serves_the_containers_bundled_source_views_first() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("ctui4-source-srcviews-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+
+        // Step 1's root — where `load_bundled_sources` extracts the container's
+        // kind-0 raw views. Project-relative, which is the layout the Noir
+        // container writes and which the writer's exact mapping does NOT hit.
+        let srcviews = root.join("bundled-srcviews");
+        std::fs::create_dir_all(srcviews.join("src"))?;
+        std::fs::write(srcviews.join("src").join("main.nr"), "SRCVIEWS\nmod shield;\n")?;
+        // Godot's virtual path: no scheme-stripped file exists on disk, so only
+        // this root can answer it.
+        std::fs::write(srcviews.join("gf_values.gd"), "SRCVIEWS-GDSCRIPT\n")?;
+
+        // Step 2's root, holding DIFFERENT bytes at the exact mapping for the
+        // same recorded path — so "step 1 answered" is established by CONTENT
+        // and not by a status code that step 2 could equally have produced.
+        let recorded = root
+            .join("worktree")
+            .join("noir_space_ship")
+            .join("src")
+            .join("main.nr");
+        let files_payload = crate::expr_loader::bundled_source_path(&root.join("files"), &recorded);
+        std::fs::create_dir_all(files_payload.parent().expect("has a parent"))?;
+        std::fs::write(&files_payload, "FILES-PAYLOAD\nmod shield;\n")?;
+
+        let mut handler = handler_over_trace_folder(&root);
+        handler.bundled_sources_root = Some(srcviews.clone());
+        assert_eq!(
+            handler.meta_dat_sources_root(),
+            Some(srcviews.clone()),
+            "the fixture must actually put step 1's root in play, or this test asserts nothing"
+        );
+
+        // `allowWorkingTree: false` throughout: a fall-through to the replay
+        // host must be a refusal here rather than a quiet third answer.
+        let response = request_source(&mut handler, 1, &recorded.to_string_lossy(), Some(false))?;
+        assert!(response.success);
+        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(
+            body.content, "SRCVIEWS\nmod shield;\n",
+            "step 1 must resolve the project-relative view through the suffix walk; \
+             `FILES-PAYLOAD` here means step 1 missed and step 2 answered"
+        );
+        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+
+        let response = request_source(&mut handler, 2, "res://gf_values.gd", Some(false))?;
+        assert!(
+            response.success,
+            "a `res://` path exists on no filesystem: only the container's bundled views can answer it"
+        );
+        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(body.content, "SRCVIEWS-GDSCRIPT\n");
+        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// CTUI-4 — a recorded path that escapes a bundle root is REFUSED, at both
+    /// roots, and is never certified as the recording's copy.
+    ///
+    /// # The defect, in the shape it actually shipped
+    ///
+    /// A recorded path is untrusted: it is whatever a container this process
+    /// did not write happened to intern. `resolve_bundled_source`'s suffix walk
+    /// skipped `..`, but its FIRST step — the writer's exact mapping — did not,
+    /// and `Path::is_file` resolves `..` through the OS. Measured through this
+    /// very handler, with `allowWorkingTree: false`:
+    ///
+    /// ```text
+    /// recorded path = /../../secret.txt
+    /// resolve_bundled_source -> Some(".../files/../../secret.txt")
+    /// success=true body={"content":"TOP SECRET, OUTSIDE THE BUNDLE\n",
+    ///                    "sourceGeneration":0,"sourceOrigin":"payload"}
+    /// ```
+    ///
+    /// A file entirely outside the trace, served, and certified `payload` — the
+    /// label that means "the recording's own copy, immune to disk edits" — to
+    /// the one kind of client that had explicitly refused anything less.
+    ///
+    /// # Every assertion carries its own control
+    ///
+    /// A refusal is trivially satisfied by a path that resolves to nothing, so
+    /// each escaping path is first asserted to be genuinely reachable through
+    /// the OS from the root it targets, and the test ends by serving an
+    /// ordinary bundled file — proving the refusals are refusals of the escape
+    /// and not of the whole arm.
+    #[test]
+    fn source_refuses_a_recorded_path_that_escapes_a_bundle_root() -> Result<(), Box<dyn Error>> {
+        let base = env::temp_dir().join(format!("ctui4-source-escape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let trace = base.join("trace");
+        std::fs::create_dir_all(trace.join("files"))?;
+        let srcviews = base.join("bundled-srcviews");
+        std::fs::create_dir_all(&srcviews)?;
+        std::fs::write(base.join("secret.txt"), "TOP SECRET, OUTSIDE THE BUNDLE\n")?;
+
+        // An honest file inside the payload, so the trace is a real recording
+        // and the control at the end has something to serve.
+        let recorded = trace.join("worktree").join("recorded.src");
+        let payload = crate::expr_loader::bundled_source_path(&trace.join("files"), &recorded);
+        std::fs::create_dir_all(payload.parent().expect("has a parent"))?;
+        std::fs::write(&payload, "recorded\n")?;
+
+        // Step 2's root is `<trace>/files`, two levels under `base`; step 1's
+        // root is `base/bundled-srcviews`, one. Each escaping path is the exact
+        // number of hops for ITS root, so both are genuinely reachable.
+        let escapes_files = "/../../secret.txt";
+        let escapes_srcviews = "/../secret.txt";
+        assert!(
+            crate::expr_loader::bundled_source_path(&trace.join("files"), Path::new(escapes_files)).is_file(),
+            "the escape must really reach the file, or the refusal below proves nothing"
+        );
+        assert!(
+            crate::expr_loader::bundled_source_path(&srcviews, Path::new(escapes_srcviews)).is_file(),
+            "the escape must really reach the file, or the refusal below proves nothing"
+        );
+
+        let mut handler = handler_over_trace_folder(&trace);
+        handler.bundled_sources_root = Some(srcviews.clone());
+
+        for (seq, escaping) in [escapes_files, escapes_srcviews].iter().enumerate() {
+            let response = request_source(&mut handler, seq as i64 + 1, escaping, Some(false))?;
+            assert!(
+                !response.success,
+                "a recorded path that leaves the bundle root must be refused, not served: {escaping}"
+            );
+            assert_eq!(
+                response.body.get("sourceOrigin").and_then(|v| v.as_str()),
+                Some("unavailable")
+            );
+            assert!(
+                response.body.get("content").is_none(),
+                "the refusal must carry no content at all"
+            );
+        }
+
+        // The same two paths with the working tree ALLOWED. They are still not
+        // the recording's copy, so `payload` remains the wrong label whatever
+        // else happens — a fall-through to step 3 would be `working-tree`.
+        // `sourceOrigin` is on the body of a refusal AND of an answer, and it
+        // serialises to the same string in both, so one read covers whichever
+        // shape the engine chose.
+        for (seq, escaping) in [escapes_files, escapes_srcviews].iter().enumerate() {
+            let response = request_source(&mut handler, seq as i64 + 10, escaping, None)?;
+            assert_ne!(
+                response.body.get("sourceOrigin").and_then(|v| v.as_str()),
+                Some("payload"),
+                "a path from outside the bundle must never be certified as the recording's copy: {escaping}"
+            );
+        }
+
+        // The control: with the escapes refused, an ordinary bundled path is
+        // still served from the payload. Without this the assertions above
+        // would also pass if the containment check had simply broken `source`.
+        let response = request_source(&mut handler, 20, &recorded.to_string_lossy(), Some(false))?;
+        assert!(response.success);
+        let body: dap_types::SourceResponseBody = serde_json::from_value(response.body)?;
+        assert_eq!(body.content, "recorded\n");
+        assert_eq!(body.source_origin, Some(dap_types::SourceOriginKind::Payload));
+
+        let _ = std::fs::remove_dir_all(&base);
+        Ok(())
     }
 
     // Test single tracepoint

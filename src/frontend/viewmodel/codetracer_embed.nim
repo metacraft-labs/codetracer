@@ -32,11 +32,22 @@
 ## | ------------------- | ------------------------------------------------------------------------ |
 ## | `ReplayDataStore`   | `store/replay_data_store`, `store/types`, `store/request_tracker`, `store/degraded_state` |
 ## | Panel ViewModels    | `CalltraceVM` `EventLogVM` `StateVM` `FlowVM` `EditorVM` `DebugControlsVM` `RequestPanelVM` |
+## | Source access       | `SourceVM` (`viewmodels/source_vm`) and `SourceProvider` (`sdk/source_provider`) |
 ## | `BackendService`    | `backend/backend_service`, `backend/mock_backend`, `backend/dap_commands` |
 ## | Session lifecycle   | `DebuggerSession`, `SessionViewModel`, `AppViewModel`                     |
 ## | `TraceSource`       | `sdk/trace_source`                                                        |
 ## | Clock               | `isonim/core/clock`, `isonim/testing/test_utils` (`withFakeTime`)         |
 ## | Types               | `store/types` — the trace, location, frame, value, event and span models  |
+##
+## The "Source access" row is not one of §3.1's original rows; it is CTUI-4's
+## addition, and it is written into this table rather than left implicit
+## because a consumer that cannot see it will reimplement it. Its argument is
+## in `viewmodels/source_vm.nim`'s header: **no ViewModel owned the text of the
+## file at the current debugger location**, because the desktop delegates that
+## to Monaco. A front-end without Monaco — the terminal one, and any embedder
+## rendering source itself — could not obtain it through this facade at all,
+## and would have had to reach past it or invent a second answer to "what is
+## the source at this stop?".
 ##
 ## Two rows of §3.1 have no Nim symbol and are therefore absent by
 ## construction rather than by omission:
@@ -215,6 +226,36 @@ export debug_controls_vm
 
 import viewmodels/request_panel_vm
 export request_panel_vm
+
+# ---------------------------------------------------------------------------
+# Source access (CTUI-4)
+#
+# `SourceVM` is a windowed, revision-identified view of the active file, and
+# `SourceProvider` is the seam that fills it — the CTFS-materialized payload and
+# the DAP `source` request behind one interface, selected by what the open trace
+# supports.
+#
+# THEY ARE EXPORTED TOGETHER AND NEITHER IS USEFUL ALONE, which is why this is
+# one row of §3.1's table rather than two. `SourceVM` deliberately performs no
+# I/O: it computes which lines of which revision it needs and refuses to invent
+# text for the rest. A consumer given only `SourceVM` would have to write the
+# acquisition itself, which for a local trace means opening files — and a
+# consumer that opens files is outside the facade, which is the boundary
+# `ci/test/sdk-facade-boundary.sh` exists to hold.
+#
+# The import graph grows by two modules of this package plus
+# `src/ct/trace/{ctfs_sources,source_paths}`, and that last edge is deliberate:
+# the CTFS payload layout has a WRITER in this repository, and the read side
+# calls `safePayloadPath` rather than mirroring it. A second spelling of that
+# mapping would drift silently, and its symptom would be "this trace has no
+# sources" for every path. Neither module reaches a renderer, a DOM, a layout
+# engine or `std/osproc`; the filesystem half is behind `when not defined(js)`
+# so this facade still compiles on the JS backend.
+import viewmodels/source_vm
+export source_vm
+
+import sdk/source_provider
+export source_provider
 
 # ---------------------------------------------------------------------------
 # Session lifecycle (§3.1, row 4; §6)

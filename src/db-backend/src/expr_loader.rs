@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[cfg(feature = "syntax-highlight")]
 use tree_sitter::{Node, Parser, Tree}; // Language,
@@ -788,7 +788,14 @@ impl ExprLoader {
         // sources under `meta_dat/sources/`, that is the authoritative
         // line text used for the classifier.
         if let Some(root) = meta_dat_sources_root {
-            let candidate = bundled_source_path(root, path);
+            // `contained_bundled_source_path`, never the raw
+            // `bundled_source_path`: `path` is RECORDED data, `read_to_string`
+            // resolves `..` through the OS, and this branch attributes whatever
+            // it reads to `SourceOrigin::BundledMetaData` — the origin the §6.1
+            // classifier treats as immune to disk edits. An unguarded join here
+            // is the same over-certification `resolve_bundled_source` refuses,
+            // one classifier away.
+            //
             // `candidate.exists() && fs::read_to_string(..)` — the shape this
             // used to have — is two filesystem calls, and on
             // `wasm32-unknown-unknown` the first is hardwired `false` and the
@@ -797,7 +804,9 @@ impl ExprLoader {
             // half of why `srcviews.dat` never surfaced there. `source_text`
             // keeps the filesystem first and adds the VFS behind it, so the
             // native answer is unchanged.
-            if let Some(text) = source_text(&candidate) {
+            if let Some(candidate) = contained_bundled_source_path(root, path)
+                && let Some(text) = source_text(&candidate)
+            {
                 // Match `get_source_line`'s 1-indexed convention: the
                 // bundled-source branch is invoked with the same `row`
                 // value the cached-file branch consumes (where
@@ -2461,6 +2470,18 @@ pub enum SourceOrigin {
 /// land on the same key. The native extraction and the VFS extraction both
 /// derive their destination from this function; a test that spelled the
 /// destination itself would keep passing if the two sides drifted.
+///
+/// # This function DOES NOT enforce containment, and no caller may use it alone
+///
+/// It is the raw mapping and nothing more. `source_path` is RECORDED data — it
+/// comes out of a trace container this process did not write — so it may carry
+/// `..` components, and `root.join("../../etc/passwd")` is a path that both
+/// `is_file()` and `read_to_string` happily resolve OUTSIDE `root`. Every
+/// production caller therefore goes through
+/// [`contained_bundled_source_path`], which applies exactly this mapping and
+/// then refuses an answer that left the bundle. This function stays public and
+/// unguarded only so a test can name the raw key; see
+/// [`is_within_bundle_root`] for what "left the bundle" means.
 pub fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
     // Godot records GDScript source under its virtual-filesystem scheme
     // (`res://script.gd`, `user://...`). That is neither a real
@@ -2477,6 +2498,205 @@ pub fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
     // Strip the leading "/" so absolute paths can sit under root/.
     let rel = source_path.strip_prefix("/").unwrap_or(source_path);
     root.join(rel)
+}
+
+/// Whether `candidate` — a path produced by mapping a RECORDED path under
+/// `root` — is genuinely inside `root`.
+///
+/// # Why a recorded path needs this at all
+///
+/// A recorded path is untrusted input. It is whatever string the recorder
+/// interned into a container this process did not write, and containers are
+/// downloaded, copied and shared. `root.join(rel)` is a *textual* operation,
+/// but every consumer of its result is not: `Path::is_file` stats the path and
+/// `fs::read_to_string` opens it, and both resolve `..` through the OS. So
+/// `<root>/../../secret.txt` is a path that looks rooted, stats as a real file,
+/// and reads bytes the bundle never contained — which the DAP `source` arm then
+/// certifies as `sourceOrigin: "payload"`, i.e. "this is the recording's own
+/// copy". That is the exact over-certification CTUI-4's provenance contract
+/// exists to make impossible, arrived at from the other direction.
+///
+/// # Two checks, because one is not enough
+///
+/// 1. **Lexical.** Everything below `root` must be an ordinary named
+///    component: no `..`, no `.`, no root or drive prefix re-anchoring the
+///    join. This is the check that must happen BEFORE anything stats the path,
+///    because a stat is already a resolution.
+/// 2. **Physical.** `..` is not the only way out of a directory — a symlink
+///    inside the bundle pointing anywhere on the host is the same escape with a
+///    different mechanism, and a bundle is unpacked from a container this
+///    process did not write. **A symlink that leaves the bundle is therefore in
+///    scope and is refused**: both sides are canonicalised (which resolves
+///    symlinks) and the candidate must still be under the root. Both sides,
+///    because a trace folder is very often reached THROUGH a symlink
+///    (`/tmp` → `/private/tmp` on macOS), and canonicalising only the candidate
+///    would refuse every legitimate answer there.
+///
+/// # When canonicalisation is impossible, and what the lexical check is worth
+/// # on its own
+///
+/// Either `canonicalize` failing drops this to the lexical check alone. THREE
+/// situations reach that fallback and they are not equally strong, so they are
+/// named separately rather than waved at as one:
+///
+/// 1. **`wasm32-unknown-unknown`**, where the whole `fs` module is
+///    `Unsupported` (measured: a `cdylib` for that target answers `0` to both
+///    `is_file()` and `exists()`), and **a virtual VFS root** that is a key
+///    prefix rather than a directory. Not a hole: there is no filesystem to
+///    escape into and no symlink can exist.
+/// 2. **A READ.** Every reader uses the result behind an `is_file()`, so the
+///    candidate exists, so both canonicalisations succeed and the physical
+///    check genuinely runs. This is the case the symlink stance above is about.
+/// 3. **A WRITE**, where the destination does not exist *yet* — `create_dir_all`
+///    is about to make it — so `canonicalize(candidate)` fails and only the
+///    lexical check applies. That is sound against the threat this function
+///    exists for, a hostile RECORDED PATH: the lexical check refuses every
+///    `..`, and the extractors create directories and regular files but never
+///    symlinks, so a container cannot arrange for one to be in the root's way.
+///    It is NOT a defence against a *different* attacker who can plant a
+///    symlink inside the extraction root — with one already there,
+///    `contained_bundled_source_path` answers `Some` for a not-yet-existing
+///    destination behind it. That is a property of where the root lives
+///    (`$TMPDIR/codetracer-bundled-sources/<hash>`, a predictable path in a
+///    shared directory) and predates this check; it is not something a
+///    containment test on the recorded path can close.
+pub fn is_within_bundle_root(root: &Path, candidate: &Path) -> bool {
+    // `strip_prefix` rather than a `..`-scan over the whole candidate: `root`
+    // ITSELF may legitimately contain `..` (a trace folder named on the command
+    // line as `../traces/x`), and scanning the joined path would then refuse
+    // every source in a perfectly ordinary session.
+    let Ok(relative) = candidate.strip_prefix(root) else {
+        return false;
+    };
+    if !relative.components().all(|c| matches!(c, Component::Normal(_))) {
+        return false;
+    }
+    match (fs::canonicalize(root), fs::canonicalize(candidate)) {
+        (Ok(real_root), Ok(real_candidate)) => real_candidate.starts_with(real_root),
+        _ => true,
+    }
+}
+
+/// [`bundled_source_path`]'s mapping, or `None` when applying it to this
+/// recorded path would leave `root`.
+///
+/// The guarded form every production caller uses — reader and writer alike. A
+/// writer that skipped the guard would place container-controlled bytes outside
+/// the extraction root; a reader that skipped it would serve bytes from outside
+/// the bundle under the bundle's provenance.
+pub fn contained_bundled_source_path(root: &Path, source_path: &Path) -> Option<PathBuf> {
+    let candidate = bundled_source_path(root, source_path);
+    if is_within_bundle_root(root, &candidate) {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// The components of a recorded path, as the suffix walk maps them under a
+/// bundle root: split on BOTH separators, with empty and `.` components
+/// dropped.
+///
+/// Both separators, because a recording made on Windows and replayed on Linux
+/// still names its files with backslashes and `Path::components` would treat
+/// the whole thing as one component there. `.` is dropped rather than pushed so
+/// `a/./b` and `a/b` name the same bundle entry.
+///
+/// `..` is deliberately NOT dropped here. Dropping it would silently rewrite
+/// `a/../b` into `a/b`, which may be a different file; the callers skip any
+/// suffix that contains one instead, which refuses rather than reinterprets.
+pub(crate) fn bundle_path_components(recorded: &str) -> Vec<&str> {
+    recorded
+        .split(['/', '\\'])
+        .filter(|component| !component.is_empty() && *component != ".")
+        .collect()
+}
+
+/// The file under `root` that holds `source_path`'s bundled bytes, or `None`
+/// when the bundle has none.
+///
+/// # Why this is a search and not one `join`
+///
+/// [`bundled_source_path`] is the WRITER's mapping and it is exact, but it is
+/// only one of the two payload layouts this workspace actually produces —
+/// measured on the two CTUI-4 fixtures, not assumed:
+///
+/// * a `ct`-imported CTFS container (the Python recorder's `calc` fixture)
+///   writes `files/<absolute path with its root stripped>`, e.g.
+///   `files/home/…/test-programs/calc/main.py`. That is exactly
+///   [`bundled_source_path`]'s answer;
+/// * the Noir recorder's container (`noir_space_ship`) writes PROJECT-RELATIVE
+///   paths — `files/src/main.nr` — while the location the engine reports for
+///   the same file is absolute (`/home/…/test-programs/noir_space_ship/src/main.nr`).
+///
+/// So the writer's mapping is tried first, exactly, and only a miss walks the
+/// recorded path's suffixes from LONGEST to shortest. Longest first is what
+/// makes the answer deterministic when a bundle holds two files with the same
+/// basename at different depths: the deeper agreement wins, and a
+/// one-component match is reached only when nothing longer exists.
+///
+/// # The bundle root is a containment boundary at EVERY step
+///
+/// Both steps go through [`is_within_bundle_root`], and the suffix walk
+/// additionally skips any suffix that still contains `..`. Guarding only the
+/// walk is what the first version of this function did, and it left the exact
+/// step — the one that is tried FIRST — resolving `<root>/../../secret.txt`
+/// through the OS and returning it, which `Handler::source` then served
+/// labelled `sourceOrigin: "payload"` even to a client that had refused the
+/// working tree. See [`is_within_bundle_root`] for why the check is two checks,
+/// and for the symlink stance.
+///
+/// # How this relates to the Nim read side, precisely
+///
+/// `src/frontend/viewmodel/sdk/source_provider.nim`'s `resolvePayload` performs
+/// the SAME suffix walk: same component split (both separators, `.` and empty
+/// dropped), same longest-first order, same `..` skip, same Godot-scheme strip,
+/// same containment check. That equality is load-bearing — a client that can
+/// reach both a trace folder and the engine compares their answers.
+///
+/// The EXACT step is deliberately not identical, and cannot be: each side
+/// applies its OWN writer's mapping, and the two writers differ.
+///
+/// * here it is [`bundled_source_path`] — strip a leading `/`, strip a Godot
+///   `res://` / `user://` scheme;
+/// * there it is `ctfs_sources.safePayloadPath` — strip a leading `/` or a
+///   `C:\` drive prefix, and no scheme handling, because the `ct` importer that
+///   writes `files/` does not strip one either.
+///
+/// Both exact steps are skipped outright for a recorded path carrying a `..`
+/// component, so the two sides answer such a path identically: from the walk,
+/// or not at all.
+pub fn resolve_bundled_source(root: &Path, source_path: &Path) -> Option<PathBuf> {
+    let source_str = source_path.to_string_lossy();
+    // Strip the Godot scheme here too, so the walk sees the same components
+    // `bundled_source_path` would have mapped.
+    let relative: &str = strip_godot_scheme(&source_str).unwrap_or(&source_str);
+    let components: Vec<&str> = bundle_path_components(relative);
+
+    // Step 1 — the writer's exact mapping. `contained_bundled_source_path`
+    // returns `None` for anything that would leave the root, so a `..` path
+    // falls through to the walk below rather than being resolved by the OS.
+    if let Some(exact) = contained_bundled_source_path(root, source_path)
+        && exact.is_file()
+    {
+        return Some(exact);
+    }
+
+    // Step 2 — the suffix walk, longest first.
+    for start in 0..components.len() {
+        let suffix = &components[start..];
+        if suffix.contains(&"..") {
+            continue;
+        }
+        let mut candidate = root.to_path_buf();
+        for component in suffix {
+            candidate.push(component);
+        }
+        if is_within_bundle_root(root, &candidate) && candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// Strip a leading Godot virtual-filesystem scheme (`res://`, `user://`)
@@ -2506,6 +2726,103 @@ fn nth_line(text: &str, row: usize) -> String {
 mod tests {
     use super::*;
     use std::fs;
+
+    /// CTUI-4 — the bundle root is a containment boundary at EVERY step, and a
+    /// recorded path cannot reach past it.
+    ///
+    /// # What this pins that the handler-level test cannot
+    ///
+    /// `dap_handler`'s `source_refuses_a_recorded_path_that_escapes_a_bundle_root`
+    /// asserts the observable behaviour of the DAP arm. This asserts the
+    /// resolver itself, which has THREE readers (`Handler::source`'s two bundle
+    /// roots and `ExprLoader::get_source_line_v2`'s §6.1 bundled probe), and it
+    /// covers the escape mechanisms individually so a future change that fixes
+    /// one and not the others is caught here rather than in whichever arm
+    /// happens to be tested.
+    ///
+    /// # The symlink arm, and why a symlink out of the bundle is in scope
+    ///
+    /// `..` is not the only way out of a directory. A payload is unpacked from
+    /// a container this process did not write, so a symlink inside it pointing
+    /// anywhere on the host is the same escape by another mechanism — and it
+    /// costs nothing to close, because `is_within_bundle_root` already has to
+    /// canonicalise. The decision is therefore: **a symlink that leaves the
+    /// bundle is refused**, and this arm is what says so.
+    #[test]
+    fn resolve_bundled_source_refuses_paths_that_leave_the_root() -> Result<(), Box<dyn std::error::Error>> {
+        let base = std::env::temp_dir().join(format!("ctui4-containment-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("bundle");
+        fs::create_dir_all(root.join("src"))?;
+        fs::write(base.join("secret.txt"), "OUTSIDE THE BUNDLE\n")?;
+        fs::write(root.join("src").join("main.nr"), "PAYLOAD\n")?;
+
+        // The control comes FIRST: an ordinary recorded path still resolves
+        // through the project-relative suffix walk. Every refusal below is only
+        // meaningful against a resolver that still resolves.
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/proj/src/main.nr")),
+            Some(root.join("src").join("main.nr"))
+        );
+
+        // 1. A leading `..` — the exact step, which is tried FIRST and which
+        //    was the unguarded one. The assertion on `bundled_source_path` is
+        //    the proof that the escape is genuinely reachable: without it a
+        //    `None` below would be indistinguishable from "there was nothing
+        //    there anyway".
+        assert!(
+            bundled_source_path(&root, Path::new("/../secret.txt")).is_file(),
+            "the escape must really reach the file, or the refusal proves nothing"
+        );
+        assert_eq!(resolve_bundled_source(&root, Path::new("/../secret.txt")), None);
+
+        // 2. `..` reached through the Godot scheme, which is stripped before the
+        //    mapping and could otherwise smuggle one past a check placed on the
+        //    raw string.
+        assert!(bundled_source_path(&root, Path::new("res://../secret.txt")).is_file());
+        assert_eq!(resolve_bundled_source(&root, Path::new("res://../secret.txt")), None);
+
+        // 3. `..` in the middle rather than at the front, so the refusal is not
+        //    a prefix test.
+        assert!(bundled_source_path(&root, Path::new("/src/../../secret.txt")).is_file());
+        assert_eq!(resolve_bundled_source(&root, Path::new("/src/../../secret.txt")), None);
+
+        // 4. A `.` component is filtered, not refused: `a/./b` and `a/b` name
+        //    the same bundled entry, and the Nim reader's `pathComponents`
+        //    drops it identically.
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/proj/./src/main.nr")),
+            Some(root.join("src").join("main.nr"))
+        );
+
+        // 5. A symlink out of the bundle. Refused — see this test's header.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&base, root.join("escape"))?;
+            assert!(
+                root.join("escape").join("secret.txt").is_file(),
+                "the symlink must really lead out of the bundle, or the refusal proves nothing"
+            );
+            assert_eq!(resolve_bundled_source(&root, Path::new("/escape/secret.txt")), None);
+            // …and a symlink that stays INSIDE the bundle is still served: the
+            // check is about where the target lands, not about symlinks.
+            std::os::unix::fs::symlink(root.join("src"), root.join("inside"))?;
+            assert_eq!(
+                resolve_bundled_source(&root, Path::new("/inside/main.nr")),
+                Some(root.join("inside").join("main.nr"))
+            );
+        }
+
+        // The control again, after every refusal, so a containment check that
+        // had simply started refusing everything cannot leave this test green.
+        assert_eq!(
+            resolve_bundled_source(&root, Path::new("/home/x/proj/src/main.nr")),
+            Some(root.join("src").join("main.nr"))
+        );
+
+        let _ = fs::remove_dir_all(&base);
+        Ok(())
+    }
 
     #[test]
     fn detects_ruby_each_loop() -> Result<(), Box<dyn std::error::Error>> {

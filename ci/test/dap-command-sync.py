@@ -113,6 +113,17 @@ EXPECTED_RESIDUE = {
     # `headless_session.nim` / the origin-mode bridge rather than from a VM.
     "ct/originMode",
     "ct/load-request-spans",
+    # `source` (CTUI-4). The engine answers it in `Handler::source` and the
+    # Embed SDK's `sdk/source_provider.nim` sends it through `BackendService`,
+    # but it produces no EVENT, so it has no `CtEventKind` and
+    # `dapCommandToEventKind` still raises on it. That is correct rather than a
+    # gap: `RealBackendService` — the Electron renderer's bridge — has no reason
+    # to send it, because the desktop reads source files with node's `fs` and
+    # hands them to Monaco. The consumers that do send it are the headless
+    # native transport (`stdio_backend`, which forwards command strings
+    # verbatim) and the WASM worker transport, neither of which goes through
+    # the event-kind translation.
+    "source",
 }
 
 # Below these, an extractor has silently stopped matching and every subset check

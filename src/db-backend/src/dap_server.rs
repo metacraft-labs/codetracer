@@ -2065,6 +2065,16 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
             sender.clone(),
         )?,
         "threads" => handler.threads(req.clone(), sender.clone())?,
+        // DAP `source` — CTUI-4. Until this arm existed the request fell
+        // through to `dap_command_to_step_action` and was answered
+        // `command source not supported here`, so no front-end could obtain
+        // source text through DAP at all; the desktop only worked because
+        // Electron reads the file itself. See `Handler::source`.
+        "source" => handler.source(
+            req.clone(),
+            req.load_args::<dap_types::SourceArguments>()?,
+            sender.clone(),
+        )?,
         "stackTrace" => handler.stack_trace(
             req.clone(),
             req.load_args::<dap_types::StackTraceArguments>()?,

@@ -580,6 +580,59 @@ pub struct SourceArguments {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<Source>,
     pub source_reference: i64,
+    /// CodeTracer extension: whether the client accepts source read off the
+    /// REPLAY HOST rather than out of the recording.
+    ///
+    /// The engine's last resort is the recorded path itself — this machine's
+    /// filesystem, or a source view a host installed through
+    /// `ct/install-source-view`. Neither is tied to the recording: the file on
+    /// this disk may be any build at all, and it may not even belong to this
+    /// trace. That answer is still useful (it is how the desktop has always
+    /// worked), so it stays available and is LABELLED
+    /// [`SourceOriginKind::WorkingTree`] — but a client that must not render
+    /// unverifiable text can refuse it up front by sending `false`, and then a
+    /// path the recording does not carry is answered as unavailable instead of
+    /// served.
+    ///
+    /// Absent means `true`, so a generic DAP client (and the desktop) keeps the
+    /// behaviour it has today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_working_tree: Option<bool>,
+}
+
+/// Where the bytes in a [`SourceResponseBody`] came from.
+///
+/// CodeTracer extension. This is the *wire* provenance of one `source`
+/// response, and it is deliberately a different type from
+/// [`crate::expr_loader::SourceOrigin`], which is the per-line provenance the
+/// value-origin classifier threads through an origin chain (spec §6.1). They
+/// answer different questions at different granularities and must be free to
+/// change independently.
+///
+/// # Why the response has to say this at all
+///
+/// Without it, `success: true` means only "some bytes exist for that path". A
+/// client cannot tell the recording's own copy from a file that merely happens
+/// to sit at the same path on the replay host, so it cannot honour the
+/// verified/unverified distinction its own source pane is built on — and an
+/// engine-side resolution bug (the payload silently skipped, the working tree
+/// silently answering) is indistinguishable from correct behaviour. Measured:
+/// before CTUI-4's fix the engine served the replay host's working tree for
+/// every Noir recording and reported it exactly as it reported a payload read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceOriginKind {
+    /// The RECORDING's own copy: the container's bundled raw source views, or
+    /// the trace folder's `files/` payload. Verifiable against the recording.
+    Payload,
+    /// Read off the replay host — its filesystem, or a source view a host
+    /// pushed in. Not tied to the recording, and reported as unverified.
+    WorkingTree,
+    /// No source anywhere for this path. Carried on the FAILURE response, so a
+    /// client can tell "this engine has nothing for this path" from "this
+    /// engine cannot answer `source` at all"; those two are different rows in
+    /// the client's degraded-state axis.
+    Unavailable,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
@@ -588,6 +641,31 @@ pub struct SourceResponseBody {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
+    /// CodeTracer extension: the source REVISION this content belongs to.
+    ///
+    /// DAP's own `SourceResponseBody` has no such field, and without one a
+    /// client cannot tell "here is the revision you asked for" from "here is
+    /// the only revision I have". Those two are the same bytes and different
+    /// answers: one file path can have several recorded contents (live HCR),
+    /// and rendering the wrong one under the right line numbers shows a build
+    /// that never ran. The client
+    /// (`src/frontend/viewmodel/sdk/source_provider.nim`) compares this
+    /// against the generation it requested and reports a typed degradation
+    /// rather than the text when they differ.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_generation: Option<i64>,
+    /// CodeTracer extension: the content digest of the served revision, when
+    /// the recording carries one. Empty/absent means the engine has no stable
+    /// digest and the client falls back to path + generation, exactly as
+    /// `Location.sourceDigest` already documents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_digest: Option<String>,
+    /// CodeTracer extension: WHERE these bytes came from. See
+    /// [`SourceOriginKind`] — this is the field that lets a client report a
+    /// working-tree read as unverified instead of trusting an answer it cannot
+    /// characterise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_origin: Option<SourceOriginKind>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]

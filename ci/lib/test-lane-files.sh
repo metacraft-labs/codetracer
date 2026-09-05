@@ -740,7 +740,23 @@ test_lane_files() {
 				'/test_sdk_facade_boundary\.nim$' \
 				'/test_project_action_runner\.nim$' \
 				'/test_platform_desktop_native\.nim$' \
-				'/test_pane_mount_markers_are_released\.nim$'
+				'/test_pane_mount_markers_are_released\.nim$' \
+				'/test_source_vm_window\.nim$' \
+				'/test_source_provider_revisions\.nim$'
+		# `test_source_vm_window` and `test_source_provider_revisions` (CTUI-4)
+		# WRITE the source files they then read back through the CTFS half of
+		# `sdk/source_provider.nim`. That half is `when not defined(js)` for the
+		# same reason these two are rejected here: it reads and writes files,
+		# and `std/os`'s file I/O has no `nim js` equivalent.
+		#
+		# THE SUBJECT IS STILL COVERED ON THIS BACKEND, and that is why the
+		# rejection is a rejection rather than a hole. `SourceVM` performs no
+		# I/O at all and compiles on both targets; `codetracer_embed` exports
+		# it, so every suite in this lane that imports the facade — the SDK's
+		# own conformance suite among them — type-checks it under `nim js`. A
+		# `when defined(js)` guard inside the suites instead would leave two
+		# files reporting green on a backend where they had asserted nothing,
+		# which is the vacuous pass this whole file exists to prevent.
 		# `test_pane_mount_markers_are_released` walks `src/frontend/ui/*.nim`
 		# with `std/os`'s `walkFiles` and reads each file, because its subject
 		# is a property of the SOURCE TREE — which panes declare a mount marker
@@ -839,10 +855,12 @@ test_lane_files() {
 				'/integration/language_smoke_test\.nim$' \
 				'/multi-replay/' \
 				'/noir-space-ship/' \
+				'/source-access/' \
 				'/request-panel/no_sidecar_manifests_test\.nim$'
 		# real_backend_test / language_smoke_test / multi-replay /
-		# noir-space-ship need `headless_session` or `stdio_backend` (a real
-		# spawned backend process) — they are the `vm-gui-headless` lane.
+		# noir-space-ship / source-access need `headless_session` or
+		# `stdio_backend` (a real spawned backend process) — they are the
+		# `vm-gui-headless` lane.
 		# no_sidecar_manifests_test drives six recorder toolchains — it is the
 		# `no-sidecar-manifests` lane.
 		;;
@@ -885,6 +903,12 @@ test_lane_files() {
 				_tlf_reject '/language_smoke_mock_test\.nim$'
 			_tlf_find src/tests/gui/tests/multi-replay '*_test.nim'
 			_tlf_find src/tests/gui/tests/noir-space-ship '*_test.nim'
+			# CTUI-4's source-access suite. It opens the `calc` and
+			# `noir_space_ship` fixtures through a real `HeadlessDebugSession`
+			# and asserts BOTH implementations of the source seam against the
+			# same spawned `replay-server` — including the DAP `source` arm,
+			# which needs a server on the other end of it.
+			_tlf_find src/tests/gui/tests/source-access '*_test.nim'
 		} | sort
 		;;
 

@@ -150,6 +150,21 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   "restart",
   "disconnect",
 
+  # `source` — the standard DAP request for a file's text
+  # (https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Source).
+  # CTUI-4 gave the engine an arm for it (`dap_server.rs`, `Handler::source`)
+  # and this package a client for it
+  # (`sdk/source_provider.nim`'s `spkDapSource`). Before that it fell through
+  # to `dap_command_to_step_action` and was answered `command source not
+  # supported here`, so the whole DAP route to source text was closed and only
+  # a front-end that could read files itself — the Electron desktop — had one.
+  #
+  # It has no `CtEventKind`, deliberately: the engine answers it as a plain
+  # request/response and emits no event for it, so it is part of
+  # `ci/test/dap-command-sync.py`'s EXPECTED_RESIDUE alongside `scopes`,
+  # `threads` and `variables`.
+  "source",
+
   # CodeTracer extension requests the engine answers.
   # `ct/originMode` — `dap_server.rs:2098` (M21 eager-origin indicator).
   "ct/originMode",

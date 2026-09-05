@@ -172,9 +172,48 @@ proc readVarString(data: string, offset: var int): string =
   result = data[offset ..< offset + length]
   offset += length
 
-proc safePayloadPath(realPath: string): string =
+proc safePayloadPath*(realPath: string): string =
+  ## Where a recorded path's bytes live under a trace folder's ``files/``.
+  ##
+  ## Public because the READ side has to derive the same answer: the Embed
+  ## SDK's CTFS source provider
+  ## (``src/frontend/viewmodel/sdk/source_provider.nim``) resolves a recorded
+  ## path to the payload this function wrote. A second, private spelling of the
+  ## same rule in the reader would drift from this one silently — the reader
+  ## would simply report "no source" for every path whose mapping had changed.
+  ##
+  ## ``..`` IS THE POINT OF THE "SAFE" IN THE NAME. ``realPath`` comes out of a
+  ## container this process did not write, and ``outputFolder / "files" /
+  ## <result>`` is handed straight to ``createDir`` and ``writeFile``. A
+  ## recorded ``/../../.bashrc`` would put container-supplied bytes anywhere the
+  ## importing user can write, so a path with a parent-directory component is
+  ## collapsed to its bare filename instead.
+  ##
+  ## BOTH separators are checked, not just the host's ``DirSep``, because a
+  ## container is written on one OS and imported on another and the guard has to
+  ## hold on whichever one runs the import. Which spelling actually escaped was
+  ## measured on both hosts rather than reasoned about, and it is the opposite
+  ## of the obvious guess:
+  ##
+  ## * ON WINDOWS (``DirSep == '\'``) the old ``split(DirSep)`` saw a
+  ##   FORWARD-slash path — ``../../evil.rs``, which is what every recorder that
+  ##   interns POSIX-style paths produces — as ONE component that is not
+  ##   ``".."``, so the guard passed it through unchanged; and Win32 honours
+  ##   ``/`` as a separator, so ``outputFolder / "files" / "../../evil.rs"``
+  ##   wrote OUTSIDE ``files/``. That is the escape this split closes.
+  ## * ON LINUX (``DirSep == '/'``) the old guard let the mirror-image spelling
+  ##   ``..\..\evil.rs`` through, but a backslash is an ordinary filename
+  ##   character there, so the bytes still landed inside ``files/``. That
+  ##   spelling was never an escape on Linux — and on Windows the old guard
+  ##   already caught it, because there ``\`` IS ``DirSep``.
+  ##
+  ## So the rule is: neither host's separator set is a superset of the other's,
+  ## and a guard that knows only its own is wrong on some input everywhere. The
+  ## reader in ``sdk/source_provider.nim`` splits on both for the same reason,
+  ## which also keeps the writer's mapping and the reader's in agreement on
+  ## either host.
   let rel = stripTracePathRoot(realPath)
-  if rel.len == 0 or rel.split(DirSep).anyIt(it == ".."):
+  if rel.len == 0 or rel.split({'/', '\\'}).anyIt(it == ".."):
     return realPath.extractFilename
   rel
 

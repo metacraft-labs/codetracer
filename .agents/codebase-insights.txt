@@ -3169,3 +3169,84 @@ commands.
   `discard session.drainEvents()` inside the loop holds the same run at
   ~164 MB. `continueForward` synchronises on its own events, so draining after
   it returns discards nothing a later call needs.
+- 2026-09-05 (CTUI-4, the source-access seam). Seven things that were surprising
+  enough to cost real time, each measured rather than reasoned about:
+  * **`replay-server` did not implement the DAP `source` request.**
+    `dap_server.rs`'s `handle_request` had no `source` arm, so it fell through
+    to `dap_command_to_step_action` and answered
+    `command source not supported here` — while `dap_types.rs` already carried
+    `SourceArguments` and `SourceResponseBody`, referenced from nowhere else.
+    `Handler::source` now serves it (bundled srcviews, then `<trace>/files/`,
+    then the recorded path) and returns `sourceGeneration` in the body, which
+    is what lets a client refuse a revision it did not ask for.
+  * **A DAP `source` response also names WHERE its bytes came from, and you
+    must not treat `success: true` as "this is the recording's copy".**
+    `SourceResponseBody.sourceOrigin` (`dap_types::SourceOriginKind`) is
+    `payload`, `working-tree`, or — on the refusal — `unavailable`, and
+    `SourceArguments.allowWorkingTree` (absent means `true`) turns the
+    last-resort read of the replay host off. This exists because the first
+    version of the arm resolved the bundle with `bundled_source_path` alone,
+    missed the project-relative layout below for every Noir recording, and
+    answered from the replay host's working tree while reporting an ordinary
+    success. Both the payload lookups now go through
+    `expr_loader::resolve_bundled_source` (exact mapping, then a longest-first
+    suffix walk), and both are labelled. If you add another resolution step,
+    label it too — an unlabelled step is the same bug again.
+  * **`EditorVM.cursorLine` is the editor CARET and nothing writes it from the
+    debugger position.** Its only writer is `EditorVM.setCursor`. A pane that
+    scrolls by `cursorLine` alone sits on line 1 for a whole session while the
+    execution pointer walks off the bottom. Use
+    `SourceVM.followExecutionPointer` / `SourceVM.executionLine`
+    (`store.debugger.val.location.line`) for stop-driven scrolling.
+  * **The trace folder's `files/` payload has two layouts.** A `ct`-imported
+    CTFS container (Python recorder) writes
+    `files/<absolute path, root stripped>` — `ctfs_sources.safePayloadPath`'s
+    answer. The Noir recorder writes PROJECT-RELATIVE paths (`files/src/main.nr`)
+    while the engine reports the same file at an absolute path. A reader has to
+    try the writer's mapping and then walk the recorded path's suffixes. There
+    are TWO readers of this layout — `sdk/source_provider.nim`'s
+    `resolvePayload` and the engine's `expr_loader::resolve_bundled_source` —
+    and applying the finding to only one of them was CTUI-4's blocking defect.
+    The container's own bundled srcviews (extracted to
+    `$TMPDIR/codetracer-bundled-sources/<hash>/`) use the SAME two layouts and
+    are resolved by the same walk; on `noir_space_ship` they are what answers,
+    ahead of `<trace>/files/`.
+  * **A RECORDED PATH IS UNTRUSTED INPUT, and a bundle root is only a boundary
+    if every step checks it.** Recorded paths come out of containers this
+    process did not write, so they may carry `..`. Both readers of the `files/`
+    layout resolved one through the OS — in OPPOSITE steps: the engine's exact
+    `bundled_source_path` mapping was unguarded while its suffix walk skipped
+    `..`, and `resolvePayload`'s exact step called the guarded
+    `safePayloadPath` while its walk did not. Measured on both: a recorded
+    `/../../secret.txt` was served from outside the trace, labelled
+    `sourceOrigin: "payload"` / `soTracePayload` ("the recording's own copy"),
+    to clients built with `allowWorkingTree = false`. Because BOTH sides had a
+    hole, the two providers agreed and `checkBothProvidersAgree` could not see
+    it — agreement between two implementations is not a containment check.
+    `expr_loader::is_within_bundle_root` and `source_provider`'s
+    `isWithinPayloadRoot` are now the single answer on each side, applied at
+    every step and by the WRITERS too (a container naming `res://../../x` would
+    otherwise have the srcviews extractor place its bytes there). Symlinks out
+    of a bundle are in scope and refused. If you add a step that maps a
+    recorded path under a root, route it through those, not through a bare
+    `join`.
+  * **`Path::is_file()` is unconditionally `false` on
+    `wasm32-unknown-unknown`** — measured, not read: a `cdylib` built for that
+    target and run under node answers `0` for both `Path::new("/").is_file()`
+    and `.exists()`, because the target falls to std's `unsupported` fs pal
+    whose `stat` returns `Err(Unsupported)`. Consequence for anything gated on
+    it: `resolve_bundled_source` can never resolve in a browser, at EITHER
+    bundle root, even when `load_bundled_sources_from_vfs` has just put the
+    container's own raw source views in the VFS. So `Handler::source` in a
+    browser answers only from step 3 — `working-tree`, or a refusal under
+    `allowWorkingTree: false`. `expr_loader::source_is_reachable`
+    (`exists() || vfs`) is the probe that works on both targets; `is_file()`
+    is not, and the difference is invisible on a native run.
+  * **`async_compat.onComplete` defers its callback even on an ALREADY-COMPLETE
+    `asyncdispatch` future.** Anything built on `BackendService.send` therefore
+    answers asynchronously on the C backend too, and a caller that reads its
+    `var` straight after the call gets the zero value. For an enum whose first
+    member means success that is indistinguishable from an empty answer — which
+    is why `SourceFetchStatus`'s consumers seed their result with
+    `sfsProviderUnavailable`. `drainSourceCallbacks()` (or
+    `async_compat.drainPlatformCallbacks`) is the pump.
