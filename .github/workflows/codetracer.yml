@@ -514,6 +514,19 @@ jobs:
             }
           }
 
+      - name: Validate env.ps1 component decomposition
+        shell: pwsh
+        # Asserts every gated component in env.ps1's dispatch block is
+        # accounted for in the per-component decomposition, and that the
+        # accounting helpers record what they claim. The coverage check is
+        # mechanical (an AST parse of env.ps1) rather than by eye, so a
+        # component added or removed later cannot fall out unnoticed. Hermetic and cheap:
+        # it parses env.ps1 and exercises the helpers against a temp
+        # directory. It installs no toolchain and downloads nothing, so it
+        # belongs in this smoke job rather than behind a real provision.
+        run: |
+          pwsh -File ci/test/bootstrap-decomposition.ps1
+
       - name: Validate toolchain-versions.env
         shell: pwsh
         run: |
@@ -1253,6 +1266,31 @@ jobs:
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
             codetracer-native-recorder=dev
+
+      - name: Upload env.ps1 component decomposition
+        # env.ps1 writes a per-component breakdown of the bootstrap -- wall
+        # clock, install size and relocatability class per component, plus the
+        # install-root total -- to `.tmp/windows-diy/`. This runner is
+        # EPHEMERAL: without this step the file is destroyed with the VM and
+        # the measurement may as well not have been taken.
+        #
+        # `if: always()` is the whole point. env.ps1 emits the report from a
+        # `finally`, so a run that dies mid-bootstrap still publishes a partial
+        # table naming the component it died in and what everything before it
+        # cost -- which is the more useful artifact while the lane is red. A
+        # success-only upload would collect the report exactly when it is least
+        # needed.
+        #
+        # `if-no-files-found: ignore` because this also runs when the bootstrap
+        # never got far enough to write anything, and a missing report must not
+        # become a second, misleading failure.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-env-decomposition
+          path: .tmp/windows-diy/windows-env-decomposition.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Remove WSL bash stub from System32
         # db-backend's build.rs runs ``Command::new("bash") ...
