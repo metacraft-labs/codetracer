@@ -1182,44 +1182,90 @@ if (-not $doSync -and $forceTtd -and (Test-BootstrapStepEnabled "TTD")) {
 if ($doSync) {
   $arch = Get-WindowsArch
 
+  # Each gated component runs through Invoke-BootstrapStep, which applies the
+  # same WINDOWS_DIY_SKIP_<NAME> gate Test-BootstrapStepEnabled did and
+  # additionally records wall clock, install size and relocatability class.
+  # That table -- written by Write-BootstrapStepReport at the end of this
+  # block -- is the per-component decomposition any sizing of this bootstrap
+  # is derived from.
+  #
+  # The -Relocatability value is the INSTALL MECHANISM, read off the
+  # corresponding ensure-*.ps1: an archive extraction or an in-place build is
+  # "relocatable", a vendor installer is "installer". Do not change one
+  # without changing the script it describes.
+  #
+  # `ci/test/bootstrap-decomposition.ps1` parses this block and fails if any
+  # Ensure-* call here bypasses the wrapper, so a component added later
+  # cannot silently fall out of the decomposition.
+
+  # The dispatch is wrapped so the decomposition is written even when a
+  # component throws. A failing run's timings are the MOST useful ones right
+  # now -- they are what identifies the component that blocks the lane -- and
+  # letting the exception skip the report would leave the slowest and most
+  # interesting runs unmeasured.
+  try {
+
   # Phase 1: No dependencies
-  if (Test-BootstrapStepEnabled "TTD")  { Ensure-Ttd -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "NODE") { Ensure-Node -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "UV")   { Ensure-Uv   -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "GCC")  { Ensure-Gcc  -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "GNAT") { Ensure-Gnat -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "GO")    { Ensure-Go    -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "LDC")   { Ensure-Ldc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "VLANG") { Ensure-Vlang -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "FPC")   { Ensure-Fpc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "ZSTD") { Ensure-Zstd -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "TTD"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Ttd   -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "NODE"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Node  -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "UV"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Uv    -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "GCC"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Gcc   -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "GNAT"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Gnat  -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "GO"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Go    -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "LDC"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Ldc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "VLANG" -Relocatability relocatable -Root $installRoot -Action { Ensure-Vlang -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  # FPC is the one component installed by a vendor installer rather than an
+  # archive: FreePascal ships an Inno Setup .exe (ensure-fpc.ps1:45-50,
+  # /VERYSILENT), so it may write outside the install root and is not a
+  # store candidate without repackaging.
+  Invoke-BootstrapStep -Step "FPC"   -Relocatability installer   -Root $installRoot -Action { Ensure-Fpc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "ZSTD"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Zstd  -Root $installRoot -Arch $arch -Toolchain $toolchain }
   # Ensure-Zlib must run after Ensure-Gcc (depends on mingw32-make + gcc).
-  if (Test-BootstrapStepEnabled "ZLIB") { Ensure-Zlib -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "LLVM") { Ensure-Llvm -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "ZLIB"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Zlib  -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "LLVM"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Llvm  -Root $installRoot -Arch $arch -Toolchain $toolchain }
   # Clingo is the ASP solver `repro` and its child `extract_runner.exe`
   # dlopen at runtime via `clingo.dll`. It has no other build-system
   # dependency; install it whenever the user does not opt out via
   # WINDOWS_DIY_SKIP_CLINGO=1.
-  if (Test-BootstrapStepEnabled "CLINGO") { Ensure-Clingo -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "CLINGO" -Relocatability relocatable -Root $installRoot -Action { Ensure-Clingo -Root $installRoot -Arch $arch -Toolchain $toolchain }
 
   # Phase 2: Rust (no deps on other managed tools)
-  if (Test-BootstrapStepEnabled "RUST") { Ensure-Rust -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "RUST" -Relocatability relocatable -Root $installRoot -Action { Ensure-Rust -Root $installRoot -Arch $arch -Toolchain $toolchain }
 
   # Phase 3: Depends on Rust/cargo
-  if (Test-BootstrapStepEnabled "JUST") { Ensure-Just -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "NEXTEST") { Ensure-Nextest -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "JUST"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Just    -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "NEXTEST" -Relocatability relocatable -Root $installRoot -Action { Ensure-Nextest -Root $installRoot -Toolchain $toolchain }
 
   # Phase 4: May need MSYS2 for source builds
-  if (Test-BootstrapStepEnabled "NIM")   { Ensure-Nim   -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "CAPNP") { Ensure-Capnp -Root $installRoot -Arch $arch -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "TUP")   { Ensure-Tup   -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "NIM"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Nim   -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "CAPNP" -Relocatability relocatable -Root $installRoot -Action { Ensure-Capnp -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "TUP"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Tup   -Root $installRoot -Toolchain $toolchain }
 
   # Phase 5: Depends on Rust + MSYS2
-  if (Test-BootstrapStepEnabled "NARGO") { Ensure-Nargo -Root $installRoot -Toolchain $toolchain -RepoRoot $repoRoot }
+  Invoke-BootstrapStep -Step "NARGO" -Relocatability relocatable -Root $installRoot -Action { Ensure-Nargo -Root $installRoot -Toolchain $toolchain -RepoRoot $repoRoot }
 
   # Phase 6: dotnet and tools that depend on it
-  if (Test-BootstrapStepEnabled "DOTNET")    { Ensure-Dotnet    -Root $installRoot -Toolchain $toolchain }
-  if (Test-BootstrapStepEnabled "CT_REMOTE") { Ensure-CtRemote -Root $installRoot -Arch $arch -Toolchain $toolchain -WindowsDir $windowsDir }
+  Invoke-BootstrapStep -Step "DOTNET"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Dotnet   -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "CT_REMOTE" -Relocatability relocatable -Root $installRoot -Action { Ensure-CtRemote -Root $installRoot -Arch $arch -Toolchain $toolchain -WindowsDir $windowsDir }
+
+  } finally {
+    # Publish the decomposition. An incomplete run is recorded as incomplete
+    # (`complete: false` plus the skipped/failed lists) rather than omitted,
+    # because a median over runs that never completed, with nothing saying
+    # so, is how this bootstrap's cost gets mis-stated.
+    #
+    # A failure to WRITE the report must not mask the failure that caused
+    # the run to abort, so this is best-effort and warns rather than throws.
+    try {
+      $decompositionDir = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_REPORT_DIR")
+      if ([string]::IsNullOrWhiteSpace($decompositionDir)) {
+        $decompositionDir = Join-Path $repoRoot ".tmp/windows-diy"
+      }
+      Write-BootstrapStepReport -Root $installRoot -OutputDir $decompositionDir | Out-Null
+    } catch {
+      Write-Warning "Failed to write the env.ps1 component decomposition: $($_.Exception.Message)"
+    }
+  }
 }
 
 $arch = Get-WindowsArch
@@ -1259,7 +1305,15 @@ $dotnetExe = Join-Path $dotnetRoot "dotnet.exe"
 # error, but the explicit gate is useful when the caller wants to avoid
 # the probe entirely (e.g. faster startup, or environments where Appx
 # behaves unpredictably).
-$skipTtdProbe = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_SKIP_TTD_PROBE" -Default $false
+#
+# It also defaults ON under WINDOWS_DIY_ONLY unless TTD is one of the named
+# components. Probing for a component the caller did not ask for buys nothing
+# and costs a `Get-AppxPackage` call, which is the least reliable thing this
+# script does on a CI guest -- "Server execution failed" / "The remote
+# procedure call failed" is a routine outcome there. An explicit
+# WINDOWS_DIY_SKIP_TTD_PROBE still wins in both directions.
+$skipTtdProbe = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_SKIP_TTD_PROBE" `
+  -Default ((Test-BootstrapAllowlistActive) -and -not (Test-BootstrapStepEnabled "TTD"))
 if ($skipTtdProbe) {
   Write-Host "WINDOWS_DIY_SKIP_TTD_PROBE=1 - skipping Resolve-TtdRuntimeInfo (TTD treated as absent)."
   $ttdRuntime = [ordered]@{
@@ -1457,7 +1511,10 @@ $clingoBinDir = Join-Path $clingoDir "bin"
 # manually after sourcing env.ps1. Ensure-NodeModulesJunction and
 # Ensure-GoldenLayoutAsset are already silent no-ops when their targets don't
 # exist, so they stay unconditional.
-if ($doSync) {
+# ...and not at all under WINDOWS_DIY_ONLY: yarn-installing codetracer's own
+# node-packages is part of making CODETRACER buildable, not part of providing
+# the one pinned component a satellite repo asked for.
+if ($doSync -and -not (Test-BootstrapAllowlistActive)) {
   Ensure-NodeTooling -RepoRoot $repoRoot -NodePackagesBin $nodePackagesBin -NodeDir $nodeDir
 }
 Ensure-NodeModulesJunction -RepoRoot $repoRoot
@@ -1561,10 +1618,25 @@ if (Test-Path -LiteralPath $llvmLibDir -PathType Container) {
 
 $clExe = Resolve-ClExePath
 if ([string]::IsNullOrWhiteSpace($clExe)) {
-  throw "cl.exe was not found on PATH and MSVC_BIN_DIR did not resolve it. Install Visual Studio Build Tools with the MSVC toolchain (e.g., 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' or 'Microsoft.VisualStudio.Component.VC.Tools.ARM64')."
+  # MSVC is a requirement of BUILDING codetracer, not of every component
+  # env.ps1 can install. Under WINDOWS_DIY_ONLY the caller asked for a named
+  # subset -- `codetracer-trace-format` asks for CAPNP, whose x64 path
+  # extracts a pinned prebuilt archive and needs no compiler at all -- so
+  # demanding cl.exe there would fail a run that got exactly what it wanted.
+  # Outside that mode nothing changes: the absence is still fatal.
+  if (Test-BootstrapAllowlistActive) {
+    Write-Warning ("cl.exe was not found, and WINDOWS_DIY_ONLY is set, so this is not treated " +
+                   "as fatal. WINDOWS_DIY_CL_EXE will be empty and anything that needs MSVC " +
+                   "will fail at the point of use.")
+  } else {
+    throw "cl.exe was not found on PATH and MSVC_BIN_DIR did not resolve it. Install Visual Studio Build Tools with the MSVC toolchain (e.g., 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' or 'Microsoft.VisualStudio.Component.VC.Tools.ARM64')."
+  }
 }
 [Environment]::SetEnvironmentVariable("WINDOWS_DIY_CL_EXE", $clExe, "Process")
-if (-not [string]::IsNullOrWhiteSpace($msvcToolsetPinnedVersion)) {
+# The toolset-version assertion reads the version out of the resolved cl.exe,
+# so it is only meaningful when one was found.
+if (-not [string]::IsNullOrWhiteSpace($msvcToolsetPinnedVersion) -and
+    -not [string]::IsNullOrWhiteSpace($clExe)) {
   $actualMsvcToolsetVersion = Resolve-MsvcToolsetVersion
   Assert-MsvcToolsetVersion -ActualVersion $actualMsvcToolsetVersion -PinnedVersion $msvcToolsetPinnedVersion
   [Environment]::SetEnvironmentVariable("WINDOWS_DIY_MSVC_TOOLSET_VERSION", $actualMsvcToolsetVersion, "Process")
@@ -1679,7 +1751,12 @@ Prepend-PathEntries -Entries @(
   $clingoBinDir
 )
 
-$ensureParser = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER" -Default $true
+# Default off under WINDOWS_DIY_ONLY: the tree-sitter Nim parser is one of
+# codetracer's own build inputs, not a component any caller can request, and
+# regenerating it needs bash + a codetracer checkout. An explicit
+# WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER still wins in both directions.
+$ensureParser = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_ENSURE_TREE_SITTER_NIM_PARSER" `
+  -Default (-not (Test-BootstrapAllowlistActive))
 if ($ensureParser) {
   # Prefer the Git Bash discovered earlier (WINDOWS_DIY_GIT_BASH_BIN).
   # On hosted Windows Server 2022, `Get-Command bash` resolves to
@@ -1711,7 +1788,11 @@ if ($ensureParser) {
   & $bashExe $tsParserScript
 }
 
-& (Join-Path $windowsDir "setup-codetracer-runtime-env.ps1") -RepoRoot $repoRoot
+# Codetracer's own runtime env (recorder/backend discovery). Out of scope for a
+# caller that named a component subset via WINDOWS_DIY_ONLY.
+if (-not (Test-BootstrapAllowlistActive)) {
+  & (Join-Path $windowsDir "setup-codetracer-runtime-env.ps1") -RepoRoot $repoRoot
+}
 
 # Keep shims first-class after runtime setup path mutations.
 Prepend-PathEntries -Entries @($shimsDir)
