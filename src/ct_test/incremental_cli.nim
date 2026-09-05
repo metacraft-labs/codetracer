@@ -500,10 +500,52 @@ proc parseLanguage(s: string): Result[IncrementalLanguage, string] =
   else:
     err("unknown language '" & s & "' (expected: python, ruby, native)")
 
+const
+  ## One vocabulary for both entry points.
+  ##
+  ## `ct test --incremental` has two front doors — the human-facing selection
+  ## run and the granular `--watch-decide` / `--watch-record` JSON protocol the
+  ## std-only `ct_incremental_adapter` process seam drives. They name the same
+  ## three concepts, so they accept the same spellings: the explicit
+  ## `--test-id` / `--cache-path` used by the seam, and the shorter `--id` /
+  ## `--cache` the usage line has always advertised. The FIRST entry of each
+  ## array is the canonical spelling shown in `usage()`; the rest are aliases.
+  ##
+  ## Keeping one table means the advertised set and the accepted set cannot
+  ## drift apart — a usage string offering a flag the parser rejects (or a
+  ## parser quietly ignoring a flag the usage string offers) is its own defect.
+  TestIdFlags = ["--test-id", "--id"]
+  TraceDirFlags = ["--trace-dir"]
+  SourceRootFlags = ["--source-root"]
+  CachePathFlags = ["--cache-path", "--cache"]
+  LanguageFlags = ["--language"]
+  ProgramFlags = ["--program"]
+  ArtifactFlags = ["--artifact"]
+  NonDeterministicFlag = "--non-deterministic"
+  WriteArtifactFlag = "--write-artifact"
+  WatchDecideFlag = "--watch-decide"
+  WatchRecordFlag = "--watch-record"
+
+func matchesFlag(arg, flag: string): bool =
+  ## True for both accepted shapes of a value-taking flag: `--flag value`
+  ## (the bare form, value in the next argument) and `--flag=value`.
+  arg == flag or arg.startsWith(flag & "=")
+
+func matchesAny(arg: string; spellings: openArray[string]): bool =
+  for flag in spellings:
+    if arg.matchesFlag(flag):
+      return true
+  false
+
 proc usage(): string =
   "usage: ct test --incremental --language <python|ruby|native> --program <path> " &
-  "[--source-root DIR] [--cache PATH] [--id TESTID] " &
-  "[--write-artifact] [--artifact PATH]"
+  "[--source-root DIR] [--cache-path PATH] [--test-id TESTID] " &
+  "[--write-artifact] [--artifact PATH]\n" &
+  "       ct test --incremental --watch-decide|--watch-record " &
+  "--test-id TESTID --trace-dir DIR [--source-root DIR] [--cache-path PATH] " &
+  "[--non-deterministic]\n" &
+  "  aliases: --test-id/--id, --cache-path/--cache. Every value-taking flag " &
+  "accepts both `--flag value` and `--flag=value`."
 
 proc takeValue(args: seq[string]; i: var int; flag: string):
     Result[string, string] =
@@ -518,6 +560,15 @@ proc takeValue(args: seq[string]; i: var int; flag: string):
     return ok(args[i])
   err("internal parse error for " & flag)
 
+proc takeAnyValue(args: seq[string]; i: var int;
+                  spellings: openArray[string]): Result[string, string] =
+  ## `takeValue` over a set of accepted spellings for one concept. The caller
+  ## has already established (via `matchesAny`) that one of them matches.
+  for flag in spellings:
+    if args[i].matchesFlag(flag):
+      return takeValue(args, i, flag)
+  err("internal parse error for " & args[i])
+
 proc parseIncrementalArgs*(args: seq[string]): Result[IncrementalArgs, string] =
   ## Parse the post-`--incremental` argument list. The `--incremental` flag
   ## itself is consumed by the caller; everything else is parsed here.
@@ -526,36 +577,36 @@ proc parseIncrementalArgs*(args: seq[string]): Result[IncrementalArgs, string] =
   var i = 0
   while i < args.len:
     let arg = args[i]
-    if arg == "--language" or arg.startsWith("--language="):
-      let v = takeValue(args, i, "--language")
+    if arg.matchesAny(LanguageFlags):
+      let v = takeAnyValue(args, i, LanguageFlags)
       if v.isErr: return err(v.error)
       let lang = parseLanguage(v.value)
       if lang.isErr: return err(lang.error)
       res.language = lang.value
       langSet = true
-    elif arg == "--program" or arg.startsWith("--program="):
-      let v = takeValue(args, i, "--program")
+    elif arg.matchesAny(ProgramFlags):
+      let v = takeAnyValue(args, i, ProgramFlags)
       if v.isErr: return err(v.error)
       res.program = v.value
-    elif arg == "--source-root" or arg.startsWith("--source-root="):
-      let v = takeValue(args, i, "--source-root")
+    elif arg.matchesAny(SourceRootFlags):
+      let v = takeAnyValue(args, i, SourceRootFlags)
       if v.isErr: return err(v.error)
       res.sourceRoot = v.value
-    elif arg == "--cache" or arg.startsWith("--cache="):
-      let v = takeValue(args, i, "--cache")
+    elif arg.matchesAny(CachePathFlags):
+      let v = takeAnyValue(args, i, CachePathFlags)
       if v.isErr: return err(v.error)
       res.cachePath = v.value
-    elif arg == "--id" or arg.startsWith("--id="):
-      let v = takeValue(args, i, "--id")
+    elif arg.matchesAny(TestIdFlags):
+      let v = takeAnyValue(args, i, TestIdFlags)
       if v.isErr: return err(v.error)
       res.testId = v.value
-    elif arg == "--write-artifact":
+    elif arg == WriteArtifactFlag:
       # M2: a bare flag — enable artifact writing at the default path. An
       # explicit path is given via the separate `--artifact PATH` flag.
       res.writeArtifact = true
-    elif arg == "--artifact" or arg.startsWith("--artifact="):
+    elif arg.matchesAny(ArtifactFlags):
       # M2: an explicit artifact path also implies `--write-artifact`.
-      let v = takeValue(args, i, "--artifact")
+      let v = takeAnyValue(args, i, ArtifactFlags)
       if v.isErr: return err(v.error)
       res.artifactPath = v.value
       res.writeArtifact = true
@@ -723,20 +774,77 @@ proc decideIncremental*(args: IncrementalArgs; ws: string): IncrementalRunResult
   IncrementalRunResult(kind: irkDecided, decision: decision,
     report: describeDecision(args.testId, decision))
 
-proc watchFlag(args: seq[string]; name: string): string =
-  ## Returns the value following `--<name>` in `args`, or "" if absent.
-  ## Used by the granular `--watch-decide` / `--watch-record` JSON CLI below.
-  let flag = "--" & name
-  for i in 0 ..< args.len:
-    if args[i] == flag:
-      if i + 1 < args.len:
-        return args[i + 1]
-      return ""
-  ""
+type
+  WatchArgs* = object
+    ## Parsed arguments of the granular `--watch-decide` / `--watch-record`
+    ## JSON protocol driven by the std-only `ct_incremental_adapter` seam.
+    testId*: string          ## REQUIRED — the cache key for this test edge.
+    traceDir*: string        ## REQUIRED — the recorded trace to decide against.
+    sourceRoot*: string      ## Optional; defaults to "/" (recorded paths are
+                             ## absolute), as in the human-facing form.
+    cachePath*: string       ## Optional; defaults under `sourceRoot`, as in the
+                             ## human-facing form.
+    nonDeterministic*: bool  ## Optional bare flag (`--watch-record` only).
 
-proc watchHasFlag(args: seq[string]; name: string): bool =
-  ## Returns true if the bare flag `--<name>` is present in `args`.
-  ("--" & name) in args
+proc parseWatchArgs*(args: seq[string]): Result[WatchArgs, string] =
+  ## Parse the granular watch protocol's arguments. `args` INCLUDES the leading
+  ## mode selector (`--watch-decide` / `--watch-record`), which is skipped here.
+  ##
+  ## Everything this returns is either a value the caller actually supplied or a
+  ## documented default. There is deliberately no third outcome: a required flag
+  ## that is absent, a flag given without a value, and an unrecognised argument
+  ## are all Errs. The previous ad-hoc lookup answered all three with an empty
+  ## string, which then flowed on as if it had been supplied — a mistyped test
+  ## id became a decision about the test named "", and a mistyped cache path
+  ## became a decision against a cache that could not be loaded. Both are
+  ## invisible at the call site; an Err is not.
+  ##
+  ## `--flag=value` is accepted alongside `--flag value` for every value-taking
+  ## flag, and the `--id` / `--cache` aliases are accepted alongside
+  ## `--test-id` / `--cache-path`, so this front door understands everything
+  ## `usage()` advertises for the other one.
+  # `sourceRoot` carries its default from here, so an omitted `--source-root`
+  # needs no post-pass; an explicitly empty one is the caller's business.
+  var res = WatchArgs(sourceRoot: "/")
+  var i = 0
+  while i < args.len:
+    let arg = args[i]
+    if arg == WatchDecideFlag or arg == WatchRecordFlag:
+      discard  # the mode selector; dispatched on by the caller
+    elif arg.matchesAny(TestIdFlags):
+      let v = takeAnyValue(args, i, TestIdFlags)
+      if v.isErr: return err(v.error)
+      res.testId = v.value
+    elif arg.matchesAny(TraceDirFlags):
+      let v = takeAnyValue(args, i, TraceDirFlags)
+      if v.isErr: return err(v.error)
+      res.traceDir = v.value
+    elif arg.matchesAny(SourceRootFlags):
+      let v = takeAnyValue(args, i, SourceRootFlags)
+      if v.isErr: return err(v.error)
+      res.sourceRoot = v.value
+    elif arg.matchesAny(CachePathFlags):
+      let v = takeAnyValue(args, i, CachePathFlags)
+      if v.isErr: return err(v.error)
+      res.cachePath = v.value
+    elif arg == NonDeterministicFlag:
+      res.nonDeterministic = true
+    else:
+      return err("unknown argument: " & arg)
+    inc i
+  # Required: the two values that have no defensible default. A cache keyed on
+  # an empty test id, or a decision taken against no trace at all, is not a
+  # weaker answer than the caller asked for — it is an answer to a different
+  # question.
+  if res.testId.len == 0:
+    return err("--test-id is required")
+  if res.traceDir.len == 0:
+    return err("--trace-dir is required")
+  # Optional, with exactly the default `parseIncrementalArgs` applies, so the
+  # two front doors decide the same way when given the same flags.
+  if res.cachePath.len == 0:
+    res.cachePath = defaultCachePath(res.sourceRoot)
+  ok(res)
 
 proc runWatchDecide(rawArgs: seq[string]): int =
   ## Granular machine-readable decision used by Reprobuild's std-only
@@ -744,18 +852,22 @@ proc runWatchDecide(rawArgs: seq[string]): int =
   ## Loads the cache, runs `decide`, and prints a single-line JSON object:
   ##   {"status":"run"|"skip","reason":"...","changedFuncs":[...]}
   ## A malformed/unreadable cache is itself a valid (fail-safe) RUN decision,
-  ## so this always exits 0 for a reached decision.
-  let
-    testId = watchFlag(rawArgs, "test-id")
-    traceDir = watchFlag(rawArgs, "trace-dir")
-    sourceRoot = watchFlag(rawArgs, "source-root")
-    cachePath = watchFlag(rawArgs, "cache-path")
-  let loaded = loadCache(cachePath)
+  ## so this exits 0 for any decision it reaches. An ARGUMENT error is not a
+  ## decision: it exits 2 with a diagnostic, exactly as the human-facing form
+  ## does, and the adapter's own fail-safe turns that non-zero exit into a
+  ## conservative re-run. A bad invocation can therefore never produce a skip.
+  let parsed = parseWatchArgs(rawArgs)
+  if parsed.isErr:
+    stderr.writeLine("ct test --incremental --watch-decide: " & parsed.error)
+    stderr.writeLine(usage())
+    return 2
+  let args = parsed.value
+  let loaded = loadCache(args.cachePath)
   if loaded.isErr:
     echo $(%*{"status": "run", "reason": "error: " & loaded.error,
       "changedFuncs": newJArray()})
     return 0
-  let decision = decide(testId, traceDir, sourceRoot, loaded.value)
+  let decision = decide(args.testId, args.traceDir, args.sourceRoot, loaded.value)
   var obj: JsonNode
   case decision.kind
   of idRunFresh:
@@ -778,18 +890,21 @@ proc runWatchDecide(rawArgs: seq[string]): int =
 proc runWatchRecord(rawArgs: seq[string]): int =
   ## Granular machine-readable record used by the std-only process seam. Records
   ## the test's executed-function hashes into the cache and persists it, then
-  ## prints a single-line JSON object: {"ok":bool,"error":str}. Always exits 0;
-  ## failures are reported through the JSON payload.
-  let
-    testId = watchFlag(rawArgs, "test-id")
-    traceDir = watchFlag(rawArgs, "trace-dir")
-    sourceRoot = watchFlag(rawArgs, "source-root")
-    cachePath = watchFlag(rawArgs, "cache-path")
-    nonDet = watchHasFlag(rawArgs, "non-deterministic")
-  let loaded = loadCache(cachePath)
-  var cache = if loaded.isOk: loaded.value else: initCache(cachePath)
-  let rec = record(cache, testId, traceDir, sourceRoot,
-    deterministic = not nonDet)
+  ## prints a single-line JSON object: {"ok":bool,"error":str}. Exits 0 for any
+  ## record it attempts; RECORDING failures are reported through the JSON
+  ## payload. An ARGUMENT error exits 2 with a diagnostic instead — recording
+  ## the wrong test id into the cache would poison later decisions, so a bad
+  ## invocation must not reach the cache at all.
+  let parsed = parseWatchArgs(rawArgs)
+  if parsed.isErr:
+    stderr.writeLine("ct test --incremental --watch-record: " & parsed.error)
+    stderr.writeLine(usage())
+    return 2
+  let args = parsed.value
+  let loaded = loadCache(args.cachePath)
+  var cache = if loaded.isOk: loaded.value else: initCache(args.cachePath)
+  let rec = record(cache, args.testId, args.traceDir, args.sourceRoot,
+    deterministic = not args.nonDeterministic)
   if rec.isErr:
     echo $(%*{"ok": false, "error": rec.error})
     return 0

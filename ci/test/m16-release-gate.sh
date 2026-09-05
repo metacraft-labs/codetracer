@@ -73,6 +73,7 @@ run_nim_test src/ct_test/run_store_test.nim
 # down every thread-creating process.
 GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0 \
 	run_nim_test src/ct_test/run_orchestration_test.nim
+run_nim_test src/ct_test/incremental_cli_test.nim
 run_nim_test src/ct_test/nim_lexer_test.nim
 run_nim_test src/ct_test/nim_unittest_provider_test.nim
 run_nim_test src/ct_test/python_providers_test.nim
