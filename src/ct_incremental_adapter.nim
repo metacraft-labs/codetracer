@@ -14,6 +14,18 @@
 ##
 ## This module intentionally imports only std modules. Any subprocess failure
 ## is a conservative re-run, never a silent skip.
+##
+## # A second, semantically equivalent copy exists downstream
+##
+## CodeTracer owns this seam, but Reprobuild's packaged (Nix) build has no
+## CodeTracer checkout to compile it from and therefore compiles its own
+## standalone copy, kept in the `reprobuild-ct-test-runner` repository. The two
+## are equivalent, not identical, and nothing mechanically enforces that. A
+## BEHAVIOUR change here — the subprocess protocol, the flags passed to `ct`, or
+## the fail-safe rules above — has to be mirrored there and the pin bumped, or
+## the packaged build will keep the old behaviour while a workspace checkout
+## gets the new one. A purely local change (comments, formatting, an added
+## helper) needs no such mirroring.
 
 import std/[json, os, osproc, strutils]
 
