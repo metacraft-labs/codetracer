@@ -62,17 +62,51 @@ if ! command -v mapfile >/dev/null 2>&1 && ! type -t mapfile >/dev/null 2>&1; th
 	exit 2
 fi
 
+# AND THE INTERPRETER THAT ACTUALLY RUNS THEM, WHICH IS A DIFFERENT ONE.
+#
+# The check above grades the shell running THIS FILE. Every graded script is
+# started as `bash <script>` — resolved from `PATH`, not inherited — so on a
+# machine where `/bin/bash` (3.2) precedes a modern one, the suite passes its
+# own version check and then hands every script it grades to a shell that dies
+# at `mapfile`. MEASURED on this repository: `bash5 ci/test/stale-artefact-
+# guards-test.sh` with `/bin/bash` first on PATH prints
+# `expected=46 executed=46 failed=8` — a partial score that reads exactly like
+# eight broken guards and is in fact one broken instrument. That is the very
+# defect this suite grades, committed by the grader, and the earlier version of
+# this file caught only half of it.
+#
+# `bash -c` rather than a version-string parse: the question is whether the
+# builtin is there, and that is what asking for it answers.
+if ! bash -c 'type -t mapfile' >/dev/null 2>&1; then
+	echo "stale-artefact-guards-test: the \`bash\` on PATH has no \`mapfile\`." >&2
+	echo "  found:   $(command -v bash)" >&2
+	echo "  version: $(bash -c 'echo "${BASH_VERSION}"' 2>/dev/null)" >&2
+	echo "  This suite EXECUTES the scripts it grades, as \`bash <script>\`, so they" >&2
+	echo "  would die before reaching their guards and be scored as missing ones —" >&2
+	echo "  which is this suite making the very mistake it grades." >&2
+	echo "  Put a bash >= 4 first on PATH, or run the lane it belongs to:" >&2
+	echo "    nix develop .#\$(...)lint -c ./ci/lint/bash.sh" >&2
+	exit 2
+fi
+
 VISUAL_CAPTURE="${REPO_ROOT}/scripts/docs/capture-visual-recording-screenshots.sh"
 STORYBOOK_FRESHNESS="${REPO_ROOT}/tools/visual-review/storybook-freshness.mjs"
 STORYBOOK_DEPS="${REPO_ROOT}/scripts/storybook-deps.sh"
 RR_SETUP="${REPO_ROOT}/ci/setup-rr-backend.sh"
 SETUP_CERTS="${REPO_ROOT}/browser-replay/setup-certs.sh"
 WEBP="${REPO_ROOT}/scripts/docs/generate-webp-animations.sh"
+CAPTURE_LIB="${REPO_ROOT}/scripts/docs/deep-review-capture-lib.sh"
+DESKTOP_COMPONENT="${REPO_ROOT}/scripts/build-desktop-component.sh"
+DEVELOPER_SETUP="${REPO_ROOT}/scripts/developer-setup.sh"
+DEPLOY_WASM="${REPO_ROOT}/browser-replay/deploy-wasm.sh"
+CROSS_REPO="${REPO_ROOT}/scripts/run-cross-repo-tests.sh"
+DESKTOP_CAPS="${REPO_ROOT}/resources/codetracer-desktop-capabilities"
+VERSION_NIM="${REPO_ROOT}/src/ct/version.nim"
 
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=46
+EXPECTED_ASSERTIONS=70
 
 ASSERTIONS=0
 FAILURES=0
@@ -115,6 +149,12 @@ assert_file_exists() {
 	if [[ -f $1 ]]; then ok "$2"; else bad "$2" "no such file: $1"; fi
 }
 
+# The other half of the one above, and the only way to say "the refusal stopped
+# the deploy" rather than "the refusal printed something".
+assert_file_absent() {
+	if [[ ! -e $1 ]]; then ok "$2"; else bad "$2" "expected no such path: $1"; fi
+}
+
 # run_expect_failure <desc> <fragment> -- <command...>
 run_expect_failure() {
 	local desc="$1" fragment="$2" out status
@@ -129,7 +169,9 @@ run_expect_failure() {
 }
 
 for required in "${VISUAL_CAPTURE}" "${STORYBOOK_FRESHNESS}" "${STORYBOOK_DEPS}" \
-	"${RR_SETUP}" "${SETUP_CERTS}" "${WEBP}"; do
+	"${RR_SETUP}" "${SETUP_CERTS}" "${WEBP}" "${CAPTURE_LIB}" \
+	"${DESKTOP_COMPONENT}" "${DEVELOPER_SETUP}" "${DEPLOY_WASM}" \
+	"${CROSS_REPO}" "${DESKTOP_CAPS}" "${VERSION_NIM}"; do
 	if [[ ! -f ${required} ]]; then
 		echo "stale-artefact-guards-test: missing '${required}'" >&2
 		exit 3
@@ -611,6 +653,295 @@ assert_contains "${FILTERED}" "recorded 3 video(s) but this script names 6" \
 	"a run that records fewer videos than there are names is refused"
 assert_contains "${FILTERED}" "assigned BY POSITION" \
 	"the refusal explains why the count has to match"
+
+# ---------------------------------------------------------------------------
+section "the desktop component bundle refuses to publish a stale core"
+# ---------------------------------------------------------------------------
+#
+# `scripts/build-desktop-component.sh` walked five candidate build trees and
+# took the first one whose `bin/ct` was `-x`, then symlinked or copied it into
+# `codetracer-desktop@<version>/bin/codetracer` — the component the LAUNCHER
+# execv()s. Two mistakes at once: the choice was made by existence (a month-old
+# `src/build-release/bin/ct` beats a fresh repro tree that has no debug
+# variant), and the "has not been built" refusal underneath said "Build it with:
+# just build-once", naming the condition it could not detect. The bundle
+# directory is named from `src/ct/version.nim` as it reads NOW, so a stale core
+# is published under the current version string.
+#
+# The fixture is a synthetic checkout carrying the real script, the real
+# capability resource and the real `version.nim`, so the name/version derivation
+# is the product's and only the sources are synthetic.
+
+DESK="${TEST_ROOT}/desktop-repo"
+mkdir -p "${DESK}/scripts/docs" "${DESK}/resources" "${DESK}/src/ct" \
+	"${DESK}/src/build-debug/bin"
+cp "${DESKTOP_COMPONENT}" "${DESK}/scripts/build-desktop-component.sh"
+cp "${CAPTURE_LIB}" "${DESK}/scripts/docs/deep-review-capture-lib.sh"
+cp "${DESKTOP_CAPS}" "${DESK}/resources/codetracer-desktop-capabilities"
+cp "${VERSION_NIM}" "${DESK}/src/ct/version.nim"
+printf 'echo "ct"\n' >"${DESK}/src/ct/codetracer.nim"
+printf 'readme\n' >"${DESK}/README.md"
+git -C "${DESK}" init -q
+git -C "${DESK}" config user.email t@t.local
+git -C "${DESK}" config user.name t
+git -C "${DESK}" add -A
+git -C "${DESK}" commit -qm sources
+# Built AFTER the sources, and outside the index — which is also what makes it
+# invisible to the `git ls-files` the guard asks.
+printf '#!/usr/bin/env bash\nexit 0\n' >"${DESK}/src/build-debug/bin/ct"
+chmod +x "${DESK}/src/build-debug/bin/ct"
+
+run_desktop() {
+	CODETRACER_COMPONENT_OUT_ROOT="${DESK}/out" \
+		bash "${DESK}/scripts/build-desktop-component.sh" "$@" 2>&1
+}
+
+assert_contains "$(run_desktop)" "codetracer-desktop component bundle ready:" \
+	"a core newer than every Nim source is published as the component"
+
+touch "${DESK}/src/ct/codetracer.nim"
+run_expect_failure "a core older than the Nim it is compiled from is refused" \
+	"stale build: the CodeTracer core binary" -- run_desktop
+STALE_CORE="$(run_desktop)"
+assert_contains "${STALE_CORE}" "codetracer.nim" \
+	"the refusal names the source file that outran the core"
+assert_not_contains "${STALE_CORE}" "bundle ready" \
+	"a refused run publishes no bundle at all"
+
+# A core handed in from elsewhere — a Nix store path, another worktree — was not
+# built from this checkout's sources, so the question cannot be asked. It says
+# so and proceeds, rather than manufacturing a refusal.
+OUTSIDE_CT="${TEST_ROOT}/elsewhere-ct/ct"
+mkdir -p "$(dirname -- "${OUTSIDE_CT}")"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${OUTSIDE_CT}"
+chmod +x "${OUTSIDE_CT}"
+touch -t 199001010000 "${OUTSIDE_CT}"
+FOREIGN_CORE="$(run_desktop --core-bin "${OUTSIDE_CT}")"
+assert_contains "${FOREIGN_CORE}" "was supplied from outside" \
+	"a core supplied from outside the checkout says why it is not checked"
+assert_contains "${FOREIGN_CORE}" "bundle ready" \
+	"...and is published, rather than refused for a question that cannot be asked"
+
+# ---------------------------------------------------------------------------
+section "developer-setup refuses to INSTALL a stale ct"
+# ---------------------------------------------------------------------------
+#
+# `[ ! -f src/build-debug/bin/ct ]` -> "Please run 'just build-once' first."
+# The sentence is the tell. Nothing deletes that binary, so one build on any
+# branch at any time satisfies the test forever — and what follows is not a
+# report: `ct install` puts THAT binary on the developer's PATH and writes its
+# desktop entry, and Phase 2 copies it to `/usr/local/lib/codetracer/` and
+# grants it cap_bpf,cap_perfmon,cap_dac_read_search.
+#
+# `--without-bpf` is passed so the run stops after Phase 1 on any platform;
+# every assertion here is about Phase 1, which is the phase that installs.
+
+DEV="${TEST_ROOT}/dev-repo"
+mkdir -p "${DEV}/scripts/docs" "${DEV}/src/ct" "${DEV}/src/build-debug/bin"
+cp "${DEVELOPER_SETUP}" "${DEV}/scripts/developer-setup.sh"
+cp "${CAPTURE_LIB}" "${DEV}/scripts/docs/deep-review-capture-lib.sh"
+printf 'echo "ct"\n' >"${DEV}/src/ct/codetracer.nim"
+git -C "${DEV}" init -q
+git -C "${DEV}" config user.email t@t.local
+git -C "${DEV}" config user.name t
+git -C "${DEV}" add -A
+git -C "${DEV}" commit -qm sources
+# The `ct` under test records what it was asked to install, so the assertions
+# below are against an invocation rather than against source text.
+# shellcheck disable=SC2016
+printf '#!/usr/bin/env bash\nprintf "ct\\t%%s\\n" "$*" >>"${TRACE}"\nexit 0\n' \
+	>"${DEV}/src/build-debug/bin/ct"
+chmod +x "${DEV}/src/build-debug/bin/ct"
+
+run_devsetup() {
+	: >"${TRACE}"
+	bash "${DEV}/scripts/developer-setup.sh" --without-bpf 2>&1
+}
+
+assert_contains "$(run_devsetup)" "=== CodeTracer Developer Machine Setup ===" \
+	"a ct newer than every Nim source is installed"
+assert_contains "$(cat "${TRACE}")" $'ct\tinstall --bpf=false' \
+	"...and the install really is the binary from the build tree"
+
+touch "${DEV}/src/ct/codetracer.nim"
+run_expect_failure "a ct older than the Nim it is compiled from is not installed" \
+	"stale build: the ct binary" -- run_devsetup
+assert_contains "$(run_devsetup)" "codetracer.nim" \
+	"the refusal names the source file that outran the binary"
+assert_not_contains "$(cat "${TRACE}")" "install" \
+	"...and nothing was installed onto the machine"
+
+# ---------------------------------------------------------------------------
+section "the browser-replay WASM deploy is dated, not merely present"
+# ---------------------------------------------------------------------------
+#
+# `[ ! -d "$PKG_SRC" ]` -> "Run: cd src/db-backend && bash build_wasm.sh". The
+# directory survives every build, so from the second one onwards the test is
+# satisfied by history. What happens next is a DEPLOY: the glue and the module
+# are copied into the directory nginx serves, and browser-replay then runs an
+# out-of-date db-backend against current traces with nothing in the page saying
+# which module it got.
+#
+# The fixture starts STALE, so the first thing asserted is that nothing is
+# copied — the healthy path is exercised afterwards, once the module has been
+# "rebuilt". A suite that deployed first could not tell a refusal from a no-op.
+
+WASMREPO="${TEST_ROOT}/wasm-repo"
+WASM_PKG="${WASMREPO}/src/db-backend/wasm-testing/pkg"
+WASM_DST="${WASMREPO}/browser-replay/app/pkg"
+mkdir -p "${WASMREPO}/browser-replay" "${WASMREPO}/scripts/docs" \
+	"${WASMREPO}/src/db-backend/src" "${WASM_PKG}"
+cp "${DEPLOY_WASM}" "${WASMREPO}/browser-replay/deploy-wasm.sh"
+cp "${CAPTURE_LIB}" "${WASMREPO}/scripts/docs/deep-review-capture-lib.sh"
+printf 'pub fn replay() {}\n' >"${WASMREPO}/src/db-backend/src/lib.rs"
+printf '[package]\nname = "db-backend"\n' >"${WASMREPO}/src/db-backend/Cargo.toml"
+printf 'lock\n' >"${WASMREPO}/src/db-backend/Cargo.lock"
+printf 'x\n' >"${WASMREPO}/src/db-backend/build.rs"
+printf 'glue\n' >"${WASM_PKG}/db_backend.js"
+printf 'wasm\n' >"${WASM_PKG}/db_backend_bg.wasm"
+git -C "${WASMREPO}" init -q
+git -C "${WASMREPO}" config user.email t@t.local
+git -C "${WASMREPO}" config user.name t
+git -C "${WASMREPO}" add -A
+git -C "${WASMREPO}" commit -qm sources
+# The crate moves on; the built module does not. This is the whole defect.
+touch "${WASMREPO}/src/db-backend/src/lib.rs"
+
+run_deploy_wasm() { bash "${WASMREPO}/browser-replay/deploy-wasm.sh" 2>&1; }
+
+run_expect_failure "a module older than the crate it is built from is refused" \
+	"stale WASM build: db_backend.js" -- run_deploy_wasm
+assert_contains "$(run_deploy_wasm)" "lib.rs" \
+	"the refusal names the Rust source that outran the module"
+assert_file_absent "${WASM_DST}/db_backend_bg.wasm" \
+	"nothing reaches the directory nginx serves"
+
+touch "${WASM_PKG}/db_backend.js" "${WASM_PKG}/db_backend_bg.wasm"
+assert_contains "$(run_deploy_wasm)" "Deployed WASM to" \
+	"a rebuilt module is deployed"
+assert_file_exists "${WASM_DST}/db_backend_bg.wasm" \
+	"...and the module really is copied there"
+
+# BOTH HALVES, NOT ONE. `wasm-bindgen` writes the glue and the module
+# separately; a run that died between them leaves a current `.js` beside a
+# `.wasm` a build old, and the deploy would ship a loader calling into exports
+# the module does not have. Checking only the first file found would pass this.
+touch "${WASMREPO}/src/db-backend/src/lib.rs"
+touch "${WASM_PKG}/db_backend.js"
+run_expect_failure "a half-written package is refused on its OTHER half" \
+	"stale WASM build: db_backend_bg.wasm" -- run_deploy_wasm
+
+# ---------------------------------------------------------------------------
+section "the cross-repo runner dates the sibling backend it tests against"
+# ---------------------------------------------------------------------------
+#
+# THE TWIN OF `ci/setup-rr-backend.sh`, and it had the identical shape: the
+# workspace-locked revision was resolved on the CI-clone path ONLY, so a sibling
+# checkout found on disk was used without the pin ever being computed, and the
+# binary inside it was chosen by `-x` between `target/release` and
+# `target/debug` — first one that exists, not newest. What that decides is which
+# `ct-native-replay` the nim/rust/go/lean flow suites replay against, so a
+# checkout at last month's revision yields a green run that measured the wrong
+# backend and names no revision anywhere.
+#
+# THE FIXTURE PINS TO ITS OWN COMMITS, never to a branch tip: `REV_NB_OLD` and
+# `REV_NB_NEW` are the two commits this suite makes, so what is asserted cannot
+# change under it.
+#
+# The runner is copied into a synthetic checkout so its `target/` logs and its
+# `cd src/db-backend` land in the throwaway tree, and `cargo` / `rustc` / `rr`
+# — which its own prerequisite check demands by name — are stubbed on PATH.
+
+XREPO="${TEST_ROOT}/xrepo"
+XWS="${TEST_ROOT}/xws"
+NB="${XWS}/codetracer-native-backend"
+mkdir -p "${XREPO}/scripts/docs" "${XREPO}/src/db-backend" "${NB}/src"
+cp "${CROSS_REPO}" "${XREPO}/scripts/run-cross-repo-tests.sh"
+cp "${CAPTURE_LIB}" "${XREPO}/scripts/docs/deep-review-capture-lib.sh"
+
+for stub in cargo rustc rr; do
+	# shellcheck disable=SC2016
+	printf '#!/usr/bin/env bash\nprintf "%%s\\t%%s\\n" "%s" "$*" >>"${TRACE}"\nexit 0\n' \
+		"${stub}" >"${BIN}/${stub}"
+	chmod +x "${BIN}/${stub}"
+done
+
+git -C "${NB}" init -q
+git -C "${NB}" config user.email t@t.local
+git -C "${NB}" config user.name t
+printf 'pub fn replay() {}\n' >"${NB}/src/main.rs"
+printf '[package]\nname = "ct-native-replay"\n' >"${NB}/Cargo.toml"
+git -C "${NB}" add -A
+git -C "${NB}" commit -qm one
+REV_NB_OLD="$(git -C "${NB}" rev-parse HEAD)"
+printf 'pub fn replay() { /* two */ }\n' >"${NB}/src/main.rs"
+git -C "${NB}" add -A
+git -C "${NB}" commit -qm two
+REV_NB_NEW="$(git -C "${NB}" rev-parse HEAD)"
+git -C "${NB}" config advice.detachedHead false
+git -C "${NB}" checkout -q "${REV_NB_OLD}"
+
+# Built after the checkout, and never tracked, so `git ls-files` does not see it.
+mkdir -p "${NB}/target/debug" "${NB}/target/release"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${NB}/target/debug/ct-native-replay"
+chmod +x "${NB}/target/debug/ct-native-replay"
+
+# run_cross <ref>  — `CT_NATIVE_REPLAY_LD_LIBRARY_PATH` short-circuits the
+# `nix develop` query, which is the only other expensive step before the guard.
+run_cross() {
+	: >"${TRACE}"
+	PATH="${BIN}:${PATH}" \
+		METACRAFT_WORKSPACE_ROOT="${XWS}" \
+		RR_BACKEND_REF="$1" \
+		CT_NATIVE_REPLAY_LD_LIBRARY_PATH="${TEST_ROOT}/nolibs" \
+		bash "${XREPO}/scripts/run-cross-repo-tests.sh" nim-flow 2>&1
+}
+run_cross_locked() { run_cross "${REV_NB_OLD}"; }
+run_cross_moved() { run_cross "${REV_NB_NEW}"; }
+run_cross_unpinned() {
+	: >"${TRACE}"
+	PATH="${BIN}:${PATH}" \
+		METACRAFT_WORKSPACE_ROOT="${XWS}" \
+		CT_NATIVE_REPLAY_LD_LIBRARY_PATH="${TEST_ROOT}/nolibs" \
+		bash "${XREPO}/scripts/run-cross-repo-tests.sh" nim-flow 2>&1
+}
+
+HEALTHY_X="$(run_cross_locked)"
+assert_contains "${HEALTHY_X}" "verified at ${REV_NB_OLD}" \
+	"a sibling at the locked revision is used, and says it was verified"
+assert_contains "${HEALTHY_X}" "Using ct-native-replay: ${NB}/target/debug/ct-native-replay" \
+	"...and the binary it names is the one from that checkout"
+
+run_expect_failure "a sibling at the WRONG revision is refused" \
+	"stale codetracer-native-backend checkout" -- run_cross_moved
+WRONG_REV="$(run_cross_moved)"
+assert_contains "${WRONG_REV}" "${REV_NB_NEW}" \
+	"the refusal names the revision the pin requires"
+
+# THE SECOND, INDEPENDENT QUESTION. `git checkout` of the pinned revision
+# leaves the PREVIOUS revision's binary sitting in `target/`, correctly pinned
+# and completely stale; the revision check above cannot see it.
+touch "${NB}/src/main.rs"
+run_expect_failure "a binary older than the sibling's own sources is refused" \
+	"stale sibling build: ct-native-replay" -- run_cross_locked
+touch "${NB}/target/debug/ct-native-replay"
+
+# THE NEWEST BUILD, NOT THE FIRST THAT EXISTS. `release` was returned whenever
+# it was executable, so a release binary from an old revision outranked a debug
+# one built minutes ago. Both profiles exist here and `debug` is the newer.
+printf '#!/usr/bin/env bash\nexit 0\n' >"${NB}/target/release/ct-native-replay"
+chmod +x "${NB}/target/release/ct-native-replay"
+touch "${NB}/target/debug/ct-native-replay"
+assert_contains "$(run_cross_locked)" \
+	"Using ct-native-replay: ${NB}/target/debug/ct-native-replay" \
+	"between two profiles the NEWER build is used, not the preferred directory"
+
+# A workstation commit with no workspace lock is ordinary, and dying there would
+# make the guard something people route around — but it is SAID, never passed
+# over in silence, and the mtime comparison still runs.
+assert_contains "$(run_cross_unpinned)" \
+	"cannot check whether '${NB}' is at the workspace-locked revision" \
+	"an unresolvable pin is spoken out loud rather than passed over"
 
 # ---------------------------------------------------------------------------
 printf '\n'

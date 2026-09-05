@@ -35,6 +35,28 @@
 # Nothing here builds CodeTracer. Every consumer photographs the build tree as
 # it stands, which is why `ctdr_require_fresh_build` exists and is loud.
 #
+# THE FRESHNESS REFUSALS ARE NO LONGER ONLY THE CAPTURES'.
+#
+# `ctdr_require_not_stale`, `ctdr_require_artefact_not_stale` and
+# `ctdr_require_tracked_sources_not_newer` are the ONE spelling in this
+# repository of "this artefact must be current with respect to its sources",
+# and four scripts that ship or install rather than photograph now ask the same
+# question through them:
+#
+#   * `scripts/build-desktop-component.sh`  — publishes `ct` into a launcher
+#     component bundle.
+#   * `scripts/developer-setup.sh`          — installs `ct` onto a workstation.
+#   * `browser-replay/deploy-wasm.sh`       — deploys the db-backend WASM module
+#     into the directory nginx serves.
+#   * `scripts/run-cross-repo-tests.sh`     — runs the flow suites against a
+#     sibling repository's `ct-native-replay`.
+#
+# They live elsewhere in the tree and are not documentation tooling; a second
+# copy of the comparison for them would be a second thing to keep correct, and
+# the mistake this whole family exists to prevent is exactly the kind that
+# reappears in the copy nobody remembered. The file's PATH is a historical
+# accident, its contents are not.
+#
 # Sourced, never executed:
 #   source "${REPO_ROOT}/scripts/docs/deep-review-capture-lib.sh"
 
@@ -206,16 +228,62 @@ ctdr_require_sibling_binary_not_stale() {
 	[[ -x ${binary} ]] || ctdr_die \
 		"missing executable ${label}: '${binary}'. ${remedy}"
 
-	local binary_abs repo_abs
-	binary_abs="$(cd -- "$(dirname -- "${binary}")" && pwd)/$(basename -- "${binary}")" || return 0
+	# The consequence sentence names the checkout the reader has to rebuild in,
+	# so it is spelled absolutely here rather than as whatever the caller typed.
+	# A `repo_root` that is not a directory is one of the two unanswerable cases
+	# below; it reaches them with the string unchanged.
+	local repo_abs="${repo_root}"
+	[[ -d ${repo_root} ]] && repo_abs="$(cd -- "${repo_root}" && pwd)"
+
+	ctdr_require_tracked_sources_not_newer "sibling build" "${label}" "${binary}" \
+		"This capture publishes what these binaries produce, so the book would get images made by an out-of-date binary. Rebuild it in '${repo_abs}', then run this again." \
+		"${repo_root}"
+}
+
+# ctdr_require_tracked_sources_not_newer <kind> <label> <artefact> <consequence> <repo-root> [pathspec...]
+#
+# THE GENERAL FORM OF `ctdr_require_sibling_binary_not_stale`'S COMPARISON,
+# extracted the same way `ctdr_require_artefact_not_stale` was extracted from
+# the two above it, and for the same reason: a fourth, fifth and sixth consumer
+# needed this exact question asked with a different sentence after it.
+#
+# The question is "is any file this git checkout CALLS A SOURCE newer than the
+# artefact?", and the source list is never guessed — `git ls-files` is the
+# checkout's own statement of what its sources are, in whatever layout it uses,
+# and a build output is never in it. That is what makes the comparison correct
+# for a sibling repository this one has never seen the inside of, and it is
+# equally what keeps it from tripping over `src/build-debug/` here: the build
+# tree is ignored, so it is not in the list, so a `find` that would have walked
+# into it never happens.
+#
+# THE PATHSPECS ARE THE ONE THING A CALLER MUST THINK ABOUT. With none, EVERY
+# tracked file counts — right for a sibling whose rebuild is one cheap command
+# and whose every file is arguably an input. Inside THIS repository that stance
+# would refuse a deploy because a README moved, which is how a guard gets
+# switched off; so the callers here name the sources their artefact is actually
+# compiled from (`'src/*.nim'` for the core binary, the db-backend crate for the
+# WASM module). Git pathspec globbing crosses `/`, so `'src/*.nim'` is the whole
+# subtree.
+#
+# TWO CASES CANNOT BE ASKED, and both say so out loud rather than passing
+# quietly — a binary supplied from OUTSIDE the checkout was not built from its
+# sources, and a tree that is not a git checkout carries no statement of what
+# its sources are. See `ctdr_require_sibling_binary_not_stale` above for why
+# each is an exemption rather than a refusal.
+ctdr_require_tracked_sources_not_newer() {
+	local kind="$1" label="$2" artefact="$3" consequence="$4" repo_root="$5"
+	shift 5
+
+	local artefact_abs repo_abs
+	artefact_abs="$(cd -- "$(dirname -- "${artefact}")" && pwd)/$(basename -- "${artefact}")" || return 0
 	[[ -d ${repo_root} ]] || {
 		echo "${CTDR_LABEL}: cannot check whether ${label} is current — '${repo_root}' is not a directory, so its sources are unknown." >&2
 		return 0
 	}
 	repo_abs="$(cd -- "${repo_root}" && pwd)"
 
-	if [[ ${binary_abs} != "${repo_abs}/"* ]]; then
-		echo "${CTDR_LABEL}: not checking whether ${label} is current — '${binary_abs}' was supplied from outside '${repo_abs}', so that checkout's sources are not what it was built from." >&2
+	if [[ ${artefact_abs} != "${repo_abs}/"* ]]; then
+		echo "${CTDR_LABEL}: not checking whether ${label} is current — '${artefact_abs}' was supplied from outside '${repo_abs}', so that checkout's sources are not what it was built from." >&2
 		return 0
 	fi
 	if [[ ! -e "${repo_abs}/.git" ]]; then
@@ -225,14 +293,14 @@ ctdr_require_sibling_binary_not_stale() {
 
 	local file newer=""
 	while IFS= read -r -d '' file; do
-		if [[ ${repo_abs}/${file} -nt ${binary_abs} ]]; then
+		if [[ ${repo_abs}/${file} -nt ${artefact_abs} ]]; then
 			newer="${repo_abs}/${file}"
 			break
 		fi
-	done < <(git -C "${repo_abs}" ls-files -z 2>/dev/null)
+	done < <(git -C "${repo_abs}" ls-files -z -- "$@" 2>/dev/null)
 
 	[[ -z ${newer} ]] || ctdr_die \
-		"stale sibling build: ${label} ('${binary_abs}') is older than its source '${newer}'. This capture publishes what these binaries produce, so the book would get images made by an out-of-date binary. Rebuild it in '${repo_abs}', then run this again."
+		"stale ${kind}: ${label} ('${artefact_abs}') is older than its source '${newer}'. ${consequence}"
 }
 
 # ctdr_require_fresh_build <repo-root> [extra-stylesheet ...]
