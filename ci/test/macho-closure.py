@@ -44,12 +44,47 @@ the members of fat archives), every dependency load command --
     LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB
 
 -- is expanded the way dyld expands it (`@loader_path`, `@executable_path`,
-`@rpath` against the file's own LC_RPATHs) and classified:
+`@rpath` against the rpath stack described below) and classified:
 
     system   /usr/lib/... or /System/...   -- lives in the dyld shared cache
     inside   resolves to a file that is present in the bundle
     MISSING  resolves to a path that does not exist          -> FAILURE
     OUTSIDE  resolves to a path outside the bundle           -> FAILURE
+
+## `@rpath` resolves against the LOADER CHAIN, not against one file
+
+dyld does not resolve `@rpath/Foo` using only the LC_RPATHs of the image that
+names it. It builds a search stack from the LC_RPATHs of every image in the
+chain that led to the load -- the main executable first, then each dylib along
+the way -- and tries them in order.
+
+Reading only the naming image's own LC_RPATHs made this file report five false
+MISSINGs against a bundle that demonstrably runs. Electron 44.1.1's `Electron
+Framework` carries exactly one rpath, `@loader_path/Libraries`, and names
+`@rpath/Squirrel.framework/Squirrel`; `Squirrel` carries NO LC_RPATH at all and
+names `@rpath/Mantle.framework/Mantle` and `@rpath/ReactiveObjC.framework/
+ReactiveObjC`. All three frameworks sit in `Electron.app/Contents/Frameworks`,
+and all three load, because the main executable `Electron` carries
+`@executable_path/../Frameworks`. Measured, not argued --
+`DYLD_PRINT_LIBRARIES=1 Electron --version` on the staged runtime prints:
+
+    .../Contents/Frameworks/Squirrel.framework/Versions/A/Squirrel
+    .../Contents/Frameworks/ReactiveObjC.framework/Versions/A/ReactiveObjC
+    .../Contents/Frameworks/Mantle.framework/Versions/A/Mantle
+
+So the rpaths available to an image are its own PLUS those inherited from every
+image that loads it: a fixpoint over the dependency graph, seeded at the
+executables. An LC_RPATH entry is expanded against the image that DECLARED it
+(`@loader_path` is that declaring image's directory), which is why what
+propagates along the chain is concrete directories and not raw strings.
+
+This widens what resolves; it does not widen it to everything. A dependency
+whose file is genuinely absent is still MISSING under every rpath in the stack
+-- the `Mantle.framework` arm of `desktop-bundle-self-contained-test.sh` holds
+that down by deleting a framework this bundle really loads and requiring the
+refusal to name it. And none of it touches `@executable_path` handling, so the
+wrong-depth defect above -- the reason this file exists -- is caught exactly as
+it was.
 
 `LC_ID_DYLIB` is read but never treated as a dependency: a bundled dylib's own
 install name is legitimately `@rpath/libfoo.dylib` with no LC_RPATH anywhere,
@@ -231,8 +266,92 @@ def read_macho(path):
     return [img] if img else []
 
 
-def expand(dep, image, executables):
+def rpath_entry_dirs(entry, image, executables):
+    """Expand ONE LC_RPATH string into concrete directories.
+
+    An LC_RPATH is expanded against the image that DECLARED it, so
+    `@loader_path` here is that image's own directory even when the entry is
+    later inherited by something it loads. `@executable_path` in an rpath names
+    the main executable's directory, which is not knowable statically for a
+    dylib, so every executable in the bundle is offered -- the same
+    over-approximation the `@executable_path` dependency branch makes below,
+    and for the same reason.
+    """
+    loader_dir = os.path.dirname(image.path)
+    exec_dirs = [loader_dir] if image.filetype == "executable" else executables
+
+    if entry.startswith("@loader_path"):
+        return [os.path.normpath(loader_dir + entry[len("@loader_path"):])]
+    if entry.startswith("@executable_path"):
+        tail = entry[len("@executable_path"):]
+        return [os.path.normpath(ed + tail) for ed in exec_dirs]
+    if os.path.isabs(entry):
+        return [os.path.normpath(entry)]
+    return [os.path.normpath(os.path.join(loader_dir, entry))]
+
+
+def rpath_stacks(images, executables):
+    """The concrete rpath directories available to each image.
+
+    dyld's rule, as the module docstring sets out: an image searches its own
+    LC_RPATHs plus those of every image in the chain that loaded it. Seeded with
+    each image's own entries and propagated along resolved dependency edges
+    until stable -- whatever an image can search, so can everything it loads.
+
+    Keyed by `id(image)`; the caller holds `images` alive for the whole run.
+    """
+    avail = {}
+    for img in images:
+        dirs = []
+        for entry in img.rpaths:
+            for d in rpath_entry_dirs(entry, img, executables):
+                if d not in dirs:
+                    dirs.append(d)
+        avail[id(img)] = dirs
+
+    # A dependency resolves through the framework's top-level symlink
+    # (`Squirrel.framework/Squirrel`), while the image that was walked is the
+    # real file behind it (`Versions/A/Squirrel`). Both sides are realpath'd so
+    # an edge to a framework actually finds the image it points at.
+    by_real = {}
+    for img in images:
+        by_real.setdefault(os.path.realpath(img.path), []).append(img)
+
+    # `avail` only grows and is bounded by the set of directories, so this
+    # terminates. In practice the loader chain is a few links deep and it
+    # settles in two or three passes.
+    for _ in range(len(images) + 1):
+        changed = False
+        for img in images:
+            here = avail[id(img)]
+            if not here:
+                continue
+            for _cmd, dep, _weak in img.deps:
+                cands, kind = expand(dep, img, executables, here)
+                if kind == "system":
+                    continue
+                hit = next((c for c in cands if os.path.exists(c)), None)
+                if hit is None:
+                    continue
+                for target in by_real.get(os.path.realpath(hit), []):
+                    if target is img:
+                        continue
+                    inherited = avail[id(target)]
+                    for d in here:
+                        if d not in inherited:
+                            inherited.append(d)
+                            changed = True
+        if not changed:
+            break
+    return avail
+
+
+def expand(dep, image, executables, rpath_dirs):
     """Expand a dyld load-command string into candidate filesystem paths.
+
+    `rpath_dirs` is the image's rpath stack from `rpath_stacks` -- already
+    concrete directories, because an inherited entry was expanded against
+    whichever image declared it.
 
     Returns (candidates, kind). `kind` is 'system' for shared-cache paths,
     'absolute' for any other absolute path, and 'expanded' otherwise.
@@ -260,13 +379,10 @@ def expand(dep, image, executables):
 
     if dep.startswith("@rpath/"):
         tail = dep[len("@rpath/"):]
-        cands = []
-        for rp in image.rpaths:
-            for exec_dir in (exec_dirs or [None]):
-                base = sub(rp, exec_dir)
-                if base is not None:
-                    cands.append(os.path.normpath(os.path.join(base, tail)))
-        return cands, "expanded"
+        return (
+            [os.path.normpath(os.path.join(base, tail)) for base in rpath_dirs],
+            "expanded",
+        )
 
     if dep.startswith("@"):
         cands = []
@@ -308,6 +424,7 @@ def main(argv):
     executables = sorted({
         os.path.dirname(i.path) for i in images if i.filetype == "executable"
     })
+    stacks = rpath_stacks(images, executables)
 
     def inside(path):
         return path == root or path.startswith(root + os.sep)
@@ -318,7 +435,7 @@ def main(argv):
     for image in sorted(images, key=lambda i: i.path):
         for cmd, dep, is_weak in image.deps:
             counted += 1
-            cands, kind = expand(dep, image, executables)
+            cands, kind = expand(dep, image, executables, stacks[id(image)])
             if kind == "system":
                 continue
             hit = next((c for c in cands if os.path.exists(c)), None)
