@@ -527,6 +527,21 @@ jobs:
         run: |
           pwsh -File ci/test/bootstrap-decomposition.ps1
 
+      - name: Validate bootstrap download and native-command bounds
+        shell: pwsh
+        # Asserts that a stalled toolchain download fails fast with a real
+        # error instead of blocking until the job timeout, and likewise for
+        # the native commands the MSYS2 leg shells out to. The checks are
+        # NEGATIVE: each bound is driven against a loopback server or a child
+        # process that genuinely never finishes, because a timeout that has
+        # only run on the happy path has not been tested. Hermetic -- the
+        # server is a loopback socket in a background job, nothing leaves the
+        # machine and no toolchain is installed -- so it belongs in this
+        # smoke job rather than behind a real provision.
+        timeout-minutes: 10
+        run: |
+          pwsh -File ci/test/download-stall-bound.ps1
+
       - name: Validate toolchain-versions.env
         shell: pwsh
         run: |
