@@ -714,33 +714,77 @@ jobs:
       - name: Build the codetracer-desktop core
         # INHERITED LRC-3 DELIVERABLE #1.  See this file's header.
         #
-        # THE EXIT CODE OF `just build-once` IS DELIBERATELY NOT THE GATE.  It
-        # currently exits 1 on a later tree-sitter-nim cargo job AFTER emitting
-        # a working src/build-debug/bin/ct (recorded under LRC-1 in
-        # codetracer-specs/Testing/Launcher-Recorder-Compatibility-Tests.milestones.org).
-        # The tolerance is scoped to this one command -- the job has no
-        # continue-on-error -- and is immediately followed by a hard artifact
-        # check: the binary must exist, be executable, and answer --version.
-        # If build-once ever emits nothing, that check fails the job.
+        # THE EXIT CODE OF `just build-once` IS THE GATE.  It did not used to
+        # be, and the comment that stood here explaining why is reproduced
+        # below with what was actually wrong with it, because the reasoning it
+        # encoded is the reason two real defects lived in `dev` unnoticed:
+        #
+        #   "THE EXIT CODE OF `just build-once` IS DELIBERATELY NOT THE GATE.
+        #    It currently exits 1 on a later tree-sitter-nim cargo job AFTER
+        #    emitting a working src/build-debug/bin/ct ... immediately followed
+        #    by a hard artifact check ... If build-once ever emits nothing,
+        #    that check fails the job."
+        #
+        # THAT WAS WRONG WHEN IT WAS WRITTEN, not merely stale.  Three ways,
+        # all checkable against run 33991455608 (and 33983224255 before it):
+        #
+        #   ONE CAUSE NAMED, TWO PRESENT.  The failing tup job is
+        #   `db-backend: cargo build ... && cp ... bin/replay-server`, and in
+        #   that one cargo invocation TWO independent build scripts panic:
+        #   `tree-sitter-nim` (its `src/parser.c` is `.gitignore`d in the
+        #   submodule, generated from grammar.js, and `bindings/rust/build.rs`
+        #   compiles it without generating it) and `replay-server` itself
+        #   (build.rs:972, `direnv exec` on a codetracer-native-recorder clone
+        #   whose `.envrc` was never allowed, because the Linux tup branch of
+        #   scripts/build-once.sh was not setting CODETRACER_DB_BACKEND_SKIP_DIRENV).
+        #   Either alone fails the build.  Naming only the first made the
+        #   second invisible for as long as the tolerance stood.
+        #
+        #   "LATER ... AFTER" IS BACKWARDS.  The cargo job failed at 20:59:03;
+        #   `ct` finished compiling at 20:59:29.  tup keeps scheduling
+        #   independent jobs after one fails, so `ct` was emitted DESPITE the
+        #   failure, not after it.  There was never a moment at which the
+        #   build had "already succeeded".
+        #
+        #   "A WORKING CORE" IT WAS NOT.  build-once.sh runs under `set -e`, so
+        #   the first `tup` returning non-zero aborts it — `webpack`, the
+        #   second tup pass, post-build-setcap.sh and require-runtime-assets.sh
+        #   never ran.  The core reached this check with no
+        #   `bin/replay-server`, no frontend bundle and no runtime-asset
+        #   verification.  The artifact check could not see any of that,
+        #   because it looked only at `bin/ct` — the one artifact the failing
+        #   job does not produce and therefore the one that always survives.
+        #   A check chosen to match the observed damage measures nothing.
+        #
+        # Both roots are fixed (nix/shells/ci-base.nix generates the parser in
+        # the shellHook BOTH shells compose; scripts/build-once.sh sets
+        # CODETRACER_DB_BACKEND_SKIP_DIRENV on the tup branch too), so the
+        # tolerance is gone and a non-zero exit fails this step.  The artifact
+        # check stays — it is worth having on its own — and now also asserts
+        # `bin/replay-server`, the artifact whose absence the old check was
+        # structurally unable to notice.
         shell: bash
         env:
           CT_DIR: ${{ steps.plan.outputs.ct-dir }}
         run: |
-          set -uo pipefail
-          cd "${CT_DIR}" || exit 1
-          build_rc=0
-          nix develop '.?submodules=1#ci' --command just build-once || build_rc=$?
-          echo "just build-once exit code: ${build_rc}"
-          if [ "${build_rc}" -ne 0 ]; then
-            echo "::warning::'just build-once' exited ${build_rc}. That is known to happen on a later tree-sitter-nim cargo job AFTER a working core has been emitted, so the artifact check below decides -- not this exit code."
-          fi
           set -euo pipefail
+          cd "${CT_DIR}"
+          nix develop '.?submodules=1#ci' --command just build-once
           CT_BIN="src/build-debug/bin/ct"
           if [ ! -x "${CT_BIN}" ]; then
             echo "::error::the desktop core was not built: no executable at ${CT_BIN}. The launcher<->recorder gate cannot run without hop 2; this is deliberately a hard failure and never a skip."
             exit 1
           fi
-          ls -l "${CT_BIN}"
+          # The db-backend cargo job is the one both of the roots above killed,
+          # and `bin/replay-server` is what it copies out. Asserting it is what
+          # makes a repeat of either root fail HERE, naming the artifact,
+          # rather than surfacing later as a replay that cannot start.
+          RS_BIN="src/build-debug/bin/replay-server"
+          if [ ! -x "${RS_BIN}" ]; then
+            echo "::error::the desktop core is incomplete: no executable at ${RS_BIN}. That binary is produced by the same 'db-backend: cargo build' tup job that the tree-sitter-nim parser.c and the replay-server direnv defects each killed; its absence means that job failed again."
+            exit 1
+          fi
+          ls -l "${CT_BIN}" "${RS_BIN}"
           nix develop '.?submodules=1#ci' --command "./${CT_BIN}" --version
           echo "desktop core artifact check: OK"
 

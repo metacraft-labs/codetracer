@@ -440,10 +440,44 @@ ct_publish_build_env "" "$ct_tup_config" "$ct_tup_variant" "src/$ct_tup_variant"
 
 # Mirror the reprobuild branch's env-var setup so cargo build scripts work
 # without network access on the Linux tup path (Linux keeps tup as default):
+#   * CODETRACER_DB_BACKEND_SKIP_DIRENV=1 makes
+#     src/db-backend/build.rs::regenerate_c invoke ``bash`` directly instead of
+#     ``direnv exec <native-recorder> bash build_native_api.sh``.
 #   * CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL=1 prevents nimble from
 #     trying to download nim-stew over the network.
 #   * CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS injects the vendored stew tree
 #     so `nim c` can resolve `results`/`stew` without a nimble package store.
+#
+# THE FIRST OF THE THREE WAS MISSING HERE, and that is a defect this comment
+# used to describe away: it claims to "mirror the reprobuild branch", and the
+# reprobuild branch sets all three (see the block above, and
+# nix/packages/default.nix:592 which sets it for the pure-Nix package build,
+# and five jobs in .github/workflows/codetracer.yml which set it as job env).
+# Only this branch -- the DEFAULT on Linux, and therefore the one every Linux
+# CI lane's `just build-once` takes -- copied two of the three.
+#
+# What that cost: on a runner where the adjacent codetracer-native-recorder
+# clone has never been `direnv allow`ed, build.rs takes the direnv path and
+# panics at build.rs:972 --
+#
+#   db-backend build.rs: generated C stale or missing at
+#     .../codetracer-native-recorder/ct_emulator/build/native_c_files;
+#     invoking .../build_native_api.sh
+#   direnv: error .../codetracer-native-recorder/.envrc is blocked.
+#     Run `direnv allow` to approve its content
+#   thread 'main' panicked at build.rs:972:17
+#   error: failed to run custom build command for `replay-server v0.1.0`
+#
+# -- which is exactly what happened on every arm of
+# `launcher-recorder-e2e (desktop edge)` (runs 33983224255, 33991455608),
+# INDEPENDENTLY of the missing tree-sitter-nim parser.c that failed the same
+# cargo invocation. Two roots, one command; either alone fails the build.
+#
+# Setting it is the right fix rather than allowing direnv in that sibling:
+# CT_EMULATOR_EXTRA_NIM_PATHS below already supplies what the direnv shell was
+# being entered to provide, so the direnv round-trip buys nothing here and
+# costs a full nested `nix develop` of the recorder's flake when it does work.
+export CODETRACER_DB_BACKEND_SKIP_DIRENV="${CODETRACER_DB_BACKEND_SKIP_DIRENV:-1}"
 export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL="${CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL:-1}"
 if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && [ -d "$PWD/libs/nim-stew/stew" ]; then
 	ct_nim_paths_lib="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew:$PWD/libs/nim-result"
