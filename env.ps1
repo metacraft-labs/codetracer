@@ -1072,6 +1072,13 @@ $toolchain = Parse-ToolchainVersions -Path $toolchainPath
 
 # Dot-source ensure modules for install-on-demand bootstrap.
 . "$windowsDir/toolchain-utils.ps1"
+
+# Before any bootstrap step runs, make sure a debugger prompt cannot strand
+# this job. See Assert-NonInteractiveDebugger for the hazard and its limits.
+foreach ($guard in (Assert-NonInteractiveDebugger)) {
+  Write-Warning "Interactive-debugger guard: $guard."
+}
+
 . "$windowsDir/ensure-rust.ps1"
 . "$windowsDir/ensure-just.ps1"
 . "$windowsDir/ensure-nextest.ps1"

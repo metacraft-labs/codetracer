@@ -3,38 +3,114 @@ $ErrorActionPreference = "Stop"
 
 # HOW LONG A SINGLE TOOLCHAIN DOWNLOAD MAY BLOCK BEFORE IT IS A FAILURE.
 #
-# `Invoke-WebRequest` has NO default timeout: `-TimeoutSec` unset means
-# infinite, and under `pwsh` (HttpClient) the value covers the whole transfer,
-# body included -- not just the response headers. Every toolchain in this file
-# is fetched through `Download-File` / `Download-String`, so before this
-# constant existed a single stalled socket parked the ENTIRE Windows dev-env
-# bootstrap forever. `Invoke-WithRetry` did not help: it bounds the number of
-# attempts (4), never the duration of one, so 4 x infinite is still infinite.
+# Every toolchain in this file is fetched through `Download-File` /
+# `Download-String`, and before these bounds existed a single stalled socket
+# parked the ENTIRE Windows dev-env bootstrap. `Invoke-WithRetry` did not help:
+# it bounds the number of attempts (4), never the duration of one, so 4 x
+# infinite is still infinite.
 #
-# This is not theoretical. On 2026-09-04 run 33880354195, `windows-rust-components`
-# sat in `Setup dev env` from 14:37:32 to 20:05:35 and `origin-DAP (materialized
-# Python, Windows)` sat in `Setup db-backend siblings` from 14:20:59 to
-# 20:05:50 -- both released only by GitHub's DEFAULT 360-minute job timeout,
-# because neither job sets `timeout-minutes` either. For those six hours they
-# held the `Codetracer CI-dev` concurrency group `in_progress`, which is what
-# starved every other verdict on the branch.
+# CORRECTION, and it is the whole reason this file no longer uses
+# `Invoke-WebRequest` for downloads. An earlier revision of this comment stated
+# that under `pwsh` (HttpClient) `-TimeoutSec` "covers the whole transfer, body
+# included -- not just the response headers". THAT IS FALSE, and the fix built
+# on it did not work. `Invoke-WebRequest -OutFile` reads the response with
+# `HttpCompletionOption.ResponseHeadersRead` and then streams to disk, so the
+# HttpClient timeout `-TimeoutSec` sets expires only up to the response
+# HEADERS; once the body has started arriving nothing bounds the read. Measured
+# on pwsh 7 against a server that sends headers, sends a few bytes, and then
+# stops: `-TimeoutSec 5` was still running 90 seconds later. A mid-body stall
+# -- which is the shape actually observed on this lane -- is therefore NOT
+# bounded by `-TimeoutSec` at any value.
+#
+# `ci/test/download-stall-bound.ps1` asserts this against a real loopback
+# server rather than restating it, so the day a future PowerShell changes it,
+# the test says so instead of a comment continuing to be believed.
+#
+# This function survives as the operator knob it always was; it now resolves
+# the TOTAL budget for `Invoke-BoundedDownload`, which additionally enforces an
+# inactivity bound that no `Invoke-WebRequest` option can express.
 #
 # The value has to clear the largest asset this bootstrap pulls: the WinDbg
 # msixbundle in ensure-ttd.ps1 is ~767 MB, so a total-transfer budget of a few
 # minutes would convert a slow link into a spurious red. 30 minutes is ~0.4 MB/s
 # sustained for that asset -- far below any healthy runner, far above a socket
 # that has stopped moving. Override for a genuinely slow network with
-# WINDOWS_DIY_DOWNLOAD_TIMEOUT_SECONDS; 0 restores the old infinite behaviour
-# and is deliberately spelled as an opt-in rather than left as the default.
+# WINDOWS_DIY_DOWNLOAD_TIMEOUT_SECONDS.
+#
+# 0 keeps its documented meaning of "no TOTAL budget", so an operator who set
+# it does not silently get a new cap. It no longer means "no bound at all":
+# the inactivity clock still applies and still guarantees termination, which is
+# the property the lane actually needed.
 function Get-DownloadTimeoutSeconds {
   $raw = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_DOWNLOAD_TIMEOUT_SECONDS")
-  if ([string]::IsNullOrWhiteSpace($raw)) { return 1800 }
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    # Fall through to the bound's own default/override resolution.
+    return 0
+  }
 
   $parsed = 0
   if (-not [int]::TryParse($raw.Trim(), [ref]$parsed) -or $parsed -lt 0) {
     throw "WINDOWS_DIY_DOWNLOAD_TIMEOUT_SECONDS must be a non-negative integer (got '$raw')."
   }
+  if ($parsed -eq 0) { return [int]::MaxValue }
   return $parsed
+}
+
+function Assert-NonInteractiveDebugger {
+  <#
+    .SYNOPSIS
+      Make the PowerShell debugger unreachable, and report whether it was.
+
+    .DESCRIPTION
+      A CI job has no terminal, so a debugger prompt is not a debugging aid --
+      it is a block that nothing will ever answer. One bootstrap job did reach
+      it:
+
+          Entering debug mode. Use h or ? for help.
+          At ...\Microsoft.PowerShell.Archive.psm1:418 char:79
+          [DBG]: PS C:\actions-runner\_work\codetracer\codetracer>>
+
+      Be precise about what that job proves, because the tempting reading is
+      wrong. It is NOT an instance of the multi-hour bootstrap hang, and this
+      guard is not the fix for that. The break landed 0.6s BEFORE the runner's
+      "The operation was canceled", in `Expand-Archive`'s partial-expansion
+      cleanup path -- i.e. the host broke into the debugger while unwinding in
+      response to the cancellation, rather than the debugger causing it. The
+      job then ran its post-steps and completed normally. Nothing waited on the
+      prompt.
+
+      So this is a latent hazard rather than an observed outage: on a host that
+      DID arrive with the debugger reachable, the same break on a real error
+      would block instead of unwinding. Nothing in this repository sets
+      `$ErrorActionPreference = 'Break'` or
+      calls `Set-PSBreakpoint`, and the workflow's `shell: pwsh` expands to
+      `pwsh -command ". '{0}'"` with neither `-NonInteractive` nor
+      `-NoProfile`. So the debugger is reachable through host state this repo
+      does not own -- a machine or user profile on the runner image being the
+      obvious candidate -- and the durable fix is to refuse to inherit it
+      rather than to hope it is absent.
+
+      Returns the guards it actually had to apply, so a caller can log that
+      the runner arrived in this state instead of silently papering over it.
+  #>
+
+  $applied = @()
+
+  if ($ErrorActionPreference -eq "Break") {
+    $script:ErrorActionPreference = "Stop"
+    $global:ErrorActionPreference = "Stop"
+    $applied += "ErrorActionPreference was 'Break'; forced to 'Stop'"
+  }
+
+  $breakpoints = @(Get-PSBreakpoint -ErrorAction SilentlyContinue)
+  if ($breakpoints.Count -gt 0) {
+    $breakpoints | Remove-PSBreakpoint -ErrorAction SilentlyContinue
+    $applied += "removed $($breakpoints.Count) inherited breakpoint(s)"
+  }
+
+  Set-PSDebug -Off
+
+  return $applied
 }
 
 function Invoke-WithRetry {
@@ -118,6 +194,201 @@ function Assert-FileSha256 {
   }
 }
 
+# Bootstrap downloads are bounded in wall-clock time, and the bound is on
+# INACTIVITY rather than only on the total.
+#
+# `Invoke-WebRequest -OutFile` cannot express this. Its `-TimeoutSec` covers
+# the request up to the response headers; once the body has started arriving
+# it does not bound the read at all, so a connection that delivers headers and
+# then stops sending bytes blocks forever. That is measured, not assumed --
+# `ci/test/download-stall-bound.ps1` asserts it against a server that stalls
+# mid-body, with and without `-TimeoutSec`, and both hang. Retrying does not
+# help either: `Invoke-WithRetry` only re-runs on a throw, and a stalled
+# stream never throws.
+#
+# So the download is streamed by hand with two clocks:
+#
+#   * a STALL clock, reset on every chunk that actually arrives, which is what
+#     catches the mid-body stall; and
+#   * a TOTAL clock, which catches a transfer that trickles just fast enough
+#     to keep resetting the stall clock but will never finish.
+#
+# Progress is printed on an interval as well, so a slow-but-live download is
+# distinguishable from a dead one in the log rather than looking identical to
+# it. Both are recoverable positions; six hours of silence is not.
+$script:DownloadStallSecondsDefault = 120
+$script:DownloadTotalSecondsDefault = 1800
+$script:DownloadProgressSecondsDefault = 30
+
+function Get-PositiveIntSetting {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)][int]$Default
+  )
+
+  $raw = [Environment]::GetEnvironmentVariable($Name)
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    return $Default
+  }
+
+  $parsed = 0
+  if (-not [int]::TryParse($raw.Trim(), [ref]$parsed) -or $parsed -le 0) {
+    throw "Invalid $Name value '$raw'. Expected a positive whole number of seconds."
+  }
+
+  return $parsed
+}
+
+function Format-DownloadBytes {
+  param([Parameter(Mandatory = $true)][long]$Bytes)
+
+  if ($Bytes -ge 1048576) {
+    return ("{0:N1} MiB" -f ($Bytes / 1048576))
+  }
+  if ($Bytes -ge 1024) {
+    return ("{0:N1} KiB" -f ($Bytes / 1024))
+  }
+  return "$Bytes B"
+}
+
+function Invoke-BoundedDownload {
+  <#
+    .SYNOPSIS
+      Stream $Url to $OutFile, failing loudly if the transfer stalls or
+      overruns its total budget.
+
+    .DESCRIPTION
+      Throws on a stall, so the caller's Invoke-WithRetry can retry a
+      genuinely transient stall, and so the FINAL failure is a real error
+      with a real message instead of a job that is killed hours later by the
+      workflow timeout with no indication of where it stopped.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Url,
+    [Parameter(Mandatory = $true)][string]$OutFile,
+    [int]$StallSeconds = 0,
+    [int]$TotalSeconds = 0,
+    [int]$ProgressSeconds = 0
+  )
+
+  if ($StallSeconds -le 0) {
+    $StallSeconds = Get-PositiveIntSetting -Name "CODETRACER_DOWNLOAD_STALL_SECONDS" -Default $script:DownloadStallSecondsDefault
+  }
+  if ($TotalSeconds -le 0) {
+    $TotalSeconds = Get-PositiveIntSetting -Name "CODETRACER_DOWNLOAD_TIMEOUT_SECONDS" -Default $script:DownloadTotalSecondsDefault
+  }
+  if ($ProgressSeconds -le 0) {
+    $ProgressSeconds = Get-PositiveIntSetting -Name "CODETRACER_DOWNLOAD_PROGRESS_SECONDS" -Default $script:DownloadProgressSecondsDefault
+  }
+
+  $parent = Split-Path -Parent $OutFile
+  if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  }
+
+  $client = $null
+  $response = $null
+  $source = $null
+  $target = $null
+  $cts = $null
+  $total = [long]0
+  $completed = $false
+  $overall = [System.Diagnostics.Stopwatch]::StartNew()
+
+  try {
+    $cts = [System.Threading.CancellationTokenSource]::new()
+    $client = [System.Net.Http.HttpClient]::new()
+    # The HttpClient-level timeout is deliberately infinite: the two clocks
+    # below are the bound, and an HttpClient timeout would abort a large but
+    # perfectly healthy download.
+    $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+
+    $cts.CancelAfter([TimeSpan]::FromSeconds([Math]::Min($StallSeconds, $TotalSeconds)))
+
+    $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $Url)
+    $response = $client.SendAsync(
+      $request,
+      [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead,
+      $cts.Token).GetAwaiter().GetResult()
+    $response.EnsureSuccessStatusCode() | Out-Null
+
+    $expected = [long]0
+    if ($null -ne $response.Content.Headers.ContentLength) {
+      $expected = [long]$response.Content.Headers.ContentLength
+    }
+
+    $source = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+    $target = [System.IO.FileStream]::new(
+      $OutFile,
+      [System.IO.FileMode]::Create,
+      [System.IO.FileAccess]::Write,
+      [System.IO.FileShare]::None)
+
+    $buffer = [byte[]]::new(131072)
+    $lastReport = [double]0
+
+    while ($true) {
+      $remaining = $TotalSeconds - $overall.Elapsed.TotalSeconds
+      if ($remaining -le 0) {
+        throw "Download of '$Url' exceeded its total budget of ${TotalSeconds}s after $(Format-DownloadBytes -Bytes $total). Raise CODETRACER_DOWNLOAD_TIMEOUT_SECONDS if this mirror is legitimately this slow."
+      }
+
+      # Re-arm the inactivity clock before each read, never letting it run
+      # past the total budget.
+      $window = [Math]::Min([double]$StallSeconds, $remaining)
+      $cts.CancelAfter([TimeSpan]::FromSeconds($window))
+
+      $read = $source.ReadAsync($buffer, 0, $buffer.Length, $cts.Token).GetAwaiter().GetResult()
+      if ($read -le 0) { break }
+
+      $target.Write($buffer, 0, $read)
+      $total += $read
+
+      if (($overall.Elapsed.TotalSeconds - $lastReport) -ge $ProgressSeconds) {
+        $lastReport = $overall.Elapsed.TotalSeconds
+        $sofar = Format-DownloadBytes -Bytes $total
+        if ($expected -gt 0) {
+          $pct = [Math]::Round(($total * 100.0) / $expected, 1)
+          Write-Host "  ... $sofar of $(Format-DownloadBytes -Bytes $expected) ($pct%) after $([int]$overall.Elapsed.TotalSeconds)s"
+        } else {
+          Write-Host "  ... $sofar after $([int]$overall.Elapsed.TotalSeconds)s"
+        }
+      }
+    }
+
+    $target.Flush()
+    if ($expected -gt 0 -and $total -ne $expected) {
+      throw "Download of '$Url' ended early: got $(Format-DownloadBytes -Bytes $total) of $(Format-DownloadBytes -Bytes $expected)."
+    }
+
+    $completed = $true
+    return $total
+  } catch [System.OperationCanceledException] {
+    # Both clocks cancel the same token, so the token alone does not say which
+    # one fired. Ask the elapsed time instead: a transfer that trickled just
+    # fast enough to keep resetting the inactivity clock, and then ran out its
+    # total budget mid-read, must not be reported as a stall -- the two have
+    # different remedies, and mislabelling them sends the reader after the
+    # wrong one.
+    if ($overall.Elapsed.TotalSeconds -ge $TotalSeconds) {
+      throw "Download of '$Url' exceeded its total budget of ${TotalSeconds}s after $(Format-DownloadBytes -Bytes $total). Raise CODETRACER_DOWNLOAD_TIMEOUT_SECONDS if this mirror is legitimately this slow."
+    }
+    throw "Download of '$Url' stalled: no data for ${StallSeconds}s (received $(Format-DownloadBytes -Bytes $total)). Bounds are CODETRACER_DOWNLOAD_STALL_SECONDS / CODETRACER_DOWNLOAD_TIMEOUT_SECONDS."
+  } finally {
+    if ($null -ne $target) { $target.Dispose() }
+    if ($null -ne $source) { $source.Dispose() }
+    if ($null -ne $response) { $response.Dispose() }
+    if ($null -ne $client) { $client.Dispose() }
+    if ($null -ne $cts) { $cts.Dispose() }
+    # Never leave a half-written file where a later run could mistake it for
+    # a cached artefact. The SHA gate would catch it, but the error it
+    # produces would name a checksum rather than the truncated transfer.
+    if (-not $completed -and (Test-Path -LiteralPath $OutFile -PathType Leaf)) {
+      Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 function Download-File {
   param(
     [Parameter(Mandatory = $true)][string]$Url,
@@ -126,14 +397,7 @@ function Download-File {
 
   $timeoutSeconds = Get-DownloadTimeoutSeconds
   Invoke-WithRetry -Script {
-    # A zero timeout is git's/PowerShell's "wait forever"; only pass the
-    # parameter when the operator has NOT asked for that, so the opt-out is a
-    # real opt-out rather than `-TimeoutSec 0` meaning something subtly else.
-    if ($timeoutSeconds -gt 0) {
-      Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec $timeoutSeconds
-    } else {
-      Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
-    }
+    Invoke-BoundedDownload -Url $Url -OutFile $OutFile -TotalSeconds $timeoutSeconds
   } | Out-Null
 }
 
@@ -141,11 +405,15 @@ function Download-String {
   param([Parameter(Mandatory = $true)][string]$Url)
 
   $timeoutSeconds = Get-DownloadTimeoutSeconds
-  $content = Invoke-WithRetry -Script {
-    if ($timeoutSeconds -gt 0) {
-      (Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $timeoutSeconds).Content
-    } else {
-      (Invoke-WebRequest -Uri $Url -UseBasicParsing).Content
+  $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("ct-download-" + [Guid]::NewGuid().ToString("N"))
+  try {
+    Invoke-WithRetry -Script {
+      Invoke-BoundedDownload -Url $Url -OutFile $scratch -TotalSeconds $timeoutSeconds
+    } | Out-Null
+    $content = [System.IO.File]::ReadAllBytes($scratch)
+  } finally {
+    if (Test-Path -LiteralPath $scratch -PathType Leaf) {
+      Remove-Item -LiteralPath $scratch -Force -ErrorAction SilentlyContinue
     }
   }
 
@@ -161,6 +429,65 @@ function Download-String {
   }
 
   return [string]$content
+}
+
+$script:NativeCommandTimeoutSecondsDefault = 1800
+
+function Invoke-BoundedNativeCommand {
+  <#
+    .SYNOPSIS
+      Run a native command with a wall-clock bound and a closed stdin.
+
+    .DESCRIPTION
+      Two hazards, and stdin is the one that is easy to miss.
+
+      A bootstrap step that shells out to a package manager or an archiver
+      inherits the runner's stdin. If the child ever decides to prompt, it
+      blocks on a read that nothing will ever answer, and the job dies at the
+      workflow timeout with the prompt buried in a log nobody watches. Giving
+      the child an empty stdin turns that into an immediate EOF, so a prompt
+      becomes a fast failure instead of a silent one.
+
+      The timeout covers the other half: a child that is not prompting but is
+      simply stuck -- a package mirror that accepted the connection and then
+      stopped sending, say -- and would otherwise run out the clock.
+
+    .PARAMETER Activity
+      Human-readable description used in the timeout message, so the failure
+      names the step rather than just a process id.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$FilePath,
+    [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+    [Parameter(Mandatory = $true)][string]$Activity,
+    [int]$TimeoutSeconds = 0
+  )
+
+  if ($TimeoutSeconds -le 0) {
+    $TimeoutSeconds = Get-PositiveIntSetting -Name "CODETRACER_NATIVE_COMMAND_TIMEOUT_SECONDS" -Default $script:NativeCommandTimeoutSecondsDefault
+  }
+
+  $emptyStdin = Join-Path ([System.IO.Path]::GetTempPath()) ("ct-stdin-" + [Guid]::NewGuid().ToString("N"))
+  New-Item -ItemType File -Path $emptyStdin -Force | Out-Null
+
+  $process = $null
+  try {
+    $process = Start-Process -FilePath $FilePath `
+      -ArgumentList $ArgumentList `
+      -NoNewWindow `
+      -PassThru `
+      -RedirectStandardInput $emptyStdin
+
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+      try { $process.Kill($true) } catch { try { $process.Kill() } catch { } }
+      throw "$Activity did not finish within ${TimeoutSeconds}s and was killed. Raise CODETRACER_NATIVE_COMMAND_TIMEOUT_SECONDS if this step is legitimately this slow."
+    }
+
+    return $process.ExitCode
+  } finally {
+    if ($null -ne $process) { $process.Dispose() }
+    Remove-Item -LiteralPath $emptyStdin -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Ensure-CleanDirectory {
@@ -965,6 +1292,11 @@ function Ensure-TupMsys2BuildPrereqs {
     }
   }
 
+  # Announce it. Every other bootstrap download says what it is fetching
+  # before it fetches it; this one did not, which is why a stall here
+  # produced a log whose last line was the PREVIOUS component finishing and
+  # gave no hint that MSYS2 was even involved.
+  Write-Host "Downloading MSYS2 base $version from $assetUrl ..."
   Download-File -Url $assetUrl -OutFile $archivePath
   try {
     Assert-FileSha256 -Path $archivePath -Expected $expectedSha
@@ -980,21 +1312,34 @@ function Ensure-TupMsys2BuildPrereqs {
   Ensure-CleanDirectory -Path $msys2Root
   New-Item -ItemType Directory -Force -Path $msys2Root | Out-Null
   $tarExe = Get-WindowsTarExe
-  # Keep native command output visible in the console while preventing it from
-  # becoming function pipeline output (which would corrupt the hashtable return value).
-  & $tarExe -xJf $archivePath -C $msys2Root | Out-Host
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to extract MSYS2 Tup prerequisite archive '$archivePath'."
+  # Bounded, and with a closed stdin: native output still reaches the console
+  # (so it cannot become function pipeline output and corrupt the hashtable
+  # return value), but neither leg can now block the job indefinitely.
+  Write-Host "Extracting MSYS2 base archive to $msys2Root ..."
+  $tarExit = Invoke-BoundedNativeCommand `
+    -FilePath $tarExe `
+    -ArgumentList @("-xJf", $archivePath, "-C", $msys2Root) `
+    -Activity "MSYS2 Tup prerequisite archive extraction"
+  if ($tarExit -ne 0) {
+    throw "Failed to extract MSYS2 Tup prerequisite archive '$archivePath' (exit $tarExit)."
   }
   if (-not (Test-Path -LiteralPath $msysBashExe -PathType Leaf)) {
     throw "MSYS2 Tup prerequisite bootstrap did not produce '$msysBashExe'."
   }
 
   $packageArgs = ($packages | ForEach-Object { $_.Trim() }) -join " "
+  # `--noconfirm` was already here, so pacman is not waiting on a [Y/n]. What
+  # it can still do is wait on a mirror that has gone quiet mid-transfer, and
+  # `-lc` means a prompt from anything pacman itself invokes would inherit the
+  # runner's stdin. The bound and the empty stdin close both.
   $packageInstallCommand = "set -euo pipefail; pacman -Sy --noconfirm --needed $packageArgs"
-  & $msysBashExe -lc $packageInstallCommand | Out-Host
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to install Tup MSYS2 prerequisite packages ($packageArgs)."
+  Write-Host "Installing MSYS2 packages: $packageArgs"
+  $pacmanExit = Invoke-BoundedNativeCommand `
+    -FilePath $msysBashExe `
+    -ArgumentList @("-lc", $packageInstallCommand) `
+    -Activity "MSYS2 pacman install of Tup prerequisites"
+  if ($pacmanExit -ne 0) {
+    throw "Failed to install Tup MSYS2 prerequisite packages ($packageArgs) (exit $pacmanExit)."
   }
 
   $mingwGccExe = Join-Path $msysInstallRoot "mingw64/bin/gcc.exe"
