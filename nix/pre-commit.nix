@@ -16,6 +16,22 @@ in
     "^src/db-backend/Cargo\\.lock$"
     "\\.min\\.js$"
     "\\.min\\.css$"
+
+    # A VENDORED COPY, and byte-identity IS the contract.
+    #
+    # tools/check-test-assertions.sh is a byte-for-byte copy of
+    # codetracer-specs/tools/check-test-assertions.sh (37e193050 explains why
+    # it is copied rather than referenced: ci/lint/bash.sh is deliberately the
+    # lane that needs no siblings and no network). The copy is only safe
+    # because ci/test/test-assertion-baseline.sh compares the two by sha256
+    # whenever both repos are on disk, so it cannot drift silently -- and the
+    # editable original, the one with a self-test, lives in the other repo.
+    #
+    # shfmt would reformat 77 lines of it on the first commit that touches its
+    # mode, breaking that sha256 against an upstream nobody had changed and
+    # turning the drift check into noise about whitespace. Formatting hooks
+    # must not have opinions about a file this repository does not own.
+    "^tools/check-test-assertions\\.sh$"
   ];
 
   hooks = {

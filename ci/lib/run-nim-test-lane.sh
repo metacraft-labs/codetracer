@@ -111,6 +111,13 @@ fi
 lane_timeout="${CT_LANE_TIMEOUT:-1800}"
 backend="$(test_lane_backend "${lane}")"
 read -r -a extra_flags <<<"$(test_lane_extra_flags "${lane}")"
+# Expanded below as ${extra_flags[@]+"${extra_flags[@]}"}, not
+# "${extra_flags[@]}": under `set -u`, bash 3.2 -- the /bin/bash every macOS
+# ships -- treats an EMPTY array's "${a[@]}" as an unbound variable and
+# aborts. Most lanes declare no extra flags, so on a Mac this runner died with
+#   run-nim-test-lane.sh: line 165: extra_flags[@]: unbound variable
+# before compiling a single file, on almost every lane. CI is bash 5 and never
+# saw it; a developer reaching for the lane locally saw nothing else.
 
 # A browser lane is compile-only BY CONSTRUCTION, not by the caller remembering
 # a flag. Its output needs a browser: run under node it would die on `document`
@@ -150,7 +157,7 @@ while read -r f; do
 		# .setProgramResult` is undeclared on the JS target, `std/unittest`
 		# substitutes a no-op, and node exits 0 even when a case fails.
 		compile_cmd=(nim js -d:nodejs --hints:off --warnings:off
-			"${extra_flags[@]}" --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
+			${extra_flags[@]+"${extra_flags[@]}"} --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
 		artifact="${cache}/${name}.js"
 	elif [ "${backend}" = "js-browser" ]; then
 		# `nim js` WITHOUT `-d:nodejs`. See test_lane_backend's header: the
@@ -158,11 +165,11 @@ while read -r f; do
 		# is fatal for a browser module — `kdom`'s `createElementNS` is absent
 		# under it, so the renderer does not compile at all.
 		compile_cmd=(nim js --hints:off --warnings:off
-			"${extra_flags[@]}" --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
+			${extra_flags[@]+"${extra_flags[@]}"} --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
 		artifact="${cache}/${name}.js"
 	else
 		compile_cmd=(nim c --hints:off --warnings:off
-			"${extra_flags[@]}" --nimcache:"${cache}" -o:"${cache}/${name}" "${f}")
+			${extra_flags[@]+"${extra_flags[@]}"} --nimcache:"${cache}" -o:"${cache}/${name}" "${f}")
 		artifact="${cache}/${name}"
 	fi
 

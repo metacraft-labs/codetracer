@@ -23,9 +23,8 @@
 # telling the reusable workflow something it already knew and the second
 # because a branch tip is not a pin.
 #
-# LOCK STATUS: RESOLVES TODAY, HAS NEVER RUN -- the same note the other four
-# callers carry, because this edge is now neither better nor worse off than
-# they are.  A lock-resolved sibling needs a workspace lock keyed by THIS
+# LOCK STATUS: RESOLVES, AND THIS EDGE NOW RUNS.  A lock-resolved sibling
+# needs a workspace lock keyed by THIS
 # repo's commit, and one now exists.  On 2026-08-22 a workspace lock was
 # published for each of this gate's five trigger repos to
 # metacraft-labs/metacraft-manifests@latest (commit 5de2a3ae); `dev` here had
@@ -43,10 +42,39 @@
 # `cross-repo/launcher-compat.yml` -- the pre-fixture pins that used to fail
 # the workspace-shape check forty minutes into a run are gone.
 #
-# THAT IS THE ONLY THING THAT CHANGED.  This gate has still NEVER executed in
-# CI -- not once, on any of its five edges -- so nothing about it is
-# CI-verified and CI-green is not claimed here.  It remains blocked on
-# self-hosted runner capacity.
+# THIS EDGE HAS EXECUTED, AND THE "NEVER RUN" NOTE THAT USED TO STAND HERE IS
+# RETIRED.  It was written while the gate was blocked on self-hosted runner
+# capacity; that block is gone.  Run 33959666015 (push, e8c5141f3) reached
+# `Run the launcher <-> recorder end-to-end gate` on all three matrix arms --
+# steps 1-10 green, step 11 red -- so the workspace resolves, the core and
+# ct-print build, and the driver starts.  What is red is real and specific:
+#
+#   step 1: building the launcher (.../codetracer-launcher/build.sh)
+#   Target: linux-musl-x86_64
+#   Wrapper: /nix/store/8ij5fkiran3a8a632r3yd60bgfgpbwg1-\
+#            x86_64-unknown-linux-musl-gcc-wrapper-14.3.0/bin/...
+#   out/launcher: 54304 bytes
+#   FAIL: over 50 KB cap by 3104 bytes
+#
+# THAT IS A TOOLCHAIN DIFFERENCE, NOT LAUNCHER CODE GROWTH.  Measured both
+# ways: with one fixed compiler across both revisions the launcher source has
+# grown 328 bytes since the `sizes.md` v0.1.0 baseline (35,280 -> 35,608 via
+# `zig cc -target x86_64-linux-musl`), nowhere near 4 KB.  And the launcher's
+# OWN size gate builds the SHIPPED linux binary with Debian musl-tools
+# (`Wrapper: /usr/bin/musl-gcc`) and passes at 50,328 bytes.  The 54,304 here
+# comes from a compiler nothing ships: codetracer-launcher/build.sh probes
+# musl-gcc, then `find /nix/store ... -name x86_64-unknown-linux-musl-gcc |
+# head -1`, and only THEN $ZIG.  On this NixOS runner there is no musl-gcc on
+# PATH, so the scavenge wins -- over the zig that `Provision the musl/zig
+# toolchain for the launcher link` deliberately materialised one step earlier
+# -- and a nixpkgs cc-wrapper adds its default hardening on top.  An unpinned
+# `find | head -1` is not a toolchain declaration, and the number it produces
+# is not comparable to the cap, which was calibrated on the shipping one.
+#
+# THE REPAIR IS IN codetracer-launcher/build.sh (prefer an explicitly provided
+# $ZIG over the /nix/store scavenge), not here.  Do NOT raise the 51200-byte
+# cap to clear this: on the shipping toolchain the launcher has 872 bytes of
+# headroom, so the cap is doing exactly the job it exists for.
 #
 # AND IT IS ONE PUSH AWAY FROM RED AGAIN.  A lock answers for an EXACT commit.
 # `clone-siblings` looks one up with `--no-walk` for `github.sha` (plus
