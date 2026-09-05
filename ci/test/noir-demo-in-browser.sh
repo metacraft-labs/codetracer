@@ -258,7 +258,15 @@ else
 	ck fail "after Run the topbar surface is '${surface}', not 'debugger-controls'"
 	note "build pane said: $(q buildText)"
 fi
+# SAMPLED WHILE THE PANE WAS ON SCREEN, not once the run was over. BUILD is
+# auto-hidden on this surface and the web path now dismisses it 2s after the
+# replay session mounts, so that the auto-hide backdrop stops covering the
+# workspace. The probe therefore polls the pane across the run and reports the
+# verdict it displayed; reading it once at the end measured the emptiness after
+# the dismiss and called a working demo broken.
 build_text="$(q buildText)"
+build_seen_at="$(q buildTextObservedAtMs)"
+note "build pane verdict observed at ${build_seen_at:-no}ms; $(q buildNonEmptySamples) of $(q buildSamples) samples non-empty"
 case "${build_text}" in
 *"did not produce a trace"*)
 	ck fail "Run reported 'the tracer did not produce a trace' — the large-trace append regressed"
@@ -268,8 +276,27 @@ case "${build_text}" in
 	;;
 *)
 	ck fail "the Build pane did not report a replay session: ${build_text:0:160}"
+	note "non-empty samples: $(q buildNonEmptySamples) of $(q buildSamples); at end of run the pane held: $(q buildTextFinal | cut -c1-160)"
 	;;
 esac
+
+# NON-VACUITY FOR THE ASSERTION ABOVE, and the other half of the same claim.
+# Now that a 2-second appearance satisfies it, that assertion alone would no
+# longer notice an overlay that went up and STAYED up — a transparent
+# `#auto-hide-backdrop` over the whole viewport, which swallows every gesture
+# over the workspace and is exactly the reported "in Debug mode there is no
+# context menu at all". So assert the dismissal the way the defect was
+# measured: over the middle of the editor, the viewport must hand back the
+# editor, not the backdrop.
+overlay_hit="$(q overlayAtEnd.hitAtEditorCentre)"
+if [ "$(q overlayAtEnd.editorFound)" != "True" ]; then
+	ck fail "no editor on screen after the run, so the overlay could not be checked over it"
+elif [ "${overlay_hit}" = "div#auto-hide-backdrop" ]; then
+	ck fail "the BUILD overlay is still up after the run — its backdrop, not the editor, takes clicks over the workspace"
+	note "overlay visible: $(q overlayAtEnd.overlayVisible), title '$(q overlayAtEnd.overlayTitle)', backdrop shown: $(q overlayAtEnd.backdropShown)"
+else
+	ck ok "and the BUILD overlay got out of the way — the editor, not the backdrop, takes clicks over the workspace"
+fi
 
 frames="$(q onePassFrames)"
 note "one_pass frames in the calltrace: ${frames}"
@@ -414,7 +441,11 @@ else
 fi
 
 echo
-expect_count 16
+# 16 -> 17: arm C gained "the BUILD overlay got out of the way". It is the
+# other half of the claim the pane's replay-session message makes, and it is
+# what keeps that message's assertion non-vacuous now that the message is
+# sampled during its 2-second window rather than at the end of the run.
+expect_count 17
 if [ "${failures}" -eq 0 ]; then
 	printf 'RESULT: PASSED — %d assertion(s) over ui.js %s.\n' "${checks}" "${ui_digest}"
 	exit 0

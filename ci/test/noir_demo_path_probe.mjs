@@ -93,15 +93,121 @@ await starterPage.close();
 // --- Run -------------------------------------------------------------------
 await page.bringToFront();
 await page.keyboard.press('Control+Enter');
-await sleep(RUN_MS);
+
+// THE BUILD PANE IS SAMPLED WHILE IT IS ON SCREEN, NOT ONCE THE RUN IS OVER.
+//
+// This used to be `await sleep(RUN_MS)` followed by a single read of
+// `#buildComponent-0`. That read the pane a full RUN_MS (60s) after Run, and
+// was correct only for as long as nothing ever took the pane down again.
+//
+// Something now does, deliberately. BUILD is auto-hidden on this surface:
+// `ensureBuildPaneVisible` reveals it through the auto-hide OVERLAY to show
+// compiler output, and since `fix(replay): dismiss the BUILD overlay when the
+// session mounts` the web path calls `build.autoDismissBuildPanel()` when the
+// replay session mounts — it keeps the overlay up for 2 SECONDS so a success
+// is readable, then hides it. That fix is not optional: while the overlay is
+// up, `#auto-hide-backdrop` is a transparent `position: fixed` layer over the
+// WHOLE VIEWPORT, so every pointer gesture over the workspace lands on it and
+// the reported "in Debug mode there is no context menu at all" follows.
+//
+// So the pane reports the replay session, and 2s later `innerText` on a hidden
+// element is the empty string. The old single read landed ~58s into that
+// emptiness and the gate reported "the Build pane did not report a replay
+// session:" with NOTHING after the colon — a true statement about the sample
+// and a false one about the product. The replay session was demonstrably
+// there: the calltrace, the flow view and the event log all rendered it in the
+// same run.
+//
+// Polling is what makes the claim observable at all now. It is also the
+// STRONGER claim: it asserts the pane put the message in front of a visitor
+// during its visible window, rather than that the message was still lying
+// around a minute later. Reading `innerText` dispatches no input events, so it
+// cannot cancel the 2s dismiss (which cancels only on `pointerdown`/`keydown`
+// over the overlay).
+const readBuildText = () => page.evaluate(() => {
+  const el = document.getElementById('buildComponent-0');
+  return el ? (el.innerText || '').replace(/\s+/g, ' ').slice(0, 600) : null;
+});
+// A VERDICT is either of the two outcomes the gate distinguishes. Once one is
+// on screen it is kept, so a later empty sample cannot overwrite it; before
+// one appears the newest non-empty sample is kept, so a run that never reaches
+// a verdict still reports what the pane last said instead of nothing.
+const isVerdict = (t) => !!t
+  && (t.includes('opening a replay session') || t.includes('did not produce a trace'));
+// 200ms against a 2000ms window: ~10 samples inside it, so catching it does
+// not depend on landing a single lucky read.
+const BUILD_POLL_MS = 200;
+const runStartedAt = Date.now();
+let buildSamples = 0;
+let buildNonEmptySamples = 0;
+out.buildText = null;
+out.buildTextObservedAtMs = null;
+while (Date.now() - runStartedAt < RUN_MS) {
+  const sample = await readBuildText();
+  buildSamples += 1;
+  if (sample && sample.trim() !== '') {
+    buildNonEmptySamples += 1;
+    if (!isVerdict(out.buildText)) {
+      out.buildText = sample;
+      out.buildTextObservedAtMs = Date.now() - runStartedAt;
+    }
+  }
+  await sleep(BUILD_POLL_MS);
+}
+out.buildSamples = buildSamples;
+out.buildNonEmptySamples = buildNonEmptySamples;
+// What the pane says at the END of the run, kept separate from the sampled
+// verdict so a failure can be told apart: an empty `buildTextFinal` next to a
+// populated `buildText` is the pane correctly getting out of the way, while
+// both empty is the pane never having reported at all.
+out.buildTextFinal = await readBuildText();
+
+// AND THAT IT GOT OUT OF THE WAY. The assertion above can now be satisfied by
+// a 2-second appearance, so on its own it would no longer notice an overlay
+// that went up and STAYED up — which is the defect the dismiss fixed, and
+// which this path is where a visitor meets. Measured the way the defect was:
+// what does the viewport hand back over the middle of the editor?
+out.overlayAtEnd = await page.evaluate(() => {
+  const overlay = document.getElementById('auto-hide-overlay');
+  const backdrop = document.getElementById('auto-hide-backdrop');
+  const desc = (el) => (el
+    ? `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}`
+    : null);
+  // The LARGEST PAINTED editor, not `querySelector`'s first match. Restored
+  // tabs leave several `.monaco-editor` nodes in the DOM and the first is
+  // routinely an inactive one with a zero-area rect; centring on that would
+  // make `elementFromPoint` answer about a point no visitor can click, and the
+  // check would pass without having looked at the workspace at all.
+  let editor = null;
+  let editorArea = 0;
+  for (const el of document.querySelectorAll('.monaco-editor')) {
+    if (!el.querySelector('.view-lines')) continue;
+    const r = el.getBoundingClientRect();
+    const area = r.width * r.height;
+    if (area > editorArea) { editor = el; editorArea = area; }
+  }
+  let hitAtEditorCentre = null;
+  if (editor && editorArea > 0) {
+    const r = editor.getBoundingClientRect();
+    hitAtEditorCentre = desc(
+      document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  }
+  return {
+    overlayVisible: !!overlay && overlay.classList.contains('visible'),
+    overlayTitle: (document.getElementById('auto-hide-overlay-title') || {}).textContent || '',
+    backdropShown: !!backdrop
+      && getComputedStyle(backdrop).display !== 'none',
+    // Only true for an editor with a real area, so "no editor to check over"
+    // fails the gate instead of quietly satisfying it.
+    editorFound: !!editor && editorArea > 0 && hitAtEditorCentre !== null,
+    editorArea: Math.round(editorArea),
+    hitAtEditorCentre,
+  };
+});
 
 out.topbarSurface = await page.evaluate(() => {
   const el = document.querySelector('[data-topbar-surface]');
   return el ? el.getAttribute('data-topbar-surface') : null;
-});
-out.buildText = await page.evaluate(() => {
-  const el = document.getElementById('buildComponent-0');
-  return el ? (el.innerText || '').replace(/\s+/g, ' ').slice(0, 600) : null;
 });
 
 // --- the calltrace, and the three frames the demo is about -----------------
