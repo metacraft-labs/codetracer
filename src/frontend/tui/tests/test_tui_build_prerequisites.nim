@@ -64,7 +64,7 @@ import ../app/cli
 # noticed by someone differencing two runs. Declared on ONE line because
 # `ci/lib/run-nim-test-lane.sh` reads exactly that spelling — inside a `const`
 # block it is invisible to the lane and the file reports "declared none".
-const ExpectedAssertions = 27
+const ExpectedAssertions = 43
 
 const PrereqRecipe = "just tui-prereqs"
 
@@ -195,6 +195,107 @@ proc countGrammarMembers(archivePath: string; grammars: seq[string]):
       inc result.found
     else:
       result.missing.add(member)
+
+# ---------------------------------------------------------------------------
+# The release entrypoint's import closure
+# ---------------------------------------------------------------------------
+#
+# CTUI-2 gives `--test-ipc` to the snapshot apps under
+# `src/frontend/tui/testing/`, and the milestone asks THIS file to be what
+# fails if it can reach a release build. `app/cli.parseTuiCommand` refusing the
+# flag is one half; the other half is that the entrypoint links none of the
+# code that implements it, and that is a question about the import graph.
+#
+# The walker below is deliberately smaller than `test_tui_facade_boundary.nim`'s
+# `importSpecs`, and the difference is the subject rather than the rigour.
+# That one answers "may this module NAME this spec?" over an adversary who can
+# choose the spelling, so it has to normalise quotes, split statements, strip
+# one-line `when` prefixes and enumerate every module-path root. This one
+# answers "what does the entrypoint REACH?" over code the repository controls,
+# and its non-vacuity is guaranteed from the other side: the closure must
+# contain four named modules, so a walker that stopped resolving goes red
+# before its negative assertion is reached. The bound is stated rather than
+# implied — a spec spelled in a form this extractor does not read would be
+# MISSED here, and the mutation arm plants the two forms the tree actually
+# uses (a relative import at the root and one two levels down).
+
+proc importSpecsOf(path: string): seq[string] =
+  ## The module specs one file names. Comments stripped, `,` lists and
+  ## `a/[b, c]` bracket lists expanded, indented continuations under a bare
+  ## `import` / `from` followed.
+  result = @[]
+  var continuing = false
+  for rawLine in readFile(path).splitLines():
+    var line = rawLine
+    let hash = line.find('#')
+    if hash >= 0: line = line[0 ..< hash]
+    let trimmed = line.strip()
+    if trimmed.len == 0:
+      continuing = false
+      continue
+    var body = ""
+    if trimmed.startsWith("import "):
+      body = trimmed["import ".len .. ^1]
+    elif trimmed.startsWith("from "):
+      let rest = trimmed["from ".len .. ^1]
+      let cut = rest.find(" import ")
+      body = if cut >= 0: rest[0 ..< cut] else: rest
+    elif trimmed.startsWith("include "):
+      body = trimmed["include ".len .. ^1]
+    elif trimmed == "import" or trimmed == "from":
+      continuing = true
+      continue
+    elif continuing and (rawLine.startsWith(" ") or rawLine.startsWith("\t")):
+      body = trimmed
+    else:
+      continuing = false
+      continue
+    continuing = continuing or trimmed == "import" or trimmed == "from"
+    # `a/[b, c]` — one root, several leaves.
+    let open = body.find('[')
+    if open >= 0 and body.endsWith("]"):
+      let stem = body[0 ..< open].strip()
+      for leaf in body[open + 1 ..< body.high].split(','):
+        let l = leaf.strip()
+        if l.len > 0: result.add(stem & l)
+    else:
+      for part in body.split(','):
+        var spec = part.strip()
+        let asPos = spec.find(" as ")
+        if asPos >= 0: spec = spec[0 ..< asPos].strip()
+        let exceptPos = spec.find(" except ")
+        if exceptPos >= 0: spec = spec[0 ..< exceptPos].strip()
+        spec = spec.strip(chars = {'"'})
+        if spec.len > 0: result.add(spec)
+
+proc resolveSpec(root, importer, spec: string): string =
+  ## The file a spec names, or "" when it resolves outside the repository (a
+  ## `std/*` module, `isonim_tui`, `codetracer_embed`). Those are not walked —
+  ## see the bound stated above.
+  var roots = @[importer.parentDir,
+                root / "src" / "frontend",
+                root / "src" / "frontend" / "viewmodel",
+                root / "src"]
+  for r in roots:
+    let candidate = normalizedPath(r / (spec & ".nim"))
+    if fileExists(candidate) and candidate.isRelativeTo(root):
+      return candidate
+  ""
+
+proc importClosure(root, entry: string): seq[string] =
+  ## Every in-repo module reachable from `entry`, transitively, `entry`
+  ## excluded.
+  result = @[]
+  var pending = @[normalizedPath(entry)]
+  var seen: seq[string] = @[normalizedPath(entry)]
+  while pending.len > 0:
+    let current = pending.pop()
+    for spec in importSpecsOf(current):
+      let resolved = resolveSpec(root, current, spec)
+      if resolved.len == 0 or resolved in seen: continue
+      seen.add resolved
+      result.add resolved
+      pending.add resolved
 
 suite "CTUI-0: TUI build prerequisites":
 
@@ -445,10 +546,117 @@ suite "CTUI-0: TUI build prerequisites":
       # And it must be refused BY NAME, so a user who typed it learns which
       # argument was rejected rather than that "something" was.
       ck ipc.message.contains("--test-ipc")
+    # EVERY POSITION, not just the first. CTUI-2 gives the flag to the snapshot
+    # apps under `src/frontend/tui/testing/`, and a parser that refused it as
+    # the sole argument while ACCEPTING it after a trace path — or swallowing
+    # it AS one — would satisfy the assertion above and still ship the flag.
+    # The positive control comes first again: a bare path must still parse, or
+    # the two arms below are refusals of everything rather than of this flag.
+    ck parseTuiCommand(["/tmp"]).kind == tckOpenTrace
+    ck parseTuiCommand(["/tmp", "--test-ipc"]).kind == tckUsageError
+    ck parseTuiCommand(["--test-ipc", "/tmp"]).kind == tckUsageError
+    ck parseTuiCommand(["--test-ipc=1"]).kind == tckUsageError
+    # `--never-settle` and `--label=` are the runtime's other two test-only
+    # flags; the shipped parser must not know them either.
+    ck parseTuiCommand(["--never-settle"]).kind == tckUsageError
+    ck parseTuiCommand(["--label=x"]).kind == tckUsageError
     # The help text, read as the value the binary prints rather than as bytes
     # in a file — a doc comment cannot satisfy this one. Positive twin first.
     ck TuiHelpText.contains("--version")
     ck not TuiHelpText.contains("--test-ipc")
+    ck not TuiHelpText.contains("--never-settle")
+
+  test "the release entrypoint cannot reach the test-only IPC runtime":
+    # THE OTHER HALF OF THE `--test-ipc` CONTRACT, and the one that makes the
+    # case above more than a convention. `parseTuiCommand` refusing the flag is
+    # a statement about ONE parser; this is a statement about the BINARY: no
+    # module under `src/frontend/tui/testing/` — the directory that holds the
+    # flag, the `TermAssertClient` connection and the screenshot request — is in
+    # `main.nim`'s import closure, so a release build contains none of it.
+    #
+    # STRUCTURAL: import specs are RESOLVED TO FILES and compared as paths,
+    # exactly as `test_tui_facade_boundary.nim` does for the app/host rule.
+    # A grep for the directory name would be reddened by this very comment.
+    #
+    # The POSITIVE CONTROL is the same walk: the closure must contain the four
+    # modules the entrypoint genuinely reaches. A walker that resolved nothing
+    # would report an empty closure, and an empty closure satisfies "contains
+    # no testing/ module" for free — trap 4, arriving through a resolver
+    # instead of through a regex.
+    let root = repoRoot()
+    let closure = importClosure(root, root / "src" / "frontend" / "tui" / "main.nim")
+    var reached: seq[string] = @[]
+    for f in closure:
+      reached.add f.relativePath(root)
+    checkpoint("main.nim reaches " & $closure.len & " in-repo module(s): " &
+               reached.join(", "))
+    for expected in ["src/frontend/tui/app/cli.nim",
+                     "src/frontend/tui/app/tui_app.nim",
+                     "src/frontend/tui/host/native_host.nim",
+                     "src/ct/version.nim"]:
+      if expected notin reached:
+        checkpoint("the import walker did not reach " & expected &
+                   " — every assertion below it is vacuous")
+      ck expected in reached
+    var testingModules: seq[string] = @[]
+    for f in reached:
+      if f.startsWith("src/frontend/tui/testing/"):
+        testingModules.add f
+    if testingModules.len > 0:
+      checkpoint("the release entrypoint reaches TEST-ONLY module(s): " &
+                 testingModules.join(", ") &
+                 " — `--test-ipc` would be in the shipped binary")
+    ck testingModules.len == 0
+
+  test "MUTATION ARM: the closure walker sees a planted testing/ import":
+    # A negative assertion whose walker had stopped resolving would stay green
+    # forever. So the same walk is run over a COPY of the tree with one import
+    # planted in it, and over the unmutated copy first — a control, because a
+    # finding in a temporary tree must not be an artefact of the copy.
+    let root = repoRoot()
+    let tmp = getTempDir() / "ctui2-closure-arm-" & $getCurrentProcessId()
+    removeDir(tmp)
+    createDir(tmp / "src" / "frontend")
+    copyDir(root / "src" / "frontend" / "tui", tmp / "src" / "frontend" / "tui")
+    createDir(tmp / "src" / "ct")
+    copyFile(root / "src" / "ct" / "version.nim",
+             tmp / "src" / "ct" / "version.nim")
+    let tmpMain = tmp / "src" / "frontend" / "tui" / "main.nim"
+
+    var control: seq[string] = @[]
+    for f in importClosure(tmp, tmpMain):
+      if f.relativePath(tmp).startsWith("src/frontend/tui/testing/"):
+        control.add f.relativePath(tmp)
+    checkpoint("control (unmutated copy): " & $control.len & " testing/ module(s)")
+    ck control.len == 0
+    # And the control reached SOMETHING, or its zero means nothing.
+    ck importClosure(tmp, tmpMain).len >= 4
+
+    writeFile(tmpMain, readFile(tmpMain) &
+              "\nimport ./testing/test_app_runtime\n")
+    var mutated: seq[string] = @[]
+    for f in importClosure(tmp, tmpMain):
+      if f.relativePath(tmp).startsWith("src/frontend/tui/testing/"):
+        mutated.add f.relativePath(tmp)
+    checkpoint("mutated: " & mutated.join(", "))
+    ck "src/frontend/tui/testing/test_app_runtime.nim" in mutated
+    # And it walks THROUGH the planted module: `test_app_runtime` imports
+    # `isonim_tui` (out of tree, so unresolved) and nothing else in `testing/`,
+    # while `dual_snap` — planted below — pulls nothing further either. What
+    # the arm proves is that a one-line edit anywhere in the entrypoint's
+    # closure is caught, not only one at its root.
+    let deeper = tmp / "src" / "frontend" / "tui" / "app" / "cli.nim"
+    writeFile(tmpMain, readFile(tmpMain).replace(
+      "\nimport ./testing/test_app_runtime\n", "\n"))
+    writeFile(deeper, readFile(deeper) &
+              "\nimport ../testing/dual_snap\n")
+    var indirect: seq[string] = @[]
+    for f in importClosure(tmp, tmpMain):
+      if f.relativePath(tmp).startsWith("src/frontend/tui/testing/"):
+        indirect.add f.relativePath(tmp)
+    checkpoint("planted two levels down: " & indirect.join(", "))
+    ck "src/frontend/tui/testing/dual_snap.nim" in indirect
+    removeDir(tmp)
 
   test "assertion count":
     # Printed as well as asserted: `ci/lib/run-nim-test-lane.sh` reads a
