@@ -394,4 +394,26 @@ lint_step "contract suite: a job that clones a recorder builds it" \
 lint_step "contract suite: the runner defect register still cites real things" \
 	bash ci/test/runner-register-citations-test.sh
 
+# THE RUST TEST-ASSERTION GATE. `tools/check-test-assertions.sh` is a vendored
+# copy of a lint codetracer-specs has shipped "for the product repos" since M0.
+# This repository invoked it NOWHERE, and could not have: the specs repo is
+# never checked out here. A guard was written, shipped, and connected to
+# nothing -- which is how assertion-less Rust tests came to live inside a
+# required gate. The glob at the top does not reach `tools/`.
+lint_step "shellcheck: Rust test-assertion lint (vendored from codetracer-specs)" \
+	shellcheck tools/check-test-assertions.sh
+
+# Registered here rather than left to be discovered, for the reason the lint
+# itself was worth wiring: an unrun check is the defect it exists to catch. It
+# is pure bash + awk over the committed tree -- no nix, no network, no siblings,
+# seconds -- so it belongs in the cheapest lane that will run it.
+#
+# It holds the flagged set to an ENUMERATED baseline rather than to zero, and
+# fails in both directions: a new assertion-less test is a line the baseline
+# lacks, and a baseline entry that gets fixed is a line the actual set lacks.
+# Because that baseline is non-empty it is also the lint's own canary -- a lint
+# that rotted into a no-op finds zero and reddens this step.
+lint_step "contract suite: no Rust test lacks an assertion (enumerated baseline)" \
+	bash ci/test/test-assertion-baseline.sh
+
 lint_summary
