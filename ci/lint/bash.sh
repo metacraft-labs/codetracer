@@ -46,8 +46,17 @@ source ci/lib/lint-steps.sh
 # inspect real certificates, the second to key a lockfile install. That suite
 # exits 3 on a missing tool rather than skipping the section, so a shell without
 # them has to fail by name here and not four steps later.
+#
+# `python3:yaml` IS A MODULE, NOT A COMMAND, AND THAT DISTINCTION COST A LANE.
+# The derivation rule above is "commands in command position", which cannot see
+# an `import`. `devShells.lint` therefore carried `python3` and not PyYAML,
+# `ci/verdict/recorder-clone-implies-build.py` imports `yaml`, and the contract
+# suite that drives it exited 1 with "PyYAML is not available; this suite cannot
+# run" on every run -- failing this lane and skipping every build job behind it,
+# while `command -v python3` said yes throughout. Requirements are declared here
+# in the form `require-tools.sh` can actually check.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh shellcheck bash git python3 node awk diff sort comm timeout openssl sha256sum
+	bash ci/lib/require-tools.sh shellcheck bash git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum
 
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh

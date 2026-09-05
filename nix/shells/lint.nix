@@ -53,6 +53,14 @@
 # and NOT `nix`, `jq`, `yq` or `cargo`, which appear nowhere in command
 # position in that set.
 #
+# THAT RULE HAS ONE BLIND SPOT AND IT HAS NOW COST A RED LANE: a rule about
+# COMMANDS cannot see a LIBRARY. `python3` is in command position and PyYAML
+# never is, so the shell had the interpreter and not the module, and
+# `ci/verdict/recorder-clone-implies-build.py` could not run. Interpreter
+# packages here therefore carry their imports explicitly (see `python3` below),
+# and `ci/lint/bash.sh` names the module to `require-tools.sh` so a missing one
+# is reported by name in the first step rather than discovered by a suite.
+#
 # ## WHAT THIS SHELL DELIBERATELY DOES NOT SERVE
 #
 # `ci/lint/rust.sh` needs the Rust toolchain, clippy, and a Nim compiler to
@@ -84,7 +92,28 @@ pkgs.mkShell {
     shellcheck
 
     # Interpreters the contract suites run under.
-    python3
+    #
+    # PYTHON CARRIES PyYAML, AND THE REASON IS THE ONE BLIND SPOT IN HOW THIS
+    # LIST WAS DERIVED. "Every command in command position" is a rule about
+    # COMMANDS, and it cannot see an `import`. `python3` was in command
+    # position, so python3 was here; `ci/verdict/recorder-clone-implies-build.py`
+    # does `import yaml`, and nothing in that derivation could notice. The
+    # result was not a crash but a REFUSAL:
+    #
+    #     FAIL: PyYAML is not available; this suite cannot run
+    #
+    # `contract suite: a job that clones a recorder builds it` exited 1 on
+    # every run, failing `lint-bash` and skipping every build job behind it —
+    # and, worse than the red, its Case 1 runs the guard against the LIVE
+    # `.github/workflows/codetracer.yml`, so for as long as the module was
+    # missing nothing was checking that today's workflow builds the recorders
+    # it clones. The suite refusing to run rather than skipping that case is
+    # why this was visible at all.
+    #
+    # A module dependency is now also declared to `ci/lib/require-tools.sh`
+    # (`python3:yaml` in ci/lint/bash.sh), so the NEXT one fails by name in the
+    # first step instead of four steps later.
+    (python3.withPackages (ps: [ ps.pyyaml ]))
     nodejs
 
     # `ci/test/nimsuggest-check.sh`. `nim` brings `nimsuggest` with it; this is

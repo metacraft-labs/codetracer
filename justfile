@@ -3038,8 +3038,13 @@ test-vm-collab-integration: vm-test-prereqs
   exec > >(tee test-logs/test-vm-collab-integration.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh vm-collab-integration
 
-# ct-test's incremental engine: fourteen suites under src/ct_test/incremental,
-# none of which was reachable by any recipe or CI script.
+# ct-test's incremental engine: seventeen suites, none of which was reachable
+# by any recipe or CI script when this lane was written. The count is not
+# maintained by hand -- `ci/lib/test-lane-files.sh` discovers them -- and it has
+# only ever moved UPWARD: fourteen when written, sixteen under
+# `src/ct_test/incremental/` today, plus `src/ct_test/incremental_cli_test.nim`
+# one level up, which `ci/test/test-lane-coverage.sh` caught running in no lane
+# at all.
 test-ct-test-incremental:
   #!/usr/bin/env bash
   set -euo pipefail

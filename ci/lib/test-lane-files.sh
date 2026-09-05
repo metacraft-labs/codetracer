@@ -881,7 +881,26 @@ test_lane_files() {
 		# named after what they exercise rather than after the convention. That
 		# is the failure mode this whole file exists to remove, so the glob
 		# follows the directory, not the naming habit.
-		_tlf_find src/ct_test/incremental 'test_*.nim' 'e2e_*.nim'
+		#
+		# AND THE INCREMENTAL SUITES THAT SIT ONE LEVEL UP. The directory rule
+		# above reaches `src/ct_test/incremental/` and stops there, so
+		# `src/ct_test/incremental_cli_test.nim` -- the argument-parsing
+		# contract of `ct test --incremental`, 144 lines of ordinary `unittest`
+		# over `incremental_cli` and `incremental/engine` -- ran in NO lane and
+		# was caught by `ci/test/test-lane-coverage.sh`. It is a glob and not
+		# an added path on purpose: the next `incremental_*_test.nim` written
+		# beside it is covered without anyone editing this file, which is the
+		# rule this whole file exists to enforce.
+		#
+		# `incremental_e2e_test.nim` is rejected because it belongs to
+		# `ct-test-incremental-e2e`: it records with a real recorder sibling,
+		# and this lane's recipe builds none. It is not dropped -- that lane
+		# names it explicitly -- so the coverage guard still sees it.
+		{
+			_tlf_find src/ct_test/incremental 'test_*.nim' 'e2e_*.nim'
+			_tlf_glob src/ct_test 'incremental_*_test.nim' |
+				_tlf_reject '/incremental_e2e_test\.nim$'
+		} | sort -u
 		;;
 
 	ct-test-incremental-e2e)

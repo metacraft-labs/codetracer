@@ -14,7 +14,12 @@
 #
 #   * every repository file it cites exists;
 #   * every gate it claims is wired into a lane really is;
-#   * every commit it cites is a real commit;
+#   * every commit it cites is a real commit -- WHERE THE CLONE CAN ANSWER
+#     THAT. In a shallow clone (which is what `lint-bash` checks out) no
+#     commit resolves, and this check used to report all nine citations of a
+#     correct register as missing. Depth is now established first, and the
+#     unverifiable ones are counted and named rather than failed or hidden;
+#     see the long note on section 3;
 #   * the scoreboard still has one row per defect, and the count is the
 #     reconciled SEVEN.
 #
@@ -107,23 +112,96 @@ fi
 
 # --- 3: every commit it cites is real --------------------------------------
 # Short SHAs in prose are the first thing to go stale after a rebase.
+#
+# A MISSING OBJECT HAS TWO CAUSES AND THIS CHECK USED TO CONFLATE THEM.
+# `lint-bash` checks out at `--depth=1` (actions/checkout's default; the fetch
+# line is visible in every run log). In a shallow clone NO cited commit
+# resolves, so this reported all nine of them as
+#
+#     FAIL cited commit exists: <sha>
+#          The register cites a commit this repository does not contain.
+#
+# for a register in which every one of the nine was correct -- verified by
+# `git cat-file -t` on a full clone of the same tree. That is not a finding
+# about the document, it is a reading of the CHECKOUT, and it failed the lane
+# and skipped every build job behind it on every run.
+#
+# Deepening the lane was considered and rejected on measurement: this repo's
+# history is ~1.6 GB and the lane runs on ephemeral runners, and the cheap
+# alternative (a partial clone, `--filter=tree:0`) is unsafe here because the
+# checkout sets `persist-credentials: false`, so the lazy fetch a partial clone
+# needs would have no credential and would turn today's honest skips in the
+# sibling suites into hard errors.
+#
+# So the two causes are separated instead. `--is-shallow-repository` is asked
+# ONCE, before any lookup:
+#
+#   * NOT shallow -- every developer checkout, every pre-commit run, and any
+#     lane that deepens later -- a commit that does not resolve is a genuine
+#     stale citation and FAILS exactly as before. Nothing is weakened where the
+#     question can be answered.
+#
+#   * shallow -- the objects are absent for a reason that has nothing to do
+#     with the register. The count is reported as UNVERIFIED, by name, rather
+#     than as a pass or as nine false accusations. It cannot pass silently: the
+#     line is printed on every run.
+#
+# The extraction check below stays unconditional, because "we extracted zero
+# SHAs" is answerable at any depth and is the failure that would otherwise make
+# this whole section vacuous.
+unverified=0
+skip() {
+	assertions=$((assertions + 1))
+	unverified=$((unverified + 1))
+	printf '  skip %s\n' "$1"
+	if [ "$#" -gt 1 ]; then
+		shift
+		printf '         %s\n' "$@"
+	fi
+}
+
+shallow="$(git -C "$REPO_ROOT" rev-parse --is-shallow-repository 2>/dev/null || echo unknown)"
+
 bad_sha=0
 sha_count=0
 # shellcheck disable=SC2016  # literal markdown backticks, as above.
 while IFS= read -r sha; do
 	sha_count=$((sha_count + 1))
-	if ! git -C "$REPO_ROOT" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+	if git -C "$REPO_ROOT" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+		continue
+	fi
+	if [ "$shallow" = "true" ]; then
+		skip "cited commit exists: $sha -- NOT VERIFIED" \
+			"This checkout is shallow (--depth=1), so no commit older than" \
+			"HEAD resolves here and absence says nothing about the register."
+	else
 		fail "cited commit exists: $sha" \
 			"The register cites a commit this repository does not contain."
 		bad_sha=$((bad_sha + 1))
 	fi
 done < <(grep -oE '`[0-9a-f]{9,40}`' "$REGISTER" | tr -d '`' | sort -u)
 
+resolved=$((sha_count - unverified - bad_sha))
 if [ "$sha_count" -eq 0 ]; then
 	fail "the register cites at least one commit" \
 		"Extracted zero SHAs -- the extraction broke, or the provenance was lost."
-elif [ "$bad_sha" -eq 0 ]; then
-	ok "all $sha_count cited commits resolve"
+else
+	if [ "$unverified" -ne 0 ]; then
+		printf '  NOTE %d of %d cited commits could not be checked: shallow clone.\n' \
+			"$unverified" "$sha_count"
+		printf '       Run this suite on a full clone (any developer checkout, and\n'
+		printf '       the pre-commit hook) to have the citations actually verified.\n'
+	fi
+	# Only a summary for what was actually established. `bad_sha` citations have
+	# already been reported individually and must not be summarised as a pass --
+	# an earlier draft of this block printed `all 9 cited commits resolve`
+	# directly under nine FAIL lines, which is the summary lying about the
+	# assertions above it.
+	if [ "$bad_sha" -eq 0 ] && [ "$unverified" -eq 0 ]; then
+		ok "all $sha_count cited commits resolve"
+	elif [ "$bad_sha" -eq 0 ] && [ "$resolved" -gt 0 ]; then
+		ok "$resolved of $sha_count cited commits resolve"
+	fi
 fi
 
 # --- 4: the count is seven ------------------------------------------------
@@ -163,4 +241,12 @@ if [ "$failures" -ne 0 ]; then
 	printf '%d of %d assertions failed\n' "$failures" "$assertions"
 	exit 1
 fi
-printf 'all %d assertions passed\n' "$assertions"
+# The unverified count is never folded into "passed". A suite that reports
+# `all N assertions passed` while N of them could not run is the exact
+# capability-that-looks-present defect the register itself is about.
+if [ "$unverified" -ne 0 ]; then
+	printf 'all %d assertions passed (%d NOT VERIFIED: shallow clone)\n' \
+		"$((assertions - unverified))" "$unverified"
+else
+	printf 'all %d assertions passed\n' "$assertions"
+fi

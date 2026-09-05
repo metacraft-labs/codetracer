@@ -44,16 +44,65 @@
 # later failures are noise, but they are visible noise under a line that says
 # what caused them — which is strictly better than 28 steps that never ran.
 #
+# A COMMAND IS NOT THE ONLY THING A STAGE CAN LOSE, AND THE FIRST VERSION
+# COULD ONLY SEE COMMANDS.
+#
+# `devShells.lint` derived its package list from "every command in command
+# position", which is a rule about commands and therefore cannot see an
+# `import`. It carried `python3` and not PyYAML;
+# `ci/verdict/recorder-clone-implies-build.py` imports `yaml`, so
+# `contract suite: a job that clones a recorder builds it` exited 1 with
+# "PyYAML is not available; this suite cannot run" on every run — failing
+# `lint-bash` and skipping every build job behind it. `command -v python3`
+# answered yes throughout, which is precisely the silent-loss failure this
+# script exists to prevent, one layer down.
+#
+# So a requirement may also name a PYTHON MODULE, as `python3:<module>`:
+#
+#     bash ci/lib/require-tools.sh shellcheck python3 python3:yaml
+#
+# It is checked by importing it, which is the only test that means anything: a
+# module can be on `sys.path` and still not import. The interpreter itself must
+# still be listed separately — a missing `python3` is reported as `python3`,
+# not as a confusing import failure.
+#
+# Only `python3` is accepted on the left. A `node:foo` form would need `-e` and
+# a different resolution rule, and quietly running `node -c "import foo"` would
+# report a missing module for one that is present — a check that lies is worse
+# than one that is absent, so an unknown interpreter is a usage error.
+#
 # Usage:
-#   bash ci/lib/require-tools.sh <tool> [<tool>...]
+#   bash ci/lib/require-tools.sh <tool|python3:module> [...]
 
 set -uo pipefail
 
 missing=()
 for tool in "$@"; do
-	if ! command -v "${tool}" >/dev/null 2>&1; then
-		missing+=("${tool}")
-	fi
+	case "${tool}" in
+	python3:*)
+		module="${tool#*:}"
+		# A missing interpreter is reported under its own name by the
+		# bare entry; reporting it again here as a failed import would
+		# name the wrong thing.
+		if ! command -v python3 >/dev/null 2>&1; then
+			missing+=("python3")
+			continue
+		fi
+		if ! python3 -c "import ${module}" >/dev/null 2>&1; then
+			missing+=("${tool}")
+		fi
+		;;
+	*:*)
+		echo "require-tools.sh: unsupported requirement '${tool}'." >&2
+		echo "  Only 'python3:<module>' is understood on the left of a colon." >&2
+		exit 2
+		;;
+	*)
+		if ! command -v "${tool}" >/dev/null 2>&1; then
+			missing+=("${tool}")
+		fi
+		;;
+	esac
 done
 
 if [ ${#missing[@]} -eq 0 ]; then
@@ -63,7 +112,7 @@ fi
 {
 	echo
 	echo "###############################################################################"
-	echo "This lint stage cannot run: ${#missing[@]} tool(s) it invokes are not on PATH."
+	echo "This lint stage cannot run: ${#missing[@]} requirement(s) it invokes are absent."
 	echo "###############################################################################"
 	for tool in "${missing[@]}"; do
 		echo "  MISSING  ${tool}"
@@ -74,7 +123,10 @@ fi
 	echo
 	echo "In devShells.lint? Add the package to nix/shells/lint.nix -- its header"
 	echo "records how the list was derived: every command in command position"
-	echo "across the lint scripts and everything they run."
+	echo "across the lint scripts and everything they run, plus the interpreter"
+	echo "MODULES those scripts import, which no reading of command position can"
+	echo "find. A 'python3:<module>' line above is such an import: add it to the"
+	echo "python3.withPackages list, not as a package of its own."
 	echo "Not in that shell? These stages expect the lint devShell, selected as"
 	echo "  nix develop .#devShells.<system>.lint"
 	echo "  CT_LINT_SHELL=${CT_LINT_SHELL:-<unset>}"

@@ -37,7 +37,10 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+# `SUITE_ROOT`, deliberately NOT `REPO_ROOT`: this suite sources
+# `ci/setup-rr-backend.sh`, which assigns a `REPO_ROOT` of its own. See the
+# long note above `rr_guard` for what the collision cost.
+SUITE_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
 # THE SUITE RUNS THE REAL SCRIPTS, so a shell that cannot run them reports
 # their guards as ABSENT rather than as unrunnable — which is this suite making
@@ -52,12 +55,14 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 #
 # `bash.sh`'s `require-tools` line already refuses a shell missing `openssl` or
 # `sha256sum` BY NAME. This is the same refusal for the interpreter itself.
+# shellcheck disable=SC2016  # the `$(...)` in the usage line below is a literal
+# placeholder, not a substitution; see the longer note on the sibling block.
 if ! command -v mapfile >/dev/null 2>&1 && ! type -t mapfile >/dev/null 2>&1; then
 	echo "stale-artefact-guards-test: this bash (${BASH_VERSION}) has no \`mapfile\`." >&2
 	echo "  The suite executes the scripts it grades, and several of them use it, so" >&2
 	echo "  the guards would be reported MISSING when they are merely unreachable." >&2
 	echo "  Run it in the lane it belongs to:" >&2
-	echo "    nix develop .#\$(...)lint -c ./ci/lint/bash.sh" >&2
+	echo '    nix develop .#$(...)lint -c ./ci/lint/bash.sh' >&2
 	echo "  or under any bash >= 4." >&2
 	exit 2
 fi
@@ -77,31 +82,38 @@ fi
 #
 # `bash -c` rather than a version-string parse: the question is whether the
 # builtin is there, and that is what asking for it answers.
+# SC2016 on the single-quoted lines below is disabled for the whole block:
+# every one of them is literal prose -- markdown-style backticks around tool
+# names, and a `$(...)` placeholder in a usage line the reader substitutes into.
+# They are single-quoted because `shfmt` rewrites the escaped double-quoted
+# spelling into exactly this, so any other quoting makes the formatter and the
+# linter undo each other on every commit.
+# shellcheck disable=SC2016
 if ! bash -c 'type -t mapfile' >/dev/null 2>&1; then
-	echo "stale-artefact-guards-test: the \`bash\` on PATH has no \`mapfile\`." >&2
+	echo 'stale-artefact-guards-test: the `bash` on PATH has no `mapfile`.' >&2
 	echo "  found:   $(command -v bash)" >&2
 	echo "  version: $(bash -c 'echo "${BASH_VERSION}"' 2>/dev/null)" >&2
-	echo "  This suite EXECUTES the scripts it grades, as \`bash <script>\`, so they" >&2
+	echo '  This suite EXECUTES the scripts it grades, as `bash <script>`, so they' >&2
 	echo "  would die before reaching their guards and be scored as missing ones —" >&2
 	echo "  which is this suite making the very mistake it grades." >&2
 	echo "  Put a bash >= 4 first on PATH, or run the lane it belongs to:" >&2
-	echo "    nix develop .#\$(...)lint -c ./ci/lint/bash.sh" >&2
+	echo '    nix develop .#$(...)lint -c ./ci/lint/bash.sh' >&2
 	exit 2
 fi
 
-VISUAL_CAPTURE="${REPO_ROOT}/scripts/docs/capture-visual-recording-screenshots.sh"
-STORYBOOK_FRESHNESS="${REPO_ROOT}/tools/visual-review/storybook-freshness.mjs"
-STORYBOOK_DEPS="${REPO_ROOT}/scripts/storybook-deps.sh"
-RR_SETUP="${REPO_ROOT}/ci/setup-rr-backend.sh"
-SETUP_CERTS="${REPO_ROOT}/browser-replay/setup-certs.sh"
-WEBP="${REPO_ROOT}/scripts/docs/generate-webp-animations.sh"
-CAPTURE_LIB="${REPO_ROOT}/scripts/docs/deep-review-capture-lib.sh"
-DESKTOP_COMPONENT="${REPO_ROOT}/scripts/build-desktop-component.sh"
-DEVELOPER_SETUP="${REPO_ROOT}/scripts/developer-setup.sh"
-DEPLOY_WASM="${REPO_ROOT}/browser-replay/deploy-wasm.sh"
-CROSS_REPO="${REPO_ROOT}/scripts/run-cross-repo-tests.sh"
-DESKTOP_CAPS="${REPO_ROOT}/resources/codetracer-desktop-capabilities"
-VERSION_NIM="${REPO_ROOT}/src/ct/version.nim"
+VISUAL_CAPTURE="${SUITE_ROOT}/scripts/docs/capture-visual-recording-screenshots.sh"
+STORYBOOK_FRESHNESS="${SUITE_ROOT}/tools/visual-review/storybook-freshness.mjs"
+STORYBOOK_DEPS="${SUITE_ROOT}/scripts/storybook-deps.sh"
+RR_SETUP="${SUITE_ROOT}/ci/setup-rr-backend.sh"
+SETUP_CERTS="${SUITE_ROOT}/browser-replay/setup-certs.sh"
+WEBP="${SUITE_ROOT}/scripts/docs/generate-webp-animations.sh"
+CAPTURE_LIB="${SUITE_ROOT}/scripts/docs/deep-review-capture-lib.sh"
+DESKTOP_COMPONENT="${SUITE_ROOT}/scripts/build-desktop-component.sh"
+DEVELOPER_SETUP="${SUITE_ROOT}/scripts/developer-setup.sh"
+DEPLOY_WASM="${SUITE_ROOT}/browser-replay/deploy-wasm.sh"
+CROSS_REPO="${SUITE_ROOT}/scripts/run-cross-repo-tests.sh"
+DESKTOP_CAPS="${SUITE_ROOT}/resources/codetracer-desktop-capabilities"
+VERSION_NIM="${SUITE_ROOT}/src/ct/version.nim"
 
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
@@ -436,11 +448,31 @@ git -C "${BACKEND}" checkout -q "${REV_OLD}"
 # Sourced rather than executed, so the guard is exercised without reaching
 # `nix build`. The script's `main` is behind a BASH_SOURCE guard for this.
 # Always in a SUBSHELL: sourcing it assigns `REPO_ROOT` and `CLONE_DIR`, and
-# this suite has variables by those names too.
+# the subshell is what keeps those assignments from reaching this suite.
+#
+# THIS SUITE'S OWN ROOT IS `SUITE_ROOT`, NOT `REPO_ROOT`, AND THAT NAME IS
+# LOAD-BEARING. It used to be `REPO_ROOT` too, defended only by this subshell.
+# The containment was correct and the runtime behaviour was never wrong — but
+# the linter, once it can SEE the sourced file, reads `REPO_ROOT="$(pwd)"`
+# inside this subshell and then reports SC2031 ("modified in a subshell, that
+# change might be lost") at every later top-level use of the suite's OWN
+# variable. Nine such findings, all false, exited `shellcheck` 1 and failed
+# `lint-bash` — which skipped every build job behind it.
+#
+# It surfaced only when `ci/lint/bash.sh` gained `shopt -s globstar`. The
+# linter follows a `source` only when the sourced file is ALSO an input, and
+# globstar is what first brought `ci/setup-rr-backend.sh` into `ci/**/*.sh`.
+# So `shellcheck <this file>` alone still exits 0 and the narrower
+# "shellcheck: stale-artefact guards" step stayed green throughout, which is
+# why the two steps disagreed about one file.
+#
+# Renaming is the fix rather than a `disable=SC2031`, because the name
+# collision was a real hazard that the subshell merely hid: with two distinct
+# names there is nothing for either the linter or a future reader to confuse.
 rr_guard() {
 	(
 		export CLONE_DIR="$1"
-		cd "${REPO_ROOT}" || exit 1
+		cd "${SUITE_ROOT}" || exit 1
 		# shellcheck source=ci/setup-rr-backend.sh disable=SC1091
 		source "${RR_SETUP}"
 		require_locked_checkout "$1" "$2"
@@ -494,8 +526,8 @@ assert_contains "${CAUGHT_UP}" "verified at ${REV_NEW}" \
 # END TO END, as a script: `main` must resolve the ref even though the directory
 # is present. This is the exact thing the old code skipped, and it fails before
 # `build_rr_support` so no nix, no credential and no network are involved.
-# shellcheck disable=SC2031  # REPO_ROOT is only ever modified inside rr_guard's subshell
-END_TO_END="$(cd "${REPO_ROOT}" && env CLONE_DIR="${BACKEND}" RR_BACKEND_REF="${REV_NEW}" \
+# shellcheck disable=SC2031  # SUITE_ROOT is only ever modified inside rr_guard's subshell
+END_TO_END="$(cd "${SUITE_ROOT}" && env CLONE_DIR="${BACKEND}" RR_BACKEND_REF="${REV_NEW}" \
 	bash "${RR_SETUP}" 2>&1)"
 assert_contains "${END_TO_END}" "Using rr-backend ref: ${REV_NEW}" \
 	"the locked revision is resolved even when the sibling is already present"
@@ -969,7 +1001,7 @@ section "the nimcache root names the checkout, not just the consumer"
 # `ci/lib/nim-cache-root.sh` is the one cause; these contracts are against it,
 # and the last two are against the sites actually delegating to it.
 
-NIMCACHE_LIB="${REPO_ROOT}/ci/lib/nim-cache-root.sh"
+NIMCACHE_LIB="${SUITE_ROOT}/ci/lib/nim-cache-root.sh"
 assert_file_exists "${NIMCACHE_LIB}" "the shared nimcache-root helper exists"
 
 # Two synthetic checkouts, which is the whole point: same gate name, different
@@ -1046,7 +1078,7 @@ fi
 # quietly exclude a real gate too.
 BARE_ROOTS="$(
 	grep -rln '/tmp/ct-nim-cache' \
-		"${REPO_ROOT}/ci/test" "${REPO_ROOT}/scripts" "${REPO_ROOT}/justfile" 2>/dev/null |
+		"${SUITE_ROOT}/ci/test" "${SUITE_ROOT}/scripts" "${SUITE_ROOT}/justfile" 2>/dev/null |
 		grep -v 'stale-artefact-guards-test.sh' || true
 )"
 if [[ -z ${BARE_ROOTS} ]]; then
@@ -1090,7 +1122,7 @@ section "a resolver picks the newest build, not the first profile that exists"
 # extracted, so the sixth copy of the regenerator inherits it rather than the
 # defect.
 
-NEWEST_LIB="${REPO_ROOT}/ci/lib/newest-build.sh"
+NEWEST_LIB="${SUITE_ROOT}/ci/lib/newest-build.sh"
 assert_file_exists "${NEWEST_LIB}" "the shared newest-build helper exists"
 
 PROFILES="${TEST_ROOT}/profiles"
@@ -1153,7 +1185,7 @@ REGENERATORS=(
 )
 NOT_DELEGATING=()
 for regen in "${REGENERATORS[@]}"; do
-	full="${REPO_ROOT}/${regen}"
+	full="${SUITE_ROOT}/${regen}"
 	if [[ ! -f ${full} ]]; then
 		NOT_DELEGATING+=("${regen} (missing)")
 	elif ! grep -q 'newest_executable' "${full}"; then
@@ -1204,8 +1236,8 @@ section "a contrast spec refuses a stylesheet older than the styl it came from"
 # and `built-theme-css.ts` is a types-only binding over it — one implementation,
 # not two copies.
 
-CSS_LIB="${REPO_ROOT}/src/tests/gui/lib/built-theme-css.cjs"
-CSS_TYPES="${REPO_ROOT}/src/tests/gui/lib/built-theme-css.ts"
+CSS_LIB="${SUITE_ROOT}/src/tests/gui/lib/built-theme-css.cjs"
+CSS_TYPES="${SUITE_ROOT}/src/tests/gui/lib/built-theme-css.ts"
 assert_file_exists "${CSS_LIB}" "the shared built-CSS resolver exists"
 assert_file_exists "${CSS_TYPES}" "...and the typed binding the specs import"
 
@@ -1286,7 +1318,7 @@ CONTRAST_SPECS=(
 )
 CSS_NOT_DELEGATING=()
 for spec in "${CONTRAST_SPECS[@]}"; do
-	full="${REPO_ROOT}/${spec}"
+	full="${SUITE_ROOT}/${spec}"
 	if [[ ! -f ${full} ]]; then
 		CSS_NOT_DELEGATING+=("${spec} (missing)")
 	elif ! grep -q 'resolveBuiltThemeCss' "${full}"; then
