@@ -150,12 +150,22 @@
 #      with "Build it with: just build-once" when there is none -- a tens-of-
 #      minutes build inside the gate would make a core-build break read as a
 #      launcher/recorder incompatibility.  So this workflow builds it, in its
-#      own visible step, before invoking the driver.  That step checks the
-#      ARTIFACT rather than the exit code: `just build-once` currently exits 1
-#      on a later tree-sitter-nim cargo job AFTER emitting a working
-#      src/build-debug/bin/ct (recorded under LRC-1).  The tolerance is scoped
-#      to that one command and is immediately followed by a hard artifact gate;
-#      it is NOT a `continue-on-error` on the job.
+#      own visible step, before invoking the driver.  That step gates on BOTH
+#      the exit code of `just build-once` AND the artifacts.
+#
+#      It used to gate on the artifact alone, on the reasoning that build-once
+#      "currently exits 1 on a later tree-sitter-nim cargo job AFTER emitting a
+#      working src/build-debug/bin/ct".  That tolerance is gone, and the step's
+#      own comment records at length why it should never have been written: the
+#      exit-1 had TWO independent causes rather than the one named, the
+#      ordering in it is backwards, and the core it called working had no
+#      `bin/replay-server`, no frontend bundle and no runtime-asset check --
+#      build-once.sh runs under `set -e`, so the failing `tup` aborted it
+#      before webpack, the second tup pass and require-runtime-assets.sh.  The
+#      artifact check saw none of that because `bin/ct` is produced by a
+#      different tup job than the one that failed.  Both causes are fixed
+#      (nix/shells/ci-base.nix, scripts/build-once.sh); the exit code is the
+#      gate.
 #
 #   2. RUNNER PREREQUISITES, each a hard failure in the driver rather than a
 #      skip, so a missing one is a red gate and never a silent green:
@@ -164,6 +174,23 @@
 #          Provisioned explicitly below instead of being left to the driver's
 #          on-demand `nixpkgs#zig` fetch, so the cost is visible in the log and
 #          attributable to its own step.
+#
+#          PROVISIONING IT IS NOT THE SAME AS IT BEING USED, and on this repo's
+#          NixOS runners it was not.  codetracer-launcher/build.sh's own header
+#          documents the probe order as `$ZIG` first, but its code probes
+#          musl-gcc, then `find /nix/store ... -name
+#          x86_64-unknown-linux-musl-gcc | head -1`, and only THEN `$ZIG`.  No
+#          musl-gcc is on PATH here, so the unpinned scavenge outranked the zig
+#          this step deliberately materialised; a nixpkgs cc-wrapper added its
+#          default hardening and the launcher weighed 54,304 bytes against a
+#          51,200 cap -- `FAIL: over 50 KB cap by 3104 bytes`, on all three
+#          arms of runs 33983224255 and 33991455608.  THE REPAIR IS IN
+#          codetracer-launcher/build.sh, not here, and raising the cap is not
+#          it: on the shipping musl-tools toolchain the launcher measures
+#          50,328 bytes with 872 to spare, so the cap is doing its job.  Note
+#          also that this gate resolves the launcher through the WORKSPACE
+#          LOCK, so a fix landing on the launcher's `dev` does not reach this
+#          gate until a lock is published for a codetracer commit that pins it.
 #        * `ct-print` from codetracer-trace-format-nim -- the design section 5.4
 #          trace-validation oracle -- built through
 #          scripts/build-siblings.sh --only codetracer-trace-format-nim/ct-print.
