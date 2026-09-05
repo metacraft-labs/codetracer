@@ -81,9 +81,11 @@ for tool in "$@"; do
 	case "${tool}" in
 	python3:*)
 		module="${tool#*:}"
-		# A missing interpreter is reported under its own name by the
-		# bare entry; reporting it again here as a failed import would
-		# name the wrong thing.
+		# A missing interpreter is reported under its own name -- an
+		# unimportable module is the wrong thing to name when there is
+		# no interpreter to import it with. The list is de-duplicated
+		# before it is printed, so declaring `python3` and two
+		# `python3:<module>`s does not report `python3` three times.
 		if ! command -v python3 >/dev/null 2>&1; then
 			missing+=("python3")
 			continue
@@ -108,6 +110,20 @@ done
 if [ ${#missing[@]} -eq 0 ]; then
 	exit 0
 fi
+
+# De-duplicated, order preserved. `python3` can be reached both as a bare
+# requirement and as the interpreter of every `python3:<module>` one; naming it
+# three times would read as three separate absences.
+seen=""
+deduped=()
+for tool in "${missing[@]}"; do
+	case " ${seen} " in
+	*" ${tool} "*) continue ;;
+	esac
+	seen="${seen} ${tool}"
+	deduped+=("${tool}")
+done
+missing=("${deduped[@]}")
 
 {
 	echo
