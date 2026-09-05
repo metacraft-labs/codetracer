@@ -419,6 +419,18 @@ while [ "${trip}" -le "${trips}" ]; do
 	d_step="$(leg "${control}" "trip-${trip}-replay" '.stepButtonPresent')"
 	d_build="$(leg "${control}" "trip-${trip}-replay" '.buildButtonPresent')"
 	d_carets="$(num "$(leg "${control}" "trip-${trip}-step" '.caretPositions | length')")"
+	# THE SAMPLE SERIES, so the first step's repaint latency is visible rather
+	# than absorbed. The caret is polled until it leaves the previous position,
+	# so a leg that passes only because the repaint took seconds reads
+	# differently here from one that was prompt — the number of assertions is
+	# unchanged by this line, and so is what they require.
+	d_caretseries="$(leg "${control}" "trip-${trip}-step" \
+		'[.caretSamples[]? | "step\(.step): \(.settledMs)ms/\(.polls) polls \(if .moved then "moved" else "STILL" end)"] | join(", ")')"
+	# EVERY STEP MUST HAVE MOVED THE SESSION, not only the pixels. `moveLines`
+	# has been collected since this leg was written and never asserted on.
+	d_steps="$(num "$(leg "${control}" "trip-${trip}-step" '.moveLines | length')")"
+	d_moves="$(num "$(leg "${control}" "trip-${trip}-step" \
+		'[.moveLines[] | select(startswith("(no move reported"))] | length')")"
 
 	s_before="$(leg "${control}" "trip-${trip}-stop-gesture" '.surfaceBefore')"
 	s_clicked="$(leg "${control}" "trip-${trip}-stop-gesture" '(.gesture.clicked and .gesture.clickEventFired)')"
@@ -464,8 +476,22 @@ while [ "${trip}" -le "${trips}" ]; do
 		"trip ${trip}: and Build is GONE from the topbar (EMT-D12: rebuilding under a live replay invalidates its trace)"
 	ck "$([ "${d_step}" = true ] && echo ok || echo no)" \
 		"trip ${trip}: and the stepping controls are there"
+	note "trip ${trip}: caret settle — ${d_caretseries}"
 	ck "$([ "${d_carets}" -gt 1 ] && echo ok || echo no)" \
 		"trip ${trip}: stepping moved the painted caret through ${d_carets} position(s) — a live session, not a painted one"
+	# THE ENGINE-SIDE HALF OF THE SAME CLAIM, and the guard on the poll above.
+	#
+	# The caret arm is now allowed to WAIT for the repaint. On its own that
+	# would let a leg pass on a pixel that moved for a reason other than a step
+	# — a scroll, a resize, a relayout — since any second distinct position
+	# satisfies `> 1`. `ui/web_replay_host.nim` logs `codetracer-replay: move`
+	# on every `ct/complete-move`, whether or not the position changed, so
+	# requiring one per step is the independent half: the SESSION moved, not
+	# just the paint. Neither arm alone is sufficient and together they are
+	# stronger than the single arm was — a painted session fails the first, and
+	# a session whose pixels drift without stepping fails the second.
+	ck "$([ "${d_steps}" -gt 0 ] && [ "${d_moves}" -eq 0 ] && echo ok || echo no)" \
+		"trip ${trip}: and the engine reported a move for every one of ${d_steps} step(s) (${d_moves} unreported) — the session stepped, not just the paint"
 
 	# THE CONTROL THIS CAMPAIGN ADDED.
 	ck "$([ "${d_stop}" = true ] && echo ok || echo no)" \
@@ -678,7 +704,13 @@ echo "${checks} check(s), ${failures} failure(s)"
 # wrong, not the assertions. Editing the guard DOWN to meet a short tally is
 # the failure this guard exists to catch, and it would have cemented the four
 # checks' silence rather than reporting it.
-expect_count $((8 + 18 * trips + 3 + 1 + 4))
+#
+# 18 -> 19 PER TRIP. The per-trip block gained "the engine reported a move for
+# every step", the engine-side half of the claim the caret arm makes about
+# pixels. It is an assertion this file added, not a tally corrected to meet the
+# code, so the number goes UP with it: `grep -c '^\tck '` over the loop body is
+# 19 and over everything outside it is still 16.
+expect_count $((8 + 19 * trips + 3 + 1 + 4))
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — Run enters the debugger, Stop comes back, ${trips} times, and the edit survives"
 	exit 0

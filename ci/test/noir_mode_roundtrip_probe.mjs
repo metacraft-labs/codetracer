@@ -648,7 +648,12 @@ try {
       const tops = new Set();
       const first = await caretTops(page);
       if (first >= 0) tops.add(first);
+      // The position each step is measured AGAINST. Carried across steps so a
+      // step waits to leave where the previous one landed, rather than
+      // comparing against a value re-read after the move has already happened.
+      let lastTop = first;
       const moveLines = [];
+      const caretSamples = [];
       for (let i = 0; i < stepCount; i += 1) {
         const movesBefore = report.consoleMilestones.length;
         const c = await hitTestedClick(page, '#next-image', `${who}: step ${i + 1}`);
@@ -677,8 +682,51 @@ try {
           await page.waitForTimeout(100);
         }
         moveLines.push(moveLine || '(no move reported within 15s)');
-        const t = await caretTops(page);
-        if (t >= 0) tops.add(t);
+
+        // AND THEN WAIT FOR THE REPAINT, which is not the same event as the
+        // engine's report.
+        //
+        // `codetracer-replay: move` says the SESSION moved. The reading below
+        // is a PIXEL, and the pixel changes when Monaco repaints the
+        // highlighted line — strictly after the move is reported, by a margin
+        // that is largest on the first step of a fresh session, when the
+        // layout and the editor are still warming. A single read taken the
+        // instant the move lands therefore returns the PREVIOUS position's
+        // offset, and because `tops` is a Set, that collapses two distinct
+        // positions into one and the leg concludes the caret never moved.
+        //
+        // MEASURED TWICE, the same shape both times: trip 1 reported 1
+        // position while trips 2 and 3 reported 2, on 35a1673b7 and again on
+        // 1291fb97c's ancestor in run 33979389123. Only the first trip is ever
+        // wrong, which is the signature of a warm-up latency being sampled
+        // rather than of a session that is not live.
+        //
+        // So the caret is polled until it LEAVES the position it was at, or a
+        // deadline expires. The deadline is what keeps this a fix to the
+        // instrument: a caret that never moves still records its unchanged
+        // value, `tops` still does not grow, and the leg still fails. Nothing
+        // here widens what counts as a move.
+        const prevTop = lastTop;
+        const caretStart = Date.now();
+        const caretDeadline = caretStart + 5000;
+        let t = await caretTops(page);
+        let polls = 1;
+        while (t === prevTop && Date.now() < caretDeadline) {
+          await page.waitForTimeout(50);
+          t = await caretTops(page);
+          polls += 1;
+        }
+        const settledMs = Date.now() - caretStart;
+        if (t >= 0) {
+          tops.add(t);
+          lastTop = t;
+        }
+        // THE SERIES, so the first step's latency is visible rather than
+        // absorbed: a leg that passes only because the caret took four
+        // seconds to repaint says so here instead of reading like a prompt one.
+        caretSamples.push({
+          step: i + 1, polls, settledMs, top: t, moved: t !== prevTop,
+        });
       }
       report.legs.push({
         leg: `${prefix}-step`,
@@ -686,6 +734,7 @@ try {
         // Beside the pixels, so a failure says whether the move was never
         // reported or was reported and landed where it started.
         moveLines,
+        caretSamples,
       });
     }
 
