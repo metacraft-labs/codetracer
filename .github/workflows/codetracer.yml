@@ -4373,12 +4373,15 @@ jobs:
   # don't need FUSE in the runner.  See
   # scripts/test-appimage-cross-distro.sh.
   appimage-cross-distro:
-    # Self-hosted on the nested-Docker class: this job's core is a 5-distro
-    # Docker matrix (scripts/test-appimage-cross-distro.sh pulls
-    # ubuntu/debian/fedora/arch images and runs the AppImage inside each), and
-    # eph-linux-x64-nested is the Incus class that exposes an in-guest Docker
-    # daemon (security.nesting + fuse-overlayfs). aws-cli comes from nixpkgs.
-    runs-on: eph-linux-x64-nested
+    # Self-hosted: this job's core is a 5-distro Docker matrix
+    # (scripts/test-appimage-cross-distro.sh pulls ubuntu/debian/fedora/arch
+    # images and runs the AppImage inside each), so it needs an in-guest Docker
+    # daemon. Every `eph-linux-x64` container now provides one: the runner-image
+    # consolidation folded the retired nested golden's capability into the single
+    # `vmh-linux-runner` image (security.nesting + nested KVM + docker/fuse3
+    # baked), so nested Docker is no longer a separate class. aws-cli comes from
+    # nixpkgs.
+    runs-on: eph-linux-x64
     needs:
       - appimage-build
     strategy:
