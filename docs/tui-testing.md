@@ -193,6 +193,32 @@ nim c --path:src/frontend/viewmodel --path:../TermAssert/src \
       -r src/frontend/tui/tests/real_terminal/test_cross_tier_snapshot_equivalence.nim
 ```
 
+### What cross-tier equality cannot catch, and never will
+
+**Cross-tier equality is a DIFFERENTIAL check.** It compares two renderings of
+the *same* program: both tiers run the same `buildTree` over the same code under
+`app/`. So it is blind by construction to any defect the two renderings share.
+A wrong screen painted identically twice compares equal.
+
+This was measured rather than reasoned about. A mutation arm made
+`app/views/gutter.lineNumberStyle(gpUnverified)` return the VERIFIED style, so
+an `savUnverified` file rendered exactly like the recording's own copy — the one
+distinction the source-access seam exists to preserve. `runDualSnap` reported
+**0 divergences at both geometries, correctly**: both tiers painted
+`indexed:8`. What reddened was the assertion about what the colour MEANS —
+`cellAt(row, col).fg.idx == 3'u8` — and nothing else in the tree could have.
+
+> **A Tier-2 case that only compares the tiers asserts that the renderer is
+> faithful. It never asserts that the screen is right.** Every colour, glyph or
+> position a Tier-2 case relies on for its MEANING must also be asserted
+> ABSOLUTELY — `fg.idx == 3'u8`, not "the same as Tier 1".
+
+The corollary matters most where a pane's cross-tier case is the only Tier-2
+case it has, which the rule above makes the common shape: adding a pane to
+`runDualSnap` buys nothing about that pane's semantics. Semantics are Tier-1
+work — except the ones observable only as a real terminal's cell state, colour
+and attributes, and those need an absolute assertion here.
+
 ---
 
 ## Determinism: never sleep, never poll for a needle
@@ -351,7 +377,19 @@ answerable separately.
 `src/frontend/tui/tests/apps/` holds child apps, not tests. They are named
 `app_*.nim` so neither lane's discovery collects them; the Tier-2 suites
 compile them on demand through `dual_snap.compileChildApp`, which is
-timestamp-guarded against both the app source and `test_app_runtime.nim`.
+timestamp-guarded against the app source, `test_app_runtime.nim` **and every
+`.nim` under `app/`** (`dual_snap.newestSourceTime`).
+
+That last clause was added by CTUI-5 after it bit: a mutation arm edited
+`app/views/gutter.nim`, rebuilt, ran the Tier-2 suite and restored the file —
+and the next lane run reused the MUTATED binary, because neither the app source
+nor the runtime had changed. The suite reported a defect that no longer
+existed. The dangerous direction is the other one: a cross-tier comparison
+between a fresh Tier-1 model and a stale Tier-2 binary is a comparison of two
+different programs. Sibling libraries (`isonim-tui`, `TermAssert`) are
+deliberately **not** in the stamp — a child app draws `app/`, and rebuilding on
+every sibling edit would cost the lane a link per case for a dependency that
+moves far less often.
 
 ### Where the artifacts are
 
@@ -389,6 +427,22 @@ src/frontend/tui/
   tests/     Tier-1 suites, plus apps/ and real_terminal/.
   main.nim   wires host/ to app/ and nothing else.
 ```
+
+### The F10 step key
+
+`testing/test_app_runtime.nim` also recognises one INPUT sequence, `\x1b[21~`
+— xterm's F10, which is exactly what `TermAssert`'s `sendKey("f10")` writes.
+On it the runtime increments a step counter, rebuilds the tree and repaints,
+leaving the cursor back on the frame barrier. CTUI-5's Tier-2 test is specified
+as "step with `sendKey(\"f10\")`", and a snapshot app therefore has to be able
+to advance rather than only to paint.
+
+It is **not a flag** and adds nothing to any command line: `buildTree` gains an
+optional `step` parameter (`SteppedTreeBuilder`), and an app that ignores it
+paints the same tree however often F10 arrives. Under `--test-ipc` the child
+labels step 0 with the parent's own label and step *N* with `<label>-stepN`
+(`stepLabel`), so a parent driving F10 asks for the frame it wants BY NAME
+rather than by timing.
 
 ### Test-only flags on the snapshot runtime
 

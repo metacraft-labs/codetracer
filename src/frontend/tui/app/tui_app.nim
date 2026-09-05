@@ -66,12 +66,27 @@ type
     title*: string
       ## What the header names this window. A field rather than a constant so a
       ## host embedding the TUI can say what it is.
+    source*: SourcePaneModel
+      ## CTUI-5's source pane, as a value, for the `editor` rectangle.
+      ##
+      ## A FIELD RATHER THAN A `SourceVM` HANDLE, and that is the same split
+      ## `app/views/source_pane.nim` argues for at length: the view is a pure
+      ## function of a value, `app/source_binding.nim` is the only thing that
+      ## reads a ViewModel, and a host sets this once per frame from what the
+      ## binding produced. Empty by default, in which case the shell paints the
+      ## pane's generic title row exactly as it did before CTUI-5.
+    highlighting*: HighlighterCache
+      ## Parsed token spans, cached per `(path, generation, digest, window)`.
+      ## Owned by the application rather than created per frame, which is
+      ## CTUI-5's risk mitigation for tree-sitter cost; `nil` parses every
+      ## frame.
 
 proc newTuiApp*(title: string = "CodeTracer TUI"): TuiApp =
   ## An application with no sessions. Constructing it sends nothing anywhere
   ## and opens nothing: creation is passive, exactly as `newHeadlessApp` and
   ## `newDebuggerSession` are.
-  TuiApp(shell: newHeadlessApp(), title: title)
+  TuiApp(shell: newHeadlessApp(), title: title,
+         highlighting: newHighlighterCache())
 
 proc openSession*(app: TuiApp; backend: BackendService;
                   title: string = ""): HeadlessSessionSlot =
@@ -134,7 +149,9 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     header: header,
     status: initStatusBarModel(mode = umNormal, profile = selected),
     layout: (if active.isNil: profileLayout(selected) else: active.layout),
-    profile: selected)
+    profile: selected,
+    source: app.source,
+    highlighting: app.highlighting)
 
 proc renderScreen*(app: TuiApp; r: TerminalRenderer;
                    width, height: int): TerminalNode =

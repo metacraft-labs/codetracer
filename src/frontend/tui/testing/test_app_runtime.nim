@@ -121,6 +121,19 @@ import ../host/resize
 const
   TestAppCaptureByte* = 'S'
     ## What the parent sends to say "I have the whole frame; ask for it now".
+  TestAppStepKey* = "\x1b[21~"
+    ## xterm's F10, which is exactly what `TermAssert`'s `sendKey("f10")`
+    ## writes (`TermAssert/src/term_assert.nim:432`).
+    ##
+    ## CTUI-5's Tier-2 test is specified as "step with `sendKey(\"f10\")`", so
+    ## a snapshot app has to be able to ADVANCE rather than only to paint. The
+    ## runtime therefore recognises this one sequence, increments a step
+    ## counter and repaints; a builder that ignores its `step` argument behaves
+    ## exactly as it did before.
+    ##
+    ## THIS IS NOT A FLAG and adds nothing to any command line. `--test-ipc`,
+    ## `--never-settle` and `--reflow` remain the only three test-only flags,
+    ## which is what `tests/test_tui_build_prerequisites.nim` asserts about.
   TestAppQuitByte* = 'q'
   TestAppDeadlineSeconds* = 30
     ## A child that is never told anything must still die, or a failing test
@@ -160,6 +173,12 @@ type
       ## delivers the signal, and the child reads its new size back with
       ## `ioctl(TIOCGWINSZ)`. Nothing about that is observable from the
       ## in-process harness.
+
+  SteppedTreeBuilder* = proc(r: TerminalRenderer;
+                             cols, rows, step: int): TerminalNode {.closure.}
+    ## A tree that depends on the terminal's size AND on how many times the
+    ## parent has pressed F10. The most general shape; the two below are
+    ## implemented in terms of it so there is ONE paint path.
 
   SizedTreeBuilder* = proc(r: TerminalRenderer;
                            cols, rows: int): TerminalNode {.closure.}
@@ -345,7 +364,16 @@ proc resizeAckBytes*(cols, rows: int): string =
   ## unaffected.
   "\x1b[8;" & $rows & ";" & $cols & "t"
 
-proc runSnapshotApp*(build: SizedTreeBuilder; opts: TestAppOptions): int =
+proc stepLabel*(base: string; step: int): string =
+  ## The screenshot label the child asks for at step `step`.
+  ##
+  ## Step 0 keeps the parent's label unchanged, so every CTUI-2 and CTUI-3
+  ## suite that asks for `settled` still gets `settled`. Later steps append
+  ## `-stepN`, so a parent driving F10 can ask for the frame it wants by name
+  ## rather than by timing.
+  if step <= 0: base else: base & "-step" & $step
+
+proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions): int =
   ## Paint `build`'s tree at `opts.cols` x `opts.rows` — or, under `--reflow`,
   ## at whatever size the tty reports — then serve the parent until it says to
   ## quit. Returns the process's exit status; the caller is the only thing that
@@ -381,8 +409,9 @@ proc runSnapshotApp*(build: SizedTreeBuilder; opts: TestAppOptions): int =
     rows = size.rows
     wakeFd = resizeWakeFd()
 
+  var step = 0
   var h = newTerminalTestHarness(cols, rows)
-  h.mount(proc(r: TerminalRenderer): TerminalNode = build(r, cols, rows))
+  h.mount(proc(r: TerminalRenderer): TerminalNode = build(r, cols, rows, step))
   h.flush()
   emit(frameBytes(h.driver.buffer))
   # The cursor now rests at (rows-1, cols-1). That IS the barrier; see the
@@ -391,6 +420,11 @@ proc runSnapshotApp*(build: SizedTreeBuilder; opts: TestAppOptions): int =
 
   let deadline = getMonoTime() + initDuration(seconds = TestAppDeadlineSeconds)
   result = TestAppExitDeadline
+  # An escape sequence arrives one byte at a time through `readByteWithTimeout`,
+  # so the step key is accumulated rather than matched on a single read. Only a
+  # PREFIX of `TestAppStepKey` is retained: anything else resets the buffer, so
+  # a stray `\x1b` cannot swallow the quit byte that follows it.
+  var pendingKey = ""
   while getMonoTime() < deadline:
     let b = readByteWithTimeout(100, wakeFd)
     if b == TestAppReadEof:
@@ -408,11 +442,31 @@ proc runSnapshotApp*(build: SizedTreeBuilder; opts: TestAppOptions): int =
         emit(resizeAckBytes(cols, rows))
         h.dispose()
         h = newTerminalTestHarness(cols, rows)
-        h.mount(proc(r: TerminalRenderer): TerminalNode = build(r, cols, rows))
+        h.mount(proc(r: TerminalRenderer): TerminalNode =
+          build(r, cols, rows, step))
         h.flush()
         emit(frameBytes(h.driver.buffer))
       continue
     let ch = char(b)
+    if pendingKey.len > 0 or ch == '\x1b':
+      pendingKey.add ch
+      if pendingKey == TestAppStepKey:
+        pendingKey = ""
+        inc step
+        h.dispose()
+        h = newTerminalTestHarness(cols, rows)
+        h.mount(proc(r: TerminalRenderer): TerminalNode =
+          build(r, cols, rows, step))
+        h.flush()
+        emit(frameBytes(h.driver.buffer))
+        # The cursor is back on the barrier, so the parent's
+        # `waitForCompleteFrame` means "the NEW frame is complete".
+        continue
+      if TestAppStepKey.startsWith(pendingKey):
+        continue
+      pendingKey = ""
+      # Fall through: the byte that broke the prefix is still an ordinary
+      # byte and must be honoured, or a `q` after a stray escape would hang.
     if ch == TestAppQuitByte or b == 0x04:
       result = TestAppExitOk
       break
@@ -427,10 +481,17 @@ proc runSnapshotApp*(build: SizedTreeBuilder; opts: TestAppOptions): int =
         # the state "label never arrived" has to be distinguishable FROM a
         # hung child and FROM a socket that was never connected.
         continue
-      client.requestScreenshot(opts.label)
+      client.requestScreenshot(stepLabel(opts.label, step))
   h.dispose()
   if connected:
     client.close()
+
+proc runSnapshotApp*(build: SizedTreeBuilder; opts: TestAppOptions): int =
+  ## The SIZED shape, in terms of the stepped one. A builder that does not
+  ## depend on the step paints the same tree however often F10 is pressed.
+  runSnapshotApp(
+    proc(r: TerminalRenderer; cols, rows, step: int): TerminalNode =
+      build(r, cols, rows), opts)
 
 proc runSnapshotApp*(build: proc(r: TerminalRenderer): TerminalNode;
                      opts: TestAppOptions): int =
@@ -440,7 +501,7 @@ proc runSnapshotApp*(build: proc(r: TerminalRenderer): TerminalNode;
   runSnapshotApp(
     proc(r: TerminalRenderer; cols, rows: int): TerminalNode = build(r), opts)
 
-proc snapshotAppMain*(build: SizedTreeBuilder; args: seq[string]): int =
+proc snapshotAppMain*(build: SteppedTreeBuilder; args: seq[string]): int =
   ## `runSnapshotApp` plus argument parsing, as one function of `argv` that
   ## returns a status. Every `apps/*.nim` main block is one call to this.
   ##
@@ -454,6 +515,12 @@ proc snapshotAppMain*(build: SizedTreeBuilder; args: seq[string]): int =
   except TestAppUsageError as e:
     stderr.writeLine("snapshot-app: " & e.msg)
     TestAppExitUsage
+
+proc snapshotAppMain*(build: SizedTreeBuilder; args: seq[string]): int =
+  ## The SIZED shape of `snapshotAppMain`.
+  snapshotAppMain(
+    proc(r: TerminalRenderer; cols, rows, step: int): TerminalNode =
+      build(r, cols, rows), args)
 
 proc snapshotAppMain*(build: proc(r: TerminalRenderer): TerminalNode;
                       args: seq[string]): int =

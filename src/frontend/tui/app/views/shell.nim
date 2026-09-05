@@ -35,7 +35,7 @@
 ## an ordinary single-pane layout would be indistinguishable from a deliberate
 ## one, which is the failure the rule is written against.
 
-import std/[strutils, unicode]
+import std/strutils
 
 import isonim_tui
 
@@ -43,10 +43,13 @@ import headless_app/layout_model
 
 import ../layout/profile
 import ../layout/project
+import ../syntax/highlighter
 import ./header
+import ./source_pane
 import ./status_bar
+import ./styled_row
 
-export header, status_bar, profile, project
+export header, status_bar, profile, project, source_pane, styled_row
 
 type
   ShellModel* = object
@@ -61,11 +64,29 @@ type
       ## load-bearing contract — and a tree rebuilt from the profile on every
       ## frame would throw the active tab away on the next repaint.
     profile*: LayoutProfile
+    source*: SourcePaneModel
+      ## CTUI-5's source pane, as a value.
+      ##
+      ## EMPTY BY DEFAULT, and that is what keeps CTUI-3's screen unchanged:
+      ## `paintPane` delegates the `editor` rectangle to
+      ## `app/views/source_pane.nim` only when `source.path` is non-empty, so
+      ## a shell built with no session open paints exactly the title row it
+      ## painted before this milestone. `app_shell.nim`'s cross-tier golden is
+      ## therefore the same screen it was, and CTUI-3's suites still read it.
+    highlighting*: HighlighterCache
+      ## CTUI-5's risk mitigation, carried on the model rather than created per
+      ## frame: "parse once per (path, generation) and cache the token spans".
+      ## `nil` means parse every frame, which is what the cold-parse benchmark
+      ## measures.
 
   ShellScreen* = object
     ## One painted frame, plus the geometry it was painted from, so a test that
     ## reads a row can say which pane owns it without projecting again.
     rows*: seq[string]
+    styledRows*: seq[StyledRow]
+      ## The same rows, carrying the style CTUI-5's panes paint with. `rows` is
+      ## the text of exactly these, so a suite that asserts on text and one
+      ## that asserts on colour are reading one screen rather than two.
     body*: CellArea
     projection*: Projection
 
@@ -132,44 +153,15 @@ proc reprofile*(model: var ShellModel; width, height: int): bool =
 # The cell grid
 # ---------------------------------------------------------------------------
 
-type Grid = object
-  ## A mutable screen of one-cell strings. A `seq[string]` per row rather than
-  ## a `string` per row, because overwriting the fourth CELL of a row that
-  ## contains a three-byte box-drawing glyph is not a byte index.
-  width: int
-  height: int
-  cells: seq[string]
-
-proc newGrid(width, height: int): Grid =
-  result = Grid(width: max(0, width), height: max(0, height), cells: @[])
-  result.cells = newSeq[string](result.width * result.height)
-  for i in 0 ..< result.cells.len:
-    result.cells[i] = " "
-
-proc paint(g: var Grid; row, col: int; text: string) =
-  ## Write `text` starting at `(row, col)`, clipped at the grid's edges.
-  ##
-  ## Wide glyphs are written into their first cell and a ZERO-WIDTH marker into
-  ## the second, so the row's cell count stays right. This module only paints
-  ## width-1 glyphs today; the branch exists so that a pane which starts
-  ## painting a CJK identifier does not silently shift every cell after it.
-  if row < 0 or row >= g.height:
-    return
-  var c = col
-  for r in runes(text):
-    if c >= g.width:
-      break
-    let w = displayWidth($r)
-    if c >= 0:
-      g.cells[row * g.width + c] = $r
-      if w == 2 and c + 1 < g.width:
-        g.cells[row * g.width + c + 1] = ""
-    c += max(1, w)
-
-proc rowText(g: Grid; row: int): string =
-  result = ""
-  for c in 0 ..< g.width:
-    result.add g.cells[row * g.width + c]
+# CTUI-5 REPLACED THIS GRID'S CELL TYPE, AND KEPT ITS TEXT.
+#
+# CTUI-3's grid held one-cell STRINGS; `app/views/styled_row.StyledGrid` holds
+# a string AND a `CellStyle` per cell, for the reason that module's header
+# gives: a string cannot say that column 4 is a red breakpoint dot. Its
+# `rowText` is byte-identical to the one this file used to carry, so every
+# CTUI-3 assertion written against `shellRows` reads the same screen, and a
+# screen with no styled pane on it still fuses into one `LayoutEntry` per row
+# and emits the same bytes.
 
 # ---------------------------------------------------------------------------
 # Pane painting
@@ -230,7 +222,7 @@ proc timelineScrubber*(tick, totalTicks, width: int): string =
   line.add "]"
   line
 
-proc paintPane(g: var Grid; region: PaneRegion; model: ShellModel;
+proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea) =
   ## One pane, into its own rectangle and no other.
   let a = region.area
@@ -239,7 +231,17 @@ proc paintPane(g: var Grid; region: PaneRegion; model: ShellModel;
   let flushRight = a.col + a.width >= body.col + body.width
   let inner = if flushRight: a.width else: a.width - 1
 
-  if region.activeTab >= 0 and region.tabs.len > 0:
+  # THE SOURCE PANE OWNS ITS WHOLE RECTANGLE, title row included. CTUI-5's
+  # provenance marker lives in that title row, so a shell that painted the
+  # generic `SOURCE ────` title first and let the pane fill the body would
+  # render a verified file and an unverified one identically at the top of the
+  # pane — the exact thing the milestone forbids.
+  if region.pane == paneEditor and not model.source.isEmpty and
+     region.activeTab < 0:
+    discard paintSourcePane(
+      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
+      model.source, model.highlighting)
+  elif region.activeTab >= 0 and region.tabs.len > 0:
     g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
   else:
     g.paint(a.row, a.col, titleRow(paneTitle(region.pane, region.title), inner))
@@ -267,11 +269,12 @@ proc shellScreen*(model: ShellModel; width, height: int;
   ## they were painted from.
   let body = bodyArea(width, height)
   let projection = projectLayout(model.layout, body, policy)
-  result = ShellScreen(rows: @[], body: body, projection: projection)
+  result = ShellScreen(rows: @[], styledRows: @[], body: body,
+                       projection: projection)
   if width <= 0 or height <= 0:
     return
 
-  var g = newGrid(width, height)
+  var g = newStyledGrid(width, height)
   g.paint(0, 0, headerText(model.header, width))
 
   for region in projection.regions:
@@ -286,13 +289,20 @@ proc shellScreen*(model: ShellModel; width, height: int;
     g.paint(height - 1, 0, statusBarText(status, width))
 
   for row in 0 ..< height:
-    result.rows.add rowText(g, row)
+    result.rows.add g.rowText(row)
+    result.styledRows.add g.rowSpans(row)
 
 proc shellRows*(model: ShellModel; width, height: int;
                 policy = DefaultProjectionPolicy): seq[string] =
-  ## Just the rows. The shape every assertion in this milestone is written
-  ## against.
+  ## Just the rows, as text. The shape every CTUI-3 assertion is written
+  ## against, unchanged by CTUI-5.
   shellScreen(model, width, height, policy).rows
+
+proc shellStyledRows*(model: ShellModel; width, height: int;
+                      policy = DefaultProjectionPolicy): seq[StyledRow] =
+  ## The rows with their style. What CTUI-5's pane assertions and the component
+  ## tree below both read.
+  shellScreen(model, width, height, policy).styledRows
 
 proc renderShellTree*(model: ShellModel; r: TerminalRenderer;
                       width, height: int;
@@ -302,9 +312,4 @@ proc renderShellTree*(model: ShellModel; r: TerminalRenderer;
   ## Built through the renderer's own element API rather than the `ui` DSL, for
   ## the reason `app/tui_app.nim` records — this milestone's compile must not
   ## depend on `isonim`'s tailwind style map being generated.
-  let root = r.createElement("div")
-  for line in shellRows(model, width, height, policy):
-    let rowNode = r.createElement("div")
-    r.appendChild(rowNode, r.createTextNode(line))
-    r.appendChild(root, rowNode)
-  root
+  styledRowsTree(r, shellStyledRows(model, width, height, policy))

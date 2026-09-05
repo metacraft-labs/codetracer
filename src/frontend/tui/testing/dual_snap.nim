@@ -723,6 +723,40 @@ proc childCompileCommand*(stem: string): string =
   cmd.add " " & appSourcePath(stem).quoteShell
   cmd
 
+proc newestSourceTime*(stem: string): float =
+  ## The newest modification time among everything a child app is built from.
+  ##
+  ## THE APP SOURCE AND THE RUNTIME ARE NOT ENOUGH, and that was measured
+  ## rather than reasoned about. CTUI-5's `app_source_pane` is a thin wrapper
+  ## over `app/views/source_pane.nim`; a mutation arm changed
+  ## `app/views/gutter.nim`, rebuilt and ran the Tier-2 suite, restored the
+  ## file — and the NEXT lane run reused the mutated binary, because neither
+  ## the app source nor `test_app_runtime.nim` had been touched. The suite went
+  ## red on the restored tree, reporting a defect that no longer existed.
+  ##
+  ## The failure mode this closes is worse than the false red that exposed it:
+  ## a cross-tier comparison between a FRESH Tier-1 model and a STALE Tier-2
+  ## binary is a comparison of two different programs, and it fails — or
+  ## passes — for a reason that has nothing to do with the renderer.
+  ##
+  ## So the whole of `app/` is in the stamp. `app/` is what a child app draws;
+  ## the sibling libraries are not, and a rebuild on every `isonim-tui` edit
+  ## would cost the lane a link per case for a dependency that changes far less
+  ## often — that residue is recorded here rather than papered over.
+  result = 0.0
+  let src = appSourcePath(stem)
+  if fileExists(src):
+    result = getFileInfo(src).lastWriteTime.toUnixFloat()
+  let tui = repoRoot() / "src" / "frontend" / "tui"
+  let runtime = tui / "testing" / "test_app_runtime.nim"
+  if fileExists(runtime):
+    result = max(result, getFileInfo(runtime).lastWriteTime.toUnixFloat())
+  let appDir = tui / "app"
+  if dirExists(appDir):
+    for path in walkDirRec(appDir):
+      if path.endsWith(".nim"):
+        result = max(result, getFileInfo(path).lastWriteTime.toUnixFloat())
+
 proc compileChildApp*(stem: string) =
   ## Compile `tests/apps/<stem>.nim` if the binary is missing or older than any
   ## of its sources. Never skips on failure: a child that will not compile is
@@ -730,16 +764,11 @@ proc compileChildApp*(stem: string) =
   let src = appSourcePath(stem)
   if not fileExists(src):
     raise newException(DualSnapError, "child app source missing: " & src)
-  let runtime = repoRoot() / "src" / "frontend" / "tui" / "testing" /
-                "test_app_runtime.nim"
   let bin = appBinaryPath(stem)
   createDir(bin.parentDir)
   if fileExists(bin):
     let binTime = getFileInfo(bin).lastWriteTime.toUnixFloat()
-    var newest = getFileInfo(src).lastWriteTime.toUnixFloat()
-    if fileExists(runtime):
-      newest = max(newest, getFileInfo(runtime).lastWriteTime.toUnixFloat())
-    if binTime > newest: return
+    if binTime > newestSourceTime(stem): return
   let (output, code) = execCmdEx(childCompileCommand(stem))
   if code != 0:
     raise newException(DualSnapError,
