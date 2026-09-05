@@ -307,6 +307,7 @@ try {
     }, { x: row.x, y: row.y });
 
     const tabsBefore = await openTabTitles();
+    const caretBefore = await page.evaluate(readCaret);
     await page.mouse.click(row.x, row.y);
     await page.waitForTimeout(1200);
     const after = await page.evaluate(() => ({
@@ -316,17 +317,47 @@ try {
       errors: (window.__jfErrors || []).slice(),
     }));
     const tabsAfter = await openTabTitles();
+    const caretAfter = await page.evaluate(readCaret);
 
     const sawClick = after.events.some((e) => e.type === 'click');
     const onRow = after.events.some((e) => e.type === 'click'
       && (String(e.target).includes('jstree') || String(e.path0).includes('jstree')));
+    // Kept as EVIDENCE, no longer as the verdict — see below.
     const opened = tabsAfter.length > tabsBefore.length
       || JSON.stringify(tabsAfter) !== JSON.stringify(tabsBefore);
+
+    // THE CLAIM IS "THE CLICKED FILE IS NOW THE ACTIVE EDITOR", and it is read
+    // off `data.services.editor.active` — the application's OWN notion of the
+    // active editor, the same field the jump assertions in this file already
+    // turn on.
+    //
+    // It used to be "the list of open tab titles changed", which is a proxy
+    // that CANNOT EXPRESS THE CLAIM IN EITHER DIRECTION:
+    //
+    //   * it calls a WORKING click a failure whenever the file's tab is
+    //     already open, because activating an existing tab adds no title and
+    //     reorders nothing. That is not a rare corner: this probe clicks every
+    //     row once in Edit mode before it ever reaches Debug mode, so by then
+    //     the tabs it is about to click are the ones it opened itself.
+    //   * it calls a BROKEN click a pass whenever the titles move for an
+    //     unrelated reason — a pane opening a listing of its own, say.
+    //
+    // The gate compensated with `badclicks <= 1`, a threshold whose own
+    // comment claimed rows were "excluded by name rather than by fudging the
+    // verdict" while the code excluded nothing and fudged by count. One extra
+    // already-open tab anywhere in the layout therefore reads as a product
+    // defect, and one genuinely dead row reads as fine. Asserting the active
+    // editor needs no threshold and no exclusions: activating an already-open
+    // tab and opening a fresh one are both simply correct.
+    const baseName = (k) => String(k || '').split(/[\\/]/).pop();
+    const activeBefore = baseName(caretBefore && caretBefore.activeKey);
+    const activeAfter = baseName(caretAfter && caretAfter.activeKey);
+    const showsClickedFile = activeAfter === row.text;
 
     let bucket;
     if (!sawClick) bucket = 'A: no document-level click at all';
     else if (!onRow) bucket = 'B: click arrived, target is NOT the tree row';
-    else if (!opened) bucket = 'C: click arrived on the row, tab did not change';
+    else if (!showsClickedFile) bucket = 'C: click arrived on the row, the file did not become active';
     else bucket = 'OK';
 
     return {
@@ -342,6 +373,9 @@ try {
       tabsBefore,
       tabsAfter,
       opened,
+      activeBefore,
+      activeAfter,
+      showsClickedFile,
       bucket,
     };
   };

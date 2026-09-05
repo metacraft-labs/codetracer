@@ -286,14 +286,32 @@ else
 fi
 
 # --- the file tree, in Debug mode -------------------------------------------
-# `OK` or an already-active tab are both correct outcomes; a click that reached
-# the row and changed nothing is the reported defect. Rows whose tab is already
-# the active one are excluded by name rather than by fudging the verdict.
+# THE CLAIM IS THE USER'S: click a file in the tree, and that file is what the
+# editor shows. Read off `data.services.editor.active`, so activating a tab
+# that is already open and opening a fresh one both count — they are the same
+# thing to the person clicking.
+#
+# This replaced "the list of open tab titles changed", which could not express
+# that claim in either direction and needed a `<= 1` threshold to limp: the
+# probe clicks every row once in Edit mode before it reaches Debug mode, so the
+# tabs it then clicks are already open and a WORKING click adds no title. The
+# threshold's own comment said rows were "excluded by name rather than by
+# fudging the verdict" while the code excluded nothing and fudged by count, so
+# one extra already-open tab read as a defect and one dead row read as fine.
+#
+# NON-VACUITY: a run that clicked nothing would satisfy "no bad clicks", so the
+# number of rows actually measured is part of the assertion.
+measured="$(q 'len(d.get("treeClicksDebugMode", []))')"
 badclicks="$(q 'sum(1 for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C"))')"
-if [ "${badclicks}" -le 1 ]; then
-	ck ok "[tree-debug] clicks in the file tree opened their file in Debug mode (${badclicks} no-op, the already-active tab)"
+missed="$(q 'sum(1 for c in d.get("treeClicksDebugMode", []) if c.get("bucket","")[:1] in ("A","B"))')"
+if [ "${measured}" -lt 4 ]; then
+	ck fail "[tree-debug] only ${measured} file row(s) were clicked in Debug mode; this run cannot speak to the report"
+elif [ "${missed}" -gt 0 ]; then
+	ck fail "[tree-debug] ${missed} of ${measured} clicks never reached their row: $(q '[(c["row"], c["bucket"], c.get("elementFromPointBefore")) for c in d.get("treeClicksDebugMode", []) if c.get("bucket","")[:1] in ("A","B")]')"
+elif [ "${badclicks}" -gt 0 ]; then
+	ck fail "[tree-debug] ${badclicks} of ${measured} clicks reached the row and did NOT make their file active: $(q '[(c["row"], c.get("activeBefore"), c.get("activeAfter")) for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C")]')"
 else
-	ck fail "[tree-debug] ${badclicks} clicks in the file tree reached the row and opened nothing: $(q '[c["row"] for c in d.get("treeClicksDebugMode", []) if c.get("bucket","").startswith("C")]')"
+	ck ok "[tree-debug] all ${measured} file-tree clicks made their file the active editor in Debug mode"
 fi
 
 # --- the console ------------------------------------------------------------
