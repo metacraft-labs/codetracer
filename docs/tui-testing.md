@@ -328,9 +328,18 @@ just test-tui-real-terminal     # Tier 2 (depends on build-tui)
 ```
 
 Both lanes are discovered, not enumerated: `ci/lib/test-lane-files.sh` globs
-`src/frontend/tui/tests/test_*.nim` one level deep for `tui`, and finds
+`src/frontend/tui/tests/test_*.nim` **and** `src/frontend/tui/app/tests/test_*.nim`
+one level deep for `tui`, and finds
 `src/frontend/tui/tests/real_terminal/test_*.nim` recursively for
 `tui-real-terminal`. Adding a suite needs no edit there.
+
+`app/tests/` is a Tier-1 directory with one extra property, and it is the
+reason CTUI-3's layout suites live there rather than in `tests/`:
+**`tests/test_tui_facade_boundary.nim` walks every `.nim` file under `app/`,
+including those.** A suite placed there cannot import `host/`, `std/posix` or
+`std/osproc` without reddening that guard. So "the reflow suite must not reach
+for SIGWINCH" is enforced structurally instead of by agreement — the signal is
+asserted at Tier 2, where a signal exists.
 
 The split matters and is deliberate: only the Tier-2 lane carries
 `--path:../TermAssert/src --path:../TermAssertClient/src
@@ -368,14 +377,29 @@ src/frontend/tui/
   app/       SDK-CONSUMER. codetracer_embed, headless_app, isonim, isonim_tui,
              std/* that touch neither a process nor a terminal. Covered by
              ci/test/sdk-facade-boundary.sh through a .sdk-consumer marker.
+    layout/  profile selection (pure) and the LayoutNode -> Yoga projection.
+    views/   header, status bar, shell — every one a pure function to text.
+    tests/   Tier-1 suites that MUST obey the app/ layer rule (see above).
   host/      NATIVE HOST. The only place allowed to reach backend/stdio_backend
-             and viewmodel/headless_session (osproc, pty, termios, signals).
-             Exempt from the facade guard, and the exemption is CHECKED.
+             and viewmodel/headless_session (osproc, pty, termios, signals),
+             and the owner of SIGWINCH (host/resize.nim). Exempt from the
+             facade guard, and the exemption is CHECKED.
   testing/   TEST-ONLY. Needs app/'s capability AND host/'s, and the shipped
              binary links none of it. Not reachable from main.nim — asserted.
   tests/     Tier-1 suites, plus apps/ and real_terminal/.
   main.nim   wires host/ to app/ and nothing else.
 ```
+
+### Test-only flags on the snapshot runtime
+
+`testing/test_app_runtime.nim` parses three flags no shipped binary may know:
+`--test-ipc` (CTUI-2), `--never-settle` (CTUI-2) and `--reflow` (CTUI-3).
+`--reflow` is what installs `host/resize.nim`'s SIGWINCH watcher in a child
+app, takes the geometry from `ioctl(TIOCGWINSZ)` rather than from `--cols` /
+`--rows`, and repaints on a kernel-delivered resize. All three are asserted to
+be **refused by `app/cli.parseTuiCommand`, absent from `TuiHelpText`, and
+unreachable from `main.nim`'s import closure** in
+`tests/test_tui_build_prerequisites.nim`.
 
 `tests/test_tui_facade_boundary.nim` walks `app/`'s import graph structurally —
 imports resolved to files, with seven mutation arms — and

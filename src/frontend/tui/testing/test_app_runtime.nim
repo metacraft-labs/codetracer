@@ -109,6 +109,15 @@ import std/[monotimes, os, posix, strutils, termios, times]
 import isonim_tui
 import term_assert_client
 
+# THE HOST LAYER, IMPORTED FROM `testing/` AND FROM NOWHERE ELSE A BINARY
+# SHIPS. CTUI-3 puts SIGWINCH in `host/resize.nim` because a signal handler and
+# an `ioctl` are host capabilities; this directory is the third layer that is
+# allowed to need both halves (see this module's header), and
+# `tests/test_tui_build_prerequisites.nim` asserts that nothing under
+# `testing/` is reachable from `main.nim`, so the release binary links none of
+# it.
+import ../host/resize
+
 const
   TestAppCaptureByte* = 'S'
     ## What the parent sends to say "I have the whole frame; ask for it now".
@@ -140,6 +149,28 @@ type
       ## False under `--never-settle`: paint the frame, park the cursor, and
       ## then decline to ask for a screenshot however often it is asked. The
       ## negative arm of the IPC suite.
+    reflow*: bool
+      ## `--reflow`. TEST-ONLY, exactly like `--test-ipc`: install
+      ## `host/resize.nim`'s SIGWINCH watcher, take the initial geometry from
+      ## the tty rather than from `--cols` / `--rows`, and repaint at the new
+      ## size whenever the kernel says the window changed.
+      ##
+      ## This is what makes CTUI-3's "the only place SIGWINCH is genuinely
+      ## exercised" a real claim: the parent calls `setWindowSize`, the KERNEL
+      ## delivers the signal, and the child reads its new size back with
+      ## `ioctl(TIOCGWINSZ)`. Nothing about that is observable from the
+      ## in-process harness.
+
+  SizedTreeBuilder* = proc(r: TerminalRenderer;
+                           cols, rows: int): TerminalNode {.closure.}
+    ## A tree that depends on the terminal's size.
+    ##
+    ## The fixed-size `buildTree*(r)` of CTUI-2's snapshot apps cannot express a
+    ## responsive shell: `app/views/shell.nim` composes each screen row for a
+    ## known width, so the SIZE is an input to the tree rather than something
+    ## the compositor applies afterwards. Both shapes are supported, and the
+    ## fixed one is implemented in terms of this one so there is a single paint
+    ## path.
 
   TestAppUsageError* = object of CatchableError
 
@@ -147,7 +178,7 @@ const DefaultTestAppLabel* = "settled"
 
 proc initTestAppOptions*(cols = 80; rows = 24): TestAppOptions =
   TestAppOptions(cols: cols, rows: rows, testIpc: false,
-                 label: DefaultTestAppLabel, settle: true)
+                 label: DefaultTestAppLabel, settle: true, reflow: false)
 
 proc parseIntFlag(arg, name: string): int =
   let raw = arg[name.len + 1 .. ^1]
@@ -177,6 +208,8 @@ proc parseTestAppArgs*(args: openArray[string]): TestAppOptions =
         raise newException(TestAppUsageError, "--label= expects a name")
     elif arg == "--never-settle":
       result.settle = false
+    elif arg == "--reflow":
+      result.reflow = true
     else:
       raise newException(TestAppUsageError, "unknown argument '" & arg & "'")
   if not result.testIpc and not result.settle:
@@ -224,20 +257,44 @@ proc emit(s: string) =
     if n == 0: return
     off += n
 
-proc readByteWithTimeout(timeoutMs: int): int =
-  ## One byte from fd 0, or -1 on timeout, or -2 on EOF.
+const
+  TestAppReadTimeout* = -1
+  TestAppReadEof* = -2
+  TestAppReadWoke* = -3
+    ## `wakeFd` became readable. Returned rather than handled here so the
+    ## caller — which owns the `ResizeWatcher` — is the one that drains the
+    ## self-pipe, and so "a signal arrived" and "a byte arrived" are two
+    ## different answers rather than one timeout.
+
+proc readByteWithTimeout(timeoutMs: int; wakeFd: cint = -1): int =
+  ## One byte from fd 0, or `TestAppReadTimeout` / `TestAppReadEof` /
+  ## `TestAppReadWoke`.
+  ##
+  ## `wakeFd` is `host/resize.resizeWakeFd()` — the read end of the SIGWINCH
+  ## self-pipe — when the caller is reflowing. Selecting on it rather than
+  ## polling on the timeout is what keeps a reflow's latency the kernel's
+  ## rather than this loop's: with a 100 ms poll every measured resize would
+  ## carry up to 100 ms of this function in it, and CTUI-14's budget for the
+  ## whole reflow is 20.
   var rs: TFdSet
   FD_ZERO(rs)
   FD_SET(0.cint, rs)
+  var maxFd = 0.cint
+  if wakeFd >= 0:
+    FD_SET(wakeFd, rs)
+    if wakeFd > maxFd: maxFd = wakeFd
   var tv: Timeval
   tv.tv_sec = posix.Time(timeoutMs div 1000)
   tv.tv_usec = clong((timeoutMs mod 1000) * 1000)
-  let ready = posix.select(1.cint, addr rs, nil, nil, addr tv)
-  if ready <= 0: return -1
+  let ready = posix.select(maxFd + 1, addr rs, nil, nil, addr tv)
+  if ready <= 0: return TestAppReadTimeout
+  if wakeFd >= 0 and FD_ISSET(wakeFd, rs) != 0 and FD_ISSET(0.cint, rs) == 0:
+    return TestAppReadWoke
+  if FD_ISSET(0.cint, rs) == 0: return TestAppReadWoke
   var b: char
   let got = posix.read(0.cint, addr b, 1)
-  if got == 0: return -2
-  if got < 0: return -1
+  if got == 0: return TestAppReadEof
+  if got < 0: return TestAppReadTimeout
   int(ord(b))
 
 # ---------------------------------------------------------------------------
@@ -268,11 +325,31 @@ proc frameBytes*(buf: ScreenBuffer): string =
 # the runtime
 # ---------------------------------------------------------------------------
 
-proc runSnapshotApp*(build: proc(r: TerminalRenderer): TerminalNode;
-                     opts: TestAppOptions): int =
-  ## Paint `build`'s tree once at `opts.cols` x `opts.rows`, then serve the
-  ## parent until it says to quit. Returns the process's exit status; the
-  ## caller is the only thing that quits.
+proc resizeAckBytes*(cols, rows: int): string =
+  ## `CSI 8 ; rows ; cols t` — what the child emits after a SIGWINCH, before
+  ## repainting.
+  ##
+  ## WHY A CHILD EMITS A WINDOW-OP AT ALL. `TermAssert.assertWindowResize` reads
+  ## libvterm's window-op log, and that log is filled ONLY by sequences the
+  ## child writes — `nim-libvterm`'s `decodeWindowOp`, reached from
+  ## `handleCsi`. `TuiTestSession.setWindowSize` resizes the pty and the
+  ## harness's own screen model and records nothing, so an assertion made after
+  ## it alone would be an assertion about the HARNESS.
+  ##
+  ## So this sequence is the child's ACKNOWLEDGEMENT of the size it read back
+  ## from `ioctl(TIOCGWINSZ)` after the kernel delivered SIGWINCH. Asserting on
+  ## it is therefore a statement about the signal path end to end: the parent
+  ## resized the pty, the kernel signalled, `host/resize.nim` woke on its
+  ## self-pipe, the ioctl returned these numbers, and they are the numbers the
+  ## parent asked for. It moves no cursor, so the frame barrier below is
+  ## unaffected.
+  "\x1b[8;" & $rows & ";" & $cols & "t"
+
+proc runSnapshotApp*(build: SizedTreeBuilder; opts: TestAppOptions): int =
+  ## Paint `build`'s tree at `opts.cols` x `opts.rows` — or, under `--reflow`,
+  ## at whatever size the tty reports — then serve the parent until it says to
+  ## quit. Returns the process's exit status; the caller is the only thing that
+  ## quits.
   var client: TuiTestClient
   var connected = false
   if opts.testIpc:
@@ -289,8 +366,23 @@ proc runSnapshotApp*(build: proc(r: TerminalRenderer): TerminalNode;
   enterRawMode()
   defer: leaveRawMode()
 
-  let h = newTerminalTestHarness(opts.cols, opts.rows)
-  h.mount(build)
+  # UNDER `--reflow` THE SIZE COMES FROM THE KERNEL, not from the command line.
+  # That is the whole point: the parent's `setWindowSize` changes what
+  # `ioctl(TIOCGWINSZ)` returns, and a child that trusted `--cols` would reflow
+  # to a number the parent told it rather than to the one the terminal has.
+  var watcher: ResizeWatcher = nil
+  var cols = opts.cols
+  var rows = opts.rows
+  var wakeFd = cint(-1)
+  if opts.reflow:
+    watcher = newResizeWatcher()
+    let size = watcher.currentSize()
+    cols = size.cols
+    rows = size.rows
+    wakeFd = resizeWakeFd()
+
+  var h = newTerminalTestHarness(cols, rows)
+  h.mount(proc(r: TerminalRenderer): TerminalNode = build(r, cols, rows))
   h.flush()
   emit(frameBytes(h.driver.buffer))
   # The cursor now rests at (rows-1, cols-1). That IS the barrier; see the
@@ -300,11 +392,26 @@ proc runSnapshotApp*(build: proc(r: TerminalRenderer): TerminalNode;
   let deadline = getMonoTime() + initDuration(seconds = TestAppDeadlineSeconds)
   result = TestAppExitDeadline
   while getMonoTime() < deadline:
-    let b = readByteWithTimeout(100)
-    if b == -2:
+    let b = readByteWithTimeout(100, wakeFd)
+    if b == TestAppReadEof:
       result = TestAppExitOk
       break
-    if b < 0: continue
+    if b < 0:
+      if not watcher.isNil and watcher.pump():
+        # A REAL SIGWINCH, folded in. Acknowledge the size the ioctl reported,
+        # then repaint the whole frame at it — in that order, because the
+        # acknowledgement must not land after the frame and move the cursor
+        # off the barrier.
+        let size = watcher.currentSize()
+        cols = size.cols
+        rows = size.rows
+        emit(resizeAckBytes(cols, rows))
+        h.dispose()
+        h = newTerminalTestHarness(cols, rows)
+        h.mount(proc(r: TerminalRenderer): TerminalNode = build(r, cols, rows))
+        h.flush()
+        emit(frameBytes(h.driver.buffer))
+      continue
     let ch = char(b)
     if ch == TestAppQuitByte or b == 0x04:
       result = TestAppExitOk
@@ -325,8 +432,15 @@ proc runSnapshotApp*(build: proc(r: TerminalRenderer): TerminalNode;
   if connected:
     client.close()
 
-proc snapshotAppMain*(build: proc(r: TerminalRenderer): TerminalNode;
-                      args: seq[string]): int =
+proc runSnapshotApp*(build: proc(r: TerminalRenderer): TerminalNode;
+                     opts: TestAppOptions): int =
+  ## The fixed-size shape, in terms of the sized one. Two paint paths would be
+  ## two things to keep true, and the CTUI-2 apps are the ones the cross-tier
+  ## equality rests on.
+  runSnapshotApp(
+    proc(r: TerminalRenderer; cols, rows: int): TerminalNode = build(r), opts)
+
+proc snapshotAppMain*(build: SizedTreeBuilder; args: seq[string]): int =
   ## `runSnapshotApp` plus argument parsing, as one function of `argv` that
   ## returns a status. Every `apps/*.nim` main block is one call to this.
   ##
@@ -340,3 +454,9 @@ proc snapshotAppMain*(build: proc(r: TerminalRenderer): TerminalNode;
   except TestAppUsageError as e:
     stderr.writeLine("snapshot-app: " & e.msg)
     TestAppExitUsage
+
+proc snapshotAppMain*(build: proc(r: TerminalRenderer): TerminalNode;
+                      args: seq[string]): int =
+  ## The fixed-size shape of `snapshotAppMain`.
+  snapshotAppMain(
+    proc(r: TerminalRenderer; cols, rows: int): TerminalNode = build(r), args)

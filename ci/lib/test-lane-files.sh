@@ -1038,6 +1038,15 @@ test_lane_files() {
 		# "asserted in process" and "asserted on a terminal" answerable
 		# separately.
 		_tlf_glob src/frontend/tui/tests 'test_*.nim'
+		# CTUI-3's three layout suites live under `app/tests/` because the
+		# milestone names them there, and the placement is load-bearing rather
+		# than cosmetic: `tests/test_tui_facade_boundary.nim` walks EVERY
+		# `.nim` file under `app/`, so a suite that sat there and reached for
+		# `host/` or `std/posix` would redden that guard. That is exactly the
+		# rule CTUI-3 asks for — SIGWINCH belongs to `host/resize.nim`, and the
+		# Tier-1 reflow suite must therefore go through `h.resize` instead.
+		# Same Tier-1 flags as the directory above; still no TermAssert.
+		_tlf_glob src/frontend/tui/app/tests 'test_*.nim'
 		;;
 
 	tui-real-terminal)

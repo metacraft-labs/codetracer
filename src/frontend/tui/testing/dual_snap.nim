@@ -877,6 +877,20 @@ proc runDualSnap*(stem: string; build: proc(r: TerminalRenderer): TerminalNode;
 
   result.divergences = compareSnapshotDirs(result.tier1Dir, result.tier2Dir)
 
+proc runDualSnap*(stem: string;
+                  build: proc(r: TerminalRenderer;
+                              cols, rows: int): TerminalNode;
+                  cols, rows: int): DualSnapResult =
+  ## The SIZED shape, for a tree that depends on the terminal's geometry.
+  ##
+  ## CTUI-3's shell composes each screen row for a known width, so the size is
+  ## an input to the tree rather than something the compositor applies
+  ## afterwards. The child receives the same numbers through `--cols` /
+  ## `--rows`, so both tiers still run one `buildTree` at one geometry — which
+  ## is what makes the comparison a statement about the renderer.
+  runDualSnap(stem, proc(r: TerminalRenderer): TerminalNode =
+    build(r, cols, rows), cols, rows)
+
 proc report*(r: DualSnapResult): string =
   ## What a failing case prints. The exclusion register is included because a
   ## reader looking at a divergence needs to know what was NOT compared before

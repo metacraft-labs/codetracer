@@ -64,7 +64,7 @@ import ../app/cli
 # noticed by someone differencing two runs. Declared on ONE line because
 # `ci/lib/run-nim-test-lane.sh` reads exactly that spelling — inside a `const`
 # block it is invisible to the lane and the file reports "declared none".
-const ExpectedAssertions = 43
+const ExpectedAssertions = 46
 
 const PrereqRecipe = "just tui-prereqs"
 
@@ -556,15 +556,24 @@ suite "CTUI-0: TUI build prerequisites":
     ck parseTuiCommand(["/tmp", "--test-ipc"]).kind == tckUsageError
     ck parseTuiCommand(["--test-ipc", "/tmp"]).kind == tckUsageError
     ck parseTuiCommand(["--test-ipc=1"]).kind == tckUsageError
-    # `--never-settle` and `--label=` are the runtime's other two test-only
-    # flags; the shipped parser must not know them either.
+    # `--never-settle`, `--label=` and CTUI-3's `--reflow` are the runtime's
+    # other test-only flags; the shipped parser must not know any of them.
+    #
+    # `--reflow` is the one with teeth: it is what makes the snapshot runtime
+    # install `host/resize.nim`'s SIGWINCH handler, and a release build that
+    # accepted it would be a release build that took a signal handler from a
+    # test module. It is listed here for the same reason `--test-ipc` was
+    # listed before the thing it guards existed.
     ck parseTuiCommand(["--never-settle"]).kind == tckUsageError
     ck parseTuiCommand(["--label=x"]).kind == tckUsageError
+    ck parseTuiCommand(["--reflow"]).kind == tckUsageError
+    ck parseTuiCommand(["/tmp", "--reflow"]).kind == tckUsageError
     # The help text, read as the value the binary prints rather than as bytes
     # in a file — a doc comment cannot satisfy this one. Positive twin first.
     ck TuiHelpText.contains("--version")
     ck not TuiHelpText.contains("--test-ipc")
     ck not TuiHelpText.contains("--never-settle")
+    ck not TuiHelpText.contains("--reflow")
 
   test "the release entrypoint cannot reach the test-only IPC runtime":
     # THE OTHER HALF OF THE `--test-ipc` CONTRACT, and the one that makes the

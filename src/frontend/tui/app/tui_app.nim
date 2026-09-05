@@ -47,7 +47,10 @@ import codetracer_embed
 import headless_app/headless_app
 import isonim_tui
 
+import ./views/shell
+
 export headless_app
+export shell
 
 type
   TuiApp* = ref object
@@ -103,6 +106,42 @@ proc statusLine*(app: TuiApp): string =
     if app.shell.activeSessionId() == NoHeadlessSession: "-"
     else: $app.shell.activeSessionId()
   app.title & "  sessions:" & $app.shell.slotCount() & "  active:" & active
+
+proc shellModel*(app: TuiApp; width, height: int): ShellModel =
+  ## The CTUI-3 screen model for this application at this terminal size.
+  ##
+  ## THE LAYOUT TREE IS THE SESSION'S OWN. When a session is open, the model
+  ## carries `slot.layout` — the very `LayoutNode` `HeadlessApp` created for
+  ## it, the one `saveLayouts` persists and the one a desktop tab click would
+  ## `activate`. Copying it, or building a fresh one from the profile, would
+  ## give the terminal a second layout that looked identical until the first
+  ## `Alt+1`, which is exactly the divergence CTUI-3 exists to prevent.
+  ##
+  ## With no session open there is nothing to carry, so the profile's default
+  ## tree is used and the header says so.
+  let selected = selectProfile(width, height)
+  var header = initHeaderModel(traceName = "-")
+  let active = app.shell.activeSlot()
+  if not active.isNil:
+    header.traceName = (if active.title.len > 0: active.title else: $active.id)
+  for id in app.shell.slotIds():
+    let s = app.shell.slot(id)
+    if not s.isNil:
+      header.sessions.add SessionTab(
+        title: (if s.title.len > 0: s.title else: $s.id),
+        active: s.id == app.shell.activeSessionId())
+  result = ShellModel(
+    header: header,
+    status: initStatusBarModel(mode = umNormal, profile = selected),
+    layout: (if active.isNil: profileLayout(selected) else: active.layout),
+    profile: selected)
+
+proc renderScreen*(app: TuiApp; r: TerminalRenderer;
+                   width, height: int): TerminalNode =
+  ## The whole CTUI-3 shell as a component tree. `renderShell` below is CTUI-0's
+  ## one-row probe and is kept because its test asserts a property this does not
+  ## — that a `TuiApp` composites at all with no size negotiated.
+  renderShellTree(app.shellModel(width, height), r, width, height)
 
 proc renderShell*(app: TuiApp; r: TerminalRenderer): TerminalNode =
   ## Build the application's component tree.

@@ -58,18 +58,28 @@ proc run(args: seq[string]): int =
   of tckOpenTrace:
     # PARSED, RESOLVED, AND HONESTLY REFUSED. The path is resolved here rather
     # than merely echoed, so a user who mistyped it learns that now instead of
-    # after CTUI-3 lands; and the refusal names the milestone, so the message
-    # cannot rot into a permanent "not implemented" nobody dates.
+    # after the interactive loop lands; and the refusal names the milestones
+    # that are still open, so the message cannot rot into a permanent "not
+    # implemented" nobody dates.
+    #
+    # CTUI-3 landed the SHELL — `app/views/shell.nim` composes a whole screen
+    # for a given size, and `app/layout/project.nim` puts the session's own
+    # `LayoutNode` onto Yoga. What is still missing here is the part that turns
+    # a screen into a program: a real terminal driver, raw mode, and an input
+    # loop. Those are CTUI-9 (keymap and modal state) and CTUI-11 (capability
+    # negotiation and the driver), so the message names them rather than
+    # claiming a screen does not exist.
     try:
       let folder = resolveTraceFolder(command.tracePath)
       let app = newTuiApp()
       stderr.writeLine(TuiProgramName & ": " & folder & " exists, but opening" &
-                       " a trace needs a screen this milestone does not build" &
-                       " yet.")
+                       " a trace needs an input loop this milestone does not" &
+                       " build yet.")
       stderr.writeLine("  " & app.statusLine())
       stderr.writeLine("  CTUI-0 delivers the build ground and the facade" &
-                       " boundary; CTUI-3 delivers the shell. See" &
-                       " codetracer-specs/Front-Ends/" &
+                       " boundary and CTUI-3 the shell and its layout; the" &
+                       " terminal driver and the keymap are CTUI-11 and" &
+                       " CTUI-9. See codetracer-specs/Front-Ends/" &
                        "CodeTracer-TUI.milestones.org.")
       let replayServer = findReplayServer()
       if replayServer.len == 0:
