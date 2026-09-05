@@ -4139,6 +4139,16 @@ build-tui: tui-prereqs
 # which is exactly why `test-tui-real-terminal` below exists and why CTUI-2
 # makes cross-tier equivalence the campaign's third milestone rather than its
 # last.
+#
+# CTUI-1 put `test_fixture_corpus.nim` in this lane, and it is the one suite
+# here that is NOT self-contained: it opens real recorded traces through a real
+# `replay-server`, and records them from `test-programs/` on a cold cache. So
+# this lane needs `src/build-debug/bin/replay-server` (or $REPLAY_SERVER_BIN)
+# and, until `test-logs/tui-fixtures/` is warm, `src/build-debug/bin/ct` plus
+# the recorders the fixtures name. Missing ones are reported as counted
+# `MISSING-PREREQ SKIP:` lines and an all-skipped run FAILS — see that file's
+# header. The first run on a workspace therefore costs a few recordings; every
+# run after it hits the content-addressed cache.
 test-tui: tui-prereqs
   #!/usr/bin/env bash
   set -euo pipefail

@@ -295,15 +295,26 @@ while read -r f; do
 		passed=$((passed + 1))
 		# A green file that skipped cases has to say WHY, on the spot. The
 		# reasons are already printed by the suites themselves — the repo's
-		# `MISSING-RECORDER SKIP:` convention and `language_smoke_test`'s
-		# `SKIP: <lang> recorder not available` — but the runner used to show
-		# a file's output only when it FAILED, so on a green file those lines
-		# went into the log and never into the report. Surfacing them here is
-		# what turns "OK (5 tests, 10 SKIPPED)" from a number into something a
-		# reader can act on.
+		# `MISSING-RECORDER SKIP:` convention, CTUI-1's `MISSING-PREREQ SKIP:`
+		# (a fixture can be blocked by something that is not a recorder binary,
+		# see src/frontend/tui/tests/fixtures/fixture_provider.nim) and
+		# `language_smoke_test`'s `SKIP: <lang> recorder not available` — but
+		# the runner used to show a file's output only when it FAILED, so on a
+		# green file those lines went into the log and never into the report.
+		# Surfacing them here is what turns "OK (5 tests, 10 SKIPPED)" from a
+		# number into something a reader can act on.
+		#
+		# The alternation matters more than it looks: the per-file output is
+		# CAPTURED, not tee'd, so a marker this grep does not match is absent
+		# from the report AND from test-logs/<lane>.log — the run reports
+		# "2 SKIPPED" and no reason anywhere. Measured on `just test-tui`
+		# before `MISSING-PREREQ SKIP:` was added here: `grep -c MISSING-PREREQ
+		# test-logs/test-tui.log` answered 0 over a run that skipped two cases
+		# for that exact reason. A new marker must be added here as well as to
+		# the suite that emits it.
 		if [ "${skips}" -gt 0 ]; then
 			printf '%s\n' "${output}" |
-				grep -E 'MISSING-RECORDER SKIP:|^[[:space:]]*SKIP:' |
+				grep -E 'MISSING-(RECORDER|PREREQ) SKIP:|^[[:space:]]*SKIP:' |
 				sort -u | head -10 | sed 's/^/      /'
 		fi
 		;;

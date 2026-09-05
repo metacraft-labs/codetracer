@@ -3115,3 +3115,57 @@ commands.
   `const` block it is invisible to the lane and the file is reported as having
   declared none. Emitting `CHECKS: <n>` at runtime is better still: the runner
   prefers it, and it is a count a run verified rather than one read off source.
+- 2026-09-05 (CTUI-1): **DAP `threads` in `replay-server` enumerates PROCESSES,
+  not threads.** `src/db-backend/src/dap_handler.rs::threads` answers from
+  `ReplaySession::list_processes` and surfaces one DAP `Thread` per process.
+  `list_processes` has two implementations: the trait DEFAULT at
+  `src/db-backend/src/replay.rs:238` returns ONE synthetic entry
+  unconditionally — the arm every CTFS/db-backed trace takes, i.e. every trace
+  the Python, Noir, Ruby and JavaScript recorders produce — and
+  `src/db-backend/src/recreator_session.rs:1068` forwards `GetProcessInfo` to
+  the rr worker, whose answer is parsed out of `rr ps`
+  (`codetracer-native-backend/src/multiprocess/process_tree.rs:180`), a
+  PID/PPID/EXIT/CMD table. Measured: a Python program with four workers past a
+  `threading.Barrier` records fine, its calltrace carries four sibling `worker`
+  frames, and DAP `threads` still answers `[{"id":1,"name":"<thread 1>"}]`. So
+  "how many threads does this trace have" is not answerable through the front-end
+  surface today, whatever the recorder did. Do not write a thread test against a
+  trace and assume >1; it will pass vacuously at 1 or be written to expect 1.
+- 2026-09-05 (CTUI-1): recorded trace fixtures for the TUI live under
+  `test-logs/tui-fixtures/<name>-<md5-of-the-program>/`, produced on demand by
+  `src/frontend/tui/tests/fixtures/fixture_provider.nim` from `test-programs/`.
+  `/test-logs/` is now gitignored WHOLESALE — before this only `*.log` was, so a
+  recorded fixture directory showed up as untracked. Superseded cache entries
+  are not pruned: editing a fixture program leaves the old `<name>-<md5>/`
+  beside the new one.
+- 2026-09-05 (host, not the tree — three ways this workspace stops `ct` from
+  building, each diagnosed far from its cause):
+  * a stray `~/.tup` makes `tup` treat `$HOME` as the project root, and
+    `just build-once` then dies parsing an unrelated repo's Tupfile. This repo's
+    tup root is `src/` (that is what `src/Tupfile.ini` marks); `tup init --force`
+    run IN `src/` fixes it, and `.tup/` is gitignored.
+  * `src/db-backend/build.rs` regenerates the MCR emulator's C by spawning
+    `direnv exec <codetracer-native-recorder> bash ct_emulator/build_native_api.sh`.
+    Under cargo's environment that nested shell failed with
+    `cannot open file: results`; run the same script by hand once
+    (`direnv exec ../codetracer-native-recorder bash ct_emulator/build_native_api.sh`)
+    and the cargo build then succeeds. `CODETRACER_DB_BACKEND_SKIP_DIRENV=1` is
+    the documented alternative.
+  * `ct` will not compile when the `io-mon` sibling predates
+    `src/io_mon/depfile.nim` (`src/ct_test/incremental/io_mon_capture.nim:83`
+    imports it). `scripts/require-siblings.sh` reports io-mon as an OPTIONAL
+    missing sibling and says the build "continues" — it does, and then fails at
+    the `ct` link step several minutes later. `config.nims` reads `$IO_MON_SRC`,
+    but it adds that path BEFORE the `../io-mon/src` sibling and Nim resolves
+    later `--path` entries first, so the env var cannot override a colliding
+    module in the sibling checkout.
+- 2026-09-05: **a `HeadlessDebugSession` that steps in a loop and never calls
+  `drainEvents()` grows without bound.** Every `continue`/step makes
+  replay-server push events the session buffers until somebody asks for them,
+  and the buffer is never trimmed on its own. Measured over the `wide_state`
+  fixture's 67-stop recursion (locals include a 600-member dict): RSS climbs
+  ~39 MB per stop, 126 MB -> 2.85 GB, linear, with replay-server itself flat at
+  ~155 MB — so the memory is on the Nim side, not the backend's. Adding one
+  `discard session.drainEvents()` inside the loop holds the same run at
+  ~164 MB. `continueForward` synchronises on its own events, so draining after
+  it returns discards nothing a later call needs.

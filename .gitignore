@@ -175,6 +175,14 @@ src/ct_test/incremental/test_*
 src/ct_test/incremental/e2e_*
 !src/ct_test/incremental/e2e_*.nim
 *.log
+# Test-lane scratch: logs, and the CTUI-1 TUI fixture cache
+# (test-logs/tui-fixtures/<name>-<key>/), which holds recorded trace
+# containers. They are large, reproducible from test-programs/ by
+# src/frontend/tui/tests/fixtures/fixture_provider.nim, and must never enter
+# the repository. Nothing under test-logs/ is tracked (`git ls-files
+# test-logs` is empty), so the whole directory is ignored rather than only the
+# `*.log` files a lane happens to write today.
+/test-logs/
 format.js
 config/.config.yaml
 /.config.yaml
