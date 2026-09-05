@@ -137,6 +137,14 @@ lint_step "contract suite: DeepReview design-review harness" \
 lint_step "shellcheck: flake pin alignment guard" \
 	shellcheck scripts/test-flake-pin-alignment.sh
 
+# CTUI-0's grammar-archive builder. Not under ci/, so the glob does not reach
+# it, and it is the FIRST thing `just tui-prereqs`, `just build-tui` and
+# `just test-tui` all run — a shell defect in it presents as a link error
+# naming a tree-sitter path, several minutes into a Nim compile, which is the
+# single worst place in the TUI's build for a diagnosis to arrive.
+lint_step "shellcheck: TUI grammar-archive builder" \
+	shellcheck scripts/build-tui-grammars.sh
+
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
 # rather than as a lint one.

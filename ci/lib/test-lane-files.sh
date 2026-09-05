@@ -168,6 +168,8 @@ agentic-headless
 agent-api-contract
 bpf
 book-isonim
+tui
+tui-real-terminal
 EOF
 }
 
@@ -203,6 +205,8 @@ test_lane_description() {
 	agent-api-contract) echo "agent session API contract" ;;
 	bpf) echo "BPF monitor unit / native / integration suites" ;;
 	book-isonim) echo "docs/book-isonim SSG suites" ;;
+	tui) echo "CodeTracer TUI Tier-1 suites (isonim-tui harness, no terminal)" ;;
+	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
 		return 1
@@ -302,6 +306,71 @@ test_lane_extra_flags() {
 		# which is what `ci/test/renderer-browser-build.sh` goes on to assert
 		# about the bundle this lane compiles.
 		echo "-d:chronicles_enabled=off -d:ctRenderer -d:ctWeb"
+		;;
+	tui | tui-real-terminal)
+		# THE TUI LANES. Three groups of flags, and each is load-bearing.
+		#
+		#   --path:src/frontend/viewmodel
+		#       `codetracer_embed` — the Embed SDK facade, and the only door
+		#       `src/frontend/tui/app/` may use — is imported by bare module
+		#       name, exactly as every `vm-*` lane above needs it to be.
+		#
+		#   --passL:-L<dir> --passL:-Wl,-rpath,<dir>
+		#       `isonim_tui/syntax/treesitter_ffi.nim` ends its `{.passl.}`
+		#       with `-ltree-sitter`, so EVERY binary that imports `isonim_tui`
+		#       needs the runtime at link time and again at load time — and
+		#       this repo's dev shell puts it on neither the linker's search
+		#       path nor LD_LIBRARY_PATH. `scripts/build-tui-grammars.sh`
+		#       resolves it (four routes, no hard-coded store path) and records
+		#       the answer; this reads that record.
+		#
+		#       READ AT LANE TIME, NOT WRITTEN HERE, and the file's absence is
+		#       deliberately NOT fatal here: without it the suites that link
+		#       `isonim_tui` fail at the link step, while
+		#       `test_tui_build_prerequisites.nim` — which imports no product
+		#       code precisely so that it still runs — reports the real cause
+		#       and names `just tui-prereqs`. Failing in this function instead
+		#       would take that diagnosis away and replace it with a lane that
+		#       could not start.
+		#
+		# Each flag has to be ONE shell word: the runner splits this answer on
+		# whitespace into an argv array, so `--passL:"-L a"` would arrive as
+		# two arguments and `nim` would reject the second.
+		#
+		#   -d:isonimTuiGrammarArchive=<abs path to OUR archive>
+		#       `treesitter_ffi.nim` also emits the ARCHIVE path as `{.passl.}`,
+		#       and its default is an absolute path inside the isonim-tui
+		#       checkout. Upstream reads it from a `{.strdefine.}`, so this names
+		#       the ten-grammar archive `scripts/build-tui-grammars.sh` builds
+		#       here and the sibling path is never consulted. Left unsaid, the
+		#       link takes whatever sits at that sibling path — which isonim-tui's
+		#       own `just grammars` replaces with a TWO-grammar archive as soon as
+		#       anyone builds there, degrading the highlighter from ten languages
+		#       to two with nothing failing. `test_tui_build_prerequisites.nim`
+		#       asserts the member count at both paths for the same reason.
+		local tui_flags="--path:src/frontend/viewmodel"
+		tui_flags="${tui_flags} -d:isonimTuiGrammarArchive=${PWD}/build/grammars/libcodetracer_tui_grammars.a"
+		if [ -r build/grammars/tui-link-flags.txt ]; then
+			# `sed` rather than a read-and-loop: the file holds one line of
+			# whitespace-separated linker flags, and each has to reach `nim` as
+			# its own `--passL:` argument.
+			tui_flags="${tui_flags} $(sed 's/^/--passL:/; s/ / --passL:/g' \
+				build/grammars/tui-link-flags.txt)"
+		fi
+		if [ "$1" = "tui-real-terminal" ]; then
+			# Tier 2 spawns the compiled binary in a real pty and parses its
+			# byte stream with a real terminal state machine. The three sibling
+			# packages that do that — TermAssert (harness), TermAssertClient
+			# (the child side of the IPC channel CTUI-2 uses instead of
+			# sleep-and-poll) and nim-libvterm (which vendors libvterm and
+			# compiles it in, so there is no system library to find) — are not
+			# on config.nims's path, because nothing else in this repo uses
+			# them.
+			tui_flags="${tui_flags} --path:../TermAssert/src"
+			tui_flags="${tui_flags} --path:../TermAssertClient/src"
+			tui_flags="${tui_flags} --path:../nim-libvterm/src"
+		fi
+		echo "${tui_flags}"
 		;;
 	*) echo "" ;;
 	esac
@@ -959,6 +1028,28 @@ test_lane_files() {
 
 	book-isonim)
 		_tlf_find docs/book-isonim/tests 'test_*.nim'
+		;;
+
+	tui)
+		# Discovery, one level deep. `real_terminal/` is the Tier-2 lane below
+		# and needs three sibling `--path`s this lane must not carry: a Tier-1
+		# suite that could compile against TermAssert would be one edit away
+		# from spawning a pty in the fast lane, and the split is what keeps
+		# "asserted in process" and "asserted on a terminal" answerable
+		# separately.
+		_tlf_glob src/frontend/tui/tests 'test_*.nim'
+		;;
+
+	tui-real-terminal)
+		# CTUI-0 declares this lane with one suite in it, and the emptiness it
+		# is avoiding is the point: `run-nim-test-lane.sh` fails a lane that
+		# matched no files, so a lane declared ahead of its tests would be red
+		# from the day it was written — and the alternative, a recipe that
+		# reports success over zero files, is the vacuous pass the whole
+		# lane library exists to prevent. CTUI-2 fills it out with the
+		# cross-tier snapshot-equivalence suites; discovery means those arrive
+		# without an edit here.
+		_tlf_find src/frontend/tui/tests/real_terminal 'test_*.nim'
 		;;
 
 	*)

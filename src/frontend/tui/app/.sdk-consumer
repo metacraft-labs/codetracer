@@ -1,0 +1,12 @@
+The CodeTracer TUI's SDK-consuming layer (CTUI-0).
+
+Every module under `src/frontend/tui/app/` reaches the ViewModel layer only
+through `codetracer_embed`, exactly as `src/frontend/headless_app/` does. It
+owns views, layout projection, input and every pane, and it has no process,
+no pty, no termios and no signal handling: those live in
+`src/frontend/tui/host/`, which is deliberately NOT a declared consumer and is
+recorded as an explicit exemption in `ci/test/sdk-facade-boundary.sh`.
+
+A directory marker rather than a per-file `## SDK-CONSUMER:` header because
+this whole tree is consumer code and marking each file would be noise — the
+spelling `ci/test/sdk-facade-boundary.sh` documents for exactly this case.

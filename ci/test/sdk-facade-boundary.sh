@@ -201,6 +201,41 @@ SIBLING_MISSING=()
 # How far into a file the `## SDK-CONSUMER:` header marker may appear.
 MARKER_SCAN_LINES=40
 
+# ---------------------------------------------------------------------------
+# THE CODETRACER TUI's TWO DIRECTORIES — one declared consumer, one EXEMPT.
+# ---------------------------------------------------------------------------
+#
+# `src/frontend/tui/` (CTUI-0, codetracer-specs/Front-Ends/
+# CodeTracer-TUI.milestones.org) is deliberately split in two, and the split is
+# the reason the terminal front-end lives in this repository at all:
+#
+#   app/   DECLARED CONSUMER. Carries a `.sdk-consumer` directory marker, so
+#          every module beneath it is covered by the outward half of this
+#          guard exactly as `headless_app/` is. Views, layout projection,
+#          input, panes.
+#
+#   host/  EXEMPT, ON PURPOSE, AND RECORDED HERE RATHER THAN INFERRED. It is
+#          the only part of the TUI allowed to import `backend/stdio_backend`
+#          and `viewmodel/headless_session` — the two modules `codetracer_embed`
+#          deliberately withholds, and the only ones that spawn a local
+#          `replay-server` for a `.ct` folder on disk. A front-end that lived
+#          outside this repo could therefore not open a local trace through the
+#          sanctioned surface AT ALL; the capability is not smuggled in, it is
+#          isolated in one named directory on the far side of this line.
+#
+# THE EXEMPTION IS THE ABSENCE OF A MARKER, WHICH IS WHY IT IS CHECKED.
+# Nothing is a consumer by accident here — but nothing is exempt by accident
+# either, and "exempt" spelled as "we did not write a file" is indistinguishable
+# from "somebody forgot". A `.sdk-consumer` placed one directory up, at
+# `src/frontend/tui/`, would silently enrol `host/` and turn this guard red for
+# a reason no reader would connect to the TUI's layering. So the `tui-layers`
+# check below asserts both halves: that `app/` IS discovered, and that `host/`
+# is NOT. The complementary rule — that no `app/` module reaches `host/` or a
+# host capability — is enforced from the other side, structurally and with a
+# mutation arm, by `src/frontend/tui/tests/test_tui_facade_boundary.nim`.
+TUI_CONSUMER_DIR="src/frontend/tui/app"
+TUI_EXEMPT_DIR="src/frontend/tui/host"
+
 # The desktop UI tree. Held in its own variable because it is the one
 # forbidden pattern with an allowlist, and both the exemption check and the
 # remedy message below have to name the same rule.
@@ -859,6 +894,47 @@ elif [ "${consumer_violations}" -eq 0 ]; then
 	check_ok "consumer-facade-only: ${#consumers[@]} declared consumer file(s), no reach past the facade"
 else
 	check_failed "consumer-facade-only: ${consumer_violations} import(s) past the facade"
+fi
+
+# ---------------------------------------------------------------------------
+# Check 5: the TUI's declared half is declared, and its exempt half is exempt
+#
+# Repo-specific, so it is skipped for the synthetic trees
+# ci/test/sdk-facade-boundary-test.sh builds — those have no TUI, and a check
+# that failed on them would be asserting something about the harness rather
+# than about the boundary. See the TUI_CONSUMER_DIR / TUI_EXEMPT_DIR block
+# above for what this is and why the exemption is checked rather than assumed.
+# ---------------------------------------------------------------------------
+
+if [ "${root_is_repo}" -eq 1 ] && [ -d "${TUI_CONSUMER_DIR}" ]; then
+	tui_app_consumers=0
+	tui_host_consumers=0
+	for c in "${consumers[@]}"; do
+		case "${c}" in
+		"${TUI_CONSUMER_DIR}"/*) tui_app_consumers=$((tui_app_consumers + 1)) ;;
+		"${TUI_EXEMPT_DIR}"/*) tui_host_consumers=$((tui_host_consumers + 1)) ;;
+		esac
+	done
+	# The POSITIVE half first. `tui_host_consumers -eq 0` is satisfied for free
+	# by a marker that stopped being discovered at all — the same empty-set
+	# pass this file's own consumer check guards against — so the two are
+	# asserted together and the positive one is what fails when discovery
+	# breaks.
+	if [ "${tui_app_consumers}" -eq 0 ]; then
+		check_failed "tui-layers: ${TUI_CONSUMER_DIR} declares no SDK consumer"
+		violation_detail "Expected a '.sdk-consumer' marker covering that tree (CTUI-0)."
+		violation_detail "Without it the TUI's app/ layer is outside this guard entirely,"
+		violation_detail "and the only thing keeping it inside the facade is review."
+	elif [ "${tui_host_consumers}" -ne 0 ]; then
+		check_failed "tui-layers: ${tui_host_consumers} file(s) under ${TUI_EXEMPT_DIR} are declared consumers"
+		violation_detail "That directory is EXEMPT by design: it is the only place allowed to"
+		violation_detail "import backend/stdio_backend and viewmodel/headless_session, which the"
+		violation_detail "facade deliberately withholds. Declaring it a consumer cannot be"
+		violation_detail "satisfied — the remedy is to remove the marker that covers it, most"
+		violation_detail "likely one placed at src/frontend/tui/ rather than at app/."
+	else
+		check_ok "tui-layers: ${tui_app_consumers} consumer file(s) under ${TUI_CONSUMER_DIR}, ${TUI_EXEMPT_DIR} exempt"
+	fi
 fi
 
 # ---------------------------------------------------------------------------

@@ -4023,6 +4023,143 @@ test-book-isonim:
     --working-directory docs/book-isonim test
 
 
+# ===========================================================================
+# CodeTracer TUI (codetracer-specs/Front-Ends/CodeTracer-TUI.milestones.org)
+# ===========================================================================
+#
+# The terminal front-end lives at src/frontend/tui/, IN THIS REPO, and the
+# reason is a fact about the Embed SDK rather than a preference: the facade
+# deliberately withholds `backend/stdio_backend` and `viewmodel/
+# headless_session` — the only modules that spawn a local `replay-server` for a
+# `.ct` folder — so a front-end in its own repository could not open a local
+# trace through the sanctioned surface at all.  It is therefore split into
+# `app/` (a declared SDK consumer) and `host/` (the one exempt directory), and
+# `src/frontend/tui/main.nim` wires the two.
+#
+# There is deliberately NO second flake, Justfile, .nimble or AGENTS.md: this
+# repo has all of them, and duplicating them was the largest wasted motion in
+# the campaign's first draft.
+
+# Everything the TUI needs before a single Nim file will link.
+#
+# All three were established by compiling rather than by reading, and each
+# fails a long way from its cause without this recipe:
+#
+#   1. `isonim` vendors Facebook Yoga as a git submodule that a fresh
+#      workspace does not initialise.  Absent, the first Nim file that touches
+#      layout dies with `cannot find: .../yoga/yoga/YGConfig.cpp`.
+#   2. Linking needs a tree-sitter grammar archive, built here from the ten
+#      grammars this repo already vendors under `libs/` — `tree-sitter-nim`
+#      does not ship `src/parser.c`, it is generated.
+#   3. The link line carries `-ltree-sitter`, whose runtime this repo's dev
+#      shell puts on neither the linker's search path nor LD_LIBRARY_PATH.
+#
+# IDEMPOTENT AND TIMESTAMP-GUARDED, because CI capacity is short and these
+# submodules are large: git is invoked only for a submodule that is actually
+# empty, and the archive is rebuilt only when a grammar source is newer than
+# it.  A warm runner does no work.  Note what is NOT here: `--recursive` over
+# all of `libs/`, which would fetch every vendored dependency in the repo to
+# link ten grammars.
+tui-prereqs:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  # 1. isonim's Yoga submodule.  Checked by the file the compiler names when it
+  #    is missing, not by `dirExists`: an uninitialised submodule IS a
+  #    directory, so its presence proves nothing.
+  if [ -d ../isonim ]; then
+    if [ ! -f ../isonim/src/isonim/layout/yoga/yoga/YGConfig.cpp ]; then
+      echo "[tui-prereqs] initialising isonim's Yoga submodule"
+      git -C ../isonim submodule update --init src/isonim/layout/yoga
+    fi
+  else
+    echo "[tui-prereqs] ../isonim is not checked out; the TUI cannot build without it" >&2
+    exit 1
+  fi
+
+  # 2. The grammar submodules the TUI links — exactly those, read from
+  #    .gitmodules so this recipe and scripts/build-tui-grammars.sh cannot
+  #    disagree about the set.
+  missing=()
+  while read -r path; do
+    [ -n "${path}" ] || continue
+    if [ ! -f "${path}/src/grammar.json" ] && [ ! -f "${path}/src/parser.c" ]; then
+      missing+=("${path}")
+    fi
+  done < <(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
+             awk '{print $2}' | grep '^libs/tree-sitter-')
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "[tui-prereqs] initialising ${#missing[@]} grammar submodule(s): ${missing[*]}"
+    git submodule update --init "${missing[@]}"
+  fi
+
+  # 3. The archive, the generated parser, and the tree-sitter runtime.
+  bash scripts/build-tui-grammars.sh
+
+# Build the TUI binary.
+#
+# `--mm:orc -d:release` is the configuration CodeTracer-TUI.md §5.4 specifies,
+# and CTUI-0 asks for it to be VERIFIED rather than assumed — the first draft's
+# risk note about ORC was written without either configuration having been run.
+# The test lane compiles the same code under the default debug flags, so both
+# arms of that check exist and are exercised by different recipes.
+build-tui: tui-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p build/bin test-logs
+  # The linker flags resolved by tui-prereqs.  Read rather than recomputed, so
+  # the binary and the test lane link against the same runtime.
+  read -r -a ts_flags < <(sed 's/^/--passL:/; s/ / --passL:/g' \
+    build/grammars/tui-link-flags.txt)
+  # WHICH GRAMMAR ARCHIVE THE LINKER IS HANDED, said explicitly.
+  #
+  # `isonim_tui/syntax/treesitter_ffi.nim` emits an archive path as `{.passl.}`,
+  # and its default is an absolute path inside the isonim-tui checkout — a fact
+  # about that sibling's build tree rather than about this binary.  Upstream now
+  # reads it from `isonimTuiGrammarArchive {.strdefine.}`, so this names OUR
+  # ten-grammar archive and the sibling path is never consulted.  Without the
+  # define the link silently falls back to whatever sits at the baked path,
+  # which `just grammars` in isonim-tui will happily replace with a TWO-grammar
+  # archive; `test_tui_build_prerequisites.nim` asserts the member count at both
+  # paths so that substitution cannot pass unnoticed.
+  nim c --hints:off \
+    --mm:orc -d:release \
+    --path:src/frontend/viewmodel \
+    "-d:isonimTuiGrammarArchive=${PWD}/build/grammars/libcodetracer_tui_grammars.a" \
+    "${ts_flags[@]}" \
+    --nimcache:build/nimcache/codetracer-tui \
+    -o:build/bin/codetracer-tui \
+    src/frontend/tui/main.nim
+  echo "built build/bin/codetracer-tui ($(wc -c <build/bin/codetracer-tui) bytes)"
+
+# Tier 1: the TUI suites that need no terminal.
+#
+# Fast, headless, and self-referential by construction — the in-process harness
+# both emits the ANSI and validates the screen it derived from that emission,
+# which is exactly why `test-tui-real-terminal` below exists and why CTUI-2
+# makes cross-tier equivalence the campaign's third milestone rather than its
+# last.
+test-tui: tui-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-tui.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh tui
+
+# Tier 2: the TUI suites that spawn the real binary in a real pty.
+#
+# Depends on `build-tui` because that is what the child process IS: TermAssert
+# spawns `build/bin/codetracer-tui` and parses its byte stream with libvterm.
+# A missing binary is reported by the suite, by name, with the recipe that
+# builds it — never skipped.
+test-tui-real-terminal: build-tui
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-tui-real-terminal.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh tui-real-terminal
+
+
 # RS-M12: assert no recorder writes a sidecar manifest any more.
 #
 # `src/tests/gui/tests/request-panel/no_sidecar_manifests_test.nim` runs each

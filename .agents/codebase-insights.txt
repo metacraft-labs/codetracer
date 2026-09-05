@@ -2927,3 +2927,76 @@ commands.
   through the list in name order, and the dedup (`a.expression ==
   b.expression`) would DELETE a watch whose expression equals a local's
   name — which is the most ordinary watch anyone types.
+- 2026-09-05 (CTUI-0, the CodeTracer TUI at `src/frontend/tui/`): **anything
+  that imports `isonim_tui` hands the linker a grammar archive path that comes
+  from isonim-tui's own source — say which one you mean with
+  `-d:isonimTuiGrammarArchive=<abs path>`.**
+  `isonim-tui/src/isonim_tui/syntax/treesitter_ffi.nim` emits that path as a
+  `{.passl.}`, and it DEFAULTS to
+  `<isonim-tui>/build/grammars/libisonim_tui_grammars.a`, computed from
+  `currentSourcePath` at compile time. Remove that file, omit the define, and
+  the link dies with `ld: cannot find <path>`; nothing else in the error names
+  isonim-tui, tree-sitter or the TUI. Building codetracer's own archive from
+  `libs/tree-sitter-*` (which `scripts/build-tui-grammars.sh` does, from all
+  ten vendored grammars) does not by itself change which path is used — the
+  define does. `just build-tui` and both `tui*` lanes pass it; verified by
+  moving the sibling archive aside and linking with and without it (0 vs 1).
+  A symlink at the baked path is still planted as a fallback, because Nim
+  SILENTLY IGNORES a `-d:` naming a constant the sources do not declare, so an
+  older isonim-tui would otherwise fail at link with no diagnosis. Beware what
+  that symlink costs: isonim-tui's `just grammars` tests the path with
+  `[ -f ]`, which follows the link, and will replace it with a TWO-grammar
+  archive — `test_tui_build_prerequisites.nim` counts the members at that path
+  for exactly this reason.
+- 2026-09-05: the tree-sitter RUNTIME (`-ltree-sitter`, appended by that same
+  `{.passl.}`) is on neither the linker search path nor `LD_LIBRARY_PATH` in
+  this repo's shells. `scripts/build-tui-grammars.sh` resolves it four ways and
+  records the answer in `build/grammars/tui-link-flags.txt`; the route that
+  works outside a dev shell is the `tree-sitter` CLI's own nix store prefix,
+  which ships `bin/`, `lib/` and `include/` in one output. Do not hard-code a
+  store path — it is correct on one machine until the next GC.
+- 2026-09-05: `tree-sitter generate` (bare) loads `grammar.js` through node and
+  fails on a host without one; `tree-sitter generate src/grammar.json` uses the
+  already-compiled grammar and needs only the CLI. `libs/tree-sitter-nim` is
+  the one vendored grammar whose `src/parser.c` is gitignored and generated;
+  the other nine commit theirs.
+- 2026-09-05: **`tree-sitter generate` run inside a grammar checkout overwrites
+  `src/tree_sitter/parser.h`, which that checkout TRACKS.** Measured, twice, in
+  `libs/tree-sitter-nim`: the CLI rewrites `src/parser.c` AND
+  `src/tree_sitter/parser.h` on *every* run (both mtimes advance on a second
+  consecutive run); `src/grammar.json` is NOT rewritten (its mtime is unchanged
+  across runs under 0.25.3 and 0.25.10 alike — an earlier note here said it was,
+  and that was wrong). The header it writes is whichever one the CLI on PATH
+  carries, so whether the run leaves DIRT depends on the version:
+  tree-sitter **0.25.3** (this host's `~/.nix-profile`) adds
+  `typedef struct TSLanguageMetadata TSLanguageMetadata;` and leaves a permanent
+  ` M libs/tree-sitter-nim`; **0.25.10** (the dev shell's) writes a header
+  byte-identical to the pinned one and leaves the checkout clean. So the
+  hazard is real but VERSION-DEPENDENT, and it is the plain-PATH tree-sitter —
+  the one `just tui-prereqs` gets outside `direnv` — that trips it. Dirt there
+  is not cosmetic: the workspace pre-push gate refuses uncommitted changes in a
+  repo's develop-set closure, so it blocks every push from that checkout.
+  Generate with
+  `-o <dir>` instead: it writes `parser.c`, `node-types.json` and a matching
+  `tree_sitter/{parser,array,alloc}.h` into `<dir>` and does not touch the
+  submodule at all. `scripts/build-tui-grammars.sh` puts that under
+  `build/grammars/generated/<grammar>/` and compiles with that directory FIRST
+  on the include path, so parser.c and its runtime header come from one run.
+  Restoring the header afterwards would be worse: a parser.c generated against
+  a header you then reverted is an ABI mismatch found late or never.
+- 2026-09-05: **both Nim import extractors in this repo — `nim_imports` in
+  `ci/test/sdk-facade-boundary.sh` and `importSpecs` in
+  `src/frontend/tui/tests/test_tui_facade_boundary.nim` — do not strip quotes
+  from a module spec, and `import "a/b"` is legal Nim.** Verified by compiling:
+  a quoted spec resolves through a `--path` root exactly as the bare one does.
+  So `import "tui/host/native_host"` planted in `src/frontend/tui/app/` passes
+  the facade boundary while all seven unquoted spellings of the same module go
+  red. Nothing in the tree uses the quoted form today, which is why it has never
+  bitten — but any "must not import X" check built on either extractor is
+  evadable by one pair of quotation marks. Fix both together (and add a
+  mutation arm), not one.
+- 2026-09-05: `ci/lib/run-nim-test-lane.sh` reads an assertion count from
+  `const ExpectedAssertions = <n>` **on a line of its own**. Written inside a
+  `const` block it is invisible to the lane and the file is reported as having
+  declared none. Emitting `CHECKS: <n>` at runtime is better still: the runner
+  prefers it, and it is a count a run verified rather than one read off source.
