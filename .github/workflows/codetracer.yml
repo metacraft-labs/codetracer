@@ -93,7 +93,14 @@ on:
   # the verdict this run exists to produce.
   workflow_dispatch:
 
-# Collapse superseded runs -- on pull requests AND on the mainline branches.
+# Collapse superseded runs. READ THE NEXT SENTENCE BEFORE THE REST: the two
+# halves of this block collapse DIFFERENT things, and a headline that says
+# "collapse superseded runs on pull requests AND on the mainline branches" --
+# which is what this line used to say -- reads as though mainline runs get
+# cancelled. They do not. On a push, `cancel-in-progress` on line 182 evaluates
+# to FALSE. What mainline gets is only GitHub's own one-pending-run-per-group
+# rule, which evicts a QUEUED run and never a STARTED one. On a pull request,
+# and only there, a started run is cancelled too.
 #
 # This is the widest workflow in the repository -- Windows, Linux and macOS
 # legs across three runner classes -- so a superseded run is the single most
@@ -177,6 +184,67 @@ on:
 # never kills an executing one. Coverage runs still collapse among THEMSELVES
 # -- one running plus one pending -- so a clock that ticks faster than the
 # fleet drains cannot pile them up.
+#
+# ---------------------------------------------------------------------------
+# DECISION 2026-09-06: `cancel-in-progress` ON PUSHES TO MAINLINE STAYS FALSE.
+# ---------------------------------------------------------------------------
+#
+# This was re-examined deliberately, as part of giving every job in this file
+# an explicit `timeout-minutes` (see the note above `jobs:`). The question was
+# whether a newer mainline commit should displace a RUNNING mainline run
+# instead of queueing behind it. The answer is no, for three reasons, the first
+# of which is not written down anywhere else and is the decisive one.
+#
+# 1. THE PUBLISH TAIL IS AT THE END OF THE RUN, SO CANCELLATION LANDS ON IT.
+#    Trace the `needs:` graph: `push-tag` waits on all four build jobs, which
+#    wait on all four lints; `create-release` waits on `push-tag`;
+#    `push-to-attic` waits on the whole test and lib-check tier. Every job that
+#    PUBLISHES anything is therefore the last thing a run does. With
+#    `cancel-in-progress: true`, a push that arrives while a run is in its
+#    final tier kills precisely the jobs that were about to ship, and ships
+#    nothing; the replacement run then reaches the same tier and is killed by
+#    the next push. On a branch that several agents land on continuously, the
+#    steady state is that NOTHING EVER SHIPS. This is not hypothetical -- it
+#    cost this project a twelve-hour publish delay. `false` is what makes a
+#    run that reached the publish tier able to finish reaching it.
+#
+# 2. `false` COSTS NOTHING IN DRAINAGE, BECAUSE THE PENDING SLOT IS ALREADY
+#    COLLAPSED. GitHub allows exactly ONE pending run per group whatever this
+#    setting says. A burst of twenty pushes to `dev` therefore leaves one
+#    running plus one pending under `false`, and one running plus one pending
+#    under `true` as well -- `true` differs only in ALSO killing the one that
+#    started. The saving `true` would buy is not queue depth; it is only the
+#    remaining runtime of a run already underway.
+#
+# 3. THAT REMAINING RUNTIME IS NOW BOUNDED, WHICH IT WAS NOT WHEN THIS BLOCK
+#    WAS LAST TOUCHED. Thirty of this file's forty-two jobs carried no
+#    `timeout-minutes` and inherited GitHub's 360-minute default, so "queued
+#    behind a started run" had a six-hour worst case per job and no computable
+#    ceiling for the run. All forty-two are now bounded, and the longest path
+#    through `needs:` that a PUSH can take is
+#      test-ui-tests (150) -> push-to-attic (60) = 210 minutes.
+#    A started mainline run can hold its group for at most three and a half
+#    hours of EXECUTION, and the argument for `false` no longer has to appeal
+#    to an unbounded quantity.
+#
+#    The honest caveat: `timeout-minutes` bounds execution, not QUEUEING. A job
+#    waiting for a self-hosted runner has not started its clock, so on a starved
+#    fleet a run can still sit open far longer than 210 minutes. What is now
+#    bounded is the thing that actually costs the fleet -- a job HOLDING a
+#    runner and not letting go. A job waiting for one strands nothing.
+#
+# Against all this, the case FOR `true` on push is that a superseded mainline
+# run produces a verdict on a commit that is no longer the tip. That is a real
+# cost, and it is the reason this block groups mainline pushes at all rather
+# than giving each commit its own group. It is paid for separately, by the
+# periodic coverage run described above, which puts a real verdict on `dev`'s
+# tip on a clock. Cancellation is not needed to buy it, and reason 1 says
+# cancellation would cost more than it buys.
+#
+# WHAT WOULD CHANGE THIS. If the publish tail were moved out of this workflow
+# into a separate workflow keyed on a successful run of this one, reason 1
+# would stop applying and `true` would become arguable. Until then, do not
+# flip line 182 to a constant.
 concurrency:
   group: ${{ github.workflow }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('coverage-{0}', github.ref_name) || github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -185,6 +253,91 @@ permissions:
   contents: read
   id-token: write
 
+# EVERY JOB BELOW CARRIES AN EXPLICIT `timeout-minutes`, AND HOW EACH ONE WAS
+# ARRIVED AT.
+#
+# Before 2026-09-06 twelve of this file's forty-two jobs were bounded and
+# THIRTY were not. An unbounded job inherits GitHub's 360-minute default, which
+# on `ubuntu-latest` costs a slow queue and on a self-hosted runner costs the
+# runner: the org GARM pool was measured at fourteen runners total, twelve busy,
+# two offline. Twenty-five of the thirty unbounded jobs ran on self-hosted
+# runners -- including every build-artefact job and all four lint lanes -- so a
+# hung job did not idle, it stranded a scarce machine for six hours.
+#
+# THE RULE THE NUMBERS FOLLOW. Each bound is derived from that job's OWN
+# measured green duration over a 200-run window (2026-09-03 to 2026-09-05,
+# 2356 job records), and the measurement is quoted in a comment on the job. No
+# single number is copied across jobs: a uniform bound is a guess wearing a
+# measurement's clothes, and the next reader cannot tell which bounds were
+# reasoned about. Where a job's greens are tightly clustered the bound is a
+# multiple of the MAX green, not the median -- for `dmg-build` the max green is
+# 3.7x the median, and that spread is a cold Nix cache, which is a normal green,
+# not an anomaly. 15 minutes is used as a floor for jobs whose whole body is
+# seconds of work, because below that the bound would be measuring runner setup.
+#
+# ERRING GENEROUS, DELIBERATELY. A timeout that fires on healthy work is worse
+# than no timeout: it converts a slow green into a red and teaches people to
+# ignore reds. Every bound here is at least ~2x the slowest green ever observed
+# for that job and most are 3-5x. The intent is to catch a HUNG job, not a slow
+# one.
+#
+# THE TWO TRAPS IN READING `gh run view --json jobs`, both of which caught an
+# earlier pass at this and both of which are why several bounds below are much
+# wider than a naive reading would give:
+#
+#   * A `cancelled` duration is NOT a duration. It says only that the job was
+#     still running at that instant, which is a LOWER bound. In this window
+#     every reading over 60 minutes was a cancellation, and the largest of them
+#     came in pairs -- `test-ui-tests-rr` and `test-ui-tests (nixos)` both stop
+#     at exactly 128.7m in run 33732534675 -- which is the signature of a whole
+#     run being cancelled, not of two jobs finishing.
+#
+#   * A `failure` duration is not a green duration either, and usually is not
+#     even close. These jobs fail EARLY and skip the rest: `viewmodel-tests`
+#     stops at step 15 of 31, `cross-process-linux` at step 7 of 9,
+#     `ct-test-providers` at step 6 of 11. The green path runs everything they
+#     skipped, so a failure duration is a lower bound on green. Failure
+#     durations are used below only to check that a bound clears them by a wide
+#     margin, never as the duration itself.
+#
+# TEN JOBS HAVE NO GREEN SAMPLE AT ALL in this window, which is a finding in its
+# own right and is recorded on each of them rather than papered over:
+# `origin-dap-macos-nightly`, `cross-process-linux`, `viewmodel-tests`,
+# `dmg-lib-check`, `test-non-gui` (both legs), `test-ui-tests` (both legs),
+# `ct-test-providers`, `push-to-attic`, `create-release`, `ci-verdict`. Of
+# these, `push-to-attic` and `create-release` have no sample of ANY kind -- only
+# zero-length cancellations, meaning they never started. Their bounds are
+# structural, not measured, and say so. Nine of the twelve ALREADY-bounded jobs
+# have no green sample either; the whole Windows family is red.
+#
+# AN EXISTING BOUND THIS MEASUREMENT CALLS INTO QUESTION. `test-ui-tests-rr`
+# carries `timeout-minutes: 120`, but that job was observed still EXECUTING at
+# 128.7m (run 33732534675) and at 120.3m (run 33733277454) before its run was
+# cancelled. Those are lower bounds, so it is not proven that a healthy
+# `test-ui-tests-rr` exceeds 120m -- but it is not proven that it does not, and
+# 120 is below a length this job has demonstrably reached. The new bound on its
+# sibling `test-ui-tests` is set to 150 for exactly this reason. `-rr`'s 120 is
+# left as-is here rather than changed on lower-bound evidence alone; the first
+# time it times out at 120 with the suite still progressing, raise it to 150 to
+# match.
+#
+# THIS IS NOT WHAT `queue-watchdog` DOES, DESPITE THE NAME. Read that job before
+# assuming otherwise -- an earlier attempt to reason about it went wrong exactly
+# here. `queue-watchdog` runs only on `pull_request` and asks a WITHIN-RUN
+# question: is anything servicing THIS run, or are all its jobs `queued` with
+# none `in_progress`? It watches for a runner-provisioning outage, not for a job
+# that holds a runner and will not give it back. It never looks at another run
+# and never looks at a concurrency group, so it cannot see the condition these
+# bounds address. Its own 300-minute bound is likewise not a duration: it polls
+# until the run is fully scheduled, which is why its greens run 77-122 minutes.
+#
+# The bounds above are the structural answer to "how long can one run hold this
+# group", and they answer it WITHOUT a watchdog. With every job bounded and
+# `ci/verdict/job-timeouts.py` keeping them bounded, the worst case is the
+# longest path through `needs:`, computable from this file alone. For a push
+# that is test-ui-tests (150) -> push-to-attic (60) = 210 minutes. A watchdog
+# would report the same fact later, and only after a runner had already been
+# stranded for the afternoon.
 jobs:
   # WHY EVERY `siblings:` ENTRY CARRIES AN EXPLICIT `=dev` REF.
   #
@@ -1390,6 +1543,10 @@ jobs:
 
   lint-bash:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # 200-run window (2026-09-03..05): 22 green, median 2.8m, max 3.1m.
+    # 15m is ~5x the slowest green; the floor this file uses for a job whose
+    # whole body is one linter and whose variance is runner setup, not work.
+    timeout-minutes: 15
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1458,6 +1615,9 @@ jobs:
 
   lint-nim:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # 200-run window: 25 green, median 3.3m, max 3.7m. Same floor as lint-bash,
+    # for the same reason: 15m is ~4x the slowest green ever observed.
+    timeout-minutes: 15
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1540,6 +1700,9 @@ jobs:
 
   lint-nix:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # 200-run window: 42 green, median 5.4m, max 7.2m. 25m is ~3.5x the slowest
+    # green -- wider than the lint floor because this lane evaluates the flake.
+    timeout-minutes: 25
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1591,6 +1754,9 @@ jobs:
 
   lint-rust:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # 200-run window: 40 green, median 8.5m, max 10.7m. 30m is ~2.8x the slowest
+    # green; clippy over the whole workspace is the longest of the four lints.
+    timeout-minutes: 30
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1695,6 +1861,9 @@ jobs:
 
   reprobuild-macos-smoke:
     runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
+    # 200-run window: 48 green, median 6.5m, max 19.1m. The spread is cache
+    # warmth, not work, so the bound is set off the MAX (~2.1x), not the median.
+    timeout-minutes: 40
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1880,6 +2049,9 @@ jobs:
 
   reprobuild-linux-smoke:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # 200-run window: 48 green, median 1.8m, max 5.1m. 15m is ~3x the slowest
+    # green.
+    timeout-minutes: 15
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -1927,6 +2099,9 @@ jobs:
   origin-dap-macos:
     name: origin-DAP (materialized Python, macOS)
     runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
+    # 200-run window: 50 green, median 4.2m, max 15.8m. Set off the max (~2.2x):
+    # the p90 is 12.1m, so the tail is real and a median-based bound would fire.
+    timeout-minutes: 35
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -2129,6 +2304,12 @@ jobs:
   origin-dap-macos-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
+    # NO GREEN SAMPLE. This job is `workflow_dispatch`-only and has never run
+    # green in the window; its 3 records are failures at 5.5m, which is a LOWER
+    # bound (they die early), not a duration. Bound chosen by sibling analogy:
+    # `origin-dap-macos` is bounded at 35m off measurement, and this variant's
+    # Windows twin already carries 75m. 45m sits between and is not measured.
+    timeout-minutes: 45
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -2333,6 +2514,12 @@ jobs:
   # drift, and any Playwright skip result.
   cross-process-linux:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # NO GREEN SAMPLE: 0 success in 50 records. Every failure dies at step 7 of 9
+    # ("Build frontend"), skipping the two Playwright steps the green path runs,
+    # so the 9.7m worst failure is a LOWER bound on green, not a duration.
+    # 45m is ~4.6x that lower bound -- deliberately generous, because the
+    # unmeasured tail is the part that does the work.
+    timeout-minutes: 45
     name: cross-process value-origin (Linux)
     steps:
       - name: Generate CI token
@@ -2410,6 +2597,11 @@ jobs:
 
   viewmodel-tests:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # NO GREEN SAMPLE: 0 success in 42 records. Failures stop at step 15 of 31
+    # with 16 real steps skipped, so the 24.3m worst failure covers under half
+    # the body and is a LOWER bound. 75m is ~3x that; the unmeasured half
+    # includes the recorder-gated tests and a `ct` build.
+    timeout-minutes: 75
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
@@ -3111,6 +3303,9 @@ jobs:
 
   push-gpg-public-key:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # 200-run window: 42 green, median 1.4m, max 5.7m. 15m is ~2.6x the slowest
+    # green; the tail is the keyserver round trip.
+    timeout-minutes: 15
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -3174,6 +3369,8 @@ jobs:
 
   push-install-script:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # 200-run window: 43 green, median 1.3m, max 5.6m. As above (~2.7x max).
+    timeout-minutes: 15
     steps:
       - name: Mint installation token for cross-repo sibling access
         # GitHub free plan restricts org-level secrets with visibility
@@ -3227,6 +3424,10 @@ jobs:
 
   dev-build:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # 200-run window: 14 green, median 7.3m, max 8.0m. Very tight distribution,
+    # so 30m is ~3.8x the slowest green -- headroom is for a cold Nix cache,
+    # which this window never sampled.
+    timeout-minutes: 30
     needs:
       - lint-bash
       - lint-nim
@@ -3308,6 +3509,9 @@ jobs:
 
   nix-build:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # 200-run window: 7 green, median 8.7m, max 10.9m. Only 7 greens, so the bound
+    # is set wide (~3.2x max) rather than trusting a small sample's tail.
+    timeout-minutes: 35
     needs:
       - lint-bash
       - lint-nim
@@ -3345,6 +3549,9 @@ jobs:
 
   appimage-build:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # 200-run window: 13 green, median 9.7m, max 18.8m. Set off the max (~2.1x);
+    # the p90 of 17.0m shows the cold-cache arm is a normal outcome, not a fluke.
+    timeout-minutes: 40
     needs:
       - lint-bash
       - lint-nim
@@ -3456,6 +3663,11 @@ jobs:
     # steps consume. `aws` comes from `nixpkgs#awscli2`, provisioned per-command
     # via `nix shell`.
     runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
+    # 200-run window: 7 green, median 11.7m, max 42.8m. The 3.7x spread between
+    # median and max IS the measurement here -- a cold aarch64-darwin build is a
+    # real green. 90m is ~2.1x the slowest observed green; anything near the
+    # median would convert that cold build into a red.
+    timeout-minutes: 90
     needs:
       - lint-bash
       - lint-nim
@@ -3998,6 +4210,11 @@ jobs:
     # downloads + extracts + smoke-runs the release dmg, so it needs no
     # Homebrew build toolchain.
     runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
+    # NO GREEN SAMPLE: 0 success in 7 records (failures at 0.8m, cancels at 0.0m).
+    # Bound by sibling: `appimage-lib-check` is the same shape (walk a built
+    # bundle's dynamic deps) and measures 1.2m max green, bounded at 15m. 20m
+    # here for the slower macOS runner. Not measured on this job.
+    timeout-minutes: 20
     needs:
       - dmg-build
     steps:
@@ -4291,6 +4508,9 @@ jobs:
     # `APPIMAGE_EXTRACT_AND_RUN=1` (self-extract, no FUSE) — the same mode
     # nix/shells/ci-base.nix documents for AppImages on these runners.
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # 200-run window: 5 green, median 1.1m, max 1.2m. 15m is ~12x the slowest
+    # green; the floor dominates because the job itself is seconds of work.
+    timeout-minutes: 15
     needs:
       - appimage-build
     steps:
@@ -4382,6 +4602,10 @@ jobs:
     # baked), so nested Docker is no longer a separate class. aws-cli comes from
     # nixpkgs.
     runs-on: eph-linux-x64
+    # 200-run window: 22 green across the five distro legs, median 9.9m,
+    # slowest leg 12.5m (ubuntu:24.04). 40m is ~3.2x the slowest leg.
+    # One bound covers the matrix, so it is set off the SLOWEST leg.
+    timeout-minutes: 40
     needs:
       - appimage-build
     strategy:
@@ -4497,6 +4721,11 @@ jobs:
           - platform: macos
             runner: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     runs-on: ${{ matrix.runner }}
+    # NO GREEN SAMPLE on either leg: 0 success in 99 records. Failures die early
+    # (max 13.0m) so they are lower bounds; more usefully, a CANCELLED macOS leg
+    # was still executing at 40.1m, which is a hard lower bound on how long a
+    # healthy run can take. 60m clears that with ~1.5x margin.
+    timeout-minutes: 60
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
     # NOTE: this job deliberately does NOT declare `needs: [lint-bash,
@@ -5106,6 +5335,12 @@ jobs:
           - platform: macos
             runner: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
     runs-on: ${{ matrix.runner }}
+    # NO GREEN SAMPLE on either leg: 0 success in 86 records. The binding number
+    # is not a failure duration but a CANCELLATION: the nixos leg was still
+    # executing at 128.7m when its whole run was cancelled. That is a hard lower
+    # bound, so any bound at or below 120m is KNOWN to be too tight. 150m is the
+    # next round number above it. See the note on `test-ui-tests-rr` below.
+    timeout-minutes: 150
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
     steps:
@@ -6367,6 +6602,9 @@ jobs:
     # 103.4 vs 122.2. Lands next to ct-test-providers, which it shares a closure
     # with, so the move is locality-positive as well as arithmetic.
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # 200-run window: 48 green, median 5.5m, max 8.6m. 25m is ~2.9x the slowest
+    # green.
+    timeout-minutes: 25
     name: ct-test release gate (M16 provider matrix)
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -6418,6 +6656,9 @@ jobs:
 
   ct-test-providers:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # NO GREEN SAMPLE: 0 success in 46 records. Failures stop at step 6 of 11
+    # (the provider gate itself), so 19.3m is a LOWER bound. 60m is ~3.1x it.
+    timeout-minutes: 60
     name: ct-test cross-language provider gate
     steps:
       - name: Mint installation token for cross-repo sibling access
@@ -6545,6 +6786,12 @@ jobs:
 
   push-to-attic:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # NO SAMPLE OF ANY KIND: 0 success, 0 failure, and 7 cancellations of zero
+    # length -- this job is `refs/heads/main`-only and never started in the
+    # window. There is nothing to measure. 60m is chosen structurally: the job
+    # pushes a Nix closure to a binary cache, so it is bounded by upload of the
+    # artefacts its `needs:` already built. Revisit once it has run green once.
+    timeout-minutes: 60
     needs:
       - test-non-gui
       - test-ui-tests
@@ -6601,6 +6848,9 @@ jobs:
     # waste `cla.yml` documents having had to fix. This job needs no Nix and no
     # checkout, so it runs on the free hosted class.
     runs-on: ubuntu-latest
+    # 200-run window: 53 green, median 0.1m, max 0.7m. Pure path filtering.
+    # 15m is the floor and is ~20x the slowest green.
+    timeout-minutes: 15
     if: ${{ !github.event['codetracer-ci'] }}
     permissions:
       # Read-only: this job only asks which files a pull request touches.
@@ -6650,6 +6900,10 @@ jobs:
   build-and-deploy-docs:
     needs: [ docs-scope ]
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # 200-run window: 14 green, median 4.5m, max 5.3m. 20m is ~3.8x the slowest
+    # green; headroom is for the gh-pages push, which contends with its own
+    # `docs-gh-pages-*` group below.
+    timeout-minutes: 20
     # The docs site is INDEPENDENT content: it is built by its own isonim-docs
     # SSG consumer (docs/book-isonim via ci/deploy/docs.sh) and consumes NO
     # artifact from the app build or the attic-cache push. It must therefore not
@@ -6855,6 +7109,9 @@ jobs:
 
   push-tag:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # 200-run window: only 2 green (1.5m, 1.6m) -- a thin sample, but the job is a
+    # single annotated-tag push. 15m is ~9x the slower of the two.
+    timeout-minutes: 15
     needs: [ dev-build, nix-build, appimage-build, dmg-build ]
     permissions:
       contents: "write"
@@ -6946,6 +7203,11 @@ jobs:
 
   create-release:
     runs-on: eph-linux-x64-g2  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
+    # NO SAMPLE OF ANY KIND: 0 success, 0 failure, 7 zero-length cancellations --
+    # it is tag-gated and never started in the window. 30m is structural, not
+    # measured: `gh release create` plus upload of the artefacts `push-tag`'s
+    # ancestors already built.
+    timeout-minutes: 30
     needs: [ push-tag ]
     if: ${{ ((startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')) || needs.push-tag.outputs.tag != '') && !github.event['codetracer-ci'] }}
     permissions:
@@ -7231,6 +7493,9 @@ jobs:
     # them down too.
     if: always()
     runs-on: ubuntu-latest
+    # 200-run window: 20 green, median 0.6m, max 0.8m. Shell self-tests only.
+    # 15m is the floor, ~19x the slowest green.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -7278,6 +7543,32 @@ jobs:
         # which one a step used; and an unresolved `steps.*.outputs.token`
         # silently becomes an empty token rather than an error.
         run: bash ci/test/sibling-provisioning-test.sh
+
+      - name: Assert every job in this workflow declares a timeout
+        # A third static check over this same file, here for the same reason as
+        # the two above: it needs no runner and no siblings, so it must not sit
+        # behind either.
+        #
+        # WHAT IT CAUGHT. On 2026-09-06 THIRTY of this file's forty-two jobs
+        # declared no `timeout-minutes` and inherited GitHub's 360-minute
+        # default. Twenty-five of the thirty ran on SELF-HOSTED runners --
+        # every build-artefact job and all four lint lanes -- against a GARM
+        # pool measured at fourteen runners, twelve busy, two offline. A hung
+        # job there does not idle; it strands a scarce machine for six hours
+        # and holds this workflow's concurrency group while doing it.
+        #
+        # The gap is cheap to reopen, which is why it is checked rather than
+        # merely fixed: adding a job requires actively remembering a key that
+        # nothing else in the file demands, and the omission is silent until a
+        # runner goes missing for an afternoon.
+        #
+        # The check does NOT judge whether a bound is well chosen -- that needs
+        # the job's measured green duration, which is in the run history, not
+        # the file. Each bound's reasoning is recorded on the job itself.
+        run: python3 ci/verdict/job-timeouts.py .github/workflows/codetracer.yml
+
+      - name: Self-test the job-timeout contract
+        run: bash ci/test/job-timeouts-test.sh
 
       - name: Check every build-once job provisions the workspace the build needs
         # The other end of the sibling contract. The suite above asks whether a
@@ -7495,6 +7786,12 @@ jobs:
       - reprobuild-macos-smoke
     if: always()
     runs-on: ubuntu-latest
+    # NO GREEN SAMPLE: 0 success in 52 records -- but this is the one job in this
+    # group whose failure duration is honest. It is a pure aggregator over `needs:`
+    # contexts with no external work, and a red IS its designed output on a red
+    # tree, reached after it has done its reading. Median 0.2m, max 0.6m. 15m is
+    # ~25x that.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v5
