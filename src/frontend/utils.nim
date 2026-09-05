@@ -1824,6 +1824,38 @@ proc showTab*(data: Data, tab: cstring, noInfoMessage: cstring = cstring"", line
         Content.EditorView, isEditor = true,
         path = editorName, editorView = tabEditorView)
 
+  # AND THE ACTIVE-EDITOR POINTER IS SET HERE, NOT LEFT TO A LAYOUT EVENT.
+  #
+  # Everything above brings the tab to the front; until now nothing SAID so.
+  # `data.services.editor.active` was reached from this path only INDIRECTLY,
+  # by GoldenLayout emitting `activeContentItemChanged` into the listener
+  # `layout.nim` registers inside `initLayout`. That listener is attached to
+  # ONE stack — `data.viewerPanel()` as it stood at the time — and only on the
+  # tab event where `data.ui.openComponentIds[state.content].len == 1`. A stack
+  # produced later by a split, or by the layout rebuild that entering Debug
+  # mode performs, carries no such listener, so activating an already-open tab
+  # inside it updates nothing.
+  #
+  # THREE OF THIS PROC'S OWN PATHS NEVER EMIT THAT EVENT AT ALL: the two
+  # `container.show()` branches above, taken when the parent is not a stack;
+  # the re-creation branch, since `openLayoutTab` does not assign this field;
+  # and a `setActiveContentItem` that GoldenLayout treats as a no-op because it
+  # already considers the item active.
+  #
+  # BOTH JUMP FAMILIES ALREADY ASSIGN IT THEMSELVES and neither waits on an
+  # event — `renderer.highlightLine` for jump-to-line, and
+  # `EditorViewComponent.onCompleteMove` for a calltrace/trace jump. That
+  # asymmetry is the whole defect, and it is why a jump looked healthy while a
+  # tree click did not. MEASURED in a browser on 6853ec899, in Debug mode over
+  # the demo: all 8 calltrace jumps moved the active editor, one of them across
+  # files, while 5 of 6 file-tree clicks left it on `main.nr` — with the clicks
+  # landing on their rows and no uncaught error or unhandled rejection. The
+  # sixth was `main.nr` itself, already active, so it passed vacuously.
+  #
+  # Assigning it here is idempotent with the listener when the listener does
+  # fire: both write the same editor name.
+  data.services.editor.active = editorName
+
   # THE CARET IS MOVED AFTER THE TAB IS ON SCREEN.
   #
   # `focusLine` ran before the activation above, so `revealLineInCenter` was
