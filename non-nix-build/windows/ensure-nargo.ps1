@@ -1,6 +1,63 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Test-MsvcLinkerPath {
+  <#
+    .SYNOPSIS
+      Decide whether a resolved `link.exe` is MSVC's, and say how it was decided.
+
+    .DESCRIPTION
+      Returns a hashtable @{ isMsvc = <bool>; reason = <string> }.
+
+      TWO independent tests, because the interesting case is the one where the
+      first is unavailable:
+
+        1. `MsvcPathAdditions` lists the directories vcvarsall contributed
+           (published by `export-msvc-env.ps1:181-183`). A `link.exe` resolved
+           from one of them is MSVC's.
+        2. Failing that, MSVC's `link.exe` sits in the same directory as
+           `cl.exe`. GNU coreutils' `link.exe` -- which MSYS2 and Git-Bash both
+           ship, and which takes exactly two operands -- does not, and neither
+           ships the other. This test needs nothing from export-msvc-env.ps1.
+
+      (2) is load-bearing rather than a nicety. `export-msvc-env.ps1` `exit 0`s
+      SILENTLY when vswhere or the VC tools are missing, so on a machine
+      without Build Tools it publishes no MSVC_PATH_ADDITIONS at all -- which
+      is the state the observed CI failures were actually in. Relying on (1)
+      alone would give up on precisely the runs this check exists to diagnose.
+
+      It is a path/filesystem test rather than a `--version` probe on purpose:
+      MSVC's link.exe rejects `--version` with a non-zero exit, and under
+      `$ErrorActionPreference = 'Stop'` on pwsh 7.4+ a non-zero native exit is
+      itself terminating, so probing would trade one opaque failure for
+      another.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$LinkExePath,
+    [AllowNull()][AllowEmptyString()][string]$MsvcPathAdditions
+  )
+
+  $linkDir = (Split-Path -Parent $LinkExePath).TrimEnd('\').TrimEnd('/')
+
+  if (-not [string]::IsNullOrWhiteSpace($MsvcPathAdditions)) {
+    $msvcDirs = @($MsvcPathAdditions -split ";" |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+      ForEach-Object { $_.Trim().TrimEnd('\').TrimEnd('/') })
+    if ($msvcDirs -contains $linkDir) {
+      return @{ isMsvc = $true; reason = "it is in an MSVC_PATH_ADDITIONS directory" }
+    }
+  }
+
+  if (Test-Path -LiteralPath (Join-Path $linkDir "cl.exe") -PathType Leaf) {
+    return @{ isMsvc = $true; reason = "cl.exe sits beside it in '$linkDir'" }
+  }
+
+  return @{
+    isMsvc = $false
+    reason = "it is in neither an MSVC_PATH_ADDITIONS directory nor a directory containing cl.exe"
+  }
+}
+
 function Ensure-Nargo {
   param(
     [Parameter(Mandatory = $true)][string]$Root,
@@ -123,7 +180,98 @@ function Ensure-Nargo {
       Set-Item -Path "Env:$name" -Value $value
     }
   }
+  # PATH ORDER MATTERS HERE, and this block exists because getting it wrong is
+  # one of the two ways the observed failure can arise.
+  #
+  # `nargo_cli` is an MSVC-target Rust build: rustc drives `link.exe` and
+  # expects MSVC's linker. MSYS2 (like Git-Bash) also ships a `link.exe` --
+  # GNU coreutils' `link(1)`, which makes a hard link and accepts exactly two
+  # operands. When that one wins the PATH lookup, rustc's link line is read as
+  # a coreutils invocation and every crate with a build script dies with
+  #
+  #     error: linking with `link.exe` failed: exit code: 1
+  #       = note: link: extra operand '...build_script_build...rcgu.o'
+  #               Try 'link --help' for more information.
+  #
+  # That message is what CI has actually been failing with here, and it aborts
+  # at the `throw` below -- i.e. cargo failed -- NOT at the "did not produce a
+  # nargo executable" throw further down. The class is recorded at
+  # `codetracer-specs/Planned-Work/Windows-Test-Suite-Health.md:416-424`
+  # ("the same `cargo test --lib` passes from PowerShell").
+  #
+  # NOTE what the message does and does not tell you. It proves a coreutils
+  # `link` answered; it does NOT prove MSVC's linker was present and lost the
+  # lookup, because `export-msvc-env.ps1` exits silently when Build Tools are
+  # missing and so leaves no trace either way. Treat "shadowed" as one of two
+  # live possibilities, not as the diagnosis.
+  #
+  # It is a DIFFERENT message from the one `ensure-just.ps1:37-39` and
+  # `ensure-nextest.ps1:36-38` describe -- "linker `link.exe` NOT FOUND",
+  # meaning no link.exe was found at all. Both occur on this bootstrap, in
+  # different runs, and their signatures are mutually exclusive: a log shows
+  # "extra operand" or "not found", never both.
+  #
+  # `export-msvc-env.ps1:149-158` deliberately emits its PATH with the MSVC
+  # additions FIRST, "they must win over any older toolset already on PATH",
+  # and publishes those additions separately as `MSVC_PATH_ADDITIONS`
+  # (`:181-183`) "so a caller that would rather PREPEND than replace can do so
+  # without re-deriving the delta". Prepending MSYS2's `mingw64/bin` -- which
+  # this build genuinely needs for clang -- undoes that ordering, so the MSVC
+  # additions are put back in front afterwards. clang is still resolved from
+  # MSYS2 because the MSVC additions do not contain one.
   $env:Path = "$msysMingwBinDir;$($env:Path)"
+  $msvcPathAdditions = [Environment]::GetEnvironmentVariable("MSVC_PATH_ADDITIONS")
+  if (-not [string]::IsNullOrWhiteSpace($msvcPathAdditions)) {
+    $env:Path = "$msvcPathAdditions;$($env:Path)"
+  }
+
+  # Belt and braces: pin the linker by absolute path so the build no longer
+  # depends on PATH order at all. Cargo reads
+  # `CARGO_TARGET_<TRIPLE>_LINKER` for the target triple and, for build
+  # scripts and proc macros, the HOST triple -- which is the same
+  # `x86_64-pc-windows-msvc` here, and build scripts are exactly where the
+  # failure above surfaced (`proc-macro2`, `quote`).
+  $resolvedLink = Get-Command link.exe -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+  if ($null -eq $resolvedLink) {
+    throw "nargo bootstrap needs MSVC's link.exe on PATH but none was found. " +
+          "export-msvc-env.ps1 should have supplied it; check that Visual Studio " +
+          "Build Tools with the C++ workload are installed."
+  }
+  # Fail loudly and EARLY with a diagnosis, rather than ~10 min into a cargo
+  # build with an opaque `link: extra operand` note. The check is a path
+  # comparison rather than a `--version` probe on purpose: MSVC's link.exe
+  # rejects `--version` with a non-zero exit, and under
+  # `$ErrorActionPreference = 'Stop'` on pwsh 7.4+ a non-zero native exit is
+  # itself terminating, so probing would trade one opaque failure for another.
+  #
+  # What the logs establish is that a GNU coreutils `link` answered rustc's
+  # `link.exe` invocation. Whether it SHADOWED a present MSVC linker or
+  # SUBSTITUTED for an absent one is NOT determinable from them, because
+  # export-msvc-env.ps1 exits silently when MSVC is missing and so leaves no
+  # trace of which case obtained. Both readings are handled: the PATH
+  # reordering above restores MSVC-first order when MSVC is there, and
+  # Test-MsvcLinkerPath fails fast below, naming the culprit, when it is not.
+  $verdict = Test-MsvcLinkerPath -LinkExePath $resolvedLink.Source `
+                                 -MsvcPathAdditions $msvcPathAdditions
+  if (-not $verdict.isMsvc) {
+    $additionsForMessage = if ([string]::IsNullOrWhiteSpace($msvcPathAdditions)) {
+      "<empty -- export-msvc-env.ps1 published none, which is what it does when Build Tools are absent>"
+    } else {
+      $msvcPathAdditions
+    }
+    throw "The first 'link.exe' on PATH is '$($resolvedLink.Source)', and " +
+          "$($verdict.reason), so it is not MSVC's linker " +
+          "(MSVC_PATH_ADDITIONS=$additionsForMessage). MSYS2 and Git-Bash both ship " +
+          "GNU coreutils' link(1) under that name, and an MSVC-target cargo build " +
+          "fails with 'link: extra operand' when it wins the lookup. Either Visual " +
+          "Studio Build Tools with the C++ workload are not installed on this " +
+          "machine, or they are installed but lost the PATH lookup. " +
+          "See Windows-Test-Suite-Health.md:416-424."
+  }
+
+  $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = $resolvedLink.Source
+  Write-Host "nargo bootstrap will link with $($resolvedLink.Source) ($($verdict.reason))"
 
   Push-Location $sourceDir
   try {

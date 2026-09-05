@@ -172,22 +172,420 @@ function Ensure-CleanDirectory {
   New-Item -ItemType Directory -Force -Path $Path | Out-Null
 }
 
-function Test-BootstrapStepEnabled {
+function Test-BootstrapAllowlistActive {
+  <#
+    .SYNOPSIS
+      True when WINDOWS_DIY_ONLY restricts this run to a named subset.
+
+    .DESCRIPTION
+      A caller that sets WINDOWS_DIY_ONLY is asking for a SUBSET of
+      codetracer's dev env -- typically a satellite repo that needs one
+      pinned tool. Everything in `env.ps1` that exists to make CODETRACER
+      ITSELF buildable (its node-packages tooling, its tree-sitter Nim
+      parser, its runtime env, the hard requirement on MSVC's cl.exe) is
+      then out of scope, and asserting it would fail a run that got exactly
+      what it asked for.
+
+      This is deliberately a single predicate rather than a set of opt-outs
+      the caller has to remember: a satellite repo that had to name each
+      extra separately would silently start failing the day a new one is
+      added, which is the same defect that makes a subtractive component
+      list unusable.
+  #>
+  return -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("WINDOWS_DIY_ONLY"))
+}
+
+function Get-BootstrapStepSkipReason {
+  <#
+    .SYNOPSIS
+      Why this component will not run, or $null if it will.
+
+    .DESCRIPTION
+      THE single decision point for whether a gated component is wanted.
+      Two gates feed it and they answer different questions:
+
+        WINDOWS_DIY_ONLY          positive allowlist -- "just these".
+        WINDOWS_DIY_SKIP_<STEP>   subtractive        -- "all but this".
+
+      They compose, and neither silently overrides the other: a component
+      must be listed by the allowlist (when one is given) AND not be
+      individually skipped.
+
+      It matters that this is ONE function. `env.ps1` consults the same
+      question twice per component -- once to dispatch it, and once again
+      afterwards to decide whether to ASSERT the tool is present (see the
+      `WINDOWS_DIY_ENSURE_TTD` / `WINDOWS_DIY_ENSURE_DOTNET` defaults). If
+      the two consultations can disagree, a component is skipped and then
+      demanded, and the run fails on the absence of something it was told
+      not to install.
+  #>
   param([Parameter(Mandatory = $true)][string]$Step)
+
+  $onlyRaw = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_ONLY")
+  if (-not [string]::IsNullOrWhiteSpace($onlyRaw)) {
+    $only = @($onlyRaw -split "[,;\s]+" |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+      ForEach-Object { $_.Trim().ToUpperInvariant() })
+    if ($only -notcontains $Step.ToUpperInvariant()) {
+      return "not listed in WINDOWS_DIY_ONLY"
+    }
+  }
 
   $envName = "WINDOWS_DIY_SKIP_$Step"
   $rawValue = [Environment]::GetEnvironmentVariable($envName)
-  if ([string]::IsNullOrWhiteSpace($rawValue)) {
-    return $true
+  if (-not [string]::IsNullOrWhiteSpace($rawValue)) {
+    $value = $rawValue.Trim().ToLowerInvariant()
+    if ($value -in @("1", "true", "yes", "on")) {
+      return "$envName=$rawValue is set"
+    }
   }
 
-  $value = $rawValue.Trim().ToLowerInvariant()
-  if ($value -in @("1", "true", "yes", "on")) {
-    Write-Warning "Skipping bootstrap step '$Step' because $envName=$rawValue."
+  return $null
+}
+
+function Test-BootstrapStepEnabled {
+  param([Parameter(Mandatory = $true)][string]$Step)
+
+  $reason = Get-BootstrapStepSkipReason -Step $Step
+  if ($null -ne $reason) {
+    Write-Warning "Skipping bootstrap step '$Step': $reason."
     return $false
   }
 
   return $true
+}
+
+# ---------------------------------------------------------------------------
+# Bootstrap step accounting
+#
+# Every gated component in `env.ps1`'s dispatch block runs through
+# `Invoke-BootstrapStep`, which times it, records whether it ran or was
+# skipped, and notes which install-root directories it created. At the end of
+# a bootstrap `Write-BootstrapStepReport` turns that into a machine-readable
+# per-component table: name, declared relocatability class, wall clock,
+# on-disk size, and the directories the size came from.
+#
+# WHY THE DISPATCH BLOCK PRODUCES THE TABLE, rather than a separate list of
+# components maintained alongside it: a separate list rots silently. A
+# component added to the dispatch later would simply be absent from the
+# decomposition, and the absence would look exactly like a component that
+# installs nothing. Because the table is emitted BY the dispatch, a new
+# component appears in it automatically, and the AST gate in
+# `ci/test/bootstrap-decomposition.ps1` refuses a dispatch line that does not
+# go through this wrapper.
+#
+# SIZES ARE MEASURED ONCE, AT THE END, not per step. Walking a multi-gigabyte
+# install root 22 times would cost more than several of the installs being
+# measured. What each step records live is the cheap part -- wall clock, and a
+# top-level directory listing before and after -- and the expensive recursive
+# sizing happens a single time in `Write-BootstrapStepReport`, attributed back
+# to whichever step created each directory.
+# ---------------------------------------------------------------------------
+
+# Valid relocatability classes. This is the property a caller needs in order
+# to decide whether a component can live in a shared immutable store at all.
+#
+# These describe the install MECHANISM, which is a static property of the
+# Ensure-* script and can be read off it. They deliberately do NOT claim the
+# installed bits are position-independent: proving that requires moving a
+# store entry and re-running it, which is a separate measurement, not a
+# declaration made here.
+#   relocatable - installed by extracting an archive or building in place
+#                 under the install root; nothing was written outside it.
+#                 A store CANDIDATE.
+#   junction    - install materialises junctions/symlinks inside the install
+#                 root. Movable only if the links are rebuilt.
+#   installer   - a vendor installer (.exe/.msi/winget/AppX) ran and may have
+#                 written outside the install root, e.g. into Program Files
+#                 or the registry. NOT a store candidate without repackaging.
+$script:BootstrapRelocatabilityClasses = @("relocatable", "junction", "installer")
+
+$script:BootstrapStepRecords = [System.Collections.Generic.List[object]]::new()
+
+function Get-BootstrapStepRecords {
+  return $script:BootstrapStepRecords.ToArray()
+}
+
+function Reset-BootstrapStepRecords {
+  $script:BootstrapStepRecords.Clear()
+}
+
+function Get-InstallRootTopLevelNames {
+  param([Parameter(Mandatory = $true)][string]$Root)
+
+  if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+    return @()
+  }
+  return @(Get-ChildItem -LiteralPath $Root -Directory -Force -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.Name })
+}
+
+function Invoke-BootstrapStep {
+  <#
+    .SYNOPSIS
+      Run one gated bootstrap component, honouring WINDOWS_DIY_SKIP_<Step>,
+      and record what it cost.
+
+    .PARAMETER Step
+      The gate name, e.g. "CAPNP". `WINDOWS_DIY_SKIP_<Step>` disables it.
+
+    .PARAMETER Relocatability
+      How this component installs; one of $BootstrapRelocatabilityClasses.
+      Declared at the call site because it is a static property of the
+      Ensure-* script, not something that can be inferred from the result.
+      `Write-BootstrapStepReport` cross-checks the "relocatable" claim
+      against the reparse points it actually finds, so a wrong declaration
+      is caught rather than trusted.
+
+    .PARAMETER Root
+      The install root, used to attribute created directories.
+
+    .PARAMETER Action
+      The Ensure-* invocation.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Step,
+    [Parameter(Mandatory = $true)][ValidateSet("relocatable", "junction", "installer")][string]$Relocatability,
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][scriptblock]$Action
+  )
+
+  # Two gates, and they answer different questions.
+  #
+  # WINDOWS_DIY_SKIP_<STEP> is subtractive: "codetracer's dev env, minus this
+  # component". WINDOWS_DIY_ONLY is a positive allowlist: "just these
+  # components". A satellite repo wants the second -- `codetracer-trace-format`
+  # needs Cap'n Proto and nothing else, and expressing that as twenty-one
+  # skip variables would be both unreadable and silently wrong the moment a
+  # twenty-third component is added, because the new one would default to ON.
+  #
+  # The allowlist is also the shape a per-project overlay needs: it NAMES the
+  # pinned components that project wants, rather than subtracting from a
+  # whole-repo default.
+  #
+  # BOTH gates live in Get-BootstrapStepSkipReason rather than here, because
+  # `env.ps1` asks the same question a second time -- after the dispatch, to
+  # decide whether to ASSERT a tool is present. Evaluating the allowlist only
+  # at this call site made the two answers disagree: a component was skipped
+  # here and then demanded there, and the run failed on the absence of
+  # something it had been told not to install.
+  $skipReason = Get-BootstrapStepSkipReason -Step $Step
+
+  if ($null -ne $skipReason) {
+    $script:BootstrapStepRecords.Add([pscustomobject]@{
+      step = $Step
+      relocatability = $Relocatability
+      status = "skipped"
+      skip_variable = "WINDOWS_DIY_SKIP_$Step"
+      skip_reason = $skipReason
+      seconds = 0.0
+      created_dirs = @()
+      error = $null
+    })
+    return
+  }
+
+  $before = Get-InstallRootTopLevelNames -Root $Root
+  $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  $status = "ok"
+  $errorText = $null
+  try {
+    & $Action
+  } catch {
+    # Record the cost of the failure before rethrowing. A component that
+    # dies 40 minutes in is a fact the decomposition needs. Timing this
+    # bootstrap from runs that never completed is how a provisioning cost
+    # gets mis-stated, and an unrecorded failure is how that happens.
+    $status = "failed"
+    $errorText = $_.Exception.Message
+    throw
+  } finally {
+    $stopwatch.Stop()
+    $after = Get-InstallRootTopLevelNames -Root $Root
+    $created = @($after | Where-Object { $before -notcontains $_ })
+    $script:BootstrapStepRecords.Add([pscustomobject]@{
+      step = $Step
+      relocatability = $Relocatability
+      status = $status
+      skip_variable = "WINDOWS_DIY_SKIP_$Step"
+      skip_reason = $null
+      seconds = [math]::Round($stopwatch.Elapsed.TotalSeconds, 3)
+      created_dirs = $created
+      error = $errorText
+    })
+  }
+}
+
+function Measure-DirectorySize {
+  <#
+    .SYNOPSIS
+      Recursive on-disk size in bytes, plus a reparse-point count.
+
+    .DESCRIPTION
+      Reparse points are counted but NOT followed, and their targets are not
+      added to the byte total. Following them would double-count a junction
+      into a directory that is itself inside the install root -- which is
+      exactly the shape `Ensure-NodeModulesJunction` creates -- and would
+      make the install-root total too large by an amount that varies with
+      how many junctions happen to exist.
+  #>
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $bytes = [long]0
+  $files = [long]0
+  $reparsePoints = [long]0
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return [pscustomobject]@{ bytes = $bytes; files = $files; reparse_points = $reparsePoints }
+  }
+
+  $stack = [System.Collections.Generic.Stack[string]]::new()
+  $stack.Push($Path)
+  while ($stack.Count -gt 0) {
+    $current = $stack.Pop()
+    $entries = @()
+    try {
+      $entries = @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)
+    } catch {
+      continue
+    }
+    foreach ($entry in $entries) {
+      $isReparse = (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+      if ($isReparse) {
+        $reparsePoints++
+        continue
+      }
+      if ($entry.PSIsContainer) {
+        $stack.Push($entry.FullName)
+      } else {
+        $bytes += [long]$entry.Length
+        $files++
+      }
+    }
+  }
+
+  return [pscustomobject]@{ bytes = $bytes; files = $files; reparse_points = $reparsePoints }
+}
+
+function Write-BootstrapStepReport {
+  <#
+    .SYNOPSIS
+      Emit the per-component decomposition and the install-root total.
+
+    .DESCRIPTION
+      Writes `<OutputDir>/windows-env-decomposition.json` (machine-readable,
+      the artifact to commit) and a short human-readable summary to the
+      host. Anything that sizes this bootstrap derives from it, so it records
+      the denominator too: whether the run completed, and which components
+      were skipped. A "green" run with components skipped is a different fact
+      from a green run without, and the file says which it was.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][string]$OutputDir
+  )
+
+  $records = Get-BootstrapStepRecords
+  $rows = @()
+  $attributed = @{}
+
+  foreach ($record in $records) {
+    $bytes = [long]0
+    $files = [long]0
+    $reparse = [long]0
+    foreach ($dir in $record.created_dirs) {
+      $full = Join-Path $Root $dir
+      $measured = Measure-DirectorySize -Path $full
+      $bytes += $measured.bytes
+      $files += $measured.files
+      $reparse += $measured.reparse_points
+      $attributed[$dir] = $record.step
+    }
+
+    # Cross-check the declared class against what is on disk. A component
+    # declared "relocatable" that produced reparse points is mis-declared,
+    # and a later store-safety assumption would inherit the error.
+    $relocatabilityWarning = $null
+    if ($record.relocatability -eq "relocatable" -and $reparse -gt 0) {
+      $relocatabilityWarning =
+        "declared relocatable but $reparse reparse point(s) found under its install directories"
+      Write-Warning "Bootstrap step '$($record.step)': $relocatabilityWarning"
+    }
+
+    $rows += [pscustomobject]@{
+      step = $record.step
+      status = $record.status
+      relocatability = $record.relocatability
+      relocatability_warning = $relocatabilityWarning
+      seconds = $record.seconds
+      bytes = $bytes
+      files = $files
+      reparse_points = $reparse
+      install_dirs = @($record.created_dirs)
+      skip_variable = $record.skip_variable
+      skip_reason = $record.skip_reason
+      error = $record.error
+    }
+  }
+
+  $rootMeasured = Measure-DirectorySize -Path $Root
+  $unattributed = @(Get-InstallRootTopLevelNames -Root $Root |
+    Where-Object { -not $attributed.ContainsKey($_) })
+
+  $skipped = @($rows | Where-Object { $_.status -eq "skipped" } | ForEach-Object { $_.step })
+  $failed = @($rows | Where-Object { $_.status -eq "failed" } | ForEach-Object { $_.step })
+
+  # Architecture is a label on the measurement, not part of it. Get-WindowsArch
+  # goes through CIM, which is Windows-only and can fail on a loaded box; a
+  # report that cannot say which architecture it came from is far more useful
+  # than no report at all, and this function is called from a `finally` whose
+  # whole purpose is to survive a failed provision.
+  $arch = "unknown"
+  try { $arch = Get-WindowsArch } catch { $arch = "unknown" }
+
+  $report = [pscustomobject]@{
+    schema = "codetracer.windows-env-decomposition.v1"
+    generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+    os = "windows"
+    arch = $arch
+    install_root = $Root
+    # The install-root total. Reported as the whole-root
+    # measurement rather than the sum of the per-step rows, because a step
+    # that writes into a directory an earlier step created contributes to
+    # the root total but is not attributed to a directory of its own.
+    install_root_bytes = $rootMeasured.bytes
+    install_root_files = $rootMeasured.files
+    install_root_reparse_points = $rootMeasured.reparse_points
+    total_seconds = [math]::Round((($rows | Measure-Object -Property seconds -Sum).Sum), 3)
+    # A run with skips is not the same fact as a run without. Recorded here
+    # so a consumer of this file cannot mistake one for the other.
+    complete = ($skipped.Count -eq 0 -and $failed.Count -eq 0)
+    skipped_steps = $skipped
+    failed_steps = $failed
+    unattributed_install_dirs = $unattributed
+    components = $rows
+  }
+
+  New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+  $jsonPath = Join-Path $OutputDir "windows-env-decomposition.json"
+  $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+
+  Write-Host ""
+  Write-Host "env.ps1 per-component decomposition ($($rows.Count) components):"
+  foreach ($row in ($rows | Sort-Object -Property seconds -Descending)) {
+    $mb = [math]::Round($row.bytes / 1MB, 1)
+    Write-Host ("  {0,-12} {1,-11} {2,10:N1}s {3,10} MB  {4}" -f `
+      $row.step, $row.status, $row.seconds, $mb, $row.relocatability)
+  }
+  Write-Host ("  TOTAL install root: {0:N1} MB in {1:N0} files ({2} reparse points)" -f `
+    ($rootMeasured.bytes / 1MB), $rootMeasured.files, $rootMeasured.reparse_points)
+  if (-not $report.complete) {
+    Write-Host ("  NOTE: incomplete run - skipped [{0}] failed [{1}]" -f `
+      ($skipped -join ","), ($failed -join ","))
+  }
+  Write-Host "Wrote $jsonPath"
+
+  return $jsonPath
 }
 
 function ConvertTo-InstallRelativePath {
