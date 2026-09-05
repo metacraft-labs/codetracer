@@ -522,8 +522,25 @@ async function menuGestureLeg(page, prefix, who) {
 
   // The press. Its own `mousedown` dismisses the open menu, so the shell is
   // rebuilt in the middle of it — which is the case that produced no `click`.
+  //
+  // STEP IN, NOT STEP OVER, AND NOT BECAUSE OF THE MENU. This leg only needs
+  // "a debugger control that is harmless to press", and it ran BEFORE the
+  // stepping leg in the same trip. `#next-image` at the session's opening
+  // `<toplevel>` position runs the whole program, so this gesture was ENDING
+  // THE REPLAY before the stepping leg ever pressed anything — on `/noir`,
+  // rrTicks 0 straight to the last tick, caret `main.nr:1` -> `main.nr:11`.
+  //
+  // That is what the caret series was really recording. `first` is sampled
+  // right after this press with nothing waiting for its repaint, so it still
+  // read the OLD position; the caret then repainted to line 11 during step 1's
+  // poll and was scored as step 1 moving the caret. The leg's one observed
+  // "move" was this gesture's, arriving late — and steps 2 and 3 correctly
+  // reported STILL, because by then there was nothing left to step.
+  //
+  // `#step-in-image` advances exactly one tick and leaves a session the
+  // stepping leg can still walk.
   leg.control = await hitTestedClick(
-    page, '#next-image', `${who}: a debugger control pressed with the menu open`);
+    page, '#step-in-image', `${who}: a debugger control pressed with the menu open`);
   // The press dismisses the menu; wait for THAT rather than for a duration.
   leg.menuDismissed = await waitForElement(page, 'menu-main', false, 5000);
   // Leave the menu closed whatever happened, so no later leg inherits it.
@@ -556,14 +573,56 @@ async function waitForSurface(page, wanted, timeoutMs) {
   return { reached: false, waitedMs: timeoutMs, surface: last };
 }
 
-const caretTops = (page) => page.evaluate(() => {
+// THE CARET, READ AS THE LINE IT DECORATES RATHER THAN AS A PIXEL.
+//
+// This used to return `getBoundingClientRect().y` — a VIEWPORT coordinate —
+// and a viewport coordinate is not a proxy for a source position. `editor.nim`
+// reveals the current line with `revealLineInCenterIfOutsideViewport`, so once
+// the caret reaches the middle of a pane the editor SCROLLS BY EXACTLY THE
+// AMOUNT THE CARET MOVED and the pixel does not change at all.
+//
+// MEASURED on the deployed build (ide.codetracer.com/noir/demo, step-in x12):
+// four consecutive genuine moves — aggregate.nr lines 46, 47, 48, 50 — every
+// one of them at `y=521`, while the editor's `scrollTop` went 629 -> 653 ->
+// 677 -> 725. Four distinct source positions, one pixel. A `Set` of those
+// pixels counts ONE, so "the caret moved through N positions" was reading a
+// number that a correct product can hold constant while stepping perfectly.
+//
+// `editor.nim:682` writes the decoration as `class: "on on-<line>"`, so the
+// line number is in the DOM already and needs no geometry. That reading is
+// scroll-invariant, and it is the same quantity the engine reports in
+// `codetracer-replay: move <path>:<line>` — which is what lets the two be
+// COMPARED rather than merely both recorded.
+//
+// The `on-<line>` form is required, not optional: `editor.nim:698` puts a bare
+// `on` on the CALLTRACE view, with no line, and a bare `.on` selector can
+// reach it first. A marker without a line number is not this reading's subject.
+const caretMark = (page) => page.evaluate(() => {
   const marks = document.querySelectorAll('.view-overlays .on, .view-line .on, .on');
   for (const m of marks) {
     const r = m.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) continue;
-    return Math.round(r.y);
+    const hit = String(m.className || '').match(/\bon-(\d+)\b/);
+    if (!hit) continue;
+    // WHICH editor holds it, so a position is a FILE and a line rather than a
+    // line: stepping crosses files (main.nr -> aggregate.nr) and line 19 of
+    // one is not line 19 of the other.
+    let uri = '';
+    try {
+      const eds = (window.monaco && window.monaco.editor
+        && window.monaco.editor.getEditors()) || [];
+      for (const e of eds) {
+        const dom = e.getDomNode && e.getDomNode();
+        if (dom && dom.contains(m)) {
+          const mod = e.getModel && e.getModel();
+          if (mod) uri = String(mod.uri);
+          break;
+        }
+      }
+    } catch (err) { /* the position still carries its line */ }
+    return { line: Number(hit[1]), uri, pos: `${uri}:${hit[1]}` };
   }
-  return -1;
+  return { line: -1, uri: '', pos: '' };
 });
 
 const modelText = (page, marker) => page.evaluate((mk) => {
@@ -645,34 +704,52 @@ try {
 
     // Step, so the session is demonstrably live rather than merely painted.
     if (stepCount > 0) {
+      // ONLY THE POSITIONS THE STEPS REACHED. This set used to be seeded with
+      // a read taken BEFORE the first step, so "the caret moved through 2
+      // positions" could mean "it started somewhere and moved once" — and
+      // worse, that seed was sampled straight after the menu gesture's press
+      // with nothing awaiting its repaint, so it routinely captured a position
+      // the session had already left. The steps must now span the positions on
+      // their own.
       const tops = new Set();
-      const first = await caretTops(page);
-      if (first >= 0) tops.add(first);
-      // The position each step is measured AGAINST. Carried across steps so a
-      // step waits to leave where the previous one landed, rather than
-      // comparing against a value re-read after the move has already happened.
-      let lastTop = first;
       const moveLines = [];
       const caretSamples = [];
       for (let i = 0; i < stepCount; i += 1) {
         const movesBefore = report.consoleMilestones.length;
-        const c = await hitTestedClick(page, '#next-image', `${who}: step ${i + 1}`);
+        // STEP IN, NOT STEP OVER, AND THE DIFFERENCE IS THE WHOLE LEG.
+        //
+        // `#next-image` is step-OVER, and the session opens in a synthetic
+        // `<toplevel>` frame at `main.nr:1`. Stepping OVER at that position
+        // means "run the rest of the program", so ONE press takes the session
+        // from the first tick to the last and the trace is then exhausted:
+        // every later press is a no-op.
+        //
+        // MEASURED on the deployed build, `/noir/demo` — a 475-step, 35-call,
+        // 5-file trace, so this is not a recording that is too small:
+        //
+        //     press 1  rrTicks 0 -> 474   main.nr:24   (the closing brace)
+        //     press 2..8                  main.nr:24   (nothing left to do)
+        //
+        // That is why steps 2 and 3 sat out the full caret deadline on every
+        // trip while the leg still passed. `#step-in-image` advances the
+        // session by exactly ONE tick per press — measured on the gate's own
+        // `/noir` subject: main.nr 8, 8, 9, 9, 10 then utils.nr 6, 7, 7, which
+        // is real progress across two files.
+        const c = await hitTestedClick(page, '#step-in-image', `${who}: step ${i + 1}`);
         if (!c.clicked) break;
         // WAIT FOR THE MOVE THE ENGINE REPORTS, not for 800ms.
         //
-        // The reading this guards is the caret's `y` — a PIXEL, which is wrong
-        // rather than absent when read early: mid-step it returns the previous
-        // position's offset, and `tops` is a Set, so an early read collapses
-        // two distinct positions into one and the leg concludes the caret did
-        // not move. A duration that is usually long enough produces a wrong
-        // NUMBER here, not a missing one.
-        //
-        // `ui/web_replay_host.nim` reports `codetracer-replay: move
+        // `ui/web_replay_host.nim:155` reports `codetracer-replay: move
         // <path>:<line> missingPath=<bool>` on every `ct/complete-move`,
-        // whether or not the position changed — which is the distinction a
-        // caret poll cannot draw. This probe's console filter is by CONTENT
-        // and `codetracer-replay:` is already in its allowlist, so the line was
-        // being captured and not used.
+        // whether or not the position changed. This probe's console filter is
+        // by CONTENT and `codetracer-replay:` is already in its allowlist, so
+        // the line was being captured and not used.
+        //
+        // IT IS USED NOW, AS THE EXPECTED VALUE THE PAINT IS COMPARED TO. The
+        // engine names the line it moved to; the editor paints a line. Those
+        // are two readings of one quantity, and asserting they AGREE is the
+        // claim "the caret follows the session" — which is what this leg is
+        // named for and had no way to check while it read pixels.
         const moveDeadline = Date.now() + 15000;
         let moveLine = '';
         while (Date.now() < moveDeadline) {
@@ -683,58 +760,74 @@ try {
         }
         moveLines.push(moveLine || '(no move reported within 15s)');
 
-        // AND THEN WAIT FOR THE REPAINT, which is not the same event as the
-        // engine's report.
+        // AND THEN WAIT FOR THE PAINT TO REACH THE LINE THE ENGINE NAMED.
         //
-        // `codetracer-replay: move` says the SESSION moved. The reading below
-        // is a PIXEL, and the pixel changes when Monaco repaints the
-        // highlighted line — strictly after the move is reported, by a margin
-        // that is largest on the first step of a fresh session, when the
-        // layout and the editor are still warming. A single read taken the
-        // instant the move lands therefore returns the PREVIOUS position's
-        // offset, and because `tops` is a Set, that collapses two distinct
-        // positions into one and the leg concludes the caret never moved.
+        // The old wait was "poll until the caret LEAVES where it was", and that
+        // condition is WRONG IN BOTH DIRECTIONS on a correct product.
         //
-        // MEASURED TWICE, the same shape both times: trip 1 reported 1
-        // position while trips 2 and 3 reported 2, on 35a1673b7 and again on
-        // 1291fb97c's ancestor in run 33979389123. Only the first trip is ever
-        // wrong, which is the signature of a warm-up latency being sampled
-        // rather than of a session that is not live.
+        // It cannot be satisfied when a step legitimately stays on its line. A
+        // source line spans several trace ticks, so consecutive steps land on
+        // the same line all the time — measured on `/noir`: ticks 1 and 2 are
+        // both `main.nr:8`, ticks 3 and 4 are both `main.nr:9`. Waiting to
+        // LEAVE line 8 after a step that correctly stayed on line 8 can only
+        // ever time out. (That is also where ~30s a run of dead time went: two
+        // of three steps sat out the full 5s deadline on every trip.)
         //
-        // So the caret is polled until it LEAVES the position it was at, or a
-        // deadline expires. The deadline is what keeps this a fix to the
-        // instrument: a caret that never moves still records its unchanged
-        // value, `tops` still does not grow, and the leg still fails. Nothing
-        // here widens what counts as a move.
-        const prevTop = lastTop;
+        // And it can be satisfied without a step, because the pixel it watched
+        // moves when the pane scrolls or relayouts.
+        //
+        // So the condition is now POSITIVE and specific: poll until the painted
+        // line EQUALS the line the engine just reported. That is promptly
+        // satisfiable in every legitimate case, including the repeats above,
+        // and it is not satisfiable by a caret that stopped following — which
+        // is the failure this leg exists to catch.
+        //
+        // THE DEADLINE STILL BOUNDS IT RATHER THAN RESCUING IT: a caret that
+        // never reaches the reported line records `followed: false`, and the
+        // shell fails the leg on it.
+        const want = /move ([^ ]+):(\d+)/.exec(moveLine);
+        const wantPath = want ? want[1] : '';
+        const wantLine = want ? Number(want[2]) : -1;
         const caretStart = Date.now();
         const caretDeadline = caretStart + 5000;
-        let t = await caretTops(page);
+        let mark = await caretMark(page);
         let polls = 1;
-        while (t === prevTop && Date.now() < caretDeadline) {
+        while (mark.line !== wantLine && Date.now() < caretDeadline) {
           await page.waitForTimeout(50);
-          t = await caretTops(page);
+          mark = await caretMark(page);
           polls += 1;
         }
         const settledMs = Date.now() - caretStart;
-        if (t >= 0) {
-          tops.add(t);
-          lastTop = t;
-        }
-        // THE SERIES, so the first step's latency is visible rather than
-        // absorbed: a leg that passes only because the caret took four
-        // seconds to repaint says so here instead of reading like a prompt one.
+        if (mark.line >= 0) tops.add(mark.pos);
+        // THE SERIES, so a leg that passes only because the repaint took
+        // seconds reads differently from one that was prompt — and so a
+        // disagreement names both numbers rather than only the verdict.
         caretSamples.push({
-          step: i + 1, polls, settledMs, top: t, moved: t !== prevTop,
+          step: i + 1,
+          polls,
+          settledMs,
+          wantPath,
+          wantLine,
+          paintedLine: mark.line,
+          pos: mark.pos,
+          followed: wantLine >= 0 && mark.line === wantLine,
         });
       }
       report.legs.push({
         leg: `${prefix}-step`,
+        // DISTINCT SOURCE POSITIONS, `<model uri>:<line>` — not distinct
+        // pixels. Stepping crosses files, so the file is part of the identity:
+        // line 19 of `main.nr` and line 19 of `aggregate.nr` are two positions
+        // and one number.
         caretPositions: Array.from(tops),
-        // Beside the pixels, so a failure says whether the move was never
-        // reported or was reported and landed where it started.
+        // Beside the paint, so a failure says whether the move was never
+        // reported or was reported and the caret did not go there.
         moveLines,
         caretSamples,
+        // The per-step verdict, tallied here so the shell asserts over a
+        // number rather than re-deriving it from the series.
+        caretFollowed: caretSamples.filter((s) => s.followed).length,
+        stepsTaken: caretSamples.length,
       });
     }
 
