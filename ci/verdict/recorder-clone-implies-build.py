@@ -77,6 +77,43 @@ COMPILED_RECORDERS = {
 }
 
 
+# The spellings `just` itself accepts, in its own search order. This repo uses
+# the lowercase one.
+#
+# THIS LIST EXISTS BECAUSE A HARD-CODED "Justfile" SHIPPED A CHECK THAT WAS
+# CORRECT ON macOS AND WRONG ON LINUX. APFS is case-insensitive, so
+# `repo_root / "Justfile"` resolved to the real `justfile` on every developer
+# machine and on every by-hand run; on the Linux CI runner it did not exist,
+# `parse_justfile` returned `{}` WITHOUT SAYING SO, no `just` target could be
+# followed, and `viewmodel-tests` -- which builds the JS recorder one level
+# down, via `just test-vm-recorder-gated` -> `scripts/build-siblings.sh --only`
+# -- was reported as a violation of a rule it does not break. That is the exact
+# false positive the docstring below says this checker was written to avoid,
+# reintroduced by a filename.
+#
+# It went unseen because it could not be seen: `devShells.lint` had no PyYAML,
+# so this suite exited before running on every CI run since it was written, and
+# everyone who ran it by hand ran it on a case-insensitive filesystem.
+JUSTFILE_NAMES = ("justfile", "Justfile", ".justfile", ".Justfile", "JUSTFILE")
+
+
+def find_justfile(repo_root):
+    """The repo's justfile, or None. Case-sensitive on purpose."""
+    # The directory is listed ONCE and matched by name, rather than probed with
+    # `.exists()`. On a case-insensitive filesystem `.exists()` answers yes for
+    # a spelling the file does not have, and that is exactly what hid this
+    # defect for as long as it existed; comparing against the names the
+    # directory actually reports gives the same answer on macOS and on Linux.
+    try:
+        present = {e.name for e in repo_root.iterdir() if e.is_file()}
+    except OSError:
+        return None
+    for name in JUSTFILE_NAMES:
+        if name in present:
+            return repo_root / name
+    return None
+
+
 def parse_justfile(path):
     """Return {recipe_name: (deps, body)} for a Justfile.
 
@@ -90,7 +127,7 @@ def parse_justfile(path):
     instead of being relaxed to permit it.
     """
     recipes = {}
-    if not path.exists():
+    if path is None or not path.is_file():
         return recipes
     name = None
     deps = []
@@ -169,7 +206,25 @@ def main(argv):
     clones_seen = 0
     # ci/verdict/<this file> -> ci/verdict -> ci -> repo root: three levels.
     repo_root = pathlib.Path(__file__).resolve().parent.parent.parent
-    recipes = parse_justfile(repo_root / "Justfile")
+    justfile = find_justfile(repo_root)
+    recipes = parse_justfile(justfile)
+
+    # AN EMPTY RECIPE TABLE IS REFUSED FOR THE SAME REASON AN EMPTY CLONE SET
+    # IS. Without recipes no `just`-delegated build can be followed, so every
+    # job that builds one level down becomes a violation -- the checker does
+    # not go quiet, it goes WRONG, and loudly, which is worse. Returning `{}`
+    # silently is what let a `Justfile`/`justfile` case mismatch report
+    # `viewmodel-tests` as a violation on Linux while passing on macOS.
+    if not recipes:
+        print(
+            "recorder-clone-implies-build: ERROR parsed 0 just recipes "
+            f"(justfile: {justfile if justfile else 'NOT FOUND under ' + str(repo_root)}). "
+            "Builds delegated to a `just` target cannot be followed without "
+            "them, so every such job would be reported as a violation. "
+            "Refusing to report on a workflow this checker cannot read fully.",
+            file=sys.stderr,
+        )
+        return 2
 
     for path in paths:
         p = pathlib.Path(path)

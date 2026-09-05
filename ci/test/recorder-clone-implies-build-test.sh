@@ -61,7 +61,6 @@ tmp_root="$(mktemp -d)"
 cleanup() { rm -rf "$tmp_root"; }
 trap cleanup EXIT
 
-
 skipped=0
 skip() {
 	skipped=$((skipped + 1))
@@ -114,6 +113,60 @@ else
 		"test-non-gui and test-ui-tests each clone ruby; test-ui-tests and" \
 		"viewmodel-tests each clone js. If this number FELL, a clone stopped" \
 		"being recognised -- fix the recogniser, do not lower this bound."
+fi
+
+# --- Case 2b: the Justfile is found BY ITS REAL NAME -----------------------
+# THE DEFECT THIS PINS SHIPPED, AND IT WAS INVISIBLE ON EVERY MACHINE ANYONE
+# RAN IT ON. The checker looked up `repo_root / "Justfile"`; the file is
+# `justfile`. APFS is case-insensitive, so `.exists()` said yes on macOS and on
+# every by-hand run, and said NO on the Linux CI runner -- where
+# `parse_justfile` then returned `{}` silently, no `just` target could be
+# followed, and `viewmodel-tests` was reported as a violation of a rule it does
+# not break. Case 4 below already covers that job, but only against the
+# HISTORICAL workflow, which is skipped in a shallow clone -- so on CI, the
+# lane that would have caught this had nothing asserting it.
+#
+# These two cases need no history and no network, so they hold at any depth.
+if [ -n "$(
+	python3 - "$REPO_ROOT" <<'PY'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+# Case-SENSITIVE, deliberately: `.exists()` is the call that hid the defect.
+names = {e.name for e in root.iterdir()}
+sys.stdout.write("yes" if names & {"justfile", "Justfile", ".justfile", ".Justfile", "JUSTFILE"} else "")
+PY
+)" ]; then
+	if grep -q "parsed 0 just recipes" <<<"$out"; then
+		fail "the checker resolves this repo's justfile by its real name" \
+			"A justfile is present, yet the checker parsed no recipes." \
+			"On a case-insensitive filesystem a wrong-case lookup still" \
+			"succeeds; that is what made this defect Linux-only." "$out"
+	else
+		ok "the checker resolves this repo's justfile by its real name"
+	fi
+else
+	fail "the checker resolves this repo's justfile by its real name" \
+		"No justfile in $REPO_ROOT under any spelling that just accepts."
+fi
+
+# --- Case 2c: no recipe table is a REFUSAL, not a pile of violations -------
+# Without recipes, every build delegated to a `just` target becomes invisible
+# and its job becomes a violation. A checker that cannot read the tree must say
+# so and stop, exactly as it already does for an empty clone set -- the
+# alternative is not silence, it is confident wrong answers.
+norecipes="$tmp_root/norecipes"
+mkdir -p "$norecipes/ci/verdict" "$norecipes/.github/workflows"
+cp "$GUARD" "$norecipes/ci/verdict/"
+cp "$REPO_ROOT/.github/workflows/codetracer.yml" "$norecipes/.github/workflows/"
+nr_out="$(python3 "$norecipes/ci/verdict/recorder-clone-implies-build.py" \
+	"$norecipes/.github/workflows/codetracer.yml" 2>&1)"
+nr_rc=$?
+if [ "$nr_rc" -eq 2 ] && grep -q "parsed 0 just recipes" <<<"$nr_out"; then
+	ok "a tree with no justfile is refused (exit 2), not reported as violations"
+else
+	fail "a tree with no justfile is refused (exit 2), not reported as violations" \
+		"got exit $nr_rc. A missing recipe table must not be reported as" \
+		"the workflow's fault." "$nr_out"
 fi
 
 # --- Case 3: THE HISTORICAL DEFECT, from git, not from a mock --------------
