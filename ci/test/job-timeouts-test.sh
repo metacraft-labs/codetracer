@@ -128,6 +128,8 @@ fi
 
 # It must name them INDIVIDUALLY. A checker that stopped at the first violation
 # would still exit 1 and would still be useless to whoever has to fix the file.
+# shellcheck disable=SC2016  # the backticks are LITERAL: they are the
+# guard's own quoting of the key name, and matching them is the point.
 named="$(grep -c ': no `timeout-minutes`' <<<"$neg_out")"
 if [ "$named" -ge 42 ]; then
 	ok "stripped report names $named jobs individually (>= the 42 present)"
@@ -174,6 +176,7 @@ if git -C "$REPO_ROOT" cat-file -e "$HISTORICAL_REV:$WORKFLOW" 2>/dev/null; then
 		fail "pre-fix workflow exited $hist_status, expected 1" "$hist_out"
 	fi
 
+	# shellcheck disable=SC2016  # literal backticks, as above.
 	hist_named="$(grep -c ': no `timeout-minutes`' <<<"$hist_out")"
 	if [ "$hist_named" -eq 30 ]; then
 		ok "pre-fix report names exactly the 30 jobs that were unbounded"
@@ -250,6 +253,9 @@ jobs:
     steps: [{run: "true"}]' \
 	"1 job(s) bounded"
 
+# shellcheck disable=SC2016  # `${{ inputs.t }}` must reach the fixture
+# UNEXPANDED -- an expression that this shell had already resolved would not
+# exercise the case at all.
 expect "an expression is rejected" 1 texpr \
 	'name: t
 on: [push]
