@@ -254,7 +254,13 @@ suite "faults are told apart from refusals":
     counted producer.vm.status.val == bsFailed
     counted producer.vm.code.val == 1
     counted producer.vm.problems.val.len == 0
-    counted linesMentioning(producer.vm, "could not decode") == 1
+    # THE NEEDLE IS THE SHIPPED COPY, and it moves when the copy moves. This
+    # read `"could not decode"` until `paintCompileResult`'s row was reworded
+    # to "the Noir compiler's answer could not be read"; the same commit
+    # updated the twin assertion in `test_noir_test_run.nim` and missed this
+    # file, so the case went red over wording while the behaviour it names was
+    # never broken. Its partner at the `== 0` below moves with it — see there.
+    counted linesMentioning(producer.vm, "could not be read") == 1
     counted producer.artifact.isNil
 
   test "a worker failure arrives on stderr and is painted":
@@ -294,7 +300,15 @@ suite "faults are told apart from refusals":
     counted producer.onExit(ProcessExit(exitCode: 0, signalled: false)) ==
       npvFaulted
     counted producer.vm.output.val.len == rowsAfterRefusal
-    counted linesMentioning(producer.vm, "could not decode") == 0
+    # THIS NEEDLE AND THE `== 1` ONE ABOVE MOVE TOGETHER, ALWAYS. A `== 0`
+    # over a string the product no longer writes passes for every input: it
+    # stops measuring and starts agreeing, and nothing goes red to say so.
+    # That is what happened here while the copy read "could not decode" —
+    # this line sat green through any second decode-fault row appended under
+    # the first, which is the ONE failure the case exists to catch. So a
+    # rewording that touches only the `== 1` needle is worse than leaving
+    # both stale: it turns a loud failure into a silent one.
+    counted linesMentioning(producer.vm, "could not be read") == 0
     counted producer.vm.status.val == bsFailed
 
   test "a STOP is not a failure":

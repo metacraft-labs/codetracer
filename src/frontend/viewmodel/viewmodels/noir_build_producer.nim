@@ -759,9 +759,15 @@ proc onExit*(producer: NoirBuildProducer; exit: ProcessExit): NoirPhaseVerdict =
   of nbpTestRecord:
     let response = parseNoirTestResponse(producer.stdoutText)
     if not response.decoded:
+      # ONE VOCABULARY FOR ONE FAULT, across all three sites that can reach
+      # it: `paintCompileResult`, `paintTestResult` and here. They said
+      # "could not decode" together until a copy pass reworded the first two
+      # and left this one behind, and a reader who greps the product for the
+      # sentence it just showed them has to find it — which is also how the
+      # matching test assertion went stale without anything going red.
       producer.note(
-        "the Noir toolchain answered with something this build could not " &
-        "decode when asked to record the test. Nothing was recorded.")
+        "the Noir toolchain's answer could not be read when asked to record " &
+        "the test. Nothing was recorded.")
       producer.lastVerdict = npvFaulted
     elif not response.ok:
       # A REFUSAL WITH A NAME. `no-such-test` and `test-takes-arguments` are
