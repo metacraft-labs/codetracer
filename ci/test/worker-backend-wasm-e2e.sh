@@ -11,6 +11,9 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${REPO_ROOT}/ci/lib/nim-cache-root.sh"
 cd "$REPO_ROOT" || exit 1
 
 WASM_TESTING="src/db-backend/wasm-testing"
@@ -19,7 +22,7 @@ HOST="$WASM_TESTING/node-host/worker_host.mjs"
 WORKER="$WASM_TESTING/worker.js"
 SRC="src/frontend/viewmodel/tests/e2e/worker_backend_wasm_e2e.nim"
 TRACE="${CT_WORKER_E2E_TRACE:-src/db-backend/tests/fixtures/stylus-fund-trace/stylus_fund_tracking_demo.ct}"
-OUT="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/worker-backend-e2e"
+OUT="$(ct_nim_cache_root "${REPO_ROOT}")/worker-backend-e2e"
 
 fail() {
 	echo "FAIL: $*" >&2

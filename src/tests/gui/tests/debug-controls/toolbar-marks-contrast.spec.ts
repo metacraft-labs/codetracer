@@ -44,12 +44,17 @@
  * WHAT IT TRUSTS. The built theme CSS in `src/build-debug/frontend/styles`
  * and the built `storybook/dist/components.js`, which is the REAL Nim view —
  * not a transcription of it. A stale bundle is caught by the mtime guard in
- * `resolveComponentsBundle`; a stale stylesheet is not detectable from here.
+ * `resolveComponentsBundle`, and a stale STYLESHEET is now caught the same way
+ * by `lib/built-theme-css`, which refuses a built `.css` older than any `.styl`
+ * under `src/frontend/styles`. This sentence used to end "a stale stylesheet is
+ * not detectable from here", one function above a guard that did exactly that
+ * for the bundle.
  */
 
 import { test, expect } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
+import { resolveBuiltThemeCss } from "../../lib/built-theme-css";
 
 const REPO_ROOT = path.resolve(__dirname, "../../../../..");
 
@@ -104,26 +109,14 @@ const THEMES = [
   { name: "white", css: "default_white_theme_electron.css" },
 ];
 
-function resolveThemeCss(file: string): string {
-  const dirs = [
-    process.env.CODETRACER_BUILD_DIR
-      ? path.join(process.env.CODETRACER_BUILD_DIR, "frontend/styles")
-      : null,
-    path.join(REPO_ROOT, "src/build-debug/frontend/styles"),
-    path.join(REPO_ROOT, "src/build-debug-repro/frontend/styles"),
-  ].filter(Boolean) as string[];
-  for (const d of dirs) {
-    const p = path.join(d, file);
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error(
-    `Built theme stylesheet ${file} not found in:\n  ${dirs.join("\n  ")}\n` +
-      `Run \`just build-once\`, or compile it directly with\n` +
-      `  node node_modules/stylus/bin/stylus -o src/build-debug/frontend/styles ` +
-      `src/frontend/styles/${file.replace(/\.css$/, ".styl")}\n` +
-      `NOTE: \`default_white_theme_electron\` is absent from repro.nim's ` +
-      `StylusCssEntryPoints, so a macOS \`just build-once\` does not produce it.`,
-  );
+/**
+ * The built stylesheet is the artefact under test, so it is resolved by
+ * `lib/built-theme-css.ts`, which picks the NEWEST candidate and refuses one
+ * older than any `.styl` under `src/frontend/styles`. This used to return the
+ * first path that existed, which after any style edit is the previous build.
+ */
+function resolveThemeCss(theme: string): string {
+  return resolveBuiltThemeCss(REPO_ROOT, theme);
 }
 
 function resolveComponentsBundle(): string {

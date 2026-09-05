@@ -45,10 +45,12 @@
  * footer is `#1b1b1b` in both.  `verify_the_light_theme_is_not_a_different_
  * bar` states that as an assertion rather than leaving it as a surprise.
  *
- * IT TRUSTS THE BUILD, exactly as its sibling does: it reads whatever
- * `src/build-debug` (or the nix output) currently holds and cannot tell a
- * fresh theme from a stale one.  Editing a `.styl` and running this without
- * `just build-once` reports on the previous build.
+ * IT DATES THE BUILD IT TRUSTS, exactly as its sibling does.  It reads
+ * whatever `src/build-debug` (or the nix output) currently holds, and
+ * `lib/built-theme-css` refuses that stylesheet if any `.styl` under
+ * `src/frontend/styles` is newer.  Editing a `.styl` and running this without
+ * `just build-once` used to report on the previous build; it now stops and
+ * names the source file that outdates the CSS.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -65,6 +67,7 @@ import {
   probeBarContrast,
 } from "../../page-objects/status-footer-contrast";
 import { SURVIVING_HIDE_SPELLINGS } from "../../page-objects/status-footer-contract";
+import { resolveBuiltThemeCss } from "../../lib/built-theme-css";
 
 /** Repo root, from `src/tests/gui/tests/status-bar`. */
 const repoRoot = path.resolve(__dirname, "../../../../..");
@@ -84,36 +87,14 @@ const THEMES = [
   "default_white_theme_electron.css",
 ] as const;
 
-/** Resolved the same way `footer-visibility-css-guard.spec.ts` resolves it. */
-function candidateStyleDirs(): string[] {
-  const dirs: string[] = [];
-  if (process.env.CODETRACER_BUILD_DIR) {
-    dirs.push(path.join(process.env.CODETRACER_BUILD_DIR, "frontend", "styles"));
-  }
-  dirs.push(path.join(repoRoot, "src", "build-debug", "frontend", "styles"));
-  if (process.env.CODETRACER_E2E_CT_PATH) {
-    dirs.push(
-      path.join(
-        path.dirname(path.dirname(process.env.CODETRACER_E2E_CT_PATH)),
-        "frontend",
-        "styles",
-      ),
-    );
-  }
-  return dirs;
-}
-
+/**
+ * The built stylesheet is the artefact under test, so it is resolved by
+ * `lib/built-theme-css.ts`, which picks the NEWEST candidate and refuses one
+ * older than any `.styl` under `src/frontend/styles`. This used to return the
+ * first path that existed, which after any style edit is the previous build.
+ */
 function resolveTheme(theme: string): string {
-  const tried: string[] = [];
-  for (const dir of candidateStyleDirs()) {
-    const candidate = path.join(dir, theme);
-    tried.push(candidate);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  throw new Error(
-    `built theme stylesheet \`${theme}\` not found — run \`just build-once\`. ` +
-      `Looked in:\n  ${tried.join("\n  ")}`,
-  );
+  return resolveBuiltThemeCss(repoRoot, theme);
 }
 
 /**

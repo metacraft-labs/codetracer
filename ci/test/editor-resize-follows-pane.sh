@@ -113,6 +113,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}"
 
 checks=0
@@ -145,7 +148,7 @@ if [ ! -d node_modules/playwright ] && ! node -e "require('playwright')" >/dev/n
 	exit 2
 fi
 
-cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/editor-resize"
+cache="$(ct_nim_cache_root "${repo_root}")/editor-resize"
 mkdir -p "${cache}"
 
 # ---------------------------------------------------------------------------

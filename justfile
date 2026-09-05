@@ -1224,7 +1224,7 @@ test-nimsuggest:
 # BPF monitor unit tests — exercises JSON parsing, timestamp conversion,
 # and event accumulation without needing bpftrace or root access.
 test-bpf-monitor:
-  nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc --nimcache:/tmp/ct-nim-cache/bpf_monitor_test src/ct/ci/bpf_monitor_test.nim
+  nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc --nimcache:"$(ci/lib/nim-cache-root.sh)/bpf_monitor_test" src/ct/ci/bpf_monitor_test.nim
 
 # BPF integration tests — requires a capabilities-aware bpftrace binary
 # and the bpftrace-collection.bt script from the codetracer-ci sibling repo.
@@ -1235,7 +1235,7 @@ test-bpf-monitor:
 # require either passwordless sudo or a patched bpftrace build. They will
 # skip with a diagnostic message when the prerequisite is not met.
 test-bpf-integration:
-  nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc --nimcache:/tmp/ct-nim-cache/bpf_integration_test src/ct/ci/bpf_integration_test.nim
+  nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc --nimcache:"$(ci/lib/nim-cache-root.sh)/bpf_integration_test" src/ct/ci/bpf_integration_test.nim
 
 # Grant BPF capabilities to the ct binary after (re)compilation.
 # Requires the sudoers rule installed by `just developer-setup`.
@@ -1289,7 +1289,7 @@ test-bpf-native:
   nim c -r --hints:off --warnings:off -d:ssl -d:useOpenssl3 --mm:refc \
     --passC:"-I$LIBBPF_PATH/include" \
     --passL:"-L$LIBBPF_PATH/lib" --passL:"-lbpf" --passL:"-lelf" --passL:"-lz" \
-    --nimcache:/tmp/ct-nim-cache/bpf_monitor_native_test \
+    --nimcache:"$(ci/lib/nim-cache-root.sh)/bpf_monitor_native_test" \
     src/ct/ci/bpf_monitor_native_test.nim
 
 # Native BPF E2E integration tests — drives the ct binary with
@@ -1302,7 +1302,7 @@ test-bpf-native-integration:
   #!/usr/bin/env bash
   set -euo pipefail
   nim c --hints:off --warnings:off --mm:refc \
-    --nimcache:/tmp/ct-nim-cache/bpf_native_integration_test \
+    --nimcache:"$(ci/lib/nim-cache-root.sh)/bpf_native_integration_test" \
     src/ct/ci/bpf_native_integration_test.nim
   LD_LIBRARY_PATH="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}" \
     src/ct/ci/bpf_native_integration_test
@@ -3967,7 +3967,7 @@ test-noir-studio-signed-out:
   mkdir -p test-logs
   exec > >(tee test-logs/test-noir-studio-signed-out.log) 2>&1
   bash ci/test/noir-studio-signed-out.sh
-  cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+  cache="$(ci/lib/nim-cache-root.sh)"
   CT_WEB_ENTRY_BUNDLE="${cache}/nsso-loop/web.js" \
   CT_RENDERER_WEB_BUNDLE="${cache}/nsso-renderer/ui.js" \
     bash ci/test/noir-studio-signed-out-test.sh
@@ -4046,7 +4046,7 @@ test-no-sidecar-manifests: vm-test-prereqs
   echo "=== RS-M12 sidecar retirement (real recording per language) ==="
   f=src/tests/gui/tests/request-panel/no_sidecar_manifests_test.nim
   name=$(basename "$f" .nim)
-  cache="/tmp/ct-nim-cache/vm-native-$name"
+  cache="$(ci/lib/nim-cache-root.sh)/vm-native-$name"
   nim c -r --hints:off \
     --path:src/frontend/viewmodel \
     --nimcache:"$cache" \
@@ -4158,7 +4158,7 @@ test-vm-recorder-gated: vm-test-prereqs
   skipped=0
   for f in $(test_lane_files vm-recorder-gated); do
     name=$(basename "$f" .nim)
-    cache="/tmp/ct-nim-cache/vm-gated-$name"
+    cache="$(ci/lib/nim-cache-root.sh)/vm-gated-$name"
     echo -n "  $f ... "
     output=$(nim c -r --hints:off \
       --path:src/frontend/viewmodel \

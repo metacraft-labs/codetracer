@@ -88,6 +88,9 @@ set -euo pipefail
 
 FIXTURE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 CODETRACER_ROOT="$(cd "$FIXTURE_DIR/../../../../../.." && pwd -P)"
+# shellcheck source=ci/lib/newest-build.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "$CODETRACER_ROOT/ci/lib/newest-build.sh"
 WORKSPACE_ROOT="$(cd "$CODETRACER_ROOT/.." && pwd -P)"
 
 JS_RECORDER="${CODETRACER_JS_RECORDER_PATH:-$WORKSPACE_ROOT/codetracer-js-recorder}"
@@ -137,23 +140,21 @@ fi
 
 CT_INSTRUMENT_BIN="${CT_INSTRUMENT_BIN:-}"
 if [ -z "$CT_INSTRUMENT_BIN" ]; then
-	for candidate in \
+	CT_INSTRUMENT_BIN="$(newest_executable \
 		"$WASM_INSTRUMENTER/target/release/ct-instrument" \
-		"$WASM_INSTRUMENTER/target/debug/ct-instrument"; do
-		[ -x "$candidate" ] && CT_INSTRUMENT_BIN="$candidate" && break
-	done
+		"$WASM_INSTRUMENTER/target/debug/ct-instrument")" \
+		|| CT_INSTRUMENT_BIN=""
 fi
 [ -n "$CT_INSTRUMENT_BIN" ] ||
 	missing+=("- ct-instrument not found (cargo build --release -p ct-instrument-cli in $WASM_INSTRUMENTER)")
 
 RECORD_WEB_BIN="${CODETRACER_RECORD_WEB_BIN:-}"
 if [ -z "$RECORD_WEB_BIN" ]; then
-	for candidate in \
+	RECORD_WEB_BIN="$(newest_executable \
 		"$CODETRACER_ROOT/src/backend-manager/target/release/session-manager" \
 		"$CODETRACER_ROOT/src/backend-manager/target/debug/session-manager" \
-		"$CODETRACER_ROOT/src/build-debug/bin/session-manager"; do
-		[ -x "$candidate" ] && RECORD_WEB_BIN="$candidate" && break
-	done
+		"$CODETRACER_ROOT/src/build-debug/bin/session-manager")" \
+		|| RECORD_WEB_BIN=""
 fi
 [ -n "$RECORD_WEB_BIN" ] ||
 	missing+=("- session-manager not built (cargo build in $CODETRACER_ROOT/src/backend-manager)")

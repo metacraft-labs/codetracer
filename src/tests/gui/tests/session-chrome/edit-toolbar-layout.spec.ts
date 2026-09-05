@@ -66,6 +66,7 @@ import { test, expect } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import { EDIT_TOOLBAR_IDS } from "../../page-objects/debug-toolbar-ids";
+import { resolveBuiltThemeCss } from "../../lib/built-theme-css";
 
 const REPO_ROOT = path.resolve(__dirname, "../../../../..");
 
@@ -96,24 +97,14 @@ const THEMES = [
   { name: "white", css: "default_white_theme_electron.css" },
 ];
 
-function resolveThemeCss(file: string): string {
-  const dirs = [
-    process.env.CODETRACER_BUILD_DIR
-      ? path.join(process.env.CODETRACER_BUILD_DIR, "frontend/styles")
-      : null,
-    path.join(REPO_ROOT, "src/build-debug/frontend/styles"),
-    path.join(REPO_ROOT, "src/build-debug-repro/frontend/styles"),
-  ].filter(Boolean) as string[];
-  for (const d of dirs) {
-    const p = path.join(d, file);
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error(
-    `Built theme stylesheet ${file} not found in:\n  ${dirs.join("\n  ")}\n` +
-      `Run \`just build-once\`, or compile it directly with\n` +
-      `  node node_modules/stylus/bin/stylus -o src/build-debug/frontend/styles ` +
-      `src/frontend/styles/${file.replace(/\.css$/, ".styl")}`,
-  );
+/**
+ * The built stylesheet is the artefact under test, so it is resolved by
+ * `lib/built-theme-css.ts`, which picks the NEWEST candidate and refuses one
+ * older than any `.styl` under `src/frontend/styles`. This used to return the
+ * first path that existed, which after any style edit is the previous build.
+ */
+function resolveThemeCss(theme: string): string {
+  return resolveBuiltThemeCss(REPO_ROOT, theme);
 }
 
 const EDIT_MARKS_SRC = path.join(

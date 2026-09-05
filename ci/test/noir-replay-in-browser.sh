@@ -46,6 +46,9 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && cd .. && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 # shellcheck source=ci/lib/published-asset.sh
@@ -73,7 +76,7 @@ remove_published() {
 	note "mutated ${tree##*/}: removed ${rel}"
 }
 
-cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/noir-replay-in-browser"
+cache="$(ct_nim_cache_root "${repo_root}")/noir-replay-in-browser"
 rm -rf "${cache}"
 mkdir -p "${cache}"
 

@@ -50,13 +50,16 @@
 # state. The trap restores on interrupt too.
 #
 # Usage:  bash ci/test/identity-token-mutation.sh
-# Env:    CT_NIM_CACHE_ROOT  nimcache root (default /tmp/ct-nim-cache)
+# Env:    CT_NIM_CACHE_ROOT  nimcache root (default: per-checkout, see ci/lib/nim-cache-root.sh)
 #         CT_IDENTITY_ARMS   'c' to skip the JS backend (local iteration only;
 #                            CI must run both, and M10 needs both)
 
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 MODULE="src/frontend/viewmodel/identity/token.nim"
@@ -92,7 +95,7 @@ use_pair() {
 		;;
 	esac
 }
-cache_root="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+cache_root="$(ct_nim_cache_root "${repo_root}")"
 work="$(mktemp -d)"
 backends="c js"
 [ "${CT_IDENTITY_ARMS:-}" = "c" ] && backends="c"

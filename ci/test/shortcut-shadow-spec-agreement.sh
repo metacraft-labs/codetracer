@@ -61,9 +61,12 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
-cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/shortcut-shadow-spec"
+cache="$(ct_nim_cache_root "${repo_root}")/shortcut-shadow-spec"
 mkdir -p "${cache}"
 
 checks=0

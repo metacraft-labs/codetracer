@@ -65,6 +65,7 @@ import {
   probeBarContrast,
   type ContrastRegion,
 } from "../../page-objects/status-footer-contrast";
+import { resolveBuiltThemeCss } from "../../lib/built-theme-css";
 
 /** Repo root, from `src/tests/gui/tests/build`. */
 const repoRoot = path.resolve(__dirname, "../../../../..");
@@ -74,29 +75,6 @@ const BUILD_VIEW = path.join(
   repoRoot,
   "src/frontend/viewmodel/views/isonim_build_view.nim",
 );
-
-/**
- * Where a built theme can be.  Mirrors `candidateStyleDirs` in
- * `status-bar/footer-visibility-css-guard.spec.ts`; see
- * `codetracer-specs/Architecture/Build-Outputs-And-Path-Resolution.md`.
- */
-function candidateStyleDirs(): string[] {
-  const dirs: string[] = [];
-  if (process.env.CODETRACER_BUILD_DIR) {
-    dirs.push(path.join(process.env.CODETRACER_BUILD_DIR, "frontend", "styles"));
-  }
-  dirs.push(path.join(repoRoot, "src", "build-debug", "frontend", "styles"));
-  if (process.env.CODETRACER_E2E_CT_PATH) {
-    dirs.push(
-      path.join(
-        path.dirname(path.dirname(process.env.CODETRACER_E2E_CT_PATH)),
-        "frontend",
-        "styles",
-      ),
-    );
-  }
-  return dirs;
-}
 
 /**
  * The themes whose compiled output carries this panel.
@@ -113,18 +91,14 @@ const THEMES = [
   "default_white_theme_electron.css",
 ] as const;
 
+/**
+ * The built stylesheet is the artefact under test, so it is resolved by
+ * `lib/built-theme-css.ts`, which picks the NEWEST candidate and refuses one
+ * older than any `.styl` under `src/frontend/styles`. This used to return the
+ * first path that existed, which after any style edit is the previous build.
+ */
 function resolveTheme(theme: string): string {
-  const tried: string[] = [];
-  for (const dir of candidateStyleDirs()) {
-    const candidate = path.join(dir, theme);
-    tried.push(candidate);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  throw new Error(
-    `built theme stylesheet \`${theme}\` not found — run \`just build-once\` ` +
-      `after editing any \`.styl\`, or this measures the previous build. ` +
-      `Looked in:\n  ${tried.join("\n  ")}`,
-  );
+  return resolveBuiltThemeCss(repoRoot, theme);
 }
 
 /**

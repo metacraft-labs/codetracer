@@ -115,16 +115,19 @@
 #
 # Usage:  bash ci/test/noir-studio-signed-out.sh
 # Env:    ISONIM_SRC        isonim source tree (else the ../isonim sibling)
-#         CT_NIM_CACHE_ROOT nimcache root (default /tmp/ct-nim-cache)
+#         CT_NIM_CACHE_ROOT nimcache root (default: per-checkout, see ci/lib/nim-cache-root.sh)
 #         CT_RENDERER_WEB_BUNDLE, CT_WEB_ENTRY_BUNDLE
 #                           prebuilt bundles, to skip the two nim js runs
 
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
-cache_root="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"
+cache_root="$(ct_nim_cache_root "${repo_root}")"
 guard_source="src/frontend/ui_js.nim"
 
 checks=0

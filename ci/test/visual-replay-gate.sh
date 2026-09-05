@@ -2,6 +2,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${REPO_ROOT}/ci/lib/nim-cache-root.sh"
 VISUAL_REPLAY_REPO="${CODETRACER_VISUAL_REPLAY_REPO_PATH:-${REPO_ROOT}/../codetracer-visual-replay}"
 NATIVE_BACKEND_REPO="${CODETRACER_NATIVE_BACKEND_REPO_PATH:-${VISUAL_REPLAY_REPO}/../codetracer-native-backend}"
 # shellcheck disable=SC1091
@@ -122,7 +125,7 @@ echo "##########################################################################
 for test_index in "${!NIM_TESTS[@]}"; do
 	test_file="${NIM_TESTS[$test_index]}"
 	test_name="$(basename "$test_file" .nim)"
-	cache="/tmp/ct-nim-cache/visual-replay-gate-${test_name}"
+	cache="$(ct_nim_cache_root "${REPO_ROOT}")/visual-replay-gate-${test_name}"
 	visual_replay_run_nim_suite "$test_file" \
 		nim c -r --hints:off \
 		--path:src/frontend/viewmodel \
@@ -181,7 +184,7 @@ source "$CODETRACER_VISUAL_REPLAY_GATE_LIB"
 run_visual_replay_nim_test() {
 	local test_file="$1" test_name cache
 	test_name="$(basename "$test_file" .nim)"
-	cache="${TMPDIR:-/tmp}/ct-nim-cache/visual-replay-sibling-gate-${test_name}"
+	cache="$(ct_nim_cache_root "${REPO_ROOT}")/visual-replay-sibling-gate-${test_name}"
 	visual_replay_run_nim_suite "$test_file" \
 		nim c -r --hints:off \
 		--nimcache:"$cache" \

@@ -2,6 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 mode="${1:-matrix}"
 log_root="${CODETRACER_AGENTIC_TEST_LOG_DIR:-${TMPDIR:-/tmp}/codetracer-agentic-headless-$(date +%Y%m%d-%H%M%S)-$$}"
 mkdir -p "$log_root"
@@ -26,7 +29,7 @@ run_nim() {
 	local name
 	name="$(basename "$path" .nim)"
 	run_cmd "$name" nim c -r --hints:off --path:src/frontend/viewmodel \
-		--nimcache:"/tmp/ct-nim-cache/${name}" -o:"/tmp/ct-nim-cache/${name}/${name}" "$path"
+		--nimcache:"$(ct_nim_cache_root "${repo_root}")/${name}" -o:"$(ct_nim_cache_root "${repo_root}")/${name}/${name}" "$path"
 }
 
 run_rust() {

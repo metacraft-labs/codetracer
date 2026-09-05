@@ -129,6 +129,9 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 # shellcheck source=ci/lib/published-asset.sh
@@ -154,7 +157,7 @@ fi
 # right, but the message blames a drifted needle rather than a moved name.
 worker_in() { published_asset "$1" assets/wasm-worker.js; }
 
-cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/wasm-worker-session"
+cache="$(ct_nim_cache_root "${repo_root}")/wasm-worker-session"
 mkdir -p "${cache}"
 
 checks=0

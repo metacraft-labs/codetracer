@@ -79,6 +79,9 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && cd .. && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 command -v nim >/dev/null 2>&1 || {
@@ -87,7 +90,7 @@ command -v nim >/dev/null 2>&1 || {
 	exit 2
 }
 
-cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/noir-build-mutations"
+cache="$(ct_nim_cache_root "${repo_root}")/noir-build-mutations"
 mkdir -p "${cache}"
 
 MARSHALLING="src/frontend/viewmodel/tests/unit/test_noir_build_marshalling.nim"

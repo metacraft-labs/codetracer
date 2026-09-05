@@ -1079,16 +1079,47 @@ package codeTracer:
     # checkout, worktree and sandboxed build on the machine share a single
     # object directory keyed only by target name, so two builds of the same
     # target from different source roots overwrote each other's ``.o`` files
-    # and produced undefined-reference link failures. Honouring ``$TMPDIR``
-    # lets a caller that already scopes its temp directory (test harnesses,
-    # CI runners, sandboxes) scope the nimcache with it. The nimcache path is
+    # and produced undefined-reference link failures. The nimcache path is
     # consumed raw by nim.exe (not via bash), so backslash mixing is OK.
-    let ctNimCacheRoot =
+    #
+    # HONOURING ``$TMPDIR`` WAS NOT ENOUGH, and the paragraph above used to
+    # stop there and claim the defect fixed. ``$TMPDIR`` is per-USER on macOS
+    # and usually unset on Linux, so on the machine this is developed on it
+    # resolves to one directory for every checkout — which is the collision it
+    # was supposed to end, with an extra step. It helps only the callers that
+    # already scope their own temp directory (sandboxes, some CI runners), and
+    # those are not the common case.
+    #
+    # So the checkout itself is in the key. ``getCurrentDir()`` is the source
+    # root the build is running in — the same discrimination
+    # ``ci/lib/nim-cache-root.sh`` makes for the shell gates, which see the
+    # identical problem from the identical cause.
+    #
+    # FNV-1a WRITTEN OUT RATHER THAN ``std/hashes``: this value names a
+    # directory that must be found again on the next build, and ``hash()``
+    # offers no cross-version stability guarantee — a Nim upgrade would
+    # silently orphan every cache. This is fixed by definition. It is not a
+    # security boundary and does not need to be; it needs to differ when the
+    # path differs.
+    let ctNimCacheKey = block:
+      var h: uint64 = 0xcbf29ce484222325'u64
+      for ch in getCurrentDir():
+        h = h xor uint64(ord(ch))
+        h = h * 0x100000001b3'u64
+      toHex(h, 16).toLowerAscii()
+
+    let ctNimCacheBase =
       when defined(windows):
         (getEnv("TEMP") / "ct-nim-cache").replace('\\', '/')
       else:
         (if getEnv("TMPDIR").len > 0: getEnv("TMPDIR") else: "/tmp") /
           "ct-nim-cache"
+
+    # The basename is kept alongside the digest only so that a human reading
+    # the directory listing can tell the checkouts apart; the digest is what
+    # makes them distinct.
+    let ctNimCacheRoot =
+      ctNimCacheBase / (getCurrentDir().lastPathPart & "-" & ctNimCacheKey)
 
     if fileExists("src/ct/db_backend_record.nim"):
       let dbBackendRecord = ctNative(

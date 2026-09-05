@@ -68,13 +68,14 @@
  * one asks whether the footer is THERE, that one asks whether it is READABLE,
  * and the regression that prompted each was invisible to the other.
  *
- * IT ALSO TRUSTS THE BUILD.  It reads whatever `src/build-debug` currently
- * holds, and cannot tell a fresh theme from a stale one — editing
- * `status_bar.styl` and running this spec WITHOUT `just build-once` reports
- * green against the previous build.  `just test-gui` takes `build-once` as a
- * prerequisite, which is what CI runs; `just test-gui-prebuilt` does not.
- * A missing build output does fail loudly (see `resolveTheme`); a stale one
- * cannot be detected from here.
+ * IT ALSO DATES THE BUILD.  It reads whatever `src/build-debug` currently
+ * holds, and `lib/built-theme-css` refuses it when any `.styl` under
+ * `src/frontend/styles` is newer.  Editing `status_bar.styl` and running this
+ * spec WITHOUT `just build-once` used to report green against the previous
+ * build; it now stops and names the `.styl` that outdates the CSS.  That
+ * matters most for `just test-gui-prebuilt`, which does NOT take `build-once`
+ * as a prerequisite — `just test-gui`, which is what CI runs, does.
+ * A missing build output fails loudly and so, now, does a stale one.
  *
  * No mocks and no fixture stylesheet: the CSS under test is the artefact
  * `just build-once` ships to the renderer.  The markup is the footer subtree
@@ -99,6 +100,7 @@ import {
   probeCollapsedIconZone,
   probeFooterRegions,
 } from "../../page-objects/status-footer-contract";
+import { resolveBuiltThemeCss } from "../../lib/built-theme-css";
 
 /** Repo root, from `src/tests/gui/tests/status-bar`. */
 const repoRoot = path.resolve(__dirname, "../../../../..");
@@ -120,33 +122,6 @@ const ICON_ZONE_VIEW = path.join(
 );
 
 /**
- * Where `just build-once` puts the compiled themes.
- *
- * Resolved the way `lib/fixtures.ts` resolves the build output — honour
- * `CODETRACER_BUILD_DIR`, else `src/build-debug` — plus the layout of a
- * nix-built app, whose `ct` lives at `<prefix>/bin/ct` with the styles at
- * `<prefix>/frontend/styles`.  See
- * `codetracer-specs/Architecture/Build-Outputs-And-Path-Resolution.md`.
- */
-function candidateStyleDirs(): string[] {
-  const dirs: string[] = [];
-  if (process.env.CODETRACER_BUILD_DIR) {
-    dirs.push(path.join(process.env.CODETRACER_BUILD_DIR, "frontend", "styles"));
-  }
-  dirs.push(path.join(repoRoot, "src", "build-debug", "frontend", "styles"));
-  if (process.env.CODETRACER_E2E_CT_PATH) {
-    dirs.push(
-      path.join(
-        path.dirname(path.dirname(process.env.CODETRACER_E2E_CT_PATH)),
-        "frontend",
-        "styles",
-      ),
-    );
-  }
-  return dirs;
-}
-
-/**
  * The themes the shipped shells link.  `index.html` links
  * `default_dark_theme_electron.css`; the web/extension shells link the other
  * two.  `default_white_theme.css` is deliberately absent: its `.styl` imports
@@ -163,17 +138,14 @@ const THEMES = [
   "default_dark_theme_extension.css",
 ] as const;
 
+/**
+ * The built stylesheet is the artefact under test, so it is resolved by
+ * `lib/built-theme-css.ts`, which picks the NEWEST candidate and refuses one
+ * older than any `.styl` under `src/frontend/styles`. This used to return the
+ * first path that existed, which after any style edit is the previous build.
+ */
 function resolveTheme(theme: string): string {
-  const tried: string[] = [];
-  for (const dir of candidateStyleDirs()) {
-    const candidate = path.join(dir, theme);
-    tried.push(candidate);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  throw new Error(
-    `built theme stylesheet \`${theme}\` not found — run \`just build-once\`. ` +
-      `Looked in:\n  ${tried.join("\n  ")}`,
-  );
+  return resolveBuiltThemeCss(repoRoot, theme);
 }
 
 /**

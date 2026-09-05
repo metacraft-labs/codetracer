@@ -106,7 +106,7 @@ VERSION_NIM="${REPO_ROOT}/src/ct/version.nim"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=70
+EXPECTED_ASSERTIONS=93
 
 ASSERTIONS=0
 FAILURES=0
@@ -942,6 +942,365 @@ assert_contains "$(run_cross_locked)" \
 assert_contains "$(run_cross_unpinned)" \
 	"cannot check whether '${NB}' is at the workspace-locked revision" \
 	"an unresolvable pin is spoken out loud rather than passed over"
+
+# ---------------------------------------------------------------------------
+section "the nimcache root names the checkout, not just the consumer"
+# ---------------------------------------------------------------------------
+#
+# THE CLUSTER. Thirty-six gates spelled their compiler cache
+# `"${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}"/<gate-name>` — a key naming the
+# CONSUMER with no component naming the TREE. That keeps two different gates
+# apart and is useless for keeping two checkouts of the same gate apart, which
+# is the collision that actually happens: this workstation carries ~35
+# worktrees of one repository and every one of them can run
+# `ci/test/web-bundle-smoke.sh`.
+#
+# MEASURED when the fix was written: `/tmp/ct-nim-cache` held 34 directories
+# and 1.9 GB, of which exactly four carried a checkout key — the ones
+# `ci/lib/run-nim-test-lane.sh` writes since it fixed this for itself on
+# 2026-09-03. The other thirty were shared by every worktree that had ever run
+# that gate.
+#
+# The failure is silent and points the wrong way: nim reuses a cached artefact
+# it believes current, so the loser of a race links objects from a DIFFERENT
+# TREE and still reports a clean pass — or a mutation arm reports SURVIVED
+# because the mutation it planted was never in the bytes it graded.
+#
+# `ci/lib/nim-cache-root.sh` is the one cause; these contracts are against it,
+# and the last two are against the sites actually delegating to it.
+
+NIMCACHE_LIB="${REPO_ROOT}/ci/lib/nim-cache-root.sh"
+assert_file_exists "${NIMCACHE_LIB}" "the shared nimcache-root helper exists"
+
+# Two synthetic checkouts, which is the whole point: same gate name, different
+# trees. Real directories rather than strings — the helper checksums a path and
+# a path that does not exist would still checksum, so using real ones keeps the
+# test honest about what it is measuring.
+CK_A="${TEST_ROOT}/checkouts/alpha"
+CK_B="${TEST_ROOT}/checkouts/beta"
+mkdir -p "${CK_A}" "${CK_B}"
+
+nimcache_for() {
+	# `env -u` so an ambient CT_NIM_CACHE_ROOT in the runner's environment
+	# cannot silently answer for the helper and turn every contract below
+	# green. Measured hazard: `build-error-nav-mutations.sh` exports it.
+	# The single quotes are deliberate: `$1` and `$2` are the INNER shell's
+	# positional parameters, bound from the arguments after `_`. Expanding them
+	# here would inline the paths and stop testing argument passing.
+	# shellcheck disable=SC2016
+	env -u CT_NIM_CACHE_ROOT bash -c \
+		'source "$1"; ct_nim_cache_root "$2"' _ "${NIMCACHE_LIB}" "$1"
+}
+
+ROOT_A="$(nimcache_for "${CK_A}")"
+ROOT_B="$(nimcache_for "${CK_B}")"
+
+if [[ -n ${ROOT_A} && ${ROOT_A} != "${ROOT_B}" ]]; then
+	ok "two checkouts running the same gate get different cache roots"
+else
+	bad "two checkouts running the same gate get different cache roots" \
+		"alpha: ${ROOT_A}" "beta:  ${ROOT_B}"
+fi
+
+# The other half, and the one a careless fix breaks: a root that differed per
+# INVOCATION would end the collision by ending caching, turning every gate into
+# a cold compile. That would look like a pass here if only difference were
+# asserted.
+if [[ "$(nimcache_for "${CK_A}")" == "${ROOT_A}" ]]; then
+	ok "...and the same checkout gets the same root twice, so the cache is reused"
+else
+	bad "...and the same checkout gets the same root twice, so the cache is reused" \
+		"first: ${ROOT_A}" "second: $(nimcache_for "${CK_A}")"
+fi
+
+assert_contains "${ROOT_A}" "alpha" \
+	"the root carries the checkout's name, so a human can read the directory listing"
+
+# A caller that sets it has said which directory it wants — usually because it
+# is handing a scratch directory to a child it is about to grade. Second-guessing
+# that would break `ci/test/build-error-nav-mutations.sh`.
+EXPLICIT="$(CT_NIM_CACHE_ROOT="${TEST_ROOT}/explicit-cache" bash -c \
+	'source "$1"; ct_nim_cache_root "$2"' _ "${NIMCACHE_LIB}" "${CK_A}")"
+assert_contains "${EXPLICIT}" "${TEST_ROOT}/explicit-cache" \
+	"an explicit CT_NIM_CACHE_ROOT is still honoured verbatim"
+
+# The helper is sourced by the shell gates and EXECUTED by justfile recipes,
+# which run under `sh` and cannot source a bash library. Two entry points that
+# disagreed would be a defect that only ever showed up in `just`.
+EXEC_MODE="$(cd "${CK_A}" && env -u CT_NIM_CACHE_ROOT "${NIMCACHE_LIB}")"
+if [[ ${EXEC_MODE} == "${ROOT_A}" ]]; then
+	ok "run as a command it prints what sourcing it computes, so justfile and gates agree"
+else
+	bad "run as a command it prints what sourcing it computes, so justfile and gates agree" \
+		"executed: ${EXEC_MODE}" "sourced:  ${ROOT_A}"
+fi
+
+# AND THE SITES. The contracts above grade the cause; this one grades whether
+# the thirty-six consumers actually reach it, because a perfect helper nobody
+# calls fixes nothing.
+#
+# Source text, deliberately, and it is the right question for THIS defect: the
+# bug is literally a spelling — a path constant with no checkout in it — so its
+# absence is what "fixed" means. This suite's own prose contains the string
+# (above), so it is excluded by name rather than by a pattern that might
+# quietly exclude a real gate too.
+BARE_ROOTS="$(
+	grep -rln '/tmp/ct-nim-cache' \
+		"${REPO_ROOT}/ci/test" "${REPO_ROOT}/scripts" "${REPO_ROOT}/justfile" 2>/dev/null |
+		grep -v 'stale-artefact-guards-test.sh' || true
+)"
+if [[ -z ${BARE_ROOTS} ]]; then
+	ok "no gate, script or justfile recipe spells a bare /tmp/ct-nim-cache any more"
+else
+	# Unquoted ON PURPOSE: `bad` prints each argument on its own line, and
+	# `BARE_ROOTS` is a newline-separated list of paths. Quoting it would report
+	# every offending file as one unreadable run-on line.
+	# shellcheck disable=SC2086
+	bad "no gate, script or justfile recipe spells a bare /tmp/ct-nim-cache any more" \
+		"still hardcoding a host-global root:" ${BARE_ROOTS}
+fi
+
+# ---------------------------------------------------------------------------
+section "a resolver picks the newest build, not the first profile that exists"
+# ---------------------------------------------------------------------------
+#
+# THE CLUSTER. Five fixture regenerators carry the same two resolvers,
+# copy-pasted — `ct-instrument` over two profiles and `session-manager` over
+# three — each one `break`ing on the first executable candidate:
+#
+#   src/db-backend/tests/fixtures/wasm-memory-calldata/regenerate.sh
+#   src/db-backend/tests/fixtures/wasm-parity-corpus/regenerate.sh
+#   src/db-backend/tests/fixtures/wasm-nan-payloads/regenerate.sh
+#   .../cross_process/account-balance-with-wasm/regenerate.sh
+#   .../cross_process/account-balance-with-wasm/stream-snapshots-demo.sh
+#
+# "Prefer release" is a preference between two CURRENT builds; applied to
+# whatever is on disk it is a preference for whichever is older, because
+# `target/release` and `target/debug` are separate directories and neither
+# build removes the other.
+#
+# WHAT IT COSTS HERE is worse than the usual stale-artefact story: these
+# scripts do not run a binary and check a result, they REGENERATE COMMITTED
+# FIXTURES with it. A stale `ct-instrument` does not fail — it writes a fixture
+# in last month's format, which then becomes the ground truth every future
+# parity assertion agrees with.
+#
+# `scripts/run-cross-repo-tests.sh` already fixed this shape for
+# `ct-native-replay` (graded above). `ci/lib/newest-build.sh` is that fix
+# extracted, so the sixth copy of the regenerator inherits it rather than the
+# defect.
+
+NEWEST_LIB="${REPO_ROOT}/ci/lib/newest-build.sh"
+assert_file_exists "${NEWEST_LIB}" "the shared newest-build helper exists"
+
+PROFILES="${TEST_ROOT}/profiles"
+mkdir -p "${PROFILES}/release" "${PROFILES}/debug"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${PROFILES}/release/tool"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${PROFILES}/debug/tool"
+chmod +x "${PROFILES}/release/tool" "${PROFILES}/debug/tool"
+
+newest_of() {
+	bash -c 'source "$1"; shift; newest_executable "$@"' _ "${NEWEST_LIB}" "$@"
+}
+
+# Release is listed FIRST, as the old code preferred it, and is deliberately
+# the older file. Explicit mtimes rather than `touch` ordering: `-nt` compares
+# whole seconds on some filesystems, and two files written in the same second
+# would make this pass for the wrong reason.
+touch -t 202001010000 "${PROFILES}/release/tool"
+touch -t 202001020000 "${PROFILES}/debug/tool"
+assert_contains "$(newest_of "${PROFILES}/release/tool" "${PROFILES}/debug/tool")" \
+	"${PROFILES}/debug/tool" \
+	"a debug build newer than release wins, though release is preferred"
+
+# The preference is not discarded, only demoted below currency: with equal
+# mtimes the earlier argument still wins, which is what "prefer release" was
+# always meant to mean.
+touch -t 202001030000 "${PROFILES}/release/tool" "${PROFILES}/debug/tool"
+assert_contains "$(newest_of "${PROFILES}/release/tool" "${PROFILES}/debug/tool")" \
+	"${PROFILES}/release/tool" \
+	"...and release still wins a tie between two builds of the same revision"
+
+# A path that exists but is not executable is a half-finished or interrupted
+# build, and `cargo` leaves those behind.
+chmod -x "${PROFILES}/debug/tool"
+touch -t 202001040000 "${PROFILES}/debug/tool"
+assert_contains "$(newest_of "${PROFILES}/release/tool" "${PROFILES}/debug/tool")" \
+	"${PROFILES}/release/tool" \
+	"a newer but non-executable candidate is not chosen"
+chmod +x "${PROFILES}/debug/tool"
+
+# Non-zero rather than an empty string, so `... || VAR=""` is the caller saying
+# out loud that it accepts absence. An empty string that looked like success
+# would flow into `"$BIN" record ...` and fail somewhere unrecognisable.
+if bash -c 'source "$1"; newest_executable "$2"' _ "${NEWEST_LIB}" \
+	"${TEST_ROOT}/definitely-absent" >/dev/null 2>&1; then
+	bad "no executable candidate is a non-zero return, not an empty success" \
+		"the command unexpectedly succeeded"
+else
+	ok "no executable candidate is a non-zero return, not an empty success"
+fi
+
+# AND THE SITES, for the same reason as above: the helper is only worth having
+# if the five copies reach it. `break` inside the candidate loop is the exact
+# shape that was removed, so its return is what regression looks like.
+REGENERATORS=(
+	"src/db-backend/tests/fixtures/wasm-memory-calldata/regenerate.sh"
+	"src/db-backend/tests/fixtures/wasm-parity-corpus/regenerate.sh"
+	"src/db-backend/tests/fixtures/wasm-nan-payloads/regenerate.sh"
+	"src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/regenerate.sh"
+	"src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/stream-snapshots-demo.sh"
+)
+NOT_DELEGATING=()
+for regen in "${REGENERATORS[@]}"; do
+	full="${REPO_ROOT}/${regen}"
+	if [[ ! -f ${full} ]]; then
+		NOT_DELEGATING+=("${regen} (missing)")
+	elif ! grep -q 'newest_executable' "${full}"; then
+		NOT_DELEGATING+=("${regen} (does not call newest_executable)")
+	elif grep -q 'for candidate in' "${full}"; then
+		NOT_DELEGATING+=("${regen} (still resolves by first-existing)")
+	fi
+done
+if [[ ${#NOT_DELEGATING[@]} -eq 0 ]]; then
+	ok "all five fixture regenerators resolve through the shared helper"
+else
+	bad "all five fixture regenerators resolve through the shared helper" \
+		"${NOT_DELEGATING[@]}"
+fi
+
+# ---------------------------------------------------------------------------
+section "a contrast spec refuses a stylesheet older than the styl it came from"
+# ---------------------------------------------------------------------------
+#
+# THE CLUSTER. Five contrast/layout specs carried the same resolver — return
+# the first candidate directory in which the built `.css` exists:
+#
+#   src/tests/gui/tests/debug-controls/toolbar-marks-contrast.spec.ts
+#   src/tests/gui/tests/build/build-panel-contrast-guard.spec.ts
+#   src/tests/gui/tests/status-bar/footer-contrast-guard.spec.ts
+#   src/tests/gui/tests/status-bar/footer-visibility-css-guard.spec.ts
+#   src/tests/gui/tests/session-chrome/edit-toolbar-layout.spec.ts
+#
+# The stylesheet is not an input to these specs, it is the SUBJECT of them.
+# Resolving it by existence means the measurement is taken from whatever CSS
+# was last compiled, which after an edit to any `.styl` is the previous build —
+# so the spec reports green about a file nobody changed and stays green through
+# the regression it was written to catch.
+#
+# EVERY ONE OF THE FIVE SAID SO IN ITS OWN WORDS, which is the tell this whole
+# suite exists to notice. `build-panel-contrast-guard.spec.ts` put it in the
+# error message of the very function that could not detect it: "run `just
+# build-once` after editing any `.styl`, or this measures the previous build".
+# `toolbar-marks-contrast.spec.ts`: "a stale stylesheet is not detectable from
+# here" — in a file whose NEXT function compares its bundle's mtime against the
+# two `.nim` views it is built from. The fix was already in the building, ten
+# lines below the defect.
+#
+# WHY THIS RUNS THE `.cjs` AND NOT THE `.ts`: there is no `tsc` in the
+# repository's node_modules and this suite's lane has no npm install, so a
+# resolver written only as TypeScript could never be watched going red. The
+# implementation is therefore plain CommonJS that `node` runs with no toolchain,
+# and `built-theme-css.ts` is a types-only binding over it — one implementation,
+# not two copies.
+
+CSS_LIB="${REPO_ROOT}/src/tests/gui/lib/built-theme-css.cjs"
+CSS_TYPES="${REPO_ROOT}/src/tests/gui/lib/built-theme-css.ts"
+assert_file_exists "${CSS_LIB}" "the shared built-CSS resolver exists"
+assert_file_exists "${CSS_TYPES}" "...and the typed binding the specs import"
+
+# A synthetic checkout with the two build variants that are routinely BOTH
+# present — `src/build-debug` from tup and `src/build-debug-repro` from
+# reprobuild, neither of which removes the other.
+CSSTREE="${TEST_ROOT}/csstree"
+mkdir -p "${CSSTREE}/src/frontend/styles/components" \
+	"${CSSTREE}/src/build-debug/frontend/styles" \
+	"${CSSTREE}/src/build-debug-repro/frontend/styles"
+printf '.x { color: red }\n' >"${CSSTREE}/src/frontend/styles/components/status_bar.styl"
+printf '.x{color:red}\n' >"${CSSTREE}/src/build-debug/frontend/styles/theme.css"
+printf '.x{color:red}\n' >"${CSSTREE}/src/build-debug-repro/frontend/styles/theme.css"
+
+resolve_css() {
+	node -e '
+		const { resolveBuiltThemeCss } = require(process.argv[1]);
+		try {
+			process.stdout.write(resolveBuiltThemeCss(process.argv[2], process.argv[3]));
+		} catch (e) {
+			process.stdout.write("REFUSED: " + e.message);
+			process.exit(1);
+		}
+	' "${CSS_LIB}" "${CSSTREE}" theme.css 2>&1
+}
+
+# `src/build-debug` is listed first and is the older of the two. The old
+# resolver returned it for that reason alone.
+touch -t 202001010000 "${CSSTREE}/src/frontend/styles/components/status_bar.styl"
+touch -t 202001020000 "${CSSTREE}/src/build-debug/frontend/styles/theme.css"
+touch -t 202001030000 "${CSSTREE}/src/build-debug-repro/frontend/styles/theme.css"
+
+assert_contains "$(resolve_css)" "build-debug-repro/frontend/styles/theme.css" \
+	"between two build variants the NEWER stylesheet is used, not the first listed"
+
+# THE SECOND, INDEPENDENT QUESTION, and the one the whole cluster was missing:
+# the winner may still predate its own sources. Editing a component `.styl` is
+# exactly what a developer does before running one of these specs.
+touch -t 202001040000 "${CSSTREE}/src/frontend/styles/components/status_bar.styl"
+STALE_CSS="$(resolve_css)"
+assert_contains "${STALE_CSS}" "is STALE" \
+	"a stylesheet older than a .styl under src/frontend/styles is refused"
+assert_contains "${STALE_CSS}" "components/status_bar.styl" \
+	"...and the refusal names the source file that outdates it"
+assert_contains "${STALE_CSS}" "just build-once" \
+	"...and says what to run, so the refusal is actionable rather than a puzzle"
+
+# The other direction, which is what makes the contract above meaningful: a
+# guard that refused everything would also have passed those three.
+touch -t 202001050000 "${CSSTREE}/src/build-debug-repro/frontend/styles/theme.css"
+assert_contains "$(resolve_css)" "build-debug-repro/frontend/styles/theme.css" \
+	"a stylesheet rebuilt after the .styl edit is accepted again"
+
+# Absence still fails loudly and says where it looked. A resolver answering ""
+# would reach `page.addStyleTag({ path: "" })`, which does not obviously fail —
+# and a contrast assertion against an unstyled page measures browser defaults
+# and can PASS.
+MISSING_CSS="$(node -e '
+	const { resolveBuiltThemeCss } = require(process.argv[1]);
+	try {
+		process.stdout.write(resolveBuiltThemeCss(process.argv[2], process.argv[3]));
+	} catch (e) {
+		process.stdout.write("REFUSED: " + e.message);
+	}
+' "${CSS_LIB}" "${CSSTREE}" absent_theme.css 2>&1)"
+assert_contains "${MISSING_CSS}" "not found" \
+	"a missing stylesheet is refused rather than returned as an empty path"
+assert_contains "${MISSING_CSS}" "build-debug" \
+	"...and the refusal lists the directories it looked in"
+
+# AND THE SITES.
+CONTRAST_SPECS=(
+	"src/tests/gui/tests/debug-controls/toolbar-marks-contrast.spec.ts"
+	"src/tests/gui/tests/build/build-panel-contrast-guard.spec.ts"
+	"src/tests/gui/tests/status-bar/footer-contrast-guard.spec.ts"
+	"src/tests/gui/tests/status-bar/footer-visibility-css-guard.spec.ts"
+	"src/tests/gui/tests/session-chrome/edit-toolbar-layout.spec.ts"
+)
+CSS_NOT_DELEGATING=()
+for spec in "${CONTRAST_SPECS[@]}"; do
+	full="${REPO_ROOT}/${spec}"
+	if [[ ! -f ${full} ]]; then
+		CSS_NOT_DELEGATING+=("${spec} (missing)")
+	elif ! grep -q 'resolveBuiltThemeCss' "${full}"; then
+		CSS_NOT_DELEGATING+=("${spec} (does not call resolveBuiltThemeCss)")
+	elif grep -q 'if (fs.existsSync(candidate)) return candidate;' "${full}"; then
+		CSS_NOT_DELEGATING+=("${spec} (still resolves by first-existing)")
+	fi
+done
+if [[ ${#CSS_NOT_DELEGATING[@]} -eq 0 ]]; then
+	ok "all five contrast specs resolve their stylesheet through the shared helper"
+else
+	bad "all five contrast specs resolve their stylesheet through the shared helper" \
+		"${CSS_NOT_DELEGATING[@]}"
+fi
 
 # ---------------------------------------------------------------------------
 printf '\n'

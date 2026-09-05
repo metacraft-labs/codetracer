@@ -139,7 +139,7 @@
 # is not a provenance.
 #
 # Usage:  bash ci/test/noir-template-toolchain.sh
-# Env:    CT_NIM_CACHE_ROOT       nim cache root (default /tmp/ct-nim-cache)
+# Env:    CT_NIM_CACHE_ROOT       nim cache root (default: per-checkout, see ci/lib/nim-cache-root.sh)
 #         CT_NOIR_WASM_COMPILER   noir_wasm.wasm (optional). Gates arm U's
 #                                 validity comparison, arm V's verdict diff,
 #                                 and the control arm's ACIR comparison — the
@@ -150,9 +150,12 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=ci/lib/nim-cache-root.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
-cache="${CT_NIM_CACHE_ROOT:-/tmp/ct-nim-cache}/noir-template-toolchain"
+cache="$(ct_nim_cache_root "${repo_root}")/noir-template-toolchain"
 mkdir -p "${cache}"
 
 checks=0
