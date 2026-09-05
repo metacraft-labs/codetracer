@@ -102,12 +102,15 @@ const CHORDS = [
 // They are NOT in `CHORDS` above and are never pressed in the same page as it,
 // and that separation is deliberate rather than tidy. Both of them change
 // application state that the other presses are measured against: `CTRL+E`
-// flips `data.ui.readOnly` and `data.ui.mode` and rebuilds the layout, and
-// `ALT+1` opens a Low Level Code tab which stays open. Pressed in the middle of
-// the 22-press sweep, they would move the eleven chords after them into a
-// different mode and the run would be measuring a different product either side
-// of them. Selected with `CT_CHORD_SUBJECTS`, one chord and one focus context
-// per page load, so every press below lands on a page in its BOOT state.
+// flips `data.ui.readOnly` and, through it, the `readOnly` option on every live
+// Monaco instance and the panels that go with it — NOT `data.ui.mode`, which it
+// must leave alone (`Mode-Transitions.md` §4 requirement 4, scenario
+// `Mode.ReadOnlyDoesNotMoveMode`) — and `ALT+1` opens a Low Level Code tab
+// which stays open. Pressed in the middle of the 22-press sweep, they would
+// leave the eleven chords after them measured against an editor that had become
+// read-only, and the run would be measuring a different product either side of
+// them. Selected with `CT_CHORD_SUBJECTS`, one chord and one focus context per
+// page load, so every press below lands on a page in its BOOT state.
 //
 // That freshness is also what makes `lowLevelTabs` readable. `openLowLevelCode`
 // creates a component the FIRST time and only redraws afterwards
@@ -291,11 +294,32 @@ async function setFocus(where) {
 // concluding "the key is alive" would be wrong in the other direction.
 //
 // So the observable state is reported too, and it is state the product owns
-// rather than anything this probe installs: `data.ui.readOnly` and
-// `data.ui.mode` are what `toggleReadOnly` and `switchToEdit` both move, and
+// rather than anything this probe installs: `data.ui.readOnly` is the model
+// flag `toggleReadOnly` assigns, `data.ui.mode` is what `switchToEdit` moves
+// (and what `toggleReadOnly` must NOT move — `Mode-Transitions.md` §4
+// requirement 4, scenario `Mode.ReadOnlyDoesNotMoveMode`), and
 // `data.ui.componentMapping[18]` (`Content.LowLevelCode`) is the table
 // `openLowLevelCode` registers into. Same fields on both bundles, so control
 // and fix are graded by one instrument.
+//
+// `monacoReadOnly` IS THE ONE THAT IS NOT A FLAG, and it is here because the
+// flag alone cannot carry the claim "the chord really did something". A
+// handler that assigned `data.ui.readOnly` and reached no editor would satisfy
+// every reading above, and `Mode-Transitions.md` §5a says outright that the two
+// are different facts which can disagree: "`data.ui.readOnly` is a model flag;
+// the `readOnly` option on a live Monaco instance is a different fact". The
+// product's own path from the chord ends at that option —
+// `toggleReadOnly` -> `setEditorsReadOnlyState` (`ui_js.nim:1512`) ->
+// `begin`/`finishReadOnlyTransition` -> `setEditorsEditable` (`:1168`) ->
+// `monacoEditorSetEditable`, which walks `data.ui.editors[label].monacoEditor`
+// — so this reads the end of it rather than the start.
+//
+// A LIST, NOT A BOOLEAN, and the length is reported with it. `setEditorsEditable`
+// walks the whole collection, so "the editors became read-only" is a statement
+// about all of them; and an EMPTY collection would make any "they all changed"
+// comparison vacuously true, which is the empty-haystack trap the preconditions
+// above already exist for. `null` when the collection cannot be read at all,
+// so "unreadable" and "empty" stay distinguishable.
 async function uiState() {
   return page.evaluate(() => {
     const d = window.data;
@@ -308,11 +332,30 @@ async function uiState() {
     } catch (e) {
       lowLevelTabs = -1;
     }
+    let monacoReadOnly = null;
+    try {
+      const out = [];
+      const editors = ui.editors || {};
+      for (const label of Object.keys(editors)) {
+        const e = editors[label];
+        if (!e || !e.monacoEditor) continue;
+        out.push([label, !!e.monacoEditor.getRawOptions().readOnly]);
+      }
+      // Sorted by label: `data.ui.editors` is a JsAssoc and its key order is
+      // not a promise, so an unsorted list would compare unequal across two
+      // readings that agree on every editor.
+      out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      monacoReadOnly = out;
+    } catch (e) {
+      monacoReadOnly = null;
+    }
     return {
       present: true,
       // `LayoutMode` — `DebugMode` and `EditMode`, as ordinals.
       mode: typeof ui.mode === 'number' ? ui.mode : null,
       readOnly: typeof ui.readOnly === 'boolean' ? ui.readOnly : null,
+      // `[[label, readOnlyOption], ...]`, or `null` if it could not be read.
+      monacoReadOnly,
       lowLevelTabs,
     };
   });
@@ -342,10 +385,31 @@ for (const where of FOCUS_CONTEXTS) {
       index: c.index,
       stateBefore,
       stateAfter,
-      // The three effect deltas, named so a shell check reads as a statement
-      // about the product rather than as arithmetic on two blobs.
+      // The effect deltas, named so a shell check reads as a statement about
+      // the product rather than as arithmetic on two blobs.
+      //
+      // `modeChanged` IS NOT A SUCCESS CRITERION FOR EVERY CHORD. It is one for
+      // `switchEdit`, and its NEGATION is one for `aToggleReadOnly`:
+      // `Mode-Transitions.md` §4 requirement 4 says "a command that wants to
+      // change what the editor allows without changing the mode must not touch
+      // the mode", and §9 names the scenario `Mode.ReadOnlyDoesNotMoveMode`.
+      // The probe reports the delta either way and leaves the direction to the
+      // shell, which is the same division `allDeliveries` is reported under.
       modeChanged: stateBefore.mode !== stateAfter.mode,
       readOnlyChanged: stateBefore.readOnly !== stateAfter.readOnly,
+      // THE EDITOR-LEVEL DELTA, and the count of what it was measured over.
+      // `monacoEditorsMeasured` is what stops "every editor changed" from
+      // being true of no editors; `null` on either side reports as unmeasured
+      // (`-1`) rather than as zero, so a collection that could not be read
+      // cannot be mistaken for one that is empty.
+      monacoReadOnlyChanged:
+        JSON.stringify(stateBefore.monacoReadOnly) !==
+        JSON.stringify(stateAfter.monacoReadOnly),
+      monacoEditorsMeasured:
+        stateAfter.monacoReadOnly === null ||
+        stateAfter.monacoReadOnly === undefined
+          ? -1
+          : stateAfter.monacoReadOnly.length,
       lowLevelTabsOpened: stateAfter.lowLevelTabs - stateBefore.lowLevelTabs,
       // The number this whole program exists to produce.
       deliveries: counts[String(c.index)] || 0,

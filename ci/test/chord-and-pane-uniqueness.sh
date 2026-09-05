@@ -522,10 +522,12 @@ echo
 # which redden on control against the same probe and the same comparison.
 #
 # ONE CHORD AND ONE FOCUS CONTEXT PER PAGE. Both of these move state the other
-# presses would then be measured against (CTRL+E flips the mode; ALT+1 leaves a
-# tab open, and `openLowLevelCode` only CREATES that tab the first time), so a
-# second press on the same page would move no counter and "the effect did not
-# happen" would be indistinguishable from "it already had".
+# presses would then be measured against (CTRL+E makes every live editor
+# read-only and rearranges the panels — it does NOT move `data.ui.mode`, and the
+# check below asserts that it does not; ALT+1 leaves a tab open, and
+# `openLowLevelCode` only CREATES that tab the first time), so a second press on
+# the same page would move no counter and "the effect did not happen" would be
+# indistinguishable from "it already had".
 echo "Part 1b: the two chords the hard-bind registry reported, pressed"
 echo
 
@@ -616,20 +618,98 @@ ck "$([ "${switch_hits}" = "0/0" ] && echo ok || echo fail)" \
 
 # THE EFFECT, not only the dispatch. Every check above counts a call into
 # `data.actions`, and a handler that had been replaced by a no-op would satisfy
-# all of them. `toggleReadOnly` moves `data.ui.readOnly` and `data.ui.mode`;
-# both must move, in BOTH contexts, or the chord is delivered and inert.
+# all of them. So the chord is graded on what a user would see: the model flag
+# moves AND the live Monaco instances move with it.
+#
+# WHY THE SECOND HALF IS THE MONACO OPTION AND NOT `data.ui.mode`. This check
+# read `readOnlyChanged and modeChanged` when it was written, against a
+# `toggleReadOnly` that still assigned `data.ui.mode`. `ui_js.nim`'s
+# `toggleReadOnly` no longer does, deliberately and by requirement —
+# `Mode-Transitions.md` § "4. The layout across a switch" -> "The requirements
+# on the switch itself", requirement 4: "A command that wants to change what
+# the editor allows without changing the mode must not touch the mode." So the
+# `modeChanged` conjunct had become an assertion that the product must violate
+# the spec, and it is not merely dropped here: it is REPLACED by a stronger
+# observable and RE-ASSERTED WITH ITS SIGN INVERTED by the check below.
+#
+# The replacement is stronger because `data.ui.readOnly` is a model flag while
+# the `readOnly` option on a live Monaco instance is what decides whether the
+# user can type — `Mode-Transitions.md` §5a is explicit that the two are
+# different facts that can disagree, and the product's path from the chord ends
+# at the option (`toggleReadOnly` -> `setEditorsReadOnlyState` ->
+# `setEditorsEditable` -> `monacoEditorSetEditable`). A handler that assigned
+# the flag and reached no editor passed the old check and fails this one.
+#
+# AND THE SUBJECT COUNT, for the same reason Part 1 asserts how many chords were
+# pressed: "every editor's option changed" is vacuously true of zero editors, so
+# the number of editors the delta was measured over is required to be positive
+# in the same expression. `-1` means the collection could not be read at all,
+# which is a different failure from an empty one and also fails.
 ctrle_effect="$(
 	for arm in ctrle-editor ctrle-outside; do
 		jq_py '
 import json,sys
 d=json.load(open(sys.argv[1]))
 r=d["results"][0] if len(d["results"])==1 else None
-print("yes" if r and r["readOnlyChanged"] and r["modeChanged"] else "no", end=",")
+print("yes" if (r and r["readOnlyChanged"] and r["monacoReadOnlyChanged"]
+                and r["monacoEditorsMeasured"] > 0) else "no", end=",")
 ' "${arm}"
 	done
 )"
 ck "$([ "${ctrle_effect}" = "yes,yes," ] && echo ok || echo fail)" \
-	"CTRL+E really toggles read-only and mode in BOTH contexts, not merely dispatches (editor,outside = ${ctrle_effect})"
+	"CTRL+E really makes the live Monaco editors read-only in BOTH contexts, not merely dispatches (editor,outside = ${ctrle_effect})"
+note "$(
+	for arm in ctrle-editor ctrle-outside; do
+		jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+r=d["results"][0] if len(d["results"])==1 else None
+if not r:
+    print("%s: no result;" % sys.argv[2], end=" ")
+else:
+    print("%s: flag %s->%s, monaco %s->%s over %s editor(s);"
+          % (sys.argv[2], r["stateBefore"]["readOnly"], r["stateAfter"]["readOnly"],
+             r["stateBefore"]["monacoReadOnly"], r["stateAfter"]["monacoReadOnly"],
+             r["monacoEditorsMeasured"]), end=" ")
+' "${arm}" "${arm}"
+	done
+)"
+
+# AND THE MODE DOES NOT MOVE — the half the check above used to get backwards,
+# now asserted in the direction the spec states.
+#
+# `Mode-Transitions.md` § 9 names this scenario: `Mode.ReadOnlyDoesNotMoveMode`,
+# "A command that only changes editability leaves the mode and both layouts
+# untouched", priority High. Requirement 4 of § 4 gives the cost of getting it
+# wrong: a command that flips the mode while leaving the layout in place makes
+# "the *next* switch save the wrong arrangement into the wrong store — it reads
+# the mode to decide which store it is leaving — and the user loses an
+# arrangement to a command that appeared to do something else entirely". That
+# was a real defect in this product, filed as M3 in the specs' 2026-09 gap
+# audit against a `toggleReadOnly` that assigned `data.ui.mode`.
+#
+# NOTHING ELSE PRESSES THE KEY TO CHECK IT. `src/frontend/ui/read_only_transition.nim`
+# and its suite reason about the transition PLAN as pure data, which cannot
+# observe what a keypress does to a running session; this is the browser half.
+# BOTH CONTEXTS, because the two dispatch through different paths (Monaco
+# inside, Mousetrap outside) and a regression could reach one and not the other
+# — the same reason every other CTRL+E check here is stated twice.
+ctrle_mode="$(
+	for arm in ctrle-editor ctrle-outside; do
+		jq_py '
+import json,sys
+d=json.load(open(sys.argv[1]))
+r=d["results"][0] if len(d["results"])==1 else None
+if not r or r["stateBefore"]["mode"] is None or r["stateAfter"]["mode"] is None:
+    print("unread", end=",")
+else:
+    print("moved(%s->%s)" % (r["stateBefore"]["mode"], r["stateAfter"]["mode"])
+          if r["modeChanged"] else "same", end=",")
+' "${arm}"
+	done
+)"
+ck "$([ "${ctrle_mode}" = "same,same," ] && echo ok || echo fail)" \
+	"CTRL+E leaves data.ui.mode untouched in BOTH contexts — Mode-Transitions.md req 4 / Mode.ReadOnlyDoesNotMoveMode (editor,outside = ${ctrle_mode})"
 
 # ALT+1 — the arm that must NOT change between the two bundles.
 alt1_in="$(chord_row alt1-editor "${lowlevel_ix}")"
@@ -665,7 +745,7 @@ echo
 # panes, so each is created once by the standalone path and parked offscreen.
 if ! probe panes-control ci/test/pane_mount_probe.mjs /noir; then
 	ck fail "the pane probe produced a report (control)"
-	expect_count 27
+	expect_count 28
 fi
 ck ok "the pane probe produced a report (control)"
 
@@ -700,7 +780,7 @@ export CT_PLANT_GL_CONTAINER=errorsComponent-0
 if ! probe panes-docked ci/test/pane_mount_probe.mjs /noir; then
 	ck fail "the pane probe produced a report (docked)"
 	unset CT_PLANT_GL_CONTAINER
-	expect_count 31
+	expect_count 32
 fi
 unset CT_PLANT_GL_CONTAINER
 ck ok "the pane probe produced a report (docked)"
@@ -744,7 +824,7 @@ export CT_PLANT_DUPLICATE_ID=errorsComponent-0
 if ! probe panes-instrument ci/test/pane_mount_probe.mjs /noir; then
 	ck fail "the pane probe produced a report (instrument)"
 	unset CT_PLANT_DUPLICATE_ID
-	expect_count 35
+	expect_count 36
 fi
 unset CT_PLANT_DUPLICATE_ID
 ck ok "the pane probe produced a report (instrument)"
@@ -827,7 +907,7 @@ PY
 
 if ! probe stopcallback ci/test/chord_stopcallback_probe.mjs /noir; then
 	ck fail "the stopCallback probe produced a report"
-	expect_count 37
+	expect_count 38
 fi
 ck ok "the stopCallback probe produced a report"
 
@@ -940,7 +1020,7 @@ fi
 
 exempt="$(match_selectors exemptByClass "${cache}/ledger-exempt.txt")"
 ck "$([ "$(printf '%s' "${exempt}" | head -1)" = "yes" ] && echo ok || echo fail)" \
-	"the inputs already tagged \`mousetrap\` are exactly the ones recorded"
+	"the inputs already tagged mousetrap are exactly the ones recorded"
 note "$(printf '%s' "${exempt}" | tail -n +2)"
 
 # ARM SI — THE INSTRUMENT. Every check above compares a measured set against a
@@ -955,10 +1035,10 @@ note "$(printf '%s' "${inst_sc}" | tail -n +2)"
 echo
 if [ "${failures}" -ne 0 ]; then
 	printf 'RESULT: FAILED — %d of %d check(s)\n' "${failures}" "${checks}"
-	expect_count 44
+	expect_count 45
 	exit 1
 fi
 printf '%d check(s), 0 failure(s)\n' "${checks}"
-expect_count 44
+expect_count 45
 echo "RESULT: OK — one press runs one action, one pane id names one node, and"
 echo "            the stopCallback override still buys what the source says"
