@@ -205,6 +205,414 @@ assert_fires "${t}" "consumer-facade-only" \
 	"an import inside a 'when defined(js)' branch does not evade the rule" \
 	"replay_data_store"
 
+# ---------------------------------------------------------------------------
+# consumer-facade-only, THE QUOTED SPELLINGS
+#
+# A module spec may be written as a string literal, and that is not a curiosity
+# of the grammar: `import "a/b"` is joined onto each search root exactly as
+# `import a/b` is. Until the extractor unquoted them, every "must not import X"
+# rule in this repository — this one, and the TUI's own
+# `src/frontend/tui/tests/test_tui_facade_boundary.nim` — was evadable by one
+# pair of quotation marks. It was demonstrated rather than theorised: planting
+# `import "tui/host/native_host"` in the real `src/frontend/tui/app/tui_app.nim`
+# compiled, reached the host layer, and left BOTH guards green, while six other
+# spellings of the same import went red by name.
+#
+# So the spellings below are the compiler's list, not a plausible-looking one:
+# each was compiled against nim 2.2.8 and resolved to the store module before it
+# was written here. Each lives in its own consumer FILE so the guard's output
+# has to name every one of them — a single file would let one spelling being
+# reported stand in for the rest.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree consumer-reaches-in-quoted)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane.nim" <<'EOF'
+## SDK-CONSUMER: the quoted spelling of the same violation.
+import "../src/frontend/viewmodel/store/replay_data_store"
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"a quoted import spec does not evade the rule" \
+	"replay_data_store"
+
+t="$(make_tree consumer-reaches-in-quoted-variants)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane_as.nim" <<'EOF'
+## SDK-CONSUMER: quoted, with an alias.
+import "../src/frontend/viewmodel/store/replay_data_store" as store
+EOF
+cat >"${t}/consumer/pane_from.nim" <<'EOF'
+## SDK-CONSUMER: quoted, in a `from` statement.
+from "../src/frontend/viewmodel/store/replay_data_store" import StoreVersion
+EOF
+cat >"${t}/consumer/pane_include.nim" <<'EOF'
+## SDK-CONSUMER: quoted, in an `include` statement.
+include "../src/frontend/viewmodel/store/replay_data_store"
+EOF
+cat >"${t}/consumer/pane_raw.nim" <<'EOF'
+## SDK-CONSUMER: quoted as a raw string literal, whose `r` is part of the
+## syntax and not part of the module name.
+import r"../src/frontend/viewmodel/store/replay_data_store"
+EOF
+cat >"${t}/consumer/pane_triple.nim" <<'EOF'
+## SDK-CONSUMER: quoted as a triple-quoted string literal.
+import """../src/frontend/viewmodel/store/replay_data_store"""
+EOF
+cat >"${t}/consumer/pane_partial.nim" <<'EOF'
+## SDK-CONSUMER: only one segment in the middle of the path is quoted.
+import ../src/frontend/"viewmodel"/store/replay_data_store
+EOF
+cat >"${t}/consumer/pane_bracket.nim" <<'EOF'
+## SDK-CONSUMER: a quoted prefix in front of a bracket list. The facade is
+## allowed; the internal beside it in the same list is not.
+import "../src/frontend/viewmodel"/[codetracer_embed, store/replay_data_store]
+EOF
+cat >"${t}/consumer/pane_mixed.nim" <<'EOF'
+## SDK-CONSUMER: one bare spec and one quoted spec on the same line, so the
+## comma split has to survive the quotation marks.
+import ../src/frontend/viewmodel/codetracer_embed, "../src/frontend/viewmodel/store/replay_data_store"
+EOF
+# The module name here ENDS IN `r`, and that is the whole point of the file.
+# The `r` of a raw string literal belongs to the quote that OPENS one; a strip
+# that drops `r` whenever a quote follows it eats the last letter of every
+# quoted spec ending in `r` — `store/replay_tracker` becomes
+# `store/replay_tracke`, which matches nothing and resolves to nothing, and the
+# quoted form is once again the way past this rule.
+# `src/frontend/viewmodel` alone holds 21 modules named that way
+# (`request_tracker`, `front_end_adapter`, `reducer`, `sync_publisher`, …), so
+# this is the common case, not a corner of one.
+cat >"${t}/src/frontend/viewmodel/store/replay_tracker.nim" <<'EOF'
+const TrackerVersion* = 1
+EOF
+cat >"${t}/consumer/pane_tracker.nim" <<'EOF'
+## SDK-CONSUMER: quoted, and the module name ends in `r`.
+import "../src/frontend/viewmodel/store/replay_tracker"
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"every quoted spelling nim accepts is caught, not only the bare one" \
+	"pane_as.nim" "pane_from.nim" "pane_include.nim" "pane_raw.nim" \
+	"pane_triple.nim" "pane_partial.nim" "pane_bracket.nim" "pane_mixed.nim" \
+	"pane_tracker.nim" "replay_tracker"
+
+# ---------------------------------------------------------------------------
+# consumer-facade-only, THE SPELLINGS THAT NEED NO SPACE — and the one that
+# needs two
+#
+# A STRING LITERAL SELF-TERMINATES, so once the spec is quoted the space before
+# `as`, before `except` and before the `import` of a `from` is optional.
+# `import "a/b"as c` compiles (nim 2.2.8, verified). An extractor that splits on
+# a SPACED keyword sees `a/bas c` — no module, no finding — so these forms sat
+# squarely inside "the quoted spellings" while evading the fix for them.
+#
+# And the mirror-image case: `/` is an ordinary infix operator, so
+# `import a / b / c` compiles and means `a/b/c`. That one is not quoted at all;
+# it evaded the extractor at HEAD too, and 26 files in this repository already
+# write imports that way — measured, by diffing the extractor's output over all
+# 998 tracked Nim files before and after the fix, not counted by eye.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree consumer-reaches-in-tight-keywords)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane_as_tight.nim" <<'EOF'
+## SDK-CONSUMER: quoted, aliased, and with no space before `as`.
+import "../src/frontend/viewmodel/store/replay_data_store"as store
+EOF
+cat >"${t}/consumer/pane_except_tight.nim" <<'EOF'
+## SDK-CONSUMER: quoted, with no space before `except`.
+import "../src/frontend/viewmodel/store/replay_data_store"except StoreVersion
+EOF
+cat >"${t}/consumer/pane_from_as_tight.nim" <<'EOF'
+## SDK-CONSUMER: quoted, aliased and imported-from, with no space anywhere.
+from "../src/frontend/viewmodel/store/replay_data_store"as store import StoreVersion
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"a quoted spec followed immediately by 'as' or 'except' does not evade the rule" \
+	"pane_as_tight.nim" "pane_except_tight.nim" "pane_from_as_tight.nim"
+
+t="$(make_tree consumer-reaches-in-spaced-separator)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane_spaced.nim" <<'EOF'
+## SDK-CONSUMER: `/` written as the infix operator it is.
+import .. / src / frontend / viewmodel / store / replay_data_store
+EOF
+cat >"${t}/consumer/pane_spaced_quoted.nim" <<'EOF'
+## SDK-CONSUMER: spaced separators AND quoted segments together.
+import ".." / "src" / "frontend" / "viewmodel" / "store" / "replay_data_store"
+EOF
+cat >"${t}/consumer/pane_spaced_bracket.nim" <<'EOF'
+## SDK-CONSUMER: a spaced separator in front of a bracket list, which is how
+## src/frontend/ui/ui_imports.nim already writes its imports.
+import .. / src / frontend / viewmodel / [codetracer_embed, store / replay_data_store]
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"whitespace around the '/' separator does not evade the rule" \
+	"pane_spaced.nim" "pane_spaced_quoted.nim" "pane_spaced_bracket.nim"
+
+# ---------------------------------------------------------------------------
+# consumer-facade-only, THE CHARACTERS THAT ARE SYNTAX OUTSIDE A LITERAL AND
+# FILENAME INSIDE ONE
+#
+# Nim requires only the BASENAME of a module path to be a valid identifier, so a
+# `#` or a `[` in a DIRECTORY component is legal and both forms below compile
+# (nim 2.2.8, verified). Inside the quotes they are filename characters; the
+# extractor must not read them as a comment marker or as a bracket list.
+#
+# Each is a MISS if got wrong, not an over-report — which is why they are here:
+#
+#   `#`  cut at the first one and `import "h#d/../…"` becomes `import "h`,
+#        naming nothing at all.
+#   `[`  counted as an unbalanced bracket and the import statement is never
+#        finished, so every following line is glued onto the same buffer and the
+#        SECOND import — the violating one — is never seen as a statement.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree consumer-reaches-in-punctuated-dir)"
+mkdir -p "${t}/consumer/h#d" "${t}/consumer/a[b"
+cat >"${t}/consumer/pane_hash.nim" <<'EOF'
+## SDK-CONSUMER: the path traverses a directory whose name contains `#`.
+import "h#d/../../src/frontend/viewmodel/store/replay_data_store"
+EOF
+cat >"${t}/consumer/pane_bracket_dir.nim" <<'EOF'
+## SDK-CONSUMER: the FIRST import traverses a directory whose name contains an
+## unbalanced `[`. It is allowed — it names the facade. The violation is on the
+## line below it, which a naive bracket count never reaches.
+import "a[b/../../src/frontend/viewmodel/codetracer_embed"
+import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"a '#' or '[' inside a quoted spec is a filename character, not syntax" \
+	"pane_hash.nim" "pane_bracket_dir.nim"
+
+# ---------------------------------------------------------------------------
+# consumer-facade-only, A LINE IS NOT A STATEMENT
+#
+# The extractor was line-oriented, and Nim is not. Two shapes put an import
+# somewhere other than at the start of its own line, both compile (nim 2.2.8,
+# verified), and both yielded NOTHING AT ALL at HEAD — a miss, not an
+# over-report:
+#
+#   `;`      separates statements, so `import a; import b` is two imports. Read
+#            as one, the whole line becomes the spec `a;importb`, which names no
+#            module, matches no pattern and resolves to no file. BOTH imports
+#            disappear. `echo 1; import a` is the same shape without an import
+#            in front.
+#   `when`   may carry its statement on the condition's own line:
+#            `when not defined(js): import a` is idiomatic and is ONE line, so
+#            the indented-continuation handling — which covers the multi-line
+#            spelling of exactly this — never saw it. The line did not begin
+#            with `import`, so it was skipped outright. `elif`, `else` and the
+#            spaceless `when(true):import a` compile too.
+#
+# Measured at codetracer@f274fa68, each planted alone in the real declared
+# consumer src/frontend/tui/app/tui_app.nim: both left the guard at
+# `6 check(s), 0 failing`.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree consumer-reaches-in-semicolon)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane_semi_second.nim" <<'EOF'
+## SDK-CONSUMER: two statements on one line; the SECOND one is the violation,
+## so the split has to reach past the first.
+import ../src/frontend/viewmodel/codetracer_embed; import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+cat >"${t}/consumer/pane_semi_first.nim" <<'EOF'
+## SDK-CONSUMER: the mirror image — the FIRST statement is the violation, so a
+## split that kept only the tail would miss it.
+import ../src/frontend/viewmodel/store/replay_data_store; import ../src/frontend/viewmodel/codetracer_embed
+EOF
+cat >"${t}/consumer/pane_semi_after_expr.nim" <<'EOF'
+## SDK-CONSUMER: the statement in front of the `;` is not an import at all, so
+## the line does not begin with a keyword this guard was looking for.
+echo 1; import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"a ';'-separated import on a shared line does not evade the rule" \
+	"pane_semi_second.nim" "pane_semi_first.nim" "pane_semi_after_expr.nim"
+
+t="$(make_tree consumer-reaches-in-one-line-when)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane_when.nim" <<'EOF'
+## SDK-CONSUMER: the idiomatic one-liner.
+when not defined(js): import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+cat >"${t}/consumer/pane_elif.nim" <<'EOF'
+## SDK-CONSUMER: the same thing on an `elif` branch.
+when defined(js):
+  discard
+elif true: import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+cat >"${t}/consumer/pane_else.nim" <<'EOF'
+## SDK-CONSUMER: and on an `else` branch, which carries no condition at all.
+when defined(js):
+  discard
+else: import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+cat >"${t}/consumer/pane_when_tight.nim" <<'EOF'
+## SDK-CONSUMER: no space anywhere — `when(cond):import x` compiles.
+when(true):import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+cat >"${t}/consumer/pane_when_semi.nim" <<'EOF'
+## SDK-CONSUMER: both shapes at once. The facade is allowed; the internal after
+## the `;`, inside the same one-line branch, is not.
+when true: import ../src/frontend/viewmodel/codetracer_embed; import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+cat >"${t}/consumer/pane_when_colon_in_cond.nim" <<'EOF'
+## SDK-CONSUMER: the condition CONTAINS a colon, so "the first colon ends the
+## condition" is wrong and the guard has to decide by what follows it.
+when {1: 2}.len > 0: import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"an import carried on a one-line 'when'/'elif'/'else' does not evade the rule" \
+	"pane_when.nim" "pane_elif.nim" "pane_else.nim" "pane_when_tight.nim" \
+	"pane_when_semi.nim" "pane_when_colon_in_cond.nim"
+
+# THE NEGATIVE HALF, and it is not decoration. Both fixes above widen what
+# counts as a statement, and a widening is exactly the change that starts
+# reporting imports nobody wrote — a commented-out line, or a `;` inside a
+# module name. A guard that reports those is a guard people switch off.
+t="$(make_tree one-line-statements-do-not-over-report)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane_commented.nim" <<'EOF'
+## SDK-CONSUMER: the violating spellings, every one of them COMMENTED OUT.
+# when true: import ../src/frontend/viewmodel/store/replay_data_store
+# import ../src/frontend/viewmodel/codetracer_embed; import ../src/frontend/viewmodel/store/replay_data_store
+import ../src/frontend/viewmodel/codetracer_embed
+EOF
+cat >"${t}/consumer/pane_when_facade.nim" <<'EOF'
+## SDK-CONSUMER: a one-line `when` around an import of exactly what it may.
+when true: import ../src/frontend/viewmodel/codetracer_embed
+EOF
+cat >"${t}/consumer/pane_semi_quoted.nim" <<'EOF'
+## SDK-CONSUMER: the `;` is INSIDE the quoted spec, so it is a filename
+## character and not a statement separator. The module does not exist, which is
+## the point: the guard must read one spec here, not two statements.
+import "../src/frontend/viewmodel/no;such;module"
+EOF
+assert_clean "${t}" \
+	"a commented-out import, a permitted one-line 'when', and a ';' inside a quoted spec are all quiet"
+
+# ---------------------------------------------------------------------------
+# import-specs-analysable, THE BLOCK COMMENT
+#
+# `import #[c]# a/b` and `import a/b #[c]#` compile (nim 2.2.8), and a comment
+# stripper that cuts at the first `#` loses the spec of the first one entirely.
+# So block comments are REMOVED, with their nesting, when they open and close on
+# the same line — and the case below proves the import behind one is still
+# graded.
+#
+# When the comment spans lines there is no honest lexical answer: tracking
+# cross-line comment state would let a `#[` inside a multi-line string literal
+# swallow the rest of a file, which is a MISS of everything after it. So those
+# two shapes are refused by name instead, the same way an escaped spec is.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree consumer-block-comment-same-line)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane.nim" <<'EOF'
+## SDK-CONSUMER: a block comment sits between the keyword and the spec.
+import #[ which store? ]# ../src/frontend/viewmodel/store/replay_data_store
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"a block comment that opens and closes on the line is removed, not treated as a line comment" \
+	"replay_data_store"
+
+t="$(make_tree consumer-block-comment-spans-lines)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane_open.nim" <<'EOF'
+## SDK-CONSUMER: the statement runs into a block comment that closes later.
+import ../src/frontend/viewmodel/codetracer_embed #[ why this one
+and not the other ]#
+EOF
+assert_fires "${t}" "import-specs-analysable" \
+	"an import statement running into a multi-line block comment is refused, not guessed at" \
+	"pane_open.nim" "multi-line block comment"
+
+t="$(make_tree consumer-block-comment-resumes)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane_resume.nim" <<'EOF'
+## SDK-CONSUMER: the import RESUMES after a block comment opened on the line
+## above it. Cutting this line at its first `#` yields `]`, and the import is
+## gone; so it is refused instead.
+#[ a comment
+]#import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+assert_fires "${t}" "import-specs-analysable" \
+	"an import resuming after a multi-line block comment is refused, not silently dropped" \
+	"pane_resume.nim" "multi-line block comment"
+
+# ---------------------------------------------------------------------------
+# import-specs-analysable, THE ONE-LINE CONDITIONAL THE LEXER CANNOT READ
+#
+# A `when` condition is arbitrary nim; this is a lexer. The extractor models
+# double-quoted strings and nothing else, so a CHARACTER LITERAL holding a `#`,
+# a `;` or a `"` lands the comment cut, the statement split or the quote parity
+# inside itself, and all three compile (nim 2.2.8). Teaching the scans about
+# character literals would mean teaching them that `1'u8` is not one, which is a
+# new way to be wrong — so instead the extractor asserts on ITSELF: a line that
+# visibly carries an import and yielded none is refused by name.
+#
+# This is the boundary of the claim rather than a curiosity, and it is why the
+# caveat in test_tui_facade_boundary.nim is bounded: what is left over is loud,
+# not silent.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree consumer-conditional-unreadable)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane_hash_char.nim" <<'EOF'
+## SDK-CONSUMER: a `#` inside a character literal, so the comment cut lands
+## inside the condition.
+when '#' == '#': import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+cat >"${t}/consumer/pane_semi_char.nim" <<'EOF'
+## SDK-CONSUMER: a `;` inside a character literal, so the statement split lands
+## inside the condition.
+when ';' == ';': import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+cat >"${t}/consumer/pane_quote_char.nim" <<'EOF'
+## SDK-CONSUMER: ONE double-quote inside a character literal, so every
+## quote-aware scan on this line is inverted.
+when '"' == 'x': import ../src/frontend/viewmodel/store/replay_data_store
+EOF
+assert_fires "${t}" "import-specs-analysable" \
+	"a one-line conditional whose condition defeats the lexer is refused, not skipped" \
+	"pane_hash_char.nim" "pane_semi_char.nim" "pane_quote_char.nim" \
+	"character literal"
+
+# ---------------------------------------------------------------------------
+# import-specs-analysable — the refusal, and why it is a failure and not a shrug
+#
+# `import "a\x2Fb"` compiles and imports `a/b`: `\x2F` is a Nim string escape
+# for `/`. This guard is lexical and does not decode escapes, because decoding
+# them WRONGLY — `r"..."` and `"""..."""` do not interpret escapes at all — is a
+# silent MISS, the one outcome a boundary lint may not produce. So it says so
+# and goes red. The negative case matters just as much: a backslash-free tree
+# must not trip it, or the refusal becomes noise everyone learns to ignore.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree consumer-escaped-spec)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane.nim" <<'EOF'
+## SDK-CONSUMER: the separators of this path are written as hex escapes.
+import "..\x2Fsrc\x2Ffrontend\x2Fviewmodel\x2Fstore\x2Freplay_data_store"
+EOF
+assert_fires "${t}" "import-specs-analysable" \
+	"a spec carrying string escapes is refused loudly, not emitted raw" \
+	"pane.nim" "carries Nim string escapes"
+
+# The other half of unquoting, and the reason it is a normalisation rather than
+# a ban: a quoted spec that names the FACADE still resolves to the facade and is
+# still allowed. Without this, "the guard now sees quoted imports" would be
+# satisfied just as well by an extractor that reported every quoted spec.
+t="$(make_tree consumer-quoted-facade-is-allowed)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane.nim" <<'EOF'
+## SDK-CONSUMER: quoted, and importing exactly what it may.
+import "../src/frontend/viewmodel/codetracer_embed"
+echo StoreVersion
+EOF
+assert_clean "${t}" \
+	"a quoted spec naming the facade resolves to the facade and stays allowed"
+
 t="$(make_tree consumer-dir-marker)"
 mkdir -p "${t}/panes/debugger"
 echo "BlockTracer's debugger panes." >"${t}/panes/.sdk-consumer"

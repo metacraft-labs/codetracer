@@ -2984,17 +2984,132 @@ commands.
   on the include path, so parser.c and its runtime header come from one run.
   Restoring the header afterwards would be worse: a parser.c generated against
   a header you then reverted is an ABI mismatch found late or never.
-- 2026-09-05: **both Nim import extractors in this repo — `nim_imports` in
-  `ci/test/sdk-facade-boundary.sh` and `importSpecs` in
-  `src/frontend/tui/tests/test_tui_facade_boundary.nim` — do not strip quotes
-  from a module spec, and `import "a/b"` is legal Nim.** Verified by compiling:
-  a quoted spec resolves through a `--path` root exactly as the bare one does.
-  So `import "tui/host/native_host"` planted in `src/frontend/tui/app/` passes
-  the facade boundary while all seven unquoted spellings of the same module go
-  red. Nothing in the tree uses the quoted form today, which is why it has never
-  bitten — but any "must not import X" check built on either extractor is
-  evadable by one pair of quotation marks. Fix both together (and add a
-  mutation arm), not one.
+- 2026-09-05: **a Nim import has far more spellings, and far more PLACES to
+  sit, than the one this repo writes; both import extractors now normalise the
+  spec and split the line into statements before grading.** The two are
+  `nim_imports` in `ci/test/sdk-facade-boundary.sh` (which every "must not import
+  X" check in the repo is built on) and `importSpecs` in
+  `src/frontend/tui/tests/test_tui_facade_boundary.nim`, deliberate mirrors of
+  each other — compare their output byte for byte over all 998 tracked Nim files
+  before believing a change to either. Five facts, all confirmed by compiling
+  against nim 2.2.8 AND then using a symbol from the imported module, not
+  remembered:
+  1. THE SPEC MAY BE A STRING LITERAL. `import "a/b"` is joined onto each
+     `--path` root exactly as `import a/b` is; so are `import "a/b" as c`,
+     `from "a/b" import c`, `from "a/b" as c import d`, `include "a/b"`,
+     `import a, "b/c"`, `import "a/b"/[c, d]`, `import "a"/b/c`,
+     `import a/"b"/c`, `import r"a/b"` and `import """a/b"""`.
+     `import "a/b/[c]"` is the one that does NOT compile — inside quotes the
+     brackets are part of a filename — so neither extractor expands it.
+  2. A STRING LITERAL SELF-TERMINATES, so the space before the next keyword is
+     OPTIONAL: `import "a/b"as c`, `import "a/b"except d` and
+     `from "a/b"as c import d` all compile. Split on a SPACED keyword and the
+     extractor yields `a/bas c`, which is nothing.
+  3. `/` IS AN INFIX OPERATOR: `import a / b / c` and `import "a" / "b" / "c"`
+     compile and mean `a/b/c`. **26** files in this repo already write imports
+     that way (`src/frontend/ui/ui_imports.nim`, `src/common/paths.nim`,
+     `src/frontend/types.nim`, …), and at HEAD their specs resolved to nothing.
+     The number is measured — diff the extractor's output over all 998 tracked
+     Nim files before and after — not counted by eye; an earlier note here said
+     "four", and the spec repo said "about twenty", from the same change.
+     `import a /b/ c` does NOT compile — nim wants the spacing symmetric — so
+     only the symmetric form is handled.
+  4. `;` SEPARATES STATEMENTS, so `import a; import b` is two imports, and so
+     is `echo 1; import a`. This is the one that hid an import in TOTAL
+     SILENCE rather than yielding a wrong spec: read as one statement the line
+     normalises to `a;importb`, one module nobody has, so both imports vanish —
+     including the permitted one, leaving a file that appears to import nothing.
+     Split on a `;` outside a string literal AND outside brackets, because
+     `when (let x = 1; x > 0): import a` compiles.
+  5. `when` / `elif` / `else` MAY CARRY THEIR STATEMENT ON THEIR OWN LINE.
+     `when not defined(js): import a` is idiomatic, compiles, and is ONE line —
+     so the indented-continuation handling, which covers the MULTI-LINE
+     `when defined(js):` spelling of exactly the same thing, never sees it. That
+     is what made this look covered: both extractors' comments cited the
+     multi-line form, so a reader checking "are conditional imports handled?"
+     found yes. `elif`, `else`, `when(c):` and `else:import a` compile too.
+     Choose the colon that ends the condition by WHAT FOLLOWS IT, not by
+     counting brackets: `when F(a: 1).a == 1:` and `when {1: 2}.len > 0:` both
+     compile.
+  Quotes also change what a character MEANS: `#`, `,`, `[`, `]` and whitespace
+  inside a literal are filename characters, and nim requires only the BASENAME
+  of a module path to be a valid identifier, so `import "h#d/../<forbidden>"`
+  compiles. Comment stripping, keyword splitting, bracket counting and the
+  statement split are therefore all quote-aware in both extractors. **If you
+  write a third extractor, do all of this**; a rule that learns about quotation
+  marks separately is how a guard grows one hole per rule.
+  Nim REJECTS these, so nothing has to handle them (checked, because "it might
+  compile" is how the list above kept growing): `if` / `block` / `static` /
+  `for` / `case` / proc bodies carrying an import ("only allowed at top level"),
+  `when a: when b: import c` ("nestable statement requires indentation"),
+  `when a: (import b)`, and `import"a/b"` — the space AFTER the keyword is
+  mandatory even though the keyword after a quoted spec may be tight.
+  THREE SHAPES ARE REFUSED LOUDLY rather than guessed at — awk logs them and the
+  script reports `VIOLATION import-specs-analysable`, the Nim mirror raises
+  `UnanalysableSpec`:
+    * a spec containing a BACKSLASH: `import "a\x2Fb\x2Fc"` imports `a/b/c`, and
+      decoding Nim's escape rules (which differ between the plain, raw and
+      triple-quoted literal forms) in two languages is a place to be silently
+      wrong;
+    * an import running into, or resuming after, a BLOCK COMMENT that does not
+      close on the same line. One that opens and closes on a line is removed,
+      nesting and all (`import #[c]# a/b` compiles); cross-line comment state is
+      NOT tracked, because a block-comment opener inside a multi-line string
+      literal would then swallow every import after it;
+    * a one-line `when`/`elif`/`else` that visibly carries an import the lexer
+      could not read out of it. The cause is a CHARACTER LITERAL in the
+      condition — `when '#' == '#':`, `when ';' == ';':`, `when '"' == 'x':` all
+      compile and land the comment cut, the statement split or the quote parity
+      inside the literal. Teaching the scans about character literals means
+      teaching them that the suffix in `1'u8` is not one, so they assert on
+      themselves instead.
+  ONE PLACE IS STILL A SILENT MISS, and it is bounded BY THE PLACE rather than
+  by the trick — bounding it by the trick ("a character literal holding a `#` or
+  a `\"`") was tried and is measurably too narrow. THE PLACE is a NON-conditional
+  statement sharing its line with an import through a `;`; anything in that
+  leading statement which unbalances the comment cut, the quote parity or the
+  bracket depth carries the import past all three. All of these compile, import
+  usably, and are read by neither extractor: `echo '#'; import a/b`,
+  `echo '"'; import a/b`, `echo '('; import a/b` (and `'['`, `'{'` — the bracket
+  depth rises so the `;` is never a separator), `echo "a\"b"; import a/b` (an
+  ESCAPED quote in an ordinary string, not a character literal at all), and the
+  closing triple-quote of a multi-line string before the same `;`. A character
+  literal holding a `;` or a CLOSING bracket IS read correctly. Extending the
+  self-check to every line was measured and rejected: six real prose comments in
+  this repo carry a `;` before "from" and eleven more carry a `:` before
+  "import"/"from", and all seventeen would go red for nothing — before counting
+  the dozens of lines in `test_tui_facade_boundary.nim` that document the forms
+  themselves. Closing the family properly needs a self-check keyed on `;` plus
+  `import`/`include` on ANY line, which none of the six prose lines would trip;
+  that is a design change, not a wording one. Emitting raw
+  text, or guessing, would be a MISS, which is the one outcome a boundary lint
+  may not produce.
+  History, so the shape of the bug is on record: at `f274fa68` the extractors
+  left the quotes on, so `import "tui/host/native_host"` planted in the real
+  `src/frontend/tui/app/tui_app.nim` compiled and left both guards green while
+  six unquoted spellings went red. The first fix stripped `r` before any `"`,
+  which ate the last letter of every quoted spec ending in `r` — measured over
+  998 tracked files it turned `"../../../../isonim-docs/src/ssr"` into
+  `.../src/ss`, and `src/frontend/viewmodel` alone holds 21 `r`-final modules
+  (`request_tracker`, `front_end_adapter`, `reducer`, …). The `r` of a raw
+  string literal belongs to the quote that OPENS one; track quote parity.
+  The pass after that shipped a caveat saying "what remains is ONE form, a
+  backslash, and it fails loudly". That was false too: at the same commit,
+  `when true: import <internal>` planted alone in the real `tui_app.nim` left
+  the guard at `6 check(s), 0 failing` while the extractor yielded NOTHING for
+  the line, and `import <a>; import <b>` yielded the single spec
+  `<a>;import<b>`, losing both. **Both were pre-existing at `f274fa68`.** If you
+  touch either extractor, do not write a completeness claim you have not put in
+  front of the compiler; a narrower true statement is worth more.
+- 2026-09-05: the repo-wide facade guard (`ci/test/sdk-facade-boundary.sh`) does
+  NOT police `src/frontend/tui/app/` -> `src/frontend/tui/host/` imports, in any
+  spelling: its consumer check only reports specs resolving under
+  `src/frontend/viewmodel`, and `host/` is not there. Its only TUI rule is
+  `tui-layers`, about which directories carry a `.sdk-consumer` marker. The
+  app/-must-not-reach-host/ rule belongs entirely to
+  `src/frontend/tui/tests/test_tui_facade_boundary.nim`. So a host import
+  planted in `app/` reddens ONE guard, not two — expect that when checking a
+  change to either.
 - 2026-09-05: `ci/lib/run-nim-test-lane.sh` reads an assertion count from
   `const ExpectedAssertions = <n>` **on a line of its own**. Written inside a
   `const` block it is invisible to the lane and the file is reported as having

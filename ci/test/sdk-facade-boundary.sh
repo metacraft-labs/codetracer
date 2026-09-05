@@ -415,6 +415,19 @@ violation_detail() {
 	echo "              $1"
 }
 
+# WHERE `nim_imports` PUTS THE SPECS IT REFUSES TO ANALYSE.
+#
+# It cannot report them itself: every call site reads it through a process
+# substitution, so it runs in a subshell and cannot touch `failures`. A file is
+# the one channel that crosses that boundary, and it is read once, below the
+# checks, where a finding can still be turned into a non-zero exit.
+#
+# Empty is the normal case and costs no check line — see the `import-specs-
+# analysable` block near the verdict for why this is an abort condition rather
+# than a standing check.
+IMPORT_UNANALYSABLE_LOG="$(mktemp)"
+trap 'rm -f "${IMPORT_UNANALYSABLE_LOG}"' EXIT
+
 # ui_path_exempt PATTERN ITEM — true when ITEM matched the `src/frontend/ui/`
 # rule but is named in UI_PATH_ALLOWLIST. Exact paths only: a prefix or a glob
 # would let the next module in silently, which is the whole thing this
@@ -439,38 +452,431 @@ ui_path_exempt() {
 #   import a as b                import a except c
 #   indented imports inside `when defined(js):`
 #   bracket lists split over several lines
+#
+# AND EVERY ONE OF THOSE WITH THE SPEC WRITTEN AS A STRING LITERAL, which is a
+# separate spelling of the same import and not a rare one to reach for:
+#
+#   import "a/b"                 import "a/b" as c      from "a/b" import c
+#   include "a/b"                import a, "b/c"        import "a/b"/[c, d]
+#   import "a"/b/c               import a/"b"/c         import r"a/b"
+#   import """a/b"""             import "a/b"as c       import "a/b"except d
+#   from "a/b"as c import d      import a / b / c       import "a" / "b" / "c"
+#
+# AND EVERY ONE OF THOSE SOMEWHERE OTHER THAN THE START OF ITS OWN LINE, because
+# a LINE IS NOT A STATEMENT — the mistake that hid an import in total silence
+# rather than yielding a wrong spec:
+#
+#   import a; import b           echo 1; import a       import a;
+#   when not defined(js): import a                      when(c):import a
+#   elif c: import a             else: import a         when c: import a; import b
+#
+# `split_statements` and `strip_conditional_prefix` below handle those. At HEAD
+# `when true: import <internal>` planted in the declared consumer
+# src/frontend/tui/app/tui_app.nim yielded NOTHING for the line and left this
+# script at `6 check(s), 0 failing`, and `import <a>; import <b>` yielded the
+# single spec `<a>;import<b>` — losing the forbidden import AND the permitted
+# one, so the file appeared to import nothing at all.
+#
+# `normalize_spec` below is what makes those the same spec as the bare form.
+# Until it existed the extractor yielded `"a/b"` with the quotation marks still
+# on, so it matched no forbidden pattern and resolved to no file — every "must
+# not import X" rule built on this extractor was evadable by one pair of
+# quotation marks, here and in
+# src/frontend/tui/tests/test_tui_facade_boundary.nim's `importSpecs`, which
+# mirrors it. Demonstrated rather than reasoned about: an
+# `import "../../viewmodel/store/replay_data_store"` planted in the declared
+# consumer src/frontend/tui/app/tui_app.nim left this script at `6 check(s), 0
+# failing`, while the same import unquoted reddened `consumer-facade-only`.
+# The contract suite carries both spellings now.
+#
+# FIVE FACTS ABOUT NIM DRIVE THE SHAPE OF THE CODE BELOW, each confirmed by
+# compiling the form against nim 2.2.8 — and, where it compiles, by then USING a
+# symbol from the module it imports, so that "it parses" was never mistaken for
+# "it imports":
+#
+#   1. A STRING LITERAL SELF-TERMINATES, so the space before `as` / `except` /
+#      the `import` of a `from` is optional once the spec is quoted.
+#      `import "a/b"as c` compiles. A split that insists on a SPACED keyword
+#      therefore sees `a/bas c` — no such module, no finding.
+#   2. `/` IS AN ORDINARY INFIX OPERATOR, so `import a / b / c` and
+#      `import "a" / "b" / "c"` compile and mean `a/b/c`. (`import a /b/ c`
+#      does NOT — nim requires an infix operator to be spaced consistently —
+#      which is why only the symmetric form has to be handled.)
+#   3. QUOTES CHANGE WHAT A CHARACTER MEANS. `#`, `,`, `[`, `]` and whitespace
+#      inside a literal are part of a filename, not syntax; and nim only
+#      requires the BASENAME of a module path to be a valid identifier, so
+#      `import "h#d/../a/b/c"` compiles. Every scan below is therefore
+#      quote-aware — comment stripping and bracket counting included, because a
+#      `#` cut in the wrong place hides an import and a `[` counted in the wrong
+#      place swallows the rest of the file into one unterminated statement.
+#   4. `;` SEPARATES STATEMENTS, so `import a; import b` is two imports and
+#      `echo 1; import a` is one behind something that is not an import at all.
+#      The split has to be outside literals AND outside brackets, because
+#      `when (let x = 1; x > 0): import a` compiles too.
+#   5. `when` / `elif` / `else` MAY CARRY THEIR STATEMENT ON THE CONDITION'S OWN
+#      LINE. `when not defined(js): import a` is idiomatic and is ONE line, so
+#      the indented-continuation handling below — which covers the MULTI-LINE
+#      spelling of exactly the same thing, and is what made this look covered —
+#      never sees it. The colon that ends the condition is chosen by WHAT
+#      FOLLOWS it, because `when F(a: 1).a == 1:` and `when {1: 2}.len > 0:`
+#      compile as well.
+#
+# NIM ITSELF REJECTS these, so nothing here has to carry them — checked, because
+# "it might compile" is how the list above kept growing: `if` / `block` /
+# `static` / `for` / `case` and proc bodies carrying an import ("'import' is
+# only allowed at top level"); `when a: when b: import c` ("nestable statement
+# requires indentation"); `when a: (import b)`; and `import"a/b"` — the space
+# AFTER the keyword is mandatory, even though the keyword after a QUOTED spec
+# may be tight.
+#
+# WHAT IS DELIBERATELY NOT READ, AND FAILS LOUDLY INSTEAD — three shapes, each
+# appended to ${IMPORT_UNANALYSABLE_LOG} and turned into a
+# `VIOLATION import-specs-analysable` at the end of this script:
+#
+#   * a spec containing a BACKSLASH. `import "a\x2Fb\x2Fc"` compiles and names
+#     `a/b/c`, and decoding it correctly would mean implementing Nim's escape
+#     rules — including that `r"..."` and `"""..."""` do NOT interpret escapes —
+#     in awk, and in a second dialect in the Nim mirror, where getting it subtly
+#     wrong is a silent MISS;
+#   * an import statement running into, or resuming after, a BLOCK COMMENT that
+#     does not close on the same line (see `strip_comment`);
+#   * a one-line conditional that visibly carries an import which this scan
+#     could not read out of it (see `conditional_import_unread`).
+#
+# Refusing to analyse is safe for a guard; guessing is not.
+#
+# WHAT IS STILL A SILENT MISS, named rather than left to be found, and bounded
+# BY THE PLACE rather than by the trick — an earlier draft bounded it by the
+# trick ("a character literal holding a `#` or a `\"`") and was measurably too
+# narrow. THE PLACE is a NON-conditional statement sharing its line with an
+# import through a `;`. Anything in that leading statement which desynchronises
+# the comment cut, the quote parity or the bracket depth carries the import past
+# all three. Each of these compiles on nim 2.2.8, imports usably, and leaves
+# this script at `6 check(s), 0 failing` with the import planted in a declared
+# consumer:
+#
+#   * a character literal holding a HASH — the comment cut lands inside it;
+#   * a character literal holding a DOUBLE-QUOTE — quote parity inverted;
+#   * a character literal holding an OPENING BRACKET of any kind — the bracket
+#     depth rises, so the `;` is never taken as a separator;
+#   * an ESCAPED double-quote inside an ordinary string literal, which is not a
+#     character literal at all;
+#   * the closing triple-quote of a multi-line string literal.
+#
+# A character literal holding a SEMICOLON or a CLOSING bracket is read
+# correctly, so the family is not "character literals" — it is "anything that
+# unbalances one of the three scans". The self-check covers the CONDITIONAL
+# version of every one of them, which is where the realistic evasion is;
+# extending it to every line was measured and rejected: six real prose comments
+# in this repository carry a `;` before the word `from`, eleven further prose
+# lines carry a `:` before `import` or `from`, and all seventeen would go red
+# for nothing — before counting the dozens of lines in
+# src/frontend/tui/tests/test_tui_facade_boundary.nim that document this very
+# behaviour.
 # ---------------------------------------------------------------------------
 
 nim_imports() {
 	[ -f "$1" ] || return 0
-	awk '
+	awk -v unan="${IMPORT_UNANALYSABLE_LOG:-/dev/null}" '
 	function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
-	function count(s, ch,   n, i) {
-		n = 0
-		for (i = 1; i <= length(s); i++) if (substr(s, i, 1) == ch) n++
+	# Occurrences of CH outside a string literal.
+	#
+	# Quote-aware because this counts the brackets that decide whether an
+	# import statement is finished, and `import "a[b/../c"` is ONE module whose
+	# name contains a bracket. Counted naively, that bracket never closes: the
+	# statement is never flushed, every later line is glued onto the same buffer
+	# and the file yields no specs at all — a whole file made invisible to every
+	# rule downstream by one character inside quotation marks.
+	function count(s, ch,   n, i, c, inq) {
+		n = 0; inq = 0
+		for (i = 1; i <= length(s); i++) {
+			c = substr(s, i, 1)
+			if (c == "\"") { inq = 1 - inq; continue }
+			if (inq == 0 && c == ch) n++
+		}
 		return n
 	}
-	function emit_spec(spec) {
-		spec = trim(spec)
-		sub(/[ \t]+as[ \t]+.*$/, "", spec)
-		spec = trim(spec)
+	# Strip comments, judging "comment" OUTSIDE string literals.
+	#
+	# Nim only requires the BASENAME of a module path to be a valid identifier,
+	# so `import "h#d/../a/b/c"` compiles and imports `a/b/c`. Cut at the first
+	# `#` regardless of quoting and that statement becomes `import "h`, which
+	# names nothing — the forbidden module is reached and no rule ever sees it.
+	#
+	# BLOCK COMMENTS ARE REMOVED RATHER THAN TREATED AS A LINE COMMENT, because
+	# `import #[c]# a/b` and `import a/b #[c]#` both compile (nim 2.2.8) and a
+	# cut at the first `#` loses the spec of the first one entirely. They nest
+	# (`#[ #[x]# ]#`), so this counts depth, and `##[ … ]##` — the doc spelling —
+	# opens one too.
+	#
+	# WHEN THE BLOCK COMMENT DOES NOT CLOSE ON THIS LINE the rest of the
+	# statement is on a line this function will never see in the same call, so
+	# it sets `stripped_at_block_comment` instead of guessing. The caller turns
+	# that into a refusal when the line was carrying an import — see the
+	# `unan` block below. Refusing to analyse is safe for a guard; guessing is
+	# not.
+	function strip_comment(s,   i, n, c, inq, depth, out) {
+		stripped_at_block_comment = 0
+		inq = 0
+		out = ""
+		i = 1
+		n = length(s)
+		while (i <= n) {
+			c = substr(s, i, 1)
+			if (c == "\"") { inq = 1 - inq; out = out c; i++; continue }
+			if (inq == 1) { out = out c; i++; continue }
+			if (c == "#") {
+				if (substr(s, i + 1, 1) == "[" || substr(s, i + 1, 2) == "#[") {
+					depth = 1
+					i += (substr(s, i + 1, 1) == "[") ? 2 : 3
+					while (i <= n && depth > 0) {
+						if (substr(s, i, 2) == "#[") { depth++; i += 2; continue }
+						if (substr(s, i, 2) == "]#") { depth--; i += 2; continue }
+						i++
+					}
+					if (depth > 0) { stripped_at_block_comment = 1; return out }
+					continue
+				}
+				return out
+			}
+			out = out c
+			i++
+		}
+		return out
+	}
+	# True when a block comment CLOSES on this line and an import statement
+	# follows it: `]# import a/b` is an import, and `strip_comment` above —
+	# which starts each line outside any comment — cuts it at the `#` and yields
+	# `]`, so the statement would vanish. Cross-line comment state is not
+	# tracked (a `#[` inside a multi-line string literal would then swallow the
+	# rest of the file), so this shape is refused rather than parsed.
+	function resumes_after_block_comment(s,   i, rest) {
+		for (i = 1; i <= length(s) - 1; i++) {
+			if (substr(s, i, 2) != "]#") continue
+			rest = trim(substr(s, i + 2))
+			if (rest ~ /^(import|from|include)([ \t]|$)/) return 1
+		}
+		return 0
+	}
+	# Split S into the statements a `;` separates, ignoring a `;` inside a
+	# string literal or inside brackets of any kind.
+	#
+	# `import a; import b` is TWO imports on one line and compiles (nim 2.2.8);
+	# so does `echo 1; import a`. Read as one statement the whole line yields
+	# `a/b/c;importa/b/d` — a module nobody has, so BOTH imports are lost and
+	# nothing is reported. The bracket depth is what keeps
+	# `when (let x = 1; x > 0): import a` — which also compiles — in one piece.
+	function split_statements(s, arr,   i, c, inq, depth, cur, n) {
+		n = 0; inq = 0; depth = 0; cur = ""
+		for (i = 1; i <= length(s); i++) {
+			c = substr(s, i, 1)
+			if (c == "\"") { inq = 1 - inq; cur = cur c; continue }
+			if (inq == 0) {
+				if (c == "(" || c == "[" || c == "{") depth++
+				else if (c == ")" || c == "]" || c == "}") depth--
+				else if (c == ";" && depth <= 0) { arr[++n] = cur; cur = ""; continue }
+			}
+			cur = cur c
+		}
+		arr[++n] = cur
+		return n
+	}
+	# Drop trailing `)` that closes nothing in S, counting outside literals.
+	#
+	# Only reachable from `strip_conditional_prefix`, and only for the one
+	# nested spelling nim accepts: `when a: (when b: import x)` compiles, and
+	# the statement found inside it ends with the paren that closes the outer
+	# one.
+	function drop_unmatched_close(s) {
+		while (s ~ /\)$/ && count(s, "(") < count(s, ")"))
+			s = trim(substr(s, 1, length(s) - 1))
+		return s
+	}
+	# A ONE-LINE `when` / `elif` / `else`, reduced to the statement it carries.
+	#
+	# `when not defined(js): import a/b` is idiomatic nim, compiles, and is ONE
+	# LINE — so the indented-continuation handling below, which covers the
+	# multi-line spelling of the same thing, never sees it. At HEAD the line did
+	# not start with `import`, so it was skipped outright and the import was
+	# invisible to every rule. `elif`, `else`, `when(cond):` and `else:import a`
+	# (no space anywhere) all compile too.
+	#
+	# WHICH COLON ENDS THE CONDITION is decided by what FOLLOWS it, not by
+	# counting brackets, because a colon can legally appear inside the condition
+	# in more ways than a lexer this size can enumerate — `when F(a: 1).a == 1:`,
+	# `when {1: 2}.len > 0:` and a comparison of two colon character literals
+	# all compile. The first colon whose remainder starts an import statement is
+	# the answer for every one of them, and for `when true: import "a:b"` as
+	# well, since a colon inside a literal is skipped.
+	function strip_conditional_prefix(t,   i, c, inq, rest) {
+		if (t !~ /^(when|elif)[ \t(]/ && t !~ /^else[ \t]*:/) return t
+		inq = 0
+		for (i = 1; i <= length(t); i++) {
+			c = substr(t, i, 1)
+			if (c == "\"") { inq = 1 - inq; continue }
+			if (inq == 1 || c != ":") continue
+			rest = trim(substr(t, i + 1))
+			if (rest ~ /^(import|from|include)([ \t]|$)/)
+				return drop_unmatched_close(rest)
+		}
+		return t
+	}
+	# THE SELF-CHECK ON THE RULE ABOVE: this line is a one-line conditional, the
+	# RAW text of it visibly carries an import statement, and yet nothing was
+	# read out of it.
+	#
+	# It exists because a condition is arbitrary nim and this is a lexer, not a
+	# parser. A CHARACTER LITERAL is the concrete way to break it: the scans
+	# here model double-quoted strings and nothing else, so a condition that
+	# compares a character literal holding a HASH, a SEMICOLON or a single
+	# DOUBLE-QUOTE lands the comment cut, the statement split or the quote
+	# parity inside that literal. All three compile (nim 2.2.8) and all three
+	# were a silent MISS. They are written out, characters and all, in the
+	# mirror of this function in
+	# src/frontend/tui/tests/test_tui_facade_boundary.nim — an apostrophe
+	# cannot appear inside this single-quoted awk program, which is why they
+	# are described here rather than shown.
+	#
+	# Rather than teach three scans about character literals — which would then
+	# have to know that a numeric suffix like 1-quote-u8 is not one — the
+	# extractor notices that it read nothing out of a line that plainly has an
+	# import on it, and refuses. A guard may fail to read; it may not fail to
+	# read QUIETLY.
+	function conditional_import_unread(raw, line,   i, n, pieces, t, frag) {
+		t = trim(raw)
+		if (t !~ /^(when|elif)[ \t(]/ && t !~ /^else[ \t]*:/) return 0
+		if (raw !~ /[:;][ \t]*(import|from|include)[ \t]/) return 0
+		n = split_statements(line, pieces)
+		for (i = 1; i <= n; i++) {
+			frag = strip_conditional_prefix(trim(pieces[i]))
+			if (frag ~ /^(import|from|include)[ \t]/ ||
+			    frag == "import" || frag == "include") return 0
+		}
+		return 1
+	}
+	# Truncate S before the first top-level occurrence of any keyword in KWS
+	# (a space-separated list).
+	#
+	# "Top-level" is outside a string literal, so a module whose name contains
+	# ` as ` is not cut in half. The keyword may be preceded by whitespace OR BY
+	# A CLOSING QUOTE, and that second case is the one a spaced-keyword regex
+	# misses: a string literal self-terminates, so `import "a/b"as c`,
+	# `import "a/b"except d` and `from "a/b"as c import d` are all legal nim
+	# (compiled, 2.2.8) and all resolve to `a/b`. Split only on ` as ` and the
+	# extractor yields `a/bas c` — no such module, no finding, evasion complete.
+	function cut_kw(s, kws,   kw, n, i, j, c, inq, prev, nxt, len) {
+		n = split(kws, kw, " ")
+		inq = 0
+		len = length(s)
+		for (i = 1; i <= len; i++) {
+			c = substr(s, i, 1)
+			if (c == "\"") { inq = 1 - inq; continue }
+			if (inq == 1) continue
+			# inq is 0 here, so a preceding quote is necessarily a CLOSING one.
+			prev = (i == 1) ? "" : substr(s, i - 1, 1)
+			if (prev != "" && prev != " " && prev != "\t" && prev != "\"") continue
+			for (j = 1; j <= n; j++) {
+				if (substr(s, i, length(kw[j])) != kw[j]) continue
+				# A keyword is only a keyword when it ends the word, which is
+				# what keeps `import a/exceptions` and `import a, ascii` whole.
+				# END OF STRING counts: `from ../ui/shortcut_labels import`
+				# with the symbol list on the lines below is how 43 tracked
+				# files in this repo are written, and requiring a trailing
+				# space left the spec as `../ui/shortcut_labels import` —
+				# resolving to nothing, silently, at HEAD.
+				nxt = substr(s, i + length(kw[j]), 1)
+				if (nxt == "" || nxt == " " || nxt == "\t") return substr(s, 1, i - 1)
+			}
+		}
+		return s
+	}
+	# A module spec reduced to the one spelling every rule downstream sees.
+	#
+	# TWO NORMALISATIONS, both of them the same module to nim and neither of
+	# them cosmetic:
+	#
+	#   QUOTES COME OFF. `import "a/b"` is joined onto each --path root exactly
+	#   as `import a/b` is (verified against nim 2.2.8 by compiling both,
+	#   together with the partly quoted `"a"/b/c` and `a/"b"/c`, the raw
+	#   `r"a/b"` and the triple-quoted `"""a/b"""`).
+	#
+	#   WHITESPACE AROUND `/` GOES. `/` is an ordinary infix operator, so
+	#   `import a / b / c` and `import "a" / "b" / "c"` compile and mean
+	#   `a/b/c`. Left alone the spec is `a / b / c`, which matches no pattern
+	#   and resolves to no file. (Only the symmetric spacing needs handling:
+	#   `import a /b/ c` is rejected by nim as `invalid module name`.)
+	#
+	# Sets spec_unanalysable when it meets a backslash inside a literal — see
+	# the block comment above for why that is refused rather than decoded.
+	function normalize_spec(s,   out, i, c, inq) {
+		spec_unanalysable = 0
+		out = ""; inq = 0
+		for (i = 1; i <= length(s); i++) {
+			c = substr(s, i, 1)
+			if (c == "\"") { inq = 1 - inq; continue }
+			if (inq == 1) {
+				if (c == "\\") { spec_unanalysable = 1; return "" }
+				out = out c
+				continue
+			}
+			# The `r` of a raw string literal goes with the quote it
+			# INTRODUCES. The `inq == 0` test is what makes that precise:
+			# the quote after an `r` is an opening quote only outside a
+			# literal. Without it, the closing quote of `"a/b/tracker"`
+			# qualifies too and the spec becomes `a/b/tracke` — a miss, and
+			# not a rare one: `src/frontend/viewmodel` alone holds 21
+			# modules whose names end in `r`.
+			if ((c == "r" || c == "R") && substr(s, i + 1, 1) == "\"") continue
+			if (c == " " || c == "\t") continue
+			out = out c
+		}
+		return out
+	}
+	function emit_spec(spec,   raw) {
+		# The alias comes off HERE, per emitted spec, and not before the bracket
+		# test in emit_list: `import ../[ types, config as frontend_config ]`
+		# aliases ONE ELEMENT OF THE LIST, and cutting the statement at that
+		# `as` would leave `../[ types, config`, which is no longer a bracket
+		# list, is never expanded, and hides both modules.
+		# src/frontend/index/window.nim is written exactly that way.
+		raw = trim(spec)
+		spec = normalize_spec(cut_kw(raw, "as"))
+		if (spec_unanalysable) {
+			# NOT emitted, and deliberately not guessed at. Printing the raw
+			# text would be a miss dressed up as a finding-free line.
+			print FILENAME "\t" raw >> unan
+			return
+		}
 		if (spec != "") print spec
 	}
-	function emit_list(body,   depth, i, ch, item, pre, inner, n, parts, j) {
-		# Split on top-level commas (commas outside [ ]).
-		depth = 0; item = ""
+	function emit_list(body,   depth, inq, i, ch, item, pre, inner, n, parts, j) {
+		# Split on top-level commas: commas outside [ ] AND outside a string
+		# literal, because `import "a,b"` is one module whose name contains a
+		# comma, not two modules.
+		depth = 0; inq = 0; item = ""
 		body = body ","
 		for (i = 1; i <= length(body); i++) {
 			ch = substr(body, i, 1)
-			if (ch == "[") depth++
-			else if (ch == "]") depth--
-			if (ch == "," && depth == 0) {
+			if (ch == "\"") inq = !inq
+			else if (inq == 0) {
+				if (ch == "[") depth++
+				else if (ch == "]") depth--
+			}
+			if (ch == "," && depth == 0 && inq == 0) {
 				item = trim(item)
 				if (item != "") {
 					if (item ~ /\[.*\]$/) {
 						# `std / [a, b]` and `a/[b, c]` are the same
 						# statement with different whitespace habits, so
 						# trim before AND after dropping the separator.
+						# The test is anchored at the end for a second
+						# reason now: `import "a/[b]"` ends in a QUOTE,
+						# so it is one module whose name contains
+						# brackets — which nim then fails to open —
+						# rather than a bracket list. Expanding it would
+						# invent a module nobody imported. `"a/b"/[c, d]`
+						# does end in `]` and is expanded, with the
+						# quotes coming off in emit_spec afterwards.
 						pre = item; sub(/\[.*$/, "", pre); pre = trim(pre)
 						sub(/\/$/, "", pre); pre = trim(pre)
 						inner = item; sub(/^[^[]*\[/, "", inner); sub(/\][^]]*$/, "", inner)
@@ -491,27 +897,26 @@ nim_imports() {
 			}
 		}
 	}
-	function flush(stmt,   p) {
+	function flush(stmt) {
 		if (stmt ~ /^from[ \t]/) {
 			sub(/^from[ \t]+/, "", stmt)
-			p = index(stmt, " import ")
-			if (p > 0) stmt = substr(stmt, 1, p - 1)
+			# `from "a/b"import c` needs no space either, so the `import`
+			# that ends the module part is found the same way `as` is.
+			stmt = cut_kw(stmt, "import")
 		} else {
 			sub(/^import[ \t]+/, "", stmt)
 			sub(/^include[ \t]+/, "", stmt)
 		}
-		sub(/[ \t]+except[ \t]+.*$/, "", stmt)
+		stmt = cut_kw(stmt, "except")
 		emit_list(stmt)
 	}
-	{
-		line = $0
-		# Strip a trailing comment. Import statements never carry a `#`
-		# inside a string, so this is safe for the lines we act on, and a
-		# mangled non-import line simply fails the prefix test below.
-		h = index(line, "#")
-		if (h > 0) line = substr(line, 1, h - 1)
-		t = trim(line)
+	# One statement, fed either from a whole line or from one `;`-separated
+	# piece of it. Owns the multi-line buffering: `collecting` and `buf` say
+	# whether a bracket list or a bare `import` is still waiting for the lines
+	# beneath it.
+	function handle_stmt(t) {
 		if (collecting == 0) {
+			t = strip_conditional_prefix(t)
 			# A bare `import` on its own line is the other common spelling
 			# in this repo (src/frontend/ui/flow.nim opens that way); the
 			# module list follows on the indented lines beneath it.
@@ -520,18 +925,42 @@ nim_imports() {
 				buf = t
 				collecting = 1
 			} else {
-				next
+				return
 			}
 		} else {
-			if (t == "") next
+			if (t == "") return
 			buf = buf " " t
 		}
-		if (buf ~ /^(import|from|include)$/) next
+		if (buf ~ /^(import|from|include)$/) return
 		if (count(buf, "[") == count(buf, "]") && buf !~ /,$/ && buf !~ /\[$/) {
 			flush(buf)
 			collecting = 0
 			buf = ""
 		}
+	}
+	{
+		line = strip_comment($0)
+		t = trim(line)
+		# THE TWO BLOCK-COMMENT SHAPES THAT WOULD OTHERWISE HIDE AN IMPORT.
+		# Both are refused rather than parsed, for the reason the backslash
+		# case is: a wrong guess here is a silent MISS.
+		if (stripped_at_block_comment &&
+		    (collecting == 1 || t ~ /^(import|from|include)([ \t]|$)/)) {
+			print FILENAME "\t" trim($0) >> unan
+			collecting = 0; buf = ""
+			next
+		}
+		if (resumes_after_block_comment($0)) {
+			print FILENAME "\t" trim($0) >> unan
+			collecting = 0; buf = ""
+			next
+		}
+		if (collecting == 0 && conditional_import_unread($0, line)) {
+			print FILENAME "\t" trim($0) >> unan
+			next
+		}
+		nstmts = split_statements(line, stmts)
+		for (si = 1; si <= nstmts; si++) handle_stmt(trim(stmts[si]))
 	}
 	END { if (collecting == 1) flush(buf) }
 	' "$1"
@@ -935,6 +1364,56 @@ if [ "${root_is_repo}" -eq 1 ] && [ -d "${TUI_CONSUMER_DIR}" ]; then
 	else
 		check_ok "tui-layers: ${tui_app_consumers} consumer file(s) under ${TUI_CONSUMER_DIR}, ${TUI_EXEMPT_DIR} exempt"
 	fi
+fi
+
+# ---------------------------------------------------------------------------
+# import-specs-analysable — the extractor met something it will not guess at
+#
+# REPORTED ONLY WHEN IT HAPPENS, and that is the intent rather than a shortcut.
+# This is not a property of the SDK boundary, which is what the numbered checks
+# above are about; it is the extractor beneath them saying it could not read a
+# statement. Every one of those checks silently assumed it could. So it is
+# raised where it belongs — as a failure that makes the whole run red — and is
+# invisible on the overwhelmingly normal path where no such spec exists.
+#
+# The alternative, emitting the raw text of the spec, is what makes this worth
+# a rule: `import "a\x2Fb\x2Fc"` compiles and imports `a/b/c`, and a guard that
+# printed `a\x2Fb\x2Fc` would match no forbidden pattern, resolve to no file
+# and report nothing. That is a MISS, and a miss is the one outcome a boundary
+# lint may not produce quietly.
+# ---------------------------------------------------------------------------
+
+if [ -s "${IMPORT_UNANALYSABLE_LOG}" ]; then
+	# DEDUPLICATED, because the log is APPENDED PER `nim_imports` CALL and the
+	# checks above deliberately overlap: a file can be walked as part of the
+	# facade's closure AND as a declared consumer, and `external_specs_of` walks
+	# the closure a second time. One refused statement in
+	# `src/frontend/viewmodel/codetracer_embed.nim` therefore reported
+	# "2 import spec(s)" with the same line printed twice — an over-count, not a
+	# miss, but a reader has no way to tell those apart from the output. Nothing
+	# asserts on the number, so `sort -u` at the read site is the whole fix.
+	mapfile -t unanalysable_entries < <(sort -u "${IMPORT_UNANALYSABLE_LOG}")
+	check_failed "import-specs-analysable: ${#unanalysable_entries[@]} import statement(s) could not be read lexically"
+	for unanalysable_entry in "${unanalysable_entries[@]}"; do
+		IFS=$'\t' read -r unanalysable_file unanalysable_spec <<<"${unanalysable_entry}"
+		[ -n "${unanalysable_file}" ] || continue
+		violation_detail "${unanalysable_file}: ${unanalysable_spec}"
+	done
+	violation_detail "This guard is LEXICAL, and two shapes cannot be read that way:"
+	violation_detail '  * a spec containing a backslash carries Nim string escapes —'
+	violation_detail '    import "a\x2Fb" is an import of a/b — and decoding them WRONGLY'
+	violation_detail "    would hide an import rather than over-report one;"
+	violation_detail "  * an import statement running into, or resuming after, a"
+	violation_detail "    multi-line block comment. Cross-line comment state is not"
+	violation_detail "    tracked here, because a block-comment opener inside a"
+	violation_detail "    multi-line string literal would then swallow the file;"
+	violation_detail "  * a one-line when/elif/else that plainly carries an import"
+	violation_detail "    which this scan could not read out of it. The usual cause"
+	violation_detail "    is a character literal in the condition holding a hash, a"
+	violation_detail "    semicolon or a double-quote."
+	violation_detail "Everything above this in the run assumed the extractor could read"
+	violation_detail "every statement, so the run is red rather than quietly incomplete."
+	violation_detail "Remedy: write the import in its plain form, on a line of its own."
 fi
 
 # ---------------------------------------------------------------------------
