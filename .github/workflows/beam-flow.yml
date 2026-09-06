@@ -20,7 +20,10 @@ on:
       - 'scripts/resolve-sibling-rev.sh'
       - '.github/workflows/beam-flow.yml'
   push:
-    branches: [main]
+    # This repo's mainline is `dev` (`stable` is the release branch). The
+    # filter previously named `main`, a branch this repo does not have, so
+    # no mainline push ever triggered this workflow.
+    branches: [dev, stable]
     paths:
       - 'src/db-backend/**'
       - 'libs/ct-dap-client/**'
