@@ -64,23 +64,34 @@ proc run(args: seq[string]): int =
     #
     # CTUI-3 landed the SHELL — `app/views/shell.nim` composes a whole screen
     # for a given size, and `app/layout/project.nim` puts the session's own
-    # `LayoutNode` onto Yoga. What is still missing here is the part that turns
-    # a screen into a program: a real terminal driver, raw mode, and an input
-    # loop. Those are CTUI-9 (keymap and modal state) and CTUI-11 (capability
-    # negotiation and the driver), so the message names them rather than
-    # claiming a screen does not exist.
+    # `LayoutNode` onto Yoga. CTUI-9 landed the KEY DISPATCH: `app/input/
+    # keymap.nim` turns a byte token into a named action, `app/input/
+    # modal_state.nim` owns the NORMAL/COMMAND/SEARCH/INSPECT machine, and
+    # `app/input/motions.nim` owns focus and the motions.
+    #
+    # WHAT IS STILL MISSING IS THE TERMINAL, and it is missing on purpose. Raw
+    # mode, the alternate screen, a signal-safe restore, SIGWINCH and the
+    # capability probe that has to run BEFORE the first paint are all
+    # `host/` capabilities and all of them are CTUI-11's named deliverables
+    # (`host/capabilities.nim` and the driver). A loop landed here would have
+    # to be reopened by CTUI-11 to insert negotiation ahead of its first frame,
+    # and CTUI-11's own gate measures cold start with probing enabled. So this
+    # message names CTUI-11 alone for the driver, and no longer names CTUI-9
+    # for the keymap — that part exists, and is exercised over a real pty by
+    # `tests/real_terminal/test_real_keybindings.nim`.
     try:
       let folder = resolveTraceFolder(command.tracePath)
       let app = newTuiApp()
       stderr.writeLine(TuiProgramName & ": " & folder & " exists, but opening" &
-                       " a trace needs an input loop this milestone does not" &
-                       " build yet.")
+                       " a trace needs a terminal driver this milestone does" &
+                       " not build yet.")
       stderr.writeLine("  " & app.statusLine())
       stderr.writeLine("  CTUI-0 delivers the build ground and the facade" &
-                       " boundary and CTUI-3 the shell and its layout; the" &
-                       " terminal driver and the keymap are CTUI-11 and" &
-                       " CTUI-9. See codetracer-specs/Front-Ends/" &
-                       "CodeTracer-TUI.milestones.org.")
+                       " boundary, CTUI-3 the shell and its layout, and" &
+                       " CTUI-9 the modal state machine, the §4.2 keymap and" &
+                       " the motions; raw mode, the alternate screen and the" &
+                       " capability probe are CTUI-11. See codetracer-specs/" &
+                       "Front-Ends/CodeTracer-TUI.milestones.org.")
       let replayServer = findReplayServer()
       if replayServer.len == 0:
         stderr.writeLine("  note: " & replayServerRemedy())

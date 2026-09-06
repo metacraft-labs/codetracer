@@ -363,7 +363,11 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
       checkpoint("header: " & wrongHeader[0 .. min(4, wrongHeader.high)].join(", "))
     if wrongStatus.len > 0:
       checkpoint("status: " & wrongStatus[0 .. min(4, wrongStatus.high)].join(", "))
-    ck checkedWidths == 240 * (2 + 5 * 3)
+    # `6` is `UiMode`'s cardinality: CTUI-9 added `umInspect`, §4.1's fourth
+    # mode, which CTUI-3 had no indicator for. The literal is deliberate — a
+    # `len(UiMode)` here would be computed by the same enum the sweep walks and
+    # would stop being able to notice that the sweep skipped a member.
+    ck checkedWidths == 240 * (2 + 6 * 3)
     ck wrongHeader.len == 0
     ck wrongStatus.len == 0
     # The positive twin: at a width that fits everything, the fields are all

@@ -335,7 +335,17 @@ somewhere in this repository — see
    *excluded* attribute that must NOT fail (with a non-excluded one through the
    same helper that must), and a directory compared with itself, which is
    refused rather than passed.
-6. **No mocks of ViewModels or trace engines.** Tests load real `.ct`
+6. **An expected value must not be produced by the code under test.** Where
+   the subject IS a published table, read the publication: CTUI-9's
+   `app/tests/test_keymap_no_conflicts.nim` parses §4.2's markdown out of
+   `codetracer-specs/Front-Ends/CodeTracer-TUI.md` at run time (located from
+   `currentSourcePath()`, not from the working directory) and compares it with
+   `app/input/keymap.defaultKeymap()`. A hand-copied table in the test would
+   have been written from the same reading that produced the implementation,
+   and the two would agree about a misreading. A missing sibling checkout
+   FAILS by name — rule 1 applies to an absent oracle exactly as it does to an
+   absent grammar archive.
+7. **No mocks of ViewModels or trace engines.** Tests load real `.ct`
    containers produced by real recorders driven by a real `replay-server`. The
    permitted fakes are `Pilot` synthetic input and `TestClock` virtual time, at
    the hardware boundary, each justified in the header of the file that uses
@@ -489,6 +499,54 @@ child labels the repaint `<label>-stepN` and the parent waits for that label.
 
 > **Rule: after sending input to a child, wait for a frame you can NAME.** The
 > cursor barrier proves *a* frame is complete, never that *your* frame is.
+
+### Driving a snapshot app with real KEYS (CTUI-9)
+
+CTUI-9 made three changes to `testing/test_app_runtime.nim`, all of them
+additive, and each one closes a hole that made a §4.2 binding untestable at
+Tier 2. Know them before you write a key-driven case.
+
+* **F10 now reaches the app.** CTUI-5 made `\x1b[21~` the runtime's own step
+  key, which meant the one function key §4.2 binds — "Step Over (Forward)":
+  `n` / `F10` — was the one key no app could be asked about. The token is now
+  offered to `input` *before* the step, and the step still happens, so every
+  CTUI-2/3/5/6/8 app behaves exactly as it did.
+
+* **`ISIG` is cleared in `enterRawMode`.** §4.2 binds `Ctrl+c` to "Quit
+  Debugger — Exit CodeTracer TUI session **cleanly**". With `ISIG` set the line
+  discipline turns `0x03` into `SIGINT` before the application reads a byte:
+  the child dies on the signal and `sendControl('c')` measures the tty rather
+  than the keymap. Clearing it is what `cfmakeraw(3)` does. No existing app is
+  affected — none is sent `0x03`.
+
+* **`FramePrologue`**, bytes written immediately *before* a frame. It exists
+  for the cursor: §4.1's modes are told apart on a real terminal by DECSCUSR
+  shape and DECTCEM visibility (`app/input/modal_state.cursorControlBytes`),
+  and "the model has no cursor" is a row of the table above. `nil` for every
+  app that does not want it, and with it the byte stream is unchanged.
+
+**Two more bytes never reach the app, and F10 was only the third.** `q` is
+`TestAppQuitByte` and `0x04` ends the child too, so the keybinding table's `q`
+("Quit Debugger") and `Ctrl+d` ("Half Page Down") cannot be driven at Tier 2 —
+sending either ends the process instead of pressing a key. `Ctrl+c` is the
+quit binding that *is* exercised here, and its half-page twin `Ctrl+u` (`0x15`)
+is unaffected. Assert those two at Tier 1, and do not read a green Tier-2 case
+that sends `q` as evidence that anything was bound.
+
+**A lone `Esc` cannot be delivered as one byte.** The runtime accumulates from
+`\x1b` while the buffer is still a prefix of the F10 sequence, so a single
+`\x1b` sits there until something else arrives. Send `\x1b\x1b`: the second one
+breaks the prefix, is not a CSI, and falls through the "honour the byte that
+broke the prefix" arm — delivering exactly one `Esc` token.
+`tests/real_terminal/test_real_keybindings.nim` asserts the MODE that produces,
+so a change to the framing reddens rather than silently delivering nothing.
+
+**`TermAssert.sendKey` drops `shift+`.** Its modifier loop consumes the prefix
+without recording it, so `sendKey("shift+f10")` writes `ESC [ 2 1 ~` — byte for
+byte what `sendKey("f10")` writes. To exercise a shifted function key, write
+xterm's modified sequence yourself: `ESC [ 2 1 ; 2 ~` (the parameter is
+`1 + Shift`). CTUI-9 drives both and asserts the consequence of each, rather
+than working around the harness silently.
 
 ### Test-only flags on the snapshot runtime
 

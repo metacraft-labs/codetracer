@@ -30,6 +30,7 @@ import ../layout/profile
 # whole shell shares, and a second copy of it is exactly how a padding bug
 # becomes profile-specific.
 import ./header
+import ./styled_row
 
 type
   UiMode* = enum
@@ -37,6 +38,11 @@ type
     umNormal = "NORMAL"
     umCommand = "COMMAND"
     umSearch = "SEARCH"
+    umInspect = "INSPECT"
+      ## CTUI-9. §4.1's fourth mode, which CTUI-3 had no indicator for because
+      ## nothing could enter it yet. `app/input/modal_state.statusMode` is the
+      ## only mapping onto this enum, so the four §4.1 modes and the five
+      ## indicators below cannot drift apart silently.
     umVisual = "VISUAL"
     umSeek = "SEEK"
 
@@ -69,6 +75,12 @@ proc keyHints*(mode: UiMode; profile: LayoutProfile): string =
     "Enter:run  Esc:cancel  Tab:complete"
   of umSearch:
     "Enter:find  Esc:cancel  n/N:next/prev match"
+  of umInspect:
+    # §4.1: "Deep navigation of complex data structures, memory hex viewing,
+    # and expression origin inspection" — so the hints are §4.2's Variables
+    # Tree row and its Value Origin row, which is exactly the set
+    # `app/input/keymap.nim` binds in `mmInspect`.
+    "Enter/l:expand  h:collapse  x:hex  m:memory  o/O:origin  Esc:leave"
   of umVisual:
     "y:yank  Esc:leave  hjkl:extend"
   of umSeek:
@@ -80,6 +92,27 @@ proc keyHints*(mode: UiMode; profile: LayoutProfile): string =
     of lpStandard, lpUltraWide:
       "'n':step-over 'p':rev-step 's':step-into 'b':rev-into 'o':origin | " &
       ":command /:find"
+
+proc modeStyle*(mode: UiMode): CellStyle =
+  ## CTUI-9. The colour §3.3.6's mode indicator is painted in.
+  ##
+  ## ONE COLOUR PER MODE, and no two the same, because
+  ## `tests/real_terminal/test_real_keybindings.nim` asks a real terminal which
+  ## mode the app is in and `docs/tui-testing.md`'s rule for a Tier-2 case is
+  ## that the colours it relies on for MEANING are asserted absolutely —
+  ## `fg.idx == 2`, not "the same as Tier 1". A shared colour would make two
+  ## modes indistinguishable to that assertion.
+  ##
+  ## The six names map onto indexed colours 2, 3, 5, 6, 4 and 12, which is what
+  ## both tiers report. `bold` on all of them, so the indicator reads as a
+  ## label rather than as coloured prose.
+  case mode
+  of umNormal: CellStyle(fg: "green", bold: true)
+  of umCommand: CellStyle(fg: "yellow", bold: true)
+  of umSearch: CellStyle(fg: "magenta", bold: true)
+  of umInspect: CellStyle(fg: "cyan", bold: true)
+  of umVisual: CellStyle(fg: "blue", bold: true)
+  of umSeek: CellStyle(fg: "bright_blue", bold: true)
 
 proc promptSigil*(mode: UiMode): string =
   ## The character §3.3.6 says each interactive prompt opens with.

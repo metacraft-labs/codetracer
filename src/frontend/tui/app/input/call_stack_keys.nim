@@ -17,10 +17,24 @@
 ## re-deriving the arithmetic on the other side of the pty.
 ##
 ## It is NOT the product's input loop. `main.nim` still has no terminal driver
-## (CTUI-3 recorded that, CTUI-5 re-recorded it, and CTUI-9 owns the modal state
-## machine and the keymap). What drives this today is the snapshot app
-## `tests/apps/app_call_stack.nim`, over a real pty, which is the strongest
-## exercise available before CTUI-9 exists.
+## (CTUI-3 recorded that, CTUI-5 re-recorded it, and CTUI-11 owns raw mode, the
+## alternate screen and the capability probe). What drives this today is the
+## snapshot app `tests/apps/app_call_stack.nim`, over a real pty.
+##
+## ## CTUI-9 LANDED THE GLOBAL KEYMAP, AND THREE OF THIS PANE'S KEYS OVERLAP IT
+##
+## `app/input/keymap.nim` now holds CodeTracer-TUI.md §4.2 as data, for the
+## whole screen. §4.2 has no row for a recursion group, so the three keys this
+## module invented for one collide with §4.2's own meanings:
+##
+##   * `x` here toggles a group; §4.2's `x` is "Toggle Hex / Dec".
+##   * `g` / `G` here are the innermost and outermost frames; §4.2's are
+##     "Jump to Start / End" of the RECORDING.
+##
+## Nothing dispatches both today, because nothing dispatches at all — there is
+## no driver. The overlap is written down in both files so that whoever wires
+## panes to the keymap MAKES the decision rather than discovering it; the
+## constants below are unchanged, and every CTUI-6 assertion still reads them.
 ##
 ## ## THE MOUSE DECODER MOVED, AND THIS MODULE RE-EXPORTS IT
 ##

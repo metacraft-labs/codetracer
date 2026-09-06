@@ -214,6 +214,26 @@ type
     ## streams are unchanged: with no handler the runtime treats an unrecognised
     ## sequence exactly as it did before — it consumes it and repaints nothing.
 
+  FramePrologue* = proc(cols, rows: int): string {.closure.}
+    ## CTUI-9. Bytes written IMMEDIATELY BEFORE a frame, or "" for none.
+    ##
+    ## It exists for one thing: the cursor. §4.1's modes are distinguishable on
+    ## a real terminal by DECSCUSR shape and DECTCEM visibility
+    ## (`app/input/modal_state.cursorControlBytes`), and those are two of the
+    ## seven facts `docs/tui-testing.md` lists as observable only at Tier 2. An
+    ## app cannot emit them from `buildTree`, which returns a component tree,
+    ## and it must not emit them AFTER the frame — see below.
+    ##
+    ## BEFORE, NOT AFTER, and the reason is the barrier. Neither sequence moves
+    ## the cursor, so either order is safe today; emitting before keeps the
+    ## invariant `runSnapshotApp` states about itself — "nothing else may be
+    ## written to fd 1 from here on" — literally true, so a future prologue
+    ## that DID move the cursor could not silently break
+    ## `dual_snap.waitForCompleteFrame`.
+    ##
+    ## `nil` for every CTUI-2 through CTUI-8 app, and with it the byte stream
+    ## is unchanged for all of them.
+
   LinkProvider* = proc(cols, rows: int): seq[PaneHyperlink] {.closure.}
     ## CTUI-6. Where the OSC 8 links go on the frame about to be painted.
     ##
@@ -275,17 +295,26 @@ var savedTermios: Termios
 var termiosSaved = false
 
 proc enterRawMode() =
-  ## Turn off ECHO and ICANON on fd 0.
+  ## Turn off ECHO, ICANON and ISIG on fd 0.
   ##
   ## Not cosmetic: the pty starts in cooked mode, so the parent's one capture
   ## byte would be ECHOED back onto the screen the test is about to compare —
   ## a divergence manufactured by the harness itself, at whatever cell the
   ## cursor happened to be parked on.
+  ##
+  ## ISIG IS CLEARED BY CTUI-9, and it has to be. §4.2 binds `Ctrl+c` to "Quit
+  ## Debugger — Exit CodeTracer TUI session CLEANLY", and with ISIG set the
+  ## line discipline turns 0x03 into SIGINT before the application ever reads a
+  ## byte: the child dies on the signal, the binding is unreachable, and
+  ## `sendControl('c')` measures the tty rather than the keymap. Clearing it is
+  ## what `cfmakeraw(3)` does and what every full-screen terminal application
+  ## does. No existing snapshot app is affected — none is sent 0x03 — and the
+  ## deadline plus `TestAppQuitByte` remain the ways a child ends.
   if tcGetAttr(0.cint, addr savedTermios) != 0:
     return
   termiosSaved = true
   var raw = savedTermios
-  raw.c_lflag = raw.c_lflag and not (ECHO or ICANON)
+  raw.c_lflag = raw.c_lflag and not (ECHO or ICANON or ISIG)
   raw.c_cc[VMIN] = 0.char
   raw.c_cc[VTIME] = 0.char
   discard tcSetAttr(0.cint, TCSANOW, addr raw)
@@ -413,7 +442,8 @@ proc isCsiFinal(c: char): bool =
 
 proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
                      input: InputHandler = nil;
-                     links: LinkProvider = nil): int =
+                     links: LinkProvider = nil;
+                     prologue: FramePrologue = nil): int =
   ## Paint `build`'s tree at `opts.cols` x `opts.rows` — or, under `--reflow`,
   ## at whatever size the tty reports — then serve the parent until it says to
   ## quit. Returns the process's exit status; the caller is the only thing that
@@ -463,6 +493,11 @@ proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
     ## `dual_snap.waitForCompleteFrame`'s barrier still means what it meant.
     h.mount(proc(r: TerminalRenderer): TerminalNode = build(r, cols, rows, step))
     h.flush()
+    if not prologue.isNil:
+      # CTUI-9's cursor-mode bytes. Before the frame; see `FramePrologue`.
+      let pre = prologue(cols, rows)
+      if pre.len > 0:
+        emit(pre)
     if links.isNil:
       emit(frameBytes(h.driver.buffer))
     else:
@@ -510,6 +545,14 @@ proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
       pendingKey.add ch
       if pendingKey == TestAppStepKey:
         pendingKey = ""
+        # CTUI-9: THE APP SEES F10 TOO. CTUI-5 made this sequence the runtime's
+        # own step key, which meant the one function key §4.2 binds ("Step Over
+        # (Forward)": `n` / `F10`) was the one key no app could be asked about.
+        # It is offered to the handler first and the step still happens
+        # afterwards, so every CTUI-2/3/5/6/8 app behaves exactly as it did —
+        # their handlers answer `false` to it and change nothing.
+        if not input.isNil:
+          discard input(TestAppStepKey)
         inc step
         repaint()
         # The cursor is back on the barrier, so the parent's
@@ -576,27 +619,30 @@ proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
 
 proc runSnapshotApp*(build: SizedTreeBuilder; opts: TestAppOptions;
                      input: InputHandler = nil;
-                     links: LinkProvider = nil): int =
+                     links: LinkProvider = nil;
+                     prologue: FramePrologue = nil): int =
   ## The SIZED shape, in terms of the stepped one. A builder that does not
   ## depend on the step paints the same tree however often F10 is pressed.
   runSnapshotApp(
     proc(r: TerminalRenderer; cols, rows, step: int): TerminalNode =
-      build(r, cols, rows), opts, input, links)
+      build(r, cols, rows), opts, input, links, prologue)
 
 proc runSnapshotApp*(build: proc(r: TerminalRenderer): TerminalNode;
                      opts: TestAppOptions;
                      input: InputHandler = nil;
-                     links: LinkProvider = nil): int =
+                     links: LinkProvider = nil;
+                     prologue: FramePrologue = nil): int =
   ## The fixed-size shape, in terms of the sized one. Two paint paths would be
   ## two things to keep true, and the CTUI-2 apps are the ones the cross-tier
   ## equality rests on.
   runSnapshotApp(
     proc(r: TerminalRenderer; cols, rows: int): TerminalNode = build(r), opts,
-    input, links)
+    input, links, prologue)
 
 proc snapshotAppMain*(build: SteppedTreeBuilder; args: seq[string];
                       input: InputHandler = nil;
-                      links: LinkProvider = nil): int =
+                      links: LinkProvider = nil;
+                      prologue: FramePrologue = nil): int =
   ## `runSnapshotApp` plus argument parsing, as one function of `argv` that
   ## returns a status. Every `apps/*.nim` main block is one call to this.
   ##
@@ -606,24 +652,26 @@ proc snapshotAppMain*(build: SteppedTreeBuilder; args: seq[string];
   ## makes about it.
   try:
     let opts = parseTestAppArgs(args)
-    runSnapshotApp(build, opts, input, links)
+    runSnapshotApp(build, opts, input, links, prologue)
   except TestAppUsageError as e:
     stderr.writeLine("snapshot-app: " & e.msg)
     TestAppExitUsage
 
 proc snapshotAppMain*(build: SizedTreeBuilder; args: seq[string];
                       input: InputHandler = nil;
-                      links: LinkProvider = nil): int =
+                      links: LinkProvider = nil;
+                      prologue: FramePrologue = nil): int =
   ## The SIZED shape of `snapshotAppMain`.
   snapshotAppMain(
     proc(r: TerminalRenderer; cols, rows, step: int): TerminalNode =
-      build(r, cols, rows), args, input, links)
+      build(r, cols, rows), args, input, links, prologue)
 
 proc snapshotAppMain*(build: proc(r: TerminalRenderer): TerminalNode;
                       args: seq[string];
                       input: InputHandler = nil;
-                      links: LinkProvider = nil): int =
+                      links: LinkProvider = nil;
+                      prologue: FramePrologue = nil): int =
   ## The fixed-size shape of `snapshotAppMain`.
   snapshotAppMain(
     proc(r: TerminalRenderer; cols, rows: int): TerminalNode = build(r), args,
-    input, links)
+    input, links, prologue)
