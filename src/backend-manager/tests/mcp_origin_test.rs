@@ -786,6 +786,14 @@ fn test_mcp_resolve_variable_step_reports_missing_variable_explicitly() {
         text.contains("no_such_variable"),
         "the error must name the variable that could not be resolved: {text}"
     );
+    // Pin the *reason*, not merely "some error": otherwise a transport or
+    // wire-schema failure upstream of the walk would satisfy this test
+    // while proving nothing about the empty-answer case it exists for.
+    assert!(
+        text.contains("No assignment to"),
+        "the error must be the walked-and-found-nothing answer, not an \
+         unrelated failure: {text}"
+    );
 }
 
 /// A breakpoint that is never hit must not be answered about.
@@ -818,6 +826,22 @@ fn test_mcp_get_value_origin_refuses_an_unreached_line() {
         result.get("isError").and_then(Value::as_bool),
         Some(true),
         "a line the recording never reaches must be an error: {response}"
+    );
+    let text = result
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|c| c.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    // Pin the reason, so an unrelated upstream failure cannot satisfy this.
+    assert!(
+        text.contains("was never hit"),
+        "the error must say the breakpoint was not reached: {text}"
     );
 }
 
