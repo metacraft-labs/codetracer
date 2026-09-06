@@ -690,10 +690,26 @@ class Trace:
         """Set a breakpoint at the given source location.
 
         The daemon translates this into a DAP ``setBreakpoints`` command
-        containing all breakpoints for the affected file.
+        containing all breakpoints for the affected file, and waits for
+        the backend to say whether the breakpoint actually bound.
+
+        A returned ID therefore means the breakpoint is live in the
+        replay engine, not merely that the request was accepted.  If the
+        backend cannot place it — most commonly because *path* is not one
+        of the paths the trace recorded — this raises rather than handing
+        back an ID for a breakpoint that would never be hit.  (It used to
+        return an ID regardless; the following
+        :meth:`continue_forward` then ran to the end of the trace and
+        raised ``StopIteration`` with nothing to explain why.)
+
+        Note that binding is per *file*, not per line: a line inside a
+        recorded file that no recorded step ever reached binds
+        successfully and simply never fires.
 
         Parameters:
             path: The source file path where the breakpoint should be set.
+                Best taken from :attr:`source_files`, which lists the
+                paths exactly as the trace spells them.
             line: The line number for the breakpoint.
 
         Returns:
@@ -701,7 +717,8 @@ class Trace:
             :meth:`remove_breakpoint` to remove this breakpoint later.
 
         Raises:
-            TraceError: If the daemon reports an error.
+            TraceError: If the daemon reports an error, or if the backend
+                could not bind the breakpoint at *path*.
         """
         response = self._connection.send_request("ct/py-add-breakpoint", {
             "tracePath": self._path,

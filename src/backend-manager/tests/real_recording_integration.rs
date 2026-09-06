@@ -5909,6 +5909,200 @@ async fn test_real_custom_breakpoint_stops_execution() {
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
+/// M5-Custom-1b. A breakpoint the backend could not bind MUST be reported
+/// as a failure to the Python client — not answered with a breakpoint id.
+///
+/// The backend already reports this correctly on the DAP wire: a
+/// `setBreakpoints` whose `source.path` is not one of the trace's recorded
+/// paths comes back with `verified: false`, `reason: "failed"` and a
+/// `message` naming the path.  A DAP client (the GUI) sees that and can
+/// render an unbound breakpoint.
+///
+/// `ct/py-add-breakpoint` used to send that `setBreakpoints` fire-and-forget
+/// and answer the client `success: true` with a positive `breakpointId`
+/// BEFORE the backend had seen the request; the response — carrying the
+/// only evidence the breakpoint had not bound — was then swallowed by the
+/// `FireAndForget` arm of the response router.  The Python
+/// `Trace.add_breakpoint()` therefore returned an id for a breakpoint that
+/// existed nowhere but in the daemon's own table, and the following
+/// `continue_forward()` ran to the end of the trace and raised
+/// `StopIteration: Reached end of trace` — with nothing anywhere in the
+/// API's output to say the breakpoint had never been set.
+///
+/// This test pins BOTH halves:
+///   * an unresolvable path is answered `success: false`, and the message
+///     names the path and the reason (not merely "failed"), and
+///   * a resolvable path still binds, and `continue_forward` still stops
+///     there afterwards — so the daemon's per-file breakpoint table is
+///     rolled back on rejection rather than left holding a phantom line.
+#[tokio::test]
+async fn test_real_custom_add_breakpoint_reports_unresolvable_path() {
+    let (test_dir, log_path) = setup_test_dir("real_custom_bp_unresolvable");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let db_backend = match find_db_backend() {
+            Some(path) => path,
+            None => {
+                log_line(&log_path, "SKIP: db-backend not found");
+                println!(
+                    "test_real_custom_add_breakpoint_reports_unresolvable_path: \
+                     SKIP (db-backend not found)"
+                );
+                return Ok(());
+            }
+        };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!(
+                    "test_real_custom_add_breakpoint_reports_unresolvable_path: \
+                     SKIP (ruby recorder not found)"
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
+
+        let real_source = test_dir
+            .join("test.rb")
+            .canonicalize()
+            .map_err(|e| format!("failed to canonicalize test.rb path: {e}"))?;
+        let real_source = real_source.to_string_lossy().to_string();
+
+        // A path that is NOT one of the trace's recorded paths.  The
+        // filename differs too: `fuzzy_path_id_for` falls back to a
+        // filename-only match, so reusing `test.rb` under another
+        // directory would legitimately resolve.
+        let unresolvable = test_dir
+            .join("never_recorded_at_all.rb")
+            .to_string_lossy()
+            .to_string();
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
+
+        let mut client = connect_to_daemon_socket(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 21_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed for custom trace, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // --- Arm 1: the unresolvable path must be reported as a failure ---
+        let (bad_id, bad_resp) =
+            send_py_add_breakpoint(&mut client, 21_001, &trace_dir, &unresolvable, 2, &log_path)
+                .await?;
+
+        assert_eq!(
+            bad_resp.get("success").and_then(Value::as_bool),
+            Some(false),
+            "ct/py-add-breakpoint must FAIL for a path the trace does not \
+             contain ({unresolvable}); the backend answered its setBreakpoints \
+             with verified:false and the daemon must not hide that. got: {bad_resp}"
+        );
+
+        let bad_message = bad_resp
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        assert!(
+            bad_message.contains("never_recorded_at_all.rb"),
+            "the failure must name the path that could not be bound, so the \
+             caller can tell a typo from a missing recording; got message: \
+             {bad_message:?}"
+        );
+        assert!(
+            bad_message.contains("find path") || bad_message.contains("not"),
+            "the failure must carry the backend's reason, not just the word \
+             'failed'; got message: {bad_message:?}"
+        );
+        assert!(
+            bad_id <= 0,
+            "a rejected breakpoint must not be handed a usable id, got: {bad_id}"
+        );
+
+        // Ask again: a rejected breakpoint must not have been left in the
+        // daemon's per-file table, so the second attempt fails the same way
+        // rather than being masked by a stale line.
+        let (_, bad_resp_2) =
+            send_py_add_breakpoint(&mut client, 21_002, &trace_dir, &unresolvable, 2, &log_path)
+                .await?;
+        assert_eq!(
+            bad_resp_2.get("success").and_then(Value::as_bool),
+            Some(false),
+            "the second add on the same unresolvable path must fail too, \
+             got: {bad_resp_2}"
+        );
+
+        // --- Arm 2: a resolvable path still binds and still stops ---
+        let (good_id, good_resp) =
+            send_py_add_breakpoint(&mut client, 21_003, &trace_dir, &real_source, 2, &log_path)
+                .await?;
+        assert_eq!(
+            good_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/py-add-breakpoint must still succeed for a recorded path, \
+             got: {good_resp}"
+        );
+        assert!(
+            good_id > 0,
+            "a bound breakpoint should carry a positive id, got: {good_id}"
+        );
+
+        let cont_resp = navigate(
+            &mut client,
+            21_004,
+            &trace_dir,
+            "continue_forward",
+            None,
+            &log_path,
+        )
+        .await?;
+        let (path, line, _, ticks, end_of_trace) = extract_nav_location(&cont_resp)?;
+        log_line(
+            &log_path,
+            &format!("after continue: path={path} line={line} ticks={ticks} eot={end_of_trace}"),
+        );
+        assert!(
+            !end_of_trace,
+            "the surviving breakpoint must still stop the run; reaching \
+             end-of-trace here would mean the rejection wiped it too"
+        );
+        assert_eq!(
+            line, 2,
+            "continue should stop at the bound breakpoint on line 2, got line {line}"
+        );
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_custom_add_breakpoint_reports_unresolvable_path",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
 /// M5-Custom-2. Set a breakpoint at a known line, continue to it, remove it,
 /// continue again.  Verify that after removal the breakpoint no longer stops
 /// execution (the trace continues past that line to end-of-trace or a later

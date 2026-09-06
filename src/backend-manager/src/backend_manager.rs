@@ -1500,9 +1500,58 @@ impl BackendManager {
 
                 // Fire-and-forget requests: silently consume the backend
                 // response without forwarding anything to the client.
-                // This is used for setBreakpoints/setDataBreakpoints
-                // commands whose results the client does not need.
+                // This is used for setDataBreakpoints commands whose
+                // results the client does not need.
                 if pending.kind == PendingPyRequestKind::FireAndForget {
+                    return;
+                }
+
+                // `ct/py-add-breakpoint`: the backend's per-line
+                // `verified` flag decides whether this succeeded, and it
+                // is handled here rather than in the formatter table
+                // below because a refusal also has to be rolled back out
+                // of the daemon's own breakpoint table.
+                if let PendingPyRequestKind::AddBreakpoint {
+                    trace_path,
+                    bp_id,
+                    index,
+                } = &pending.kind
+                {
+                    let (success, body_or_error) =
+                        python_bridge::format_add_breakpoint_response(msg, *index, *bp_id);
+
+                    if !success {
+                        // Drop the breakpoint the backend refused, so it
+                        // is not re-sent with every subsequent add for
+                        // this file — and so a later `remove_breakpoint`
+                        // cannot be answered for an id that never bound.
+                        if let Some(ds) = self.daemon_state.as_mut() {
+                            ds.py_bridge
+                                .breakpoint_state_mut(trace_path)
+                                .forget_breakpoint(*bp_id);
+                        }
+                    }
+
+                    let py_response = if success {
+                        serde_json::json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": true,
+                            "command": pending.response_command,
+                            "body": body_or_error,
+                        })
+                    } else {
+                        serde_json::json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": false,
+                            "command": pending.response_command,
+                            "message": body_or_error.get("message")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown error"),
+                        })
+                    };
+                    self.send_to_client(pending.client_id, py_response);
                     return;
                 }
 
@@ -1549,8 +1598,9 @@ impl BackendManager {
                         // the backend's history update.
                         python_bridge::format_resolve_variable_step_response(msg, &pending.expression)
                     }
-                    PendingPyRequestKind::FireAndForget => {
-                        // Already handled above; unreachable.
+                    PendingPyRequestKind::AddBreakpoint { .. }
+                    | PendingPyRequestKind::FireAndForget => {
+                        // Both are answered above; unreachable.
                         return;
                     }
                 };
@@ -3331,8 +3381,21 @@ impl BackendManager {
     /// Handles `ct/py-add-breakpoint` requests from Python clients.
     ///
     /// Adds a breakpoint to the per-trace breakpoint state, sends a
-    /// `setBreakpoints` command to the backend (fire-and-forget), and
-    /// immediately returns the assigned breakpoint ID to the client.
+    /// `setBreakpoints` command to the backend, and answers the client
+    /// only once the backend has said whether the breakpoint BOUND.
+    ///
+    /// The wait is the point.  `setBreakpoints` answers `success: true`
+    /// even when it could not place a breakpoint — an unplaceable one is
+    /// reported per-line as `verified: false` with a `message`.  While
+    /// this handler fired and forgot, that verdict was discarded and the
+    /// client was told `success: true` with an id before the backend had
+    /// seen the request, so a breakpoint on a path the trace never
+    /// recorded looked identical to one that bound, and the caller's
+    /// next `continue` simply ran to the end of the trace.
+    ///
+    /// A rejected breakpoint is also dropped from the daemon's own table
+    /// (see [`python_bridge::BreakpointState::forget_breakpoint`]) so it
+    /// is not re-sent with the next add for the same file.
     ///
     /// # Wire protocol
     ///
@@ -3350,7 +3413,7 @@ impl BackendManager {
     /// }
     /// ```
     ///
-    /// **Response:**
+    /// **Response (bound):**
     /// ```json
     /// {
     ///   "type": "response",
@@ -3358,6 +3421,19 @@ impl BackendManager {
     ///   "success": true,
     ///   "command": "ct/py-add-breakpoint",
     ///   "body": {"breakpointId": 1}
+    /// }
+    /// ```
+    ///
+    /// **Response (not bound)** — carries the backend's own reason, which
+    /// is what tells a typo apart from a missing recording:
+    /// ```json
+    /// {
+    ///   "type": "response",
+    ///   "request_seq": 1,
+    ///   "success": false,
+    ///   "command": "ct/py-add-breakpoint",
+    ///   "message": "failed to set breakpoint at other.nim:10: can't add a
+    ///               breakpoint: can't find path `other.nim` in trace"
     /// }
     /// ```
     async fn handle_py_add_breakpoint(
@@ -3421,7 +3497,9 @@ impl BackendManager {
         self.reset_ttl_for_backend_id(backend_id);
 
         // Update the breakpoint state and get the full list for the file.
-        let (bp_id, all_lines) = match self.daemon_state.as_mut() {
+        // `index` is where this breakpoint's verdict will sit in the
+        // backend's per-line `setBreakpoints` response.
+        let (bp_id, all_lines, index) = match self.daemon_state.as_mut() {
             Some(ds) => {
                 let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
                 bp_state.add_breakpoint(&source_path, line)
@@ -3447,30 +3525,50 @@ impl BackendManager {
             }
         });
 
-        // Fire-and-forget: send the DAP command but register a pending
-        // request so the response router silently consumes the backend's
-        // response instead of forwarding it to the client.
-        let _ = self.message(backend_id, dap_request).await;
+        // Wait for the backend.  This used to be fire-and-forget: the
+        // handler answered `success: true` with a breakpoint id before
+        // the backend had even seen the request, and the response router
+        // then dropped the backend's answer on the `FireAndForget` arm.
+        // That answer is the only place the backend says whether the
+        // breakpoint BOUND — `setBreakpoints` reports an unplaceable
+        // breakpoint as `verified: false` with a reason, not as a failed
+        // request.  Discarding it meant `Trace.add_breakpoint()` returned
+        // an id for a breakpoint registered nowhere but in the daemon's
+        // own table, and the next `continue_forward()` ran to the end of
+        // the trace and raised `StopIteration: Reached end of trace` with
+        // nothing in the API's output to explain it.
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            // Roll back: nothing was sent, so the daemon must not keep a
+            // breakpoint the backend has never heard of.
+            if let Some(ds) = self.daemon_state.as_mut() {
+                ds.py_bridge
+                    .breakpoint_state_mut(&trace_path)
+                    .forget_breakpoint(bp_id);
+            }
+            self.send_py_command_error(
+                seq,
+                "ct/py-add-breakpoint",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
         if let Some(ds) = self.daemon_state.as_mut() {
             ds.py_bridge.pending_requests.push(PendingPyRequest {
-                kind: PendingPyRequestKind::FireAndForget,
-                client_id: 0,
-                original_seq: 0,
+                kind: PendingPyRequestKind::AddBreakpoint {
+                    trace_path,
+                    bp_id,
+                    index,
+                },
+                client_id,
+                original_seq: seq,
                 backend_seq: dap_seq,
-                response_command: String::new(),
+                response_command: "ct/py-add-breakpoint".to_string(),
                 expression: String::new(),
             });
         }
 
-        // Respond to the client immediately with the breakpoint ID.
-        let response = json!({
-            "type": "response",
-            "request_seq": seq,
-            "success": true,
-            "command": "ct/py-add-breakpoint",
-            "body": {"breakpointId": bp_id}
-        });
-        self.send_response_for_seq(seq, response);
         Ok(())
     }
 
