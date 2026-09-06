@@ -57,14 +57,58 @@ pub const META_DAT_VERSION: u16 = 3;
 /// [`META_DAT_VERSION`].
 pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[3];
 
+// The canonical flag list lives in
+// `src/db-backend/src/ctfs_trace_reader/meta_dat.rs` (and mirrors the Nim
+// writer's `meta_dat.nim`).  This module is a second, smaller reader for
+// the fields backend-manager needs, and its mask MUST cover the same bits:
+// a bit outside `KNOWN_FLAGS_MASK` makes `parse_meta_dat` reject the whole
+// container, which takes down every backend-manager trace surface
+// (`ct trace info` / `query` / `origin`, and all the MCP tools) for a
+// recording the db-backend opens perfectly well.  Bits 4..13 were added to
+// the canonical reader without being mirrored here, so every trace from a
+// current recorder failed with "unknown flag bits set".
+//
+// Blocks gated by bits 4..13 live in CTFS files or in the step stream, not
+// in the `meta.dat` tail this parser walks, so recognising them costs
+// nothing beyond letting the container open.
 const FLAG_HAS_MCR_FIELDS: u16 = 1 << 0;
 const FLAG_HAS_REPLAY_LAUNCH_FIELDS: u16 = 1 << 1;
 const FLAG_HAS_LAYOUT_SNAPSHOT: u16 = 1 << 2;
 const FLAG_HAS_TRACE_FILTER_PROVENANCE: u16 = 1 << 3;
+/// Bit 4 — column-aware step encoding (P6.3 / P6.4).
+const FLAG_HAS_COLUMN_AWARE_STEPS: u16 = 1 << 4;
+/// Bit 5 — alternate source views (`srcviews.dat` / `srcviews.off`).
+const FLAG_HAS_ALTERNATE_SOURCE_VIEWS: u16 = 1 << 5;
+/// Bit 6 — recorder advertises per-column breakpoint placement.
+const FLAG_SUPPORTS_COLUMN_BREAKPOINTS: u16 = 1 << 6;
+/// Bit 7 — recorder advertises per-column step motions.
+const FLAG_SUPPORTS_COLUMN_MOTIONS: u16 = 1 << 7;
+/// Bit 8 — dedicated `calls.dat` call stream (M17a/M17b).
+const FLAG_HAS_CALL_STREAM: u16 = 1 << 8;
+/// Bit 9 — dedicated `steps.dat` execution stream (M23a).
+const FLAG_HAS_STEP_STREAM: u16 = 1 << 9;
+/// Bit 10 — dedicated `values.dat` value stream (M23b).
+const FLAG_HAS_VALUE_STREAM: u16 = 1 << 10;
+/// Bit 11 — dedicated `events.dat` I/O event stream (M23c).
+const FLAG_HAS_IO_EVENT_STREAM: u16 = 1 << 11;
+/// Bit 12 — binary varint interning tables (M23d).
+const FLAG_HAS_INTERNING_TABLES: u16 = 1 << 12;
+/// Bit 13 — `spans.dat` / `spans.idx` / `spantype.ns` span stream (RS-M1).
+const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
 const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_REPLAY_LAUNCH_FIELDS
     | FLAG_HAS_LAYOUT_SNAPSHOT
-    | FLAG_HAS_TRACE_FILTER_PROVENANCE;
+    | FLAG_HAS_TRACE_FILTER_PROVENANCE
+    | FLAG_HAS_COLUMN_AWARE_STEPS
+    | FLAG_HAS_ALTERNATE_SOURCE_VIEWS
+    | FLAG_SUPPORTS_COLUMN_BREAKPOINTS
+    | FLAG_SUPPORTS_COLUMN_MOTIONS
+    | FLAG_HAS_CALL_STREAM
+    | FLAG_HAS_STEP_STREAM
+    | FLAG_HAS_VALUE_STREAM
+    | FLAG_HAS_IO_EVENT_STREAM
+    | FLAG_HAS_INTERNING_TABLES
+    | FLAG_HAS_SPAN_STREAM;
 
 // ── Public types ─────────────────────────────────────────────────────────
 

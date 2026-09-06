@@ -295,13 +295,15 @@ fn get_value_origin_tool() -> Value {
 /// Returns the JSON schema for the `resolve_variable_step` tool.
 ///
 /// Companion to `get_value_origin`: same query, but it answers only the
-/// first hop — the step at which `variable` last received the value it
-/// holds at `path:line`.  It takes the same location anchor for the same
-/// reason (see [`get_value_origin_tool`]).
+/// first hop of the chain.  It takes the same location anchor for the
+/// same reason (see [`get_value_origin_tool`]), and reports both the
+/// step where the value becomes observable and the statement that
+/// assigned it — see [`variable_step_from_chain`] for why naming both
+/// matters.
 fn resolve_variable_step_tool() -> Value {
     json!({
         "name": "resolve_variable_step",
-        "description": "Resolve a variable to the step that assigned the value it holds at `path`:`line`. Returns that step's id and source location (path, line, function) plus the assigning source text. This is the first hop of the origin chain; for the whole chain use `get_value_origin`, or the `trace.value_origin` Python API via `exec_script`.",
+        "description": "Resolve where the value a variable holds at `path`:`line` came from, one hop back. Returns `stepId` + `location` (the earliest step at which the variable is observed holding that value), `assignment` (the source statement that produced it), `originKind`, and `sourceVariable`. Note that a recorded step carries the state on entering a line, so `location.line` is the line after the assignment statement. This is the first hop of the origin chain; for the whole chain use `get_value_origin`, or the `trace.value_origin` Python API via `exec_script`.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -3025,8 +3027,8 @@ async fn handle_get_value_origin(
 
 /// Handles the `resolve_variable_step` tool.
 ///
-/// Answers the first hop of the same chain `get_value_origin` walks: the
-/// step that assigned the value `variable` holds at `path:line`.
+/// Answers the first hop of the same chain `get_value_origin` walks:
+/// where the value `variable` holds at `path:line` came from.
 async fn handle_resolve_variable_step(
     id: &Value,
     arguments: Option<&Value>,
@@ -3076,7 +3078,17 @@ async fn handle_resolve_variable_step(
 }
 
 /// Project an `OriginChain` body down to the `resolve_variable_step`
-/// answer shape: the first hop's step id and location.
+/// answer shape: the chain's first hop.
+///
+/// Field naming here is deliberately literal about what the backend
+/// reports.  `stepId` / `location` are the earliest step at which the
+/// variable is observed holding this value; because a recorded step
+/// carries the state on *entering* a line, that is the step after the
+/// assignment executed.  `assignment` is the source statement that
+/// produced the value — for `c = b` on line 11 the pair is
+/// `location.line == 12`, `assignment == "    c = b"`.  Calling the
+/// step id "the assignment line" would be off by one step; naming both
+/// keeps the answer honest.
 fn variable_step_from_chain(chain: &Value, variable: &str) -> Option<Value> {
     let hop = chain
         .get("hops")
@@ -3084,11 +3096,12 @@ fn variable_step_from_chain(chain: &Value, variable: &str) -> Option<Value> {
         .and_then(|hops| hops.first())?;
     let step_id = hop.get("stepId").and_then(Value::as_i64)?;
     Some(json!({
-        "stepId": step_id,
         "variable": variable,
+        "stepId": step_id,
         "location": hop.get("location").cloned().unwrap_or(Value::Null),
-        "kind": hop.get("kind").cloned().unwrap_or(Value::Null),
-        "source": hop.get("source").cloned().unwrap_or(Value::Null),
+        "assignment": hop.get("sourceText").cloned().unwrap_or(Value::Null),
+        "originKind": hop.get("kind").cloned().unwrap_or(Value::Null),
+        "sourceVariable": hop.get("sourceVariable").cloned().unwrap_or(Value::Null),
     }))
 }
 

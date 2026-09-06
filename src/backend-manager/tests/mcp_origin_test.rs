@@ -22,6 +22,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -111,12 +112,29 @@ struct McpClient {
 }
 
 impl McpClient {
+    /// Spawn an MCP server with no daemon wired up — enough for the
+    /// schema / registration tests, which never touch a trace.
     fn spawn(binary: &Path) -> Result<Self, String> {
-        let mut child = Command::new(binary)
+        Self::spawn_inner(binary, None)
+    }
+
+    /// Spawn an MCP server pointed at a specific daemon socket, so tool
+    /// calls reach a real `replay-server` over a real recording.
+    fn spawn_with_daemon(binary: &Path, socket: &Path) -> Result<Self, String> {
+        Self::spawn_inner(binary, Some(socket))
+    }
+
+    fn spawn_inner(binary: &Path, socket: Option<&Path>) -> Result<Self, String> {
+        let mut command = Command::new(binary);
+        command
             .args(["trace", "mcp"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        if let Some(socket) = socket {
+            command.env("CODETRACER_DAEMON_SOCK", socket);
+        }
+        let mut child = command
             .spawn()
             .map_err(|e| format!("failed to spawn `{} trace mcp`: {e}", binary.display()))?;
         let stdin = child.stdin.take().ok_or("no stdin on MCP subprocess")?;
@@ -191,7 +209,6 @@ impl McpClient {
         }
     }
 
-    #[allow(dead_code)]
     fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, String> {
         let id = self.send_request("tools/call", json!({"name": name, "arguments": arguments}))?;
         self.read_response(id)
@@ -298,12 +315,87 @@ fn test_mcp_resolve_variable_step_tool_registered() {
 
 // ---------------------------------------------------------------------------
 // End-to-end tests — gated on the recorder being installed.
+//
+// These drive the REAL surface an MCP client sees: the `trace mcp`
+// subprocess, speaking JSON-RPC on stdio, against a daemon running a real
+// `replay-server` over a real recording.  That matters here specifically:
+// `get_value_origin` and `resolve_variable_step` were advertised by
+// `tools/list` for several releases while `tools/call` answered
+// `-32602 Unknown tool`, and every layer *beneath* the MCP surface —
+// the classifier, `ct/originChain`, the per-language
+// `origin_*_dap_test.rs` suites — was green the whole time.  A test that
+// called the classifier directly would have proved nothing.
 // ---------------------------------------------------------------------------
 
-/// Helper: record the canonical Python fixture and return the trace
-/// directory. Returns `None` (with a SKIP line) when the recorder
-/// produces no `.ct` container, which happens when the native extension
-/// isn't installed.
+/// Locate a built `replay-server`, mirroring the probe in
+/// `real_recording_integration.rs`.
+fn find_replay_server() -> Option<PathBuf> {
+    let mut target_dir = std::env::current_exe().ok()?;
+    target_dir.pop();
+    if target_dir.ends_with("deps") {
+        target_dir.pop();
+    }
+    for name in ["replay-server", "db-backend"] {
+        let candidate = target_dir.join(format!("{}{}", name, std::env::consts::EXE_SUFFIX));
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let exe = std::env::consts::EXE_SUFFIX;
+    for relative in [
+        format!("../db-backend/target/debug/replay-server{exe}"),
+        format!("../db-backend/target/release/replay-server{exe}"),
+        format!("../build-debug/bin/replay-server{exe}"),
+    ] {
+        let path = manifest_dir.join(&relative);
+        if path.exists() {
+            return Some(path.canonicalize().unwrap_or(path));
+        }
+    }
+
+    if let Ok(from_env) = std::env::var("CODETRACER_REPLAY_SERVER_CMD") {
+        let path = PathBuf::from(from_env);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+/// The Python interpreter to drive the recorder with.
+fn python_command() -> String {
+    std::env::var("CODETRACER_PYTHON_CMD")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            ["python3.12", "python3.13", "python3", "python"]
+                .iter()
+                .find(|cmd| {
+                    Command::new(cmd)
+                        .arg("--version")
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false)
+                })
+                .copied()
+                .unwrap_or("python3")
+                .to_string()
+        })
+}
+
+/// Record the named Python fixture and return the directory holding the
+/// resulting `.ct` container.
+///
+/// Returns `None` (with a `SKIPPED:` line) only for narrow, precisely
+/// identified environment problems — the recorder module not being
+/// importable, or the fixture source having moved.  A recorder that runs
+/// and fails is a hard error: that is a real bug, not an environment
+/// gap.
 fn record_python_fixture(scenario: &str) -> Option<PathBuf> {
     let source = fixture_source(scenario);
     if !source.exists() {
@@ -313,99 +405,450 @@ fn record_python_fixture(scenario: &str) -> Option<PathBuf> {
         ));
         return None;
     }
-    if !python_recorder_installed() {
+
+    let python = python_command();
+    let importable = Command::new(&python)
+        .args(["-c", "import codetracer_python_recorder"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !importable && !python_recorder_installed() {
         skip(
-            "Python recorder not found (install codetracer-python-recorder or set CODETRACER_PYTHON_RECORDER_PATH)",
+            "Python recorder not importable (install codetracer-python-recorder or set CODETRACER_PYTHON_RECORDER_PATH)",
         );
         return None;
     }
 
-    // SKIP — fully driving the recorder + DAP backend from this
-    // integration test requires the heavy `test_harness` machinery the
-    // db-backend test crate ships and which is not visible here (each
-    // integration test is its own crate). The
-    // `origin_python_dap_test.rs` test in db-backend already covers
-    // the `ct/originChain` path end-to-end against this fixture; this
-    // helper exists so future revisions can plug the recorder run in
-    // without changing the call sites.
-    skip(
-        "end-to-end recorder + MCP roundtrip not wired in this crate (covered by db-backend's origin_python_dap_test)",
+    // Short path: the daemon's Unix socket lives beside the trace, and an
+    // over-long socket path fails with `SUN_LEN`.
+    let root = PathBuf::from("/tmp").join(format!(
+        "ct-mcp-origin-{}-{}",
+        std::process::id(),
+        scenario
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let trace_dir = root.join("trace");
+    std::fs::create_dir_all(&trace_dir).expect("cannot create trace dir");
+
+    // Record from a copy so the recorded source path lives beside the
+    // trace, which is where the DAP server resolves breakpoints from.
+    let source_copy = trace_dir.join("main.py");
+    std::fs::copy(&source, &source_copy).expect("cannot copy fixture source");
+
+    let output = Command::new(&python)
+        .args([
+            "-m",
+            "codetracer_python_recorder",
+            "--out-dir",
+            trace_dir.to_str().unwrap(),
+            source_copy.to_str().unwrap(),
+        ])
+        .current_dir(&trace_dir)
+        .env("CODETRACER_TRACE_FORMAT", "ctfs")
+        .output()
+        .expect("failed to spawn the Python recorder");
+    assert!(
+        output.status.success(),
+        "recording {scenario} failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
-    None
+
+    let produced_ct = std::fs::read_dir(&trace_dir)
+        .ok()
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|e| e.path().extension().is_some_and(|ext| ext == "ct"))
+        })
+        .unwrap_or(false);
+    if !produced_ct {
+        skip(&format!(
+            "recorder produced no .ct container in {} (native extension missing?)",
+            trace_dir.display()
+        ));
+        return None;
+    }
+
+    Some(trace_dir)
 }
 
+/// A daemon running a real `replay-server`, torn down on drop.
+struct TestDaemon {
+    child: Child,
+    socket: PathBuf,
+}
+
+impl Drop for TestDaemon {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = std::fs::remove_file(&self.socket);
+    }
+}
+
+/// Start a daemon whose socket lives under `root`, backed by a real
+/// `replay-server`.  Returns `None` (with a `SKIPPED:` line) when no
+/// `replay-server` has been built.
+fn start_daemon(binary: &Path, root: &Path) -> Option<TestDaemon> {
+    let replay_server = match find_replay_server() {
+        Some(p) => p,
+        None => {
+            skip(
+                "replay-server not built (cargo build --bin replay-server in src/db-backend), \
+                 so no real trace can be opened",
+            );
+            return None;
+        }
+    };
+
+    let socket = root.join("daemon.sock");
+    let _ = std::fs::remove_file(&socket);
+
+    let child = Command::new(binary)
+        .args(["daemon", "start"])
+        .env("CODETRACER_DAEMON_SOCKET", &socket)
+        .env("CODETRACER_REPLAY_SERVER_CMD", &replay_server)
+        .env("TMPDIR", root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("cannot spawn daemon");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
+        if socket.exists() {
+            return Some(TestDaemon { child, socket });
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let mut daemon = TestDaemon { child, socket };
+    let _ = daemon.child.kill();
+    panic!("daemon socket never appeared within 20s");
+}
+
+/// Everything an end-to-end origin test needs: a recorded trace, a live
+/// daemon, and an MCP client wired to it.
+struct OriginHarness {
+    _daemon: TestDaemon,
+    client: McpClient,
+    trace_path: String,
+}
+
+/// Build the harness for `scenario`, or return `None` after emitting a
+/// `SKIPPED:` line explaining precisely what was missing.
+fn origin_harness(scenario: &str) -> Option<OriginHarness> {
+    let binary = match find_binary() {
+        Some(b) => b,
+        None => {
+            skip("backend-manager binary not yet built");
+            return None;
+        }
+    };
+    let trace_dir = record_python_fixture(scenario)?;
+    let root = trace_dir.parent().expect("trace dir has a parent").to_path_buf();
+    let daemon = start_daemon(&binary, &root)?;
+
+    let client = match McpClient::spawn_with_daemon(&binary, &daemon.socket) {
+        Ok(c) => c,
+        Err(e) => panic!("cannot spawn MCP subprocess: {e}"),
+    };
+
+    Some(OriginHarness {
+        _daemon: daemon,
+        client,
+        trace_path: trace_dir.to_string_lossy().to_string(),
+    })
+}
+
+/// Unwrap a `tools/call` result into its text content, asserting the call
+/// did not come back as a tool error.
+fn expect_tool_text(response: &Value, what: &str) -> String {
+    assert!(
+        response.get("error").is_none(),
+        "{what} returned a JSON-RPC error (an advertised tool must at least dispatch): {response}"
+    );
+    let result = response
+        .get("result")
+        .unwrap_or_else(|| panic!("{what} returned neither result nor error: {response}"));
+    let text = result
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|c| c.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    assert_ne!(
+        result.get("isError").and_then(Value::as_bool),
+        Some(true),
+        "{what} failed: {text}"
+    );
+    text
+}
+
+/// The canonical `simple_trivial_chain` answer, end to end through the
+/// MCP surface: `c -> b -> a -> Literal(10)`.
+///
+/// Asserted against `tests/fixtures/origin/python/simple_trivial_chain/ANSWERS.md`.
 #[test]
 fn test_mcp_get_value_origin_returns_canonical_chain() {
-    let Some(_trace_dir) = record_python_fixture("simple_trivial_chain") else {
+    let Some(mut harness) = origin_harness("simple_trivial_chain") else {
         return;
     };
-    // Reached only when the recorder is installed AND we wire the
-    // end-to-end harness — see SKIP path above for current status.
-    unreachable!("end-to-end path is skipped until harness sharing lands");
+
+    let response = harness
+        .client
+        .call_tool(
+            "get_value_origin",
+            json!({
+                "trace_path": harness.trace_path,
+                "path": "main.py",
+                "line": 12,
+                "variable": "c",
+            }),
+        )
+        .expect("get_value_origin call should complete");
+    let text = expect_tool_text(&response, "get_value_origin");
+
+    // The tool appends the canonical wire body after the rendered chain.
+    let json_start = text
+        .find('{')
+        .unwrap_or_else(|| panic!("no canonical JSON in get_value_origin output: {text}"));
+    let chain: Value = serde_json::from_str(text[json_start..].trim())
+        .unwrap_or_else(|e| panic!("canonical JSON did not parse ({e}): {}", &text[json_start..]));
+
+    let hops = chain
+        .get("hops")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("chain has no hops array: {chain}"));
+    assert_eq!(
+        hops.len(),
+        3,
+        "ANSWERS.md expects c -> b -> a; got {} hops: {chain}",
+        hops.len()
+    );
+    let kinds: Vec<&str> = hops
+        .iter()
+        .filter_map(|h| h.get("kind").and_then(Value::as_str))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["trivialCopy", "trivialCopy", "literal"],
+        "unexpected hop kinds: {chain}"
+    );
+    let sources: Vec<&str> = hops
+        .iter()
+        .filter_map(|h| h.get("sourceText").and_then(Value::as_str))
+        .map(str::trim)
+        .collect();
+    assert_eq!(
+        sources,
+        vec!["c = b", "b = a", "a = 10"],
+        "unexpected assigning statements: {chain}"
+    );
+    assert_eq!(
+        chain
+            .get("terminator")
+            .and_then(|t| t.get("kind"))
+            .and_then(Value::as_str),
+        Some("literal"),
+        "ANSWERS.md expects a Literal terminator: {chain}"
+    );
+    assert_eq!(
+        chain
+            .get("terminator")
+            .and_then(|t| t.get("expression"))
+            .and_then(Value::as_str),
+        Some("10"),
+        "ANSWERS.md expects the chain to terminate at the literal 10: {chain}"
+    );
 }
 
+/// `resolve_variable_step` answers the first hop.
+///
+/// Queried for `a` at the `print(c)` line, the answer must point back at
+/// the `a = 10` assignment — not at the query line, which would mean the
+/// tool had merely echoed its own input.
 #[test]
 fn test_mcp_resolve_variable_step_finds_latest_step() {
-    let Some(_trace_dir) = record_python_fixture("simple_trivial_chain") else {
+    let Some(mut harness) = origin_harness("simple_trivial_chain") else {
         return;
     };
-    unreachable!("end-to-end path is skipped until harness sharing lands");
+
+    let response = harness
+        .client
+        .call_tool(
+            "resolve_variable_step",
+            json!({
+                "trace_path": harness.trace_path,
+                "path": "main.py",
+                "line": 12,
+                "variable": "a",
+            }),
+        )
+        .expect("resolve_variable_step call should complete");
+    let text = expect_tool_text(&response, "resolve_variable_step");
+    let answer: Value = serde_json::from_str(text.trim())
+        .unwrap_or_else(|e| panic!("resolve_variable_step output did not parse ({e}): {text}"));
+
+    assert_eq!(
+        answer.get("variable").and_then(Value::as_str),
+        Some("a"),
+        "answer must name the queried variable: {answer}"
+    );
+    assert_eq!(
+        answer.get("assignment").and_then(Value::as_str).map(str::trim),
+        Some("a = 10"),
+        "answer must name the statement that produced the value: {answer}"
+    );
+    assert_eq!(
+        answer.get("originKind").and_then(Value::as_str),
+        Some("literal"),
+        "`a = 10` is a literal assignment: {answer}"
+    );
+
+    // The reported step must be strictly before the query line, or the
+    // tool has told the caller nothing it did not already supply.
+    let line = answer
+        .get("location")
+        .and_then(|l| l.get("line"))
+        .and_then(Value::as_i64)
+        .unwrap_or_else(|| panic!("answer carries no location line: {answer}"));
+    assert!(
+        line < 12,
+        "the resolved step must precede the query line 12, got {line}: {answer}"
+    );
 }
 
+/// A variable that is never assigned must produce an explicit failure.
+///
+/// An empty-but-successful answer is indistinguishable from an
+/// unimplemented tool, which is precisely the defect these tools shipped
+/// with; this test pins the distinction.
 #[test]
-fn test_mcp_session_affinity_avoids_reload() {
-    let Some(_trace_dir) = record_python_fixture("simple_trivial_chain") else {
+fn test_mcp_resolve_variable_step_reports_missing_variable_explicitly() {
+    let Some(mut harness) = origin_harness("simple_trivial_chain") else {
         return;
     };
-    unreachable!("end-to-end path is skipped until harness sharing lands");
+
+    let response = harness
+        .client
+        .call_tool(
+            "resolve_variable_step",
+            json!({
+                "trace_path": harness.trace_path,
+                "path": "main.py",
+                "line": 12,
+                "variable": "no_such_variable",
+            }),
+        )
+        .expect("resolve_variable_step call should complete");
+
+    let result = response
+        .get("result")
+        .unwrap_or_else(|| panic!("expected a tool result: {response}"));
+    assert_eq!(
+        result.get("isError").and_then(Value::as_bool),
+        Some(true),
+        "an unresolvable variable must be reported as a tool error, not as an empty success: {response}"
+    );
+    let text = result
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|c| c.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    assert!(
+        text.contains("no_such_variable"),
+        "the error must name the variable that could not be resolved: {text}"
+    );
 }
 
+/// A breakpoint that is never hit must not be answered about.
+///
+/// Line 3 is a comment: the replay runs to the end of the recording
+/// instead of stopping there.  Answering with whatever chain the final
+/// step happens to yield would be a wrong answer dressed as a right one.
+#[test]
+fn test_mcp_get_value_origin_refuses_an_unreached_line() {
+    let Some(mut harness) = origin_harness("simple_trivial_chain") else {
+        return;
+    };
+
+    let response = harness
+        .client
+        .call_tool(
+            "get_value_origin",
+            json!({
+                "trace_path": harness.trace_path,
+                "path": "main.py",
+                "line": 3,
+                "variable": "c",
+            }),
+        )
+        .expect("get_value_origin call should complete");
+    let result = response
+        .get("result")
+        .unwrap_or_else(|| panic!("expected a tool result: {response}"));
+    assert_eq!(
+        result.get("isError").and_then(Value::as_bool),
+        Some(true),
+        "a line the recording never reaches must be an error: {response}"
+    );
+}
+
+/// The scripting path the `get_value_origin` description points at must
+/// work too: `exec_script` running `trace.value_origin(...)`.
+///
+/// `ct/py-origin-chain` had a Python client, a response formatter and a
+/// pending-request variant, but no route in the daemon's dispatch — so
+/// every call raised `TraceError`.  This drives it through the MCP
+/// surface end to end.
 #[test]
 fn test_mcp_exec_script_trace_value_origin_returns_chain() {
-    let Some(_trace_dir) = record_python_fixture("simple_trivial_chain") else {
+    let Some(mut harness) = origin_harness("simple_trivial_chain") else {
         return;
     };
-    unreachable!("end-to-end path is skipped until harness sharing lands");
-}
 
-#[test]
-fn test_mcp_exec_script_value_origin_session_reuse() {
-    let Some(_trace_dir) = record_python_fixture("simple_trivial_chain") else {
-        return;
-    };
-    unreachable!("end-to-end path is skipped until harness sharing lands");
-}
+    // Step 7 is the `print(c)` step for this fixture — the same query
+    // point `get_value_origin` reaches via its breakpoint.
+    let script = r#"
+trace.goto_ticks(7)
+chain = trace.value_origin("c")
+print("HOPS", len(chain.hops))
+print("TERMINATOR", chain.terminator.kind.value)
+"#;
 
-#[test]
-fn test_cli_trace_origin_json_output() {
-    let Some(_trace_dir) = record_python_fixture("simple_trivial_chain") else {
-        return;
-    };
-    unreachable!("end-to-end path is skipped until harness sharing lands");
-}
+    let response = harness
+        .client
+        .call_tool(
+            "exec_script",
+            json!({ "trace_path": harness.trace_path, "script": script }),
+        )
+        .expect("exec_script call should complete");
+    let text = expect_tool_text(&response, "exec_script + trace.value_origin");
 
-#[test]
-fn test_cli_trace_origin_markdown_output() {
-    let Some(_trace_dir) = record_python_fixture("simple_trivial_chain") else {
-        return;
-    };
-    unreachable!("end-to-end path is skipped until harness sharing lands");
-}
-
-#[test]
-fn test_cli_trace_origin_text_output_matches_spec_layout() {
-    let Some(_trace_dir) = record_python_fixture("simple_trivial_chain") else {
-        return;
-    };
-    unreachable!("end-to-end path is skipped until harness sharing lands");
-}
-
-#[test]
-fn test_cli_trace_origin_honours_origin_patterns_toml() {
-    let Some(_trace_dir) = record_python_fixture("simple_trivial_chain") else {
-        return;
-    };
-    unreachable!("end-to-end path is skipped until harness sharing lands");
+    assert!(
+        text.contains("HOPS 3"),
+        "trace.value_origin should walk c -> b -> a: {text}"
+    );
+    assert!(
+        text.contains("TERMINATOR literal"),
+        "trace.value_origin should terminate at the literal 10: {text}"
+    );
 }
 
 #[test]
