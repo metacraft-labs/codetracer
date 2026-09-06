@@ -5,6 +5,16 @@
 #
 # THIS FILE IS THE CANONICAL COPY OF A STEP THAT CANNOT `uses:` IT.
 #
+# NOT-A-CI-GATE: the canonical text of an inline pre-checkout step, not a script
+# any lane can call. It must run BEFORE `actions/checkout`, when this file is not
+# yet on the runner's disk, so it is pasted verbatim into seven `run:` blocks;
+# readonly-leftovers-sweep-test.sh extracts that body, executes it against a
+# fixture, and asserts all seven copies are byte-identical to it. Until 2026-09-06
+# this file counted as REACHABLE because `readonly-leftovers-sweep-test.sh` names
+# it in `CANON="ci/runner/sweep-readonly-leftovers.sh"` — an assignment feeding a
+# `python3` extractor that READS it. Naming a file is not running it, and the
+# corrected reachability rule stopped crediting that.
+#
 # The sweep has to run BEFORE `actions/checkout`, and before checkout the
 # repository — and therefore this script — is not on the runner's disk. So
 # everything from the `BEGIN INLINE BODY` marker down is pasted verbatim into

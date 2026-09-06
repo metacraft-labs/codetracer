@@ -54,9 +54,24 @@
 #
 # It is not an exemption list. `NOT-A-CI-GATE:` in a file's own header is the
 # exemption, and it means "this is not a gate" — a claim about the file, made in
-# the file, that a reviewer can disagree with. Nine scripts under `scripts/` say
-# that about themselves: developer setup, a PATH diagnostic, a stylus generator
-# and six documentation-capture tools. This file means the opposite: these ARE
+# the file, that a reviewer can disagree with. TEN files say that about
+# themselves, and the guard prints the count on every run so this sentence
+# cannot drift again — it read "nine scripts under `scripts/`" while six of the
+# nine were under `scripts/` and one was not a script at all. They are: a PATH
+# diagnostic, a stylus generator, four documentation-capture tools, a
+# cross-repository shim, the canonical text of an inline pre-checkout runner
+# step, and the two fixtures `sourced-var-collision-gate.sh` scans as text.
+#
+# THE LAST THREE WERE ADDED 2026-09-06, and none of them is a hole being
+# excused. Each was counted REACHABLE until that day only because something
+# NAMED it — `CANON="ci/runner/sweep-readonly-leftovers.sh"` feeding a python
+# extractor, `expect_leak leaky.sh` feeding a grep — and naming a file is not
+# running it. When `refs_of_text` stopped reading a mention as a wire, the three
+# surfaced as what they always were: files no lane can invoke, because none of
+# them is a gate. The sweep in particular CANNOT be wired — it runs before
+# `actions/checkout`, when it is not yet on the runner's disk.
+#
+# This file means the opposite: these ARE
 # gates, they SHOULD run, and today nothing runs them. (One entry — the
 # `ci/lib/` library at the bottom — is neither, and says so on its own line.)
 #

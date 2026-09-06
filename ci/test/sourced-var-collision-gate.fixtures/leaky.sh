@@ -4,6 +4,11 @@
 # it exists so that a detector which has rotted into a no-op fails loudly instead
 # of reporting a clean repository.
 #
+# NOT-A-CI-GATE: input data for sourced-var-collision-gate.sh, which SCANS this
+# file as text. Executing it would prove nothing; the gate reads it. It counted
+# as reachable until 2026-09-06 only because `expect_leak leaky.sh REPO_ROOT`
+# names it, and `expect_leak` hands its first argument to `leak_scan` — a grep.
+#
 # It deliberately carries NO `ct-leaks:` declaration: the gate must find these.
 
 # The shape from 3c7b257ed.

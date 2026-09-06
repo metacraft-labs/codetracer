@@ -3,6 +3,11 @@
 # on all of them. This half matters as much as leaky.sh: a detector that flags
 # the fix as well as the defect makes the rule unusable, and noise in the
 # `lint-bash` lane skips every build artefact job behind it.
+#
+# NOT-A-CI-GATE: input data for sourced-var-collision-gate.sh, which SCANS this
+# file as text. See leaky.sh for the same note; both counted as reachable until
+# 2026-09-06 because the suite NAMES them in `expect_clean`/`expect_leak` calls,
+# and both of those only ever grep the file they are handed.
 
 # 1. Declared `local` on a PRECEDING line, then assigned. This is the single
 #    most common correct form in ci/lib/*.sh, and a detector that only
