@@ -127,6 +127,13 @@ name: Deploy ide.codetracer.com
 #   workflow does not create it.
 # ---------------------------------------------------------------------------
 
+# ci-mainline-exempt: deploys ide.codetracer.com; `cloud` is the deploy branch and a mainline push must not reach production
+#
+# The filter below names `cloud` and no mainline branch. That is deliberate, not
+# the "filter omits the mainline" defect: this workflow publishes to production,
+# so a push to `dev` must NOT trigger it. The marker above declares that to the
+# shared branch-filter guard.
+
 on:
   push:
     branches: [cloud]
