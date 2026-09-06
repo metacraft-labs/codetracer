@@ -118,7 +118,7 @@ VERSION_NIM="${SUITE_ROOT}/src/ct/version.nim"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=93
+EXPECTED_ASSERTIONS=107
 
 ASSERTIONS=0
 FAILURES=0
@@ -1332,6 +1332,156 @@ if [[ ${#CSS_NOT_DELEGATING[@]} -eq 0 ]]; then
 else
 	bad "all five contrast specs resolve their stylesheet through the shared helper" \
 		"${CSS_NOT_DELEGATING[@]}"
+fi
+
+# ---------------------------------------------------------------------------
+# THE DB-BACKEND WASM REPLAY ENGINE.
+#
+# `src/db-backend/wasm-testing/pkg/` is a build output, gitignored twice over
+# (`*.wasm` at the repo root, `dist/` in browser-replay), so it is never
+# checked in, never refreshed by a pull, and never disturbed by a branch
+# switch. Its readers asked "is there a .wasm, and is it over a megabyte?".
+#
+# MEASURED on 2026-09-06: in a worktree at origin/dev (1006b5ab1) holding the
+# engine built on 2026-08-31 — 42 db-backend commits earlier, 79,304 bytes
+# different from what that tree builds — `ci/test/worker-backend-wasm-e2e.sh`
+# printed "19 passed, 0 failed". Nineteen green assertions about a replay
+# engine, not one of them about the engine in the tree.
+#
+# THE CHECK IS NOT AN MTIME, and the two contracts below are the reason. This
+# engine's build is not reproducible across checkout paths — it embeds absolute
+# source paths, so two CLEAN checkouts of the SAME commit emit different
+# binaries (measured: 5abaaece… here, 39e47d47… in a sibling worktree, both at
+# 1006b5ab1). That rules out "assert a rebuild emits the same sha256". And a
+# rebuild after a comment-only edit emitted a BYTE-IDENTICAL wasm (measured),
+# which is the blocktracer 6f106f2 case where an mtime gate cannot be cleared
+# by the remedy it prints. So the stamp records the digest of the INPUTS, is
+# rewritten on every build whether or not the output changed, and is therefore
+# always clearable by the command the refusal names.
+section "db-backend WASM engine: existence is not freshness"
+
+WASM_FRESHNESS_LIB="${SUITE_ROOT}/ci/lib/wasm-engine-freshness.sh"
+WORKER_E2E="${SUITE_ROOT}/ci/test/worker-backend-wasm-e2e.sh"
+BUILD_DIST="${SUITE_ROOT}/browser-replay/build-dist.sh"
+TEST_DIST="${SUITE_ROOT}/browser-replay/tests/test_dist.sh"
+BUILD_WASM="${SUITE_ROOT}/src/db-backend/build_wasm.sh"
+
+if [[ ! -f ${WASM_FRESHNESS_LIB} ]]; then
+	echo "stale-artefact-guards-test: missing '${WASM_FRESHNESS_LIB}'" >&2
+	exit 3
+fi
+
+# A throwaway repo shaped like the real one. No cargo, no wasm-pack, no nix:
+# the guard reads file CONTENT, so a synthetic tree exercises it exactly.
+ENGINE_REPO="${TEST_ROOT}/engine-repo/codetracer"
+mkdir -p "${ENGINE_REPO}/src/db-backend/src" \
+	"${ENGINE_REPO}/src/db-backend/wasm-testing/pkg" \
+	"${ENGINE_REPO}/ci/lib"
+cp "${WASM_FRESHNESS_LIB}" "${ENGINE_REPO}/ci/lib/"
+printf 'fn replay() {}\n' >"${ENGINE_REPO}/src/db-backend/src/lib.rs"
+printf '[package]\nname = "db-backend"\n' >"${ENGINE_REPO}/src/db-backend/Cargo.toml"
+printf '# lock\n' >"${ENGINE_REPO}/src/db-backend/Cargo.lock"
+printf 'fn main() {}\n' >"${ENGINE_REPO}/src/db-backend/build.rs"
+printf '#!/usr/bin/env bash\n' >"${ENGINE_REPO}/src/db-backend/build_wasm.sh"
+ENGINE_PKG="${ENGINE_REPO}/src/db-backend/wasm-testing/pkg"
+printf 'ENGINE-BYTES-A\n' >"${ENGINE_PKG}/db_backend_bg.wasm"
+printf '// bindings\n' >"${ENGINE_PKG}/db_backend.js"
+
+# shellcheck source=ci/lib/wasm-engine-freshness.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${WASM_FRESHNESS_LIB}"
+
+# 1. An engine with no stamp cannot be shown to belong to any tree. This is the
+#    state EVERY checkout is in before the first stamped build, and the state
+#    the 19-green run above was measured in.
+UNSTAMPED="$(wasm_engine_assert_fresh "${ENGINE_REPO}" 2>&1)"
+assert_contains "${UNSTAMPED}" "STALE ENGINE" \
+	"an unstamped engine is refused"
+assert_contains "${UNSTAMPED}" "build_wasm.sh" \
+	"...and the refusal names the command that builds one"
+
+# 2. Stamped from this tree: accepted.
+wasm_engine_write_stamp "${ENGINE_REPO}" >/dev/null
+if wasm_engine_assert_fresh "${ENGINE_REPO}" >/dev/null 2>&1; then
+	ok "an engine stamped from this tree is accepted"
+else
+	bad "an engine stamped from this tree is accepted" \
+		"$(wasm_engine_assert_fresh "${ENGINE_REPO}" 2>&1)"
+fi
+
+# 3. THE ANTI-MTIME CONTRACT. A source newer than the engine, with identical
+#    content, must NOT be refused. An mtime gate goes red here — on a tree that
+#    has just built correctly — and prints a remedy that cannot clear it.
+touch "${ENGINE_REPO}/src/db-backend/src/lib.rs" \
+	"${ENGINE_REPO}/src/db-backend/Cargo.lock"
+if wasm_engine_assert_fresh "${ENGINE_REPO}" >/dev/null 2>&1; then
+	ok "a touched but unchanged source does not make the engine stale"
+else
+	bad "a touched but unchanged source does not make the engine stale" \
+		"this is the mtime failure mode the stamp exists to avoid"
+fi
+
+# 4. A source whose CONTENT changed: refused, and the refusal says why.
+printf 'fn replay() { /* changed */ }\n' >"${ENGINE_REPO}/src/db-backend/src/lib.rs"
+CHANGED="$(wasm_engine_assert_fresh "${ENGINE_REPO}" 2>&1)"
+assert_contains "${CHANGED}" "built from different sources than this tree has" \
+	"an engine built from different sources is refused"
+assert_contains "${CHANGED}" "engine built at git HEAD" \
+	"...and the refusal reports the revision the engine came from"
+
+# 5. THE REMEDY CLEARS IT. Not "a remedy is printed" — the printed remedy is
+#    run, and the guard then passes. Three gates in this campaign printed
+#    remedies that could not clear what they named; this contract is the reason
+#    a fourth cannot be added here unnoticed. `wasm_engine_write_stamp` is the
+#    last act of `build_wasm.sh`, which is what the refusal tells you to run.
+wasm_engine_write_stamp "${ENGINE_REPO}" >/dev/null
+if wasm_engine_assert_fresh "${ENGINE_REPO}" >/dev/null 2>&1; then
+	ok "the remedy the refusal prints actually clears the refusal"
+else
+	bad "the remedy the refusal prints actually clears the refusal" \
+		"$(wasm_engine_assert_fresh "${ENGINE_REPO}" 2>&1)"
+fi
+
+# 6. A stamp that has been separated from its binary. This is not theoretical:
+#    copying `pkg/` between worktrees — how the stale engine reached the tree
+#    that scored 19/19 — produces exactly this.
+printf 'ENGINE-BYTES-B\n' >"${ENGINE_PKG}/db_backend_bg.wasm"
+SWAPPED="$(wasm_engine_assert_fresh "${ENGINE_REPO}" 2>&1)"
+assert_contains "${SWAPPED}" "the stamp does not describe the binary next to it" \
+	"a stamp separated from its binary is refused"
+
+# 7. And the plain absence of the engine, which must not be a skip.
+rm -f "${ENGINE_PKG}/db_backend_bg.wasm"
+MISSING_ENGINE="$(wasm_engine_assert_fresh "${ENGINE_REPO}" 2>&1)"
+assert_contains "${MISSING_ENGINE}" "missing" \
+	"a missing engine is refused rather than skipped"
+
+# AND THE SITES. A guard nothing calls protects nothing.
+if grep -q 'wasm_engine_assert_fresh' "${WORKER_E2E}"; then
+	ok "worker-backend-wasm-e2e.sh asserts the engine is this tree's"
+else
+	bad "worker-backend-wasm-e2e.sh asserts the engine is this tree's" \
+		"it is the gate measured at 19 passed / 0 failed on a stale engine"
+fi
+assert_not_contains "$(cat "${WORKER_E2E}")" '\-gt 1000000' \
+	"...and no longer settles for 'the file is over a megabyte'"
+if grep -q 'wasm_engine_assert_fresh' "${BUILD_DIST}"; then
+	ok "build-dist.sh refuses to bundle an engine that is not this tree's"
+else
+	bad "build-dist.sh refuses to bundle an engine that is not this tree's" \
+		"it publishes to ide.codetracer.com"
+fi
+if grep -q 'wasm_engine_assert_dir_fresh' "${TEST_DIST}"; then
+	ok "test_dist.sh checks the bundled engine's provenance, not just its size"
+else
+	bad "test_dist.sh checks the bundled engine's provenance, not just its size" \
+		"every other assertion in it passes for any 1-10 MB file"
+fi
+if grep -q 'wasm_engine_write_stamp' "${BUILD_WASM}"; then
+	ok "build_wasm.sh stamps the engine it builds"
+else
+	bad "build_wasm.sh stamps the engine it builds" \
+		"without the stamp every guard above can only report 'unstamped'"
 fi
 
 # ---------------------------------------------------------------------------

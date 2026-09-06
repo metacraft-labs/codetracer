@@ -160,6 +160,8 @@ lint_step "shellcheck: stale-artefact guards" \
 	scripts/run-cross-repo-tests.sh \
 	browser-replay/setup-certs.sh \
 	browser-replay/deploy-wasm.sh \
+	browser-replay/build-dist.sh \
+	browser-replay/tests/test_dist.sh \
 	ci/test/stale-artefact-guards-test.sh
 
 # Executed here, and not only linted, for the reason the whole sweep exists: a

@@ -7,6 +7,15 @@ SYSROOT="$(pwd)/wasm-sysroot"
 echo "SYSROOT: ${SYSROOT}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolved HERE, before the `source "$PRIVATE_BUILD_ENV"` below, and under a
+# name that file does not use. `ct_emulator/export_build_env.sh` assigns a
+# `SCRIPT_DIR` of its own (its line 7), so every `$SCRIPT_DIR`-relative path
+# computed after that source points into the recorder repo instead of this one.
+# MEASURED: the stamping step at the end of this script resolved
+# `$SCRIPT_DIR/../../ci/lib/...` to `/Users/zahary/m/dev/ci/lib/...` — one
+# directory above BOTH repositories — and the build finished 0 with the stamp
+# silently unwritten.
+CT_REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 RECORDER_ROOT="$WORKSPACE_ROOT/codetracer-native-recorder"
 EMULATOR_DIR="$RECORDER_ROOT/ct_emulator"
@@ -100,3 +109,19 @@ esac
 cargo build --target wasm32-unknown-unknown --release --no-default-features --features browser-transport
 
 wasm-pack build --target web --release -d ./wasm-testing/pkg -- --no-default-features --features browser-transport
+
+# Record WHICH SOURCES this engine was built from, next to the engine itself.
+#
+# `wasm-testing/pkg/` is gitignored, so it survives branch switches, rebases
+# and worktree copies with nothing to mark it stale. Gates that read it used to
+# check only that a .wasm existed and was over a megabyte; measured on
+# 2026-09-06, that let `ci/test/worker-backend-wasm-e2e.sh` report 19 passed /
+# 0 failed while driving an engine built six days and 42 db-backend commits
+# earlier. The stamp is what lets a reader tell the difference.
+#
+# Not an mtime: see the header of ci/lib/wasm-engine-freshness.sh for why the
+# obvious mtime check is the one that cannot be cleared by its own remedy.
+# shellcheck source=ci/lib/wasm-engine-freshness.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "$CT_REPO_ROOT/ci/lib/wasm-engine-freshness.sh"
+wasm_engine_write_stamp "$CT_REPO_ROOT"
