@@ -49,12 +49,31 @@ permissions:
 jobs:
   windows-provision:
     runs-on: eph-win-x64  # DIY-Windows (env.ps1) -> eph-win-x64
-    # The same cap `windows-rust-components` carries. Matching it deliberately:
-    # this probe's whole purpose is to say something about THAT lane, and a
-    # provision that fits here fits there. Omitting it would mean GitHub's
-    # 360-minute default, which is how an unbounded bootstrap step turns into a
-    # six-hour non-answer.
-    timeout-minutes: 75
+    # RAISED FROM 75 AFTER THE FIRST PROBE RUN (34026964163), and the number is
+    # derived from that run's own step timings rather than guessed.
+    #
+    # That run was killed by the 75-minute cap having provisioned 7 of the 22
+    # components. Its budget went:
+    #
+    #   checkout (submodules)     37.8 min   <- not provisioning at all
+    #   job setup + git + token    3.3 min
+    #   the two bound/gate checks   2.2 min
+    #   sibling clone              1.5 min
+    #   env.ps1                   29.6 min   <- the only part being measured
+    #
+    # So HALF the cap was spent on a recursive submodule checkout that
+    # `env.ps1` does not read (it contains no `submodule` reference, and no
+    # `ensure-*.ps1` reads anything under `libs/`). Moving that fetch below the
+    # measurement returns ~35 min to provisioning at no extra slot cost, which
+    # is why this cap rises by much less than the shortfall would suggest.
+    #
+    # 120 = ~10 min of measured non-provisioning overhead, plus the provisioning
+    # tail, plus headroom. It is a BACKSTOP rather than the primary bound: every
+    # download now carries a total budget and a stall bound, so this job can no
+    # longer sit silently for hours the way an unbounded transfer allowed.
+    # If it fires again it will do so having measured 20+ components, and the
+    # next value can be arithmetic instead of an estimate.
+    timeout-minutes: 120
     steps:
       # Verbatim from `windows-rust-components`: `actions/checkout` needs a real
       # git on PATH on these guests, and `submodules: recursive` cannot be
@@ -96,10 +115,28 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      # NO SUBMODULES HERE, DELIBERATELY, AND IT DOES NOT NARROW THE PROBE.
+      #
+      # On run 34026964163 the recursive submodule checkout cost 37.8 minutes of
+      # a 75-minute cap -- 30.2 min fetching 33 submodules, plus ~4 min of
+      # per-submodule `git config` in "Setting up auth" and 1.4 min persisting
+      # their credentials. That is half the budget spent before the step under
+      # measurement starts.
+      #
+      # None of it is an input to what is being measured. `env.ps1` contains no
+      # reference to submodules, and no `ensure-*.ps1` reads anything under
+      # `libs/` -- `ensure-nargo.ps1` wants `flake.lock` and
+      # `non-nix-build/windows/`, both tracked in this repo proper. So the
+      # provisioning cost this job exists to record is bit-for-bit unaffected by
+      # whether the submodules are present, and fetching them AFTER the
+      # measurement changes the measurement not at all.
+      #
+      # The build-evidence steps at the bottom DO need them; they get their own
+      # fetch below, once the decomposition is safely uploaded.
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: recursive
+          submodules: false
           token: ${{ steps.ci_token.outputs.token }}
 
       # Cheap, hermetic, and it runs the download/native-command bounds' own
@@ -133,9 +170,17 @@ jobs:
             codetracer-native-recorder=dev
 
       - name: Upload env.ps1 component decomposition
-        # `if: always()` because `env.ps1` emits the report from a `finally`: a
-        # run that dies mid-bootstrap still publishes a partial table naming the
-        # component it died in and what everything before it cost.
+        # `if: always()` so a run that dies mid-bootstrap still publishes what
+        # it measured.
+        #
+        # THE `if: always()` IS NOT SUFFICIENT ON ITS OWN, and run 34026964163
+        # proved it: both this step and the summary below ran and succeeded, and
+        # yet no artifact was produced, because there was no file to upload. The
+        # report was emitted from a `finally` inside `env.ps1`, and a `finally`
+        # does not run when the process is KILLED -- which is exactly what the
+        # job cap does. `env.ps1` now flushes the table after every component,
+        # so the file exists from the first component onward and a capped run
+        # yields real timings instead of nothing.
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -158,18 +203,36 @@ jobs:
             return
           }
           $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+          # A partial (the bootstrap was killed before it finished) carries
+          # timings but NO sizes. Saying so explicitly matters: this table is
+          # what downstream sizing is read off, and a partial quoted as a
+          # complete provision would understate it by however many components
+          # never ran.
+          $isPartial = ($report.phase -eq "partial")
           $lines = @()
+          if ($isPartial) {
+            $lines += "**PARTIAL** - the bootstrap did not finish. Timings below are real for the"
+            $lines += "components listed; components not listed never ran, and NO size was measured."
+            $lines += ""
+          }
           $lines += "| component | status | seconds | MB | class | note |"
           $lines += "|---|---|---:|---:|---|---|"
           foreach ($c in ($report.components | Sort-Object -Property seconds -Descending)) {
             $note = if ($c.error) { $c.error } elseif ($c.skip_reason) { $c.skip_reason } else { "" }
-            $lines += ("| {0} | {1} | {2:N1} | {3:N1} | {4} | {5} |" -f `
-              $c.step, $c.status, $c.seconds, ($c.bytes / 1MB), $c.relocatability, $note)
+            $mb = if ($null -eq $c.bytes) { "n/a" } else { "{0:N1}" -f ($c.bytes / 1MB) }
+            $lines += ("| {0} | {1} | {2:N1} | {3} | {4} | {5} |" -f `
+              $c.step, $c.status, $c.seconds, $mb, $c.relocatability, $note)
           }
           $lines += ""
-          $lines += ("install_root_bytes: {0} ({1:N1} MB in {2:N0} files)" -f `
-            $report.install_root_bytes, ($report.install_root_bytes / 1MB), $report.install_root_files)
-          $lines += ("total_seconds: {0}   complete: {1}" -f $report.total_seconds, $report.complete)
+          $lines += ("components measured: {0} of 22" -f @($report.components).Count)
+          if ($null -eq $report.install_root_bytes) {
+            $lines += "install_root_bytes: NOT MEASURED (partial run)"
+          } else {
+            $lines += ("install_root_bytes: {0} ({1:N1} MB in {2:N0} files)" -f `
+              $report.install_root_bytes, ($report.install_root_bytes / 1MB), $report.install_root_files)
+          }
+          $lines += ("total_seconds: {0}   complete: {1}   phase: {2}" -f `
+            $report.total_seconds, $report.complete, $report.phase)
           $lines += ("skipped: [{0}]  failed: [{1}]" -f `
             ($report.skipped_steps -join ","), ($report.failed_steps -join ","))
           $text = $lines -join "`n"
@@ -184,6 +247,34 @@ jobs:
       # pre-existing build failure is a different question and must not be
       # imported into this one, which is why the build below is
       # `continue-on-error`.
+
+      # The submodules the checkout above deliberately skipped. They are inputs
+      # to the build-evidence steps only, never to provisioning, so they are
+      # fetched here -- after the measurement has been taken AND uploaded.
+      # Ordered this way, a slow submodule fetch can cost the build evidence but
+      # can no longer cost the decomposition, which is this job's actual
+      # deliverable.
+      #
+      # `continue-on-error` for the same reason: losing the build evidence is a
+      # far smaller loss than losing the measurement, and it must not turn a run
+      # that produced the measurement red.
+      #
+      # The token goes in via `git -c url.<authed>.insteadOf`, not by re-running
+      # `actions/checkout`: a second checkout would `git clean -ffdx` the
+      # working tree, and `env.ps1` has by then created junctions inside it.
+      # `git -c` is exported as GIT_CONFIG_PARAMETERS, which git propagates to
+      # the child processes that clone each submodule -- so one command
+      # authenticates the whole recursive walk without writing the token to any
+      # config file.
+      - name: Fetch submodules for the build-evidence steps
+        continue-on-error: true
+        shell: bash
+        env:
+          CI_TOKEN: ${{ steps.ci_token.outputs.token }}
+        run: |
+          git -c "url.https://x-access-token:${CI_TOKEN}@github.com/.insteadOf=https://github.com/" \
+            submodule update --init --recursive --depth=1
+
       - name: Remove WSL bash stub from System32
         shell: pwsh
         run: |

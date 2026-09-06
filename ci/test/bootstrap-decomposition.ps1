@@ -458,6 +458,126 @@ try {
 }
 
 # ---------------------------------------------------------------------------
+# Part 2b - the partial decomposition survives a run that never reaches the end.
+#
+# The `finally` around env.ps1's dispatch publishes a table when a component
+# THROWS. It publishes nothing when the process is KILLED, which is what a CI
+# job timeout does -- and on this lane a timeout kill is the common ending, not
+# the rare one. So the guarantee that matters is the one tested here: after
+# every component, the table so far is already ON DISK, at the path the final
+# report will later overwrite.
+#
+# The kill is simulated by simply NOT calling Write-BootstrapStepReport, which
+# is exactly what a killed process does. Anything stronger (actually killing a
+# child pwsh) would test the harness rather than the contract.
+# ---------------------------------------------------------------------------
+
+Write-Host "== partial decomposition survives a killed run"
+
+$progressRoot = Join-Path ([IO.Path]::GetTempPath()) ("ct-progress-" + [Guid]::NewGuid().ToString('N'))
+$progressInstall = Join-Path $progressRoot "install"
+$progressReport = Join-Path $progressRoot "report"
+New-Item -ItemType Directory -Force -Path $progressInstall | Out-Null
+
+try {
+  Reset-BootstrapStepRecords
+
+  $decompositionPath = Join-Path $progressReport "windows-env-decomposition.json"
+
+  # Before anything is armed, a component must NOT write a progress file.
+  # Existing callers and satellite repos rely on the in-memory-only behaviour.
+  Invoke-BootstrapStep -Step "ALPHA" -Relocatability relocatable -Root $progressInstall -Action { }
+  Assert-True -Condition (-not (Test-Path -LiteralPath $decompositionPath)) `
+    -Message "no progress file is written until Initialize-BootstrapProgress arms it"
+
+  Reset-BootstrapStepRecords
+  Initialize-BootstrapProgress -OutputDir $progressReport
+
+  Invoke-BootstrapStep -Step "ALPHA" -Relocatability relocatable -Root $progressInstall -Action {
+    $dir = Join-Path $progressInstall "alpha/1.0"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    [IO.File]::WriteAllBytes((Join-Path $dir "a.bin"), (New-Object byte[] 2048))
+  }
+
+  Assert-True -Condition (Test-Path -LiteralPath $decompositionPath -PathType Leaf) `
+    -Message "the partial decomposition exists after the FIRST component, before any report call"
+
+  $partial = Get-Content -LiteralPath $decompositionPath -Raw | ConvertFrom-Json
+  Assert-Equal -Expected "partial" -Actual $partial.phase `
+    -Message "the partial declares itself partial"
+  Assert-Equal -Expected 1 -Actual @($partial.components).Count `
+    -Message "the partial carries the one component that has run"
+  Assert-Equal -Expected "ALPHA" -Actual @($partial.components)[0].step `
+    -Message "and names it"
+  Assert-True -Condition (@($partial.components)[0].seconds -ge 0) `
+    -Message "the partial carries a real wall-clock figure for it"
+  Assert-True -Condition ($null -eq $partial.install_root_bytes) `
+    -Message "the partial reports install_root_bytes as NULL, never as zero"
+  Assert-True -Condition ($null -eq @($partial.components)[0].bytes) `
+    -Message "a partial component's size is NULL, so it cannot be read as 'installed nothing'"
+  Assert-True -Condition (-not $partial.complete) `
+    -Message "a partial is never complete"
+
+  # A second component must extend the partial in place, at the same path.
+  Invoke-BootstrapStep -Step "GAMMA" -Relocatability installer -Root $progressInstall -Action {
+    $dir = Join-Path $progressInstall "gamma"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  }
+  $partial2 = Get-Content -LiteralPath $decompositionPath -Raw | ConvertFrom-Json
+  Assert-Equal -Expected 2 -Actual @($partial2.components).Count `
+    -Message "each further component extends the partial in place"
+
+  # THE CASE THAT MOTIVATES ALL OF THIS: a component that dies mid-flight.
+  # Everything before it must already be on disk, and the run is then abandoned
+  # WITHOUT calling Write-BootstrapStepReport -- the killed-process shape.
+  try {
+    Invoke-BootstrapStep -Step "DELTA" -Relocatability relocatable -Root $progressInstall -Action {
+      throw "simulated DELTA failure"
+    }
+  } catch { }
+
+  $partial3 = Get-Content -LiteralPath $decompositionPath -Raw | ConvertFrom-Json
+  Assert-Equal -Expected 3 -Actual @($partial3.components).Count `
+    -Message "the component that died is itself recorded in the partial"
+  Assert-True -Condition (@($partial3.failed_steps) -contains "DELTA") `
+    -Message "and is named in failed_steps, so the blocking component is identifiable"
+  Assert-True -Condition (@($partial3.components | Where-Object { $_.step -eq "ALPHA" }).Count -eq 1) `
+    -Message "timings for the components that DID finish survive the abandoned run"
+
+  # Finally: the real report must overwrite the partial at the same path, and
+  # be distinguishable from it. If it landed elsewhere, the pipeline that
+  # collects the artifact would publish the partial and silently drop the real
+  # one -- worse than having no partial at all.
+  $finalPath = Write-BootstrapStepReport -Root $progressInstall -OutputDir $progressReport
+  Assert-Equal -Expected $decompositionPath -Actual $finalPath `
+    -Message "the final report overwrites the partial at the SAME path"
+  $final = Get-Content -LiteralPath $finalPath -Raw | ConvertFrom-Json
+  Assert-Equal -Expected "final" -Actual $final.phase `
+    -Message "the final report declares itself final"
+  Assert-True -Condition ($final.install_root_bytes -gt 0) `
+    -Message "and unlike the partial it carries the measured install-root size"
+
+  # WINDOWS_DIY_REPORT_DIR must steer the partial and the final to the SAME
+  # directory. Two resolvers that could disagree is the defect this shares one
+  # function to prevent.
+  $override = Join-Path $progressRoot "override"
+  $env:WINDOWS_DIY_REPORT_DIR = $override
+  try {
+    Assert-Equal -Expected $override -Actual (Resolve-BootstrapReportDir -RepoRoot $progressRoot) `
+      -Message "WINDOWS_DIY_REPORT_DIR steers the report directory"
+  } finally {
+    Remove-Item Env:\WINDOWS_DIY_REPORT_DIR -ErrorAction SilentlyContinue
+  }
+  Assert-Equal -Expected (Join-Path $progressRoot ".tmp/windows-diy") `
+    -Actual (Resolve-BootstrapReportDir -RepoRoot $progressRoot) `
+    -Message "and without it the default is <repo>/.tmp/windows-diy"
+
+} finally {
+  Remove-Item -LiteralPath $progressRoot -Recurse -Force -ErrorAction SilentlyContinue
+  Reset-BootstrapStepRecords
+}
+
+# ---------------------------------------------------------------------------
 # Part 3 - the nargo linker verification.
 #
 # `ensure-nargo.ps1` refuses to hand cargo a `link.exe` it cannot show to be

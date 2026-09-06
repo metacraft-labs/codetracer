@@ -669,12 +669,149 @@ $script:BootstrapRelocatabilityClasses = @("relocatable", "junction", "installer
 
 $script:BootstrapStepRecords = [System.Collections.Generic.List[object]]::new()
 
+# Where the running decomposition is flushed after every component, or $null
+# when nobody asked for progress reporting. See Write-BootstrapStepProgress for
+# why this exists at all.
+$script:BootstrapProgressDir = $null
+
 function Get-BootstrapStepRecords {
   return $script:BootstrapStepRecords.ToArray()
 }
 
 function Reset-BootstrapStepRecords {
   $script:BootstrapStepRecords.Clear()
+  $script:BootstrapProgressDir = $null
+}
+
+# The decomposition file's name. One constant, because the partial writer and
+# the final writer MUST target the same path: the whole point of the partial is
+# that the pipeline which collects the final report needs no special case to
+# collect it instead.
+$script:BootstrapDecompositionFileName = "windows-env-decomposition.json"
+
+function Resolve-BootstrapReportDir {
+  <#
+    .SYNOPSIS
+      The directory the decomposition is written to.
+
+    .DESCRIPTION
+      `WINDOWS_DIY_REPORT_DIR` when set, else `<RepoRoot>/.tmp/windows-diy`.
+
+      This is a function rather than an expression repeated at each call site
+      because it is now consulted TWICE per bootstrap -- once up front to arm
+      progress reporting, and once at the end to write the final report -- and
+      the two must not be able to disagree. A satellite repo that sets
+      WINDOWS_DIY_REPORT_DIR and got the partial in one place and the final in
+      another would be worse off than with no partial at all.
+  #>
+  param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+  $dir = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_REPORT_DIR")
+  if ([string]::IsNullOrWhiteSpace($dir)) {
+    $dir = Join-Path $RepoRoot ".tmp/windows-diy"
+  }
+  return $dir
+}
+
+function Initialize-BootstrapProgress {
+  <#
+    .SYNOPSIS
+      Arm per-component flushing of the decomposition to $OutputDir.
+
+    .DESCRIPTION
+      Call before the dispatch block. Until this is called, Invoke-BootstrapStep
+      accumulates records in memory only, which is the behaviour every existing
+      caller and test relies on.
+  #>
+  param([Parameter(Mandatory = $true)][string]$OutputDir)
+
+  $script:BootstrapProgressDir = $OutputDir
+}
+
+function Write-BootstrapStepProgress {
+  <#
+    .SYNOPSIS
+      Flush the components recorded SO FAR to the decomposition path.
+
+    .DESCRIPTION
+      WHY THIS EXISTS, and it is not redundant with the `finally` that calls
+      Write-BootstrapStepReport.
+
+      That `finally` publishes a partial table when a component THROWS. It does
+      nothing at all when the process is KILLED -- and on CI the dominant way
+      this bootstrap ends is neither success nor an exception but a job or step
+      timeout, which terminates pwsh outright. A PowerShell `finally` is not a
+      process-death handler: no unwinding happens, so the report is never
+      written and the run yields no timings whatsoever. That is not
+      hypothetical; it is the observed outcome of the provisioning probe, whose
+      workflow's own comment claimed a partial table would survive.
+
+      Flushing after each component converts "killed at the cap => zero data"
+      into "killed at the cap => exact timings for everything that finished,
+      and the name of the component it died in". For a bootstrap whose whole
+      measurement problem is that it rarely reaches the end, that is the
+      difference between a run costing a scarce runner slot for nothing and a
+      run that advances the measurement.
+
+      SIZES ARE DELIBERATELY ABSENT from the partial. Recursive sizing of a
+      multi-gigabyte install root is the expensive half of the report and doing
+      it 22 times would cost more than several of the installs being measured
+      -- the same reason Write-BootstrapStepReport measures once, at the end.
+      The partial therefore carries `phase = "partial"` and a NULL
+      `install_root_bytes`, so a consumer cannot mistake "not measured yet" for
+      "measured as zero". The final report overwrites this file in place.
+
+      Best-effort by construction: this runs between components, and a failure
+      to write a progress file must never abort a provision that is otherwise
+      succeeding.
+  #>
+  if ([string]::IsNullOrWhiteSpace($script:BootstrapProgressDir)) { return }
+
+  try {
+    $records = Get-BootstrapStepRecords
+    $rows = @()
+    foreach ($record in $records) {
+      $rows += [pscustomobject]@{
+        step = $record.step
+        status = $record.status
+        relocatability = $record.relocatability
+        relocatability_warning = $null
+        seconds = $record.seconds
+        # Null rather than 0: this component's bytes are UNMEASURED at this
+        # point, and a zero here would be read as "installed nothing".
+        bytes = $null
+        files = $null
+        reparse_points = $null
+        install_dirs = @($record.created_dirs)
+        skip_variable = $record.skip_variable
+        skip_reason = $record.skip_reason
+        error = $record.error
+      }
+    }
+
+    $report = [pscustomobject]@{
+      schema = "codetracer.windows-env-decomposition.v1"
+      phase = "partial"
+      generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+      os = "windows"
+      install_root_bytes = $null
+      install_root_files = $null
+      install_root_reparse_points = $null
+      total_seconds = [math]::Round((($rows | Measure-Object -Property seconds -Sum).Sum), 3)
+      # A partial is never complete by definition -- there are components it
+      # has not reached yet.
+      complete = $false
+      skipped_steps = @($rows | Where-Object { $_.status -eq "skipped" } | ForEach-Object { $_.step })
+      failed_steps = @($rows | Where-Object { $_.status -eq "failed" } | ForEach-Object { $_.step })
+      components = $rows
+    }
+
+    New-Item -ItemType Directory -Force -Path $script:BootstrapProgressDir | Out-Null
+    $jsonPath = Join-Path $script:BootstrapProgressDir $script:BootstrapDecompositionFileName
+    $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+  } catch {
+    Write-Warning "Failed to flush the partial env.ps1 decomposition: $($_.Exception.Message)"
+  }
 }
 
 function Get-InstallRootTopLevelNames {
@@ -749,6 +886,7 @@ function Invoke-BootstrapStep {
       created_dirs = @()
       error = $null
     })
+    Write-BootstrapStepProgress
     return
   }
 
@@ -780,6 +918,9 @@ function Invoke-BootstrapStep {
       created_dirs = $created
       error = $errorText
     })
+    # Flush before control leaves this component. If the job cap kills the
+    # process during the NEXT component, everything up to here survives.
+    Write-BootstrapStepProgress
   }
 }
 
@@ -912,6 +1053,11 @@ function Write-BootstrapStepReport {
 
   $report = [pscustomobject]@{
     schema = "codetracer.windows-env-decomposition.v1"
+    # "final" distinguishes this from the per-component flush
+    # Write-BootstrapStepProgress leaves at the same path when a run is killed
+    # mid-bootstrap. Only a "final" report has sizes, and only a "final" report
+    # can be quoted as the cost of a complete provision.
+    phase = "final"
     generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
     os = "windows"
     arch = $arch

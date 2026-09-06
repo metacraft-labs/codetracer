@@ -1210,6 +1210,16 @@ if ($doSync) {
   # now -- they are what identifies the component that blocks the lane -- and
   # letting the exception skip the report would leave the slowest and most
   # interesting runs unmeasured.
+  #
+  # The `finally` below covers an EXCEPTION. It does not cover the process
+  # being KILLED, which is what a CI job or step timeout does -- no unwinding
+  # happens and the report is simply never written. Arming progress reporting
+  # first makes each component flush the table so far to the same path, so a
+  # run that dies at the cap still yields timings for everything that finished
+  # instead of nothing at all.
+  $decompositionDir = Resolve-BootstrapReportDir -RepoRoot $repoRoot
+  Initialize-BootstrapProgress -OutputDir $decompositionDir
+
   try {
 
   # Phase 1: No dependencies
@@ -1264,10 +1274,6 @@ if ($doSync) {
     # A failure to WRITE the report must not mask the failure that caused
     # the run to abort, so this is best-effort and warns rather than throws.
     try {
-      $decompositionDir = [Environment]::GetEnvironmentVariable("WINDOWS_DIY_REPORT_DIR")
-      if ([string]::IsNullOrWhiteSpace($decompositionDir)) {
-        $decompositionDir = Join-Path $repoRoot ".tmp/windows-diy"
-      }
       Write-BootstrapStepReport -Root $installRoot -OutputDir $decompositionDir | Out-Null
     } catch {
       Write-Warning "Failed to write the env.ps1 component decomposition: $($_.Exception.Message)"
