@@ -265,9 +265,18 @@ if [ ! -d "${FIXTURE_DIR}" ]; then
 	exit 1
 fi
 
+# THE HAYSTACK IS MATERIALISED FIRST, and `grep -q` reads it from a HERE-STRING
+# rather than from a pipe. `producer | grep -q PAT` under `set -o pipefail`
+# returns a successful match AS A FAILURE: `grep -q` exits on the first match,
+# the producer takes EPIPE, and the pipeline adopts its 141. See
+# `ci/test/grep-q-pipefail-gate.sh`, which caught these three sites in this very
+# file -- after a local run of that gate had reported the tree clean, because it
+# scans `git ls-files` and these files were still UNTRACKED when it ran.
 expect_leak() { # FILE NAME
 	check_count=$((check_count + 1))
-	if leak_scan "${FIXTURE_DIR}/$1" | cut -f2 | grep -qx -- "$2"; then
+	local found
+	found="$(leak_scan "${FIXTURE_DIR}/$1" | cut -f2)"
+	if grep -qx -- "$2" <<<"${found}"; then
 		ok "fixture $1: \$$2 is detected as a leak"
 	else
 		fail "fixture $1: \$$2 is a leak and the detector MISSED it"
@@ -275,7 +284,9 @@ expect_leak() { # FILE NAME
 }
 expect_clean() { # FILE NAME WHY
 	check_count=$((check_count + 1))
-	if leak_scan "${FIXTURE_DIR}/$1" | cut -f2 | grep -qx -- "$2"; then
+	local found
+	found="$(leak_scan "${FIXTURE_DIR}/$1" | cut -f2)"
+	if grep -qx -- "$2" <<<"${found}"; then
 		fail "fixture $1: \$$2 is FLAGGED but $3"
 	else
 		ok "fixture $1: \$$2 is not flagged — $3"
@@ -414,7 +425,7 @@ while IFS=$'\t' read -r why f; do
 	while IFS=$'\t' read -r ln nm; do
 		[ -n "${nm:-}" ] || continue
 		check_count=$((check_count + 1))
-		if printf '%s\n' "${decl}" | grep -qx -- "${nm}"; then
+		if grep -qx -- "${nm}" <<<"${decl}"; then
 			printf '%s\t%s\n' "${f}" "${nm}" >>"${declared_inventory}"
 			declared_total=$((declared_total + 1))
 		else
