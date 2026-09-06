@@ -292,6 +292,45 @@
       url = "github:metacraft-labs/isonim/dev";
       flake = false;
     };
+    # Facebook's Yoga, which ``isonim`` vendors as a GIT SUBMODULE at
+    # ``src/isonim/layout/yoga`` and ``src/isonim/layout/yoga_bindings.nim``
+    # compiles directly with ``{.compile.}`` -- 40-odd ``.cpp`` files, no
+    # separate build step.
+    #
+    # WHY IT IS A SEPARATE INPUT.  The ``isonim`` input above is a ``github:``
+    # url, which nix fetches as a TARBALL, and a tarball carries no submodule
+    # content.  So ``$ISONIM_STAGE/isonim/src/isonim/layout/yoga`` is EMPTY in
+    # the sandbox, and the first derivation to compile anything that touches
+    # isonim's layout dies with
+    #
+    #   yoga_bindings.nim(20, 10) Error: cannot find:
+    #     .../src/isonim/layout/yoga/yoga/YGConfig.cpp
+    #
+    # measured on 2026-09-06 while packaging ``codetracer-tui`` (CTUI-12).
+    # Nothing hit it before because the JS-target derivations never reach the
+    # C++ branch.  This is the same prerequisite CTUI-0 recorded for a
+    # workspace checkout, where ``just tui-prereqs`` answers it with
+    # ``git submodule update --init``.
+    #
+    # PINNED BY SHA, ON PURPOSE, and the sha is isonim's own gitlink:
+    #   git -C isonim ls-tree <isonim-rev> src/isonim/layout/yoga
+    # reports 3acb6cca at both the revision ``flake.lock`` pins for ``isonim``
+    # (9936c544) and at the current ``dev`` tip (2a24d954).  A floating ref
+    # would let this input and isonim's submodule disagree about which Yoga is
+    # being compiled, with nothing to notice it: a tarball carries no gitlink,
+    # so no build-time check can compare them.  When isonim bumps its
+    # submodule, bump this line in the same change, and re-read the sha with
+    # the command above rather than from memory.
+    #
+    # The alternative -- refetching ``isonim`` itself as
+    # ``git+https://...?ref=dev&submodules=1`` -- was rejected here because it
+    # would MOVE the isonim pin (9936c544 -> dev tip) for every derivation that
+    # consumes it, which is a content change that has nothing to do with
+    # packaging the TUI.
+    isonim-yoga = {
+      url = "github:facebook/yoga/3acb6cca429736a15e8634fbb3823003a9fe3a3d";
+      flake = false;
+    };
     isonim-tui = {
       url = "github:metacraft-labs/isonim-tui/dev";
       flake = false;

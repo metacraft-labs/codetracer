@@ -156,11 +156,17 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 57
-    ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED after
-    ## CTUI-11, which added six: `theme/capabilities.nim`,
-    ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and the two
-    ## suites under `tests/`.
+  ExpectedAppModules = 58
+    ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED twice
+    ## since: after CTUI-11, which added six (`theme/capabilities.nim`,
+    ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
+    ## suites under `tests/`), and after CTUI-12, which added one —
+    ## `tests/test_caps_file_shape.nim`.
+    ##
+    ## The number is deliberately brittle, and the CTUI-12 bump is the shape it
+    ## is meant to have: a new file under `app/` reddens this case on the spot
+    ## and is re-counted in the same change, rather than silently widening the
+    ## set the "called from exactly one file" rows below are measured over.
 
   ExpectedStyleLiterals = 165
   ExpectedStyledFiles = 20

@@ -364,10 +364,19 @@ just test-tui-real-terminal     # Tier 2 (depends on build-tui)
 ```
 
 Both lanes are discovered, not enumerated: `ci/lib/test-lane-files.sh` globs
-`src/frontend/tui/tests/test_*.nim` **and** `src/frontend/tui/app/tests/test_*.nim`
-one level deep for `tui`, and finds
+`src/frontend/tui/tests/test_*.nim`, `src/frontend/tui/app/tests/test_*.nim`
+**and** `src/tests/launcher/test_*.nim` one level deep for `tui`, and finds
 `src/frontend/tui/tests/real_terminal/test_*.nim` recursively for
 `tui-real-terminal`. Adding a suite needs no edit there.
+
+`src/tests/launcher/` is the third `tui` glob and the odd one out. CTUI-12 put
+it there because the milestone names the path, and the placement is right for
+what the suite is: it drives the `ct` **launcher** — a binary built in the
+`codetracer-launcher` sibling — over component bundles
+`scripts/build-tui-component.sh` assembles, so it belongs to neither `app/`
+(which may not spawn a process) nor `real_terminal/` (it needs no pty). It runs
+with the Tier-1 flags, which cost it nothing: it links no grammar archive and
+imports no `isonim_tui`.
 
 `app/tests/` is a Tier-1 directory with one extra property, and it is the
 reason CTUI-3's layout suites live there rather than in `tests/`:

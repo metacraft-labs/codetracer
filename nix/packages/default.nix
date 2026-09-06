@@ -1614,6 +1614,154 @@
 
         };
 
+        # ------------------------------------------------------------------
+        # CTUI-12: the terminal front-end, and the launcher component bundle
+        # that makes `ct tui <trace>` work from a packaged install.
+        #
+        # TWO DERIVATIONS, NOT ONE, and the split follows the one the launcher
+        # already imposes on the desktop.  `codetracer-tui` is a plain program:
+        # a binary in `$out/bin` plus, in `$out/share`, the capability file it
+        # is declared by.  `codetracer-tui-component` is the INSTALL LAYOUT the
+        # router discovers -- `<name>@<version>/capabilities` beside
+        # `<name>@<version>/bin/<bin-name>` (CodeTracer-Launcher.md §2.2/§2.3)
+        # -- and it is produced by running the repository's own
+        # `scripts/build-tui-component.sh`, not by re-deriving the layout here.
+        #
+        # That is deliberate.  `src/tests/launcher/test_launcher_routes_tui.nim`
+        # and `src/frontend/tui/tests/real_terminal/test_real_launcher_exec.nim`
+        # both assert against bundles that script assembles; a Nix expression
+        # that laid the directory out itself would ship a layout no test covers,
+        # and the two would drift the first time either changed.  The script
+        # derives the component name, the binary name and the version from
+        # `packaging/codetracer-tui.caps` and `src/ct/version.nim`, so this
+        # expression names none of the three.
+        codetracer-tui = stdenv.mkDerivation {
+          name = "codetracer-tui";
+          pname = "codetracer-tui";
+
+          inherit src;
+
+          nativeBuildInputs = [
+            nim-codetracer
+            pkgs.tree-sitter # the CLI: tree-sitter-nim ships no parser.c
+            pkgs.git # scripts/build-tui-grammars.sh reads .gitmodules
+            pkgs.python3 # ... and realpaths the CLI with it
+            pkgs.pkg-config
+          ];
+          buildInputs = [
+            pkgs.tree-sitter # the runtime: the link line ends in -ltree-sitter
+          ];
+
+          buildPhase = prepareIsonimSiblings + ''
+            # YOGA, WHICH THE STAGED ``isonim`` DOES NOT CARRY.
+            #
+            # ``prepareIsonimSiblings`` copies the ``isonim`` flake input, and
+            # that input is a ``github:`` TARBALL: submodule content is not in
+            # it, so ``src/isonim/layout/yoga`` arrives empty and
+            # ``yoga_bindings.nim``'s 40-odd ``{.compile.}`` pragmas fail on
+            # the first file. See the ``isonim-yoga`` input in flake.nix for
+            # why it is pinned by sha and why ``isonim`` itself was not
+            # refetched with ``submodules=1``.
+            #
+            # Staged HERE rather than in ``prepareIsonimSiblings`` because
+            # this is the only derivation that compiles the C++ branch; the
+            # JS-target derivations that share that helper would pay for a
+            # copy they never read.
+            mkdir -p "$ISONIM_STAGE/isonim/src/isonim/layout/yoga"
+            cp -a ${inputs.isonim-yoga}/. \
+              "$ISONIM_STAGE/isonim/src/isonim/layout/yoga/"
+            chmod -R u+w "$ISONIM_STAGE/isonim/src/isonim/layout/yoga"
+            # Fail HERE, naming the input, rather than 40 lines into a nim
+            # compile that reports a missing file and not a missing pin.
+            if [ ! -f "$ISONIM_STAGE/isonim/src/isonim/layout/yoga/yoga/YGConfig.cpp" ]; then
+              echo "the isonim-yoga input does not look like a Yoga checkout:" >&2
+              echo "  no yoga/YGConfig.cpp under ${inputs.isonim-yoga}" >&2
+              exit 1
+            fi
+
+            # WHY THE OVERRIDE IS SET RATHER THAN LEFT TO THE PROBE.
+            # `scripts/build-tui-grammars.sh` resolves the tree-sitter runtime
+            # through four routes and refuses to guess; `CT_TREE_SITTER_LIB_DIR`
+            # is route 1, the sanctioned escape hatch, and it is the only one
+            # that cannot depend on what the sandbox happens to export.  It is
+            # still VALIDATED by the script (`_probe_lib_dir`), so a wrong value
+            # fails here and not at link time.
+            export CT_TREE_SITTER_LIB_DIR=${pkgs.tree-sitter}/lib
+
+            # The grammar archive.  `libs/` carries ten tree-sitter grammars as
+            # submodules, so this needs `?submodules=1` on the flake ref -- the
+            # same requirement `nix build '.?submodules=1#codetracer'` already
+            # has.  The script fails by name on a missing one rather than
+            # archiving nine of ten.
+            bash scripts/build-tui-grammars.sh
+
+            # Read the resolved flags rather than recomputing them, exactly as
+            # the `build-tui` just recipe does, so the packaged binary and the
+            # developer's link against the same runtime.
+            read -r -a ts_flags < <(sed 's/^/--passL:/; s/ / --passL:/g' \
+              build/grammars/tui-link-flags.txt)
+
+            ${nim-codetracer.out}/bin/nim2 \
+              ${isonimNimPaths} \
+              --mm:orc -d:release --hints:off --warnings:off \
+              --path:src/frontend/viewmodel \
+              "-d:isonimTuiGrammarArchive=$PWD/build/grammars/libcodetracer_tui_grammars.a" \
+              "''${ts_flags[@]}" \
+              --nimcache:nimcache \
+              --out:codetracer-tui \
+              c ./src/frontend/tui/main.nim
+          '';
+
+          installPhase = ''
+            mkdir -p $out/bin $out/share/codetracer-tui
+            cp ./codetracer-tui $out/bin/
+            # The capability file travels WITH the binary, verbatim.  A
+            # packager that had only the binary could not declare it to the
+            # launcher, and one that re-typed the declaration would ship a
+            # different routing contract from the one the tests assert.
+            cp ./packaging/codetracer-tui.caps $out/share/codetracer-tui/
+          '';
+
+          meta.mainProgram = "codetracer-tui";
+        };
+
+        codetracer-tui-component = stdenv.mkDerivation {
+          name = "codetracer-tui-component";
+          pname = "codetracer-tui-component";
+
+          inherit src;
+
+          nativeBuildInputs = [ codetracer-tui ];
+
+          dontBuild = true;
+
+          installPhase = ''
+            mkdir -p $out/components
+            # `--copy`, not `--link`: a store path holding a symlink to another
+            # store path is fine, but a components root is something a user
+            # copies or rsyncs to a machine, and a dangling `bin/` entry there
+            # would present as `ct: execv failed` with nothing naming the cause.
+            bash ./scripts/build-tui-component.sh \
+              --out-root $out/components \
+              --tui-bin ${codetracer-tui}/bin/codetracer-tui \
+              --copy
+
+            # A launcher pointed at $out/components finds exactly one component
+            # and it is this one.  Asserted here rather than trusted, because
+            # the directory NAME is what the router matches and it is derived
+            # from the capability file two steps away.
+            found=$(find $out/components -mindepth 1 -maxdepth 1 -type d | wc -l)
+            if [ "$found" != "1" ]; then
+              echo "expected one component bundle, found $found" >&2
+              exit 1
+            fi
+          '';
+
+          meta.description =
+            "codetracer-tui as a `ct` launcher component: point "
+            + "CODETRACER_COMPONENTS_ROOT at $out/components";
+        };
+
         codetracer-dependency-paths = pkgs.writeTextFile {
           name = "all-paths.json";
           text = builtins.toJSON { };

@@ -1071,6 +1071,15 @@ test_lane_files() {
 		# Tier-1 reflow suite must therefore go through `h.resize` instead.
 		# Same Tier-1 flags as the directory above; still no TermAssert.
 		_tlf_glob src/frontend/tui/app/tests 'test_*.nim'
+		# CTUI-12's launcher-routing suite. It lives at
+		# `src/tests/launcher/` because the milestone names it there, and the
+		# placement is right for what it is: it drives the `ct` LAUNCHER — a
+		# binary from a sibling repository — over component bundles this
+		# repository's packaging scripts assemble, so it belongs to neither
+		# `app/` (which may not spawn a process) nor `tests/real_terminal/`
+		# (it needs no pty). Tier-1 flags are harmless to it: it links no
+		# grammar archive and imports no `isonim_tui`.
+		_tlf_glob src/tests/launcher 'test_*.nim'
 		;;
 
 	tui-real-terminal)

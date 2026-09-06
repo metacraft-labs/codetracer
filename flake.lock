@@ -2698,6 +2698,23 @@
         "type": "github"
       }
     },
+    "isonim-yoga": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1775616213,
+        "narHash": "sha256-7JOuxPd5BEAQMkHkVUjhbIMnUKT69iejH2F7xF7wMwI=",
+        "owner": "facebook",
+        "repo": "yoga",
+        "rev": "3acb6cca429736a15e8634fbb3823003a9fe3a3d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "facebook",
+        "repo": "yoga",
+        "rev": "3acb6cca429736a15e8634fbb3823003a9fe3a3d",
+        "type": "github"
+      }
+    },
     "llm-agents": {
       "inputs": {
         "blueprint": "blueprint",
@@ -5121,6 +5138,7 @@
         "isonim": "isonim",
         "isonim-gpui": "isonim-gpui",
         "isonim-tui": "isonim-tui",
+        "isonim-yoga": "isonim-yoga",
         "nim-acp": "nim-acp",
         "nim-agent-harbor": "nim-agent-harbor",
         "nim-agents": "nim-agents",

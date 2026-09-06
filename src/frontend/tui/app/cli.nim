@@ -82,6 +82,26 @@ type
 const
   TuiProgramName* = "codetracer-tui"
 
+  LauncherCommandNames*: array[2, string] = ["tui", "ct-tui"]
+    ## The command words `packaging/codetracer-tui.caps` declares, and the
+    ## reason this parser has to know them at all — CTUI-12.
+    ##
+    ## THE LAUNCHER DOES NOT STRIP THE COMMAND WORD. `codetracer-launcher/src/
+    ## launcher.nim` overwrites `argv[0]` with the resolved binary path and
+    ## `execv`s the ORIGINAL argv, so `ct tui <trace>` reaches this process as
+    ## `[<binpath>, "tui", "<trace>"]`. That is the same contract the desktop
+    ## core lives under (`ct record foo.py` arrives as `codetracer record
+    ## foo.py`), and it is what "the launcher execs the binary, with no
+    ## subprocess indirection" costs: there is no wrapper in between to rewrite
+    ## the arguments. Measured, not assumed — before this, `ct tui <trace>`
+    ## reported `expected at most one trace folder, got 'tui' and '<trace>'`.
+    ##
+    ## Only in FIRST position, so `codetracer-tui --no-mouse tui` still opens a
+    ## folder named `tui`. A folder named `tui` or `ct-tui` in the working
+    ## directory is shadowed when it is written first and bare; `./tui` names
+    ## it unambiguously, the same escape the launcher's own `project ./Makefile`
+    ## marker uses.
+
   PlannedOptions*: array[6, (string, string)] = [
     ("--theme", "CTUI-10 recorded the theme registry as unbuilt here"),
     ("--goto", "CTUI-8 owns tick seeking; the flag is CTUI-12's entrypoint work"),
@@ -151,9 +171,22 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   if args.len == 0:
     return TuiCommand(kind: tckHelp)
 
+  # THE LAUNCHER'S COMMAND WORD, DROPPED HERE AND NOWHERE ELSE. See
+  # `LauncherCommandNames`. `low(args)` rather than `0`: `args` is an
+  # `openArray` and a caller may hand it a slice.
+  var first = low(args)
+  if args[first] in LauncherCommandNames:
+    inc first
+  if first > high(args):
+    # `ct tui` with nothing after it. The same answer an empty command line
+    # gets, for the same reason: a debugger front-end with no trace has
+    # nothing to show.
+    return TuiCommand(kind: tckHelp)
+
   var tracePath = ""
   var flags = initCapabilityFlags()
-  for arg in args:
+  for i in first .. high(args):
+    let arg = args[i]
     case arg
     of "-h", "--help":
       return TuiCommand(kind: tckHelp)

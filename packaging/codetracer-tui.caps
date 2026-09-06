@@ -1,0 +1,57 @@
+# codetracer-tui capabilities file -- CTUI-12.
+#
+# The launcher's routing contract for the terminal front-end.  Installers
+# copy this file VERBATIM to <components-root>/codetracer-tui@<version>/
+# capabilities (scripts/build-tui-component.sh); the line format and every
+# keyword below are specified in CodeTracer-Launcher.md §2.3 and parsed by
+# codetracer-launcher/src/caps.nim.  The desktop's equivalent is
+# resources/codetracer-desktop-capabilities.
+#
+# SIZE BUDGET.  The launcher parses this into a fixed 4096-byte CapBuffer
+# (CAP_BUFFER_BYTES, caps.nim) and REFUSES -- does not truncate -- a larger
+# file, dropping the whole component.  app/tests/test_caps_file_shape.nim
+# asserts the byte count against that constant.
+#
+# THIS FILE IS NOT A TRANSCRIPTION OF CodeTracer-TUI.md §6.1, AND THAT IS
+# DELIBERATE.  §6.1 illustrates the declaration as `cmd tui`, `cmd ct-tui`,
+# `extension .ct`, `match-magic CTFS`, `priority 100`.  caps.nim has no
+# `cmd`, `extension`, `match-magic` or `priority` keyword: a command line IS
+# `<command> [.ext ...]`, and an unrecognised first token is read as a
+# COMMAND NAME rather than skipped.  Written literally, §6.1's block occupies
+# four command names nobody wants -- `cmd`, `extension`, `match-magic`,
+# `priority` -- and declares neither `tui` nor `ct-tui`.  Only ONE of the four
+# is reachable, and that one is the damage: `ct extension foo.ct` execs this
+# component, because `extension .ct` is a command line whose extension list
+# contains `.ct`.  The other three carry token lists (`tui`/`ct-tui`, `CTFS`,
+# `100`) that begin with no `.` and are not `noext`, so nothing can match them
+# -- they are declared and unroutable, which costs the name rather than
+# misroutes an argument.  test_caps_file_shape.nim lifts that block out of the
+# specification at run time and asserts exactly that, so the divergence is
+# pinned rather than remembered.
+#
+# WHY `noext` IS ON BOTH COMMAND LINES, and it is load-bearing rather than
+# defensive.  A CodeTracer recording is a DIRECTORY (host/native_host.
+# traceFolderProblem: it holds `trace.bin`, or `rr/`, or a `.ct` container),
+# and the cached fixtures this repo records are directories with no suffix at
+# all -- `test-logs/tui-fixtures/calc-2f0db4f45192`.  `ct tui <that>` gives
+# the router a zero-length extension, and without `noext` the only thing that
+# could match is an unqualified `tui` line -- which would ALSO swallow
+# `ct tui foo.py`.  `noext` is rule NTR-R1's reserved token
+# (Native-Target-Recognition.md §4): it matches when the argument's suffix
+# carries no routing information, and NOT when some component declares that
+# suffix.  So `ct tui foo.py` stays `no component handles 'tui' for '.py'`
+# while `ct tui <trace-dir>` and `ct tui recording.ct` both route here.
+#
+# NO `project` MARKERS, for the same reason the desktop declares none: the
+# router DROPS an unqualified command match when a component declares markers
+# and none match the cwd (launcher.nim, `projectMarkerOutcome` == 1).
+#
+# NO `help-delegate`: codetracer-desktop is the delegate, and a second one at
+# the same level would make `ct --help` depend on directory iteration order.
+
+name codetracer-tui
+bin codetracer-tui
+description CodeTracer terminal front-end -- time-travel debugging over SSH
+
+tui .ct noext
+ct-tui .ct noext

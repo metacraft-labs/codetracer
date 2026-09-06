@@ -91,6 +91,21 @@ build-siblings *args:
 build-desktop-component *args:
   bash scripts/build-desktop-component.sh {{args}}
 
+# Assemble the `codetracer-tui` component bundle the same launcher fronts:
+#   <out-root>/codetracer-tui@<ver>/{capabilities, bin/codetracer-tui}
+# The TUI half of the recipe above, and deliberately its twin: `capabilities`
+# is copied byte-for-byte from `packaging/codetracer-tui.caps`, and both the
+# directory name and the binary filename come from that file's `name` / `bin`
+# lines.  Requires an already-built front-end (`just build-tui`); a missing one
+# is a loud failure.  Output defaults to the gitignored
+# `build-tui-component/`.  Point the launcher at the SAME out-root as the
+# desktop bundle to get a components tree that serves both — that is the
+# arrangement `src/tests/launcher/test_launcher_routes_tui.nim` routes over.
+# See scripts/build-tui-component.sh and
+# codetracer-specs/Front-Ends/CodeTracer-TUI.milestones.org CTUI-12.
+build-tui-component *args:
+  bash scripts/build-tui-component.sh {{args}}
+
 # Smoke-test the built AppImage on multiple Linux distros via Docker.
 # Catches glibc/libgcc/libstdc++ symbol-version regressions and missing
 # runtime libs that the on-NixOS build can't surface.  Pass the AppImage
