@@ -157,9 +157,27 @@ function Ensure-Nargo {
   $msysMingwBinDir = Join-Path ([string]$msys2.root) "mingw64/bin"
   $clangExe = Join-Path $msysMingwBinDir "clang.exe"
   if (-not (Test-Path -LiteralPath $clangExe -PathType Leaf)) {
-    & $msysBashExe -lc "set -euo pipefail; pacman -Sy --noconfirm --needed mingw-w64-x86_64-clang"
-    if ($LASTEXITCODE -ne 0) {
-      throw "Failed to install MSYS2 clang prerequisite for nargo bootstrap."
+    # The SECOND pacman invocation in the bootstrap, and it had the mirror
+    # image of its sibling's defects: `&` passes the command string intact,
+    # but nothing bounded it, so a mirror that went quiet mid-transfer could
+    # hold this call until the job cap -- the exact hang the bounded helper
+    # exists to prevent. It is bounded here, and the outcome is checked rather
+    # than inferred from an exit code: `clang.exe` is why this ran, so
+    # `clang.exe` is what has to be there when it returns.
+    Write-Host "Installing MSYS2 clang prerequisite for nargo bootstrap ..."
+    $clangExit = Invoke-BoundedNativeCommand `
+      -FilePath $msysBashExe `
+      -ArgumentList @("-lc", "set -euo pipefail; pacman -Sy --noconfirm --needed mingw-w64-x86_64-clang") `
+      -Activity "MSYS2 pacman install of the nargo clang prerequisite"
+    if ($clangExit -ne 0) {
+      throw "Failed to install MSYS2 clang prerequisite for nargo bootstrap (exit $clangExit)."
+    }
+    if (-not (Test-Path -LiteralPath $clangExe -PathType Leaf)) {
+      throw (
+        "The MSYS2 install of mingw-w64-x86_64-clang reported success (exit 0) but " +
+        "produced no clang at '$clangExe'. Treat the exit code as unproven: a shell " +
+        "given a truncated command can succeed without installing anything."
+      )
     }
   }
 

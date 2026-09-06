@@ -479,18 +479,70 @@ function Invoke-BoundedNativeCommand {
       Run a native command with a wall-clock bound and a closed stdin.
 
     .DESCRIPTION
-      Two hazards, and stdin is the one that is easy to miss.
+      Three hazards. Stdin is the one that is easy to miss, and argument
+      quoting is the one that is easy to get wrong.
 
       A bootstrap step that shells out to a package manager or an archiver
       inherits the runner's stdin. If the child ever decides to prompt, it
       blocks on a read that nothing will ever answer, and the job dies at the
       workflow timeout with the prompt buried in a log nobody watches. Giving
-      the child an empty stdin turns that into an immediate EOF, so a prompt
-      becomes a fast failure instead of a silent one.
+      the child an immediately-closed stdin turns that into an instant EOF, so
+      a prompt becomes a fast failure instead of a silent one.
 
-      The timeout covers the other half: a child that is not prompting but is
+      The timeout covers the second: a child that is not prompting but is
       simply stuck -- a package mirror that accepted the connection and then
       stopped sending, say -- and would otherwise run out the clock.
+
+      ARGUMENT QUOTING IS THE THIRD, AND IT IS WHY THIS USES
+      `ProcessStartInfo.ArgumentList` RATHER THAN THE OBVIOUS SPELLINGS.
+
+      An argument that contains a space is one argument. Preserving that
+      across a process boundary is the whole problem, because Windows does not
+      have an argv: `CreateProcess` takes ONE string, and the child splits it
+      again with its own rules. Three ways to launch a child from PowerShell,
+      and only one of them gets this right:
+
+        Start-Process -ArgumentList @(...)
+            JOINS THE ARRAY WITH SPACES AND QUOTES NOTHING. Every element is
+            concatenated into `StartInfo.Arguments` verbatim, so an argument
+            that contains a space arrives as several arguments and one that
+            contains a quote arrives mangled. This is not a Windows-only
+            hazard -- it corrupts the argument on Linux and macOS pwsh too.
+            This function used to do exactly this, and the cost was a run in
+            which `bash -lc "<pacman command>"` reached bash as the two
+            arguments `-lc` and `set`: bash ran the builtin `set`, exited 0,
+            and the exit-code guard below could not fire. Nothing was
+            installed and nothing said so.
+
+        & $exe @args
+            Correct on pwsh 7 (`$PSNativeCommandArgumentPassing` defaults to
+            `Standard`, which builds an argv rather than a string), and it is
+            the right tool for a call that needs no bound. It is the wrong
+            tool HERE, because it gives no handle on the child: no way to wait
+            with a deadline, no way to kill the process tree when the deadline
+            passes, and no way to hand it a closed stdin. Reaching for it
+            would restore the quoting by discarding the two properties this
+            function exists to provide.
+
+        ProcessStartInfo.ArgumentList  <- what this does
+            A real per-argument collection. On Unix it is passed straight to
+            `execve`, so there is no quoting step to get wrong. On Windows the
+            runtime escapes each element with the exact inverse of
+            `CommandLineToArgvW` -- the same algorithm the child uses to split
+            -- so an argument round-trips whatever it contains. And because it
+            is a plain `Process`, the deadline, the tree-kill and the closed
+            stdin all stay exactly as they were.
+
+      Hand-rolling the Windows escaping into a single `-ArgumentList` string
+      was the other candidate and was rejected: it is the one part of this
+      that the runtime already implements correctly, and a subtly wrong
+      backslash-before-quote rule would fail in precisely the silent way this
+      change exists to eliminate.
+
+      stdout and stderr are deliberately NOT redirected. They stay inherited,
+      so native output goes straight to the job log and can never be captured
+      into the PowerShell pipeline, where it would corrupt the return value of
+      whatever function is calling this.
 
     .PARAMETER Activity
       Human-readable description used in the timeout message, so the failure
@@ -498,7 +550,11 @@ function Invoke-BoundedNativeCommand {
   #>
   param(
     [Parameter(Mandatory = $true)][string]$FilePath,
-    [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+    # `AllowEmptyString` applies to the ELEMENTS: without it a mandatory
+    # `[string[]]` rejects the whole call if any single argument is "", which
+    # is a legitimate argument (`-D` with an empty value, say) and one that
+    # .NET's per-argument quoting round-trips correctly as `""`.
+    [Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$ArgumentList,
     [Parameter(Mandatory = $true)][string]$Activity,
     [int]$TimeoutSeconds = 0
   )
@@ -507,16 +563,35 @@ function Invoke-BoundedNativeCommand {
     $TimeoutSeconds = Get-PositiveIntSetting -Name "CODETRACER_NATIVE_COMMAND_TIMEOUT_SECONDS" -Default $script:NativeCommandTimeoutSecondsDefault
   }
 
-  $emptyStdin = Join-Path ([System.IO.Path]::GetTempPath()) ("ct-stdin-" + [Guid]::NewGuid().ToString("N"))
-  New-Item -ItemType File -Path $emptyStdin -Force | Out-Null
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = $FilePath
+  foreach ($argument in $ArgumentList) {
+    if ($null -eq $argument) {
+      throw "$Activity was given a null argument. Every element of -ArgumentList must be a string."
+    }
+    $startInfo.ArgumentList.Add($argument)
+  }
+  # Required for ArgumentList to be honoured at all, and for the console
+  # handles to be inherited rather than a new window being created -- the same
+  # thing `Start-Process -NoNewWindow` was asking for.
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $false
+  # Closed immediately after start; see the EOF note above.
+  $startInfo.RedirectStandardInput = $true
 
-  $process = $null
+  $process = [System.Diagnostics.Process]::new()
   try {
-    $process = Start-Process -FilePath $FilePath `
-      -ArgumentList $ArgumentList `
-      -NoNewWindow `
-      -PassThru `
-      -RedirectStandardInput $emptyStdin
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    # The child's stdin is a pipe whose write end we close before it can read.
+    # A read on it returns EOF at once, which is what an empty stdin bought and
+    # costs no temp file to arrange.
+    #
+    # Swallowing a failure here is safe rather than lazy: the only consequence
+    # of not closing is that the child could block on a read, and the deadline
+    # below already covers that. Rethrowing would turn a child that exited
+    # before we got to the close into a spurious failure of the step.
+    try { $process.StandardInput.Close() } catch { }
 
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
       try { $process.Kill($true) } catch { try { $process.Kill() } catch { } }
@@ -525,8 +600,7 @@ function Invoke-BoundedNativeCommand {
 
     return $process.ExitCode
   } finally {
-    if ($null -ne $process) { $process.Dispose() }
-    Remove-Item -LiteralPath $emptyStdin -Force -ErrorAction SilentlyContinue
+    $process.Dispose()
   }
 }
 
@@ -1517,28 +1591,95 @@ function Ensure-TupMsys2BuildPrereqs {
   # `--noconfirm` was already here, so pacman is not waiting on a [Y/n]. What
   # it can still do is wait on a mirror that has gone quiet mid-transfer, and
   # `-lc` means a prompt from anything pacman itself invokes would inherit the
-  # runner's stdin. The bound and the empty stdin close both.
-  $packageInstallCommand = "set -euo pipefail; pacman -Sy --noconfirm --needed $packageArgs"
+  # runner's stdin. The bound and the closed stdin close both.
+  #
+  # THE COMPLETION MARKER IS NOT BELT-AND-BRACES; IT IS THE GUARD THAT WORKS.
+  #
+  # `$pacmanExit -ne 0` asks "did the shell fail?", which is only a proxy for
+  # "did the install happen?", and the two came apart badly once: the command
+  # string was split on its spaces before it reached bash, bash ran the
+  # builtin `set` instead, and `set` exits 0. A zero from a command that never
+  # ran is indistinguishable from a zero from a command that succeeded, so the
+  # guard could not fire and the run went on to fail three checks later on a
+  # missing gcc -- naming a symptom of the real fault and giving no route back
+  # to it.
+  #
+  # A marker written by the LAST statement of the command string cannot be
+  # faked by a truncated or misdelivered command: its existence proves the
+  # whole string arrived AND that every statement before it succeeded (`set
+  # -e`). It goes in `/tmp`, which for MSYS2 is the installation root's own
+  # `tmp` directory -- bash.exe lives at `<msys64>/usr/bin`, so `/` is
+  # `<msys64>` -- and that lets this side check for it with no Windows-to-MSYS
+  # path conversion.
+  $markerName = "ct-msys2-pacman-" + [Guid]::NewGuid().ToString("N") + ".done"
+  $msysTmpDir = Join-Path $msysInstallRoot "tmp"
+  New-Item -ItemType Directory -Force -Path $msysTmpDir | Out-Null
+  $markerPath = Join-Path $msysTmpDir $markerName
+  $packageInstallCommand =
+    "set -euo pipefail; pacman -Sy --noconfirm --needed $packageArgs; printf 'ok' > '/tmp/$markerName'"
   Write-Host "Installing MSYS2 packages: $packageArgs"
-  $pacmanExit = Invoke-BoundedNativeCommand `
-    -FilePath $msysBashExe `
-    -ArgumentList @("-lc", $packageInstallCommand) `
-    -Activity "MSYS2 pacman install of Tup prerequisites"
-  if ($pacmanExit -ne 0) {
-    throw "Failed to install Tup MSYS2 prerequisite packages ($packageArgs) (exit $pacmanExit)."
+  $ranToCompletion = $false
+  try {
+    $pacmanExit = Invoke-BoundedNativeCommand `
+      -FilePath $msysBashExe `
+      -ArgumentList @("-lc", $packageInstallCommand) `
+      -Activity "MSYS2 pacman install of Tup prerequisites"
+    if ($pacmanExit -ne 0) {
+      throw "Failed to install Tup MSYS2 prerequisite packages ($packageArgs) (exit $pacmanExit)."
+    }
+    $ranToCompletion = Test-Path -LiteralPath $markerPath -PathType Leaf
+  } finally {
+    Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
   }
 
+  # THE MARKER DIAGNOSES; THE TOOLS DECIDE.
+  #
+  # Deliberately in this order, and deliberately not "no marker => throw".
+  # The archive was extracted into a directory this function had just emptied,
+  # so these three binaries exist only if THIS pacman run produced them --
+  # which makes their presence proof of the install that is independent of
+  # both the exit code and the marker. Letting the marker veto that proof
+  # would put a fresh way to fail a working provision in place of the old way
+  # to pass a broken one, and the marker is the newer, less-proven of the two
+  # signals. So the tools decide the outcome, and the marker decides what the
+  # failure is CALLED -- which is the part that was missing, because the
+  # symptom ("no gcc") and the cause ("the install never ran") had become
+  # indistinguishable from here.
   $mingwGccExe = Join-Path $msysInstallRoot "mingw64/bin/gcc.exe"
   $mingwPkgConfigExe = Join-Path $msysInstallRoot "mingw64/bin/pkg-config.exe"
   $msysMakeExe = Join-Path $msysInstallRoot "usr/bin/make.exe"
-  if (-not (Test-Path -LiteralPath $mingwGccExe -PathType Leaf)) {
-    throw "MSYS2 Tup prerequisite install is incomplete. Missing MinGW compiler at '$mingwGccExe'."
+
+  $missing = @()
+  if (-not (Test-Path -LiteralPath $mingwGccExe -PathType Leaf)) { $missing += "MinGW compiler at '$mingwGccExe'" }
+  if (-not (Test-Path -LiteralPath $mingwPkgConfigExe -PathType Leaf)) { $missing += "MinGW pkg-config at '$mingwPkgConfigExe'" }
+  if (-not (Test-Path -LiteralPath $msysMakeExe -PathType Leaf)) { $missing += "make at '$msysMakeExe'" }
+
+  if ($missing.Count -gt 0) {
+    if (-not $ranToCompletion) {
+      # The observed failure, now named at its cause instead of three checks
+      # downstream.
+      throw (
+        "The MSYS2 pacman install DID NOT RUN. '$msysBashExe' exited 0 without reaching " +
+        "the end of the install command, so nothing was installed and the exit code " +
+        "means nothing -- a shell handed a truncated command succeeds at running the " +
+        "wrong thing. Requested packages: $packageArgs. Missing afterwards: " +
+        ($missing -join "; ") + ". Check that the command string reached bash intact " +
+        "(the arguments a child receives are gated by ci/test/download-stall-bound.ps1)."
+      )
+    }
+    throw (
+      "The MSYS2 pacman install of ($packageArgs) ran to completion and reported success, " +
+      "but produced no " + ($missing -join "; and no ") + ". Suspect a renamed package or " +
+      "an incomplete mirror rather than the invocation."
+    )
   }
-  if (-not (Test-Path -LiteralPath $mingwPkgConfigExe -PathType Leaf)) {
-    throw "MSYS2 Tup prerequisite install is incomplete. Missing MinGW pkg-config at '$mingwPkgConfigExe'."
-  }
-  if (-not (Test-Path -LiteralPath $msysMakeExe -PathType Leaf)) {
-    throw "MSYS2 Tup prerequisite install is incomplete. Missing make at '$msysMakeExe'."
+
+  if (-not $ranToCompletion) {
+    # Everything asked for is present, so the install unambiguously happened
+    # and this run is sound. Say so anyway: the marker is what makes the
+    # failure above diagnosable, and a marker that has quietly stopped working
+    # must not be discovered during the next incident.
+    Write-Host "::warning::MSYS2 pacman completion marker was not found at '$markerPath', but every requested tool is present. The install succeeded; the marker check itself needs attention."
   }
 
   Write-KeyValueFile -Path $installMetaFile -Values $expectedMetadata

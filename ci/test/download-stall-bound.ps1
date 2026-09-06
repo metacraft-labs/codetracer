@@ -468,6 +468,152 @@ try {
     -Message "a successful child still reports exit 0"
 
   # -------------------------------------------------------------------------
+  # Part 5b - the child receives the ARGUMENTS IT WAS GIVEN.
+  #
+  # THIS GROUP EXISTS BECAUSE ITS ABSENCE SHIPPED A BUG.
+  #
+  # Part 5 above drives the timeout and the stdin contracts hard, and passed
+  # throughout. It never once passed an argument containing a space, and every
+  # argument in the MSYS2 leg that matters is one long, space-filled shell
+  # command. So the suite was green while the one production call that carried
+  # such an argument was silently destroying it: `Start-Process -ArgumentList`
+  # concatenates its array with spaces and quotes nothing, so
+  #
+  #     bash -lc "set -euo pipefail; pacman -Sy --noconfirm --needed <pkgs>"
+  #
+  # reached bash as `-lc` followed by `set`, and bash dutifully ran the
+  # BUILTIN `set` -- which exits 0. Nothing was installed, the caller's
+  # `exit -ne 0` guard could not fire, and the run failed several checks later
+  # on a missing gcc.
+  #
+  # The assertion is therefore on the RECEIVED argv, not on any string this
+  # process builds. A check that inspected our own command-line construction
+  # would be asserting the bug's own assumptions back at itself. Here a real
+  # child process is launched, and it reports what the operating system
+  # actually handed it; the round trip through `CreateProcess`/`execve` is the
+  # thing under test, and it is the only place the defect was visible.
+  #
+  # The child reads `[Environment]::GetCommandLineArgs()` rather than
+  # PowerShell's `$args`, deliberately: that is the raw process argv, before
+  # any PowerShell parameter binding, so nothing between the kernel and the
+  # assertion can paper over a mangled argument.
+  # -------------------------------------------------------------------------
+
+  Write-Host "== Invoke-BoundedNativeCommand delivers arguments to the child intact"
+
+  # Everything after the sentinel is reported back, separated by U+001F (unit
+  # separator) -- a character that cannot occur in a Windows command line, so
+  # the separator can never be confused with argument content.
+  $echoArgvScript = Join-Path $scratchRoot "echo-argv.ps1"
+  Set-Content -LiteralPath $echoArgvScript -Encoding UTF8 -Value @'
+$all = [Environment]::GetCommandLineArgs()
+$begin = [Array]::IndexOf($all, "--ct-argv-begin")
+if ($begin -lt 0) { exit 3 }
+$dest = $all[$begin + 1]
+$rest = @($all | Select-Object -Skip ($begin + 2))
+[System.IO.File]::WriteAllText($dest, ($rest -join ([string][char]31)))
+exit 0
+'@
+
+  # Named cases, each one an argument shape that a bootstrap step really does
+  # pass. The first is the exact shape that broke.
+  $argvCases = [ordered]@{
+    "a shell command with spaces (the MSYS2 pacman shape)" =
+      "set -euo pipefail; pacman -Sy --noconfirm --needed mingw-w64-x86_64-gcc make pkgconf"
+    "a Windows path containing a space" =
+      'C:\Program Files\Some Dir\tool.exe'
+    "a path with a space AND a trailing backslash (the classic quoting trap)" =
+      'C:\Program Files\Some Dir\'
+    "an argument containing double quotes" =
+      'say "hello world" twice'
+    "an argument with several consecutive spaces" = "a  b   c"
+  }
+  $expectedArgs = @($argvCases.Values)
+
+  $argvOut = Join-Path $scratchRoot "received-argv.txt"
+  $argvExit = Invoke-BoundedNativeCommand `
+    -FilePath $pwshPath `
+    -ArgumentList (@("-NoProfile", "-File", $echoArgvScript, "--ct-argv-begin", $argvOut) + $expectedArgs) `
+    -Activity "a child that reports the arguments it received" `
+    -TimeoutSeconds 120
+
+  Assert-Equal -Expected 0 -Actual $argvExit `
+    -Message "the argv-reporting child ran to completion"
+
+  $receivedArgs = @()
+  if (Test-Path -LiteralPath $argvOut -PathType Leaf) {
+    $receivedArgs = @([System.IO.File]::ReadAllText($argvOut) -split ([string][char]31))
+  }
+
+  # The count is the load-bearing check and the one that would have caught the
+  # regression on its own: the pacman argument alone went from 1 argument to 8.
+  Assert-Equal -Expected $expectedArgs.Count -Actual $receivedArgs.Count `
+    -Message "the child receives exactly as many arguments as it was given (a split argument shows up here first)"
+
+  $index = 0
+  foreach ($case in $argvCases.GetEnumerator()) {
+    $actual = if ($index -lt $receivedArgs.Count) { $receivedArgs[$index] } else { "<missing>" }
+    # -ceq: case-sensitive and exact. A quoting bug that only changes case is
+    # not a thing, but a comparison that silently coerces is.
+    Assert-True -Condition ($actual -ceq $case.Value) `
+      -Message ("$($case.Key) survives intact: expected [$($case.Value)], got [$actual]")
+    $index++
+  }
+
+  # And the same guarantee stated the way the caller needs it: the MSYS2 leg
+  # passes TWO arguments to bash, and the second is one whole shell program.
+  # This is a separate check from the loop above because it is the invariant
+  # the production call depends on, and it should fail by name.
+  $bashShapeOut = Join-Path $scratchRoot "received-bash-shape.txt"
+  $shellCommand = "set -euo pipefail; pacman -Sy --noconfirm --needed make pkgconf"
+  Invoke-BoundedNativeCommand `
+    -FilePath $pwshPath `
+    -ArgumentList @("-NoProfile", "-File", $echoArgvScript, "--ct-argv-begin", $bashShapeOut, "-lc", $shellCommand) `
+    -Activity "a child standing in for bash -lc" `
+    -TimeoutSeconds 120 | Out-Null
+
+  $bashShape = @([System.IO.File]::ReadAllText($bashShapeOut) -split ([string][char]31))
+  Assert-Equal -Expected 2 -Actual $bashShape.Count `
+    -Message 'bash -lc <command> arrives as exactly two arguments, not as the command word count'
+  Assert-True -Condition ($bashShape.Count -eq 2 -and $bashShape[1] -ceq $shellCommand) `
+    -Message "and the second argument is the WHOLE shell program, not its first word"
+
+  # The empty argument gets its own invocation, LAST, and the placement is
+  # deliberate rather than cosmetic. Passing "" also exercises the parameter
+  # BINDER (a mandatory [string[]] rejects an empty element unless the
+  # parameter allows it), so a build in which that attribute is missing fails
+  # here on binding, before the child is ever started. Folded into the group
+  # above, that early abort would pre-empt the checks that actually describe a
+  # split argument -- the failure would be real but would name the wrong
+  # thing.
+  $emptyArgOut = Join-Path $scratchRoot "received-empty-arg.txt"
+  $emptyArgCase = @("before", "", "after")
+  $emptyArgBound = $true
+  try {
+    Invoke-BoundedNativeCommand `
+      -FilePath $pwshPath `
+      -ArgumentList (@("-NoProfile", "-File", $echoArgvScript, "--ct-argv-begin", $emptyArgOut) + $emptyArgCase) `
+      -Activity "a child given an empty argument" `
+      -TimeoutSeconds 120 | Out-Null
+  } catch {
+    $emptyArgBound = $false
+    Write-Host "  (empty-argument call failed: $([string]$_.Exception.Message))"
+  }
+  Assert-True -Condition $emptyArgBound `
+    -Message "an empty argument is accepted rather than rejected by the parameter binder"
+  if ($emptyArgBound) {
+    $emptyArgReceived = @([System.IO.File]::ReadAllText($emptyArgOut) -split ([string][char]31))
+    Assert-Equal -Expected 3 -Actual $emptyArgReceived.Count `
+      -Message "an empty argument still occupies a position rather than vanishing"
+    Assert-True -Condition (
+      $emptyArgReceived.Count -eq 3 -and
+      $emptyArgReceived[0] -ceq "before" -and
+      $emptyArgReceived[1] -ceq "" -and
+      $emptyArgReceived[2] -ceq "after") `
+      -Message "and the arguments around it keep their positions"
+  }
+
+  # -------------------------------------------------------------------------
   # Part 6 - the bounds are configurable, and reject nonsense loudly.
   # -------------------------------------------------------------------------
 

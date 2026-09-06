@@ -47,9 +47,25 @@ function Ensure-Fpc {
     $innoArgs = @("/VERYSILENT", "/SP-", "/SUPPRESSMSGBOXES", "/NORESTART",
                   "/NOICONS", "/DIR=$fpcVersionRoot")
     $env:__compat_layer = 'RunAsInvoker'
-    $proc = Start-Process -FilePath $tempInstaller -ArgumentList $innoArgs -Wait -PassThru
-    if ($proc.ExitCode -ne 0) {
-      throw "FreePascal installer exited with code $($proc.ExitCode)."
+    # NOT `Start-Process -ArgumentList`, and the reason is `/DIR=`.
+    #
+    # `Start-Process` joins its argument array with spaces and quotes nothing,
+    # so `/DIR=C:\Users\Jane Doe\...\fpc\3.2.2` would arrive as `/DIR=C:\Users\Jane`
+    # plus a stray `Doe\...` operand -- a silent install into the wrong
+    # directory, or a rejected switch, on any host whose dev-deps root contains
+    # a space. CI's root has none, which is exactly why a bug of this shape can
+    # sit here indefinitely without being seen.
+    #
+    # `Invoke-BoundedNativeCommand` passes a real per-argument list, and brings
+    # two things this call also wanted anyway: a wall-clock bound, and a closed
+    # stdin so a silent installer that decides to ask something fails fast
+    # rather than holding the runner.
+    $installerExit = Invoke-BoundedNativeCommand `
+      -FilePath $tempInstaller `
+      -ArgumentList $innoArgs `
+      -Activity "FreePascal $version silent install"
+    if ($installerExit -ne 0) {
+      throw "FreePascal installer exited with code $installerExit."
     }
   } finally {
     Remove-Item -LiteralPath $tempInstaller -Force -ErrorAction SilentlyContinue

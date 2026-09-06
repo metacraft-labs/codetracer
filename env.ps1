@@ -1232,8 +1232,8 @@ if ($doSync) {
   Invoke-BootstrapStep -Step "LDC"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Ldc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
   Invoke-BootstrapStep -Step "VLANG" -Relocatability relocatable -Root $installRoot -Action { Ensure-Vlang -Root $installRoot -Arch $arch -Toolchain $toolchain }
   # FPC is the one component installed by a vendor installer rather than an
-  # archive: FreePascal ships an Inno Setup .exe (ensure-fpc.ps1:45-50,
-  # /VERYSILENT), so it may write outside the install root and is not a
+  # archive: FreePascal ships an Inno Setup .exe (see the `/VERYSILENT` call in
+  # `Ensure-Fpc`), so it may write outside the install root and is not a
   # store candidate without repackaging.
   Invoke-BootstrapStep -Step "FPC"   -Relocatability installer   -Root $installRoot -Action { Ensure-Fpc   -Root $installRoot -Arch $arch -Toolchain $toolchain }
   Invoke-BootstrapStep -Step "ZSTD"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Zstd  -Root $installRoot -Arch $arch -Toolchain $toolchain }
