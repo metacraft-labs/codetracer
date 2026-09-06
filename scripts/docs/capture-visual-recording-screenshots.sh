@@ -74,7 +74,7 @@ record_trace() {
 	echo "Recording visual trace for book screenshots (attempt ${attempt}): ${trace_path}"
 	LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}" \
 		LP_NUM_THREADS="${LP_NUM_THREADS:-1}" \
-		"${CT_MCR}" record --use-interpose -o "${trace_path}" -- "${GL_SCENE}" "${frame_output_base}"
+		"${CT_MCR}" record --interpose -o "${trace_path}" -- "${GL_SCENE}" "${frame_output_base}"
 }
 
 if [[ -n ${TRACE_PATH} ]]; then

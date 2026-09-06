@@ -169,8 +169,13 @@ proc recordCommand*(providerId: string; scope: TestScope; args,
           args
         else:
           @["sh", "-lc", testCommand]
+      # ``--interpose`` is the recorder's spelling; ct's own public flag is
+      # ``--use-interpose`` and the two must not be confused. ``recorder`` here
+      # is ct_cli/ct-mcr, whose parser retired ``--use-interpose`` and rejects
+      # unknown options outright
+      # (``codetracer-native-recorder/ct_cli/src/ct_cli/arg_parser.nim:695``).
       recordArgs = nativeRecorderEnvironmentPrefix() & recorder & @["record",
-          "--use-interpose", "--source", scope.file, "--output", tracePath,
+          "--interpose", "--source", scope.file, "--output", tracePath,
           "--"] & traceTargetArgs
       command = commandLine(recordArgs)
       runId = providerId & ":record:" & $scope.kind & ":" & scope.selector

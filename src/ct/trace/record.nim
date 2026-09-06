@@ -533,7 +533,18 @@ proc record*(lang: string,
           # Forwarded as a trailing recorder-side flag; db-backend-record
           # already passes unknown ``--`` args through to the native
           # recorder when ``--backend=mcr`` is in effect.
-          nativeArgs.add("--use-interpose")
+          #
+          # THE RECORDER'S SPELLING IS ``--interpose``, NOT CODETRACER'S
+          # ``--use-interpose``. They are two different CLIs: `--use-interpose`
+          # is ct's own public flag (docs/book/src/reference/ct_cli.md), while
+          # the flag that reaches ct_cli must be the one its parser knows
+          # (`codetracer-native-recorder/ct_cli/src/ct_cli/arg_parser.nim:695`).
+          # ct_cli RETIRED `--use-interpose` and its parser's `else` branch
+          # returns `err("unknown option: ...")`, so sending the ct spelling
+          # here does not degrade — it fails the recording outright. This is
+          # the exact skew `src/common/target_assessment.nim:26` cites as the
+          # precedent for versioning the launcher protocol.
+          nativeArgs.add("--interpose")
       return recordInternal(
         dbBackendRecordExe,
         nativeArgs,

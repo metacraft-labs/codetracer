@@ -224,7 +224,7 @@ mkdir -p "$REAL_VISUAL_TRACE_DIR"
 real_visual_record_command='set -euo pipefail
 cd "$VISUAL_REPLAY_REPO"
 LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS="${LP_NUM_THREADS:-1}" ../codetracer-native-recorder/ct_cli/ct_cli record \
-	--use-interpose \
+	--interpose \
 	-o "$REAL_VISUAL_TRACE" \
 	-- ../codetracer-native-test-programs/gl/gl_scene "$REAL_VISUAL_OUTPUT_BASE"
 test -f "$REAL_VISUAL_TRACE"

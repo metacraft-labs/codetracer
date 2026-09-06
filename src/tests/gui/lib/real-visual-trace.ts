@@ -500,9 +500,12 @@ function recordGlFixtureTrace(): RealVisualTrace {
   // unless the recorder checkpoints often.  Only inject the extra flag
   // when the software-GL opt-in is active so GPU hosts keep their
   // current, unchanged recording profile.
+  // ``--interpose`` is ct_cli's spelling. ct's own public flag is
+  // ``--use-interpose``; ct_cli retired that name and its parser rejects
+  // unknown options outright, so the two must not be interchanged here.
   const ctMcrArgs = softwareGl.enabled
-    ? ["record", "--use-interpose", "--checkpoint-interval", String(softwareGl.checkpointIntervalMs), "-o", tracePath, "--", glScene, frameOutputBase]
-    : ["record", "--use-interpose", "-o", tracePath, "--", glScene, frameOutputBase];
+    ? ["record", "--interpose", "--checkpoint-interval", String(softwareGl.checkpointIntervalMs), "-o", tracePath, "--", glScene, frameOutputBase]
+    : ["record", "--interpose", "-o", tracePath, "--", glScene, frameOutputBase];
   const args = ctMcrArgs;
   const timeoutMs = Number(process.env.CODETRACER_REAL_VISUAL_TRACE_RECORD_TIMEOUT_MS ?? "180000");
 
