@@ -38,8 +38,12 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # `SUITE_ROOT`, deliberately NOT `REPO_ROOT`: this suite sources
-# `ci/setup-rr-backend.sh`, which assigns a `REPO_ROOT` of its own. See the
-# long note above `rr_guard` for what the collision cost.
+# `ci/setup-rr-backend.sh`, which USED TO assign a `REPO_ROOT` of its own. That
+# script now names it `RR_REPO_ROOT` and DECLARES what it leaks, and
+# `ci/test/sourced-var-collision-gate.sh` holds it to that declaration — so the
+# collision this name avoids can no longer be reintroduced silently. The name
+# stays as it is: `SUITE_ROOT` says which script owns it, which is the property
+# worth keeping. See the long note above `rr_guard` for what the collision cost.
 SUITE_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
 # THE SUITE RUNS THE REAL SCRIPTS, so a shell that cannot run them reports
@@ -447,8 +451,11 @@ git -C "${BACKEND}" checkout -q "${REV_OLD}"
 
 # Sourced rather than executed, so the guard is exercised without reaching
 # `nix build`. The script's `main` is behind a BASH_SOURCE guard for this.
-# Always in a SUBSHELL: sourcing it assigns `REPO_ROOT` and `CLONE_DIR`, and
-# the subshell is what keeps those assignments from reaching this suite.
+# Always in a SUBSHELL: sourcing it assigns `RR_REPO_ROOT` and `CLONE_DIR`, and
+# the subshell is what keeps those assignments from reaching this suite. The
+# subshell is now BELT AND BRACES rather than the only defence — neither of
+# those names can collide with anything here — but it stays, because what it
+# actually contains is the `cd` and the PATH edits, not just the two variables.
 #
 # THIS SUITE'S OWN ROOT IS `SUITE_ROOT`, NOT `REPO_ROOT`, AND THAT NAME IS
 # LOAD-BEARING. It used to be `REPO_ROOT` too, defended only by this subshell.
@@ -469,6 +476,12 @@ git -C "${BACKEND}" checkout -q "${REV_OLD}"
 # Renaming is the fix rather than a `disable=SC2031`, because the name
 # collision was a real hazard that the subshell merely hid: with two distinct
 # names there is nothing for either the linter or a future reader to confuse.
+#
+# BOTH SIDES ARE RENAMED NOW, and the second one is what closes the class.
+# Renaming only this suite left `ci/setup-rr-backend.sh` free to collide with
+# the NEXT script that sources it, and nothing would have said so. That file
+# now declares what it leaks (`ct-leaks: CLONE_DIR`) and
+# `ci/test/sourced-var-collision-gate.sh` fails if it ever leaks anything else.
 rr_guard() {
 	(
 		export CLONE_DIR="$1"

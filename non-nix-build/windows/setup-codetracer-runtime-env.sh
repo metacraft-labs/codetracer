@@ -1,8 +1,33 @@
 #!/usr/bin/env bash
-
-if [[ -z ${ROOT_DIR:-} ]]; then
+#
+# SOURCED, never executed — `env.sh` sources it at the end of its own setup —
+# so every top-level name here lands in the sourcer's shell.
+#
+# IT NOW LEAKS NOTHING, which is why there is no `ct-leaks:` line here: all
+# three fallbacks below supply a name only when the caller has not set it, so
+# none of them can overwrite anything.
+#
+# THE BLOCK BELOW IS THE SHAPE THAT COST THIS REPOSITORY TWO DEFECTS IN ONE
+# NIGHT, caught here before it cost a third. `env.sh` resolves `ROOT_DIR`,
+# `WINDOWS_DIR` and `NON_NIX_BUILD_DIR` for itself and then sources this file;
+# this file assigns all three names again. It WAS one `if`, keyed on `ROOT_DIR`
+# alone — harmless for that particular caller, since `env.sh` sets `ROOT_DIR`
+# first and the block never fired, but a caller that had resolved
+# `NON_NIX_BUILD_DIR` or `WINDOWS_DIR` and NOT `ROOT_DIR` had both silently
+# rewritten. MEASURED on the pre-fix file: a caller holding
+# `NON_NIX_BUILD_DIR=/the/callers/own/non-nix-build` got it replaced with this
+# file's own parent directory. `env.sh` uses `$NON_NIX_BUILD_DIR` five lines
+# after the source.
+#
+# Each name is now guarded on ITSELF. That is the whole fix: a fallback should
+# supply what is missing, never overwrite what the caller already resolved.
+if [[ -z ${WINDOWS_DIR:-} ]]; then
 	WINDOWS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+fi
+if [[ -z ${NON_NIX_BUILD_DIR:-} ]]; then
 	NON_NIX_BUILD_DIR=$(cd "$WINDOWS_DIR/.." && pwd)
+fi
+if [[ -z ${ROOT_DIR:-} ]]; then
 	ROOT_DIR=$(cd "$NON_NIX_BUILD_DIR/.." && pwd)
 fi
 

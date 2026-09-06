@@ -14,9 +14,22 @@ set -euo pipefail
 # Requires GH_TOKEN to be set for cloning the private repo.
 # Exports CODETRACER_RR_BACKEND_PRESENT=1 and updated PATH/LD_LIBRARY_PATH
 # to GITHUB_ENV / GITHUB_PATH for subsequent CI steps.
-
-# Save the repo root (all paths relative to this)
-REPO_ROOT="$(pwd)"
+#
+# THIS SCRIPT IS SOURCED, so every name it assigns at top level lands in its
+# sourcer's shell. It now CLOBBERS NOTHING GENERIC, which is why it carries no
+# `ct-leaks:` line: `CLONE_DIR` is an input as much as an output — callers set
+# it to choose the checkout — so it is assigned default-preserving and can
+# never overwrite theirs. `ci/test/sourced-var-collision-gate.sh` checks that.
+#
+# `RR_REPO_ROOT` used to be `REPO_ROOT`, which is what made it worth writing
+# any of this down. `ci/test/stale-artefact-guards-test.sh` had a `REPO_ROOT`
+# of its own and had to source this file inside a SUBSHELL to survive it; once
+# `shopt -s globstar` let shellcheck see both files at once it read that
+# assignment as "modified in a subshell" and emitted nine FALSE SC2031s on the
+# suite's own variable, failing `lint-bash` and dark-gating every build job
+# behind it for 13 runs (3c7b257ed). The prefix is the fix: no sourcer can
+# collide with a name that says which script owns it.
+RR_REPO_ROOT="$(pwd)"
 # Clone as a sibling directory so that path deps in rr-backend's Cargo.toml
 # (../codetracer/libs/ct-dap-client) resolve correctly.
 CLONE_DIR="${CLONE_DIR:-$(pwd)/../codetracer-native-backend}"
@@ -29,7 +42,7 @@ resolve_sibling_rev() { # $1 = sibling repo name
 	local args=(--repo codetracer --sibling "$1")
 	[ -n "${CT_MANIFEST_DIR:-}" ] && args+=(--manifest-dir "$CT_MANIFEST_DIR")
 	[ -n "${CT_LOCK_SHA:-}" ] && args+=(--sha "$CT_LOCK_SHA" --no-walk)
-	"$REPO_ROOT/scripts/resolve-sibling-rev.sh" "${args[@]}"
+	"$RR_REPO_ROOT/scripts/resolve-sibling-rev.sh" "${args[@]}"
 }
 
 resolve_ref() {
@@ -230,7 +243,7 @@ resolve_runtime_deps() {
 
 	# Create symlinks for rr, dlv, gdb that the codetracer nix shell expects
 	# at $PRJ_ROOT/target/debug/ (normally created by rr-backend shellHook)
-	local target_debug="${REPO_ROOT}/target/debug"
+	local target_debug="${RR_REPO_ROOT}/target/debug"
 	mkdir -p "$target_debug"
 
 	for tool in rr dlv gdb; do
@@ -266,7 +279,7 @@ export_to_github_env() {
 		bin_dir=$(dirname "$ct_native_replay")
 		echo "$bin_dir" >>"$GITHUB_PATH"
 		# Also add the target/debug dir for rr, dlv, gdb symlinks
-		echo "${REPO_ROOT}/target/debug" >>"$GITHUB_PATH"
+		echo "${RR_REPO_ROOT}/target/debug" >>"$GITHUB_PATH"
 	fi
 
 	echo ""

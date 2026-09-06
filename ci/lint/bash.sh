@@ -85,6 +85,42 @@ lint_step "shellcheck: CI scripts" \
 lint_step "contract suite: no producer is piped into 'grep -q' under pipefail" \
 	bash ci/test/grep-q-pipefail-gate.sh
 
+# THE SECOND DEFECT SHELLCHECK DOES NOT HAVE A CODE FOR, and this one has bitten
+# twice in one night. A script assigns a common name, sources another script that
+# assigns the SAME name at top level, and every later use silently resolves to
+# the other script's value — a path that exists, a step that exits 0, and an
+# artefact that is simply absent.
+#
+#   * `SCRIPT_DIR` (295f36835): `src/db-backend/build_wasm.sh` sources
+#     `ct_emulator/export_build_env.sh` from the recorder repo. The stamping step
+#     afterwards resolved to `/Users/zahary/m/dev/ci/lib/...` — one directory
+#     ABOVE BOTH REPOSITORIES — and the build finished 0 with its freshness stamp
+#     unwritten.
+#   * `REPO_ROOT` (3c7b257ed): `ci/test/stale-artefact-guards-test.sh` sources
+#     `ci/setup-rr-backend.sh`. Contained at runtime by a subshell, so it
+#     surfaced only as nine FALSE SC2031s once `shopt -s globstar` above let the
+#     linter see both files at once — failing this lane and dark-gating every
+#     build artefact job for 13 runs.
+#
+#     (Worded that way on purpose: a comment line whose first word is the
+#     linter's own name is parsed as a DIRECTIVE, and this paragraph reddened
+#     `shellcheck: CI scripts` with SC1072/SC1073 while it was being written.)
+#
+# Both were fixed at the site. Neither fix stopped the next one, and the hazard
+# was already written down in the stale-artefact suite's own header. The rule is
+# on the SOURCED side because that side is small (sixteen files are ever sourced;
+# eleven already leak nothing) and, decisively, CHECKABLE without knowing
+# anything about a file's callers. Its Arm B covers the one thing Arm A cannot:
+# a source into ANOTHER REPOSITORY, where no invariant of ours applies.
+#
+# Pure bash + awk + git over the committed tree, under a second. Its Step 0 runs
+# the detector against fixtures carrying one of each shape — three real leaks and
+# seven correct constructions — and refuses to report on the tree at all if any
+# is misjudged, because a detector that has rotted into a no-op produces exactly
+# the output of a clean repository.
+lint_step "contract suite: a sourced script leaks only what it declares" \
+	bash ci/test/sourced-var-collision-gate.sh
+
 lint_step "shellcheck: AppImage scripts" \
 	shellcheck appimage-scripts/*.sh
 

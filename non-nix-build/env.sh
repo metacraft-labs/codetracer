@@ -1,4 +1,26 @@
 #!/usr/bin/env bash
+#
+# The POSIX (Linux/macOS) non-nix build environment. SOURCED, never executed,
+# so every name it assigns at top level lands in its sourcer's shell.
+#
+# ct-leaks: ROOT_DIR NON_NIX_BUILD_DIR
+#
+# Both are the CONTRACT, not an accident: eleven scripts in this directory read
+# `$ROOT_DIR`, and `non-nix-build/windows/ensure-tup.ps1` reads it from the
+# PowerShell side. Declared here rather than renamed because there is no defect
+# behind them — only names that have to be said out loud.
+#
+# `BIN_DIR` and `DEPS_DIR` are NOT on that line and that is measured, not
+# overlooked: `: "${BIN_DIR:="$NON_NIX_BUILD_DIR"/bin}"` assigns only when
+# unset, so it can never overwrite a caller's value and is not a collision.
+# `platform` and `os` do leak, but neither is a generic root name that two
+# unrelated scripts would both compute for themselves.
+#
+# `ci/test/sourced-var-collision-gate.sh` holds this file to exactly the line
+# above. A generic name that starts crossing this `source` boundary without
+# being written down is how `SCRIPT_DIR` (295f36835) and `REPO_ROOT`
+# (3c7b257ed) each silently repointed a caller's paths at another directory
+# that really existed, and neither said a word.
 
 set -e
 

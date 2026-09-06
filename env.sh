@@ -12,6 +12,25 @@ if [[ ${WINDOWS_ENV_WAS_SOURCED:-0} -eq 0 ]]; then
 	set -e
 fi
 
+# SOURCED far more often than it is executed (`. env.sh` is how a Windows DIY
+# shell gets its toolchain), so every top-level name here lands in the user's
+# shell.
+#
+# ct-leaks: ROOT_DIR WINDOWS_DIR NON_NIX_BUILD_DIR
+#
+# All three are the contract this file shares with `non-nix-build/*.sh` and
+# with `non-nix-build/windows/setup-codetracer-runtime-env.sh`, which it
+# sources near the end and which computes the same three names for itself.
+# Declared rather than renamed because they are load-bearing across two
+# languages — `ensure-tup.ps1` reads `ROOT_DIR` from the PowerShell side —
+# and held to that declaration by `ci/test/sourced-var-collision-gate.sh`.
+#
+# THE SOURCE AT THE END OF THIS FILE USED TO REWRITE TWO OF THEM. That file's
+# fallbacks were all keyed on `ROOT_DIR` alone, so they never fired for this
+# caller and the collision stayed invisible — but any caller that had resolved
+# `NON_NIX_BUILD_DIR` without `ROOT_DIR` had it silently replaced, and this
+# file uses `$NON_NIX_BUILD_DIR` five lines after that source. Each fallback
+# there now guards on its own name.
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WINDOWS_DIR="$ROOT_DIR/non-nix-build/windows"
 NON_NIX_BUILD_DIR="$ROOT_DIR/non-nix-build"
