@@ -2690,7 +2690,10 @@ fn parse_origin_arguments(arguments: Option<&Value>, max_hops: u64) -> Result<Or
 /// first, then a unique path-component suffix match.  An ambiguous
 /// suffix is an error rather than a silent pick: answering about the
 /// wrong file would look like a wrong origin chain, not a wrong file.
-fn resolve_recorded_source_path(requested: &str, source_files: &[String]) -> Result<String, String> {
+fn resolve_recorded_source_path(
+    requested: &str,
+    source_files: &[String],
+) -> Result<String, String> {
     if source_files.iter().any(|f| f == requested) {
         return Ok(requested.to_string());
     }

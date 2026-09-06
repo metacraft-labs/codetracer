@@ -58,7 +58,10 @@ impl McpStdio {
             // Point the daemon socket at a path that cannot exist, so a
             // handler that *did* reach the daemon fails fast instead of
             // auto-starting a real one.
-            .env("CODETRACER_DAEMON_SOCK", "/nonexistent/mcp-tool-surface.sock")
+            .env(
+                "CODETRACER_DAEMON_SOCK",
+                "/nonexistent/mcp-tool-surface.sock",
+            )
             .spawn()
             .expect("failed to spawn `trace mcp`");
         let stdin = child.stdin.take().expect("no stdin");
@@ -86,7 +89,10 @@ impl McpStdio {
         loop {
             let mut line = String::new();
             let n = self.reader.read_line(&mut line).expect("read MCP stdout");
-            assert!(n > 0, "MCP subprocess closed stdout while awaiting {method}");
+            assert!(
+                n > 0,
+                "MCP subprocess closed stdout while awaiting {method}"
+            );
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;

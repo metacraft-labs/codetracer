@@ -4,19 +4,23 @@
 //! - `resolve_variable_step` MCP tool — registration + schema.
 //! - `ct trace origin` CLI subcommand — registration only (the full
 //!   roundtrip needs a live daemon + recorder).
-//! - End-to-end smokes for `get_value_origin` against a canonical
-//!   Python fixture — SKIP cleanly when the Python recorder is not
-//!   installed in the dev shell.
+//! - End-to-end runs of both tools against the canonical
+//!   `simple_trivial_chain` Python fixture, recorded for real.
 //!
 //! The end-to-end tests drive the actual `backend-manager` binary as a
-//! subprocess speaking the MCP JSON-RPC protocol on stdin/stdout. This
-//! exercises the tool dispatch, schema, and (when the recorder is
-//! present) the full daemon → backend → `ct/originChain` path.
+//! subprocess speaking the MCP JSON-RPC protocol on stdin/stdout,
+//! against a daemon running a real `replay-server` over a real
+//! recording. That is deliberate: `get_value_origin` and
+//! `resolve_variable_step` were advertised by `tools/list` while
+//! `tools/call` answered `-32602 Unknown tool`, and every layer beneath
+//! the MCP surface was green throughout. Only a test that goes through
+//! `tools/call` can see that defect.
 //!
 //! SKIP discipline mirrors M3/M5/M6: narrow probes only, no broad
-//! heuristics. When the Python recorder is unavailable we emit a
-//! `SKIPPED: <precise reason>` line on stderr and `return` — never
-//! `panic!`. Genuine M8 bugs surface as hard failures.
+//! heuristics. When the Python recorder or `replay-server` is
+//! unavailable we emit a `SKIPPED: <precise reason>` line on stderr and
+//! `return` — never `panic!`. A recorder that runs and *fails*, by
+//! contrast, is a hard error. Genuine M8 bugs surface as failures.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -423,11 +427,8 @@ fn record_python_fixture(scenario: &str) -> Option<PathBuf> {
 
     // Short path: the daemon's Unix socket lives beside the trace, and an
     // over-long socket path fails with `SUN_LEN`.
-    let root = PathBuf::from("/tmp").join(format!(
-        "ct-mcp-origin-{}-{}",
-        std::process::id(),
-        scenario
-    ));
+    let root =
+        PathBuf::from("/tmp").join(format!("ct-mcp-origin-{}-{}", std::process::id(), scenario));
     let _ = std::fs::remove_dir_all(&root);
     let trace_dir = root.join("trace");
     std::fs::create_dir_all(&trace_dir).expect("cannot create trace dir");
@@ -550,7 +551,10 @@ fn origin_harness(scenario: &str) -> Option<OriginHarness> {
         }
     };
     let trace_dir = record_python_fixture(scenario)?;
-    let root = trace_dir.parent().expect("trace dir has a parent").to_path_buf();
+    let root = trace_dir
+        .parent()
+        .expect("trace dir has a parent")
+        .to_path_buf();
     let daemon = start_daemon(&binary, &root)?;
 
     let client = match McpClient::spawn_with_daemon(&binary, &daemon.socket) {
@@ -622,8 +626,12 @@ fn test_mcp_get_value_origin_returns_canonical_chain() {
     let json_start = text
         .find('{')
         .unwrap_or_else(|| panic!("no canonical JSON in get_value_origin output: {text}"));
-    let chain: Value = serde_json::from_str(text[json_start..].trim())
-        .unwrap_or_else(|e| panic!("canonical JSON did not parse ({e}): {}", &text[json_start..]));
+    let chain: Value = serde_json::from_str(text[json_start..].trim()).unwrap_or_else(|e| {
+        panic!(
+            "canonical JSON did not parse ({e}): {}",
+            &text[json_start..]
+        )
+    });
 
     let hops = chain
         .get("hops")
@@ -705,7 +713,10 @@ fn test_mcp_resolve_variable_step_finds_latest_step() {
         "answer must name the queried variable: {answer}"
     );
     assert_eq!(
-        answer.get("assignment").and_then(Value::as_str).map(str::trim),
+        answer
+            .get("assignment")
+            .and_then(Value::as_str)
+            .map(str::trim),
         Some("a = 10"),
         "answer must name the statement that produced the value: {answer}"
     );
