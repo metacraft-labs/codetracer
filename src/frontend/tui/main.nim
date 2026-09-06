@@ -21,19 +21,177 @@
 ## state it belongs in `app/`, and the moment it needs a file descriptor it
 ## belongs in `host/`.
 ##
-## ## What CTUI-0 wires
+## ## CTUI-11: THIS IS THE MILESTONE THAT MADE THE BINARY RUN
 ##
-## `--help` and `--version`, and an honest refusal for everything else. A trace
-## path parses (see `app/cli.nim`) and is reported as not yet openable, naming
-## the milestone that opens it. That is deliberate: a binary that accepted a
-## trace and drew nothing would be indistinguishable, from the outside, from
-## one that opened it and failed.
+## Until now every pane in this front-end was exercised only through the
+## in-process harness and the snapshot apps: `main.nim` parsed `--help`,
+## `--version` and a trace path, and then reported — honestly, and by name —
+## that opening a trace needed a terminal driver nobody had built. CTUI-11 built
+## it (`host/terminal_driver.nim`), and this is the wiring.
+##
+## ## THE ORDER OF THE FIRST FRAME, WHICH IS THE MILESTONE'S OWN CONTRACT
+##
+## CTUI-11 requires that capabilities resolve BEFORE the first paint, and it
+## puts a published gate on cold start with probing enabled. Both are properties
+## of the sequence below, so the sequence is written out rather than left to be
+## read out of the code:
+##
+##   1. parse `argv`                    — `app/cli.parseTuiCommand`, no I/O
+##   2. negotiate the terminal          — `host/capabilities`, seven `getEnv`s
+##                                        and one `isatty`, no child process
+##   3. claim the tty                   — raw mode, alt screen, mouse
+##   4. **paint frame 0**               — the shell, saying which trace is
+##                                        being opened
+##   5. spawn `replay-server`, DAP      — seconds, on a cold page cache
+##   6. paint frame 1                   — the debugger
+##
+## Steps 1-4 are what "cold start" measures, and putting step 5 AFTER the first
+## frame is not a trick to make a number look good: a user who typed a command
+## should see their terminal change immediately, and a front-end that showed
+## nothing until the engine had answered would be indistinguishable, for that
+## whole second, from one that had hung. It is also what makes "resolved before
+## first paint" observable rather than asserted — the driver cannot be
+## constructed without a `TerminalCapabilities`, and the paint is a method on
+## the driver.
 
 import std/os
 
 import ./app/cli
+import ./app/runtime
 import ./app/tui_app
+import ./host/capabilities
 import ./host/native_host
+import ./host/terminal_driver
+import ./host/tui_session
+
+const
+  ExitOk* = 0
+  ExitUnhandled* = 1
+  ExitUsage* = 2
+  ExitNoTerminal* = 3
+    ## There is a trace and there is no screen to draw it on. Distinguishable
+    ## from a usage error on purpose: `codetracer-tui trace | cat` is a correct
+    ## command line and an impossible request, and reporting it as a bad
+    ## argument would send the user looking at their arguments.
+
+  IdlePollMs = 200
+    ## How long the loop blocks when nothing is happening.
+    ##
+    ## A CEILING ON LATENCY FOR NOTHING, and it is not a poll interval: input
+    ## and SIGWINCH both wake the `select` immediately, so this only bounds how
+    ## long the process sleeps between two events it does not have. It exists so
+    ## a partially framed escape sequence — an `ESC` with nothing after it — is
+    ## not held forever.
+
+proc paint(driver: TerminalDriver; rt: TuiRuntime) =
+  ## One frame of `rt` onto `driver`.
+  ##
+  ## The cursor is CTUI-9's: `modal_state.cursorControlBytes` says what shape
+  ## and visibility the current mode has, and it goes in the PROLOGUE because it
+  ## does not move the cursor. §3.3.6's prompt DOES move it, so it goes in the
+  ## epilogue — `docs/tui-testing.md` records why those two are different hooks
+  ## and what it costs a reader of the frame barrier.
+  let screen = rt.shellScreenOf()
+  var epilogue = ""
+  let (prompting, row, col) = rt.promptCursor()
+  if prompting:
+    epilogue = "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" & ShowCursorBytes
+  driver.paint(screen.styledRows,
+               prologue = cursorControlBytes(rt.modal.mode),
+               epilogue = epilogue)
+
+proc interactive(command: TuiCommand): int =
+  ## Open a trace and run the loop until the user quits or the terminal goes
+  ## away. Returns the process's exit status; nothing here calls `quit`.
+  let caps = negotiateCapabilities(command.flags)
+  if not stdoutIsTerminal():
+    stderr.writeLine(TuiProgramName & ": standard output is not a terminal," &
+                     " so there is nothing to draw on.")
+    stderr.writeLine("  negotiated: " & describe(caps))
+    stderr.writeLine("  run it in a terminal, or wait for --serve (CTUI-13)" &
+                     " and --headless (CTUI-12).")
+    return ExitNoTerminal
+
+  let folder = resolveTraceFolder(command.tracePath)
+  # BEFORE THE TERMINAL IS CLAIMED, and that order is the whole point. CTUI-11
+  # measured what the other order costs: pointed at a directory that is not a
+  # recording, the binary claimed the alternate screen, painted "opening …",
+  # and then hung inside the DAP handshake — `replay-server` exits 2 on a folder
+  # it cannot open and writes no DAP at all. The input loop had not started, so
+  # no key could end it. Both checks below are `stat`s and both refuse on the
+  # ORDINARY screen.
+  let problem = traceFolderProblem(folder)
+  if problem.len > 0:
+    stderr.writeLine(TuiProgramName & ": " & folder & ": " & problem)
+    return ExitUsage
+  let replayServer = findReplayServer()
+  if replayServer.len == 0:
+    stderr.writeLine(TuiProgramName & ": " & replayServerRemedy())
+    return ExitUsage
+
+  let driver = newTerminalDriver(caps)
+  driver.start()
+  # FROM HERE THE TERMINAL IS OURS AND MUST BE GIVEN BACK ON EVERY PATH,
+  # including an exception. `nim-termctl`'s signal handlers and `atexit` hook
+  # cover a kill and a crash; this covers a normal return and a raise.
+  defer: driver.stop()
+
+  var size = driver.size()
+  let app = newTuiApp()
+  app.notification = "opening " & folder & " …"
+  let rt = newTuiRuntime(app, caps, size.cols, size.rows)
+  # FRAME 0, BEFORE THE ENGINE. See this module's header on why the order is
+  # this way round.
+  paint(driver, rt)
+
+  var session: TuiSession = nil
+  try:
+    session = openTuiSession(folder, viewportHeight = max(1, size.rows - 6))
+  except CatchableError as e:
+    driver.stop()
+    stderr.writeLine(TuiProgramName & ": could not open " & folder & ": " &
+                     e.msg)
+    return ExitUsage
+  defer: session.close()
+
+  session.header(rt)
+  session.setViewportHeight(rt.sourcePaneRows())
+  session.learnExtent()
+  session.refresh(rt)
+  app.notification = describe(session)
+  paint(driver, rt)
+
+  var running = true
+  while running:
+    let ev = driver.nextEvent(IdlePollMs)
+    case ev.kind
+    of dekEof:
+      # The terminal closed its end. Not an error and not a quit key: the user
+      # is gone, and the only correct thing left is to give the tty back.
+      running = false
+    of dekIdle:
+      discard
+    of dekResize:
+      size = ev.size
+      rt.resize(size.cols, size.rows)
+      # THE SOURCE WINDOW FOLLOWS THE PANE, not the terminal. A reflow that
+      # changed the profile changed the editor's rectangle, and a `SourceVM`
+      # still holding the old height would scroll the execution line off the
+      # pane — see `runtime.sourcePaneRows`.
+      session.setViewportHeight(rt.sourcePaneRows())
+      session.refresh(rt)
+      paint(driver, rt)
+    of dekToken:
+      let outcome = rt.handleToken(ev.token, nowMs())
+      if outcome.quit:
+        running = false
+      else:
+        if outcome.awaitsMove:
+          session.pumpMove()
+          session.refresh(rt)
+        if outcome.repaint:
+          paint(driver, rt)
+  ExitOk
 
 proc run(args: seq[string]): int =
   ## The whole entrypoint, as a function of its arguments, returning the
@@ -48,71 +206,29 @@ proc run(args: seq[string]): int =
   case command.kind
   of tckHelp:
     echo TuiHelpText
-    0
+    ExitOk
   of tckVersion:
     echo TuiVersionText
-    0
+    ExitOk
   of tckUsageError:
     stderr.writeLine(TuiProgramName & ": " & command.message)
-    2
+    ExitUsage
   of tckOpenTrace:
-    # PARSED, RESOLVED, AND HONESTLY REFUSED. The path is resolved here rather
-    # than merely echoed, so a user who mistyped it learns that now instead of
-    # after the interactive loop lands; and the refusal names the milestones
-    # that are still open, so the message cannot rot into a permanent "not
-    # implemented" nobody dates.
-    #
-    # CTUI-3 landed the SHELL — `app/views/shell.nim` composes a whole screen
-    # for a given size, and `app/layout/project.nim` puts the session's own
-    # `LayoutNode` onto Yoga. CTUI-9 landed the KEY DISPATCH: `app/input/
-    # keymap.nim` turns a byte token into a named action, `app/input/
-    # modal_state.nim` owns the NORMAL/COMMAND/SEARCH/INSPECT machine, and
-    # `app/input/motions.nim` owns focus and the motions.
-    #
-    # WHAT IS STILL MISSING IS THE TERMINAL, and it is missing on purpose. Raw
-    # mode, the alternate screen, a signal-safe restore, SIGWINCH and the
-    # capability probe that has to run BEFORE the first paint are all
-    # `host/` capabilities and all of them are CTUI-11's named deliverables
-    # (`host/capabilities.nim` and the driver). A loop landed here would have
-    # to be reopened by CTUI-11 to insert negotiation ahead of its first frame,
-    # and CTUI-11's own gate measures cold start with probing enabled. So this
-    # message names CTUI-11 alone for the driver, and no longer names CTUI-9
-    # for the keymap — that part exists, and is exercised over a real pty by
-    # `tests/real_terminal/test_real_keybindings.nim`.
     try:
-      let folder = resolveTraceFolder(command.tracePath)
-      let app = newTuiApp()
-      stderr.writeLine(TuiProgramName & ": " & folder & " exists, but opening" &
-                       " a trace needs a terminal driver this milestone does" &
-                       " not build yet.")
-      stderr.writeLine("  " & app.statusLine())
-      stderr.writeLine("  CTUI-0 delivers the build ground and the facade" &
-                       " boundary, CTUI-3 the shell and its layout, and" &
-                       " CTUI-9 the modal state machine, the §4.2 keymap and" &
-                       " the motions; raw mode, the alternate screen and the" &
-                       " capability probe are CTUI-11. See codetracer-specs/" &
-                       "Front-Ends/CodeTracer-TUI.milestones.org.")
-      let replayServer = findReplayServer()
-      if replayServer.len == 0:
-        stderr.writeLine("  note: " & replayServerRemedy())
-      if not stdoutIsTerminal():
-        stderr.writeLine("  note: standard output is not a terminal, so even" &
-                         " a finished TUI would have nothing to draw on here.")
-      app.dispose()
-      3
+      interactive(command)
     except TuiHostError as e:
       stderr.writeLine(TuiProgramName & ": " & e.msg)
-      2
+      ExitUsage
 
 when isMainModule:
   # The ONLY `quit` in the entrypoint, and it is reached on every path. An
   # unhandled exception must not become exit 0 here: `run` returns a status and
   # anything that escapes it is caught, named on stderr and reported as a
   # failure. stdout is left clean because `--version` is machine-readable.
-  var status = 0
+  var status = ExitOk
   try:
     status = run(commandLineParams())
   except CatchableError as e:
     stderr.writeLine(TuiProgramName & ": " & $e.name & ": " & e.msg)
-    status = 1
+    status = ExitUnhandled
   quit(status)

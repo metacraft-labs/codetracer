@@ -54,7 +54,7 @@ import ../../../../ct/version
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling, and inside a `const` block the declaration is invisible to it.
-const ExpectedAssertions = 15
+const ExpectedAssertions = 17
 
 const BuildRecipe = "just build-tui"
 
@@ -157,13 +157,34 @@ suite "CTUI-0 Tier 2: the entrypoint through a real pty":
     # every in-process harness — which reads a pipe — necessarily observes the
     # FALSE branch. Only a pty can observe the true one.
     #
+    # WHAT CTUI-11 CHANGED HERE, and why the assertion moved rather than being
+    # deleted. Before the driver existed this case ran the entrypoint on a
+    # directory that is not a trace and asserted exit 3 — the "opening a trace
+    # needs a terminal driver this milestone does not build yet" refusal. That
+    # refusal is gone: `main.nim` now negotiates the terminal and then decides
+    # whether the folder is a recording at all. A directory that is not one is
+    # refused as a USAGE error (2), NAMING THE FOLDER AND WHAT IS MISSING FROM
+    # IT, before the tty is claimed.
+    #
+    # That ORDER is itself the assertion, and it was written from a hang.
+    # Checking the shape after `driver.start()` left this very command with the
+    # alternate screen claimed, `opening ...` on the status line, and no input
+    # loop yet running: `replay-server` exits 2 on a folder it cannot open and
+    # writes no DAP at all, so the handshake's blocking read never returned and
+    # no key could end it. `host/native_host.traceFolderProblem` is the `stat`
+    # that now runs first.
+    #
+    # Exit 3 still exists and still means "there is no screen here"; it is
+    # asserted in `test_real_capability_negotiation.nim`, which runs the binary
+    # with its stdout redirected to a file. The claim this case makes is the one
+    # only a pty can make: on a REAL terminal that branch is not taken.
+    #
     # 200 columns deliberately: the entrypoint's diagnostics are one long line
     # each, and a wrapped line would let the negative assertion below pass
     # because the needle straddled a row boundary rather than because the note
-    # was absent. Both needles are the first ~20 characters of their lines, so
-    # at this width neither can be split.
+    # was absent.
     var sess = newTuiTest(tuiBinary, @[repoRoot()]).width(200).height(24).spawn()
-    let status = sess.waitExit(initDuration(seconds = 15))
+    let status = sess.waitExit(initDuration(seconds = 30))
     discard sess.drainOutput(60)
     let screen = sess.screenContents()
     checkpoint("screen: " & screen.strip())
@@ -171,11 +192,16 @@ suite "CTUI-0 Tier 2: the entrypoint through a real pty":
     # stream and the same run: if stderr never reached the terminal, this goes
     # red rather than leaving "does not contain" true for free.
     ck screen.contains("codetracer-tui:")
-    # And the exit status proves the branch RAN TO THE END — the note is
-    # emitted a few lines before the `3` is returned, so an absent note cannot
-    # be explained by the program having stopped earlier.
     ck status.isSome
-    ck status.get() == 3
+    ck status.get() == 2
+    # The refusal names the folder AND what is missing from it, so a user
+    # learns which argument was wrong and why rather than that "something" was.
+    ck screen.contains(repoRoot())
+    ck screen.contains("not a CodeTracer recording")
+    # AND THE TERMINAL WAS GIVEN BACK. `driver.stop()` runs on this path before
+    # anything is written to stderr, so the message lands on the ordinary
+    # screen rather than inside the alternate one — where it would vanish with
+    # it and the user would see nothing at all.
     ck not screen.contains("note: standard output")
     sess.close()
 

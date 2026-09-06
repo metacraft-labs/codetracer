@@ -156,15 +156,37 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 51
-    ## Every `.nim` under `app/`, counted on 2026-09-06.
+  ExpectedAppModules = 57
+    ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED after
+    ## CTUI-11, which added six: `theme/capabilities.nim`,
+    ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and the two
+    ## suites under `tests/`.
 
-  ExpectedStyleLiterals = 121
-  ExpectedStyledFiles = 18
-    ## What `:theme`'s "nothing to switch" report MEANS, as two numbers:
-    ## every colour this front-end paints is a `const CellStyle` literal, in 18
-    ## files. Counted on 2026-09-06 and asserted, so the report stops being
-    ## true — and this suite says so — the day a theme registry arrives.
+  ExpectedStyleLiterals = 165
+  ExpectedStyledFiles = 20
+    ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
+    ##
+    ## CTUI-10 counted 121 literals in 18 files and read them as "every colour
+    ## this front-end paints is a `const CellStyle` literal, so there is nothing
+    ## for a theme to switch". CTUI-11 MOVED BOTH NUMBERS AND HALF THE
+    ## CONCLUSION, and the difference is worth stating rather than absorbing:
+    ##
+    ##   * The literals grew to 165 in 20 files because
+    ##     `app/theme/degradation.nim` is itself written as `CellStyle`
+    ##     literals — four rungs of a colour ladder — and
+    ##     `app/tests/test_degraded_style_tables.nim` reads them back.
+    ##   * The 18 view modules still paint their own literals and nothing under
+    ##     `app/` names `isonim-tui`'s `ThemeRegistry`, so `:theme dark` still
+    ##     has no registry to switch and still reports `drUnsupported`. That
+    ##     assertion is unchanged and is the one this case is about.
+    ##   * What DOES now switch is the TIER, not the theme:
+    ##     `degradation.roleFor` maps a painted style to a semantic role and
+    ##     `degradeRows` re-emits it at the terminal's colour depth. A theme
+    ##     registry would be a second axis over that, and `:theme` remains the
+    ##     command that has none.
+    ##
+    ## Both numbers are asserted so the report stops being true — and this
+    ## suite says so — the day a theme registry arrives.
 
   Garbage = [
     "", "   ", ":", "  :  ", ":teleport", ":nex", ":NEXT", ":n3xt",

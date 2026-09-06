@@ -3341,3 +3341,35 @@ commands.
     one use is a CUP into a `:` prompt so `cursorPosition` can be asserted —
     and a parent driving such an app waits on `dual_snap.waitForCursorAt`
     rather than `waitForCompleteFrame`.
+  * **CTUI-11: the TUI binary now RUNS.** `build/bin/codetracer-tui <trace>`
+    opens a recording and paints the §3.1 screen. `main.nim` is still the
+    wiring; the loop's state is `tui/app/runtime.nim`, the tty is
+    `tui/host/terminal_driver.nim` and the live session is
+    `tui/host/tui_session.nim`.
+  * **`replay-server` EXITS 2 AND WRITES NO DAP for a folder it cannot open.**
+    Measured directly. `DapStdioBackend.waitForEvent` is a blocking read with a
+    message budget and no clock, so a front-end that had already claimed the
+    alternate screen hung there with no input loop running.
+    `tui/host/native_host.traceFolderProblem` `stat`s for the three trace
+    shapes (`trace.bin`, `rr/`, a `.ct` container) BEFORE the tty is claimed. A
+    shape-valid folder that stalls the handshake still stalls.
+  * **`nim-libvterm`'s `synchronizedOutput()` is a LIVE FLAG, not a latch**, and
+    **`TermAssert.assertSynchronizedRender` cannot fail** — its "not observed"
+    arm is `discard` (`TermAssert/src/term_assert.nim:640-647`). To assert DEC
+    2026 pairing, feed the emitter's own bytes to a fresh
+    `nim_libvterm.newScreen` (true after the open, false after the close, and an
+    unpaired stream latches true) and assert `false` on the live session.
+  * **`isonim-tui`'s inline styles now understand `indexed:N`.** `ckIndexed` was
+    always ENCODABLE (`text/ansi.fgParams` emits `38;5;N`) and had no spelling
+    in `compositor.parseColorOrDefault`, so a truecolor→256→16→mono ladder could
+    not have four distinct rungs. Additive: every string that reached that point
+    previously fell through to `namedColor`.
+  * **An EMPTY shell has zero styled spans.** `shell.paintPane` draws CTUI-3's
+    plain `TITLE ────` row with the default style and only delegates to a
+    pane's own painter when that pane's model has content. A style test built
+    from `newShellModel` alone makes "no colour" true for free.
+  * **The token framer, the timed read and `frameBytes` live in
+    `tui/host/terminal_driver.nim`**, and `testing/test_app_runtime.nim`
+    imports them. The direction is forced: no module under `testing/` may appear
+    in `main.nim`'s import closure. The framer handles SS3 (`ESC O P`..`S`),
+    which the old copy did not — §4.2's `F1` was unreachable until CTUI-11.

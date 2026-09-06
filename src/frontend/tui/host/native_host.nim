@@ -42,7 +42,7 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it spawns replay-server.".}
 
-import std/[os, posix]
+import std/[os, posix, strutils]
 
 import headless_session
 export headless_session
@@ -124,12 +124,63 @@ proc resolveTraceFolder*(path: string): string =
     raiseHost("no such trace folder: " & absolute)
   absolute
 
+proc traceFolderProblem*(path: string): string =
+  ## "" when `path` holds something `replay-server` can open, and what is wrong
+  ## with it otherwise.
+  ##
+  ## ## Why this exists, measured rather than supposed
+  ##
+  ## CTUI-11 pointed the shipped binary at a directory that is not a recording
+  ## (the checkout root) and it HUNG: the driver had already claimed the
+  ## terminal and painted "opening …", `replay-server` refused the folder and
+  ## exited 2 without writing one byte of DAP, and the handshake's blocking read
+  ## never returned. The user was left with a claimed alternate screen, no
+  ## input loop yet running, and no key that could end it — the worst shape a
+  ## failure can take in a full-screen application.
+  ##
+  ## So the shape is checked BEFORE anything is spawned and before the terminal
+  ## is claimed. It is a cheap `stat`, and it turns the overwhelmingly common
+  ## mistake — a mistyped or wrong path — into a named refusal on the ordinary
+  ## screen.
+  ##
+  ## ## What it does NOT claim
+  ##
+  ## That the recording is INTACT. A folder with a truncated `trace.bin` passes
+  ## here and fails in the engine, and a folder that passes here and then hangs
+  ## the handshake would hang exactly as before — `DapStdioBackend`'s
+  ## `waitForEvent` is a blocking read with a message budget and no clock, and
+  ## bounding it is a change to a module twenty-five suites share. That is
+  ## recorded as a limit rather than papered over.
+  ##
+  ## ## The three shapes
+  ##
+  ## The same three `src/frontend/tui/tests/fixtures/fixture_provider.
+  ## isUsableTraceDir` recognises, which are in turn the ones
+  ## `src/tests/gui/tests/noir-space-ship/noir_space_ship_test.nim` has always
+  ## recognised. Spelled again here rather than shared, because that one is a
+  ## TEST helper and a shipped binary must not depend on the test tree; the two
+  ## are cross-referenced so a fourth shape is added to both.
+  if not dirExists(path):
+    return "no such folder"
+  if fileExists(path / "trace.bin"):
+    return ""
+  if dirExists(path / "rr"):
+    return ""
+  for kind, entry in walkDir(path):
+    if kind == pcFile and entry.endsWith(".ct"):
+      return ""
+  "it holds no `trace.bin`, no `rr/` and no `.ct` container, so it is not a " &
+  "CodeTracer recording"
+
 proc openLocalTrace*(traceFolder: string): HeadlessDebugSession =
   ## Spawn `replay-server` on `traceFolder` and complete the DAP handshake.
   ##
   ## The one operation in the whole TUI that the Embed SDK facade cannot
   ## express, and therefore the one that decided this directory exists.
   let resolved = resolveTraceFolder(traceFolder)
+  let problem = traceFolderProblem(resolved)
+  if problem.len > 0:
+    raiseHost(resolved & ": " & problem)
   let bin = findReplayServer()
   if bin.len == 0:
     raiseHost(replayServerRemedy())

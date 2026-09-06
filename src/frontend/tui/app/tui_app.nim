@@ -80,6 +80,37 @@ type
       ## Owned by the application rather than created per frame, which is
       ## CTUI-5's risk mitigation for tree-sitter cost; `nil` parses every
       ## frame.
+    callStack*: CallStackModel
+    variables*: VariablesModel
+    timeline*: TimelineBarModel
+    eventLog*: EventLogModel
+      ## CTUI-6, CTUI-7 and CTUI-8's panes, as values, on exactly the rule
+      ## `source` above states: a host sets each one per frame from what the
+      ## matching binding produced, and the view is a pure function of the
+      ## value.
+      ##
+      ## CTUI-11 ADDED THESE, and until it did there was nothing that could
+      ## have: every one of those panes was exercised only through a test that
+      ## built its own model, because `main.nim` had no driver and therefore no
+      ## frame to put one in. Their zero values are the EMPTY models
+      ## `app/views/shell.nim` already documents as its default, so a `TuiApp`
+      ## that never fills them paints exactly the screen it painted before.
+    notification*: string
+      ## §3.3.6's message line. Owned here rather than recomputed per frame so
+      ## the answer to the last command survives until the next one.
+    traceName*: string
+    tick*: int
+    totalTicks*: int
+      ## §3.1's header fields for a session a HOST opened.
+      ##
+      ## SEPARATE FROM `shell.activeSlot()`, and that is the point rather than
+      ## duplication. `HeadlessApp`'s slots are the DESKTOP's multi-session
+      ## model — a tab strip, a persisted `LayoutNode` per session — and the
+      ## terminal front-end opens one trace through `host/tui_session.nim`,
+      ## which spawns `replay-server` and therefore cannot be an `app/` concern.
+      ## Left at "" and 0 these change nothing: `shellModel` prefers the active
+      ## slot's title when there is one, so every existing caller paints the
+      ## header it painted before.
 
 proc newTuiApp*(title: string = "CodeTracer TUI"): TuiApp =
   ## An application with no sessions. Constructing it sends nothing anywhere
@@ -135,7 +166,9 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   ## With no session open there is nothing to carry, so the profile's default
   ## tree is used and the header says so.
   let selected = selectProfile(width, height)
-  var header = initHeaderModel(traceName = "-")
+  var header = initHeaderModel(
+    traceName = (if app.traceName.len > 0: app.traceName else: "-"),
+    tick = app.tick, totalTicks = app.totalTicks)
   let active = app.shell.activeSlot()
   if not active.isNil:
     header.traceName = (if active.title.len > 0: active.title else: $active.id)
@@ -147,11 +180,16 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
         active: s.id == app.shell.activeSessionId())
   result = ShellModel(
     header: header,
-    status: initStatusBarModel(mode = umNormal, profile = selected),
+    status: initStatusBarModel(mode = umNormal, profile = selected,
+                               notification = app.notification),
     layout: (if active.isNil: profileLayout(selected) else: active.layout),
     profile: selected,
     source: app.source,
-    highlighting: app.highlighting)
+    highlighting: app.highlighting,
+    callStack: app.callStack,
+    variables: app.variables,
+    timeline: app.timeline,
+    eventLog: app.eventLog)
 
 proc renderScreen*(app: TuiApp; r: TerminalRenderer;
                    width, height: int): TerminalNode =

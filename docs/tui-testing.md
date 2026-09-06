@@ -569,6 +569,95 @@ is the only one that **moves the cursor**.
 > frames still use the ordinary barrier and only its prompt frames need the
 > other one.
 
+### Driving the SHIPPED BINARY on a real trace (CTUI-11)
+
+Until CTUI-11 every Tier-2 case spawned a **snapshot app**: one component tree,
+`test_app_runtime`'s runtime, no debugger. CTUI-11 gave `main.nim` a driver, so
+`build/bin/codetracer-tui <trace-folder>` is now itself a subject —
+`tests/real_terminal/test_real_capability_negotiation.nim` spawns it. Three
+things about it differ from a snapshot app and all three will bite.
+
+**It paints TWICE on startup, and `waitForCompleteFrame` returns on the first.**
+`main.nim` negotiates the terminal, claims the tty and paints *frame 0* — the
+shell, with `opening <folder> …` on the status line — and only then spawns
+`replay-server`. Frame 1 is the debugger. Both end with the cursor on the
+bottom-right cell, so the cursor barrier cannot tell them apart. Wait for the
+status row to stop saying `opening ` and *then* for the cursor barrier;
+`settleOnDebugger` in that suite is the shape.
+
+That order is deliberate and is not a testing convenience: a front-end that
+showed nothing until the engine answered would be indistinguishable, for that
+whole second, from one that had hung. It is also what makes CTUI-11's cold-start
+gate measurable — process start to frame 0, with probing enabled, measured at
+**25 ms** on a 24-core host at load 10.8.
+
+**It needs a real recording.** `resolveFixture("calc")` from
+`tests/fixtures/fixture_provider.nim`, and a resolution failure **fails by
+name** with the recipe rather than skipping.
+
+**It restores the terminal on the way out**, so anything read after the child
+exits reads a terminal that has been given back: `mouseProtocol()` is `mpNone`
+again after `?1006l ?1000l`. Read the negotiation **while the child is alive**.
+
+### What libvterm can and cannot see about DEC 2026
+
+`synchronizedOutput()` is a **live flag, not a latch**:
+`nim-libvterm/extended_state.handleCsi` sets it on `CSI ? 2026 h` and clears it
+on `CSI ? 2026 l`. After a complete frame it reads `false` whether the driver
+bracketed correctly or never opened a bracket at all.
+
+**`TermAssert.assertSynchronizedRender` cannot fail.** Its "not observed" arm is
+`discard` (`TermAssert/src/term_assert.nim:640-647`). Calling it satisfies the
+published gate and asserts nothing, so it is never the only thing a case does.
+
+The pairing is therefore established in two halves, both falsifiable:
+
+* feed `host/terminal_driver.bracketFrame`'s own output into a fresh
+  `nim_libvterm.newScreen` — the same parser the pty path uses. The flag goes
+  **true** after the open and **false** after the close, and a stream missing the
+  close leaves it **true**. That is the positive control, and the mutation arm
+  is one line.
+* assert `synchronizedOutput() == false` on the live binary after a settled
+  frame. An unpaired open latches it and reddens this.
+
+### The token framer is `host/`'s now, and the snapshot runtime consumes it
+
+`testing/test_app_runtime.nim` no longer carries its own byte-to-token state
+machine, timed read or `frameBytes`. All three moved to
+`host/terminal_driver.nim` and it imports them. The direction is forced:
+`tests/test_tui_build_prerequisites.nim` asserts that no module under `testing/`
+is in `main.nim`'s import closure, so the shipped driver cannot import the
+runtime.
+
+Behaviour is byte-for-byte what it was on every sequence any suite here sends,
+including the two documented above (a held lone `\x1b`, and `\x1b\x1b`
+delivering exactly one `Esc`). **One thing was added: SS3.** `ESC O P` … `ESC O
+S` are xterm's F1-F4 and exactly what `sendKey("f1")` writes; the old framing
+dropped the `ESC` and delivered `O` then `P` as two ordinary bytes, so §4.2's
+`F1` (Command Palette) was a binding no terminal could reach. Nothing in this
+tree sent those bytes, so no existing byte stream moved.
+
+**What was NOT shared is the termios.** `host/terminal_driver.start` uses
+`nim-termctl`'s `enableRawMode`, which installs the signal-safe restore CTUI-11
+asks for — and with it an `atexit` hook that writes an alt-screen leave, a
+mouse-off and a cursor-show as the process dies. A snapshot app must not do
+that: those bytes would land on the pty a suite is still parsing, and
+`cursorVisible` is a fact CTUI-9's modal cases assert.
+
+### An empty shell has no styled spans on it
+
+Measured while writing `app/tests/test_degraded_style_tables.nim`:
+`newShellModel(...)` plus `shellStyledRows` produces a screen with **zero**
+cells carrying a colour. `app/views/shell.paintPane` draws CTUI-3's plain
+`TITLE ────` row with the default style and only delegates to a pane's own
+painter when that pane's model has content.
+
+So a fixture built from `newShellModel` alone makes "no colour after degrading"
+true for free, on a screen that never had any — the positive-floor trap arriving
+through a fixture instead of through an assertion. Fill at least one pane model
+(`initTimelineBarModel(boundsKnown = true)` is the cheapest) before asserting
+anything about styles.
+
 ### `unicode.strip` does not strip an all-whitespace string
 
 A Tier-2 suite that reads rows off the terminal almost always trims the

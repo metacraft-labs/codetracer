@@ -104,7 +104,7 @@
 ## decision to answer — `--never-settle` makes it paint, park the cursor and
 ## never ask, which is the negative arm `test_ipc_settled_frame.nim` needs.
 
-import std/[monotimes, os, posix, strutils, termios, times]
+import std/[monotimes, posix, strutils, termios, times]
 
 import isonim_tui
 import term_assert_client
@@ -117,6 +117,28 @@ import term_assert_client
 # `testing/` is reachable from `main.nim`, so the release binary links none of
 # it.
 import ../host/resize
+
+# CTUI-11. THE FRAMING, THE TIMED READ AND THE FRAME BYTES ARE THE DRIVER'S NOW,
+# and this module consumes them rather than carrying its own copies.
+#
+# The direction is forced. `tests/test_tui_build_prerequisites.nim` asserts that
+# no module under `testing/` appears in `main.nim`'s import closure, so the
+# shipped driver cannot import this file; the shared code therefore has to live
+# in `host/` and this file reaches down to it. That is also the arrangement that
+# makes the sharing worth anything: the framing is exercised against a real
+# terminal by every Tier-2 case in this tree, and a second copy inside the
+# release binary would be the copy nothing tested.
+#
+# WHAT IS NOT SHARED IS THE TERMIOS, and that is deliberate rather than
+# residual. `host/terminal_driver.start` uses `nim-termctl`'s `enableRawMode`,
+# which is what installs the signal-safe restore CTUI-11 asks for — and with it
+# an `atexit` hook that writes an alt-screen leave, a mouse-off and a
+# cursor-show onto the terminal as the process dies. A snapshot app must not do
+# that: those bytes would land on the pty a Tier-2 suite is still parsing, and
+# `cursorVisible` is a fact CTUI-9's modal cases assert. So the child keeps the
+# narrow `ECHO | ICANON | ISIG` clear below, which is the smallest thing that
+# makes a capture byte not echo and `Ctrl+c` reach the app.
+import ../host/terminal_driver
 
 # CTUI-6. The OSC 8 emitter lives in `app/views/hyperlinks.nim` — product code
 # in the SDK-consuming layer — and is called from here because this is what
@@ -348,81 +370,33 @@ proc leaveRawMode() =
     termiosSaved = false
 
 proc emit(s: string) =
-  ## One `write(2)`, no stdio buffering. Short writes are retried because a pty
-  ## whose reader is behind will accept only part of a frame at a time.
-  var off = 0
-  while off < s.len:
-    let n = posix.write(1.cint, unsafeAddr s[off], s.len - off)
-    if n < 0:
-      let e = osLastError()
-      if cint(e) == EINTR: continue
-      return
-    if n == 0: return
-    off += n
+  ## One `write(2)`, no stdio buffering. `host/terminal_driver.writeAll` is the
+  ## implementation; this name is kept because it is what the paint path below
+  ## has always called and renaming it would obscure the diff that moved the
+  ## code.
+  writeAll(1.cint, s)
 
 const
-  TestAppReadTimeout* = -1
-  TestAppReadEof* = -2
-  TestAppReadWoke* = -3
-    ## `wakeFd` became readable. Returned rather than handled here so the
-    ## caller — which owns the `ResizeWatcher` — is the one that drains the
-    ## self-pipe, and so "a signal arrived" and "a byte arrived" are two
-    ## different answers rather than one timeout.
+  TestAppReadTimeout* = ReadTimeout
+  TestAppReadEof* = ReadEof
+  TestAppReadWoke* = ReadWoke
+    ## The driver's sentinels under this module's published names, so the
+    ## suites that already spell them `TestApp…` keep resolving.
 
 proc readByteWithTimeout(timeoutMs: int; wakeFd: cint = -1): int =
-  ## One byte from fd 0, or `TestAppReadTimeout` / `TestAppReadEof` /
-  ## `TestAppReadWoke`.
-  ##
-  ## `wakeFd` is `host/resize.resizeWakeFd()` — the read end of the SIGWINCH
-  ## self-pipe — when the caller is reflowing. Selecting on it rather than
-  ## polling on the timeout is what keeps a reflow's latency the kernel's
-  ## rather than this loop's: with a 100 ms poll every measured resize would
-  ## carry up to 100 ms of this function in it, and CTUI-14's budget for the
-  ## whole reflow is 20.
-  var rs: TFdSet
-  FD_ZERO(rs)
-  FD_SET(0.cint, rs)
-  var maxFd = 0.cint
-  if wakeFd >= 0:
-    FD_SET(wakeFd, rs)
-    if wakeFd > maxFd: maxFd = wakeFd
-  var tv: Timeval
-  tv.tv_sec = posix.Time(timeoutMs div 1000)
-  tv.tv_usec = clong((timeoutMs mod 1000) * 1000)
-  let ready = posix.select(maxFd + 1, addr rs, nil, nil, addr tv)
-  if ready <= 0: return TestAppReadTimeout
-  if wakeFd >= 0 and FD_ISSET(wakeFd, rs) != 0 and FD_ISSET(0.cint, rs) == 0:
-    return TestAppReadWoke
-  if FD_ISSET(0.cint, rs) == 0: return TestAppReadWoke
-  var b: char
-  let got = posix.read(0.cint, addr b, 1)
-  if got == 0: return TestAppReadEof
-  if got < 0: return TestAppReadTimeout
-  int(ord(b))
+  ## One byte from fd 0. `host/terminal_driver.readByteWithTimeout` with this
+  ## module's fixed descriptor bound.
+  terminal_driver.readByteWithTimeout(timeoutMs, 0.cint, wakeFd)
 
 # ---------------------------------------------------------------------------
 # painting
 # ---------------------------------------------------------------------------
 
-proc frameBytes*(buf: ScreenBuffer): string =
-  ## The exact byte stream a snapshot app writes for one frame.
-  ##
-  ## Exposed rather than inlined so a test can assert on the emission without
-  ## a pty — and so the row re-gluing rule described in this module's header
-  ## has exactly one implementation.
-  result = "\x1b[2J\x1b[H"
-  let raw = encodeAnsi(buf)
-  var row = 1
-  var line = ""
-  for ch in raw:
-    if ch == '\n':
-      result.add "\x1b[" & $row & ";1H" & line
-      line = ""
-      inc row
-    else:
-      line.add ch
-  if line.len > 0:
-    result.add "\x1b[" & $row & ";1H" & line
+# `frameBytes` MOVED TO `host/terminal_driver.nim` and is re-exported below.
+# It was CTUI-2's, it is now what the shipped driver writes for every frame, and
+# it is the row re-gluing rule this module's header describes — which now has
+# exactly one implementation for both tiers rather than one per tier.
+export terminal_driver.frameBytes
 
 # ---------------------------------------------------------------------------
 # the runtime
@@ -456,12 +430,6 @@ proc stepLabel*(base: string; step: int): string =
   ## `-stepN`, so a parent driving F10 can ask for the frame it wants by name
   ## rather than by timing.
   if step <= 0: base else: base & "-step" & $step
-
-proc isCsiFinal(c: char): bool =
-  ## Whether `c` terminates a CSI sequence: the final-byte range 0x40-0x7E of
-  ## ECMA-48. Parameter bytes are 0x30-0x3F and intermediates 0x20-0x2F, so
-  ## `ESC [ < 0 ; 12 ; 5 M` ends at `M` and `ESC [ 21 ~` at `~`.
-  c >= '\x40' and c <= '\x7e'
 
 proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
                      input: InputHandler = nil;
@@ -549,10 +517,12 @@ proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
   let deadline = getMonoTime() + initDuration(seconds = TestAppDeadlineSeconds)
   result = TestAppExitDeadline
   # An escape sequence arrives one byte at a time through `readByteWithTimeout`,
-  # so the step key is accumulated rather than matched on a single read. Only a
-  # PREFIX of `TestAppStepKey` is retained: anything else resets the buffer, so
-  # a stray `\x1b` cannot swallow the quit byte that follows it.
-  var pendingKey = ""
+  # so bytes are framed into whole tokens by `host/terminal_driver.InputFramer`
+  # — the same framer the shipped driver runs. Its two documented behaviours are
+  # the ones every Tier-2 suite here depends on: a lone `\x1b` is held (it is a
+  # prefix of every escape sequence) and `\x1b\x1b` delivers exactly one `Esc`,
+  # because the second byte breaks the prefix and is honoured on its own.
+  var framer = initInputFramer()
   while getMonoTime() < deadline:
     let b = readByteWithTimeout(100, wakeFd)
     if b == TestAppReadEof:
@@ -570,64 +540,49 @@ proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
         emit(resizeAckBytes(cols, rows))
         repaint()
       continue
-    let ch = char(b)
-    if pendingKey.len > 0 or ch == '\x1b':
-      pendingKey.add ch
-      if pendingKey == TestAppStepKey:
-        pendingKey = ""
-        # CTUI-9: THE APP SEES F10 TOO. CTUI-5 made this sequence the runtime's
-        # own step key, which meant the one function key §4.2 binds ("Step Over
-        # (Forward)": `n` / `F10`) was the one key no app could be asked about.
-        # It is offered to the handler first and the step still happens
-        # afterwards, so every CTUI-2/3/5/6/8 app behaves exactly as it did —
-        # their handlers answer `false` to it and change nothing.
-        if not input.isNil:
-          discard input(TestAppStepKey)
+    let (complete, token) = framer.feed(char(b))
+    if not complete:
+      continue
+    if token == TestAppStepKey:
+      # CTUI-9: THE APP SEES F10 TOO. CTUI-5 made this sequence the runtime's
+      # own step key, which meant the one function key §4.2 binds ("Step Over
+      # (Forward)": `n` / `F10`) was the one key no app could be asked about.
+      # It is offered to the handler first and the step still happens
+      # afterwards, so every CTUI-2/3/5/6/8 app behaves exactly as it did —
+      # their handlers answer `false` to it and change nothing.
+      if not input.isNil:
+        discard input(TestAppStepKey)
+      inc step
+      repaint()
+      # The cursor is back on the barrier, so the parent's
+      # `waitForCompleteFrame` means "the NEW frame is complete".
+      continue
+    let ch = if token.len == 1: token[0] else: '\0'
+    if token.len > 1:
+      # A WHOLE SEQUENCE — an SGR-1006 mouse report, an arrow, a function key.
+      # CTUI-6's reason for framing at all: `app/input/call_stack_keys.decodeMouse`
+      # decodes a value, so it can be asserted against the exact bytes
+      # `TermAssert.sendMouseClick` writes without a pty.
+      if not input.isNil and input(token):
+        # THE STEP COUNTER ADVANCES ON ANY REPAINT THE PARENT CAUSED, not only
+        # on F10, and that is what makes the new frame NAMEABLE: under
+        # `--test-ipc` the child labels its screenshot `<label>-stepN`, and a
+        # parent that drove a click would otherwise ask for a label that already
+        # exists and be answered with the frame from BEFORE its input.
+        # `dual_snap.waitForCompleteFrame` cannot close that gap either — the
+        # cursor is already parked on the barrier from the previous frame.
         inc step
         repaint()
-        # The cursor is back on the barrier, so the parent's
-        # `waitForCompleteFrame` means "the NEW frame is complete".
-        continue
-      if TestAppStepKey.startsWith(pendingKey):
-        continue
-      # NOT THE STEP KEY. CTUI-6: an app with an `input` handler receives whole
-      # SEQUENCES — SGR-1006 mouse reports are the reason — so the accumulation
-      # continues to the CSI final byte instead of being abandoned here.
-      #
-      # Without a handler, and for anything that is not a CSI, the ORIGINAL
-      # behaviour is kept exactly: drop the escape, honour the byte that broke
-      # the prefix. That is what keeps `q` after a stray `\x1b` from hanging,
-      # and it is why every CTUI-2/3/5 app behaves as it did.
-      if pendingKey.len >= 2 and pendingKey[1] == '[':
-        if pendingKey.len > 64:
-          pendingKey = ""          # runaway: not a sequence, drop it
-        elif isCsiFinal(ch):
-          let token = pendingKey
-          pendingKey = ""
-          if not input.isNil and input(token):
-            # THE STEP COUNTER ADVANCES ON ANY REPAINT THE PARENT CAUSED, not
-            # only on F10, and that is what makes the new frame NAMEABLE: under
-            # `--test-ipc` the child labels its screenshot `<label>-stepN`, and
-            # a parent that drove a click would otherwise ask for a label that
-            # already exists and be answered with the frame from BEFORE its
-            # input. `dual_snap.waitForCompleteFrame` cannot close that gap
-            # either — the cursor is already parked on the barrier from the
-            # previous frame.
-            inc step
-            repaint()
-        continue
-      pendingKey = ""
-      # Fall through: the byte that broke the prefix is still an ordinary
-      # byte and must be honoured, or a `q` after a stray escape would hang.
-    if ch == TestAppQuitByte or b == 0x04:
+      continue
+    if ch == TestAppQuitByte or ch == '\x04':
       result = TestAppExitOk
       break
     if ch != TestAppCaptureByte and not input.isNil:
       # An ordinary key for the app: `j`, `k`, `x`. The capture byte is checked
       # first and is never handed on, so a pane cannot bind `S` and break every
       # suite's screenshot handshake.
-      if input($ch):
-        # See the CSI branch above on why an input-driven repaint is a step.
+      if input(token):
+        # See the sequence branch above on why an input-driven repaint is a step.
         inc step
         repaint()
       continue
