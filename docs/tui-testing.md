@@ -386,7 +386,24 @@ and the next lane run reused the MUTATED binary, because neither the app source
 nor the runtime had changed. The suite reported a defect that no longer
 existed. The dangerous direction is the other one: a cross-tier comparison
 between a fresh Tier-1 model and a stale Tier-2 binary is a comparison of two
-different programs. Sibling libraries (`isonim-tui`, `TermAssert`) are
+different programs.
+
+**CTUI-7 met the same trap through a different door, and it is worth knowing
+before you run a mutation arm.** The stamp compares MTIMES. Restoring a mutated
+file from a backup taken with `cp -p` — or with `git stash`, or with any tool
+that preserves timestamps — gives the restored file an mtime OLDER than the
+binary built from the mutation, so `newestSourceTime` sees nothing new and the
+next Tier-2 run reuses the mutated child app. It presents as three suites
+failing on rows whose model and terminal text differ by exactly the thing the
+arm changed, long after the arm was restored and `git diff` is clean. The remedy
+is two commands:
+
+```sh
+find src/frontend/tui/app -name '*.nim' -exec touch {} +
+rm -rf test-logs/tui-dual-snap/bin
+```
+
+The guard is right; a timestamp-preserving restore is what defeats it. Sibling libraries (`isonim-tui`, `TermAssert`) are
 deliberately **not** in the stamp — a child app draws `app/`, and rebuilding on
 every sibling edit would cost the lane a link per case for a dependency that
 moves far less often.

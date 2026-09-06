@@ -49,9 +49,10 @@ import ./header
 import ./source_pane
 import ./status_bar
 import ./styled_row
+import ./variables
 
 export header, status_bar, profile, project, source_pane, styled_row
-export call_stack
+export call_stack, variables
 
 type
   ShellModel* = object
@@ -75,6 +76,16 @@ type
       ## a shell built with no session open paints exactly the title row it
       ## painted before this milestone. `app_shell.nim`'s cross-tier golden is
       ## therefore the same screen it was, and CTUI-3's suites still read it.
+    variables*: VariablesModel
+      ## CTUI-7's variables pane, as a value.
+      ##
+      ## EMPTY BY DEFAULT, on exactly the same rule as `source` and
+      ## `callStack` below and for exactly the same reason: `paintPane`
+      ## delegates the `state` rectangle to `app/views/variables.nim` only when
+      ## the model has scopes, so a shell with no session open paints the tab
+      ## strip CTUI-3 painted, `app_shell.nim`'s cross-tier golden is unchanged,
+      ## and every CTUI-3, CTUI-5 and CTUI-6 assertion that reads that row still
+      ## reads it.
     callStack*: CallStackModel
       ## CTUI-6's call stack pane, as a value.
       ##
@@ -262,6 +273,25 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
     discard paintCallStack(
       g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
       model.callStack)
+  # THE VARIABLES PANE IS THE FIRST ONE THAT CAN BE IN A TAB STACK, and that is
+  # why this arm is shaped differently from the two above. `paneState` sits in a
+  # `stack` with `paneEventLog` in every profile's layout, so the rectangle
+  # already carries CTUI-3's tab strip on its first row; the pane owns what is
+  # left. Its own title row (`VARIABLES 22 name(s) …`) goes below the strip
+  # rather than replacing it, because the strip is what says which of the two
+  # stacked panes is on screen and CTUI-9 will make it clickable.
+  elif region.pane == paneState and not model.variables.isEmpty:
+    if region.activeTab >= 0 and region.tabs.len > 0:
+      g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
+      if a.height >= 2:
+        discard paintVariables(
+          g, CellArea(col: a.col, row: a.row + 1, width: inner,
+                      height: a.height - 1),
+          model.variables)
+    else:
+      discard paintVariables(
+        g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
+        model.variables)
   elif region.activeTab >= 0 and region.tabs.len > 0:
     g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
   else:
