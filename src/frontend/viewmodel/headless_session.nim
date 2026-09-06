@@ -460,121 +460,300 @@ proc getDebuggerStatus*(s: HeadlessDebugSession): DebuggerStatus =
 # DAP response parsing helpers
 # ---------------------------------------------------------------------------
 
-proc extractValueText(valueNode: JsonNode): string =
-  ## Extract a human-readable text representation from a ct/load-locals
-  ## ``Value`` JSON object.
-  ##
-  ## The backend's ``Value`` struct (see ``src/db-backend/src/value.rs``)
-  ## uses a tagged-flat layout: ``kind`` is a numeric ``TypeKind`` ordinal,
-  ## and the actual data lives in ``i`` (int), ``f`` (float), ``text``
-  ## (string), ``b`` (bool), ``c`` (char), ``r`` (raw), ``msg`` (error),
-  ## or ``elements`` (compound).
-  ##
-  ## TypeKind ordinals (from codetracer-trace-format):
-  ##   7 = Int, 8 = Float, 3 = String, 4 = CString, 5 = Bool,
-  ##   6 = Struct, 9 = Seq, 10 = Char, 11 = Tuple, 30 = None, etc.
+# ---------------------------------------------------------------------------
+# `ct/load-locals` value decoding
+#
+# THE ORDINALS BELOW ARE THE WIRE'S, AND THEY ARE NAMED BECAUSE THE PREVIOUS
+# SET WAS WRONG.
+#
+# `Value.kind` is serialised by `serde` from the Rust `TypeKind`, whose
+# discriminants come from `codetracer-trace-format`'s Cap'n Proto schema —
+# `Seq = 0 … Slice = 33`, generated into
+# `src/db-backend/target/*/build/codetracer_trace_format_capnp-*/out/src/
+# trace_capnp.rs`. The constants here are that list, transcribed, and the
+# spelling is deliberately `tk*` so a reader can grep both sides.
+#
+# The mapping this replaces was written from a different enumeration and
+# disagreed on SIX kinds, which is not a cosmetic difference — it decided what
+# a debugger showed for a string and for a boolean. Measured on CTUI-1's corpus
+# (2026-09-06), before the fix:
+#
+#   * a `String` (kind 9) was decoded as a `Seq`, so `__doc__` came back as
+#     `[]` — an empty LIST where the program has text;
+#   * a `Bool` (kind 12) matched nothing and came back as `""`;
+#   * a `Tuple` (kind 27) and a `Seq` (kind 0) matched nothing, so
+#     `wide_state`'s 600-entry `wide_mapping` — a `Seq` of `Tuple`s — decoded
+#     to `""` with 600 children that were all `""` as well;
+#   * a `Raw` (kind 16) matched nothing and came back as `""`, which is every
+#     Python function, class and module object in the corpus — `<function add
+#     at 0x…>` and its 3935 siblings;
+#   * an `Error` (kind 24) matched nothing and came back as `""` too.
+#
+# THOSE ARE THE SIX, AND THEY ARE ALL OF THEM: the corpus produces exactly
+# eight `TypeKind`s — 0, 7, 9, 12, 16, 24, 27, 30 — and the old mapping agreed
+# with the wire on only `Int` (7) and `None` (30).
+#
+# The `""` cases are the dangerous ones. `app/source_binding.annotationsFrom`
+# DROPS a variable with an empty value on the grounds that "the formatter had
+# nothing to print", and a step-to-step diff over rendered text cannot see a
+# change between two values that both render as `[]` — so a `symbol` moving
+# from `"+"` to `"-"` was invisible to anything comparing what the pane shows.
+# ---------------------------------------------------------------------------
+
+const
+  tkSeq* = 0
+  tkSet* = 1
+  tkHashSet* = 2
+  tkOrderedSet* = 3
+  tkArray* = 4
+  tkVarargs* = 5
+  tkStruct* = 6
+  tkInt* = 7
+  tkFloat* = 8
+  tkString* = 9
+  tkCString* = 10
+  tkChar* = 11
+  tkBool* = 12
+  tkLiteral* = 13
+  tkRef* = 14
+  tkRecursion* = 15
+  tkRaw* = 16
+  tkEnum* = 17
+  tkEnum16* = 18
+  tkEnum32* = 19
+  tkC* = 20
+  tkTable* = 21
+  tkUnion* = 22
+  tkPointer* = 23
+  tkError* = 24
+  tkFunction* = 25
+  tkTypeValue* = 26
+  tkTuple* = 27
+  tkVariant* = 28
+  tkHtml* = 29
+  tkNone* = 30
+  tkNonExpanded* = 31
+  tkAny* = 32
+  tkSlice* = 33
+
+  SequenceKinds* = {tkSeq, tkSet, tkHashSet, tkOrderedSet, tkArray, tkVarargs,
+                    tkSlice}
+    ## Kinds rendered `[a, b, c]`. A `Dict` arrives as one of these carrying
+    ## `Tuple` elements — that is how `wide_state`'s `wide_mapping` is on the
+    ## wire, measured rather than assumed.
+  CompoundKinds* = SequenceKinds + {tkStruct, tkTuple, tkUnion, tkVariant}
+    ## Kinds whose `elements` are the value's own members, so a tree view can
+    ## expand them.
+
+  ValueDecodeDepth* = 16
+    ## Bound on the recursion below. The engine already bounds the answer with
+    ## `depthLimit` (7 in every request this module makes), so this is a guard
+    ## against a malformed response rather than a display policy — a cycle in
+    ## the JSON would otherwise not terminate.
+
+proc valueTypeName*(valueNode: JsonNode): string =
+  ## `Value.typ.langType`, or "" when the response carries no type.
   if valueNode.isNil or valueNode.kind != JObject:
     return ""
+  let typ = valueNode.getOrDefault("typ")
+  if typ.isNil or typ.kind != JObject:
+    return ""
+  typ.getOrDefault("langType").getStr("")
+
+proc valueLabels(valueNode: JsonNode): seq[string] =
+  ## `Value.typ.labels`, verbatim. For a struct these are its field names; for
+  ## an enum they are its member names; for a tuple the wire fills them with
+  ## the members' own indices.
+  result = @[]
+  if valueNode.isNil or valueNode.kind != JObject:
+    return
+  let typ = valueNode.getOrDefault("typ")
+  if typ.isNil or typ.kind != JObject:
+    return
+  let labels = typ.getOrDefault("labels")
+  if labels.isNil or labels.kind != JArray:
+    return
+  for label in labels:
+    result.add label.getStr("")
+
+proc memberLabels(valueNode: JsonNode): seq[string] =
+  ## The labels a compound value's MEMBERS are named by — a struct's, and
+  ## nothing else's.
+  ##
+  ## A decision rather than an observation: the wire puts `["0", "1"]` in a
+  ## tuple's labels, so honouring them everywhere would render `wide_state`'s
+  ## dictionary entries as `(0: "key_000", 1: 0)` — a positional pair dressed
+  ## up as a record whose fields are named after their own indices.
+  ## `textReprDefault` (`common_types/utils/text_representation.nim`) uses
+  ## labels for `Instance` and for nothing else, and this follows it.
+  if valueNode.isNil or valueNode.kind != JObject:
+    return @[]
+  if valueNode.getOrDefault("kind").getInt(-1) != tkStruct:
+    return @[]
+  valueLabels(valueNode)
+
+proc valueElements(valueNode: JsonNode): JsonNode =
+  ## `Value.elements`, or nil.
+  if valueNode.isNil or valueNode.kind != JObject:
+    return nil
+  let elements = valueNode.getOrDefault("elements")
+  if elements.isNil or elements.kind != JArray: nil else: elements
+
+proc extractValueText*(valueNode: JsonNode;
+                       depth: int = ValueDecodeDepth): string =
+  ## A human-readable rendering of one `ct/load-locals` `Value`.
+  ##
+  ## Mirrors the engine's own `Value::text_repr`
+  ## (`src/db-backend/src/value.rs`) for every kind that function defines, and
+  ## `common_types/utils/text_representation.textReprDefault` for the ones it
+  ## leaves as a Rust `{:?}` debug print (tuples, enums, pointers, variants).
+  ## That module cannot be imported here — see `viewmodels/state_vm.nim`'s
+  ## header on the double-inclusion of `common_types` — so the conventions are
+  ## reproduced rather than shared, and the two are listed side by side above.
+  ##
+  ## ONE DELIBERATE DEPARTURE, and it is the brackets: `Value::text_repr` wraps
+  ## a `Struct` in `(…)` and `textReprDefault` writes it `Type(field:…)`, while
+  ## this writes `{…}`. A reader of a value column has to tell a record from a
+  ## positional tuple by looking at it, and the TUI's own
+  ## `app/formatters/type_formatters.classifyValue` reads exactly that shape —
+  ## `{…}` is `vcStruct` and `(…)` is `vcTuple`. Rendering both with parens
+  ## would make the two indistinguishable downstream.
+  if valueNode.isNil or valueNode.kind != JObject:
+    return ""
+  if depth <= 0:
+    return "#"
   let kind = valueNode.getOrDefault("kind").getInt(-1)
-  case kind
-  of 7:  # Int
-    result = valueNode.getOrDefault("i").getStr("")
-  of 8:  # Float
-    result = valueNode.getOrDefault("f").getStr("")
-  of 3:  # String
-    result = "\"" & valueNode.getOrDefault("text").getStr("") & "\""
-  of 4:  # CString
-    result = "\"" & valueNode.getOrDefault("cText").getStr("") & "\""
-  of 5:  # Bool
-    result = if valueNode.getOrDefault("b").getBool(false): "true" else: "false"
-  of 10: # Char
-    result = "'" & valueNode.getOrDefault("c").getStr("") & "'"
-  of 6, 9, 11: # Struct, Seq, Tuple
-    # For compound types, produce a comma-separated list of child representations.
-    let elements = valueNode.getOrDefault("elements")
-    if not elements.isNil and elements.kind == JArray:
-      var parts: seq[string]
-      # For structs, try to include field labels from typ.labels.
-      let typ = valueNode.getOrDefault("typ")
-      var labels: seq[string]
-      if not typ.isNil and typ.kind == JObject:
-        let labelsNode = typ.getOrDefault("labels")
-        if not labelsNode.isNil and labelsNode.kind == JArray:
-          for lbl in labelsNode:
-            labels.add(lbl.getStr(""))
+
+  template joinElements(sep: string): string =
+    var parts: seq[string] = @[]
+    let elements = valueElements(valueNode)
+    if not elements.isNil:
+      let labels = memberLabels(valueNode)
       for idx in 0 ..< elements.len:
-        let elem = elements[idx]
-        let childRepr = extractValueText(elem)
+        let childRepr = extractValueText(elements[idx], depth - 1)
         if idx < labels.len and labels[idx].len > 0:
-          parts.add(labels[idx] & ": " & childRepr)
+          parts.add labels[idx] & ": " & childRepr
         else:
-          parts.add(childRepr)
-      let open = if kind == 9: "[" elif kind == 11: "(" else: "{"
-      let close = if kind == 9: "]" elif kind == 11: ")" else: "}"
-      result = open & parts.join(", ") & close
+          parts.add childRepr
+    parts.join(sep)
+
+  case kind
+  of tkInt:
+    valueNode.getOrDefault("i").getStr("")
+  of tkFloat:
+    valueNode.getOrDefault("f").getStr("")
+  of tkString:
+    "\"" & valueNode.getOrDefault("text").getStr("") & "\""
+  of tkCString:
+    "\"" & valueNode.getOrDefault("cText").getStr("") & "\""
+  of tkChar:
+    "'" & valueNode.getOrDefault("c").getStr("") & "'"
+  of tkBool:
+    if valueNode.getOrDefault("b").getBool(false): "true" else: "false"
+  of tkSeq, tkSet, tkHashSet, tkOrderedSet, tkArray, tkVarargs, tkSlice:
+    "[" & joinElements(", ") & "]"
+  of tkStruct:
+    "{" & joinElements(", ") & "}"
+  of tkTuple:
+    "(" & joinElements(", ") & ")"
+  of tkUnion, tkVariant:
+    # `textReprDefault` renders a variant as `Type::variant(fields…)`. The
+    # active variant's own value is a sibling field rather than an element.
+    let variant = valueNode.getOrDefault("activeVariant").getStr("")
+    let active = valueNode.getOrDefault("activeVariantValue")
+    let head = valueTypeName(valueNode) & "::" &
+               (if variant.len > 0: variant else: "?")
+    if not active.isNil and active.kind == JObject:
+      head & "(" & extractValueText(active, depth - 1) & ")"
     else:
-      result = "()"
-  of 30: # None
-    result = "nil"
-  of 14: # Raw
-    result = valueNode.getOrDefault("r").getStr("")
-  of 15: # Error
-    result = "<error: " & valueNode.getOrDefault("msg").getStr("") & ">"
+      head & "(" & joinElements(", ") & ")"
+  of tkEnum, tkEnum16, tkEnum32:
+    # The wire carries the ordinal in `i` and the member names in
+    # `typ.labels`. Out of range, the ordinal is printed with the type's own
+    # name — `textReprDefault`'s `{langType}({enumInt})` — because a bare
+    # number beside a name-shaped column reads as an integer variable.
+    let ordinalText = valueNode.getOrDefault("i").getStr("")
+    let labels = valueLabels(valueNode)
+    var ordinal = -1
+    try:
+      ordinal = parseInt(ordinalText)
+    except ValueError:
+      ordinal = -1
+    if ordinal >= 0 and ordinal < labels.len and labels[ordinal].len > 0:
+      labels[ordinal]
+    else:
+      valueTypeName(valueNode) & "(" & ordinalText & ")"
+  of tkRef:
+    # A reference renders as the thing it refers to, which is what
+    # `textReprDefault` does: the indirection is not information a reader of a
+    # value column wants repeated on every row.
+    let target = valueNode.getOrDefault("refValue")
+    if target.isNil or target.kind != JObject: "nil"
+    else: extractValueText(target, depth - 1)
+  of tkPointer:
+    let address = valueNode.getOrDefault("address").getStr("")
+    let target = valueNode.getOrDefault("refValue")
+    if address.len == 0:
+      "NULL"
+    elif target.isNil or target.kind != JObject:
+      address
+    else:
+      address & " -> (" & extractValueText(target, depth - 1) & ")"
+  of tkRecursion:
+    "this"
+  of tkRaw:
+    valueNode.getOrDefault("r").getStr("")
+  of tkError:
+    "<error: " & valueNode.getOrDefault("msg").getStr("") & ">"
+  of tkFunction:
+    "function<" & valueTypeName(valueNode) & ">"
+  of tkNone:
+    "nil"
+  of tkNonExpanded:
+    ".."
   else:
-    # Unknown kind — fall back to ``i`` or ``text`` if present, otherwise empty.
+    # An unknown kind is reported as whatever scalar payload the response
+    # carried rather than as "", because "" is indistinguishable from "the
+    # debugger has no value for this" everywhere downstream.
     let i = valueNode.getOrDefault("i").getStr("")
-    if i.len > 0: return i
-    let text = valueNode.getOrDefault("text").getStr("")
-    if text.len > 0: return text
-    result = ""
+    if i.len > 0: i
+    else: valueNode.getOrDefault("text").getStr("")
+
+proc variableFromValue*(name: string; valueNode: JsonNode;
+                        depth: int = ValueDecodeDepth): Variable =
+  ## One `Variable` and, RECURSIVELY, its members.
+  ##
+  ## THE RECURSION IS THE POINT, and its absence was a real limitation rather
+  ## than a simplification: the previous implementation built children with
+  ## neither `hasChildren` nor `children` set, so a compound member — every
+  ## entry of `wide_state`'s `wide_mapping`, which is a `(key, value)` tuple —
+  ## arrived at a tree view as a leaf that could not be opened. The engine's
+  ## own answer already carries the whole subtree (bounded by the request's
+  ## `depthLimit`), so nothing extra is fetched; it was being discarded.
+  result = Variable(name: name, value: extractValueText(valueNode, depth),
+                    typeName: valueTypeName(valueNode))
+  if depth <= 0:
+    return
+  let kind =
+    if valueNode.isNil or valueNode.kind != JObject: -1
+    else: valueNode.getOrDefault("kind").getInt(-1)
+  if kind notin CompoundKinds:
+    return
+  let elements = valueElements(valueNode)
+  if elements.isNil or elements.len == 0:
+    return
+  let labels = memberLabels(valueNode)
+  result.hasChildren = true
+  for idx in 0 ..< elements.len:
+    let childName =
+      if idx < labels.len and labels[idx].len > 0: labels[idx]
+      else: "[" & $idx & "]"
+    result.children.add variableFromValue(childName, elements[idx], depth - 1)
 
 proc parseVariable(localNode: JsonNode): Variable =
   ## Parse a single variable entry from the ct/load-locals response.
-  let expression = localNode.getOrDefault("expression").getStr("")
-  let valueNode = localNode.getOrDefault("value")
-  let valueText = extractValueText(valueNode)
-  var typeName = ""
-  if not valueNode.isNil and valueNode.kind == JObject:
-    let typ = valueNode.getOrDefault("typ")
-    if not typ.isNil and typ.kind == JObject:
-      typeName = typ.getOrDefault("langType").getStr("")
-
-  # Check for compound children (structs, seqs, tuples).
-  var children: seq[Variable]
-  var hasChildren = false
-  if not valueNode.isNil and valueNode.kind == JObject:
-    let elements = valueNode.getOrDefault("elements")
-    if not elements.isNil and elements.kind == JArray and elements.len > 0:
-      hasChildren = true
-      let typ = valueNode.getOrDefault("typ")
-      var labels: seq[string]
-      if not typ.isNil and typ.kind == JObject:
-        let labelsNode = typ.getOrDefault("labels")
-        if not labelsNode.isNil and labelsNode.kind == JArray:
-          for lbl in labelsNode:
-            labels.add(lbl.getStr(""))
-      for idx in 0 ..< elements.len:
-        let elem = elements[idx]
-        let childName = if idx < labels.len and labels[idx].len > 0: labels[idx]
-                        else: "[" & $idx & "]"
-        let childValue = extractValueText(elem)
-        var childTypeName = ""
-        let childTyp = elem.getOrDefault("typ")
-        if not childTyp.isNil and childTyp.kind == JObject:
-          childTypeName = childTyp.getOrDefault("langType").getStr("")
-        children.add(Variable(
-          name: childName,
-          value: childValue,
-          typeName: childTypeName,
-        ))
-
-  Variable(
-    name: expression,
-    value: valueText,
-    typeName: typeName,
-    hasChildren: hasChildren,
-    children: children,
-  )
+  variableFromValue(localNode.getOrDefault("expression").getStr(""),
+                    localNode.getOrDefault("value"))
 
 proc parseCallLine(callLineNode: JsonNode; globalIndex: int64): CallLine =
   ## Parse a single calltrace line from the ct/load-calltrace-section response.

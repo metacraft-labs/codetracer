@@ -269,7 +269,21 @@ suite "CTUI-5: inline annotations follow the tick, and clear":
           inc clearedCount
           # The CLEARING case has to follow an ANNOTATED one to be the case
           # CTUI-5 names — "clear when STEPPING TO a line with none".
-          if clearedIdx < 0 and annotatedIdx >= 0 and i == annotatedIdx + 1:
+          #
+          # ANY bare frame whose PREDECESSOR annotated, not specifically the one
+          # after the FIRST annotated frame. The stricter form was what this
+          # suite was written with and it was an accident of the data rather
+          # than a statement about the pane: CTUI-7 corrected
+          # `headless_session.extractValueText`, whose `TypeKind` ordinals were
+          # wrong for six kinds, and frames 7-10 of this walk — the four
+          # `OPERATIONS = {…}` lines, each binding a FUNCTION OBJECT, which the
+          # wire sends as `TypeKind.Raw` (16), an ordinal the old mapping did
+          # not have at all, so it decoded to `""` and `annotationsFrom` dropped
+          # it — started annotating. Measured either side of the correction:
+          # 16 annotated frames with the first at index 20, and 23 with the
+          # first at index 7. The case this suite exists to assert is still in
+          # the walk; the index it sits at moved.
+          if clearedIdx < 0 and i > 0 and frames[i - 1].expected.len > 0:
             clearedIdx = i
       echo "CTUI-5 ANNOTATION WALK: " & $frames.len & " frame(s), " &
            $annotatedCount & " annotated, " & $clearedCount & " bare; " &
@@ -294,7 +308,12 @@ suite "CTUI-5: inline annotations follow the tick, and clear":
       checkpoint("cleared row: " & cleared.paneRow.strip())
 
       checkAnnotatedFrameShowsTheViewModelsValues(annotated)
-      checkClearedFrameShowsNothing(cleared, annotated)
+      # The second argument is the frame the walk really came FROM, which is
+      # what `checkClearedFrameShowsNothing`'s stale-annotation half is about.
+      # It used to be `annotated`, and that was the same frame only because the
+      # selector above insisted on `annotatedIdx + 1`; once the selector took
+      # any bare frame whose predecessor annotated, the two parted company.
+      checkClearedFrameShowsNothing(cleared, frames[clearedIdx - 1])
 
       # ---- the values are THIS tick's, not a remembered one ----------------
       # Two frames on the SAME line with DIFFERENT values would be the sharpest
