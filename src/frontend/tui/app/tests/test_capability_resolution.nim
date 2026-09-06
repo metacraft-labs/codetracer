@@ -52,7 +52,23 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 238
+const ExpectedAssertions = 244
+
+const
+  LandedThroughMilestone = 12
+    ## The highest CTUI milestone that has LANDED. Bump it when the next one
+    ## does — the stale-label check below is what makes a rotten
+    ## `PlannedOptions` owner visible, and it can only do that if this number is
+    ## current.
+
+  CutMilestones = [13]
+    ## Milestones that were WITHDRAWN rather than delivered. CTUI-13 would have
+    ## served the TUI session to a browser over `isonim-tui-serve`; it was cut
+    ## because `ct host` already serves a trace together with the replay front
+    ## end. A cut milestone owes a flag exactly as little as a landed one does,
+    ## so it is barred from an owner string for the same reason — and it needs
+    ## its own list because `n > LandedThroughMilestone` would happily accept
+    ## it.
 
 var countedAssertions = 0
 
@@ -505,12 +521,78 @@ suite "CTUI-11 Tier 1: capability resolution":
       inc namedCount
     checkpoint("published-but-unbuilt options refused by name: " & $namedCount)
     ck namedCount == PlannedOptions.len
-    ck namedCount == 6
+    # FOUR, NOT SIX. Two options left the list for DIFFERENT reasons, and the
+    # literal here is what makes each a decision rather than a drift:
+    # `--headless` is built, and `--serve` was CUT — `ct host` already serves a
+    # trace together with the replay front end, so a browser-hosted terminal
+    # emulator duplicated it with a worse UI.
+    ck namedCount == 4
+    # `--headless` PARSES, because it is built.
+    let headless = parseTuiCommand(["--headless", "/tmp"])
+    checkpoint("--headless -> " & $headless.kind)
+    ck headless.kind == tckHeadless
+    # `--serve` IS AN UNKNOWN OPTION, because the feature does not exist. Not a
+    # `PlannedOptions` entry: parking it there would promise a user that
+    # somebody still owes them the flag.
+    let serve = parseTuiCommand(["--serve", "/tmp"])
+    checkpoint("--serve -> " & $serve.kind & ": " &
+               (if serve.kind == tckUsageError: serve.message else: ""))
+    ck serve.kind == tckUsageError
+    ck serve.message.contains("unknown option")
+    var serveAdvertised = false
+    for (option, _) in PlannedOptions:
+      if option == "--serve":
+        serveAdvertised = true
+    ck not serveAdvertised
+    ck not TuiHelpText.contains("--serve")
     # …and a genuinely unknown option still reads as one, so the arm above is a
     # classification and not a catch-all.
     let unknown = parseTuiCommand(["--wat", "/tmp"])
     ck unknown.kind == tckUsageError
     ck unknown.message.contains("unknown option")
+
+  test "no PlannedOptions owner credits a milestone that cannot deliver it":
+    # THE STALE-LABEL RULE. `PlannedOptions` is a promise about work somebody
+    # still owes; an owner naming a milestone that has already LANDED — or one
+    # that was CUT — is a promise nobody is going to keep, and it reads to a
+    # user as "this was supposed to be done".
+    #
+    # Two entries carried exactly that defect and both are fixed: `--headless`
+    # said "CTUI-12, the launcher and packaging milestone" long after CTUI-12
+    # shipped (and CTUI-12's Deliverables never named it), and `--goto` said
+    # "the flag is CTUI-12's entrypoint work". The rule is what keeps them
+    # fixed.
+    #
+    # Mechanical rather than a list of forbidden strings: every `CTUI-<n>`
+    # token in an owner must name a milestone that has NOT landed and was NOT
+    # cut. An owner may name none at all, which is how `--theme` records a
+    # finding without claiming somebody owes the work.
+    var milestoneTokens = 0
+    for (option, owner) in PlannedOptions:
+      checkpoint(option & " is owed by: " & owner)
+      var i = 0
+      while true:
+        let at = owner.find("CTUI-", i)
+        if at < 0:
+          break
+        var digits = ""
+        var j = at + len("CTUI-")
+        while j < owner.len and owner[j].isDigit:
+          digits.add owner[j]
+          inc j
+        i = j
+        if digits.len == 0:
+          continue
+        inc milestoneTokens
+        let n = parseInt(digits)
+        checkpoint("  names CTUI-" & $n & "; landed through CTUI-" &
+                   $LandedThroughMilestone & "; cut: " & $CutMilestones)
+        ck n > LandedThroughMilestone
+        ck n notin CutMilestones
+    # THE FLOOR: at least one entry really does name a milestone, so the sweep
+    # above is not vacuously true of a list whose owners lost their labels.
+    checkpoint("milestone tokens found: " & $milestoneTokens)
+    ck milestoneTokens >= 3
 
   test "§6.3's own glyph sets and terminal list, read from the document":
     # THE ORACLE. Rule 6 of `docs/tui-testing.md`: where the subject is a

@@ -29,8 +29,8 @@
 ##
 ## §6.2 lists eleven options. CTUI-11 owns `--truecolor`, `--no-color`,
 ## `--ascii-borders` and `--no-mouse` — the capability overrides — and those are
-## the four this parser accepts. `--theme`, `--goto`, `--serve`,
-## `--record-keys`, `--replay-keys` and `--headless` are still refused BY NAME
+## the four this parser accepts, alongside `--headless`. `--theme`, `--goto`,
+## `--record-keys` and `--replay-keys` are still refused BY NAME
 ## (see `PlannedOptions`), with the milestone that owns each: a flag that parsed
 ## and then did nothing is the shape CTUI-0's header refuses, and a flag that
 ## reported "unknown option" would tell a user who read §6.2 that the
@@ -61,19 +61,29 @@ type
       ## A trace path was given. CTUI-0 parses it and `main.nim` reports that
       ## opening is not wired yet; CTUI-1 gives it fixtures and CTUI-3 gives it
       ## a screen.
+    tckHeadless
+      ## `--headless`. Render one settled §3.1 screen as plain text and exit.
+      ##
+      ## §6.2 publishes it ("run headlessly without opening a terminal window
+      ## (for CI)") and it is the answer to a real dead end: `codetracer-tui
+      ## <trace> | cat` used to exit 3 with "there is nothing to draw on", which
+      ## is true and unhelpful.
     tckUsageError
       ## The arguments do not name a command. Carries the message a user reads.
 
   TuiCommand* = object
     ## The parsed command line. A value, so a test can assert on it without a
     ## process.
+    ##
+    ## The two trace-opening arms share one branch, so a caller can read
+    ## `tracePath` and `flags` off either without knowing which mode it got.
+    ## `--help` and `--version` are NOT in that branch: a colour depth is not a
+    ## property of either, and the type is what says so.
     case kind*: TuiCommandKind
-    of tckOpenTrace:
+    of tckOpenTrace, tckHeadless:
       tracePath*: string
       flags*: CapabilityFlags
-        ## §6.2's four capability overrides, as a value. Carried on this arm
-        ## only: `--help` and `--version` print and exit, and a colour depth is
-        ## not a property of either.
+        ## §6.2's four capability overrides, as a value.
     of tckUsageError:
       message*: string
     else:
@@ -102,13 +112,13 @@ const
     ## it unambiguously, the same escape the launcher's own `project ./Makefile`
     ## marker uses.
 
-  PlannedOptions*: array[6, (string, string)] = [
-    ("--theme", "CTUI-10 recorded the theme registry as unbuilt here"),
-    ("--goto", "CTUI-8 owns tick seeking; the flag is CTUI-12's entrypoint work"),
-    ("--serve", "CTUI-13, the isonim-tui-serve web bridge"),
+  PlannedOptions*: array[4, (string, string)] = [
+    ("--theme",
+     "unbuilt here: isonim-tui ships a ThemeRegistry, app/ carries 121" &
+     " const CellStyle literals and no wiring to it"),
+    ("--goto", "CTUI-14, startup navigation"),
     ("--record-keys", "CTUI-14, input recording for replay and benchmarks"),
-    ("--replay-keys", "CTUI-14, input replay"),
-    ("--headless", "CTUI-12, the launcher and packaging milestone")]
+    ("--replay-keys", "CTUI-14, input replay")]
     ## §6.2's options that are PUBLISHED AND NOT BUILT, each with the milestone
     ## that owns it.
     ##
@@ -117,6 +127,47 @@ const
     ## and silently does nothing, and a flag from the published specification
     ## that reports "unknown option". Both leave a user unable to tell a gap in
     ## the product from a mistake in their command line.
+    ##
+    ## EVERY OWNER NAMES AN UNLANDED MILESTONE, OR NAMES NO MILESTONE AT ALL.
+    ## That is the rule `app/tests/test_capability_resolution.nim` enforces, and
+    ## it is what makes this list a promise rather than a fossil: a milestone
+    ## that has landed — or that has been CUT — cannot owe anybody a flag. Two
+    ## entries broke it and both are fixed here: `--goto` said "the flag is
+    ## CTUI-12's entrypoint work" and CTUI-12 shipped without it (it is
+    ## CTUI-14's now), and `--theme` credited CTUI-10 for a MEASUREMENT, which
+    ## reads as ownership; that entry now states the finding and names no
+    ## milestone, because none owns it.
+    ##
+    ## `--headless` IS OFF THIS LIST BECAUSE IT IS BUILT. It was labelled
+    ## `CTUI-12, the launcher and packaging milestone` — but CTUI-12's
+    ## Deliverables never named it, CTUI-12 is landed, and the message therefore
+    ## told a user that a FINISHED milestone owed them a flag. It is now a
+    ## parsed mode (`tckHeadless`, `host/headless.nim`).
+    ##
+    ## `--serve` IS OFF THIS LIST BECAUSE THE FEATURE WAS CUT, not built. CTUI-13
+    ## would have served the session to a browser over `isonim-tui-serve`; it was
+    ## withdrawn because `ct host` already serves a trace together with the
+    ## replay front end, so a browser-hosted terminal emulator duplicated it with
+    ## a worse UI. §6.4 of `codetracer-specs/Front-Ends/CodeTracer-TUI.md` points
+    ## the reader at `ct host`, and the flag is deliberately absent from §6.2's
+    ## published set rather than parked here: nothing owes it.
+
+  ExitOk* = 0
+  ExitUnhandled* = 1
+  ExitUsage* = 2
+  ExitNoTerminal* = 3
+    ## There is a trace and there is no screen to draw it on. Distinguishable
+    ## from a usage error on purpose: `codetracer-tui trace | cat` is a correct
+    ## command line and an impossible request, and reporting it as a bad
+    ## argument would send the user looking at their arguments.
+    ##
+    ## `--headless` gives that invocation an ANSWER, so the message behind this
+    ## code names a flag that exists rather than a milestone.
+    ##
+    ## The exit codes live HERE rather than in `main.nim` because
+    ## `host/headless.nim` returns them and `main.nim` imports it: a constant in
+    ## the entrypoint would have to be duplicated by everything the entrypoint
+    ## calls.
 
   TuiVersionText* = TuiProgramName & " " & CodeTracerVersionStr
     ## Deliberately the CodeTracer version. The TUI is a front-end of this
@@ -136,6 +187,7 @@ options:
   --no-color         monochrome: weight, underline and glyph carry every state
   --ascii-borders    draw + - | instead of the Unicode box-drawing glyphs
   --no-mouse         do not ask the terminal for mouse reporting
+  --headless         render one screen as plain text and exit — for CI
 
 The capability flags always beat the environment probe. With none of them, the
 colour depth comes from COLORTERM / TERM / TERM_PROGRAM, the border set from
@@ -185,6 +237,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
 
   var tracePath = ""
   var flags = initCapabilityFlags()
+  var mode = tckOpenTrace
   for i in first .. high(args):
     let arg = args[i]
     case arg
@@ -200,6 +253,11 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       flags.asciiBorders = true
     of "--no-mouse":
       flags.noMouse = true
+    of "--headless":
+      # Idempotent rather than an error: `--headless --headless` asks for the
+      # same one thing twice, and there is no second display mode left for it
+      # to contradict.
+      mode = tckHeadless
     else:
       if arg.startsWith("-"):
         let (planned, owner) = plannedOption(arg)
@@ -229,8 +287,26 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       kind: tckUsageError,
       message: "--truecolor and --no-color contradict each other; pass one")
 
+  # A DISPLAY MODE WITH NOTHING TO DISPLAY is a usage error rather than a help
+  # screen. `codetracer-tui --headless` with no trace reached `tckHeadless` with
+  # an empty path, and `host/headless` would then have reported the working
+  # directory as an unopenable recording — a diagnosis about the wrong thing.
+  if mode == tckHeadless and tracePath.len == 0:
+    return TuiCommand(
+      kind: tckUsageError,
+      message: "'--headless' needs a trace folder to open")
+
   # The path is returned exactly as it was written. Resolving it against the
   # process's working directory is `host/`'s job, along with deciding whether
   # it exists — this layer does no filesystem I/O, which is what lets the whole
   # command surface be asserted without one.
-  TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags)
+  # SPELLED AS A `case` rather than as `TuiCommand(kind: mode, …)`: nim will
+  # not construct an object variant from a runtime discriminator unless it can
+  # prove every branch that value could select carries the fields being set,
+  # and `mode` is an ordinary `TuiCommandKind` as far as the compiler knows.
+  # Two one-line arms are the price of not having to prove it.
+  case mode
+  of tckHeadless:
+    TuiCommand(kind: tckHeadless, tracePath: tracePath, flags: flags)
+  else:
+    TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags)

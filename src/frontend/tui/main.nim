@@ -60,20 +60,12 @@ import ./app/cli
 import ./app/runtime
 import ./app/tui_app
 import ./host/capabilities
+import ./host/headless
 import ./host/native_host
 import ./host/terminal_driver
 import ./host/tui_session
 
 const
-  ExitOk* = 0
-  ExitUnhandled* = 1
-  ExitUsage* = 2
-  ExitNoTerminal* = 3
-    ## There is a trace and there is no screen to draw it on. Distinguishable
-    ## from a usage error on purpose: `codetracer-tui trace | cat` is a correct
-    ## command line and an impossible request, and reporting it as a bad
-    ## argument would send the user looking at their arguments.
-
   IdlePollMs = 200
     ## How long the loop blocks when nothing is happening.
     ##
@@ -108,8 +100,14 @@ proc interactive(command: TuiCommand): int =
     stderr.writeLine(TuiProgramName & ": standard output is not a terminal," &
                      " so there is nothing to draw on.")
     stderr.writeLine("  negotiated: " & describe(caps))
-    stderr.writeLine("  run it in a terminal, or wait for --serve (CTUI-13)" &
-                     " and --headless (CTUI-12).")
+    # THE MESSAGE NAMES A FLAG THAT EXISTS. It used to end "wait for --serve
+    # (CTUI-13) and --headless (CTUI-12)", which named a milestone that had
+    # already landed and one that never owned the flag; --serve was later cut
+    # outright, because `ct host` already serves a trace to a browser together
+    # with the replay front end.
+    stderr.writeLine("  run it in a terminal, or use --headless for one" &
+                     " plain-text screen.")
+    stderr.writeLine("  to replay it in a browser, use `ct host` instead.")
     return ExitNoTerminal
 
   let folder = resolveTraceFolder(command.tracePath)
@@ -216,6 +214,12 @@ proc run(args: seq[string]): int =
   of tckOpenTrace:
     try:
       interactive(command)
+    except TuiHostError as e:
+      stderr.writeLine(TuiProgramName & ": " & e.msg)
+      ExitUsage
+  of tckHeadless:
+    try:
+      runHeadless(command.tracePath, command.flags, headlessGeometry())
     except TuiHostError as e:
       stderr.writeLine(TuiProgramName & ": " & e.msg)
       ExitUsage

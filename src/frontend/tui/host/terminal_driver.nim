@@ -72,7 +72,7 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it owns the tty.".}
 
-import std/[monotimes, os, posix, times]
+import std/[monotimes, os, posix, strutils, times, unicode]
 
 import isonim_tui
 import nim_termctl
@@ -303,6 +303,48 @@ proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   let comp = newCompositor(cols, height)
   comp.paint(styledRowsTree(renderer, rows), driver)
   driver.buffer
+
+proc plainScreen*(buf: ScreenBuffer): string =
+  ## A composited screen as PLAIN TEXT: one line per row, trailing blanks
+  ## trimmed, no escape sequences at all.
+  ##
+  ## For `--headless`, whose entire output contract is "something a
+  ## CI job can `grep`". Deliberately NOT `encodeAnsi`: a pipeline that has to
+  ## strip SGR before it can match is a pipeline that will match the wrong
+  ## thing on the day a colour changes.
+  ##
+  ## A zero rune is a cell nothing was written to, and a wide glyph's
+  ## continuation cell has `width == 0` — emitting either would put a NUL or a
+  ## duplicated half-glyph into the text, so the first becomes a space and the
+  ## second is skipped.
+  var lines: seq[string] = @[]
+  for r in 0 ..< buf.rowsCount:
+    var line = ""
+    for cell in buf.rows[r].cells:
+      if cell.width == 0:
+        continue
+      if cell.rune.int32 == 0:
+        line.add ' '
+      else:
+        line.add unicode.toUTF8(cell.rune)
+    # `strutils.strip` EXPLICITLY. `std/unicode` is imported here for `toUTF8`
+    # and exports a `strip` of its own that leaves an all-whitespace string
+    # UNCHANGED (nim 2.2.8) — recorded in `docs/tui-testing.md` as a trap this
+    # tree has already been bitten by. A blank row is the common case here, so
+    # the wrong overload would put `cols` spaces on every empty line.
+    lines.add strutils.strip(line, leading = false, trailing = true)
+  lines.join("\n")
+
+proc plainFrame*(caps: TerminalCapabilities; rows: seq[StyledRow];
+                 cols, height: int): string =
+  ## The same composited frame `paint` writes to a tty, read as PLAIN TEXT.
+  ##
+  ## `--headless`'s whole output. It is here rather than in `host/headless.nim`
+  ## because `degradeRows` and `composite` are called from this module and
+  ## nowhere else, so there is exactly one thing in this front-end that turns a
+  ## pane tree into a screen — a headless render and a terminal render cannot
+  ## drift apart into two renderers.
+  plainScreen(composite(degradeRows(rows, caps), cols, height))
 
 # ---------------------------------------------------------------------------
 # The driver

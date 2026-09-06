@@ -128,11 +128,11 @@ const
     ## painted screen cannot satisfy "at least one".
 
   MeasurementDate = "2026-09-06"
-  MeasuredBinaryBytes = 13_355_200
+  MeasuredBinaryBytes = 13_364_232
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
-    ## `MeasurementDate`. Stripped it is 12_775_472; the shipped artifact is the
+    ## `MeasurementDate`. Stripped it is 12_783_664; the shipped artifact is the
     ## unstripped one, so that is what the band below is drawn around.
     ##
     ## This REPLACES the draft's "<15 MB stripped, no dynamic dependencies
@@ -140,14 +140,38 @@ const
     ## The number is measured rather than budgeted, which is the point: it says
     ## what the product costs today so a change can be seen, not what somebody
     ## hoped it would cost.
+    ##
+    ## RE-MEASURED AFTER CTUI-13 WAS CUT, and it came back down. The withdrawn
+    ## web bridge had taken this to 14_055_704 — `isonim-tui-serve`, the
+    ## `std/asynchttpserver` + `asyncnet` + `asyncdispatch` closure,
+    ## `isonim-tui`'s `WebDriver`, and 288 KB of `staticRead` xterm.js. All of
+    ## it is gone with the feature.
+    ##
+    ##   13_355_200  CTUI-12
+    ##   14_055_704  CTUI-13's bridge + embedded xterm bundle (withdrawn)
+    ##   13_364_232  today: the bridge removed, `--headless` KEPT
+    ##
+    ## The +9_032 bytes over CTUI-12 (+0.068%) is what `--headless` costs on its
+    ## own — `host/headless.nim` plus `terminal_driver.plainScreen` /
+    ## `plainFrame`. It is a MEASURED number and not a restored one: the value
+    ## here was taken from a fresh `just build-tui` after the removal, because
+    ## the pre-bridge figure could not have accounted for the flag that
+    ## survived the cut.
 
   BinaryCeilingBytes = 14_500_000
-    ## MeasuredBinaryBytes + 8.6%. Wide enough that ordinary work — a pane, a
+    ## MeasuredBinaryBytes + 8.50%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second
     ## grammar archive, a stdlib module pulling in a subsystem) does. When it
     ## trips, RE-MEASURE and move the band in the same change as the growth,
     ## with the new number and the date; do not raise it to make a run green.
+    ##
+    ## BACK TO CTUI-12'S CEILING, because the growth it had been widened for
+    ## (15_300_000) no longer exists. Lowering a ceiling is the same discipline
+    ## as raising one: the band is anchored to `MeasuredBinaryBytes`, and
+    ## leaving 15_300_000 against a 13_364_232 anchor would have widened the
+    ## margin to 14.5% — a band loose enough to let a real link-line accident
+    ## through unnoticed.
 
   BinaryFloorBytes = 6_000_000
     ## The other half of the band, and not a formality. The single largest

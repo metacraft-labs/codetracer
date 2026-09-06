@@ -163,10 +163,18 @@ const
     ## suites under `tests/`), and after CTUI-12, which added one —
     ## `tests/test_caps_file_shape.nim`.
     ##
-    ## The number is deliberately brittle, and the CTUI-12 bump is the shape it
-    ## is meant to have: a new file under `app/` reddens this case on the spot
-    ## and is re-counted in the same change, rather than silently widening the
-    ## set the "called from exactly one file" rows below are measured over.
+    ## The number is deliberately brittle, and every one of those bumps is the
+    ## shape it is meant to have: a new file under `app/` reddens this case on
+    ## the spot and is re-counted in the same change, rather than silently
+    ## widening the set the "called from exactly one file" rows below are
+    ## measured over.
+    ##
+    ## RE-COUNTED AGAIN WHEN CTUI-13 WAS CUT, and it came back to exactly this
+    ## number. The withdrawn web bridge had added three here — `serve_protocol.
+    ## nim` and two suites — and all three are gone; `--headless` survived the
+    ## cut but lives under `host/`, and its stale-label rule moved into
+    ## `tests/test_capability_resolution.nim` rather than into a new file. A
+    ## removal is re-counted exactly as an addition is.
 
   ExpectedStyleLiterals = 165
   ExpectedStyledFiles = 20
