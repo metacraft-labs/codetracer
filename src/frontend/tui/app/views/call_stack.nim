@@ -300,10 +300,8 @@ proc titleRowSpans*(model: CallStackModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    var rule = ""
-    while cellWidthOf(rule) < width - used:
-      rule.add PaneRule
-    result.add StyledSpan(text: rule, style: RuleStyle)
+    result.add StyledSpan(text: repeatGlyph(PaneRule, width - used),
+                          style: RuleStyle)
 
 proc titleRowText*(model: CallStackModel; width: int): string =
   rowText(titleRowSpans(model, width))

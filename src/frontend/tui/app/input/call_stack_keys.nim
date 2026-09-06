@@ -22,29 +22,22 @@
 ## `tests/apps/app_call_stack.nim`, over a real pty, which is the strongest
 ## exercise available before CTUI-9 exists.
 ##
-## ## THE MOUSE DECODER IS SGR 1006, AND IT IS WRITTEN AGAINST THE BYTES
+## ## THE MOUSE DECODER MOVED, AND THIS MODULE RE-EXPORTS IT
 ##
-## §4.4 asks that clicking a call frame navigate the source view to that frame.
-## `TermAssert.sendMouseClick(row, col)` writes
-##
-##     ESC [ < <button> ; <col+1> ; <row+1> M      (press)
-##     ESC [ < <button> ; <col+1> ; <row+1> m      (release)
-##
-## (`TermAssert/src/term_assert.nim`, `sendMouseClick`) — SGR 1006, 1-BASED on
-## the wire, and that off-by-one is the whole reason this decoder returns
-## 0-based coordinates and says so in its type. `isonim_tui` ships a full input
-## parser (`inputParser`, over nim-termctl) which the product's loop will
-## almost certainly use; it is not used here because this module must be
-## callable on a `string` a test wrote, with no parser state to carry, and
-## because a decoder whose output is compared against the exact bytes the
-## harness writes is checkable in a way a delegation is not.
-##
-## Wheel events arrive on the same protocol as buttons 64 and 65, which is why
-## scrolling is decoded here rather than in a second module.
+## §4.4 asks that clicking a call frame navigate the source view to that frame,
+## and CTUI-6 wrote the SGR-1006 decoder here to answer it. CTUI-8's scrubber
+## has the same need — §4.4's "clicking on the timeline scrubber" — so the
+## decoder now lives in `app/input/mouse.nim`, which this module imports and
+## RE-EXPORTS. Every CTUI-6 call site, `app/tests/test_call_stack_keys.nim`
+## included, resolves unchanged; see that module's header for the byte-level
+## contract and for why a second copy was the wrong answer.
 
 import std/strutils
 
 import ../views/call_stack
+import ./mouse
+
+export mouse
 
 type
   CallStackAction* = enum
@@ -66,25 +59,6 @@ type
     csaScrolled
       ## The body scrolled without the selection moving (wheel).
 
-  MouseButton* = enum
-    mbLeft
-    mbMiddle
-    mbRight
-    mbWheelUp
-    mbWheelDown
-    mbOther
-
-  MouseEventKind* = enum
-    mekPress
-    mekRelease
-
-  MouseEvent* = object
-    ## One decoded SGR-1006 report, in ZERO-BASED screen coordinates.
-    kind*: MouseEventKind
-    button*: MouseButton
-    row*: int
-    col*: int
-
 const
   KeyDown* = "j"
   KeyUp* = "k"
@@ -102,46 +76,6 @@ const
     ## Rows one wheel notch scrolls. Three is the convention every terminal
     ## multiplexer uses; the number is named so a test can assert the exact
     ## resulting `scrollTop` rather than "it moved".
-
-proc decodeMouse*(token: string): (bool, MouseEvent) =
-  ## Decode one SGR-1006 report. `(false, _)` when `token` is not one.
-  ##
-  ## Returns a tuple rather than raising or returning an `Option`, so a caller
-  ## in a byte loop neither pays for an exception nor imports `std/options` to
-  ## ask a yes/no question.
-  var event = MouseEvent(kind: mekPress, button: mbOther, row: -1, col: -1)
-  if token.len < 9 or not token.startsWith("\x1b[<"):
-    return (false, event)
-  let final = token[^1]
-  if final != 'M' and final != 'm':
-    return (false, event)
-  let fields = token[3 ..< token.len - 1].split(';')
-  if fields.len != 3:
-    return (false, event)
-  var code, col, row: int
-  try:
-    code = parseInt(fields[0])
-    col = parseInt(fields[1])
-    row = parseInt(fields[2])
-  except ValueError:
-    return (false, event)
-  # The low two bits are the button; bits 2-4 are shift/alt/ctrl; bit 6 (64) is
-  # the wheel flag. Modifiers are decoded away rather than rejected, so a
-  # ctrl-click is still a click on the row it happened on.
-  event.kind = if final == 'M': mekPress else: mekRelease
-  event.button =
-    if (code and 64) != 0:
-      if (code and 1) == 0: mbWheelUp else: mbWheelDown
-    else:
-      case code and 3
-      of 0: mbLeft
-      of 1: mbMiddle
-      of 2: mbRight
-      else: mbOther
-  # 1-BASED ON THE WIRE. See this module's header.
-  event.row = row - 1
-  event.col = col - 1
-  (true, event)
 
 proc selectFrame*(model: var CallStackModel; frame: int;
                   bodyHeight: int): CallStackAction =

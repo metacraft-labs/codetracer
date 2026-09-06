@@ -1038,6 +1038,19 @@ type
     file*: string
     sourceGeneration*: int
     sourceDigest*: string
+    # CTUI-8 added the four fields below. They were already on the wire — every
+    # one is a field of ``ProgramEvent``
+    # (``libs/ct-dap-client/src/types/common.rs``) that this decoder discarded —
+    # and a timeline pane needs all four: ``kind`` and ``stdout`` are what
+    # decide whether a recorded write is a print or a storage mutation,
+    # ``eventIndex`` is the row's position in the WHOLE log rather than in the
+    # page, and ``maxRRTicks`` is the recording's last step id, which is the
+    # only surface in this workspace that reports a completed replay's extent.
+    kind*: int
+      ## ``EventLogKind`` ordinal: 0 = Write, 1 = WriteFile, … 11 = Error.
+    stdout*: bool
+    eventIndex*: int
+    maxRRTicks*: uint64
 
 proc requestAndLoadEventLog*(s: HeadlessDebugSession;
                              start: int = 0;
@@ -1073,6 +1086,12 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
             ev.getOrDefault("sourceGeneration").getInt(0))
           entry.sourceDigest = ev.getOrDefault("source_digest").getStr(
             ev.getOrDefault("sourceDigest").getStr(""))
+          entry.kind = ev.getOrDefault("kind").getInt(0)
+          entry.stdout = ev.getOrDefault("stdout").getBool(false)
+          entry.eventIndex = ev.getOrDefault("event_index").getInt(
+            ev.getOrDefault("eventIndex").getInt(0))
+          entry.maxRRTicks =
+            ev.getOrDefault("maxRRTicks").getBiggestInt(0).uint64
           result.add(entry)
 
 proc eventJump*(s: HeadlessDebugSession; event: EventLogEntry) =
@@ -1102,6 +1121,136 @@ proc eventJump*(s: HeadlessDebugSession; event: EventLogEntry) =
   s.backend.sendDapRequestNoResponse("ct/event-jump", args)
   discard s.backend.waitForEvent("stopped")
   s.consumeCompleteMoveEvent()
+
+# ---------------------------------------------------------------------------
+# Absolute tick seeking (CTUI-8)
+# ---------------------------------------------------------------------------
+
+proc settleAfterSeek*(s: HeadlessDebugSession) =
+  ## Consume the ``stopped`` + ``ct/complete-move`` pair a seek produces and
+  ## mirror the landed position into the store.
+  ##
+  ## EXPOSED SEPARATELY BECAUSE THE SEEK ITSELF BELONGS TO THE PRODUCT.  CTUI-8's
+  ## contract is that selecting an event issues ONE atomic ``goto`` through
+  ## ``TimelineVM.seek`` — a ViewModel action, on the store's own
+  ## ``BackendService`` — and a harness that also sent the request would be
+  ## testing its own path instead of the product's.  So a caller drives
+  ## ``TimelineVM.seek`` and then calls this to pump the events; nothing else in
+  ## this module can do the pumping for it, because ``consumeCompleteMoveEvent``
+  ## is private and the position mirroring is what makes every pane agree.
+  discard s.backend.waitForEvent("stopped")
+  s.consumeCompleteMoveEvent()
+
+proc gotoTick*(s: HeadlessDebugSession; tick: uint64) =
+  ## Seek to an absolute recorded tick with ``ct/goto-ticks`` and block until
+  ## the backend reports the new position.
+  ##
+  ## ``ct/goto-ticks`` and ``ct/timeline-seek`` reach the SAME handler —
+  ## ``dap_server.rs`` routes both into ``Handler::goto_ticks`` — so this is the
+  ## raw twin of the product path above, for callers that need a position
+  ## without a ViewModel in the picture.
+  s.backend.sendDapRequestNoResponse("ct/goto-ticks", %*{"ticks": tick.int64})
+  s.settleAfterSeek()
+
+# ---------------------------------------------------------------------------
+# Post-hoc tracepoints (CTUI-8)
+# ---------------------------------------------------------------------------
+
+type
+  TracepointSweepSpec* = object
+    ## One tracepoint to run over the whole recording.
+    tracepointId*: int
+    path*: string
+    line*: int
+    expression*: string
+    lang*: int
+      ## ``Lang`` ordinal (``libs/ct-lang/src/lib.rs``).  Measured on ``calc``
+      ## with both 12 (``Python``) and 21 (``PythonDb``): the engine answered
+      ## identically and echoed ``lang: 0`` on every ``Stop``, so it does not
+      ## select the evaluator on a CTFS trace.  The field is still sent because
+      ## ``Tracepoint`` requires it.
+
+  TracepointSweepHit* = object
+    ## One ``Stop`` from a ``ct/tracepoint-results`` answer.
+    tracepointId*: int
+    rrTicks*: uint64
+    path*: string
+    line*: int
+    values*: seq[(string, string)]
+      ## The locals the expression named, as ``(name, rendered)``.
+    errorMessage*: string
+
+proc runTracepoints*(s: HeadlessDebugSession;
+                     specs: seq[TracepointSweepSpec];
+                     maxMessages = 40): seq[TracepointSweepHit] =
+  ## Run post-hoc tracepoints over the WHOLE recording and return every hit.
+  ##
+  ## ``ct/run-tracepoints`` ANSWERS WITH NO DAP RESPONSE, and that is not a
+  ## guess: ``Handler::run_tracepoints`` (``src/db-backend/src/dap_handler.rs``)
+  ## sends ``ct/updated-trace`` and ``ct/tracepoint-results`` and never calls
+  ## ``respond_dap``.  A caller that used ``sendDapRequest`` here would block for
+  ## ever — measured, as a hang, on ``calc`` on 2026-09-06 before the handler was
+  ## read.  This is exactly the shape
+  ## ``codetracer-specs/Testing/Verification-Harness-Traps.md`` §3 describes: the
+  ## symptom is a timeout and the cause is a boundary that speaks a different
+  ## shape.  So the request is sent WITHOUT expecting a reply and the
+  ## synchronisation is on the ``ct/tracepoint-results`` event.
+  ##
+  ## Raises ``ValueError`` (from ``waitForEvent``) when the event does not
+  ## arrive within the message budget, rather than returning an empty sequence:
+  ## "the sweep found nothing" and "the sweep never answered" are different
+  ## facts and only one of them is a result.
+  var tracepoints = newJArray()
+  for spec in specs:
+    tracepoints.add %*{
+      "tracepointId": spec.tracepointId,
+      "mode": 0,
+      "line": spec.line,
+      "offset": 0,
+      "name": spec.path,
+      "expression": spec.expression,
+      "lastRender": 0,
+      "isDisabled": false,
+      "isChanged": true,
+      "lang": spec.lang,
+      "results": newJArray(),
+      "tracepointError": "",
+    }
+  s.backend.sendDapRequestNoResponse("ct/run-tracepoints", %*{
+    "session": {
+      "tracepoints": tracepoints,
+      "found": newJArray(),
+      "lastCount": 0,
+      "results": newJObject(),
+      "id": 0,
+    },
+    "stopAfter": -1,
+  })
+  let event = s.backend.waitForEvent("ct/tracepoint-results",
+                                     maxMessages = maxMessages)
+  let body = event.getOrDefault("body")
+  if body.isNil or body.kind != JObject:
+    return
+  let results = body.getOrDefault("results")
+  if results.isNil or results.kind != JArray:
+    return
+  for stop in results:
+    var hit = TracepointSweepHit(
+      tracepointId: stop.getOrDefault("tracepointId").getInt(0),
+      rrTicks: stop.getOrDefault("rrTicks").getBiggestInt(0).uint64,
+      path: stop.getOrDefault("path").getStr(""),
+      line: stop.getOrDefault("line").getBiggestInt(0).int,
+      values: @[],
+      errorMessage: stop.getOrDefault("errorMessage").getStr(""))
+    let locals = stop.getOrDefault("locals")
+    if not locals.isNil and locals.kind == JArray:
+      for pair in locals:
+        # `StringAndValueTuple` serialises as `{"Field0": name, "Field1": value}`
+        # — a tuple struct, so the names are positional and not descriptive.
+        let name = pair.getOrDefault("Field0").getStr("")
+        let value = pair.getOrDefault("Field1")
+        hit.values.add (name, extractValueText(value))
+    result.add hit
 
 # ---------------------------------------------------------------------------
 # Trace recording

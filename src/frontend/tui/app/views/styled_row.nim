@@ -361,3 +361,60 @@ proc cellSlice*(s: string; startCell, endCell: int): string =
 proc truncateToCells*(s: string; cells: int): string =
   ## `s` clipped to `cells` columns.
   if cells <= 0: "" else: cellSlice(s, 0, cells)
+
+proc padRight*(s: string; width: int): string =
+  ## `s` left-aligned in `width` CELLS (not bytes, not runes), and clipped to
+  ## them.
+  ##
+  ## By cell for `padLeft`'s reason: a recorded path may hold a wide glyph, and
+  ## a field padded by BYTES would shift every column after it. Clipping is part
+  ## of the contract — a field is a COLUMN a Tier-2 case reads at a fixed
+  ## offset, so an over-long value must lose its tail rather than the layout.
+  let cells = cellWidthOf(s)
+  if cells >= width: truncateToCells(s, width)
+  else: s & repeat(' ', width - cells)
+
+proc repeatGlyph*(glyph: string; cells: int): string =
+  ## `glyph` repeated until it occupies `cells` columns.
+  ##
+  ## EVERY PANE TITLE ENDS WITH ONE OF THESE, and this exists because the
+  ## obvious spelling is QUADRATIC:
+  ##
+  ##     while cellWidthOf(rule) < want: rule.add glyph
+  ##
+  ## `cellWidthOf` walks the whole string and allocates per rune, so filling
+  ## `n` cells costs O(n^2) rune iterations. Measured on 2026-09-06 while taking
+  ## CTUI-8's seek-latency figure, at width 200, best of 60, load 0.7:
+  ## `timeline_bar.titleRowSpans` took **8.008 ms** of an 8.479 ms repaint, and
+  ## the rule loop was all of it. With this proc it is **0.032 ms**, and the
+  ## whole `timelineBarScreen` falls from **8.479 ms to 0.484 ms**.
+  ##
+  ## The same loop was in EVERY pane title this front-end draws, and all of them
+  ## are replaced. Measured the same way, at width 200, best of 60:
+  ##
+  ##     views/timeline_bar.titleRowSpans    8.008 ms -> 0.034 ms
+  ##     views/variables.titleRowSpans       9.950 ms -> 0.012 ms
+  ##     views/call_stack.titleRowSpans      8.710 ms -> 0.026 ms
+  ##     views/source_pane.titleRowSpans     9.262 ms -> 0.021 ms
+  ##     views/shell.titleRow / .tabRow      8.011 ms -> 0.006 ms
+  ##
+  ## `shell.titleRow` and `shell.tabRow` spelled it with `header.textCells`
+  ## rather than `cellWidthOf`, which is why a grep for the `cellWidthOf` form
+  ## missed them; they are the HOTTEST of the five, because they draw every pane
+  ## that has no painter of its own plus every tab strip, on every repaint.
+  ##
+  ## The cost is quadratic in the pane's WIDTH, so a 46- or 60-cell pane pays a
+  ## tenth of what a 200-cell one does — but it is the same defect, and "milder"
+  ## is not a reason to leave one behind.
+  ##
+  ## The glyph's own width is measured ONCE. `─`, `━` and `═` are all one cell,
+  ## but a caller is free to pass something wider and the answer must still not
+  ## overrun the field.
+  result = ""
+  if cells <= 0 or glyph.len == 0:
+    return
+  let unit = max(1, cellWidthOf(glyph))
+  var at = 0
+  while at + unit <= cells:
+    result.add glyph
+    at += unit

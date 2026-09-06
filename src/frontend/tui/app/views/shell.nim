@@ -45,14 +45,18 @@ import ../layout/profile
 import ../layout/project
 import ../syntax/highlighter
 import ./call_stack
+import ./event_log
 import ./header
 import ./source_pane
 import ./status_bar
 import ./styled_row
+import ./timeline_bar
+import ./tracepoint_manager
 import ./variables
 
 export header, status_bar, profile, project, source_pane, styled_row
 export call_stack, variables
+export event_log, timeline_bar, tracepoint_manager
 
 type
   ShellModel* = object
@@ -96,6 +100,27 @@ type
       ## `CALL STACK ────` title row CTUI-3 painted, `app_shell.nim`'s
       ## cross-tier golden is unchanged, and every CTUI-3 and CTUI-5 assertion
       ## that reads that row still reads it.
+    timeline*: TimelineBarModel
+      ## CTUI-8's scrubber, as a value.
+      ##
+      ## EMPTY BY DEFAULT, on exactly the same rule as `source`, `callStack` and
+      ## `variables` above: `paintPane` delegates the `timeline` rectangle to
+      ## `app/views/timeline_bar.nim` only when the model has BOUNDS, so a shell
+      ## with no session open paints CTUI-3's own `timelineScrubber` row and
+      ## every CTUI-3 assertion that reads it still reads it.
+    eventLog*: EventLogModel
+      ## CTUI-8's event log, as a value. It shares the `timeline` rectangle with
+      ## the scrubber — §3.3.5 is ONE pane holding both, and the Standard and
+      ## Ultra-wide layouts call that pane "Timeline & Tracepoints" — so the bar
+      ## takes the top `TimelineBarRows` rows and this takes the rest. In the
+      ## Compact profile they are two tabs of one stack and each owns its whole
+      ## rectangle.
+    tracepoints*: TracepointManagerModel
+      ## CTUI-8's post-hoc tracepoint dialog. An OVERLAY: when `open` it is
+      ## painted over the middle of the body, after every pane, so it is not
+      ## one of `projectLayout`'s rectangles and no profile has to make room for
+      ## it. Closed by default, so a shell that never opens it paints exactly
+      ## the screen it painted before.
     highlighting*: HighlighterCache
       ## CTUI-5's risk mitigation, carried on the model rather than created per
       ## frame: "parse once per (path, generation) and cache the token spans".
@@ -112,6 +137,10 @@ type
       ## that asserts on colour are reading one screen rather than two.
     body*: CellArea
     projection*: Projection
+    overlay*: CellArea
+      ## Where the tracepoint dialog was painted, or a zero rectangle when it
+      ## was closed. Reported rather than recomputed by the caller, for
+      ## `frame_item.FrameItem`'s reason.
 
 const
   PaneRuleGlyph* = "─"
@@ -122,7 +151,14 @@ const
     ## right edge.
   TimelineTrackGlyph* = "─"
   TimelineCursorGlyph* = "▲"
-    ## §3.3.5's execution-pointer marker on the scrubber.
+    ## §3.3.5's execution-pointer marker on the scrubber. The same glyph
+    ## `app/views/timeline_bar.NeedleGlyph` paints; kept here because CTUI-3's
+    ## own one-line fallback scrubber still uses it when no bounds are known.
+
+  TracepointOverlayWidth* = 64
+  TracepointOverlayHeight* = 14
+    ## The tracepoint dialog's ceiling. Clamped to the body, so an 80x24
+    ## terminal gets a smaller one rather than a clipped one.
 
 proc paneTitle*(kind: PaneKind; fallback: string): string =
   ## What a pane calls itself. The `LayoutNode`'s own title wins — it is what a
@@ -201,8 +237,11 @@ proc titleRow(title: string; width: int): string =
   var line = toUpperAscii(title)
   if textCells(line) + 1 <= width:
     line.add " "
-    while textCells(line) < width:
-      line.add PaneRuleGlyph
+    # `repeatGlyph` rather than `while textCells(line) < width: line.add …` —
+    # see `styled_row.repeatGlyph` for why the obvious spelling is quadratic.
+    # This one is the hottest of them all: it draws EVERY pane that has no
+    # painter of its own, on every repaint.
+    line.add repeatGlyph(PaneRuleGlyph, width - textCells(line))
   fitCells(line, width)
 
 proc tabRow(tabs: seq[string]; active, width: int): string =
@@ -220,8 +259,7 @@ proc tabRow(tabs: seq[string]; active, width: int): string =
     line.add(if i == active: "[" & t & "]" else: " " & t & " ")
   if textCells(line) + 1 <= width:
     line.add " "
-    while textCells(line) < width:
-      line.add PaneRuleGlyph
+    line.add repeatGlyph(PaneRuleGlyph, width - textCells(line))
   fitCells(line, width)
 
 proc timelineScrubber*(tick, totalTicks, width: int): string =
@@ -244,6 +282,16 @@ proc timelineScrubber*(tick, totalTicks, width: int): string =
     line.add(if i == pos: TimelineCursorGlyph else: TimelineTrackGlyph)
   line.add "]"
   line
+
+proc tracepointOverlayArea*(body: CellArea): CellArea =
+  ## The rectangle the tracepoint dialog occupies: centred in the body, at most
+  ## `TracepointOverlayWidth` x `TracepointOverlayHeight`, never larger than the
+  ## body itself.
+  let w = min(TracepointOverlayWidth, max(0, body.width))
+  let h = min(TracepointOverlayHeight, max(0, body.height))
+  CellArea(col: body.col + (body.width - w) div 2,
+           row: body.row + (body.height - h) div 2,
+           width: w, height: h)
 
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea) =
@@ -292,15 +340,45 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
       discard paintVariables(
         g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
         model.variables)
+  # THE EVENT LOG HAS A RECTANGLE OF ITS OWN in two profiles — a column in
+  # Ultra-wide, a tab of the Compact stack — and shares the `timeline` one in
+  # the third. This arm is the first two; the third is below.
+  elif region.pane == paneEventLog and model.eventLog.hasContent:
+    if region.activeTab >= 0 and region.tabs.len > 0:
+      g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
+      if a.height >= 2:
+        discard paintEventLog(
+          g, CellArea(col: a.col, row: a.row + 1, width: inner,
+                      height: a.height - 1),
+          model.eventLog)
+    else:
+      discard paintEventLog(
+        g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
+        model.eventLog)
   elif region.activeTab >= 0 and region.tabs.len > 0:
     g.paint(a.row, a.col, tabRow(region.tabs, region.activeTab, inner))
   else:
     g.paint(a.row, a.col, titleRow(paneTitle(region.pane, region.title), inner))
 
+  # THE TIMELINE RECTANGLE HOLDS TWO PANES, which is what §3.3.5 describes and
+  # what the Standard and Ultra-wide layouts call "Timeline & Tracepoints". The
+  # scrubber takes the top `TimelineBarRows` rows and the event log takes the
+  # rest. CTUI-3's own one-line `timelineScrubber` stays as the fallback for a
+  # shell with no bounds — see `ShellModel.timeline`.
   if region.pane == paneTimeline and a.height >= 2:
-    g.paint(a.row + 1, a.col,
-            timelineScrubber(model.header.tick, model.header.totalTicks, inner))
-
+    if model.timeline.boundsKnown:
+      discard paintTimelineBar(
+        g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
+        model.timeline)
+      if a.height > TimelineBarRows:
+        discard paintEventLog(
+          g, CellArea(col: a.col, row: a.row + TimelineBarRows, width: inner,
+                      height: a.height - TimelineBarRows),
+          model.eventLog)
+    else:
+      g.paint(a.row + 1, a.col,
+              timelineScrubber(model.header.tick, model.header.totalTicks,
+                               inner))
   if not flushRight:
     for row in a.row ..< a.row + a.height:
       g.paint(row, a.col + a.width - 1, PaneSeparatorGlyph)
@@ -321,7 +399,10 @@ proc shellScreen*(model: ShellModel; width, height: int;
   let body = bodyArea(width, height)
   let projection = projectLayout(model.layout, body, policy)
   result = ShellScreen(rows: @[], styledRows: @[], body: body,
-                       projection: projection)
+                       projection: projection,
+                       overlay: (if model.tracepoints.open:
+                                   tracepointOverlayArea(body)
+                                 else: CellArea()))
   if width <= 0 or height <= 0:
     return
 
@@ -332,6 +413,17 @@ proc shellScreen*(model: ShellModel; width, height: int;
     paintPane(g, region, model, body)
   if projection.status != prOk and body.height > 0:
     g.paint(body.row, body.col, degradedBanner(projection.status, width))
+
+  # THE TRACEPOINT DIALOG IS AN OVERLAY, painted AFTER every pane and over
+  # whichever ones it covers. It is deliberately not one of `projectLayout`'s
+  # rectangles: a modal that took a share of the layout would shrink the source
+  # pane on a profile that has no room to spare, and every profile would have to
+  # be re-measured to add it. `tracepointOverlayArea` is the rectangle, derived
+  # from the body, and it is REPORTED on `ShellScreen` so a test reads the same
+  # coordinates the paint used.
+  if model.tracepoints.open:
+    discard paintTracepointManager(g, tracepointOverlayArea(body),
+                                   model.tracepoints)
 
   var status = model.status
   if projection.status != prOk and status.notification.len == 0:

@@ -31,7 +31,7 @@
 ## | §3.1 row            | Exported                                                                 |
 ## | ------------------- | ------------------------------------------------------------------------ |
 ## | `ReplayDataStore`   | `store/replay_data_store`, `store/types`, `store/request_tracker`, `store/degraded_state` |
-## | Panel ViewModels    | `CalltraceVM` `EventLogVM` `StateVM` `FlowVM` `EditorVM` `DebugControlsVM` `RequestPanelVM` |
+## | Panel ViewModels    | `CalltraceVM` `EventLogVM` `TimelineVM` `StateVM` `FlowVM` `EditorVM` `DebugControlsVM` `RequestPanelVM` |
 ## | Source access       | `SourceVM` (`viewmodels/source_vm`) and `SourceProvider` (`sdk/source_provider`) |
 ## | `BackendService`    | `backend/backend_service`, `backend/mock_backend`, `backend/dap_commands` |
 ## | Session lifecycle   | `DebuggerSession`, `SessionViewModel`, `AppViewModel`                     |
@@ -151,7 +151,9 @@ export replay_data_store
 # ---------------------------------------------------------------------------
 # Panel ViewModels (§3.1, row 2)
 #
-# Exactly the seven the spec names. `RequestPanelVM` is the spans ViewModel:
+# The seven the spec names, plus `TimelineVM` — see the note beside its
+# import below on why it is here and what it costs (nothing). `RequestPanelVM`
+# is the spans ViewModel:
 # it is the VM over `ReplayDataStore.requestSpans`, which is what the spec's
 # `SpansVM` refers to. The name difference is recorded rather than papered
 # over — see the module note in `viewmodels/request_panel_vm.nim`.
@@ -161,6 +163,22 @@ export calltrace_vm
 
 import viewmodels/event_log_vm
 export event_log_vm
+
+# The Timeline panel's ViewModel (CTUI-8).
+#
+# Exported for the same reason `origin_chain_vm` was, and it adds NOTHING to
+# the facade's import graph: `timeline_vm` imports `isonim/core/*`,
+# `isonim/viewmodel`, `backend/backend_service` and `store/*`, every one of
+# which is already inside the graph `ci/test/sdk-facade-boundary.sh` walks. It
+# was unreachable from an embedder only because this file did not name it, and
+# §7 makes anything not exported here private.
+#
+# `TimelineVM.seek` is the ONE seek path a front-end has: it sends
+# `ct/timeline-seek`, which `dap_server.rs` routes into `Handler::goto_ticks`.
+# A consumer given `EventLogVM` and not this one can select an event and cannot
+# go to it.
+import viewmodels/timeline_vm
+export timeline_vm
 
 import viewmodels/state_vm
 export state_vm
