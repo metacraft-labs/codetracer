@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 478
+const ExpectedAssertions = 1358
 
 var countedAssertions = 0
 
@@ -88,9 +88,17 @@ const
     ## be added without the number moving in a diff a reviewer reads. The same
     ## construction `testing/dual_snap.CrossTierExclusionCount` uses.
 
-proc capsFor(depth: ColorDepth; mode: BorderMode): TerminalCapabilities =
+proc capsFor(depth: ColorDepth; mode: BorderMode;
+             theme = utDark): TerminalCapabilities =
   TerminalCapabilities(colors: depth, borders: mode, mouse: true,
-                       synchronizedOutput: false, kittyKeyboard: false)
+                       synchronizedOutput: false, kittyKeyboard: false,
+                       theme: theme)
+
+const AllThemes = [utDark, utLight, utPlain, utMonokai]
+  ## §6.2's four published themes — CTUI-14. Spelled as an array rather than
+  ## iterated from `UiTheme` so the sweep below can assert its comparison count
+  ## against a NUMBER a reader can check, which is what
+  ## `compared == pairs * depths * modes * themes` is for.
 
 proc isMerged(a, b: SemanticRole): bool =
   ## Whether this pair is one `PermittedMerges` names, in either order.
@@ -223,6 +231,81 @@ suite "CTUI-11 Tier 1: degraded style tables":
     ck compared == eligiblePairs * AllDepths.len * AllBorderModes.len
     ck eligiblePairs >= 60
     ck mergesSeen == ExpectedMergeCount
+
+  test "no THEME collapses a distinction, over all four of them":
+    # CTUI-14. A theme is a PALETTE and never a distinction, and the case above
+    # asserts that for `utDark` alone because `roleStyle`'s theme parameter
+    # defaults to it. This is the same property over the whole cross product —
+    # roles x depths x border modes x themes — and it is the check that would
+    # redden if a hue picked for `light` or `monokai` happened to collide with
+    # another role's in the same group.
+    var compared = 0
+    var eligiblePairs = 0
+    var collisions: seq[string] = @[]
+    for group in DistinctionGroup:
+      let members = rolesIn(group)
+      for i in 0 ..< members.len:
+        for j in i + 1 ..< members.len:
+          let a = members[i]
+          let b = members[j]
+          if ansi16Style(a) == ansi16Style(b):
+            continue
+          if isMerged(a, b):
+            continue
+          inc eligiblePairs
+          for theme in AllThemes:
+            for depth in AllDepths:
+              for mode in AllBorderModes:
+                let caps = capsFor(depth, mode, theme)
+                inc compared
+                if distinctionKey(a, caps) == distinctionKey(b, caps):
+                  collisions.add $theme & " " & $group & " " & $a & " == " &
+                                 $b & " at " & $depth & "/" & $mode
+    checkpoint("eligible pairs: " & $eligiblePairs & "  comparisons: " &
+               $compared & " over " & $AllThemes.len & " theme(s)")
+    if collisions.len > 0:
+      for c in collisions:
+        checkpoint("THEME COLLAPSE: " & c)
+    ck collisions.len == 0
+    # THE COMPARISON COUNT AGAINST ITS PARAMETERS, which is what says the theme
+    # axis was actually swept rather than iterated over one value.
+    ck compared == eligiblePairs * AllThemes.len * AllDepths.len *
+                   AllBorderModes.len
+    ck AllThemes.len == 4
+
+  test "a theme moves the COLOURS and never the attributes":
+    # THE OTHER HALF OF "a theme is a palette". `ansi256Style` and
+    # `trueColorStyle` are built by widening `ansi16Style` and overwriting `fg`
+    # / `bg`, so a theme cannot reach a weight — and that is asserted rather
+    # than left to the construction, because the construction is one edit away
+    # from being different.
+    var moved = 0
+    var roles = 0
+    for role in SemanticRole:
+      inc roles
+      let dark = ansi256Style(role, utDark)
+      for theme in AllThemes:
+        let tinted = ansi256Style(role, theme)
+        ck tinted.bold == dark.bold
+        ck tinted.italic == dark.italic
+        ck tinted.underline == dark.underline
+        ck tinted.reverse == dark.reverse
+        let rgb = trueColorStyle(role, theme)
+        ck rgb.bold == dark.bold
+        ck rgb.italic == dark.italic
+        if theme notin [utDark, utPlain] and tinted != dark:
+          inc moved
+    checkpoint($roles & " role(s); " & $moved &
+               " (theme, role) pair(s) whose colour moved off the dark table")
+    ck roles == ExpectedRoleCount
+    # THE NON-VACUITY FLOOR, and the important one here: a `tintsFor` that
+    # answered `DarkTints` for everything would satisfy every equality above
+    # and move nothing. Two themes x at least twenty-five tinted roles.
+    ck moved >= 50
+    # …AND `utPlain` IS DELIBERATELY THE DARK TABLE, because it never reaches a
+    # coloured rung at all: `resolveColorDepth` sends it to `cdMonochrome`.
+    for role in SemanticRole:
+      ck ansi256Style(role, utPlain) == ansi256Style(role, utDark)
 
   test "MUTATION ARM: the sweep reports a collapse when there is one":
     # A comparison that cannot be made to fail is indistinguishable from one

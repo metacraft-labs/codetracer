@@ -4416,6 +4416,48 @@ developer-setup *flags:
 capture-readme-animations-review:
   bash scripts/docs/capture-readme-animations.sh
 
+# ─── CodeTracer TUI benchmarks (CTUI-14) ────────────────────────────────────
+#
+# `metacraft-dev-guidelines/policies/continuous-benchmarking.md` §1: "every
+# benchmark must be runnable with a single `just` command", `just bench` for the
+# full suite and `just bench --quick` for the abbreviated CI run. §2 and §3: the
+# run writes `bench-results/benchmark_results.json` in github-action-benchmark
+# format and a self-contained `bench-results/report.html`.
+#
+# BUILT WITH `-d:release`, and that is a decision rather than a default.  The
+# fuzzy-palette gate is the reason: CTUI-10 measured it at 3.88 ms idle and
+# 7.13 ms under 2x oversubscription against an 8 ms gate ON A DEBUG BUILD, with
+# 7 of 9 runs over.  A performance figure taken from a build nobody ships is a
+# figure a gate cannot be set from.
+#
+# Depends on `build-tui` because four of the metrics are properties of the
+# SHIPPED PROCESS — cold start, time to a usable debugger, resident set and
+# idle CPU — and are measured by spawning it in a real pty.  The other four are
+# properties of the render path and run in process against a real recording,
+# opened through a real `replay-server`; there is no mock in the suite.
+#
+# The human-readable summary goes to STDERR (policy §1) and every figure carries
+# the host's load average, because a benchmark number without one cannot be
+# compared with another.
+build-tui-benchmarks: tui-prereqs build-tui
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p build/bin build/nimcache
+  link_flags=""
+  if [ -r build/grammars/tui-link-flags.txt ]; then
+    link_flags=$(sed 's/^/--passL:/; s/ / --passL:/g' \
+      build/grammars/tui-link-flags.txt)
+  fi
+  nim c -d:release --path:src/frontend/viewmodel ${link_flags} \
+    "-d:isonimTuiGrammarArchive=${PWD}/build/grammars/libcodetracer_tui_grammars.a" \
+    --nimcache:build/nimcache/tui-benchmarks \
+    -o:build/bin/tui-benchmarks \
+    src/frontend/tui/benchmarks/tui_benchmarks.nim
+  echo "built build/bin/tui-benchmarks"
+
+bench *args: build-tui-benchmarks
+  ./build/bin/tui-benchmarks {{args}}
+
 # Performance + E2E Coverage campaign benchmarks (P2 / P3 / P4).
 #
 # Each target builds + drives the `ct-bench` CLI from

@@ -178,6 +178,18 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   for extra in result.lines:
     text.add "  |  " & extra
   rt.note(text)
+  # THE ACTION THE COMMAND RESOLVED TO IS CARRIED OUT, so `handleToken` can
+  # route it exactly as it routes the same action arriving as a KEY.
+  #
+  # CTUI-14 found the defect this closes, and `tests/real_terminal/
+  # test_real_pty_lifecycle.nim` is what found it: §4.3 publishes `quit` (alias
+  # `q`), `interpreter.dispatchAction` answered `drDone` for it, the status bar
+  # said `quit` — and the session carried on, because ENDING THE LOOP IS NOT
+  # SOMETHING THE DISPATCHER CAN DO. `kaQuit` is a local action; the loop that
+  # stops is `main.nim`'s, and only `applyLocalAction` reaches it. The key path
+  # (`q`, `Ctrl+c`) always went through there and always worked, which is why a
+  # published command was broken behind two working keys.
+  outcome.action = result.dispatch.action
   if result.dispatch.status == drDone:
     outcome.awaitsMove = true
 
@@ -296,6 +308,11 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       discard
     of claSubmitted:
       rt.runPromptLine(line, result)
+      # A §4.3 COMMAND MAY RESOLVE TO A LOCAL ACTION, and `quit` does. Routed
+      # through the SAME `applyLocalAction` the key path uses rather than
+      # answered here, so `:quit` and `q` cannot end a session differently.
+      if result.action != kaNone:
+        discard rt.applyLocalAction(result.action, result)
       discard rt.modal.applyModalEvent(meCommit)
       result.repaint = true
       return

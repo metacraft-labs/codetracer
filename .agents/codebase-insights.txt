@@ -3373,3 +3373,87 @@ commands.
     imports them. The direction is forced: no module under `testing/` may appear
     in `main.nim`'s import closure. The framer handles SS3 (`ESC O P`..`S`),
     which the old copy did not — §4.2's `F1` was unreachable until CTUI-11.
+  * **`osproc.outputStream` IS BUFFERED ON POSIX** — `createStream(p.outHandle,
+    fmRead)` is `open()` + `newFileStream()`, a C `FILE*`. A `select` in front
+    of it sleeps on data `fread` has already taken off the pipe: measured with
+    `ioctl(FIONREAD)` returning 0 while a blocking read on the same descriptor
+    returned instantly. The UNBUFFERED `FileHandleStream` in
+    `nim/lib/pure/streams.nim` is real and is `osproc`'s **Windows** arm.
+    `viewmodel/backend/stdio_backend.nim` therefore reads
+    `process.outputHandle` into its own buffer. If you ever put a readiness
+    check in front of a stream you did not write, find out where the bytes are
+    first — `codetracer-specs/Testing/Verification-Harness-Traps.md` §8.
+  * **A signal kills the TUI rather than being translated into an exit code.**
+    `nim-termctl`'s handler restores the terminal and lets the signal through,
+    so `waitpid` reports `WIFSIGNALED` and `nim-pty` reports `-WTERMSIG` (`-2`
+    for SIGINT, `-15` for SIGTERM) — not the shell's `128 + N`, which is the
+    same wait status in a different encoding. `isonim-tui`'s own signal case
+    asserts `130` because ITS fixture app installs a handler calling
+    `quit(130)`.
+  * **The strip cache never hits in the shipped TUI, and it is not the cache's
+    fault.** `compositor.stripForEntry` keys on `LayoutEntry.nodeId`;
+    `terminal_driver.composite` calls `resetNodeIds()` (so ids repeat) but
+    builds a FRESH `Compositor` every frame, so the cache it would have hit is
+    thrown away. Measured: 0 hits / 20,320 without `resetNodeIds()` per frame
+    on a persistent compositor, 98.33% with it. CTUI-14 diffs at the byte level
+    (`host/ssh_tuning.dirtyRuns`) instead and did not move the diff base,
+    because every Tier-2 frame barrier rests on it.
+  * **`TermAssert.effectiveEnv` applied its BLOCKLIST to its OVERRIDES**
+    (`if k in blocked: continue`), so `.envRemove("X").envSet("X", v)` left
+    `X` ABSENT. FIXED in `TermAssert` 2026-09-06 (an explicit `envSet` wins),
+    but keep blocking **or** setting and never both: this workspace pins no
+    `TermAssert` revision, so a lane can be built against a checkout that
+    predates the fix.
+  * **Two more `TermAssert` defects, both unfixed and both silent.**
+    `sendKey` strips `shift+` and never uses it — measured, `sendKey("shift+f10")`
+    and `sendKey("f10")` put the identical `^[[21~` on the wire, and `ctrl+`
+    has the same hole for a NAMED key. And `assertSynchronizedRender` contains
+    no `raise` at all (its "not observed" arm is a bare `discard`), so it
+    passes over a child that emits zero DEC 2026 sequences — measured against
+    `echo`. Both are traps 9 and 10 of
+    `codetracer-specs/Testing/Verification-Harness-Traps.md`.
+  * **`--headless` renders ONE settled frame, so it takes `--goto` and refuses
+    `--record-keys` / `--replay-keys`.** The refusal is a usage error naming
+    the conflict, not silence: all three used to parse into `tckHeadless` and
+    `runHeadless` read none of them. When a MODE cannot honour a flag, refuse
+    it — `app/cli.PlannedOptions`'s rule is about a list and this arrived
+    through a mode, which is why the list could not catch it.
+  * **A benchmark's `samples=` belongs to the ENTRY, not to the run.**
+    `benchmarks/tui_benchmarks.nim` used to stamp the suite's loop budget onto
+    all twelve entries, four of which are one observation of one spawned
+    process. `record` now takes `samples` and `shape` with no defaults so a new
+    metric cannot inherit somebody else's provenance by omission.
+  * **`conditionGap` has no default either, and `cgNone` is why.** A benchmark
+    row can beat its number under circumstances its target is not stated for —
+    `tui/steady-state-rss` (no fixture is 50,000 ticks) and
+    `tui/strip-cache-hit-rate` (the shipped driver rebuilds the compositor
+    every frame, so its real rate is 0%). Both emitted a bare `verdict=met`,
+    with the gap only in `extra`'s prose. `cgNone` is the POSITIVE claim that
+    the condition held, so defaulting it hands that claim to every metric added
+    later; the artifact now emits `met-CONDITION-NOT-external` /
+    `-internal`, and every `verdict=` value is one whitespace-free token
+    (`reported (not gated)` was read as `reported` by a space-splitting parse).
+  * **A timing check on the DIFFERENCE of two runs cannot use an exact bound.**
+    `tests/real_terminal/test_real_pty_lifecycle.nim` opens the same wedged
+    session under a 1500 ms and a 6000 ms handshake budget and asserts the
+    exit-time gap. It read `gap >= 4500` on the argument that "a loaded host
+    makes this LARGER, never smaller" — false: each run pays its own overhead,
+    so the gap is `4500 + (overhead_long - overhead_short)` and the bracket has
+    either sign. It failed at 4499 ms with overheads of 26 and 25 ms, after
+    passing three times. Now `abs(gap - 4500) <= 500`, which is STRONGER (the
+    one-sided form accepted an arbitrarily large gap), with each run's own
+    overhead separately asserted inside the same tolerance so it cannot hide a
+    regression. See trap 12 in
+    `codetracer-specs/Testing/Verification-Harness-Traps.md`.
+  * **`tests/test_benchmark_artifact.nim` reads the COMMITTED
+    `bench-results/benchmark_results.json`.** It derives entry count, names,
+    condition-gap kinds and comparison directions from `tui_benchmarks.nim`'s
+    own `record(...)` call sites, so a metric added without regenerating the
+    artifact reddens the `tui` lane. Four of CTUI-14's defects were in the
+    artifact and none could redden a suite, because nothing read it — if you
+    commit a generated file, give it a reader.
+  * **`TermAssert` can keep the raw byte stream**: `newTuiTest(…).transcript()`
+    plus `transcriptBytes` / `transcriptDroppedBytes`. Off by default, capped at
+    8 MB. It is the only way to assert a PAIRED alternate screen — the
+    terminal's live alt-screen state after the child exits is `false` whether
+    the child left correctly or never entered, the same trap DEC 2026 has.

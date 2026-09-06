@@ -61,6 +61,7 @@ import ./app/runtime
 import ./app/tui_app
 import ./host/capabilities
 import ./host/headless
+import ./host/key_journal
 import ./host/native_host
 import ./host/terminal_driver
 import ./host/tui_session
@@ -127,6 +128,18 @@ proc interactive(command: TuiCommand): int =
     stderr.writeLine(TuiProgramName & ": " & replayServerRemedy())
     return ExitUsage
 
+  # THE KEY JOURNAL IS OPENED BEFORE THE TTY, for the reason the two `stat`s
+  # above are done before it: a missing `--replay-keys` file and an unwritable
+  # `--record-keys` path are both diagnoses a user can act on, and a diagnosis
+  # printed onto a claimed alternate screen is a diagnosis nobody reads.
+  var journal: KeyJournal = nil
+  try:
+    journal = openKeyJournal(command.recordKeys, command.replayKeys)
+  except TuiHostError as e:
+    stderr.writeLine(TuiProgramName & ": " & e.msg)
+    return ExitUsage
+  defer: journal.close()
+
   let driver = newTerminalDriver(caps)
   driver.start()
   # FROM HERE THE TERMINAL IS OURS AND MUST BE GIVEN BACK ON EVERY PATH,
@@ -142,26 +155,93 @@ proc interactive(command: TuiCommand): int =
   # this way round.
   paint(driver, rt)
 
+  # THE HANDSHAKE IS BOUNDED, AND IT IS ALSO INTERRUPTIBLE. CTUI-14.
+  #
+  # This is the point the front-end used to wedge at, and the reproduction is
+  # in `backend/stdio_backend.nim`'s header: a folder with a garbage
+  # `trace.bin` passes every `stat` above, `replay-server` answers the whole
+  # handshake up to and including `launch` and then goes silent without ever
+  # sending `stopped`, and the old blocking read never returned. The
+  # alternate screen was already claimed, `cfmakeraw` had cleared `ISIG`, and
+  # the loop below had not started — so `Ctrl+c` reached nothing and the user's
+  # only recovery was a kill from another terminal.
+  #
+  # Both halves are installed here rather than one, because they answer
+  # different users: the clock is for a session nobody is watching, and the
+  # keyboard is for one somebody is. The fd is the DRIVER's, and
+  # `absorbInterruptByte` queues whatever it takes, so nothing typed while the
+  # trace opens is lost.
+  let bound = DapReadBound(
+    timeoutMs: handshakeBudgetMs(),
+    interruptFd: driver.inFd,
+    onInterrupt: proc(): bool = driver.absorbInterruptByte())
+
   var session: TuiSession = nil
   try:
-    session = openTuiSession(folder, viewportHeight = max(1, size.rows - 6))
+    session = openTuiSession(folder, viewportHeight = max(1, size.rows - 6),
+                             bound = bound)
+  except DapInterruptedError:
+    # THE USER ENDED IT, so this is not a failure. `driver.stop()` gives the
+    # terminal back on the ordinary screen and the status is the one `q` and
+    # `Ctrl+c` produce everywhere else in this program.
+    driver.stop()
+    stderr.writeLine(TuiProgramName & ": cancelled while opening " & folder)
+    return ExitOk
+  except DapStalledError as e:
+    # A DISTINCT EXIT CODE, because this is a distinct fact. `ExitUsage` would
+    # send a user to look at their command line for a folder that named itself
+    # correctly and then did not open.
+    driver.stop()
+    stderr.writeLine(TuiProgramName & ": " & folder &
+                     ": the replay engine stopped answering (" & e.msg & ")")
+    stderr.writeLine("  the folder has a recording's shape but the engine" &
+                     " could not read it; re-record it, or run" &
+                     " `replay-server dap-server --stdio` against it to see" &
+                     " what it says.")
+    return ExitEngineStalled
   except CatchableError as e:
     driver.stop()
     stderr.writeLine(TuiProgramName & ": could not open " & folder & ": " &
                      e.msg)
     return ExitUsage
   defer: session.close()
+  # THE HATCH COMES OFF NOW. See `tui_session.disarmHandshakeInterrupt`: a read
+  # abandoned mid-message cannot be resynchronised, which is the right trade
+  # while the session is still being built and the wrong one afterwards.
+  session.disarmHandshakeInterrupt()
 
   session.header(rt)
   session.setViewportHeight(rt.sourcePaneRows())
   session.learnExtent()
   session.refresh(rt)
   app.notification = describe(session)
+
+  # §6.2's `--goto=<tick>`: BEFORE THE FIRST DEBUGGER FRAME, which is the whole
+  # of what the flag adds over typing `:goto` — `session.seekToStartupTick`
+  # dispatches the same `kaSeekToTick` action the command resolves to. It runs
+  # after `learnExtent` on purpose: the clamp is against the recording's own
+  # bounds, and those are what `ct/event-load`'s `maxRRTicks` just supplied.
+  if command.gotoTick != NoGotoTick:
+    app.notification = session.seekToStartupTick(rt, command.gotoTick)
+  if journal.isReplaying:
+    app.notification = describe(journal)
   paint(driver, rt)
 
   var running = true
   while running:
-    let ev = driver.nextEvent(IdlePollMs)
+    # §6.2's `--replay-keys`: "replay input events from file and exit". The
+    # journal REPLACES the keyboard rather than being merged with it, so a
+    # replay is a fixed amount of work — which is what lets
+    # `benchmarks/tui_benchmarks.nim` time one and
+    # `tests/real_terminal/test_real_high_latency.nim` compare two.
+    var ev: DriverEvent
+    if journal.isReplaying:
+      let (has, token) = journal.nextReplayToken()
+      if not has:
+        break
+      ev = DriverEvent(kind: dekToken, token: token)
+    else:
+      ev = driver.nextEvent(IdlePollMs)
     case ev.kind
     of dekEof:
       # The terminal closed its end. Not an error and not a quit key: the user
@@ -180,6 +260,11 @@ proc interactive(command: TuiCommand): int =
       session.refresh(rt)
       paint(driver, rt)
     of dekToken:
+      # RECORDED BEFORE IT IS HANDLED, so the journal of a session that quit on
+      # this token still contains it. A `q` written down only after the loop
+      # decided to stop would be a journal that replays to a different screen
+      # than the one it recorded.
+      journal.note(ev.token)
       let outcome = rt.handleToken(ev.token, nowMs())
       if outcome.quit:
         running = false
@@ -187,7 +272,15 @@ proc interactive(command: TuiCommand): int =
         if outcome.awaitsMove:
           session.pumpMove()
           session.refresh(rt)
-        if outcome.repaint:
+        # WRITE COALESCING, CTUI-14. A repaint is skipped only when the user's
+        # NEXT key is already waiting to be handled — `driver.holdFrame` asks
+        # the input fd, it does not consult a clock — so the frame that answers
+        # a keystroke typed on its own is never delayed by a millisecond, and
+        # the frames dropped are the ones a terminal could not have shown
+        # before they were replaced. `ssh_tuning.WriteCoalescer.maxHeld` is what
+        # stops a held key from freezing the screen for as long as it is held.
+        if outcome.repaint and
+           not driver.holdFrame(journal.pendingReplay > 0):
           paint(driver, rt)
   ExitOk
 
@@ -219,7 +312,8 @@ proc run(args: seq[string]): int =
       ExitUsage
   of tckHeadless:
     try:
-      runHeadless(command.tracePath, command.flags, headlessGeometry())
+      runHeadless(command.tracePath, command.flags, headlessGeometry(),
+                  gotoTick = command.gotoTick)
     except TuiHostError as e:
       stderr.writeLine(TuiProgramName & ": " & e.msg)
       ExitUsage

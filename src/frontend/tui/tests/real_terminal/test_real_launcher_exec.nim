@@ -128,11 +128,11 @@ const
     ## painted screen cannot satisfy "at least one".
 
   MeasurementDate = "2026-09-06"
-  MeasuredBinaryBytes = 13_364_232
+  MeasuredBinaryBytes = 13_423_040
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
-    ## `MeasurementDate`. Stripped it is 12_783_664; the shipped artifact is the
+    ## `MeasurementDate`. Stripped it is 12_833_072; the shipped artifact is the
     ## unstripped one, so that is what the band below is drawn around.
     ##
     ## This REPLACES the draft's "<15 MB stripped, no dynamic dependencies
@@ -149,17 +149,29 @@ const
     ##
     ##   13_355_200  CTUI-12
     ##   14_055_704  CTUI-13's bridge + embedded xterm bundle (withdrawn)
-    ##   13_364_232  today: the bridge removed, `--headless` KEPT
+    ##   13_364_232  CTUI-13's cut: the bridge removed, `--headless` KEPT
+    ##   13_422_696  CTUI-14
+    ##   13_423_040  today: CTUI-14's verification pass
     ##
-    ## The +9_032 bytes over CTUI-12 (+0.068%) is what `--headless` costs on its
-    ## own — `host/headless.nim` plus `terminal_driver.plainScreen` /
-    ## `plainFrame`. It is a MEASURED number and not a restored one: the value
-    ## here was taken from a fresh `just build-tui` after the removal, because
-    ## the pre-bridge figure could not have accounted for the flag that
-    ## survived the cut.
+    ## The +9_032 bytes CTUI-13's cut left over CTUI-12 (+0.068%) is what
+    ## `--headless` costs on its own. CTUI-14 adds 58_464 more
+    ## (+0.437%) for `host/ssh_tuning.nim`, `host/key_journal.nim`, three
+    ## theme palettes, four §6.2 flags and the bounded DAP reads — RE-MEASURED
+    ## from a fresh `just build-tui` rather than predicted, and the ceiling is
+    ## unchanged because the band still has 8.0% of headroom.
+    ##
+    ## The last +344 bytes (+0.0026%) are the verification pass making
+    ## `--headless` honour `--goto` and refuse `--record-keys` /
+    ## `--replay-keys` instead of accepting all three and acting on none — two
+    ## usage-error messages and one `seekToStartupTick` call. Re-measured from
+    ## a fresh build rather than left at the previous anchor, because an anchor
+    ## nobody moves is how a band stops measuring anything: the point of
+    ## re-measuring a 344-byte change is that the NEXT one is compared against
+    ## what the product actually costs. Stripped, unchanged at 12_833_072 —
+    ## the whole delta is in the not-stripped sections.
 
   BinaryCeilingBytes = 14_500_000
-    ## MeasuredBinaryBytes + 8.50%. Wide enough that ordinary work — a pane, a
+    ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second
     ## grammar archive, a stdlib module pulling in a subsystem) does. When it

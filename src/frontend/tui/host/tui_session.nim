@@ -96,7 +96,9 @@ type
     maxRRTicks*: uint64
     originNav*: ref OriginNavigator
 
-proc openTuiSession*(traceFolder: string; viewportHeight: int): TuiSession =
+proc openTuiSession*(traceFolder: string; viewportHeight: int;
+                     bound: DapReadBound = DapReadBound(interruptFd: -1)
+                    ): TuiSession =
   ## Spawn `replay-server` on `traceFolder`, complete the DAP handshake and
   ## build the ViewModel graph the panes read.
   ##
@@ -106,7 +108,11 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int): TuiSession =
   ## user the code they have NOW for a recording made against the code they had
   ## THEN. §3.3.2's provenance marker exists to make that difference visible, and
   ## it cannot if the provider papers over it.
-  let sess = openLocalTrace(traceFolder)
+  ## `bound` is CTUI-14's per-message clock and its escape hatch; see
+  ## `host/native_host.openLocalTrace`. It is carried rather than built here
+  ## because the fd it watches is the DRIVER's input fd, and this module owns
+  ## no terminal.
+  let sess = openLocalTrace(traceFolder, bound)
   let store = sess.session.store
   let src = createSourceVM(store, sess.session.editorVM)
   src.setViewport(height = max(1, viewportHeight), overscan = SourceOverscan)
@@ -302,6 +308,49 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     targets: targetsFor(s.bounds, s.callBoundaries, s.mutations),
     selectedVariable: "",
     functions: @[])
+
+proc disarmHandshakeInterrupt*(s: TuiSession) =
+  ## Take the ESCAPE HATCH off the DAP channel now that the session is open,
+  ## and leave the CLOCK on.
+  ##
+  ## The two halves of `DapReadBound` have different lifetimes and this is the
+  ## line between them. Abandoning a read leaves the stream part way through a
+  ## framed message, which `stdio_backend.DapStdioBackend.broken` turns into a
+  ## declared death — correct during the handshake, where the next thing that
+  ## happens is that the whole session is thrown away, and WRONG afterwards,
+  ## where a keystroke would kill a working channel. Measured rather than
+  ## reasoned about: with the hatch left armed, typing `nnq` at a live session
+  ## consumed the `n` and the `q` inside `pumpMove`'s read, aborted it
+  ## mid-message and left the front-end unable to answer anything.
+  ##
+  ## The clock stays because a mid-session stall would otherwise hang the loop
+  ## with no input running at all — the very shape CTUI-14 exists to remove.
+  ## When it fires the channel is declared dead, every later read fails fast,
+  ## and the user keeps a terminal that answers `q`.
+  if s.isNil or s.session.isNil or s.session.backend.isNil:
+    return
+  s.session.backend.bound.interruptFd = -1
+  s.session.backend.bound.onInterrupt = nil
+
+proc seekToStartupTick*(s: TuiSession; rt: TuiRuntime; tick: int64): string =
+  ## §6.2's `--goto=<tick>`, applied ONCE before the first debugger frame.
+  ##
+  ## CTUI-14 owns the flag and CTUI-8 owns the seek, and this is the whole of
+  ## the difference: it dispatches `kaSeekToTick` — the SAME action `:goto`
+  ## resolves to and the same one `t <tick> Enter` reaches — through the same
+  ## `dispatchAction`, so the flag cannot seek differently from the command.
+  ## `interpreter.seekWithin` remains the only call site of
+  ## `timeline_binding.seekTo`, which is what keeps "exactly one goto per
+  ## action" a property a test can count.
+  ##
+  ## Returns the dispatcher's own detail line, which `main.nim` puts on the
+  ## status bar: a clamp against the recording's bounds is reported there
+  ## ("goto to tick 900 (clamped from 99999)") rather than silently obeyed.
+  let outcome = dispatchAction(rt.dispatcher, rt.context, kaSeekToTick, $tick)
+  if outcome.status == drDone:
+    s.pumpMove()
+    s.refresh(rt)
+  outcome.detail
 
 proc header*(s: TuiSession; rt: TuiRuntime) =
   ## Put the trace's NAME where §3.1's header row reads it. Separate from

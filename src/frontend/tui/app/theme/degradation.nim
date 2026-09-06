@@ -265,7 +265,197 @@ proc ansi16Style*(role: SemanticRole): CellStyle =
   of srTimelineNeedle: NeedleStyle
   of srTimelineBounds: BoundsStyle
 
-proc ansi256Style*(role: SemanticRole): CellStyle =
+type
+  ThemeTint* = object
+    ## What ONE theme repaints ONE role with, at the two rungs that have a
+    ## palette wide enough to differ.
+    ##
+    ## `""` MEANS "DO NOT TOUCH IT", which is what makes a theme a diff against
+    ## the 16-colour rung rather than a fourth copy of the whole table. The
+    ## 16-colour rung is deliberately NOT themed: it has sixteen names, every
+    ## one of which a terminal renders in the user's own configured palette, so
+    ## a "light theme" there would be this program overriding the choice the
+    ## user already made in their terminal. Monochrome is not themed for the
+    ## stronger reason that it has no colour to theme.
+    fg256*, bg256*, fgRgb*, bgRgb*: string
+
+  ThemeTints* = array[SemanticRole, ThemeTint]
+
+proc tint(fg256 = ""; bg256 = ""; fgRgb = ""; bgRgb = ""): ThemeTint =
+  ThemeTint(fg256: fg256, bg256: bg256, fgRgb: fgRgb, bgRgb: bgRgb)
+
+const
+  DarkTints*: ThemeTints = [
+    ## CTUI-11's OWN NUMBERS, moved into a table and not re-picked. Every value
+    ## here is the one `ansi256Style` and `trueColorStyle` carried before
+    ## CTUI-14 gave them a theme axis, which is what makes `utDark` — the
+    ## published default and the zero value — byte-for-byte the screen that
+    ## shipped. `test_real_capability_negotiation.nim` asserting `indexed:244`
+    ## on a default run is the check that keeps that true.
+    srChromeText: tint(),
+    srChromeMuted: tint(fg256 = "indexed:244", fgRgb = "#8a8f98"),
+    srChromeTitle: tint(fg256 = "indexed:255", fgRgb = "#eceff4"),
+    srChromeTitleFocused: tint(fg256 = "indexed:255", fgRgb = "#eceff4"),
+    srChromeNotification: tint(fg256 = "indexed:214", fgRgb = "#f0a020"),
+    srChromeError: tint(fg256 = "indexed:203", fgRgb = "#ff5f56"),
+
+    srGutterNoMark: tint(),
+    srGutterBreakpoint: tint(fg256 = "indexed:196", fgRgb = "#e0483d"),
+    srGutterBreakpointDisabled: tint(fg256 = "indexed:244", fgRgb = "#8a8f98"),
+    srGutterTracepoint: tint(fg256 = "indexed:44", fgRgb = "#22b8cf"),
+    srGutterExecutionPointer: tint(fg256 = "indexed:220", fgRgb = "#ffd43b"),
+    srGutterInspectionPointer: tint(fg256 = "indexed:80", fgRgb = "#5bc0de"),
+
+    srSourceVerified: tint(fg256 = "indexed:41", fgRgb = "#2fb344"),
+    srSourceUnverified: tint(fg256 = "indexed:214", fgRgb = "#f0a020"),
+    srSourceAbsent: tint(fg256 = "indexed:203", fgRgb = "#ff5f56"),
+
+    srLineOrdinary: tint(),
+    srLineExecution: tint(bg256 = "indexed:24", bgRgb = "#1d3557"),
+    srLineSearchMatch: tint(fg256 = "indexed:16", bg256 = "indexed:220",
+                            fgRgb = "#101010", bgRgb = "#ffd43b"),
+
+    srValueUnchanged: tint(),
+    srValueModified: tint(fg256 = "indexed:41", fgRgb = "#2fb344"),
+    srValueModifiedTag: tint(fg256 = "indexed:16", bg256 = "indexed:41",
+                             fgRgb = "#101010", bgRgb = "#2fb344"),
+
+    srSyntaxPlain: tint(),
+    srSyntaxIdentifier: tint(fg256 = "indexed:252", fgRgb = "#d8dee9"),
+    srSyntaxKeyword: tint(fg256 = "indexed:170", fgRgb = "#c678dd"),
+    srSyntaxType: tint(fg256 = "indexed:80", fgRgb = "#56b6c2"),
+    srSyntaxString: tint(fg256 = "indexed:114", fgRgb = "#98c379"),
+    srSyntaxNumber: tint(fg256 = "indexed:215", fgRgb = "#d19a66"),
+    srSyntaxComment: tint(fg256 = "indexed:243", fgRgb = "#7f848e"),
+    srSyntaxOperator: tint(fg256 = "indexed:75", fgRgb = "#61afef"),
+    srSyntaxPunctuation: tint(fg256 = "indexed:68", fgRgb = "#4b7bec"),
+
+    srTimelineTrack: tint(fg256 = "indexed:240", fgRgb = "#5c6370"),
+    srTimelineSpan: tint(fg256 = "indexed:62", fgRgb = "#7c7aed"),
+    srTimelineMark: tint(fg256 = "indexed:214", fgRgb = "#f0a020"),
+    srTimelineNeedle: tint(fg256 = "indexed:87", fgRgb = "#56d4ff"),
+    srTimelineBounds: tint(fg256 = "indexed:255", fgRgb = "#eceff4")]
+
+  LightTints*: ThemeTints = [
+    ## FOR A LIGHT TERMINAL BACKGROUND. Every hue is darkened rather than
+    ## re-hued: a light theme that changed which colour a keyword is would be a
+    ## second product decision hiding inside a background change, and a user who
+    ## knows `#c678dd` means "keyword" on the dark screen should not have to
+    ## learn a second mapping to read the light one.
+    ##
+    ## The two roles with a BACKGROUND are the ones that had to be re-picked
+    ## rather than darkened: `srLineExecution` and `srLineSearchMatch` paint a
+    ## whole row, and a dark row on a light screen is a hole in it.
+    srChromeText: tint(),
+    srChromeMuted: tint(fg256 = "indexed:243", fgRgb = "#6b7280"),
+    srChromeTitle: tint(fg256 = "indexed:232", fgRgb = "#1b1f24"),
+    srChromeTitleFocused: tint(fg256 = "indexed:232", fgRgb = "#1b1f24"),
+    srChromeNotification: tint(fg256 = "indexed:130", fgRgb = "#a35c00"),
+    srChromeError: tint(fg256 = "indexed:160", fgRgb = "#c01c28"),
+
+    srGutterNoMark: tint(),
+    srGutterBreakpoint: tint(fg256 = "indexed:160", fgRgb = "#c01c28"),
+    srGutterBreakpointDisabled: tint(fg256 = "indexed:243", fgRgb = "#6b7280"),
+    srGutterTracepoint: tint(fg256 = "indexed:30", fgRgb = "#0f7285"),
+    srGutterExecutionPointer: tint(fg256 = "indexed:136", fgRgb = "#b07d00"),
+    srGutterInspectionPointer: tint(fg256 = "indexed:31", fgRgb = "#1d6fa5"),
+
+    srSourceVerified: tint(fg256 = "indexed:28", fgRgb = "#1a7f37"),
+    srSourceUnverified: tint(fg256 = "indexed:130", fgRgb = "#a35c00"),
+    srSourceAbsent: tint(fg256 = "indexed:160", fgRgb = "#c01c28"),
+
+    srLineOrdinary: tint(),
+    srLineExecution: tint(bg256 = "indexed:153", bgRgb = "#cfe3ff"),
+    srLineSearchMatch: tint(fg256 = "indexed:232", bg256 = "indexed:222",
+                            fgRgb = "#1b1f24", bgRgb = "#ffe08a"),
+
+    srValueUnchanged: tint(),
+    srValueModified: tint(fg256 = "indexed:28", fgRgb = "#1a7f37"),
+    srValueModifiedTag: tint(fg256 = "indexed:255", bg256 = "indexed:28",
+                             fgRgb = "#ffffff", bgRgb = "#1a7f37"),
+
+    srSyntaxPlain: tint(),
+    srSyntaxIdentifier: tint(fg256 = "indexed:236", fgRgb = "#30363d"),
+    srSyntaxKeyword: tint(fg256 = "indexed:90", fgRgb = "#8250df"),
+    srSyntaxType: tint(fg256 = "indexed:30", fgRgb = "#0f7285"),
+    srSyntaxString: tint(fg256 = "indexed:22", fgRgb = "#0a6640"),
+    srSyntaxNumber: tint(fg256 = "indexed:130", fgRgb = "#a35c00"),
+    srSyntaxComment: tint(fg256 = "indexed:245", fgRgb = "#8a9199"),
+    srSyntaxOperator: tint(fg256 = "indexed:26", fgRgb = "#0a58ca"),
+    srSyntaxPunctuation: tint(fg256 = "indexed:60", fgRgb = "#3d4f8a"),
+
+    srTimelineTrack: tint(fg256 = "indexed:249", fgRgb = "#b1b7bd"),
+    srTimelineSpan: tint(fg256 = "indexed:61", fgRgb = "#5850c4"),
+    srTimelineMark: tint(fg256 = "indexed:130", fgRgb = "#a35c00"),
+    srTimelineNeedle: tint(fg256 = "indexed:31", fgRgb = "#1d6fa5"),
+    srTimelineBounds: tint(fg256 = "indexed:232", fgRgb = "#1b1f24")]
+
+  MonokaiTints*: ThemeTints = [
+    ## Monokai's published hues, the ones the scheme is recognised BY: pink
+    ## `#f92672` for keywords, green `#a6e22e` for types, yellow `#e6db74` for
+    ## strings, purple `#ae81ff` for numbers, grey `#75715e` for comments, blue
+    ## `#66d9ef` for operators. The chrome roles are given the scheme's own
+    ## greys rather than left on the dark theme's, so the whole screen reads as
+    ## one palette.
+    srChromeText: tint(),
+    srChromeMuted: tint(fg256 = "indexed:242", fgRgb = "#75715e"),
+    srChromeTitle: tint(fg256 = "indexed:231", fgRgb = "#f8f8f2"),
+    srChromeTitleFocused: tint(fg256 = "indexed:231", fgRgb = "#f8f8f2"),
+    srChromeNotification: tint(fg256 = "indexed:186", fgRgb = "#e6db74"),
+    srChromeError: tint(fg256 = "indexed:197", fgRgb = "#f92672"),
+
+    srGutterNoMark: tint(),
+    srGutterBreakpoint: tint(fg256 = "indexed:197", fgRgb = "#f92672"),
+    srGutterBreakpointDisabled: tint(fg256 = "indexed:242", fgRgb = "#75715e"),
+    srGutterTracepoint: tint(fg256 = "indexed:81", fgRgb = "#66d9ef"),
+    srGutterExecutionPointer: tint(fg256 = "indexed:208", fgRgb = "#fd971f"),
+    srGutterInspectionPointer: tint(fg256 = "indexed:141", fgRgb = "#ae81ff"),
+
+    srSourceVerified: tint(fg256 = "indexed:148", fgRgb = "#a6e22e"),
+    srSourceUnverified: tint(fg256 = "indexed:208", fgRgb = "#fd971f"),
+    srSourceAbsent: tint(fg256 = "indexed:197", fgRgb = "#f92672"),
+
+    srLineOrdinary: tint(),
+    srLineExecution: tint(bg256 = "indexed:237", bgRgb = "#3e3d32"),
+    srLineSearchMatch: tint(fg256 = "indexed:235", bg256 = "indexed:186",
+                            fgRgb = "#272822", bgRgb = "#e6db74"),
+
+    srValueUnchanged: tint(),
+    srValueModified: tint(fg256 = "indexed:148", fgRgb = "#a6e22e"),
+    srValueModifiedTag: tint(fg256 = "indexed:235", bg256 = "indexed:148",
+                             fgRgb = "#272822", bgRgb = "#a6e22e"),
+
+    srSyntaxPlain: tint(),
+    srSyntaxIdentifier: tint(fg256 = "indexed:231", fgRgb = "#f8f8f2"),
+    srSyntaxKeyword: tint(fg256 = "indexed:197", fgRgb = "#f92672"),
+    srSyntaxType: tint(fg256 = "indexed:148", fgRgb = "#a6e22e"),
+    srSyntaxString: tint(fg256 = "indexed:186", fgRgb = "#e6db74"),
+    srSyntaxNumber: tint(fg256 = "indexed:141", fgRgb = "#ae81ff"),
+    srSyntaxComment: tint(fg256 = "indexed:242", fgRgb = "#75715e"),
+    srSyntaxOperator: tint(fg256 = "indexed:81", fgRgb = "#66d9ef"),
+    srSyntaxPunctuation: tint(fg256 = "indexed:245", fgRgb = "#8f908a"),
+
+    srTimelineTrack: tint(fg256 = "indexed:239", fgRgb = "#49483e"),
+    srTimelineSpan: tint(fg256 = "indexed:141", fgRgb = "#ae81ff"),
+    srTimelineMark: tint(fg256 = "indexed:208", fgRgb = "#fd971f"),
+    srTimelineNeedle: tint(fg256 = "indexed:81", fgRgb = "#66d9ef"),
+    srTimelineBounds: tint(fg256 = "indexed:231", fgRgb = "#f8f8f2")]
+
+proc tintsFor*(theme: UiTheme): ThemeTints =
+  ## The palette one theme paints in.
+  ##
+  ## `utPlain` answers `DarkTints` and that is not a fallback: `plain` resolves
+  ## the colour LADDER to `cdMonochrome` (see
+  ## `app/theme/capabilities.resolveColorDepth`), so no rung that reads a tint
+  ## is ever reached under it. Answering with a table nothing consults is the
+  ## honest shape; inventing a fourth palette for it would be a table that could
+  ## never be wrong because it could never be seen.
+  case theme
+  of utDark, utPlain: DarkTints
+  of utLight: LightTints
+  of utMonokai: MonokaiTints
+
+proc ansi256Style*(role: SemanticRole; theme: UiTheme = utDark): CellStyle =
   ## THE 256-COLOUR RUNG. `indexed:N` names a cell of xterm's 256-colour cube,
   ## which `compositor.parseColorOrDefault` now understands and `ansi.fgParams`
   ## emits as `38;5;N`.
@@ -273,83 +463,22 @@ proc ansi256Style*(role: SemanticRole): CellStyle =
   ## Every attribute is carried over from the 16-colour rung unchanged, so this
   ## is a widening of the palette and never a change of weight: a role that is
   ## bold at 16 colours is bold at 256, and the distinguishability property
-  ## therefore cannot be *lost* on the way up.
+  ## therefore cannot be *lost* on the way up. THAT IS ALSO WHY A THEME CANNOT
+  ## COLLAPSE TWO STATES BY ACCIDENT — it moves hues and leaves every attribute
+  ## where it was — but it is asserted rather than assumed, over all four
+  ## themes, in `app/tests/test_degraded_style_tables.nim`.
   result = ansi16Style(role)
-  case role
-  of srChromeMuted: result.fg = "indexed:244"
-  of srChromeTitle, srChromeTitleFocused: result.fg = "indexed:255"
-  of srChromeNotification: result.fg = "indexed:214"
-  of srChromeError: result.fg = "indexed:203"
-  of srGutterBreakpoint: result.fg = "indexed:196"
-  of srGutterBreakpointDisabled: result.fg = "indexed:244"
-  of srGutterTracepoint: result.fg = "indexed:44"
-  of srGutterExecutionPointer: result.fg = "indexed:220"
-  of srGutterInspectionPointer: result.fg = "indexed:80"
-  of srSourceVerified: result.fg = "indexed:41"
-  of srSourceUnverified: result.fg = "indexed:214"
-  of srSourceAbsent: result.fg = "indexed:203"
-  of srLineExecution: result.bg = "indexed:24"
-  of srLineSearchMatch:
-    result.bg = "indexed:220"
-    result.fg = "indexed:16"
-  of srValueModified: result.fg = "indexed:41"
-  of srValueModifiedTag:
-    result.bg = "indexed:41"
-    result.fg = "indexed:16"
-  of srSyntaxIdentifier: result.fg = "indexed:252"
-  of srSyntaxKeyword: result.fg = "indexed:170"
-  of srSyntaxType: result.fg = "indexed:80"
-  of srSyntaxString: result.fg = "indexed:114"
-  of srSyntaxNumber: result.fg = "indexed:215"
-  of srSyntaxComment: result.fg = "indexed:243"
-  of srSyntaxOperator: result.fg = "indexed:75"
-  of srSyntaxPunctuation: result.fg = "indexed:68"
-  of srTimelineTrack: result.fg = "indexed:240"
-  of srTimelineSpan: result.fg = "indexed:62"
-  of srTimelineMark: result.fg = "indexed:214"
-  of srTimelineNeedle: result.fg = "indexed:87"
-  of srTimelineBounds: result.fg = "indexed:255"
-  else: discard
+  let t = tintsFor(theme)[role]
+  if t.fg256.len > 0: result.fg = t.fg256
+  if t.bg256.len > 0: result.bg = t.bg256
 
-proc trueColorStyle*(role: SemanticRole): CellStyle =
+proc trueColorStyle*(role: SemanticRole; theme: UiTheme = utDark): CellStyle =
   ## THE 24-BIT RUNG. Same rule as the one above: hues widen, weights do not
   ## move.
   result = ansi16Style(role)
-  case role
-  of srChromeMuted: result.fg = "#8a8f98"
-  of srChromeTitle, srChromeTitleFocused: result.fg = "#eceff4"
-  of srChromeNotification: result.fg = "#f0a020"
-  of srChromeError: result.fg = "#ff5f56"
-  of srGutterBreakpoint: result.fg = "#e0483d"
-  of srGutterBreakpointDisabled: result.fg = "#8a8f98"
-  of srGutterTracepoint: result.fg = "#22b8cf"
-  of srGutterExecutionPointer: result.fg = "#ffd43b"
-  of srGutterInspectionPointer: result.fg = "#5bc0de"
-  of srSourceVerified: result.fg = "#2fb344"
-  of srSourceUnverified: result.fg = "#f0a020"
-  of srSourceAbsent: result.fg = "#ff5f56"
-  of srLineExecution: result.bg = "#1d3557"
-  of srLineSearchMatch:
-    result.bg = "#ffd43b"
-    result.fg = "#101010"
-  of srValueModified: result.fg = "#2fb344"
-  of srValueModifiedTag:
-    result.bg = "#2fb344"
-    result.fg = "#101010"
-  of srSyntaxIdentifier: result.fg = "#d8dee9"
-  of srSyntaxKeyword: result.fg = "#c678dd"
-  of srSyntaxType: result.fg = "#56b6c2"
-  of srSyntaxString: result.fg = "#98c379"
-  of srSyntaxNumber: result.fg = "#d19a66"
-  of srSyntaxComment: result.fg = "#7f848e"
-  of srSyntaxOperator: result.fg = "#61afef"
-  of srSyntaxPunctuation: result.fg = "#4b7bec"
-  of srTimelineTrack: result.fg = "#5c6370"
-  of srTimelineSpan: result.fg = "#7c7aed"
-  of srTimelineMark: result.fg = "#f0a020"
-  of srTimelineNeedle: result.fg = "#56d4ff"
-  of srTimelineBounds: result.fg = "#eceff4"
-  else: discard
+  let t = tintsFor(theme)[role]
+  if t.fgRgb.len > 0: result.fg = t.fgRgb
+  if t.bgRgb.len > 0: result.bg = t.bgRgb
 
 proc monochromeStyle*(role: SemanticRole): CellStyle =
   ## THE BOTTOM RUNG: weight, underline, reverse. No `fg`, no `bg`, ever —
@@ -407,13 +536,18 @@ proc monochromeStyle*(role: SemanticRole): CellStyle =
   of srTimelineNeedle: CellStyle(bold: true, underline: true)
   of srTimelineBounds: CellStyle(bold: true, italic: true)
 
-proc roleStyle*(role: SemanticRole; depth: ColorDepth): CellStyle =
+proc roleStyle*(role: SemanticRole; depth: ColorDepth;
+                theme: UiTheme = utDark): CellStyle =
   ## The one entry point into the four tables above.
+  ##
+  ## The theme reaches only the two rungs that have a palette wide enough to
+  ## carry one — see `ThemeTint`. `theme` defaults to the published default so
+  ## every existing call site reads unchanged and means what it always meant.
   case depth
   of cdMonochrome: monochromeStyle(role)
   of cdAnsi16: ansi16Style(role)
-  of cdAnsi256: ansi256Style(role)
-  of cdTrueColor: trueColorStyle(role)
+  of cdAnsi256: ansi256Style(role, theme)
+  of cdTrueColor: trueColorStyle(role, theme)
 
 proc roleGlyph*(role: SemanticRole; mode: BorderMode): string =
   ## The mark this role paints, in the border set the terminal can show.
@@ -438,8 +572,8 @@ proc roleGlyph*(role: SemanticRole; mode: BorderMode): string =
 
 proc appearance*(role: SemanticRole;
                  caps: TerminalCapabilities): RoleAppearance =
-  ## What this role looks like on THIS terminal.
-  RoleAppearance(style: roleStyle(role, caps.colors),
+  ## What this role looks like on THIS terminal, in the theme it was asked for.
+  RoleAppearance(style: roleStyle(role, caps.colors, caps.theme),
                  glyph: roleGlyph(role, caps.borders))
 
 proc distinctionKey*(a: RoleAppearance): string =
@@ -631,7 +765,8 @@ proc degradeStyle*(style: CellStyle; caps: TerminalCapabilities): CellStyle =
   ## and reported by `app/tests/test_degraded_style_tables.nim`, rather than
   ## reaching a terminal.
   let (claimed, role) = roleFor(style)
-  let widened = if claimed: roleStyle(role, caps.colors) else: style
+  let widened =
+    if claimed: roleStyle(role, caps.colors, caps.theme) else: style
   projectStyle(widened, caps.colors)
 
 proc degradeText*(text: string; caps: TerminalCapabilities): string =

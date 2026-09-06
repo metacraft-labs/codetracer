@@ -1,0 +1,294 @@
+name: "TUI Benchmark"
+
+# ============================================================================
+# WITHDRAWN. THIS FILE IS NOT A WORKFLOW AND IS NOT RUN BY ANYTHING.
+# ============================================================================
+#
+# It is parked here, under `ci/benchmarks/` and with a `.withdrawn` suffix, so
+# that the reasoning below survives. Moving it to
+# `.github/workflows/tui-benchmark.yml` is what activates it, and DOING THAT IS
+# A PIPELINE DECISION THAT HAS NOT BEEN TAKEN — see "WHY IT WAS WITHDRAWN".
+#
+# The suffix is load-bearing in two ways, both mechanical:
+#
+#   * `.github/workflows/*.yml` is the ONLY root set `ci/test/shell-gate-coverage.sh`
+#     seeds reachability from. A file here seeds nothing, so nothing this file
+#     names is credited as CI-reachable — which is the correct answer, because
+#     CI does not reach it.
+#   * The name does not end in `.yml`, so no `*.yml` glob — a linter's, a
+#     workflow's `paths:` filter, a future collector's — picks it up by accident.
+#
+# The split logic below is written INLINE in its `run:` block rather than
+# extracted to `ci/benchmarks/split-artifact.sh`, and that is deliberate too:
+# `shell-gate-coverage.sh` discovers every `*.sh`, `*.mjs` and `*.py` under
+# `ci/` and `scripts/` as a gate, and a script that only a WITHDRAWN workflow
+# calls is reachable from no lane at all. Extracting it would create a dark gate
+# and redden the very guard this file was withdrawn to respect.
+#
+# ---------------------------------------------------------------------------
+# WHAT HAS AND HAS NOT BEEN VALIDATED, stated plainly because this file has
+# never run
+# ---------------------------------------------------------------------------
+#
+# VALIDATED, by execution, against the committed
+# `bench-results/benchmark_results.json` on 2026-09-06:
+#
+#   * The `jq` split below. Run against the real artifact it divides 12 entries
+#     into 11 + 1, with `tui/strip-cache-hit-rate` alone on the
+#     bigger-is-better side. Both halves non-empty; the counts sum to 12.
+#   * That the split key is UNAMBIGUOUS on that artifact: of the 12 entries,
+#     exactly 11 carry a `target<=` token and exactly 1 carries `target>=`.
+#     None carries both and none carries neither, which is the property the
+#     sum-to-the-whole assertion exists to keep true as metrics are added.
+#   * That parking the file here leaves `ci/test/shell-gate-coverage.sh` green.
+#
+# NOT VALIDATED, because it cannot be from here, and NOT claimed:
+#
+#   * That a runner matching `[self-hosted, benchmark]` exists and is idle.
+#   * That `benchmark-action/github-action-benchmark@v1` behaves as documented
+#     for two data directories on one `gh-pages` branch.
+#   * That the `nix develop --command just …` steps succeed on a runner. They
+#     are the recipes this repository uses locally; nothing has run them in CI.
+#
+# Anyone activating this file owns those three. The first `gh-pages` baseline
+# run is where they get answered.
+#
+# ---------------------------------------------------------------------------
+# WHY IT WAS WITHDRAWN
+# ---------------------------------------------------------------------------
+#
+# `just bench` depends on `just build-tui`, which depends on
+# `scripts/build-tui-grammars.sh`, which declares `NOT-A-CI-GATE:` in its own
+# header. `ci/test/shell-gate-coverage.sh` refuses that combination by name —
+# "is reachable from CI AND declares 'NOT-A-CI-GATE:' — one of the two is
+# wrong" — and it is right to. Putting the TUI benchmark in a pipeline puts the
+# TUI BUILD in one, and that moves the `tui` and `tui-real-terminal` lanes from
+# "declared, green, waiting on a pipeline" to "in CI". That is a decision that
+# belongs with the change that publishes this campaign's branches, which is also
+# what a `gh-pages` baseline needs before the comparison step means anything.
+#
+# ---------------------------------------------------------------------------
+# CTUI-14. The eight §8 performance targets of
+# codetracer-specs/Front-Ends/CodeTracer-TUI.md, plus a time-to-debugger entry
+# and a release-build figure for the fuzzy command palette.
+#
+# Follows metacraft-dev-guidelines/policies/continuous-benchmarking.md §4 and
+# the reference workflow it names
+# (codetracer-native-recorder/.github/workflows/benchmark.yml).
+#
+# ## THE MEASUREMENT JOB IS ON THE DEDICATED BENCHMARK RUNNER, and that is the
+# ## whole reason this is a separate workflow
+#
+# The policy is explicit: "benchmark measurement jobs must use the self-hosted
+# runner pool … never GitHub-hosted runners. Concurrent CI traffic on shared
+# runners makes perf measurements unreliable." `gpu-server-001` is CPU-isolated
+# and is a single instance, so this workflow's concurrency group is what keeps
+# two runs off it at once — a queued run is correct here and a cancelled one is
+# not, because a benchmark that raced another benchmark is a number nobody can
+# use.
+#
+# This was measured rather than assumed while CTUI-14 was written: on a 24-core
+# developer host that was also running a self-hosted runner, the identical
+# release binary reported `tui/time-to-debugger` at 259.7 ms at load 38.6 and at
+# 82.5 ms at load 17.0 within four minutes. Every entry the suite writes carries
+# its own `load1`, so a figure taken on a busy machine can be recognised as one.
+#
+# ## gh-pages TRACKING IS NOT WIRED YET, deliberately
+#
+# `benchmark-action/github-action-benchmark` compares against a baseline stored
+# on `gh-pages`. There is no baseline until this workflow has run on the default
+# branch at least once, and the CodeTracer TUI campaign's work is unpushed
+# across six repositories at the time this file was written. The PR leg below is
+# therefore `save-data-file: false` / `auto-push: false` (a comment, no write)
+# and the baseline leg is guarded on the default branch, which is exactly the
+# shape the policy's reference workflow uses. Nothing here needs changing when
+# the first baseline lands.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "src/frontend/tui/**"
+      - "src/frontend/viewmodel/**"
+      - "justfile"
+      - ".github/workflows/tui-benchmark.yml"
+  pull_request:
+    paths:
+      - "src/frontend/tui/**"
+      - "src/frontend/viewmodel/**"
+      - "justfile"
+      - ".github/workflows/tui-benchmark.yml"
+  workflow_dispatch:
+
+concurrency:
+  # ONE AT A TIME ON THE BENCHMARK RUNNER, and a queued run is not cancelled.
+  # `cancel-in-progress: false` is the opposite of what most workflows want and
+  # is right here: killing a half-finished measurement wastes the slot and
+  # leaves no number, while queuing costs only time.
+  group: tui-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: [self-hosted, benchmark]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      # `just bench` depends on `build-tui`, which depends on `tui-prereqs`
+      # (submodules + the ten-grammar archive). Four of the metrics are
+      # properties of the SHIPPED PROCESS and are measured by spawning it in a
+      # real pty, so the binary is not optional.
+      - name: Build the TUI and the benchmark binary
+        run: nix develop --command just build-tui-benchmarks
+
+      # The recorded fixtures the in-process half opens. A missing fixture
+      # FAILS the run by name rather than skipping — the suite raises with the
+      # recipe that produces one.
+      - name: Warm the fixture corpus
+        run: nix develop --command just test-tui
+
+      - name: Run benchmarks
+        run: nix develop --command just bench --quick
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tui-benchmark-report
+          path: bench-results/
+
+      # ══════════════════════════════════════════════════════════════════════
+      # THE ARTIFACT IS SPLIT BY COMPARISON DIRECTION BEFORE IT IS PUBLISHED
+      # ══════════════════════════════════════════════════════════════════════
+      #
+      # `benchmark-action/github-action-benchmark` takes ONE `tool:` PER OUTPUT
+      # FILE, and that setting is what decides whether a RISE is a regression.
+      # This suite mixes senses: eleven of its twelve entries are
+      # smaller-is-better, and `tui/strip-cache-hit-rate` is a HIT RATE whose §8
+      # target is `>= 92%`.
+      #
+      # An earlier draft of this file set `tool: customSmallerIsBetter` for the
+      # whole artifact. Restored as written it would have alerted on the strip
+      # cache GETTING BETTER, and reported a collapse from 98% to 5% as an
+      # improvement — alerting with the sign inverted, on the one metric here
+      # whose failure is silent in every other respect (the shipped driver's
+      # rate is a property nothing else in the suite observes).
+      #
+      # THE SPLIT KEY IS A FACT THE ARTIFACT CARRIES, not a list of metric names
+      # kept in step by hand. The suite already writes `target<=<n>` or
+      # `target>=<n>` into every entry's `extra` — it is how the report renders
+      # the comparison column — so the direction is read back out of the data.
+      # A hand-maintained name list would go stale the first time a second
+      # bigger-is-better metric is added, and would do so SILENTLY, which is the
+      # same failure one level up.
+      #
+      # BOTH HALVES ARE ASSERTED NON-EMPTY AND ASSERTED TO SUM TO THE WHOLE.
+      # A `jq` filter that matches nothing produces `[]`, which the action
+      # ACCEPTS and reports as a run with no benchmarks — trap 4 of
+      # `codetracer-specs/Testing/Verification-Harness-Traps.md`, arriving in a
+      # workflow. The sum assertion catches the other direction: an entry whose
+      # `extra` carries neither token, or both, would be silently dropped from
+      # or double-counted across the two charts.
+      - name: Split the artifact by comparison direction
+        run: |
+          set -euo pipefail
+
+          artifact=bench-results/benchmark_results.json
+          smaller_file=bench-results/benchmark_results.smaller-is-better.json
+          bigger_file=bench-results/benchmark_results.bigger-is-better.json
+
+          jq '[.[] | select(.extra | test("target<=[0-9]"))]' \
+            "${artifact}" > "${smaller_file}"
+          jq '[.[] | select(.extra | test("target>=[0-9]"))]' \
+            "${artifact}" > "${bigger_file}"
+
+          total=$(jq 'length' "${artifact}")
+          smaller=$(jq 'length' "${smaller_file}")
+          bigger=$(jq 'length' "${bigger_file}")
+
+          echo "artifact carries ${total} entrie(s):"
+          echo "  ${smaller} smaller-is-better -> perf/tui"
+          jq -r '.[] | "    " + .name' "${smaller_file}"
+          echo "  ${bigger} bigger-is-better -> perf/tui-bigger"
+          jq -r '.[] | "    " + .name' "${bigger_file}"
+
+          # An empty half is the trap: the action accepts `[]` and reports a
+          # run with no benchmarks, so the chart quietly stops updating.
+          if [ "${smaller}" -eq 0 ]; then
+            echo "::error::the smaller-is-better half is EMPTY — the action would accept it as a run with no benchmarks" >&2
+            exit 1
+          fi
+          if [ "${bigger}" -eq 0 ]; then
+            echo "::error::the bigger-is-better half is EMPTY — tui/strip-cache-hit-rate should be here; has its target direction changed?" >&2
+            exit 1
+          fi
+
+          # Nothing dropped and nothing counted twice.
+          if [ "$((smaller + bigger))" -ne "${total}" ]; then
+            echo "::error::${smaller} + ${bigger} != ${total} — an entry's extra carries neither 'target<=' nor 'target>=', or carries both" >&2
+            exit 1
+          fi
+
+      # ── PULL REQUEST: comment, never write the baseline ──────────────────
+      #
+      # TWO INVOCATIONS PER LEG, one per direction, into TWO DATA DIRECTORIES.
+      # `perf/tui-bigger` is its own directory rather than a second series in
+      # `perf/tui` because two series with opposite senses in one chart is the
+      # same defect one level up: the chart's own axis would mean "lower" for
+      # eleven lines and "higher" for one.
+      - name: Compare benchmarks — smaller is better (PR)
+        if: github.event_name == 'pull_request'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: customSmallerIsBetter
+          output-file-path: bench-results/benchmark_results.smaller-is-better.json
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: perf/tui
+          # The org default. The SUITE also writes a per-metric
+          # `alert-threshold=` into each entry's `extra`, derived from that
+          # metric's own headroom against its published target and clamped to
+          # [105%, 120%] — a metric sitting at half its budget can absorb the
+          # default and one sitting at 95% of it cannot. The action takes one
+          # number for the whole file, so this is the ceiling and the per-metric
+          # figures are the reviewer's context.
+          alert-threshold: "120%"
+          comment-always: true
+          save-data-file: false
+          auto-push: false
+
+      - name: Compare benchmarks — bigger is better (PR)
+        if: github.event_name == 'pull_request'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: customBiggerIsBetter
+          output-file-path: bench-results/benchmark_results.bigger-is-better.json
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: perf/tui-bigger
+          alert-threshold: "120%"
+          comment-always: true
+          save-data-file: false
+          auto-push: false
+
+      # ── DEFAULT BRANCH: update the baseline ──────────────────────────────
+      - name: Update baseline — smaller is better (main)
+        if: github.ref == 'refs/heads/main'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: customSmallerIsBetter
+          output-file-path: bench-results/benchmark_results.smaller-is-better.json
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: perf/tui
+          auto-push: true
+
+      - name: Update baseline — bigger is better (main)
+        if: github.ref == 'refs/heads/main'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: customBiggerIsBetter
+          output-file-path: bench-results/benchmark_results.bigger-is-better.json
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: perf/tui-bigger
+          auto-push: true

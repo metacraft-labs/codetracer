@@ -351,6 +351,19 @@ somewhere in this repository — see
    the hardware boundary, each justified in the header of the file that uses
    it; and `MockBackendService` in exactly one file, CTUI-0's stack-compiles
    test.
+8. **A generated file this repository COMMITS needs a reader in a lane.**
+   `bench-results/benchmark_results.json` is committed, is what
+   `github-action-benchmark` consumes, and for the whole of CTUI-14 no test
+   opened it — so four defects lived in it (a `samples=` that no test asserts,
+   a `verdict=met` on two rows whose published condition was not satisfied, a
+   `verdict=` value with a space in it, a comparison direction) while every
+   suite stayed green. `tests/test_benchmark_artifact.nim` reads it, and takes
+   its expectations from `benchmarks/tui_benchmarks.nim`'s own `record(...)`
+   call sites rather than from a list in the test, so entry count, names,
+   condition-gap kinds and comparison directions are compared BETWEEN the
+   source in the tree and the file committed beside it. Rule 4 applies to the
+   parse itself: a scan that found no call sites would make every one of those
+   comparisons pass, so it carries an explicit non-vacuity floor.
 
 ---
 
@@ -686,6 +699,112 @@ content* passes either way, so this only ever shows up as "a blank row is 100
 characters long" — which is how it was found, in
 `tests/real_terminal/test_real_command_mode.nim`. **Qualify `strutils.strip` in
 any helper that reads a terminal row.**
+
+### The raw byte stream (CTUI-14)
+
+`TermAssert` parses everything it reads with libvterm, and for almost every
+assertion in this tree that is the right subject. Two claims are not about the
+parsed screen at all, and both are about **sequences**:
+
+* **the alternate screen is PAIRED** — `CSI ? 1049 h` and `CSI ? 1049 l`,
+  counted;
+* **DEC 2026 is paired** — the same shape, and CTUI-11 established it by feeding
+  the driver's own `bracketFrame` output into a fresh libvterm screen.
+
+Neither is readable off a terminal after the child exits, for the reason
+CTUI-11 recorded about `synchronizedOutput`: these are **live flags, not
+latches**. After the leave, alt-screen state is `false` whether the child left
+correctly or never entered.
+
+So `newTuiTest(...).transcript()` keeps the raw bytes beside the parse.
+
+```nim
+var sess = newTuiTest(bin, args).width(120).height(40).transcript().spawn()
+…
+let counts = altScreenCounts(sess)       # lifecycle_support.nim
+check counts.enters == 1
+check counts.leaves == 1
+check sess.transcriptDroppedBytes() == 0 # a truncated transcript is not sound
+```
+
+**Off by default**, so no existing case pays for a second copy of its output,
+and capped at `TermAssert.TranscriptCapBytes` (8 MB) with
+`transcriptDroppedBytes` reporting when the cap bit — because a "does not
+contain" assertion over a truncated buffer is not an assertion.
+
+### `lifecycle_support.nim` is a library, not a suite
+
+`tests/real_terminal/lifecycle_support.nim` holds what CTUI-14's four
+`test_real_*` suites share: `tuiSession` (the shipped binary in a pty with a
+known environment), `settleOnDebugger`, `waitForOpeningFrame`,
+`altScreenCounts`, `wedgeFolder`, and the surviving-child detectors. The name
+is what keeps it out of the lane — `ci/lib/test-lane-files.sh` finds
+`test_*.nim` — and **nothing in it calls `check`**, which is stronger than "use
+a template": a shared helper is exactly where the invisible-`testStatusIMPL`
+trap does the most damage, so those functions answer or raise and the suites
+assert.
+
+**`TermAssert`'s blocklist used to beat its overrides.** `effectiveEnv` skipped
+any override whose key was also blocked (`if k in blocked: continue`), so
+`.envRemove("X").envSet("X", v)` left `X` **absent**. This cost CTUI-14 a
+confusing run: the clock case set `CODETRACER_TUI_HANDSHAKE_MS` to 1500 and to
+6000 and measured 30013 ms and 30016 ms both times, because the variable never
+reached the child and the binary used its own default.
+
+**Fixed in `TermAssert` (2026-09-06)** — an explicit `envSet` now wins over
+`envRemove` and over the tmux defaults, pinned by
+`TermAssert/tests/test_harness_env_overrides.nim`, and written up as trap 11 of
+`codetracer-specs/Testing/Verification-Harness-Traps.md`. **Keep blocking
+**or** setting, never both, anyway**: this workspace pins no `TermAssert`
+revision, so this lane can be built against a checkout that predates the fix,
+and the discipline costs nothing.
+
+**Two more `TermAssert` traps this campaign found, neither fixed, both
+measured** — traps 9 and 10 of the same document, and both make a case
+*vacuous* rather than red:
+
+* **`sendKey` silently strips `shift+`.** Measured by spawning `cat -v` in a
+  pty: `sendKey("shift+f10")` puts `^[[21~` on the wire, byte for byte what
+  `sendKey("f10")` puts there. `ctrl+` has the same hole for a *named* key (it
+  is only applied in the single-character arm), so `ctrl+f10` is also `F10`.
+  Write a modified function key as bytes — `ESC [ 21 ; 2 ~` for shifted `F10`.
+* **`assertSynchronizedRender` cannot fail.** Its "not observed" arm is a bare
+  `discard` and the function contains no `raise` at all. Measured against
+  `echo no-sync-here` (14 bytes of output, zero DEC 2026 sequences,
+  `synchronizedOutput()` false): the assertion returned normally. Assert the
+  pairing on the byte stream instead, as
+  `test_real_capability_negotiation.nim` does.
+
+### The shape-valid non-recording (CTUI-14)
+
+`lifecycle_support.wedgeFolder()` builds `test-logs/ctui14-wedge/` with a
+4096-byte deterministic blob as its `trace.bin`. It is the folder that
+**passes** `host/native_host.traceFolderProblem` and then **stalls the DAP
+handshake**: `replay-server` answers `initialize`, `configurationDone` and
+`launch` in full — `Content-Length: 102`, all 102 bytes, `success: true` — and
+then never sends the `stopped` event the handshake waits for, and never exits.
+The stall is therefore at a MESSAGE BOUNDARY; a stall mid-body is what
+`DapStdioBackend.broken` guards, and this folder does not produce one.
+
+Before CTUI-14 that hung the front-end for ever behind a claimed alternate
+screen with `ISIG` cleared. It is now bounded by
+`backend/stdio_backend.DapReadBound` — a clock and an escape hatch — and
+`CODETRACER_TUI_HANDSHAKE_MS` is the env knob that lets a test make the clock
+fire in seconds. It is **not** a CLI flag: §6.2 is a published surface.
+
+### Driving a session from a FILE (CTUI-14)
+
+`--record-keys=<file>` writes every input token as one `strutils.escape` line;
+`--replay-keys=<file>` reads them instead of the keyboard and **exits when the
+journal runs out** (§6.2's own wording). That is what makes "the same key
+sequence" a fact rather than an intention —
+`tests/real_terminal/test_real_high_latency.nim` drives both of its runs from
+one journal, so its equality claim is about the link and not about the input.
+
+> **A `--replay-keys` run leaves the alternate screen when it ends**, and
+> libvterm then reverts to the primary screen: the debugger's last frame is
+> *replaced*, not kept. To assert on the final screen, truncate the transcript
+> at the last `CSI ? 1049 l` and feed it to a fresh `nim_libvterm.newScreen`.
 
 ### Test-only flags on the snapshot runtime
 

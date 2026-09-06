@@ -673,9 +673,23 @@ suite "CTUI-10: §4.3's command surface is the published one":
     ck noTheme.message == NoThemeSurfaceNote
     # …AND THE CLAIM IN THAT MESSAGE IS MEASURED, not asserted in prose. Every
     # style this front-end paints is a `const CellStyle` literal and nothing
-    # under `app/` names `isonim-tui`'s `ThemeRegistry`, so there is genuinely
-    # nothing for a theme to switch. Both numbers move the day a theme arrives,
-    # which is when this arm should stop reading `unsupported`.
+    # under `app/` names `isonim-tui`'s `ThemeRegistry`.
+    #
+    # CTUI-14 UPDATE, and it is the reason this comment is not simply deleted:
+    # `-t/--theme` IS BUILT and these two numbers did not move, which is the
+    # interesting part. The palettes did not come from rewriting 121 literals
+    # or from adopting a registry; they came from
+    # `app/theme/degradation.tintsFor`, because `degradeRows` was already
+    # re-styling every span of a composited screen by SEMANTIC ROLE at the
+    # resolved tier — that pass is the theme hook, and a theme is a different
+    # tint table behind it.
+    #
+    # So what `:theme` still lacks is not a palette. It is a way to change
+    # `TerminalCapabilities.theme` on a LIVE session and repaint, which is a
+    # host act: the capability set is resolved once, before the first paint,
+    # and `app/` is handed the answer. That is why this arm still reads
+    # `unsupported` while §6.2's flag works, and the day it stops is the day a
+    # host seam exists — not the day a literal count moves.
     var styleLiterals = 0
     var filesWithStyles = 0
     var themeReferences = 0

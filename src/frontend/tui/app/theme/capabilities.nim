@@ -67,6 +67,34 @@ type
     bmUnicode = "unicode"
     bmAscii = "ascii"
 
+  UiTheme* = enum
+    ## §6.2's `-t, --theme=<name>`: "dark (default), light, plain, monokai" —
+    ## CTUI-14, and the four names are the published ones rather than a set this
+    ## milestone chose.
+    ##
+    ## THE ZERO VALUE IS THE PUBLISHED DEFAULT, which is what lets a theme axis
+    ## be added to `CapabilityFlags` and `TerminalCapabilities` without moving a
+    ## single existing assertion: everything that did not ask for a theme
+    ## resolves to `utDark`, and `utDark`'s tables are the ones CTUI-11 shipped.
+    ##
+    ## A THEME IS A PALETTE AND NEVER A DISTINCTION. `app/theme/degradation.nim`
+    ## states the contract that survives it: within a group of roles that are
+    ## states of one thing, any two the 16-colour rung tells apart are told apart
+    ## at every rung. Re-picking hues must not merge two states, and
+    ## `app/tests/test_degraded_style_tables.nim` asserts that over the whole
+    ## cross product of roles, depths AND themes rather than over the default
+    ## one.
+    utDark = "dark"
+    utLight = "light"
+    utPlain = "plain"
+      ## NOT A PALETTE AT ALL. `plain` is the request for a screen with no
+      ## colour on it, so it resolves the colour ladder to `cdMonochrome`
+      ## whatever the terminal can do — which is the same rung `--no-color`
+      ## reaches, by a different door and for a different reason. Weight,
+      ## underline, reverse and glyph carry every state, exactly as
+      ## `monochromeStyle` already lays out.
+    utMonokai = "monokai"
+
   CapabilitySource* = enum
     ## WHY an axis resolved the way it did. Carried on the resolved value, and
     ## not decoration: the status bar and `--help`'s companion diagnostics name
@@ -119,6 +147,9 @@ type
       ## `--ascii-borders`
     noMouse*: bool
       ## `--no-mouse`
+    theme*: UiTheme
+      ## `-t, --theme=<name>` — CTUI-14. `utDark` when the flag is absent, which
+      ## is also what §6.2 publishes as the default.
 
   TerminalCapabilities* = object
     ## The resolved set. ONE value, computed once, before the first paint.
@@ -147,10 +178,13 @@ type
       ## observable: `tests/real_terminal/test_real_capability_negotiation.nim`
       ## asserts that a Kitty-advertising terminal is told nothing, which is a
       ## claim about a choice and not about an absence.
+    theme*: UiTheme
+      ## Which palette the role tables paint in — CTUI-14.
     colorsFrom*: CapabilitySource
     bordersFrom*: CapabilitySource
     mouseFrom*: CapabilitySource
     syncFrom*: CapabilitySource
+    themeFrom*: CapabilitySource
 
 const
   TrueColorPrograms* = ["iTerm.app", "WezTerm", "ghostty", "Hyper"]
@@ -188,10 +222,30 @@ proc initTerminalEnv*(term = ""; colorterm = ""; termProgram = "";
               isTty: isTty)
 
 proc initCapabilityFlags*(forceTrueColor = false; noColor = false;
-                          asciiBorders = false; noMouse = false):
-                         CapabilityFlags =
+                          asciiBorders = false; noMouse = false;
+                          theme = utDark): CapabilityFlags =
   CapabilityFlags(forceTrueColor: forceTrueColor, noColor: noColor,
-                  asciiBorders: asciiBorders, noMouse: noMouse)
+                  asciiBorders: asciiBorders, noMouse: noMouse, theme: theme)
+
+proc parseTheme*(name: string): (bool, UiTheme) =
+  ## `-t, --theme=<name>`'s argument, matched against the enum's own published
+  ## spellings. `(false, utDark)` for a name §6.2 does not list.
+  ##
+  ## READ OFF THE ENUM rather than written out again, so a theme added to
+  ## `UiTheme` is parseable the moment it exists and a name cannot be accepted
+  ## by the parser and then be unknown to the tables.
+  let wanted = name.toLowerAscii()
+  for theme in UiTheme:
+    if $theme == wanted:
+      return (true, theme)
+  (false, utDark)
+
+proc themeNames*(): string =
+  ## The four names, for a usage message. Same source as `parseTheme`.
+  var parts: seq[string] = @[]
+  for theme in UiTheme:
+    parts.add $theme
+  parts.join(", ")
 
 proc effectiveLocale*(env: TerminalEnv): string =
   ## The locale string that decides the character set, in POSIX precedence
@@ -237,6 +291,16 @@ proc resolveColorDepth(env: TerminalEnv;
   ## things and any precedence rule would be this module inventing an intent
   ## the user did not express.
   if flags.noColor:
+    return (cdMonochrome, csFlag)
+  if flags.theme == utPlain:
+    # `--theme=plain` IS A REQUEST FOR NO COLOUR, and §6.2 lists it beside
+    # `dark`, `light` and `monokai` as if it were one more palette. It is not:
+    # there is no plain palette anywhere in `degradation.nim`, and there must
+    # not be, because the thing a user asks for by that name is a screen that
+    # carries its distinctions in weight and underline. It therefore resolves
+    # the LADDER rather than the tables. `--theme=plain --truecolor` is refused
+    # by `app/cli.nim` as a usage error, for the reason `--truecolor --no-color`
+    # is: any precedence here would be this module inventing an intent.
     return (cdMonochrome, csFlag)
   if flags.forceTrueColor:
     # DELIBERATELY ABOVE the `TERM=dumb` floor. §6.2 calls it "force 24-bit
@@ -320,8 +384,10 @@ proc resolveCapabilities*(env: TerminalEnv;
   TerminalCapabilities(
     colors: colors, borders: borders, mouse: mouse, synchronizedOutput: sync,
     kittyKeyboard: resolveKittyKeyboard(env),
+    theme: flags.theme,
     colorsFrom: colorsFrom, bordersFrom: bordersFrom, mouseFrom: mouseFrom,
-    syncFrom: syncFrom)
+    syncFrom: syncFrom,
+    themeFrom: (if flags.theme == utDark: csDefault else: csFlag))
 
 proc describe*(caps: TerminalCapabilities): string =
   ## One line naming every axis AND the source that decided it. Printed by
@@ -334,5 +400,6 @@ proc describe*(caps: TerminalCapabilities): string =
   " mouse=" & (if caps.mouse: "on" else: "off") & "(" & $caps.mouseFrom & ")" &
   " sync2026=" & (if caps.synchronizedOutput: "on" else: "off") &
   "(" & $caps.syncFrom & ")" &
+  " theme=" & $caps.theme & "(" & $caps.themeFrom & ")" &
   " kitty-keyboard=" & (if caps.kittyKeyboard: "advertised" else: "no") &
   "(never enabled)"

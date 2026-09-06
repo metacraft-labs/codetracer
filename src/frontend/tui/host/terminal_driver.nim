@@ -82,8 +82,10 @@ import ../app/theme/degradation
 import ../app/views/styled_row
 import ./capabilities
 import ./resize
+import ./ssh_tuning
 
 export capabilities, resize
+export ssh_tuning
 
 # ---------------------------------------------------------------------------
 # Token framing
@@ -208,80 +210,19 @@ proc readByteWithTimeout*(timeoutMs: int; fd: cint = STDIN_FILENO;
   if got < 0: return ReadTimeout
   int(ord(b))
 
-proc writeAll*(fd: cint; s: string) =
-  ## One `write(2)` loop, no stdio buffering. Short writes are retried because a
-  ## terminal whose reader is behind will accept only part of a frame at a time,
-  ## and a 200x60 frame is comfortably larger than a pty's buffer.
-  var off = 0
-  while off < s.len:
-    let n = posix.write(fd, unsafeAddr s[off], s.len - off)
-    if n < 0:
-      let e = osLastError()
-      if cint(e) == EINTR: continue
-      return
-    if n == 0: return
-    off += n
-
 # ---------------------------------------------------------------------------
 # Frame bytes
 # ---------------------------------------------------------------------------
-
-const
-  ClearScreenBytes* = "\x1b[2J\x1b[H"
-  SynchronizedOpenBytes* = "\x1b[?2026h"
-  SynchronizedCloseBytes* = "\x1b[?2026l"
-    ## DEC 2026. `h` asks the terminal to hold the frame it is about to receive
-    ## and `l` releases it, so a partially transmitted frame is never shown.
-    ## §6.3 names Kitty, iTerm2, WezTerm, Alacritty and Foot; every other
-    ## terminal ignores an unknown DECSET, and `TerminalCapabilities` is what
-    ## decides whether either byte string is emitted at all.
-
-proc frameBytes*(buf: ScreenBuffer): string =
-  ## The exact byte stream one composited frame writes.
-  ##
-  ## MOVED HERE FROM `testing/test_app_runtime.nim`, which is where CTUI-2 wrote
-  ## it and where it stayed until this milestone gave the product a driver. Its
-  ## two rules are unchanged and both were measured rather than assumed:
-  ##
-  ##   * `encodeAnsi` is the production SGR path — the same `text/ansi.renderSgr`
-  ##     transitions any isonim-tui driver emits — so what a terminal parses here
-  ##     is what a terminal parses from a snapshot app, which is what makes
-  ##     CTUI-2's cross-tier equality a statement about this emitter.
-  ##   * libvterm does not carriage-return on a line feed (LNM defaults off), so
-  ##     a stream that separated rows with `\n` would stair-step. Each row is
-  ##     re-glued with an explicit `CSI <row> ; 1 H`.
-  ##
-  ## The cursor therefore comes to rest on the bottom-right cell exactly when
-  ## the frame is complete, which is the frame barrier every Tier-2 suite in this
-  ## tree waits on (`dual_snap.waitForCompleteFrame`).
-  result = ClearScreenBytes
-  let raw = encodeAnsi(buf)
-  var row = 1
-  var line = ""
-  for ch in raw:
-    if ch == '\n':
-      result.add "\x1b[" & $row & ";1H" & line
-      line = ""
-      inc row
-    else:
-      line.add ch
-  if line.len > 0:
-    result.add "\x1b[" & $row & ";1H" & line
-
-proc bracketFrame*(caps: TerminalCapabilities; body: string): string =
-  ## `body` wrapped in DEC 2026, or `body` unchanged.
-  ##
-  ## A PURE FUNCTION, and that is what makes the pairing assertable at all. The
-  ## Tier-2 gate reads `synchronizedOutput()` off a real terminal, and libvterm
-  ## holds that flag only BETWEEN the two sequences — after a complete frame it
-  ## reads `false` whether the frame opened and closed correctly or never opened
-  ## at all. So "the bracket is emitted and correctly paired" is asserted here,
-  ## absolutely, on the bytes the driver writes; and "the terminal was left
-  ## un-bracketed" is asserted there, on the flag. Neither claim is the other's,
-  ## and neither alone is the gate.
-  if not caps.synchronizedOutput:
-    return body
-  SynchronizedOpenBytes & body & SynchronizedCloseBytes
+#
+# `ClearScreenBytes`, `SynchronizedOpenBytes`, `SynchronizedCloseBytes`,
+# `bracketFrame`, `frameBytes` and `writeAll` MOVED TO `host/ssh_tuning.nim` in
+# CTUI-14, and are re-exported above. They went because they are the emission
+# and CTUI-14 gave the emission a policy — a full frame and a diffed frame are
+# two answers to one question, and a module that owned only the first would
+# have owned a third of it. Nothing about them changed, so
+# `test_real_capability_negotiation.nim`'s DEC 2026 pairing gate and
+# `test_real_call_stack.nim`'s hyperlink identity assertion resolve and read
+# exactly as they did.
 
 proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   ## One frame's component tree, laid out and composited into a screen buffer.
@@ -381,6 +322,26 @@ type
     watcher*: ResizeWatcher
       ## CTUI-3's SIGWINCH self-pipe and the two reactive size signals.
     framer*: InputFramer
+    buffered*: seq[string]
+      ## Complete input tokens framed while the input loop was NOT running.
+      ##
+      ## CTUI-14. The handshake's escape hatch (`absorbInterruptByte`) reads
+      ## the user's bytes off the same fd `nextEvent` reads, and a byte read
+      ## there and dropped would be a keystroke the front-end lost. So every
+      ## byte it takes is framed and queued here, and `nextEvent` empties this
+      ## before it goes back to the kernel — which is what makes the hatch
+      ## LOSSLESS rather than merely responsive.
+    emitter*: FrameEmitter
+      ## CTUI-14's `host/ssh_tuning.nim`: what actually goes down the wire, and
+      ## the memory of what the terminal is already showing.
+      ##
+      ## The driver owns a file descriptor and this owns the answer to "what is
+      ## the least I have to say" — which is why every assertion about the
+      ## second one is in the fast lane with no pty in sight.
+    coalescer*: WriteCoalescer
+      ## Whether the frame the application just produced has to go out NOW. The
+      ## caller answers `morePending`; see `ssh_tuning.hold` for why that
+      ## parameter, and not a clock, is what keeps p50 input latency unmoved.
     framesPainted*: int
     bytesEmitted*: int
       ## Counters, for the status line and for a benchmark. Not decoration: a
@@ -400,7 +361,10 @@ proc newTerminalDriver*(caps: TerminalCapabilities;
   ## A driver over a negotiated terminal. Touches no OS state — `start` does
   ## that — so constructing one is as passive as constructing a `TuiApp`.
   TerminalDriver(caps: caps, inFd: inFd, outFd: outFd, watcher: nil,
-                 framer: initInputFramer(), framesPainted: 0, bytesEmitted: 0,
+                 framer: initInputFramer(), buffered: @[],
+                 emitter: newFrameEmitter(caps),
+                 coalescer: initWriteCoalescer(),
+                 framesPainted: 0, bytesEmitted: 0,
                  started: false, mouseOwned: false, altOwned: false,
                  rawOwned: false)
 
@@ -420,6 +384,10 @@ proc start*(d: TerminalDriver) =
   ## scrollback is already saved when anything is drawn.
   if d.started:
     return
+  # THE EMITTER FORGETS WHAT THE TERMINAL IS SHOWING. It is about to be a
+  # different screen — the alternate one — and diffing against a memory of the
+  # screen this process is leaving would emit a delta onto a blank page.
+  d.emitter.reset()
   d.watcher = newResizeWatcher(d.outFd)
   try:
     d.rawMode = enableRawMode(d.inFd)
@@ -481,14 +449,87 @@ proc paint*(d: TerminalDriver; rows: seq[StyledRow];
   ## ONE WRITE, and that is what makes the DEC 2026 bracket worth emitting: a
   ## frame split across several `write(2)` calls gives the terminal a chance to
   ## render between them, which is the tear the bracket exists to prevent.
+  ##
+  ## CTUI-14 put `host/ssh_tuning.FrameEmitter` between the buffer and the
+  ## write. What reaches the terminal is now usually the RUNS that changed
+  ## rather than the whole screen — §8's 250-byte budget for a single line step
+  ## is not reachable any other way — and the emitter's own contract is that a
+  ## diffed frame and a full frame leave a terminal in the same state.
   let sz = d.size()
   let degraded = degradeRows(rows, d.caps)
   let buf = composite(degraded, sz.cols, sz.rows)
-  let body = prologue & frameBytes(buf) & epilogue
-  let stream = bracketFrame(d.caps, body)
+  let stream = d.emitter.emit(buf, prologue, epilogue)
   writeAll(d.outFd, stream)
+  d.coalescer.noteFlush()
   inc d.framesPainted
   d.bytesEmitted += stream.len
+
+proc inputPending*(d: TerminalDriver): bool =
+  ## Whether there is input this process has already been given and has not
+  ## handled — either framed onto `buffered`, or sitting on the input fd.
+  ##
+  ## THE WHOLE OF THE COALESCING CONTRACT RESTS ON THIS ANSWER, and it is a
+  ## zero-timeout `select` rather than a guess: `ssh_tuning.hold` defers a frame
+  ## only when this is true, so a keystroke that arrives with nothing behind it
+  ## is answered by a paint on the same turn of the loop. A conservative
+  ## implementation that ever said `true` when the user was idle would trade
+  ## exactly the latency §8's p50 budget is about.
+  if d.buffered.len > 0:
+    return true
+  var rs: TFdSet
+  FD_ZERO(rs)
+  FD_SET(d.inFd, rs)
+  var tv: Timeval
+  tv.tv_sec = posix.Time(0)
+  tv.tv_usec = 0
+  posix.select(d.inFd + 1, addr rs, nil, nil, addr tv) > 0
+
+proc holdFrame*(d: TerminalDriver; alsoPending = false): bool =
+  ## Whether to skip the repaint for the input just handled because more input
+  ## is already waiting. See `ssh_tuning.WriteCoalescer`.
+  ##
+  ## `alsoPending` is for input that never touched this driver's fd:
+  ## `host/key_journal.nim`'s replay feeds the runtime from a file, and a
+  ## replayed burst has to coalesce exactly as a typed one does or the
+  ## benchmark that drives it would be measuring a path the user never takes.
+  d.coalescer.hold(alsoPending or d.inputPending())
+
+const
+  InterruptTokens*: array[2, string] = ["\x03", "q"]
+    ## The tokens that END A WAIT the user did not ask to be in.
+    ##
+    ## §4.2's two quit bindings and nothing else. `Ctrl+d` is deliberately
+    ## absent: §4.2 binds it to "Half Page Down", and a user who reached for a
+    ## scroll while a trace was opening must not have the trace closed under
+    ## them. `Esc` is absent for the framing reason `docs/tui-testing.md`
+    ## records — a lone `\x1b` is held as the prefix of every escape sequence,
+    ## so it is not a token a single keystroke can produce.
+
+proc absorbInterruptByte*(d: TerminalDriver): bool =
+  ## Read ONE byte from the input fd, frame it, queue it, and say whether it
+  ## asks the current wait to end.
+  ##
+  ## CTUI-14's escape hatch, and the callback behind
+  ## `stdio_backend.DapReadBound.onInterrupt`. It exists because the terminal
+  ## is already in raw mode when the DAP handshake runs: `cfmakeraw` has
+  ## cleared `ISIG`, so `Ctrl+c` is a byte on this fd and NOT a signal, and
+  ## with no input loop yet running there was nothing on the other side of it.
+  ##
+  ## THE BYTE IS NEVER DROPPED. It goes through the same `InputFramer` the
+  ## loop uses and any complete token lands on `d.buffered`, which `nextEvent`
+  ## drains first — so a user who typed ahead while the trace was opening finds
+  ## their keys waiting for them rather than eaten by the adapter.
+  var b: char
+  let got = posix.read(d.inFd, addr b, 1)
+  if got <= 0:
+    # EOF on the terminal is itself a reason to stop waiting: there is nobody
+    # left to show the trace to.
+    return got == 0
+  let (complete, token) = d.framer.feed(b)
+  if not complete:
+    return false
+  d.buffered.add token
+  token in InterruptTokens
 
 proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
   ## Block until a token, a resize, a timeout or end-of-input.
@@ -497,6 +538,15 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
   ## escape sequence from being split across two of the caller's iterations: a
   ## partial sequence leaves `dekIdle` and the framer holding it, so the caller
   ## repaints nothing and comes straight back.
+  ##
+  ## TOKENS TAKEN BY `absorbInterruptByte` COME OUT HERE FIRST, in the order
+  ## they were typed. Reaching for the kernel while `d.buffered` still held a
+  ## key would deliver the user's input out of order — and, for the `Ctrl+c`
+  ## that ended a stalled open, would deliver it never.
+  if d.buffered.len > 0:
+    let token = d.buffered[0]
+    d.buffered.delete(0)
+    return DriverEvent(kind: dekToken, token: token)
   let wake = if d.watcher.isNil: cint(-1) else: resizeWakeFd()
   let b = readByteWithTimeout(timeoutMs, d.inFd, wake)
   if b == ReadEof:

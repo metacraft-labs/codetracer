@@ -52,10 +52,10 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 244
+const ExpectedAssertions = 345
 
 const
-  LandedThroughMilestone = 12
+  LandedThroughMilestone = 14
     ## The highest CTUI milestone that has LANDED. Bump it when the next one
     ## does — the stale-label check below is what makes a rotten
     ## `PlannedOptions` owner visible, and it can only do that if this number is
@@ -108,6 +108,68 @@ proc sectionText(document, heading: string): string =
       continue
     if collecting:
       result.add line & "\n"
+
+proc publishedOptions(section: string): seq[string] =
+  ## Every option NAME §6.2's `Options:` block publishes, in order.
+  ##
+  ## The block is fixed-width text, one option per line, and an option line is
+  ## the only kind that begins with whitespace and then a `-`. A line may carry
+  ## two spellings (`-h, --help`), and a name may carry its argument
+  ## (`--theme=<name>`); both are split here so what comes out is exactly what a
+  ## user would type as `argv[i]` up to the `=`.
+  ##
+  ## STOPS AT THE FIRST NON-OPTION LINE after the block, so §6.2's prose and
+  ## `Usage:`/`Arguments:` headers cannot contribute a token.
+  result = @[]
+  var inOptions = false
+  for rawLine in section.splitLines():
+    let line = strutils.strip(rawLine, leading = false)
+    if strutils.strip(line) == "Options:":
+      inOptions = true
+      continue
+    if not inOptions:
+      continue
+    if strutils.strip(line).len == 0:
+      continue
+    if not (line.len > 0 and line[0] == ' '):
+      # The fenced block ended, or the prose after it began.
+      break
+    let body = strutils.strip(line)
+    if body.len == 0 or body[0] != '-':
+      continue
+    # `-h, --help        show …` -> the leading run of comma-separated tokens.
+    let head = body.split({' ', '\t'})[0 .. min(2, body.split({' ', '\t'}).high)]
+    for piece in head:
+      for token in piece.split(','):
+        let name = strutils.strip(token)
+        if name.len < 2 or name[0] != '-':
+          continue
+        let cut = name.find('=')
+        result.add(if cut > 0: name[0 ..< cut] else: name)
+
+proc milestoneTokensIn(owner: string): seq[int] =
+  ## Every `CTUI-<n>` a `PlannedOptions` owner string names, in order.
+  ##
+  ## EXTRACTED FROM THE CASE THAT USED TO INLINE IT, because CTUI-14 emptied
+  ## `PlannedOptions` and a rule that can only be exercised over a non-empty
+  ## list is a rule that stops being checked the moment the list is empty. As a
+  ## function it can be run over fabricated owners, which is what gives the
+  ## stale-label rule arms that actually redden.
+  result = @[]
+  var i = 0
+  while true:
+    let at = owner.find("CTUI-", i)
+    if at < 0:
+      break
+    var digits = ""
+    var j = at + len("CTUI-")
+    while j < owner.len and owner[j].isDigit:
+      digits.add owner[j]
+      inc j
+    i = j
+    if digits.len == 0:
+      continue
+    result.add parseInt(digits)
 
 proc backtickedRunes(text: string): seq[string] =
   ## Every single-glyph `` `x` `` in `text`, in order and without repeats.
@@ -511,7 +573,10 @@ suite "CTUI-11 Tier 1: capability resolution":
     ck clash.message.contains("--truecolor")
     ck clash.message.contains("--no-color")
     # §6.2's published-but-unbuilt options are refused BY NAME with the
-    # milestone that owns them, not as "unknown option".
+    # milestone that owns them, not as "unknown option". The list is EMPTY as
+    # of CTUI-14 — see the next two cases, which is where the interesting claim
+    # now lives — so this sweep is kept for the mechanism and its count is
+    # asserted against the list rather than against a literal.
     var namedCount = 0
     for (option, owner) in PlannedOptions:
       let refused = parseTuiCommand([option, "/tmp"])
@@ -521,12 +586,11 @@ suite "CTUI-11 Tier 1: capability resolution":
       inc namedCount
     checkpoint("published-but-unbuilt options refused by name: " & $namedCount)
     ck namedCount == PlannedOptions.len
-    # FOUR, NOT SIX. Two options left the list for DIFFERENT reasons, and the
-    # literal here is what makes each a decision rather than a drift:
-    # `--headless` is built, and `--serve` was CUT — `ct host` already serves a
-    # trace together with the replay front end, so a browser-hosted terminal
-    # emulator duplicated it with a worse UI.
-    ck namedCount == 4
+    # ZERO, AND THE NEXT CASE IS WHY THAT IS A CLAIM AND NOT AN ABSENCE. A
+    # literal here used to say FOUR; it says nothing on its own now, so the
+    # positive statement — every option §6.2 publishes is accepted — is made
+    # against the published document instead.
+    ck namedCount == 0
     # `--headless` PARSES, because it is built.
     let headless = parseTuiCommand(["--headless", "/tmp"])
     checkpoint("--headless -> " & $headless.kind)
@@ -551,48 +615,264 @@ suite "CTUI-11 Tier 1: capability resolution":
     ck unknown.kind == tckUsageError
     ck unknown.message.contains("unknown option")
 
-  test "no PlannedOptions owner credits a milestone that cannot deliver it":
+  test "CTUI-14 parses the four options §6.2 published and this binary owed":
+    # THE FLAGS THIS MILESTONE ADDS, asserted on the VALUE the parser produces
+    # rather than on the absence of an error — "it did not refuse it" is
+    # satisfied by a parser that accepted the spelling and threw the argument
+    # away, which is precisely the shape `app/cli.nim`'s header refuses.
+    let dark = parseTuiCommand(["/tmp"])
+    ck dark.flags.theme == utDark
+    ck dark.gotoTick == NoGotoTick
+    ck dark.recordKeys.len == 0
+    ck dark.replayKeys.len == 0
+
+    var themesSeen = 0
+    for theme in UiTheme:
+      let long = parseTuiCommand(["--theme=" & $theme, "/tmp"])
+      ck long.kind == tckOpenTrace
+      ck long.flags.theme == theme
+      # THE SHORT SPELLING REACHES THE SAME VALUE. §6.2 writes it
+      # `-t, --theme=<name>`, so a `-t` that resolved differently would be two
+      # options wearing one line of documentation.
+      let short = parseTuiCommand(["-t", $theme, "/tmp"])
+      ck short.kind == tckOpenTrace
+      ck short.flags.theme == theme
+      inc themesSeen
+    checkpoint("themes parsed in both spellings: " & $themesSeen)
+    ck themesSeen == ord(high(UiTheme)) + 1
+
+    # …and a name §6.2 does not list is refused, naming the four that are.
+    let badTheme = parseTuiCommand(["--theme=solarized", "/tmp"])
+    checkpoint("--theme=solarized -> " & badTheme.message)
+    ck badTheme.kind == tckUsageError
+    ck badTheme.message.contains("solarized")
+    ck badTheme.message.contains("monokai")
+
+    # `--goto` CARRIES A TICK, and 0 is a tick.
+    let goto = parseTuiCommand(["--goto=4500", "/tmp"])
+    ck goto.kind == tckOpenTrace
+    ck goto.gotoTick == 4500'i64
+    let gotoZero = parseTuiCommand(["--goto=0", "/tmp"])
+    ck gotoZero.gotoTick == 0'i64
+    # …and `0` is distinguishable from "not given", which is the whole reason
+    # `NoGotoTick` is -1 rather than 0.
+    ck gotoZero.gotoTick != NoGotoTick
+    let badGoto = parseTuiCommand(["--goto=soon", "/tmp"])
+    ck badGoto.kind == tckUsageError
+    ck badGoto.message.contains("soon")
+    let negativeGoto = parseTuiCommand(["--goto=-1", "/tmp"])
+    ck negativeGoto.kind == tckUsageError
+    ck negativeGoto.message.contains("at or after 0")
+
+    # THE JOURNAL PAIR, and the contradiction between them.
+    let record = parseTuiCommand(["--record-keys=/tmp/j", "/tmp"])
+    ck record.recordKeys == "/tmp/j"
+    ck record.replayKeys.len == 0
+    let replay = parseTuiCommand(["--replay-keys=/tmp/j", "/tmp"])
+    ck replay.replayKeys == "/tmp/j"
+    ck replay.recordKeys.len == 0
+    let bothJournals = parseTuiCommand(
+      ["--record-keys=/tmp/a", "--replay-keys=/tmp/b", "/tmp"])
+    checkpoint("--record-keys + --replay-keys -> " & bothJournals.message)
+    ck bothJournals.kind == tckUsageError
+    ck bothJournals.message.contains("--record-keys")
+    ck bothJournals.message.contains("--replay-keys")
+
+    # `--theme=plain` IS A COLOUR DECISION and contradicts `--truecolor`, the
+    # same way `--no-color` does — and it resolves to the same rung, which is
+    # the fact that makes it one.
+    let plainClash = parseTuiCommand(["--theme=plain", "--truecolor", "/tmp"])
+    checkpoint("--theme=plain --truecolor -> " & plainClash.message)
+    ck plainClash.kind == tckUsageError
+    ck plainClash.message.contains("plain")
+    let plainCaps = resolveCapabilities(
+      initTerminalEnv(term = "xterm-256color", colorterm = "truecolor",
+                      lang = "en_US.UTF-8"),
+      initCapabilityFlags(theme = utPlain))
+    checkpoint("--theme=plain on a truecolor terminal: " & describe(plainCaps))
+    ck plainCaps.colors == cdMonochrome
+    ck plainCaps.colorsFrom == csFlag
+    # …and the SAME terminal without it is not monochrome, so the line above is
+    # a statement about the theme rather than about the environment.
+    let richCaps = resolveCapabilities(
+      initTerminalEnv(term = "xterm-256color", colorterm = "truecolor",
+                      lang = "en_US.UTF-8"), initCapabilityFlags())
+    ck richCaps.colors == cdTrueColor
+    ck describe(richCaps).contains("theme=dark(default)")
+    ck describe(plainCaps).contains("theme=plain(flag)")
+
+    # EVERY ONE OF THEM NEEDS A TRACE. `--goto` with nothing to seek in is a
+    # command line that cannot do what it says, and it is named individually so
+    # the message says which option was the problem.
+    var orphanCount = 0
+    for option in ["--goto=1", "--record-keys=/tmp/j", "--replay-keys=/tmp/j"]:
+      let orphan = parseTuiCommand([option])
+      ck orphan.kind == tckUsageError
+      ck orphan.message.contains("trace folder")
+      inc orphanCount
+    checkpoint("session options refused without a trace: " & $orphanCount)
+    ck orphanCount == 3
+
+  test "--headless refuses the two flags it cannot honour and honours the one it can":
+    # THE DEFECT THIS CASE PINS. `--headless` accepted `--goto`,
+    # `--record-keys` and `--replay-keys` and acted on none of them:
+    # `host/headless.runHeadless` took the path, the flags and the geometry and
+    # never saw the other three fields. That is "a flag that parses and then
+    # does nothing" — the failure mode `app/cli.PlannedOptions`'s own header
+    # names, arriving through a mode rather than through the list.
+    #
+    # The three are not one problem. Two of them CANNOT be honoured in a mode
+    # with no input loop, and are refused by name; one of them is exactly what
+    # this mode's single frame is, and is honoured.
+    var refusedCount = 0
+    for option in ["--record-keys=/tmp/j", "--replay-keys=/tmp/j"]:
+      let clash = parseTuiCommand(["--headless", option, "/tmp"])
+      checkpoint("--headless " & option & " -> " &
+                 (if clash.kind == tckUsageError: clash.message else: $clash.kind))
+      ck clash.kind == tckUsageError
+      # THE MESSAGE NAMES BOTH SIDES of the conflict, because a user who typed
+      # two flags needs to know which pair is the problem.
+      ck clash.message.contains(option[0 ..< option.find('=')])
+      ck clash.message.contains("--headless")
+      inc refusedCount
+      # …AND THE SAME FLAG WITHOUT `--headless` IS STILL ACCEPTED, so what is
+      # being asserted is the COMBINATION rather than the flag.
+      let alone = parseTuiCommand([option, "/tmp"])
+      ck alone.kind == tckOpenTrace
+    checkpoint("flags refused under --headless: " & $refusedCount)
+    ck refusedCount == 2
+
+    # …and the order does not matter: `--headless` may be written after.
+    let reversed = parseTuiCommand(["--replay-keys=/tmp/j", "--headless", "/tmp"])
+    ck reversed.kind == tckUsageError
+    ck reversed.message.contains("--replay-keys")
+
+    # `--goto` SURVIVES INTO THE HEADLESS COMMAND, which is the positive arm.
+    # Without it, this case would pass on a parser that refused all three — and
+    # refusing `--goto` would be the same defect wearing an error message.
+    let headlessGoto = parseTuiCommand(["--headless", "--goto=200", "/tmp"])
+    checkpoint("--headless --goto=200 -> " & $headlessGoto.kind &
+               " tick " & $headlessGoto.gotoTick)
+    ck headlessGoto.kind == tckHeadless
+    ck headlessGoto.gotoTick == 200'i64
+    # …and a plain `--headless` still carries "not given", so the field above
+    # is the flag's value rather than a default that happens to match.
+    let headlessPlain = parseTuiCommand(["--headless", "/tmp"])
+    ck headlessPlain.kind == tckHeadless
+    ck headlessPlain.gotoTick == NoGotoTick
+    # A BAD TICK IS STILL A BAD TICK under `--headless`, so the validation the
+    # tty path gets is not skipped for the mode.
+    let headlessBadGoto = parseTuiCommand(["--headless", "--goto=soon", "/tmp"])
+    ck headlessBadGoto.kind == tckUsageError
+    ck headlessBadGoto.message.contains("soon")
+
+  test "every option §6.2 publishes is accepted, read from the document":
+    # THE ORACLE, and the reason `PlannedOptions` being empty is a claim rather
+    # than an absence. §6.2 is a published table of eleven option lines; this
+    # reads the option NAMES out of the document and asserts that the shipped
+    # parser refuses none of them — neither as "unknown option" nor as "not
+    # built yet".
+    #
+    # Rule 6 of `docs/tui-testing.md`: where the subject is a published table,
+    # read the publication. A hand-copied list here would have been written
+    # from the same reading that produced the parser.
+    let path = specPath()
+    if path.len == 0:
+      checkpoint("codetracer-specs/Front-Ends/CodeTracer-TUI.md was not found" &
+                 " from " & currentSourcePath() &
+                 " — check out the codetracer-specs sibling")
+    ck path.len > 0
+    let section = sectionText(readFile(path), "6.2 CLI Arguments and Options")
+    checkpoint("§6.2 is " & $section.splitLines().len & " lines")
+    ck section.len > 0
+    ck section.contains("Options:")
+
+    let options = publishedOptions(section)
+    checkpoint("options published in §6.2: " & options.join(" "))
+    # THE NON-VACUITY FLOOR. An extractor that matched nothing would satisfy
+    # every acceptance check below for free. Fourteen tokens over eleven lines:
+    # `-h/--help`, `-v/--version` and `-t/--theme` are each written as a pair.
+    ck options.len == 14
+
+    var accepted = 0
+    for option in options:
+      let parsed = parseTuiCommand([option, "/tmp"])
+      let message = if parsed.kind == tckUsageError: parsed.message else: ""
+      if message.contains("unknown option") or message.contains("not built"):
+        checkpoint("§6.2 PUBLISHES AN OPTION THIS BINARY REFUSES: " & option &
+                   " -> " & message)
+      ck not message.contains("unknown option")
+      ck not message.contains("not built")
+      inc accepted
+    checkpoint("published options the parser accepts: " & $accepted)
+    ck accepted == options.len
+
+    # THE POSITIVE TWIN, through the same predicate: an option §6.2 does NOT
+    # publish really is reported as unknown, so the sweep above is a
+    # measurement rather than a `not contains` over a haystack that never
+    # contains anything.
+    let absent = parseTuiCommand(["--not-in-the-spec", "/tmp"])
+    ck absent.kind == tckUsageError
+    ck absent.message.contains("unknown option")
+    ck "--not-in-the-spec" notin options
+
+  test "the stale-label rule still reddens, on a list that is now empty":
     # THE STALE-LABEL RULE. `PlannedOptions` is a promise about work somebody
     # still owes; an owner naming a milestone that has already LANDED — or one
     # that was CUT — is a promise nobody is going to keep, and it reads to a
     # user as "this was supposed to be done".
     #
-    # Two entries carried exactly that defect and both are fixed: `--headless`
-    # said "CTUI-12, the launcher and packaging milestone" long after CTUI-12
-    # shipped (and CTUI-12's Deliverables never named it), and `--goto` said
-    # "the flag is CTUI-12's entrypoint work". The rule is what keeps them
-    # fixed.
+    # CTUI-14 EMPTIED THE LIST, which would have made the old shape of this
+    # case vacuously green: a sweep over no entries finds no bad owner. So the
+    # rule is now applied to FABRICATED lists as well, and the arms that must
+    # redden are the point of the case rather than a demonstration beside it.
     #
     # Mechanical rather than a list of forbidden strings: every `CTUI-<n>`
     # token in an owner must name a milestone that has NOT landed and was NOT
-    # cut. An owner may name none at all, which is how `--theme` records a
+    # cut. An owner may name none at all, which is how an entry can record a
     # finding without claiming somebody owes the work.
-    var milestoneTokens = 0
+    var realTokens = 0
     for (option, owner) in PlannedOptions:
       checkpoint(option & " is owed by: " & owner)
-      var i = 0
-      while true:
-        let at = owner.find("CTUI-", i)
-        if at < 0:
-          break
-        var digits = ""
-        var j = at + len("CTUI-")
-        while j < owner.len and owner[j].isDigit:
-          digits.add owner[j]
-          inc j
-        i = j
-        if digits.len == 0:
-          continue
-        inc milestoneTokens
-        let n = parseInt(digits)
+      for n in milestoneTokensIn(owner):
+        inc realTokens
         checkpoint("  names CTUI-" & $n & "; landed through CTUI-" &
                    $LandedThroughMilestone & "; cut: " & $CutMilestones)
         ck n > LandedThroughMilestone
         ck n notin CutMilestones
-    # THE FLOOR: at least one entry really does name a milestone, so the sweep
-    # above is not vacuously true of a list whose owners lost their labels.
-    checkpoint("milestone tokens found: " & $milestoneTokens)
-    ck milestoneTokens >= 3
+    checkpoint("milestone tokens in the live list: " & $realTokens)
+    ck realTokens == 0
+
+    # THE ARMS THAT MUST REDDEN, through the same extractor and the same two
+    # predicates the sweep above runs.
+    let landedOwner = "CTUI-12, the launcher and packaging milestone"
+    let landedTokens = milestoneTokensIn(landedOwner)
+    ck landedTokens.len == 1
+    ck landedTokens[0] == 12
+    ck not (landedTokens[0] > LandedThroughMilestone)
+
+    let cutOwner = "CTUI-13, the web bridge"
+    let cutTokens = milestoneTokensIn(cutOwner)
+    ck cutTokens.len == 1
+    ck cutTokens[0] == 13
+    ck cutTokens[0] in CutMilestones
+
+    # …and an owner that names a milestone still to come passes BOTH, so the
+    # two arms above fail for the reason they claim rather than because
+    # nothing can pass.
+    let futureTokens = milestoneTokensIn("CTUI-20, something later")
+    ck futureTokens.len == 1
+    ck futureTokens[0] > LandedThroughMilestone
+    ck futureTokens[0] notin CutMilestones
+
+    # …and an owner with no milestone at all yields no tokens rather than a
+    # zero, which is what lets an entry state a finding and name nobody.
+    ck milestoneTokensIn("unbuilt here; nobody owes it").len == 0
+    # THE EXTRACTOR'S OWN FLOOR: two tokens in one owner are both found.
+    let pair = milestoneTokensIn("CTUI-15 and CTUI-16 share it")
+    ck pair.len == 2
+    ck pair[0] == 15
+    ck pair[1] == 16
 
   test "§6.3's own glyph sets and terminal list, read from the document":
     # THE ORACLE. Rule 6 of `docs/tui-testing.md`: where the subject is a

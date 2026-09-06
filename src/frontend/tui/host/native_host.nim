@@ -146,11 +146,15 @@ proc traceFolderProblem*(path: string): string =
   ## ## What it does NOT claim
   ##
   ## That the recording is INTACT. A folder with a truncated `trace.bin` passes
-  ## here and fails in the engine, and a folder that passes here and then hangs
-  ## the handshake would hang exactly as before — `DapStdioBackend`'s
-  ## `waitForEvent` is a blocking read with a message budget and no clock, and
-  ## bounding it is a change to a module twenty-five suites share. That is
-  ## recorded as a limit rather than papered over.
+  ## here and fails in the engine.
+  ##
+  ## CTUI-11 recorded that as an OPEN WEDGE — such a folder hung the handshake
+  ## behind a claimed alternate screen — and CTUI-14 closed it, in
+  ## `backend/stdio_backend.DapReadBound` rather than here. The division is the
+  ## point and is worth stating: THIS function refuses a folder that is not a
+  ## recording, cheaply and before anything is spawned; the BOUND survives a
+  ## folder that is a recording's shape and is not a recording, which no `stat`
+  ## can tell apart from one that is. `openLocalTrace` below installs it.
   ##
   ## ## The three shapes
   ##
@@ -172,11 +176,58 @@ proc traceFolderProblem*(path: string): string =
   "it holds no `trace.bin`, no `rr/` and no `.ct` container, so it is not a " &
   "CodeTracer recording"
 
-proc openLocalTrace*(traceFolder: string): HeadlessDebugSession =
+const
+  DefaultHandshakeMs* = 30_000
+    ## How long the TUI waits for ONE message from `replay-server` before it
+    ## gives the terminal back and says so.
+    ##
+    ## THIRTY SECONDS IS DELIBERATELY GENEROUS, and it can be because it is not
+    ## the only way out: the same bound watches the keyboard, so an attended
+    ## session never waits this out — `Ctrl+c` ends it at once. What the clock
+    ## is for is the UNATTENDED session, where there is nobody to press
+    ## anything: a `ct tui` in a pane nobody is watching, or a CI job. A budget
+    ## tight enough to be felt would instead have to be defended against every
+    ## slow recording on every loaded machine, and losing that argument means
+    ## refusing to open a trace that was merely slow.
+    ##
+    ## PER MESSAGE, not per session. See `DapReadBound.timeoutMs`.
+  HandshakeEnvVar* = "CODETRACER_TUI_HANDSHAKE_MS"
+    ## Overrides `DefaultHandshakeMs`, in milliseconds.
+    ##
+    ## NOT A COMMAND-LINE FLAG. §6.2 is a published surface and this is a knob
+    ## for a test that needs the clock to fire in seconds rather than in
+    ## half a minute — `tests/real_terminal/test_real_pty_lifecycle.nim` is the
+    ## reason it exists. `app/cli.parseTuiCommand` therefore never sees it and
+    ## `TuiHelpText` never mentions it.
+
+proc handshakeBudgetMs*(): int =
+  ## The per-message budget this process will use, from the environment or
+  ## from `DefaultHandshakeMs`.
+  ##
+  ## A value that does not parse, or that is not positive, falls back to the
+  ## default rather than disabling the bound: "the clock is off" is exactly the
+  ## state this milestone exists to remove, and it must not be reachable by
+  ## mistyping an environment variable.
+  let raw = getEnv(HandshakeEnvVar, "")
+  if raw.len == 0:
+    return DefaultHandshakeMs
+  try:
+    let parsed = parseInt(raw.strip())
+    if parsed > 0: parsed else: DefaultHandshakeMs
+  except ValueError:
+    DefaultHandshakeMs
+
+proc openLocalTrace*(traceFolder: string;
+                     bound: DapReadBound = DapReadBound(interruptFd: -1)
+                    ): HeadlessDebugSession =
   ## Spawn `replay-server` on `traceFolder` and complete the DAP handshake.
   ##
   ## The one operation in the whole TUI that the Embed SDK facade cannot
   ## express, and therefore the one that decided this directory exists.
+  ##
+  ## `bound` is CTUI-14's clock and escape hatch. It defaults to the zero value
+  ## so a caller that has no terminal to lose — a fixture builder, a probe —
+  ## keeps the reads it always had; `main.nim` builds a real one.
   let resolved = resolveTraceFolder(traceFolder)
   let problem = traceFolderProblem(resolved)
   if problem.len > 0:
@@ -184,7 +235,7 @@ proc openLocalTrace*(traceFolder: string): HeadlessDebugSession =
   let bin = findReplayServer()
   if bin.len == 0:
     raiseHost(replayServerRemedy())
-  newHeadlessDebugSession(resolved, bin)
+  newHeadlessDebugSession(resolved, bin, handshake = bound)
 
 proc stdoutIsTerminal*(): bool =
   ## Whether standard output is a terminal.

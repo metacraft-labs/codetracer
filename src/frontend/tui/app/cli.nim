@@ -25,16 +25,29 @@
 ## useful message, and "unknown argument" is the wrong diagnosis for an
 ## argument that is merely not implemented.
 ##
-## ## CTUI-11 adds four flags, and exactly four
+## ## CTUI-11 adds four flags; CTUI-14 adds the last four, and the list is now
+## ## §6.2 ENTIRE
 ##
-## §6.2 lists eleven options. CTUI-11 owns `--truecolor`, `--no-color`,
-## `--ascii-borders` and `--no-mouse` — the capability overrides — and those are
-## the four this parser accepts, alongside `--headless`. `--theme`, `--goto`,
-## `--record-keys` and `--replay-keys` are still refused BY NAME
-## (see `PlannedOptions`), with the milestone that owns each: a flag that parsed
-## and then did nothing is the shape CTUI-0's header refuses, and a flag that
-## reported "unknown option" would tell a user who read §6.2 that the
-## specification was wrong rather than that the work is not done.
+## §6.2 lists eleven options. CTUI-11 owned `--truecolor`, `--no-color`,
+## `--ascii-borders` and `--no-mouse` — the capability overrides — alongside
+## `--headless`. CTUI-14 adds `-t/--theme`, `--goto`, `--record-keys` and
+## `--replay-keys`, which empties `PlannedOptions` for the first time in this
+## campaign. That is the interesting fact about this file now: **there is no
+## published option this binary refuses**, and the machinery that reported the
+## refusals is kept rather than deleted, because it is the shape the NEXT
+## published-before-built option needs and because
+## `app/tests/test_capability_resolution.nim` asserts the rule it enforces.
+##
+## The four this milestone adds are not all the same kind of thing, and the type
+## says so:
+##
+##   * `--theme` is a CAPABILITY override like the other four. It lands in
+##     `CapabilityFlags` and `app/theme/degradation` decides what it means.
+##   * `--goto` is a STARTUP NAVIGATION. It is a tick, it is applied once before
+##     the first debugger frame, and nothing reads it afterwards.
+##   * `--record-keys` / `--replay-keys` are an INPUT SOURCE and an input SINK.
+##     They are the pair §6.2 publishes together and they are what makes a
+##     hundred-step benchmark or a reported bug reproducible key for key.
 ##
 ## The overrides land in a `CapabilityFlags` value and nothing else. Deciding
 ## what they MEAN is `app/theme/capabilities.resolveCapabilities`, which is a
@@ -83,7 +96,17 @@ type
     of tckOpenTrace, tckHeadless:
       tracePath*: string
       flags*: CapabilityFlags
-        ## §6.2's four capability overrides, as a value.
+        ## §6.2's five capability overrides, as a value — the four CTUI-11
+        ## parsed plus CTUI-14's `--theme`.
+      gotoTick*: int64
+        ## `--goto=<tick>`, or `NoGotoTick` when it was not given.
+        ##
+        ## SIGNED, and the parser refuses a negative one, so "not given" and
+        ## "given as 0" are different values: tick 0 is the entry point of every
+        ## recording and is a perfectly ordinary thing to ask for.
+      recordKeys*: string
+      replayKeys*: string
+        ## `--record-keys=<file>` and `--replay-keys=<file>`, or "".
     of tckUsageError:
       message*: string
     else:
@@ -112,15 +135,22 @@ const
     ## it unambiguously, the same escape the launcher's own `project ./Makefile`
     ## marker uses.
 
-  PlannedOptions*: array[4, (string, string)] = [
-    ("--theme",
-     "unbuilt here: isonim-tui ships a ThemeRegistry, app/ carries 121" &
-     " const CellStyle literals and no wiring to it"),
-    ("--goto", "CTUI-14, startup navigation"),
-    ("--record-keys", "CTUI-14, input recording for replay and benchmarks"),
-    ("--replay-keys", "CTUI-14, input replay")]
+  NoGotoTick* = -1'i64
+    ## `--goto` was not given. See `TuiCommand.gotoTick`.
+
+  PlannedOptions*: array[0, (string, string)] = []
     ## §6.2's options that are PUBLISHED AND NOT BUILT, each with the milestone
     ## that owns it.
+    ##
+    ## **EMPTY AS OF CTUI-14, and that is a state this list is written to be
+    ## able to reach.** The four it carried are built: `--theme` resolves a
+    ## palette through `app/theme/degradation.tintsFor`, `--goto` seeks before
+    ## the first debugger frame, and `--record-keys` / `--replay-keys` are
+    ## `host/key_journal.nim`. The mechanism is deliberately NOT deleted with
+    ## its last entry — a published option that is not built is a state this
+    ## product will be in again, and the rule
+    ## `app/tests/test_capability_resolution.nim` enforces about owners is worth
+    ## more than the four lines it costs to keep the list declarable.
     ##
     ## Refused by name rather than swallowed, and refused rather than accepted:
     ## the two failure modes this list is written against are a flag that parses
@@ -168,6 +198,17 @@ const
     ## `host/headless.nim` returns them and `main.nim` imports it: a constant in
     ## the entrypoint would have to be duplicated by everything the entrypoint
     ## calls.
+  ExitEngineStalled* = 4
+    ## The folder has a recording's SHAPE, `replay-server` accepted it, and
+    ## then the engine stopped answering — CTUI-14.
+    ##
+    ## Distinct from `ExitUsage` on purpose, and the distinction is measured
+    ## rather than stylistic: `host/native_host.traceFolderProblem` refuses a
+    ## folder that is not a recording (exit 2, on the ordinary screen, before
+    ## anything is spawned), and this is what is left over — a garbage
+    ## `trace.bin` passes every `stat` and stalls the DAP handshake. Reporting
+    ## that as a usage error would send a user to inspect a command line that
+    ## was correct.
 
   TuiVersionText* = TuiProgramName & " " & CodeTracerVersionStr
     ## Deliberately the CodeTracer version. The TUI is a front-end of this
@@ -187,6 +228,10 @@ options:
   --no-color         monochrome: weight, underline and glyph carry every state
   --ascii-borders    draw + - | instead of the Unicode box-drawing glyphs
   --no-mouse         do not ask the terminal for mouse reporting
+  -t, --theme=NAME   dark (default), light, plain, monokai
+  --goto=TICK        seek to TICK before the first debugger frame
+  --record-keys=FILE write every input token to FILE, one per line
+  --replay-keys=FILE read input from FILE instead of the keyboard, then exit
   --headless         render one screen as plain text and exit — for CI
 
 The capability flags always beat the environment probe. With none of them, the
@@ -214,6 +259,21 @@ proc plannedOption(arg: string): (bool, string) =
       return (true, owner)
   (false, "")
 
+proc optionValue(arg: string; name: string): (bool, string) =
+  ## `("--goto=17", "--goto")` -> `(true, "17")`. `(false, "")` for any other
+  ## option.
+  ##
+  ## `--goto=<value>` ONLY, and never `--goto <value>`. §6.2 writes every one of
+  ## these with an `=`, and accepting the separated spelling would make a
+  ## mistyped flag swallow the trace path: `codetracer-tui --got 400 trace`
+  ## would then be a run with two positional arguments rather than a named
+  ## refusal.
+  if arg == name:
+    return (true, "")
+  if arg.startsWith(name & "="):
+    return (true, arg[name.len + 1 .. ^1])
+  (false, "")
+
 proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   ## Classify `args` — the arguments AFTER the program name.
   ##
@@ -238,8 +298,13 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var tracePath = ""
   var flags = initCapabilityFlags()
   var mode = tckOpenTrace
-  for i in first .. high(args):
+  var gotoTick = NoGotoTick
+  var recordKeys = ""
+  var replayKeys = ""
+  var i = first
+  while i <= high(args):
     let arg = args[i]
+    inc i
     case arg
     of "-h", "--help":
       return TuiCommand(kind: tckHelp)
@@ -258,24 +323,88 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       # same one thing twice, and there is no second display mode left for it
       # to contradict.
       mode = tckHeadless
+    of "-t":
+      # THE ONLY SHORT OPTION §6.2 GIVES A VALUE TO, and it is written
+      # `-t, --theme=<name>` there, so the separated spelling is the one a user
+      # of the short form will type.
+      if i > high(args):
+        return TuiCommand(
+          kind: tckUsageError,
+          message: "'-t' needs a theme name (" & themeNames() & ")")
+      let (ok, theme) = parseTheme(args[i])
+      inc i
+      if not ok:
+        return TuiCommand(
+          kind: tckUsageError,
+          message: "unknown theme '" & args[i - 1] & "'; pick one of " &
+                   themeNames())
+      flags.theme = theme
     else:
       if arg.startsWith("-"):
-        let (planned, owner) = plannedOption(arg)
-        if planned:
+        block options:
+          let (isTheme, themeName) = optionValue(arg, "--theme")
+          if isTheme:
+            let (ok, theme) = parseTheme(themeName)
+            if not ok:
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "unknown theme '" & themeName & "'; pick one of " &
+                         themeNames())
+            flags.theme = theme
+            break options
+          let (isGoto, tickText) = optionValue(arg, "--goto")
+          if isGoto:
+            var tick = NoGotoTick
+            try:
+              tick = parseBiggestInt(tickText)
+            except ValueError:
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "'--goto' takes a tick number, not '" & tickText & "'")
+            if tick < 0:
+              # A NEGATIVE TICK IS NOT A POSITION, and it is refused rather
+              # than clamped to 0: `--goto=-1` is `NoGotoTick`'s own value, and
+              # a clamp would make "seek to the start" and "do not seek"
+              # indistinguishable inside the parsed command.
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "'--goto' takes a tick at or after 0, not '" &
+                         tickText & "'")
+            gotoTick = tick
+            break options
+          let (isRecord, recordPath) = optionValue(arg, "--record-keys")
+          if isRecord:
+            if recordPath.len == 0:
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "'--record-keys' needs a file to write to")
+            recordKeys = recordPath
+            break options
+          let (isReplay, replayPath) = optionValue(arg, "--replay-keys")
+          if isReplay:
+            if replayPath.len == 0:
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "'--replay-keys' needs a file to read from")
+            replayKeys = replayPath
+            break options
+          let (planned, owner) = plannedOption(arg)
+          if planned:
+            return TuiCommand(
+              kind: tckUsageError,
+              message: "'" & arg & "' is in CodeTracer-TUI.md §6.2 and is not" &
+                       " built yet (" & owner & ")")
           return TuiCommand(
             kind: tckUsageError,
-            message: "'" & arg & "' is in CodeTracer-TUI.md §6.2 and is not" &
-                     " built yet (" & owner & ")")
-        return TuiCommand(
-          kind: tckUsageError,
-          message: "unknown option '" & arg & "'; try '" & TuiProgramName &
-                   " --help'")
-      if tracePath.len > 0:
-        return TuiCommand(
-          kind: tckUsageError,
-          message: "expected at most one trace folder, got '" & tracePath &
-                   "' and '" & arg & "'")
-      tracePath = arg
+            message: "unknown option '" & arg & "'; try '" & TuiProgramName &
+                     " --help'")
+      else:
+        if tracePath.len > 0:
+          return TuiCommand(
+            kind: tckUsageError,
+            message: "expected at most one trace folder, got '" & tracePath &
+                     "' and '" & arg & "'")
+        tracePath = arg
 
   # CONTRADICTORY FLAGS ARE A USAGE ERROR, not a precedence rule. `--truecolor`
   # says "24-bit whatever the terminal claims" and `--no-color` says "no colour
@@ -287,6 +416,25 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       kind: tckUsageError,
       message: "--truecolor and --no-color contradict each other; pass one")
 
+  # `--theme=plain` IS A COLOUR DECISION, so it can contradict one. It resolves
+  # the ladder to monochrome (`app/theme/capabilities.resolveColorDepth`), which
+  # is the opposite of what `--truecolor` asks for; the two are refused together
+  # for exactly the reason above rather than ordered.
+  if flags.theme == utPlain and flags.forceTrueColor:
+    return TuiCommand(
+      kind: tckUsageError,
+      message: "--theme=plain and --truecolor contradict each other; pass one")
+
+  # …AND `--record-keys` / `--replay-keys` CONTRADICT EACH OTHER TOO, for a
+  # different reason: `--replay-keys` reads a journal and exits, so a recording
+  # made during it would be a copy of its own input file. Refused rather than
+  # quietly producing one.
+  if recordKeys.len > 0 and replayKeys.len > 0:
+    return TuiCommand(
+      kind: tckUsageError,
+      message: "--record-keys and --replay-keys contradict each other;" &
+               " a replay would only record its own input back")
+
   # A DISPLAY MODE WITH NOTHING TO DISPLAY is a usage error rather than a help
   # screen. `codetracer-tui --headless` with no trace reached `tckHeadless` with
   # an empty path, and `host/headless` would then have reported the working
@@ -296,6 +444,46 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       kind: tckUsageError,
       message: "'--headless' needs a trace folder to open")
 
+  # `--headless` HAS NO INPUT LOOP, SO THE TWO JOURNAL FLAGS ARE REFUSED RATHER
+  # THAN ACCEPTED AND IGNORED. This list's own rule (see `PlannedOptions`) is
+  # that "a flag that parses and silently does nothing" is one of the two
+  # failure modes it exists to prevent, and `--headless --replay-keys=f` was
+  # exactly that: it parsed, it reached `tckHeadless`, and `host/headless.nim`
+  # never read the field. The mode renders ONE settled screen as plain text and
+  # exits; a replayed session's interest is in the frames BETWEEN its keys,
+  # which one frame at the end throws away, and there is no keyboard for
+  # `--record-keys` to record. Named individually so the message says which.
+  #
+  # `--goto` is NOT on this list, and the difference is the point: it is a
+  # startup navigation applied before the first paint, and the one frame
+  # `--headless` renders IS the first paint. It is honoured (`host/headless.
+  # runHeadless` takes the tick and dispatches the same `kaSeekToTick`), which
+  # is what makes `codetracer-tui --headless --goto=200 <trace>` a usable CI
+  # assertion about a specific point in a recording.
+  if mode == tckHeadless:
+    for (given, option) in [(recordKeys.len > 0, "--record-keys"),
+                            (replayKeys.len > 0, "--replay-keys")]:
+      if given:
+        return TuiCommand(
+          kind: tckUsageError,
+          message: "'" & option & "' and '--headless' contradict each other;" &
+                   " --headless renders one settled screen and exits, so" &
+                   " there is no input loop to " &
+                   (if option == "--record-keys": "record from"
+                    else: "replay into"))
+
+  # THE SAME RULE FOR THE THREE OPTIONS THAT ACT ON A SESSION. `--goto`,
+  # `--record-keys` and `--replay-keys` all describe something to do with a
+  # trace, and every one of them is silently nothing without one. Named
+  # individually rather than as "one of these", so the message says which.
+  if tracePath.len == 0:
+    for (given, option) in [(gotoTick != NoGotoTick, "--goto"),
+                            (recordKeys.len > 0, "--record-keys"),
+                            (replayKeys.len > 0, "--replay-keys")]:
+      if given:
+        return TuiCommand(
+          kind: tckUsageError,
+          message: "'" & option & "' needs a trace folder to open")
   # The path is returned exactly as it was written. Resolving it against the
   # process's working directory is `host/`'s job, along with deciding whether
   # it exists — this layer does no filesystem I/O, which is what lets the whole
@@ -307,6 +495,10 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   # Two one-line arms are the price of not having to prove it.
   case mode
   of tckHeadless:
-    TuiCommand(kind: tckHeadless, tracePath: tracePath, flags: flags)
+    TuiCommand(kind: tckHeadless, tracePath: tracePath, flags: flags,
+               gotoTick: gotoTick, recordKeys: recordKeys,
+               replayKeys: replayKeys)
   else:
-    TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags)
+    TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
+               gotoTick: gotoTick, recordKeys: recordKeys,
+               replayKeys: replayKeys)

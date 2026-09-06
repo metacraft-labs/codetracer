@@ -30,6 +30,8 @@ import std/[json, options, strutils, asyncdispatch, osproc, os, streams]
 import isonim/core/[signals, computation, async_compat]
 
 import backend/stdio_backend
+export stdio_backend.DapReadBound, stdio_backend.DapStalledError,
+       stdio_backend.DapInterruptedError
 import store/[replay_data_store, types]
 import session_vm
 import app/app_vm
@@ -154,8 +156,11 @@ proc consumeNextCompleteMove*(session: HeadlessDebugSession) =
 # Construction
 # ---------------------------------------------------------------------------
 
-proc newHeadlessDebugSession*(tracePath: string;
-                              replayServerBin: string): HeadlessDebugSession =
+proc newHeadlessDebugSession*(
+    tracePath: string;
+    replayServerBin: string;
+    handshake: DapReadBound = DapReadBound(interruptFd: -1)
+  ): HeadlessDebugSession =
   ## Create a headless debug session.
   ##
   ## Steps:
@@ -166,69 +171,94 @@ proc newHeadlessDebugSession*(tracePath: string;
   ## 5. Create the full SessionViewModel wired to the stdio backend.
   ##
   ## Raises on failure (process spawn, handshake timeout, etc.).
+  ##
+  ## ``handshake`` is CTUI-14's ``DapReadBound``, and it applies to steps 2-5
+  ## and then STAYS ON the backend for the rest of the session.  The default is
+  ## the zero value — unbounded, exactly what every caller had before — and
+  ## `src/frontend/tui/host/native_host.openLocalTrace` is the caller that
+  ## passes one, because it is the caller holding a terminal it would otherwise
+  ## never give back.  ``stdio_backend.nim``'s header has the reproduction.
 
   # 1. Spawn
-  let backend = startReplayServer(replayServerBin)
+  let backend = startReplayServer(replayServerBin, bound = handshake)
 
-  # 2. DAP initialization handshake
-  let initResp = backend.sendDapRequest("initialize", %*{
-    "clientID": "headless-test",
-    "adapterID": "codetracer",
-    "supportsProgressReporting": false,
-  })
-  if not initResp.getOrDefault("success").getBool(false):
-    backend.close()
-    raise newException(IOError,
-      "DAP initialize failed: " & $initResp)
+  # THE CHILD IS REAPED ON EVERY FAILING PATH, not only on the two the code
+  # below already named. CTUI-14 made that matter: with a `DapReadBound`
+  # installed a stalled handshake now RAISES where it used to hang, and the
+  # raise used to leave `replay-server` running with nobody holding it — one
+  # orphan per refused trace, which is exactly what
+  # `tests/real_terminal/test_real_no_orphans.nim` counts. The two explicit
+  # `backend.close()` calls inside stay where they are: they close a session
+  # that answered and REFUSED, which is a different fact from one that broke.
+  try:
+    # 2. DAP initialization handshake
+    let initResp = backend.sendDapRequest("initialize", %*{
+      "clientID": "headless-test",
+      "adapterID": "codetracer",
+      "supportsProgressReporting": false,
+    })
+    if not initResp.getOrDefault("success").getBool(false):
+      backend.close()
+      raise newException(IOError,
+        "DAP initialize failed: " & $initResp)
 
-  # Wait for the "initialized" event that the server sends after
-  # processing the initialize request.
-  let initializedEvent = backend.waitForEvent("initialized")
-  discard initializedEvent  # we just need to consume it
+    # Wait for the "initialized" event that the server sends after
+    # processing the initialize request.
+    let initializedEvent = backend.waitForEvent("initialized")
+    discard initializedEvent  # we just need to consume it
 
-  # 3. Configuration done mirrors the GUI startup order.
-  let configResp = backend.sendDapRequest("configurationDone")
-  discard configResp
+    # 3. Configuration done mirrors the GUI startup order.
+    let configResp = backend.sendDapRequest("configurationDone")
+    discard configResp
 
-  # 4. Launch with the trace folder
-  # The Rust backend deserializes ``traceFolder`` (camelCase) via serde rename.
-  let launchResp = backend.sendDapRequest("launch", %*{
-    "traceFolder": tracePath,
-  })
-  if not launchResp.getOrDefault("success").getBool(false):
-    backend.close()
-    raise newException(IOError,
-      "DAP launch failed: " & $launchResp)
+    # 4. Launch with the trace folder
+    # The Rust backend deserializes ``traceFolder`` (camelCase) via serde
+    # rename.
+    let launchResp = backend.sendDapRequest("launch", %*{
+      "traceFolder": tracePath,
+    })
+    if not launchResp.getOrDefault("success").getBool(false):
+      backend.close()
+      raise newException(IOError,
+        "DAP launch failed: " & $launchResp)
 
-  # 5. Wait for the initial stopped event and ct/complete-move.
-  # The server sends a standard DAP "stopped" event plus a CT-specific
-  # "ct/complete-move" event that carries the actual source location.
-  discard backend.waitForEvent("stopped")
+    # 5. Wait for the initial stopped event and ct/complete-move.
+    # The server sends a standard DAP "stopped" event plus a CT-specific
+    # "ct/complete-move" event that carries the actual source location.
+    discard backend.waitForEvent("stopped")
 
-  # 6. Create the ViewModel layer through the Embed SDK session, with the
-  #    stdio backend injected as the BackendService (spec §3.1 — the
-  #    transport is injectable, so the same lifecycle code serves the mock,
-  #    a worker and this spawned process).
-  #
-  #    `attach` rather than `launch`: steps 2-5 above already performed the
-  #    DAP handshake on the raw channel, because they need the blocking
-  #    `waitForEvent` that `BackendService.onEvent` does not provide.
-  let backendService = backend.toBackendService()
-  let sdkSession = newDebuggerSession(backendService)
-  sdkSession.attach(localFolderTrace(tracePath))
+    # 6. Create the ViewModel layer through the Embed SDK session, with the
+    #    stdio backend injected as the BackendService (spec §3.1 — the
+    #    transport is injectable, so the same lifecycle code serves the mock,
+    #    a worker and this spawned process).
+    #
+    #    `attach` rather than `launch`: steps 2-5 above already performed the
+    #    DAP handshake on the raw channel, because they need the blocking
+    #    `waitForEvent` that `BackendService.onEvent` does not provide.
+    let backendService = backend.toBackendService()
+    let sdkSession = newDebuggerSession(backendService)
+    sdkSession.attach(localFolderTrace(tracePath))
 
-  result = HeadlessDebugSession(
-    backend: backend,
-    sdk: sdkSession,
-    app: sdkSession.app,
-    session: sdkSession.session,
-    tracePath: tracePath,
-    replayServerBin: replayServerBin,
-  )
+    result = HeadlessDebugSession(
+      backend: backend,
+      sdk: sdkSession,
+      app: sdkSession.app,
+      session: sdkSession.session,
+      tracePath: tracePath,
+      replayServerBin: replayServerBin,
+    )
 
-  # Push initial position into the store from the ct/complete-move event.
-  let completeMoveEvent = backend.waitForEvent("ct/complete-move")
-  result.updatePositionFromCompleteMove(completeMoveEvent)
+    # Push initial position into the store from the ct/complete-move event.
+    let completeMoveEvent = backend.waitForEvent("ct/complete-move")
+    result.updatePositionFromCompleteMove(completeMoveEvent)
+  except CatchableError:
+    try:
+      backend.close()
+    except CatchableError:
+      # A child that cannot be closed is not a reason to lose the diagnosis of
+      # why the handshake failed, which is what re-raising from here would do.
+      discard
+    raise
 
 # ---------------------------------------------------------------------------
 # Stepping actions
