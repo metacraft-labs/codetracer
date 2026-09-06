@@ -32,6 +32,45 @@ in
     # turning the drift check into noise about whitespace. Formatting hooks
     # must not have opinions about a file this repository does not own.
     "^tools/check-test-assertions\\.sh$"
+
+    # A CANONICAL BODY WITH SEVEN PASTED COPIES, and byte-identity IS the
+    # contract -- the same reason as the entry above, arrived at from the
+    # opposite direction: that file is owned elsewhere, this one is owned here
+    # but duplicated into YAML.
+    #
+    # ci/runner/sweep-readonly-leftovers.sh keeps its body between
+    # `# --- BEGIN INLINE BODY` / `# --- END INLINE BODY` markers, and that body
+    # is pasted verbatim into SEVEN `run:` blocks in
+    # .github/workflows/codetracer.yml (jobs: reprobuild-macos-smoke,
+    # origin-dap-macos, origin-dap-macos-nightly, dmg-build, dmg-lib-check,
+    # test-non-gui, test-ui-tests). It cannot simply be invoked instead: the
+    # sweep runs BEFORE actions/checkout, when the file is not yet on the
+    # runner's disk. ci/test/readonly-leftovers-sweep-test.sh is what stops the
+    # seven copies drifting -- it de-indents each `run:` block and compares it
+    # to the canonical body with exact string equality (`found[name] != body`),
+    # so every byte of leading whitespace is contractual.
+    #
+    # WHY IT IS SAFE TODAY, AND WHY THAT IS NOT GOOD ENOUGH. The body is
+    # SPACE-indented at 2. shfmt reads .editorconfig, whose `[*]` stanza says
+    # `indent_style = space` / `indent_size = 2`, so shfmt currently rewrites
+    # NOTHING here (`shfmt -l` does not list it). The file is therefore
+    # protected only by a repo-wide style knob that says nothing about this
+    # file's actual contract.
+    #
+    # That protection is one edit away from gone, and the edit is a reasonable
+    # one: 306 of the 366 tracked *.sh files are tab-indented and do NOT match
+    # that `[*]` stanza (shfmt would rewrite them), so aligning .editorconfig
+    # with reality by adding `[*.sh] indent_style = tab` is a cleanup somebody
+    # will eventually make. The moment it lands, shfmt retabs 78 lines of this
+    # file and breaks the equality against all seven copies at once -- and the
+    # breakage would read as a test bug rather than a formatter bug. Dropping
+    # .editorconfig from shfmt's scope does the same thing.
+    #
+    # Nor could that be "resolved" by tabbing both sides: YAML block scalars
+    # cannot use tabs for indentation at all. Do not fix a future breakage here
+    # by relaxing the equality in readonly-leftovers-sweep-test.sh -- that
+    # equality is the only thing holding the seven copies together.
+    "^ci/runner/sweep-readonly-leftovers\\.sh$"
   ];
 
   hooks = {
