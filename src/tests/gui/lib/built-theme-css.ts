@@ -13,7 +13,7 @@
  *
  * It cannot call a `.ts`. There is no `tsc` in the repository's node_modules,
  * `src/tests/gui/tsconfig.json` sets `"module": "CommonJS"` and explicitly
- * `"exclude"`s `**/*.mjs`, and the suite's own lane has no npm install — the
+ * `"exclude"`s `**\/*.mjs`, and the suite's own lane has no npm install — the
  * specs' TypeScript is transpiled by Playwright at run time and by nothing else.
  * A resolver written only as TypeScript would therefore be a fix whose guard
  * could never be watched going red, which is the one thing this campaign does
@@ -23,8 +23,16 @@
  *
  * So the logic is plain CommonJS that `node` runs with no toolchain at all, and
  * the specs get types from here. One implementation, two callers — not two
- * copies. `tsconfig.json`'s `include` lists only `**/*.ts`, so the `.cjs` is
+ * copies. `tsconfig.json`'s `include` lists only `**\/*.ts`, so the `.cjs` is
  * never type-checked and never double-compiled.
+ *
+ * THE BACKSLASHES IN THE TWO GLOBS ABOVE ARE LOAD-BEARING, NOT A TYPO. A bare
+ * `**` followed by `/` contains the sequence that ENDS a block comment, so
+ * writing the globs unescaped closes this comment twelve lines early and the
+ * prose below it becomes syntax errors. That is not hypothetical: it shipped in
+ * `464b8f296` and took the stylesheet-guard step red on both `test-ui-tests`
+ * legs, which SKIPPED the entire DB-based Playwright suite behind it for every
+ * run until it was found. Do not "clean up" these backslashes.
  */
 
 /* eslint-disable @typescript-eslint/no-var-requires */
