@@ -84,16 +84,84 @@ function Get-PwshPath {
 # A one-shot HTTP server with three behaviours, run in a background job so the
 # test process can be the client.
 #
-#   full   - send headers and the whole body, then close.
+#   full   - send headers and the whole body, then close GRACEFULLY.
 #   stall  - send headers and a first chunk, then stop sending and hold the
 #            connection open. This is the shape that hung CI.
 #   trickle- send headers and then one byte every 200ms, forever. This never
 #            trips an inactivity bound; only a total budget catches it.
+#
+# TWO PROPERTIES BELOW ARE LOAD-BEARING, AND BOTH WERE LEARNED THE EXPENSIVE
+# WAY -- each cost a run on a two-slot Windows lane, and in BOTH cases the
+# defect was in this server, not in the downloader it is pointed at. A harness
+# that is less reliable than the thing it measures cannot measure it.
+#
+# 1. THE RESPONSE IS BUILT BEFORE READINESS IS SIGNALLED, NEVER WHILE A CLIENT
+#    IS WAITING ON IT.
+#
+#    The body used to be generated one byte at a time, in a PowerShell `for`
+#    loop, AFTER the response headers had already gone out. The client's
+#    inactivity clock starts at the headers, so every one of those 262,144
+#    interpreted loop iterations was spent inside the very bound the test was
+#    about to assert. That loop costs ~2s on a developer machine and an order
+#    of magnitude more on a loaded CI guest, and when it crossed the 20s
+#    inactivity window the download failed with `no data for 20s (received
+#    0 B)` -- a real stall, correctly detected, caused entirely by the test
+#    server sitting on its hands.
+#
+#    So the body is now filled by tiling a 26-byte pattern with
+#    `Buffer.BlockCopy` (~30x cheaper, and identical bytes), and -- the part
+#    that actually makes it deterministic rather than merely faster -- it is
+#    built BEFORE the ready file appears. The parent cannot connect until the
+#    bytes are already in memory, so no amount of host slowness can put CPU
+#    time inside the measured window. The constant got better; the invariant
+#    is what removes the race.
+#
+# 2. THE `full` CONNECTION IS CLOSED GRACEFULLY, NOT BY LETTING THE JOB EXIT.
+#
+#    `NetworkStream.Write` returns when the kernel has ACCEPTED the bytes, not
+#    when the peer has received them. The server used to write the body and
+#    then simply run off the end of the scriptblock, so the background job's
+#    process exited with up to a full socket send buffer still queued. Linux
+#    hides this: loopback send buffers are megabytes, so nothing is ever in
+#    flight, and the kernel drains what is. Windows does not -- a process
+#    exiting with queued data resets the connection, and the queued bytes are
+#    discarded. That is how a run saw exactly `128.0 KiB of 256.0 KiB (50%)`
+#    -- one read buffer -- and then "An existing connection was forcibly
+#    closed by the remote host": a truncated body from a server that had
+#    already returned from `Write` and believed it was done.
+#
+#    The fix is the standard graceful-close handshake: shut down the sending
+#    half, then read until the peer's FIN. The client only closes after it has
+#    consumed all `Content-Length` bytes, so that FIN is a positive
+#    acknowledgement that the whole body landed. The server cannot exit before
+#    it, and there is nothing left queued when it does.
+#
+#    This is deliberately NOT applied to `stall` or `trickle`. Holding those
+#    connections open, indefinitely and rudely, is their entire purpose.
 $serverScript = {
   param($Port, $Mode, $BodySize, $ReadyFile)
 
   $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
   $listener.Start()
+
+  # Build the whole response first -- see note 1 above. Nothing between the
+  # ready signal and the write may cost measurable time.
+  $declared = if ($Mode -eq "trickle") { 1073741824 } else { $BodySize }
+  $header = "HTTP/1.1 200 OK`r`nContent-Length: $declared`r`nContent-Type: application/octet-stream`r`nConnection: close`r`n`r`n"
+  $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
+
+  $body = $null
+  if ($Mode -eq "full") {
+    # Byte i is 'A' + (i mod 26), exactly as the assertion in Part 4 expects;
+    # tiling the pattern produces the same bytes as the per-byte loop did.
+    $body = [byte[]]::new($BodySize)
+    $pattern = [byte[]](65..90)
+    for ($offset = 0; $offset -lt $BodySize; $offset += $pattern.Length) {
+      [System.Buffer]::BlockCopy(
+        $pattern, 0, $body, $offset, [Math]::Min($pattern.Length, $BodySize - $offset))
+    }
+  }
+
   # Signal readiness out of band. The obvious handshake -- have the parent
   # connect to check the port is open -- cannot be used here, because this
   # listener is one-shot: the probe connection would BE the accepted
@@ -107,18 +175,29 @@ $serverScript = {
     $request = [byte[]]::new(65536)
     $stream.Read($request, 0, $request.Length) | Out-Null
 
-    $declared = if ($Mode -eq "trickle") { 1073741824 } else { $BodySize }
-    $header = "HTTP/1.1 200 OK`r`nContent-Length: $declared`r`nContent-Type: application/octet-stream`r`nConnection: close`r`n`r`n"
-    $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
     $stream.Write($headerBytes, 0, $headerBytes.Length)
     $stream.Flush()
 
     switch ($Mode) {
       "full" {
-        $body = [byte[]]::new($BodySize)
-        for ($i = 0; $i -lt $BodySize; $i++) { $body[$i] = [byte](65 + ($i % 26)) }
         $stream.Write($body, 0, $body.Length)
         $stream.Flush()
+
+        # Graceful close -- see note 2 above. Half-close, then read until the
+        # client's FIN, which it can only send once it has read every declared
+        # byte. The receive timeout is a liveness backstop so a client that
+        # dies without closing cannot strand this job; it is not part of the
+        # handshake and must never be reached on the happy path.
+        $client.Client.Shutdown([System.Net.Sockets.SocketShutdown]::Send)
+        $client.Client.ReceiveTimeout = 60000
+        $drain = [byte[]]::new(4096)
+        try {
+          while ($stream.Read($drain, 0, $drain.Length) -gt 0) { }
+        } catch [System.IO.IOException] {
+          # Receive timeout, or the client aborted. Either way the send half
+          # is already shut down, so nothing of ours is left unsent.
+        }
+        $client.Close()
       }
       "stall" {
         $chunk = [byte[]]::new(4096)

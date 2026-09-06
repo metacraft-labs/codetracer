@@ -139,16 +139,7 @@ jobs:
           submodules: false
           token: ${{ steps.ci_token.outputs.token }}
 
-      # Cheap, hermetic, and it runs the download/native-command bounds' own
-      # NEGATIVE tests on a real Windows host rather than only on Linux pwsh.
-      # If a bound behaves differently here than it does on Linux, that matters
-      # more than the provisioning result and is worth 2 minutes to learn first.
-      - name: Validate download and native-command bounds on this host
-        shell: pwsh
-        timeout-minutes: 10
-        run: pwsh -File ci/test/download-stall-bound.ps1
-
-      # Also cheap, and it pins the claim the decomposition below depends on:
+      # It pins the claim the decomposition below depends on:
       # that every gated component in `env.ps1` really goes through the
       # instrumented wrapper, so the table cannot silently omit one.
       - name: Validate the component-decomposition coverage gate
@@ -240,6 +231,37 @@ jobs:
           if ($env:GITHUB_STEP_SUMMARY) {
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $text
           }
+
+      # RUNS AFTER THE DELIVERABLE IS SAFE, AND IS STILL A HARD GATE.
+      #
+      # This runs the download/native-command bounds' own NEGATIVE tests on a
+      # real Windows host rather than only on Linux pwsh, which is worth
+      # knowing. It used to run FIRST, before provisioning, and that ordering
+      # cost two runs on a two-slot lane -- both times in its POSITIVE case,
+      # and both times because of a defect in its own loopback test server
+      # rather than in any bound it asserts. Those defects are fixed, but the
+      # ordering that converted them into a total loss is the thing worth
+      # correcting: a check whose subject is HOST behaviour should not stand
+      # between the run and the measurement the run exists to take.
+      #
+      # It is NOT weakened to earn the move. Every assertion keeps its full
+      # strength and a failure still turns this job red; it simply can no
+      # longer cost the decomposition, which by this point is uploaded and
+      # summarised. Nor does moving it blunt the gate, because this is not
+      # where the gate has its teeth: the same script runs as a hard,
+      # first-class, blocking step in `windows-bootstrap-smoke`
+      # (`codetracer.yml`) and in `windows-msys2-provision-check`, both of
+      # which gate the mainline. Here it is a second opinion from a
+      # provisioning host, and second opinions go after the evidence.
+      #
+      # 15 rather than 10: the step was measured taking ~4 minutes to reach its
+      # fourth group on this runner class, most of it `Start-Job` spawn, so a
+      # 10-minute cap left too little headroom on a contended guest -- and a
+      # cap that fires reports a timeout rather than a finding.
+      - name: Validate download and native-command bounds on this host
+        shell: pwsh
+        timeout-minutes: 15
+        run: pwsh -File ci/test/download-stall-bound.ps1
 
       # From here down: enough of `windows-rust-components` to establish that
       # provisioning really did leave the runner able to start a build. The bar
