@@ -2426,6 +2426,7 @@ impl BackendManager {
                     "ct/py-read-source" => self.handle_py_read_source(seq, args).await,
                     "ct/py-processes" => self.handle_py_processes(seq, args).await,
                     "ct/py-select-process" => self.handle_py_select_process(seq, args).await,
+                    "ct/py-origin-chain" => self.handle_py_origin_chain(seq, args).await,
                     "ct/py-memory-diff" => self.handle_py_memory_diff(seq, args).await,
                     "ct/mcrMemoryDiff" => self.handle_py_memory_diff(seq, args).await,
                     "ct/py-memory-diff-record-vs-replay" => {
@@ -2444,9 +2445,24 @@ impl BackendManager {
                             && let Some(id) = id.as_u64()
                         {
                             let backend_id = id as usize;
+                            // `replay-id` is a *routing* directive for this
+                            // daemon, not part of any backend command's
+                            // argument schema — note the kebab-case, unlike
+                            // every camelCase DAP field.  Strip it before
+                            // forwarding: several backend argument structs
+                            // (e.g. `CtOriginChainArguments`) are
+                            // `#[serde(deny_unknown_fields)]` and reject the
+                            // whole request when it survives the hop.
+                            let mut forwarded = message.clone();
+                            if let Some(args) = forwarded
+                                .get_mut("arguments")
+                                .and_then(Value::as_object_mut)
+                            {
+                                args.remove("replay-id");
+                            }
                             // Reset TTL for the session that owns this replay.
                             self.reset_ttl_for_backend_id(backend_id);
-                            return self.message(backend_id, message).await;
+                            return self.message(backend_id, forwarded).await;
                         }
                         // Reset TTL for the currently selected replay.
                         self.reset_ttl_for_backend_id(self.selected);
@@ -4955,6 +4971,170 @@ impl BackendManager {
                 backend_seq: dap_seq,
                 response_command: "ct/py-read-source".to_string(),
                 expression: String::new(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Handles `ct/py-origin-chain` requests from Python clients.
+    ///
+    /// Backs `Trace.value_origin(...)` (M8 of the Value Origin Tracking
+    /// milestones) by translating the request into the backend's
+    /// `ct/originChain` DAP command and registering a pending request
+    /// whose response is forwarded verbatim (spec §4.1 is the public
+    /// wire contract — see
+    /// [`python_bridge::format_origin_chain_response`]).
+    ///
+    /// Without this route the command fell through to the generic
+    /// "forward to the selected replay" arm, which handed the backend a
+    /// `ct/py-origin-chain` command it does not implement — so every
+    /// `trace.value_origin(...)` call raised `TraceError`, and the
+    /// `PendingPyRequestKind::OriginChain` arm below was unreachable.
+    ///
+    /// # Wire protocol
+    ///
+    /// **Request** (from the Python client):
+    /// ```json
+    /// {
+    ///   "type": "request",
+    ///   "command": "ct/py-origin-chain",
+    ///   "seq": 1,
+    ///   "arguments": {
+    ///     "tracePath": "/path/to/trace",
+    ///     "variableName": "total",
+    ///     "maxHops": 16,
+    ///     "lazy": false,
+    ///     "stepId": 137,
+    ///     "frameId": 0
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// **Response:** the backend's `OriginChain` body, unmodified.
+    async fn handle_py_origin_chain(
+        &mut self,
+        seq: i64,
+        args: Option<&Value>,
+    ) -> Result<(), Box<dyn Error>> {
+        let trace_path_str = match args
+            .and_then(|a| a.get("tracePath"))
+            .and_then(Value::as_str)
+        {
+            Some(p) => p.to_string(),
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-origin-chain",
+                    "missing 'tracePath' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let variable_name = match args
+            .and_then(|a| a.get("variableName"))
+            .and_then(Value::as_str)
+        {
+            Some(v) if !v.is_empty() => v.to_string(),
+            _ => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-origin-chain",
+                    "missing 'variableName' in arguments",
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_path = PathBuf::from(&trace_path_str);
+
+        let backend_id = match self.backend_id_for_trace(&trace_path) {
+            Some(id) => id,
+            None => {
+                self.send_py_command_error(
+                    seq,
+                    "ct/py-origin-chain",
+                    &self.no_session_error_message(&trace_path_str),
+                );
+                return Ok(());
+            }
+        };
+
+        self.reset_ttl_for_backend_id(backend_id);
+
+        // Negative frame / step mean "topmost frame" / "current step" on
+        // the backend side, which is exactly what an omitted argument
+        // should mean here.
+        let frame_id = args
+            .and_then(|a| a.get("frameId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        let step_id = args
+            .and_then(|a| a.get("stepId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        let max_hops = args
+            .and_then(|a| a.get("maxHops"))
+            .and_then(Value::as_u64)
+            .unwrap_or(16);
+        let lazy = args
+            .and_then(|a| a.get("lazy"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let dap_seq = match self.daemon_state.as_mut() {
+            Some(ds) => ds.py_bridge.next_seq(),
+            None => return Ok(()),
+        };
+
+        // `CtOriginChainArguments` is `#[serde(deny_unknown_fields)]`, so
+        // every key here must be one of its camelCase fields — do not
+        // forward the client's argument object wholesale (it carries
+        // `tracePath`, which the backend would reject).
+        let mut backend_args = serde_json::json!({
+            "variableName": variable_name,
+            "variablePath": [],
+            "frameId": frame_id,
+            "stepId": step_id,
+            "threadId": 0,
+            "maxHops": max_hops,
+            "lazy": lazy,
+            "sessionId": "",
+            "classifySource": true,
+        });
+        if let Some(token) = args
+            .and_then(|a| a.get("continuationToken"))
+            .and_then(Value::as_str)
+        {
+            backend_args["continuationToken"] = serde_json::json!(token);
+        }
+
+        let dap_request = serde_json::json!({
+            "type": "request",
+            "command": "ct/originChain",
+            "seq": dap_seq,
+            "arguments": backend_args,
+        });
+
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            self.send_py_command_error(
+                seq,
+                "ct/py-origin-chain",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
+        if let Some(ds) = self.daemon_state.as_mut() {
+            ds.py_bridge.pending_requests.push(PendingPyRequest {
+                kind: PendingPyRequestKind::OriginChain,
+                client_id,
+                original_seq: seq,
+                backend_seq: dap_seq,
+                response_command: "ct/py-origin-chain".to_string(),
+                expression: variable_name,
             });
         }
 

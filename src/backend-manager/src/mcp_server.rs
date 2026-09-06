@@ -38,10 +38,12 @@
 //! - `trace:///home/user/traces/my-program/source/src/main.nim` - source file
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::io::BufRead;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -245,17 +247,22 @@ fn find_recording_by_id_tool() -> Value {
 
 /// Returns the JSON schema for the `get_value_origin` tool.
 ///
-/// The MCP tool surface intentionally steers callers toward
-/// `exec_script` + `trace.value_origin(...)` for full programmatic
-/// access; this top-level tool is a discovery handle that points
-/// agents at the Python scripting workflow rather than duplicating
-/// it.  The description names both `exec_script` and `value_origin`
-/// so the test in `tests/mcp_origin_test.rs::test_mcp_get_value_origin
-/// _description_points_at_scripting` can verify the steering.
+/// The query is anchored at a source location (`path` + `line`) rather
+/// than at a step id: an MCP call is stateless, and `ct/open-trace`
+/// rewinds the replay to the program entry, where no interesting
+/// variable is live yet.  The handler therefore sets a breakpoint at
+/// `path:line`, continues to it, and asks the backend for the chain at
+/// the step it stopped on — the same sequence the per-language
+/// `origin_*_dap_test.rs` suites use.
+///
+/// The description still names both `exec_script` and `value_origin`
+/// because the Python binding remains the right tool for multi-query
+/// sessions; `tests/mcp_origin_test.rs::test_mcp_get_value_origin
+/// _description_points_at_scripting` asserts both names are present.
 fn get_value_origin_tool() -> Value {
     json!({
         "name": "get_value_origin",
-        "description": "Return the origin chain for a recorded value.  Prefer the scripting workflow: call `exec_script` with a Python script that invokes `trace.value_origin(path, line, variable)` to get programmatic access to the full chain (steps, scopes, source locations).  This top-level tool is a discovery handle; use `exec_script` + `trace.value_origin` for production queries.",
+        "description": "Return the backward dataflow (origin) chain for a recorded value: where the value in `variable` at `path`:`line` came from, hop by hop, down to the literal / computation / parameter that produced it. Sets a breakpoint at `path`:`line`, runs to it, and returns the canonical OriginChain (hops, terminator, confidence, metrics). For multi-query sessions that reuse one loaded trace, call `exec_script` with a Python script that uses `trace.value_origin(...)` instead.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -265,15 +272,19 @@ fn get_value_origin_tool() -> Value {
                 },
                 "path": {
                     "type": "string",
-                    "description": "Source file path (within the trace) of the variable's defining line."
+                    "description": "Source file path of the query line. May be a suffix of the recorded path (e.g. `main.py`); it is resolved against the trace's source file list."
                 },
                 "line": {
                     "type": "number",
-                    "description": "1-based line number where the variable is defined or last assigned."
+                    "description": "1-based line number to run to before querying. The variable must be live at this line."
                 },
                 "variable": {
                     "type": "string",
-                    "description": "Variable name to trace the origin of."
+                    "description": "Variable name to trace the origin of. Identifier only; dotted paths are not supported yet."
+                },
+                "max_hops": {
+                    "type": "number",
+                    "description": "Maximum hops to walk in this request (default 16). Backends clamp this to their own tier limit."
                 }
             },
             "required": ["trace_path", "path", "line", "variable"]
@@ -283,13 +294,14 @@ fn get_value_origin_tool() -> Value {
 
 /// Returns the JSON schema for the `resolve_variable_step` tool.
 ///
-/// Companion to `get_value_origin`: this tool resolves a single
-/// variable name at the latest matching step rather than returning
-/// the full origin chain.
+/// Companion to `get_value_origin`: same query, but it answers only the
+/// first hop — the step at which `variable` last received the value it
+/// holds at `path:line`.  It takes the same location anchor for the same
+/// reason (see [`get_value_origin_tool`]).
 fn resolve_variable_step_tool() -> Value {
     json!({
         "name": "resolve_variable_step",
-        "description": "Resolve a variable to its latest assigning step in the trace.  Returns the step location (path, line, function) and the value as observed at that step.  For the full origin chain, use `get_value_origin` or the `trace.value_origin` Python API via `exec_script`.",
+        "description": "Resolve a variable to the step that assigned the value it holds at `path`:`line`. Returns that step's id and source location (path, line, function) plus the assigning source text. This is the first hop of the origin chain; for the whole chain use `get_value_origin`, or the `trace.value_origin` Python API via `exec_script`.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -297,12 +309,20 @@ fn resolve_variable_step_tool() -> Value {
                     "type": "string",
                     "description": "Either a local path to a `.ct` trace folder OR an observability dive-in URL."
                 },
+                "path": {
+                    "type": "string",
+                    "description": "Source file path of the query line. May be a suffix of the recorded path; it is resolved against the trace's source file list."
+                },
+                "line": {
+                    "type": "number",
+                    "description": "1-based line number to run to before querying. The variable must be live at this line."
+                },
                 "variable": {
                     "type": "string",
-                    "description": "Variable name to resolve to its latest assigning step."
+                    "description": "Variable name to resolve to its assigning step."
                 }
             },
-            "required": ["trace_path", "variable"]
+            "required": ["trace_path", "path", "line", "variable"]
         }
     })
 }
@@ -1086,32 +1106,188 @@ fn handle_initialize(id: &Value) -> Value {
     )
 }
 
+// ---------------------------------------------------------------------------
+// The tool table — the single source of truth for the MCP tool surface
+// ---------------------------------------------------------------------------
+
+/// The future returned by a tool's dispatch function.
+///
+/// Boxed because the entries of [`TOOLS`] must share one concrete type;
+/// `async fn`s each have an anonymous, mutually incompatible future type.
+type ToolFuture<'a> = Pin<Box<dyn Future<Output = Value> + 'a>>;
+
+/// A tool's dispatch function: same signature for every tool, so handlers
+/// that don't need `config` or `loaded_traces` simply ignore them.
+type ToolDispatch = for<'a> fn(
+    &'a Value,
+    Option<&'a Value>,
+    &'a McpServerConfig,
+    &'a mut HashMap<String, LoadedTrace>,
+) -> ToolFuture<'a>;
+
+/// One MCP tool: its advertised schema AND the handler that answers it.
+///
+/// Keeping both in one struct is what makes the historical defect
+/// unrepresentable.  `tools/list` used to be a hand-written array and
+/// `tools/call` a hand-written `match`; the two drifted, and
+/// `get_value_origin` / `resolve_variable_step` were advertised for
+/// several releases while `tools/call` answered `-32602 Unknown tool`.
+/// A `ToolDef` cannot be constructed without a `dispatch`, and both
+/// handlers below read the same [`TOOLS`] slice, so an advertised tool is
+/// a dispatched tool by construction.  Do not reintroduce a second list.
+struct ToolDef {
+    /// Tool name as it appears in `tools/list` and `tools/call`.
+    ///
+    /// Must equal the `"name"` field the `schema` function emits; the
+    /// `tool_names_match_their_schemas` unit test enforces that.
+    name: &'static str,
+    /// Builds the JSON schema advertised through `tools/list`.
+    schema: fn() -> Value,
+    /// Answers a `tools/call` for this tool.
+    dispatch: ToolDispatch,
+}
+
+/// Adapter functions turning each `async fn` handler into a [`ToolDispatch`].
+///
+/// A non-capturing closure would also coerce to the function pointer, but
+/// the higher-ranked lifetime in [`ToolDispatch`] is far easier to satisfy
+/// with named `fn`s.
+mod dispatch {
+    use super::*;
+
+    pub(super) fn exec_script<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        config: &'a McpServerConfig,
+        traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(handle_exec_script(id, args, config, traces))
+    }
+
+    pub(super) fn trace_info<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        config: &'a McpServerConfig,
+        traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(handle_trace_info(id, args, config, traces))
+    }
+
+    pub(super) fn list_source_files<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        config: &'a McpServerConfig,
+        _traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(handle_list_source_files(id, args, config))
+    }
+
+    pub(super) fn read_source_file<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        config: &'a McpServerConfig,
+        _traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(handle_read_source_file(id, args, config))
+    }
+
+    pub(super) fn find_recordings_by_window<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        _config: &'a McpServerConfig,
+        _traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(handle_find_recordings_by_window(id, args))
+    }
+
+    pub(super) fn find_recording_by_id<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        _config: &'a McpServerConfig,
+        _traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(handle_find_recording_by_id(id, args))
+    }
+
+    pub(super) fn get_value_origin<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        config: &'a McpServerConfig,
+        traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(handle_get_value_origin(id, args, config, traces))
+    }
+
+    pub(super) fn resolve_variable_step<'a>(
+        id: &'a Value,
+        args: Option<&'a Value>,
+        config: &'a McpServerConfig,
+        traces: &'a mut HashMap<String, LoadedTrace>,
+    ) -> ToolFuture<'a> {
+        Box::pin(handle_resolve_variable_step(id, args, config, traces))
+    }
+}
+
+/// Every tool this server exposes, advertised and dispatched from here.
+const TOOLS: &[ToolDef] = &[
+    ToolDef {
+        name: "exec_script",
+        schema: exec_script_tool,
+        dispatch: dispatch::exec_script,
+    },
+    ToolDef {
+        name: "trace_info",
+        schema: trace_info_tool,
+        dispatch: dispatch::trace_info,
+    },
+    ToolDef {
+        name: "list_source_files",
+        schema: list_source_files_tool,
+        dispatch: dispatch::list_source_files,
+    },
+    ToolDef {
+        name: "read_source_file",
+        schema: read_source_file_tool,
+        dispatch: dispatch::read_source_file,
+    },
+    ToolDef {
+        name: "find_recordings_by_window",
+        schema: find_recordings_by_window_tool,
+        dispatch: dispatch::find_recordings_by_window,
+    },
+    ToolDef {
+        name: "find_recording_by_id",
+        schema: find_recording_by_id_tool,
+        dispatch: dispatch::find_recording_by_id,
+    },
+    ToolDef {
+        name: "get_value_origin",
+        schema: get_value_origin_tool,
+        dispatch: dispatch::get_value_origin,
+    },
+    ToolDef {
+        name: "resolve_variable_step",
+        schema: resolve_variable_step_tool,
+        dispatch: dispatch::resolve_variable_step,
+    },
+];
+
 /// Handles `tools/list` requests.
 ///
-/// Returns the list of available tools with their input schemas.
+/// Returns the list of available tools with their input schemas, derived
+/// from [`TOOLS`] — the same table `handle_tools_call` dispatches from.
 fn handle_tools_list(id: &Value) -> Value {
-    jsonrpc_result(
-        id,
-        json!({
-            "tools": [
-                exec_script_tool(),
-                trace_info_tool(),
-                list_source_files_tool(),
-                read_source_file_tool(),
-                find_recordings_by_window_tool(),
-                find_recording_by_id_tool(),
-                get_value_origin_tool(),
-                resolve_variable_step_tool(),
-            ]
-        }),
-    )
+    let tools: Vec<Value> = TOOLS.iter().map(|tool| (tool.schema)()).collect();
+    jsonrpc_result(id, json!({ "tools": tools }))
 }
 
 /// Handles `tools/call` requests.
 ///
-/// Dispatches to the appropriate tool handler based on the tool name.
-/// On successful trace operations, updates `loaded_traces` so that
-/// subsequent `resources/list` calls reflect the newly loaded trace.
+/// Looks the tool up in [`TOOLS`] and invokes its dispatch function.
+/// Because that is the same table `tools/list` advertises from, a tool
+/// can never be advertised without being callable.  On successful trace
+/// operations the handlers update `loaded_traces` so that subsequent
+/// `resources/list` calls reflect the newly loaded trace.
 async fn handle_tools_call(
     id: &Value,
     params: Option<&Value>,
@@ -1124,14 +1300,9 @@ async fn handle_tools_call(
         .unwrap_or("");
     let arguments = params.and_then(|p| p.get("arguments"));
 
-    match tool_name {
-        "exec_script" => handle_exec_script(id, arguments, config, loaded_traces).await,
-        "trace_info" => handle_trace_info(id, arguments, config, loaded_traces).await,
-        "list_source_files" => handle_list_source_files(id, arguments, config).await,
-        "read_source_file" => handle_read_source_file(id, arguments, config).await,
-        "find_recordings_by_window" => handle_find_recordings_by_window(id, arguments).await,
-        "find_recording_by_id" => handle_find_recording_by_id(id, arguments).await,
-        _ => jsonrpc_error(id, -32602, &format!("Unknown tool: {tool_name}")),
+    match TOOLS.iter().find(|tool| tool.name == tool_name) {
+        Some(tool) => (tool.dispatch)(id, arguments, config, loaded_traces).await,
+        None => jsonrpc_error(id, -32602, &format!("Unknown tool: {tool_name}")),
     }
 }
 
@@ -2447,6 +2618,478 @@ async fn handle_read_source_file(
 
     let duration_ms = start.elapsed().as_millis();
     jsonrpc_result(id, tool_result_text_with_timing(&content, duration_ms))
+}
+
+// ---------------------------------------------------------------------------
+// Value Origin Tracking tools (`get_value_origin`, `resolve_variable_step`)
+// ---------------------------------------------------------------------------
+
+/// Default hop budget for `get_value_origin`, matching
+/// `db_backend::task::DEFAULT_ORIGIN_MAX_HOPS` (spec §6.1.7).
+const DEFAULT_ORIGIN_MAX_HOPS: u64 = 16;
+
+/// The arguments both origin tools accept, after validation.
+struct OriginQuery {
+    trace_path: String,
+    source_path: String,
+    line: i64,
+    variable: String,
+    max_hops: u64,
+}
+
+/// Validate the shared argument set of the two origin tools.
+///
+/// Returns the tool-error text on failure so the caller can wrap it in
+/// its own timing envelope.
+fn parse_origin_arguments(arguments: Option<&Value>, max_hops: u64) -> Result<OriginQuery, String> {
+    let trace_path = arguments
+        .and_then(|a| a.get("trace_path"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or("Missing required argument: trace_path")?
+        .to_string();
+    let source_path = arguments
+        .and_then(|a| a.get("path"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or("Missing required argument: path (source file of the query line)")?
+        .to_string();
+    let line = arguments
+        .and_then(|a| a.get("line"))
+        .and_then(Value::as_i64)
+        .filter(|n| *n > 0)
+        .ok_or("Missing required argument: line (1-based line number)")?;
+    let variable = arguments
+        .and_then(|a| a.get("variable"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or("Missing required argument: variable")?
+        .to_string();
+    let max_hops = arguments
+        .and_then(|a| a.get("max_hops"))
+        .and_then(Value::as_u64)
+        .filter(|n| *n > 0)
+        .unwrap_or(max_hops);
+
+    Ok(OriginQuery {
+        trace_path,
+        source_path,
+        line,
+        variable,
+        max_hops,
+    })
+}
+
+/// Match a user-supplied source path against the paths recorded in the
+/// trace.
+///
+/// Agents naturally write `main.py` or `src/lib.rs`, while the trace
+/// stores the absolute path the recorder saw.  Accept an exact match
+/// first, then a unique path-component suffix match.  An ambiguous
+/// suffix is an error rather than a silent pick: answering about the
+/// wrong file would look like a wrong origin chain, not a wrong file.
+fn resolve_recorded_source_path(requested: &str, source_files: &[String]) -> Result<String, String> {
+    if source_files.iter().any(|f| f == requested) {
+        return Ok(requested.to_string());
+    }
+
+    let needle = std::path::Path::new(requested);
+    let matches: Vec<&String> = source_files
+        .iter()
+        .filter(|recorded| {
+            let recorded_path = std::path::Path::new(recorded.as_str());
+            recorded_path
+                .components()
+                .rev()
+                .zip(needle.components().rev())
+                .all(|(a, b)| a == b)
+                && recorded_path.components().count() >= needle.components().count()
+        })
+        .collect();
+
+    match matches.len() {
+        1 => Ok(matches[0].clone()),
+        0 => Err(format!(
+            "Source file {requested:?} is not part of this trace. Recorded source files: {}",
+            if source_files.is_empty() {
+                "(none reported)".to_string()
+            } else {
+                source_files.join(", ")
+            }
+        )),
+        _ => Err(format!(
+            "Source file {requested:?} is ambiguous within this trace — it matches {}. \
+             Pass a longer path suffix.",
+            matches
+                .iter()
+                .map(|m| m.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// Send a DAP request and return both the response and the last
+/// `ct/complete-move` event seen while waiting for it.
+///
+/// [`dap_request`] discards events; the `continue` handler reports where
+/// the replay actually stopped only through `ct/complete-move`, and the
+/// daemon broadcasts backend events to every connected client.  Capturing
+/// it is what lets `get_value_origin` say "the breakpoint was never hit"
+/// instead of quietly answering about the wrong step.
+async fn dap_request_capturing_move(
+    stream: &mut UnixStream,
+    command: &str,
+    seq: i64,
+    arguments: Value,
+    deadline_secs: u64,
+) -> Result<(Value, Option<Value>), String> {
+    let request = json!({
+        "type": "request",
+        "command": command,
+        "seq": seq,
+        "arguments": arguments,
+    });
+    let bytes = DapParser::to_bytes(&request);
+    stream
+        .write_all(&bytes)
+        .await
+        .map_err(|e| format!("failed to write to daemon: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(deadline_secs);
+    let mut last_move: Option<Value> = None;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("timeout waiting for {command} response"));
+        }
+
+        let msg = tokio::time::timeout(remaining, dap_read_message(stream))
+            .await
+            .map_err(|_| format!("timeout waiting for {command} response"))?
+            .map_err(|e| format!("failed to read daemon response: {e}"))?;
+
+        let msg_type = msg.get("type").and_then(Value::as_str).unwrap_or("");
+        if msg_type == "event" {
+            if msg.get("event").and_then(Value::as_str) == Some("ct/complete-move") {
+                last_move = msg
+                    .get("body")
+                    .and_then(|b| b.get("location"))
+                    .cloned()
+                    .or(last_move);
+            }
+            continue;
+        }
+        if msg_type == "response" {
+            let resp_seq = msg.get("request_seq").and_then(Value::as_i64).unwrap_or(-1);
+            if resp_seq != seq {
+                continue;
+            }
+        }
+        return Ok((msg, last_move));
+    }
+}
+
+/// Extract `message` from a failed DAP response.
+fn dap_failure_message(response: &Value, fallback: &str) -> String {
+    response
+        .get("message")
+        .and_then(Value::as_str)
+        .filter(|m| !m.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+/// Run the shared origin query: open the trace, break at `path:line`,
+/// continue to it, and ask the backend for the origin chain.
+///
+/// Returns the canonical `OriginChain` body (spec §4.1) exactly as the
+/// backend produced it.  Every failure is reported as an error string —
+/// there is deliberately no "empty chain" success path, because an empty
+/// answer is indistinguishable from an unimplemented tool, which is the
+/// bug these tools were shipped with.
+async fn run_origin_query(
+    query: &OriginQuery,
+    config: &McpServerConfig,
+    loaded_traces: &mut HashMap<String, LoadedTrace>,
+) -> Result<Value, String> {
+    let trace_path = resolve_trace_path_or_url(&query.trace_path).await?;
+
+    let mut stream = connect_to_daemon(config)
+        .await
+        .map_err(|e| format!("Cannot connect to daemon: {e}"))?;
+
+    // 1. Open the trace (idempotent). Large traces can take a while, so
+    //    reuse the generous timeout `trace_info` / `ct trace origin` use.
+    let open_resp = dap_request(
+        &mut stream,
+        "ct/open-trace",
+        1,
+        json!({ "tracePath": trace_path }),
+        180,
+    )
+    .await
+    .map_err(|e| format!("Failed to open trace: {e}"))?;
+    if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        return Err(format!(
+            "Failed to open trace: {}",
+            dap_failure_message(&open_resp, "unknown error")
+        ));
+    }
+    let open_body = open_resp.get("body").cloned().unwrap_or(json!({}));
+
+    // The daemon routes by `replay-id` and strips it before forwarding,
+    // so subsequent requests reach *this* trace's backend even when the
+    // daemon holds several sessions.
+    let replay_id = open_body
+        .get("backendId")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+
+    let source_files: Vec<String> = open_body
+        .get("sourceFiles")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Cache metadata so `resources/list` sees this trace, exactly as
+    // `trace_info` does.
+    loaded_traces.insert(
+        trace_path.clone(),
+        LoadedTrace {
+            language: open_body
+                .get("language")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string(),
+            total_events: open_body
+                .get("totalEvents")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            source_files: source_files.clone(),
+            program: open_body
+                .get("program")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            workdir: open_body
+                .get("workdir")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        },
+    );
+
+    let recorded_source = resolve_recorded_source_path(&query.source_path, &source_files)?;
+
+    // 2. Break at the query line.
+    let bp_resp = dap_request(
+        &mut stream,
+        "setBreakpoints",
+        2,
+        json!({
+            "source": { "path": recorded_source },
+            "breakpoints": [{ "line": query.line }],
+            "replay-id": replay_id,
+        }),
+        30,
+    )
+    .await
+    .map_err(|e| format!("Failed to set breakpoint: {e}"))?;
+    if bp_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        return Err(format!(
+            "Failed to set breakpoint at {recorded_source}:{}: {}",
+            query.line,
+            dap_failure_message(&bp_resp, "unknown error")
+        ));
+    }
+
+    // 3. Run to it. The backend answers the `continue` request only after
+    //    the move has completed, and reports the landing location through
+    //    the `ct/complete-move` event that precedes the response.
+    let (continue_resp, landed) = dap_request_capturing_move(
+        &mut stream,
+        "continue",
+        3,
+        json!({ "threadId": 1, "replay-id": replay_id }),
+        120,
+    )
+    .await
+    .map_err(|e| format!("Failed to run to {recorded_source}:{}: {e}", query.line))?;
+    if continue_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        return Err(format!(
+            "Failed to run to {recorded_source}:{}: {}",
+            query.line,
+            dap_failure_message(&continue_resp, "unknown error")
+        ));
+    }
+
+    // Refuse to answer about the wrong step: if the replay did not stop
+    // on the requested line, the chain would describe a different program
+    // point than the caller asked about.
+    if let Some(location) = &landed {
+        let landed_line = location.get("line").and_then(Value::as_i64).unwrap_or(-1);
+        if landed_line != query.line {
+            let landed_path = location
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            return Err(format!(
+                "The breakpoint at {recorded_source}:{} was never hit — execution stopped at \
+                 {landed_path}:{landed_line} instead. Check that the line is executable and \
+                 that it is reached by this recording.",
+                query.line
+            ));
+        }
+    }
+
+    // 4. Ask for the chain at the step we stopped on. `stepId: -1` means
+    //    "the backend's current step", which is that breakpoint.
+    let origin_resp = dap_request(
+        &mut stream,
+        "ct/originChain",
+        4,
+        json!({
+            "variableName": query.variable,
+            "variablePath": [],
+            "frameId": -1,
+            "stepId": -1,
+            "threadId": 0,
+            "maxHops": query.max_hops,
+            "lazy": false,
+            "sessionId": "",
+            "classifySource": true,
+            "replay-id": replay_id,
+        }),
+        60,
+    )
+    .await
+    .map_err(|e| format!("ct/originChain request failed: {e}"))?;
+
+    if origin_resp.get("success").and_then(Value::as_bool) != Some(true) {
+        let detail = origin_resp
+            .get("body")
+            .and_then(|b| b.get("detail"))
+            .map(|d| format!(" ({d})"))
+            .unwrap_or_default();
+        return Err(format!(
+            "Cannot resolve the origin of {:?} at {recorded_source}:{}: {}{detail}",
+            query.variable,
+            query.line,
+            dap_failure_message(&origin_resp, "ct/originChain failed")
+        ));
+    }
+
+    Ok(origin_resp.get("body").cloned().unwrap_or(json!({})))
+}
+
+/// Handles the `get_value_origin` tool.
+///
+/// Returns the canonical `OriginChain` (spec §4.1) for `variable` as of
+/// `path:line`, rendered as the spec §3.2 text layout with the raw JSON
+/// appended so an agent can either read it or parse it.
+async fn handle_get_value_origin(
+    id: &Value,
+    arguments: Option<&Value>,
+    config: &McpServerConfig,
+    loaded_traces: &mut HashMap<String, LoadedTrace>,
+) -> Value {
+    let start = Instant::now();
+
+    let query = match parse_origin_arguments(arguments, DEFAULT_ORIGIN_MAX_HOPS) {
+        Ok(q) => q,
+        Err(e) => return jsonrpc_result(id, tool_result_error(&e)),
+    };
+
+    match run_origin_query(&query, config, loaded_traces).await {
+        Ok(chain) => {
+            let mut text = crate::origin_renderer::render_text(&chain);
+            text.push_str("\n\nCanonical OriginChain JSON:\n");
+            text.push_str(
+                &serde_json::to_string_pretty(&chain).unwrap_or_else(|_| chain.to_string()),
+            );
+            let duration_ms = start.elapsed().as_millis();
+            jsonrpc_result(id, tool_result_text_with_timing(&text, duration_ms))
+        }
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms))
+        }
+    }
+}
+
+/// Handles the `resolve_variable_step` tool.
+///
+/// Answers the first hop of the same chain `get_value_origin` walks: the
+/// step that assigned the value `variable` holds at `path:line`.
+async fn handle_resolve_variable_step(
+    id: &Value,
+    arguments: Option<&Value>,
+    config: &McpServerConfig,
+    loaded_traces: &mut HashMap<String, LoadedTrace>,
+) -> Value {
+    let start = Instant::now();
+
+    // One hop is all this tool reports, so ask for one.
+    let query = match parse_origin_arguments(arguments, 1) {
+        Ok(mut q) => {
+            q.max_hops = 1;
+            q
+        }
+        Err(e) => return jsonrpc_result(id, tool_result_error(&e)),
+    };
+
+    let chain = match run_origin_query(&query, config, loaded_traces).await {
+        Ok(c) => c,
+        Err(e) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms));
+        }
+    };
+
+    let duration_ms = start.elapsed().as_millis();
+    match variable_step_from_chain(&chain, &query.variable) {
+        Some(step) => {
+            let text = serde_json::to_string_pretty(&step).unwrap_or_else(|_| step.to_string());
+            jsonrpc_result(id, tool_result_text_with_timing(&text, duration_ms))
+        }
+        // No hop means the backend found no assignment for this variable.
+        // Say so; an empty success would read as "the tool does nothing".
+        None => jsonrpc_result(
+            id,
+            tool_result_error_with_timing(
+                &format!(
+                    "No assignment to {:?} is recorded on the path reaching {}:{}. The variable \
+                     may be a parameter bound at the recording boundary, or never written in \
+                     this recording.",
+                    query.variable, query.source_path, query.line
+                ),
+                duration_ms,
+            ),
+        ),
+    }
+}
+
+/// Project an `OriginChain` body down to the `resolve_variable_step`
+/// answer shape: the first hop's step id and location.
+fn variable_step_from_chain(chain: &Value, variable: &str) -> Option<Value> {
+    let hop = chain
+        .get("hops")
+        .and_then(Value::as_array)
+        .and_then(|hops| hops.first())?;
+    let step_id = hop.get("stepId").and_then(Value::as_i64)?;
+    Some(json!({
+        "stepId": step_id,
+        "variable": variable,
+        "location": hop.get("location").cloned().unwrap_or(Value::Null),
+        "kind": hop.get("kind").cloned().unwrap_or(Value::Null),
+        "source": hop.get("source").cloned().unwrap_or(Value::Null),
+    }))
 }
 
 // ---------------------------------------------------------------------------
