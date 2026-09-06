@@ -35,41 +35,50 @@
 ##   * `remaining_shield`, queried at tick 283 (`shield.nr:6`), answered ONE
 ##     hop of kind `okComputational`, confidence 0.9, terminator
 ##     `tkwComputational`,
-##     at `shield.nr:14`, **tick 220** — a previous iteration of the loop. The
+##     at `shield.nr:12`, **tick 219** — a previous iteration of the loop. The
 ##     hop's `sourceExpr` is `regeneration` and its `sourceText` is
-##     `remaining_shield += regeneration;`.
+##     `remaining_shield += regeneration;`, which IS line 12.
 ##   * `mass` answered a FOUR-hop chain; `did_survive_positive`, queried at the
-##     end of `main`, answered a hop at tick 671 — 643 ticks back.
+##     end of `main` (tick 1313), answered an `okFunctionCall` hop at
+##     `main.nr:15`, **tick 670** — 643 ticks back — whose `sourceText` is
+##     line 15 itself, `let did_survive_positive = shield::iterate_asteroids(…)`.
+##     Its `stepId` is 671: see the defect note below for why the two differ.
 ##   * Seeking to the hop's `location.rrTicks` lands the engine at exactly
 ##     `location.path` and `location.line`, and `stackTrace` at the destination
 ##     reports the same line. Three surfaces agree.
 ##
-## ONE MEASURED DISAGREEMENT, recorded rather than smoothed over, AND ITS CAUSE
-## IS IN `db.rs`: a hop's `sourceText` is the statement the CLASSIFIER matched,
-## and `location.line` is the line the recorded STEP is on. For
-## `remaining_shield` above they are twelve and fourteen —
-## `remaining_shield += regeneration;` is line 12 of `shield.nr` and the step at
-## tick 220 is on line 14.
+## THIS MODULE NAVIGATES BY `location`, and the reason is that `sourceText`
+## names no tick: `location.rrTicks`, `location.path`, `location.line` and
+## `stackTrace` at the destination are mutually consistent and are the only
+## coordinate a seek can use.
 ##
-## `src/db-backend/src/db.rs`, in `origin_chain_inferred_with_metadata`'s step
-## "(2) Resolve the source line", resolves the producing line in TWO PASSES:
-## the line of `last_change_step`, and — when that line does not parse as an
-## assignment naming the target — the immediately preceding step in the same
-## frame, which is the case of a recorder that snapshots variables at line entry
-## rather than after the line executes. Noir's is one, so the second pass fires
-## here. It assigns only `line_text`; the step it found is bound as `_prev_step`
-## and DISCARDED, so `location` keeps naming the later step.
+## ## AN ENGINE DEFECT THIS MODULE'S SUITE FOUND, AND ITS FIX (2026-09-06)
 ##
-## THIS MODULE NAVIGATES BY `location` ANYWAY, and the reason is that
-## `sourceText` names no tick: `location.rrTicks`, `location.path`,
-## `location.line` and `stackTrace` at the destination are mutually consistent
-## and are the only coordinate a seek can use. The price is that for such a
-## recorder `o` lands ONE RECORDED STEP AFTER the write — `shield.nr:14` where
-## §4.2's "the exact step where the variable was written" is `shield.nr:12`.
-## That is an ENGINE DEFECT, not a tie between two equally good answers, and it
-## is filed rather than absorbed. `tests/test_value_origin_jump.nim` asserts
-## both fields, including that they differ, so the day `db.rs` keeps
-## `_prev_step` the suite says so instead of quietly moving the destination.
+## The numbers above read `shield.nr:14`, tick 220 when CTUI-10 first measured
+## them, and `sourceText` read line 12's statement — one hop, two accounts of
+## itself, disagreeing. The cause was in `src/db-backend/src/db.rs`, in
+## `origin_chain_inferred`'s step "(2) Resolve the source line": it resolves the
+## producing line in TWO PASSES — the line of `last_change_step`, and, when that
+## line does not parse as an assignment naming the target, the immediately
+## preceding step in the same frame, which is the case of a recorder that
+## snapshots variables at LINE ENTRY rather than after the line executes. Noir's
+## is one, so the second pass fires here. It assigned only `line_text`; the step
+## it found was bound as `_prev_step` and DISCARDED, so `location` kept naming
+## the SNAPSHOT step and `o` landed ONE RECORDED STEP AFTER the write —
+## `shield.nr:14` where §4.2's "the exact step where the variable was written"
+## is `shield.nr:12`.
+##
+## That was an ENGINE DEFECT, not a tie between two equally good answers, and it
+## was filed rather than absorbed: `tests/test_value_origin_jump.nim` asserted
+## the two fields DIFFERED, as a tripwire. `db.rs` now keeps that step and
+## builds the hop's `location` from it — which is what Value-Origin-Tracking.md
+## §6.1.0 specified all along ("The hop's `location` correctly points at the
+## source line that produced the value because the source line is read from the
+## *previous* `Step` event"). The suite's assertion is INVERTED, not deleted, so
+## it now guards the fix. The hop's `step_id` deliberately still names
+## `last_change_step`: it is the engine-facing cursor, and
+## `cross_process_origin.rs` correlates marker firings against it with a ±1-step
+## tolerance sized for exactly this snapshot variance.
 ##
 ## ## THE QUERY IS ASYNCHRONOUS AND ITS PENDING STATE IS VISIBLE
 ##

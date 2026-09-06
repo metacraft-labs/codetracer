@@ -34,25 +34,35 @@
 ##      `location.line`, and `stackTrace` at the destination agrees. Three
 ##      independent surfaces on one coordinate.
 ##
-## ## ONE MEASURED DISAGREEMENT INSIDE THE ENGINE'S ANSWER
+## ## THE ENGINE'S TWO ACCOUNTS OF ONE HOP AGREE — AND THAT IS ASSERTED
 ##
 ## An `OriginHop` carries BOTH `sourceText` (the statement the classifier
-## matched) and `location.line` (the line of the recorded step it stopped on),
-## and on this recording they are two different lines: `sourceText` is
-## `remaining_shield += regeneration;` (line 12 of `shield.nr`) while
-## `location.line` is 14 (`status_report(…)`).
+## matched) and `location.line` (the line of the recorded step it names), and
+## this suite asserts they are THE SAME STATEMENT, with `location.line` read
+## back off disk rather than taken from the engine a second time.
 ##
-## The cause is in `db.rs` and it is an ENGINE DEFECT rather than a tie: the
-## origin walk's second pass finds the producing line by stepping back one
-## recorded step (for recorders that snapshot variables at line entry, which
-## Noir's is), assigns only `line_text`, and discards the step it found as
-## `_prev_step`. So `location` keeps naming the LATER step and `o` lands one
-## recorded step after the write. See `app/origin_binding.nim`'s header.
+## Until 2026-09-06 they were not, and this assertion was its inequality — a
+## deliberate tripwire on an ENGINE DEFECT. `db.rs`'s origin walk resolves the
+## producing line in two passes; the second exists for recorders that snapshot
+## variables at LINE ENTRY (Noir's is one) and finds the step that actually
+## performed the write. It assigned only `line_text` and threw that step away
+## as `_prev_step`, so `location` kept naming the SNAPSHOT step: `sourceText`
+## read `remaining_shield += regeneration;` (line 12 of `shield.nr`) while
+## `location.line` was 14 (`status_report(…)`), and `o` — which navigates by
+## `location`, the only field of a hop that names a tick — landed one recorded
+## step after the write.
 ##
-## Asserted here as an inequality, with both read back off disk, so the day
-## `db.rs` keeps `_prev_step` this suite says so instead of quietly navigating
-## somewhere new. This front-end navigates by `location` because it is the only
-## one of the two that names a tick.
+## `db.rs` now keeps that step and builds `location` from it (see
+## `origin_chain_inferred`'s step "(2) Resolve the source line", and
+## `src/db-backend/tests/origin_dap_test.rs`'s
+## `test_origin_hop_location_names_the_writing_step_not_its_successor`).
+## Measured here on 2026-09-06 after the fix: the origin of `remaining_shield`
+## is `shield.nr:12` at tick 219, where before it was `shield.nr:14` at tick
+## 220 — §4.2's "the exact step where the variable was written", exactly.
+##
+## The assertion is INVERTED rather than deleted, so it still guards: an engine
+## that goes back to naming the successor step reddens here instead of quietly
+## moving every front-end's origin jump.
 ##
 ## ## THE PENDING STATE IS ASSERTED, WHICH IS CTUI-10's NAMED RISK MITIGATION
 ##
@@ -547,17 +557,23 @@ suite "CTUI-10: `o` lands on the origin OriginChainVM reports":
       ck originStep.kind != okUnknown
       ck originStep.confidence > 0.0
 
-      # THE ENGINE'S TWO ACCOUNTS OF ONE HOP DISAGREE, and both are its own.
+      # THE ENGINE'S TWO ACCOUNTS OF ONE HOP AGREE, and both are its own.
       # `sourceText` is the statement the classifier matched; `location.line`
-      # is the line of the recorded step. Measured 2026-09-06 — asserted as an
-      # inequality with both read off disk, so a reconciliation reddens here.
+      # is the line of the recorded step the hop names, and the file is read
+      # off DISK rather than asked of the engine again — so this is the two
+      # accounts checked against a third party, not against each other.
+      #
+      # This assertion was an INEQUALITY until 2026-09-06, as a tripwire on the
+      # `db.rs` defect that made `location` name the step AFTER the write (see
+      # this file's header). It is inverted rather than deleted: an engine that
+      # regresses to the successor step reddens here.
       let lineAtLocation = recordedProgramLine(originStep.path, originStep.line)
       echo "CTUI-10 HOP SOURCE TEXT: classifier '",
            originStep.sourceText.strip(), "' vs the file at line ",
            originStep.line, ": '", lineAtLocation.strip(), "'"
       ck originStep.sourceText.len > 0
       ck lineAtLocation.len > 0
-      ck originStep.sourceText.strip() != lineAtLocation.strip()
+      ck originStep.sourceText.strip() == lineAtLocation.strip()
 
       # ---- PRESS `o` AGAIN: the same dispatch completes the jump -----------
       discard h.session.drainEvents()

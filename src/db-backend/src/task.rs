@@ -2124,8 +2124,24 @@ pub struct OriginHop {
     pub target_expr: String,
     pub source_expr: String,
     pub source_variable: Option<String>,
+    /// WHERE THE WRITE HAPPENED — the coordinate every front-end
+    /// navigates to (the desktop's `onSeekToHop` seeks
+    /// `location.rrTicks`; the TUI's `o` does the same). It names the
+    /// step whose source line produced the value, so `location.line`
+    /// and [`Self::source_text`] always describe ONE statement.
     pub location: Location,
     pub source_text: String,
+    /// The step at which the new value first became OBSERVABLE — spec
+    /// §6.1.0's `last_change_step`. This is the engine-facing cursor
+    /// (`cross_process_origin::find_receive_marker_for_tail` correlates
+    /// marker firings against it), not a navigation target.
+    ///
+    /// For a recorder that snapshots variables at line entry (Python's
+    /// `sys.monitoring` `on_line`, Noir's recorder) this is the step
+    /// AFTER the one `location` names, so
+    /// `location.rr_ticks.0 != step_id` is normal and expected on those
+    /// traces — they were identical before 2026-09-06 only because
+    /// `location` was wrong.
     pub step_id: i64,
     #[serde(default)]
     pub frame_transition: Option<FrameTransition>,

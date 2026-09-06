@@ -764,6 +764,163 @@ fn test_origin_chain_unparseable_line_returns_unknown() {
 }
 
 #[test]
+fn test_origin_hop_location_names_the_writing_step_not_its_successor() {
+    // REGRESSION — the hop's `location` and its `source_text` must name
+    // ONE statement.
+    //
+    // Spec §6.1.0: `last_change_step` is "the step at which the new value
+    // first becomes observable", and for a recorder that snapshots
+    // variables at LINE ENTRY (Python's `sys.monitoring` `on_line`
+    // callback, and Noir's recorder) that is the step AFTER the one whose
+    // line performed the write. §6.1.0 then states the contract this test
+    // guards: "The hop's `location` correctly points at the source line
+    // that produced the value because the source line is read from the
+    // *previous* `Step` event".
+    //
+    // Until 2026-09-06 it did not. `origin_chain_inferred`'s step "(2)
+    // Resolve the source line" ran the second pass, found the writing
+    // step, bound it as `_prev_step`, assigned only `line_text` and threw
+    // the step away — so `source_text` named the write and `location`
+    // named its successor. Measured on the `noir_space_ship` fixture
+    // through a real `replay-server`: `remaining_shield`'s origin reported
+    // `remaining_shield += regeneration;` (`shield.nr:12`) at
+    // `location.line == 14` (`status_report(…)`). Every front-end
+    // navigates by `location` — it is the only field of a hop that names
+    // a tick — so `o` / the GUI's origin jump landed one recorded step
+    // after the write.
+    //
+    // The fixture below is the same shape in miniature, with the
+    // line-entry timing made explicit in the snapshots: at the step for
+    // line N the variables hold their values as of N's ENTRY.
+    let recipe = Recipe {
+        source_path: "fixture.py",
+        source: "a = 10\nb = a\nprint(b)\npass\n",
+        function_name: "main",
+        steps: vec![
+            // step 0 — entering line 1: nothing has been written yet.
+            (1, vec![]),
+            // step 1 — entering line 2: line 1's write to `a` is now
+            // observable. `a`'s writing step is step 0.
+            (2, vec![("a", int_value(10))]),
+            // step 2 — entering line 3: line 2's write to `b` is now
+            // observable. `b`'s writing step is step 1.
+            (3, vec![("a", int_value(10)), ("b", int_value(10))]),
+            // step 3 — entering line 4, the query step.
+            (4, vec![("a", int_value(10)), ("b", int_value(10))]),
+        ],
+        extra_calls: Vec::new(),
+    };
+    let (db, tmpdir) = build_trace(recipe);
+    let chain = run_chain(db, "b", 3, tmpdir.path());
+
+    assert_eq!(
+        chain.hops.len(),
+        2,
+        "expected `b <- a` then `a <- 10`, got {:?}",
+        chain.hops
+    );
+
+    // ---- HOP 1: `b = a`, written on line 2 at step 1 ------------------
+    let hop = &chain.hops[0];
+    assert_eq!(hop.kind, OriginKind::TrivialCopy);
+    assert_eq!(hop.target_expr, "b");
+    assert_eq!(
+        hop.source_text.trim(),
+        "b = a",
+        "the classifier matched the producing statement"
+    );
+    // THE ASSERTION THIS TEST EXISTS FOR. Before the fix this was 3
+    // (`print(b)`) — the snapshot step's line, one recorded step after the
+    // write.
+    assert_eq!(
+        hop.location.line, 2,
+        "hop.location must name the line that WROTE `b` (2, `b = a`), \
+         not the step at which the write became observable (3, `print(b)`); \
+         source_text says {:?}",
+        hop.source_text
+    );
+    // `location.rr_ticks` is the step index on a materialized trace
+    // (`TraceReader::load_location`), and it is what every front-end seeks
+    // to. It must name the writing step, not its successor.
+    assert_eq!(
+        hop.location.rr_ticks.0, 1,
+        "hop.location.rr_ticks must be the writing step (1), not the \
+         snapshot step (2) — this is the coordinate `o` navigates to"
+    );
+    // …and `step_id` deliberately stays on `last_change_step`: it is the
+    // engine-facing cursor spec §6.1.0 defines, and
+    // `cross_process_origin::find_receive_marker_for_tail` correlates
+    // marker firings against it with a ±1-step tolerance sized for exactly
+    // this variance. Pinned so the split between the two fields is a
+    // decision the suite states rather than an accident.
+    assert_eq!(
+        hop.step_id, 2,
+        "hop.step_id must remain the step at which the value first became \
+         observable"
+    );
+
+    // ---- HOP 2: `a = 10`, written on line 1 at step 0 -----------------
+    // The same fallback, one hop deeper, so this is not a single-sample
+    // assertion.
+    let hop = &chain.hops[1];
+    assert_eq!(hop.target_expr, "a");
+    assert_eq!(hop.source_text.trim(), "a = 10");
+    assert_eq!(hop.location.line, 1, "hop.location must name the line that WROTE `a`");
+    assert_eq!(hop.location.rr_ticks.0, 0);
+    assert_eq!(hop.step_id, 1);
+
+    assert_eq!(chain.terminator.kind, TerminatorKind::Literal);
+}
+
+#[test]
+fn test_origin_hop_location_unchanged_for_post_write_snapshot_recorders() {
+    // THE CONTROL for the test above, and the reason the fix is scoped to
+    // the second pass rather than applied unconditionally.
+    //
+    // A recorder that snapshots variables AFTER the named line executes
+    // (`last_change_step.line` already IS the producing statement) never
+    // reaches the fallback: pass 1 parses as an assignment naming the
+    // target, so `location` stays on `last_change_step` and nothing about
+    // this shape moves. Asserted, not assumed — the fix would otherwise be
+    // free to shift every hop on every recorder by one step.
+    let recipe = Recipe {
+        source_path: "fixture.py",
+        source: "a = 10\nb = a\nprint(b)\n",
+        function_name: "main",
+        steps: vec![
+            // step 0 — line 1 has executed: `a` is already observable.
+            (1, vec![("a", int_value(10))]),
+            // step 1 — line 2 has executed: `b` is already observable.
+            (2, vec![("a", int_value(10)), ("b", int_value(10))]),
+            (3, vec![("a", int_value(10)), ("b", int_value(10))]),
+        ],
+        extra_calls: Vec::new(),
+    };
+    let (db, tmpdir) = build_trace(recipe);
+    let chain = run_chain(db, "b", 2, tmpdir.path());
+
+    assert_eq!(
+        chain.hops.len(),
+        2,
+        "expected `b <- a` then `a <- 10`, got {:?}",
+        chain.hops
+    );
+    let hop = &chain.hops[0];
+    assert_eq!(hop.source_text.trim(), "b = a");
+    // location, rr_ticks and step_id all name the SAME step here, because
+    // for this recorder shape the snapshot step and the writing step are
+    // one and the same.
+    assert_eq!(hop.location.line, 2);
+    assert_eq!(hop.location.rr_ticks.0, 1);
+    assert_eq!(hop.step_id, 1);
+    let hop = &chain.hops[1];
+    assert_eq!(hop.source_text.trim(), "a = 10");
+    assert_eq!(hop.location.line, 1);
+    assert_eq!(hop.location.rr_ticks.0, 0);
+    assert_eq!(hop.step_id, 0);
+}
+
+#[test]
 fn test_origin_summary_eager_and_placeholder_default() {
     // Construct an origin chain manually and call into the helper
     // pathway exposed by `origin_chain_to_summary` to confirm:

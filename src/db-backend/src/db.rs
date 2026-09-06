@@ -3351,12 +3351,43 @@ impl MaterializedReplaySession {
             // accept the fallback when the new line parses to an
             // assignment whose LHS matches the target — this protects
             // against spurious matches from unrelated nearby lines.
+            //
+            // `origin_step` is THE STEP THAT WROTE THE VALUE and is what
+            // the hop's `location` names. It starts as `last_change_step`
+            // and becomes the step the fallback found when the fallback
+            // fires, because that step is the one whose source line
+            // produced the value.
+            //
+            // Keeping the two apart is deliberate, and the split is the
+            // fix for a defect that shipped until 2026-09-06: the second
+            // pass used to bind the step it found as `_prev_step` and
+            // discard it, assigning only `line_text`. The hop then
+            // carried the *producing statement* as `source_text` while
+            // `location` still named the *snapshot* step — a hop whose
+            // two accounts of itself disagreed. Measured on
+            // `noir_space_ship`: `remaining_shield`'s origin reported
+            // `remaining_shield += regeneration;` (`shield.nr:12`) at
+            // `location.line == 14` (`status_report(…)`), so every
+            // front-end that navigates by `location` — the desktop GUI,
+            // the Embed SDK and the TUI's `o` — landed one recorded step
+            // after the write. Spec §6.1.0 states the intended contract
+            // directly: "The hop's `location` correctly points at the
+            // source line that produced the value because the source line
+            // is read from the *previous* `Step` event".
+            //
+            // `step_id` deliberately stays on `last_change_step`: it is
+            // the engine-facing cursor (spec §6.1.0's "step at which the
+            // new value first becomes observable") and
+            // `cross_process_origin::find_receive_marker_for_tail`
+            // correlates marker firings against it with a ±1-step
+            // tolerance sized for exactly this snapshot variance.
             let line_matches_target = classifier_lang
                 .and_then(|lang| parse_assignment(&line_text, lang))
                 .map(|ast| ast.targets_variable(&current_var_name))
                 .unwrap_or(false);
+            let mut origin_step = last_change_step;
             if !line_matches_target
-                && let Some((_prev_step, prev_line_text, prev_origin)) = self.resolve_previous_frame_source_line(
+                && let Some((prev_step, prev_line_text, prev_origin)) = self.resolve_previous_frame_source_line(
                     last_change_step,
                     current_frame,
                     &probe_path,
@@ -3370,6 +3401,22 @@ impl MaterializedReplaySession {
             {
                 line_text = prev_line_text;
                 source_origin = prev_origin;
+                // `prev_line_text` was read out of `probe_path` — the
+                // file `last_change_step` is in — so adopting the step
+                // for `location` is only sound when that step really is
+                // in the same file. It is, for every recorder we know of
+                // (the helper only accepts steps inside `current_frame`,
+                // i.e. inside one call to one function), but a trace
+                // where it is not would otherwise get a `location` and a
+                // `source_text` naming two different files, which is the
+                // very disagreement this block exists to end.
+                if self
+                    .reader
+                    .step(prev_step)
+                    .is_some_and(|prev| prev.path_id == step_record.path_id)
+                {
+                    origin_step = prev_step;
+                }
             }
 
             // Spec §5.3.1: capture digest for the chain's continuation
@@ -3383,7 +3430,9 @@ impl MaterializedReplaySession {
                 self.lookup_materialized_origin_metadata(origin_metadata, &current_var_name, last_change_step)
                 && let Some(wire_kind) = metadata_wire_kind(record)
             {
-                let location = self.reader.load_location(last_change_step, current_frame, expr_loader);
+                // `origin_step`, not `last_change_step` — see the
+                // two-pass block above.
+                let location = self.reader.load_location(origin_step, current_frame, expr_loader);
                 let source_expr = origin_metadata
                     .and_then(|decoder| decoder.source_expr_text(record.source_expr_idx))
                     .unwrap_or("")
@@ -3472,7 +3521,7 @@ impl MaterializedReplaySession {
                     target_expr: current_var_name.clone(),
                     source_expr: String::new(),
                     source_variable: None,
-                    location: self.reader.load_location(last_change_step, current_frame, expr_loader),
+                    location: self.reader.load_location(origin_step, current_frame, expr_loader),
                     source_text: line_text.clone(),
                     step_id: last_change_step.0,
                     frame_transition: None,
@@ -3504,7 +3553,10 @@ impl MaterializedReplaySession {
             // call such as Noir's `println(c);` is not an assignment, but it
             // still observes/forwards the queried value. Treat that as a
             // no-op hop and continue walking the variable's earlier writes.
-            let location = self.reader.load_location(last_change_step, current_frame, expr_loader);
+            //
+            // `origin_step`, not `last_change_step` — see the two-pass
+            // block above.
+            let location = self.reader.load_location(origin_step, current_frame, expr_loader);
             let (classification, ast_source) = match classification {
                 Some(pair) => pair,
                 None => {
@@ -4099,6 +4151,12 @@ impl MaterializedReplaySession {
     /// the previous step rather than at `last_change_step.line`. The
     /// helper exists separately so the fallback stays out of the main
     /// loop's body.
+    ///
+    /// The returned `StepId` is THE STEP THAT WROTE THE VALUE, and the
+    /// caller uses it — not `last_change_step` — to build the hop's
+    /// `location`. Discarding it (which the caller did until
+    /// 2026-09-06) is what made a hop's `source_text` and its
+    /// `location.line` name two different statements.
     fn resolve_previous_frame_source_line(
         &self,
         last_change_step: StepId,

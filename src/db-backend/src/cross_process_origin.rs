@@ -544,6 +544,18 @@ fn find_receive_marker_for_tail(
             // hop's step within ±1 step is considered the same line
             // event (per spec §6.1.0 monotonicity — the recorder's
             // line-snapshot timing variance is within ±1 step).
+            //
+            // NB the two fields read here come from DIFFERENT steps
+            // since 2026-09-06, and deliberately so: `location` names
+            // the step that WROTE the value (what a front-end navigates
+            // to), while `step_id` stays on `last_change_step` — the
+            // step at which the write became observable, which is the
+            // step a marker firing is recorded against and therefore the
+            // one this window must be measured from. `location.path` is
+            // safe to mix in because `db.rs`'s two-pass resolution only
+            // adopts a previous step that is in the SAME FILE. See
+            // `MaterializedReplaySession::origin_chain_inferred_with_cross_process`,
+            // step "(2) Resolve the source line".
             if (ev.step_id - tail_hop.step_id).abs() > 1 {
                 continue;
             }

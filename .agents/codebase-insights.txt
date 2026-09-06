@@ -3289,27 +3289,42 @@ commands.
     (`dap_server.rs` -> `Handler::origin_chain`), and the chain comes back on
     the `ct/updated-origin-chain` EVENT that `respond_origin_chain` emits
     beside the response — exactly one event per query. `remaining_shield` at
-    tick 283 (`shield.nr:6`) answers one `okComputational` hop at tick 220,
+    tick 283 (`shield.nr:6`) answers one `okComputational` hop at tick 219,
     confidence 0.9; `mass` answers four. Three of six locals at that stop have
     a classified hop. `onShowOrigin` DISCARDS `send`'s future by design, so the
     event is the only place the answer is readable from a host — that is the
     documented event-driven path, not a workaround.
-  * **An origin hop's `sourceText` and its `location.line` disagree, and
-    `db.rs` says why: the fallback that finds the producing line THROWS THE
-    STEP AWAY.** In `db.rs`'s `origin_chain_inferred_with_metadata`, step "(2)
-    Resolve the source line", pass one takes the line of `last_change_step`;
-    when that line does not parse as an assignment naming the target, pass two
-    retries the immediately preceding step in the same frame — the case of a
-    recorder that snapshots variables at line entry, which Noir's is. Pass two
-    assigns only `line_text`; the step it found is bound as `_prev_step` and
-    DISCARDED, so `location` still names the later step. For `remaining_shield`
-    above: `sourceText` is `remaining_shield += regeneration;` (line 12 of
-    `shield.nr`), `location.line` is 14 (`status_report(…)`).
-    Navigate by `location` — it is the only one of the two that names a tick,
-    and `location.rrTicks` / `location.path` / `location.line` / `stackTrace`
-    are mutually consistent — but KNOW THAT IT LANDS ONE RECORDED STEP AFTER
-    THE WRITE for such recorders. Fixing it means keeping `_prev_step` and
-    reporting its location.
+  * **An origin hop's `location` names the step that WROTE the value; its
+    `step_id` names the step at which the write became OBSERVABLE. They are
+    different steps on a line-entry recorder, and that is deliberate.**
+    In `db.rs`'s `origin_chain_inferred`, step "(2) Resolve the source line",
+    pass one takes the line of `last_change_step`; when that line does not
+    parse as an assignment naming the target, pass two retries the immediately
+    preceding step in the same frame — the case of a recorder that snapshots
+    variables at line entry, which Noir's and Python's are. Pass two now keeps
+    that step (`origin_step`) and the hop's `location` is built from it, so
+    `location.line` and `source_text` always describe ONE statement.
+    NAVIGATE BY `location` — `location.rrTicks` is the coordinate every
+    front-end seeks to (`OriginChainVM.onSeekToHop`, the TUI's `o`), and
+    `location.rrTicks` / `path` / `line` / `stackTrace` are mutually
+    consistent. Do NOT navigate by `step_id`: it is the engine's cursor and
+    `cross_process_origin::find_receive_marker_for_tail` correlates recorded
+    marker firings against it with a ±1-step window. On a materialized trace
+    `Location::rr_ticks` IS the step index (`trace_reader.rs::load_location`),
+    so `location.rrTicks != step_id` on such a recorder — that inequality is
+    the fix, not a bug.
+    THIS WAS A LIVE DEFECT UNTIL 2026-09-06: pass two assigned only
+    `line_text` and bound the step it found as `_prev_step`, which it then
+    DISCARDED, so `location` kept naming the later step and `o` / the desktop's
+    origin jump landed ONE RECORDED STEP AFTER the write. Measured then:
+    `remaining_shield`'s `sourceText` was `remaining_shield += regeneration;`
+    (line 12 of `shield.nr`) at `location.line` 14 (`status_report(…)`), tick
+    220. Measured after the fix: `shield.nr:12`, tick 219 — the write.
+    Guarded by `origin_dap_test.rs::test_origin_hop_location_names_the_writing_
+    step_not_its_successor` (with `…_unchanged_for_post_write_snapshot_
+    recorders` as its control) and, end to end on a real trace, by
+    `tui/tests/test_value_origin_jump.nim`, whose inequality tripwire is now
+    the corresponding EQUALITY.
   * **`keyName(" ")` is `"Space"`, and that made a space untypeable at a text
     prompt until CTUI-10.** The shadowing rule in `tui/app/input/keymap.resolve`
     used to ask `isPrintableKey`, which is false for a five-letter name, so a
