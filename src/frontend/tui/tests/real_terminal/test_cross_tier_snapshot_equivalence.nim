@@ -49,6 +49,7 @@ import ../../testing/dual_snap
 
 import ../apps/app_borders as borderApp
 import ../apps/app_color_depth as colorApp
+import ../apps/app_command_palette as paletteApp
 import ../apps/app_overlay as overlayApp
 import ../apps/app_scroll_viewport as scrollApp
 import ../apps/app_wide_glyphs as wideApp
@@ -56,7 +57,7 @@ import ../apps/app_wide_glyphs as wideApp
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 75
+const ExpectedAssertions = 79
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40)]
@@ -168,6 +169,11 @@ suite "CTUI-2: cross-tier snapshot equivalence":
 
   test "overlays: layer ordering and opaque fills":
     bothGeometries("app_overlay", overlayApp.buildTree, 1279, 1279)
+
+  test "the command palette: reverse-video selection and accented match runs":
+    # CTUI-10's one new pane. `docs/tui-testing.md`: "A new pane needs exactly
+    # one cross-tier equivalence test. Not zero, and not one per assertion."
+    bothGeometries("app_command_palette", paletteApp.buildTree, 557, 637)
 
   test "the dim exclusion is exercised, not hypothetical":
     # The `dim-has-no-tier-2-representation` exclusion stops the comparison

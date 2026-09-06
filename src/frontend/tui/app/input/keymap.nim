@@ -54,11 +54,19 @@
 ##
 ## THE SECOND HALF OF THAT RESOLUTION IS A RULE ABOUT TEXT: in a mode that is
 ## accepting text (COMMAND always, SEARCH while its prompt is open — see
-## `modal_state.isTextEntry`), a bound PRINTABLE key is shadowed by the text
-## field, and a bound NON-PRINTABLE one is not. So `n` typed into an open `/`
-## prompt is the letter n, `n` pressed while browsing the committed matches is
-## "next match", and `Esc` is `Esc` in both. One rule, stated once, applied by
-## `resolve` alone.
+## `modal_state.isTextEntry`), a bound key that stands for a CHARACTER is
+## shadowed by the text field, and one that does not is not. So `n` typed into
+## an open `/` prompt is the letter n, `n` pressed while browsing the committed
+## matches is "next match", and `Esc` is `Esc` in both. One rule, stated once,
+## applied by `resolve` alone.
+##
+## "STANDS FOR A CHARACTER" IS `keyCharacter`, NOT `isPrintableKey`, and the
+## difference is one key. `keyName(" ")` is `"Space"` — a five-letter NAME,
+## because §4.2 binds `Space` to "Toggle Breakpoint" — so under the
+## `isPrintableKey` spelling this rule had until CTUI-10, a space typed at a `:`
+## prompt resolved to `krNone` and was silently lost, and `:goto 4500` could not
+## be typed at all. `KeyResolution.character` carries what to insert, so no
+## prompt has to know that `Space` is special.
 ##
 ## ## THREE ACTIONS COME FROM §4.1 RATHER THAN §4.2, AND THEY ARE MARKED
 ##
@@ -218,7 +226,8 @@ type
       ## arrived did not start a binding either. Distinct from
       ## `krPendingAbandoned` so a status bar can say WHY the prefix went away.
     krText = "text"
-      ## The mode is a text field and this printable key is a character in it.
+      ## The mode is a text field and this key is a character in it. What to
+      ## INSERT is `KeyResolution.character`, never `key` — see `keyCharacter`.
 
   KeyResolution* = object
     kind*: KeyResolutionKind
@@ -227,6 +236,12 @@ type
       ## The binding that fired, for a notification or a failure message.
     key*: string
       ## The canonical name of the key that arrived.
+    character*: string
+      ## What a text field should INSERT for this key — set only on `krText`,
+      ## and "" otherwise. `key` is `"Space"` and `character` is `" "`; for
+      ## every other text key the two are equal. Carried rather than re-derived
+      ## by each prompt, because a caller that inserted `key` would type the
+      ## word "Space" into the buffer.
     pending*: string
       ## What the pending indicator should read; empty when nothing is pending.
 
@@ -296,10 +311,41 @@ const
 proc isPrintableKey*(name: string): bool =
   ## Whether a canonical key name is a single printable character.
   ##
-  ## THE ONE PREDICATE THE TEXT-ENTRY SHADOWING RULE USES. `Esc`, `Enter`,
-  ## `Tab`, `F10` and `Ctrl+p` are all multi-character names, so the rule needs
-  ## no second list to know they are not characters.
+  ## `Esc`, `Enter`, `Tab`, `F10` and `Ctrl+p` are all multi-character names,
+  ## so this needs no second list to know they are not characters. It is NOT
+  ## the whole of the text-entry shadowing rule — see `keyCharacter`.
   name.len == 1 and name[0] >= ' ' and name[0] <= '~'
+
+proc keyCharacter*(name: string): string =
+  ## The CHARACTER a canonical key name inserts into a text field, or "".
+  ##
+  ## THE PREDICATE THE TEXT-ENTRY SHADOWING RULE ACTUALLY USES, and it is not
+  ## `isPrintableKey` because of exactly one key. `keyName` answers `"Space"`
+  ## for byte `0x20`, deliberately: §4.2 binds `Space` to "Toggle Breakpoint"
+  ## and a table cell reading ` ` would be unreadable. But `isPrintableKey`
+  ## answers false for a five-letter name, so under CTUI-9's rule a space typed
+  ## at a `:` prompt resolved to `krNone` AND WAS SILENTLY LOST — `:goto 4500`
+  ## could not be typed at all.
+  ##
+  ## CTUI-9 could not have seen it: its own header records that "§4.2's table
+  ## has no key that enters INSPECT mode and no way to run or edit the `:`
+  ## prompt", so there was no text field to lose a character into. CTUI-10 has
+  ## one, and `tests/real_terminal/test_real_command_mode.nim` types
+  ## `:goto 4500` as real bytes on a real pty, which is where this was measured.
+  ##
+  ## The fix is here rather than in the prompt because the SHADOWING DECISION is
+  ## here: a resolver that classified `Space` as "not text" and left the prompt
+  ## to notice would be two rules for one question, which is the thing this
+  ## module's header exists to prevent.
+  if name == "Space": " "
+  elif isPrintableKey(name): name
+  else: ""
+
+proc isTextKey*(name: string): bool =
+  ## Whether a text field owns this key. `keyCharacter` with the character
+  ## thrown away, named so `resolve` reads as a rule rather than as a length
+  ## test.
+  keyCharacter(name).len > 0
 
 proc keyName*(token: string): string =
   ## The canonical name of one complete input token — a byte, or a whole escape
@@ -687,7 +733,7 @@ proc resolve*(km: Keymap; state: ModalState; pending: var PendingState;
   ## the two different answers.
   let name = keyName(token)
   result = KeyResolution(kind: krNone, action: kaNone, spelling: "", key: name,
-                         pending: "")
+                         pending: "", character: "")
   if name.len == 0:
     # Not a key at all — a mouse report, or a sequence this module does not
     # name. A pending prefix SURVIVES it: a mouse report arriving between
@@ -710,8 +756,9 @@ proc resolve*(km: Keymap; state: ModalState; pending: var PendingState;
     # a character, not a command — see the module header. Non-printable
     # bindings (`Esc`, `Enter`, `Backspace`) are never shadowed, which is what
     # keeps a prompt escapable.
-    if pending.chords.len == 0 and isPrintableKey(name) and state.isTextEntry:
+    if pending.chords.len == 0 and isTextKey(name) and state.isTextEntry:
       result.kind = krText
+      result.character = keyCharacter(name)
       return
     pending.clear()
     result.kind = krAction
@@ -720,8 +767,9 @@ proc resolve*(km: Keymap; state: ModalState; pending: var PendingState;
     return
 
   if hasPrefix(km, state.mode, candidate):
-    if pending.chords.len == 0 and isPrintableKey(name) and state.isTextEntry:
+    if pending.chords.len == 0 and isTextKey(name) and state.isTextEntry:
       result.kind = krText
+      result.character = keyCharacter(name)
       return
     pending.chords = candidate
     pending.startedMs = nowMs
@@ -736,8 +784,9 @@ proc resolve*(km: Keymap; state: ModalState; pending: var PendingState;
     result.kind = krPendingAbandoned
     return
 
-  if isPrintableKey(name) and state.isTextEntry:
+  if isTextKey(name) and state.isTextEntry:
     result.kind = krText
+    result.character = keyCharacter(name)
     return
 
   result.kind = if timedOut: krPendingTimedOut else: krNone

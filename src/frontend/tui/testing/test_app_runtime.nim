@@ -234,6 +234,29 @@ type
     ## `nil` for every CTUI-2 through CTUI-8 app, and with it the byte stream
     ## is unchanged for all of them.
 
+  FrameEpilogue* = proc(cols, rows: int): string {.closure.}
+    ## CTUI-10. Bytes written IMMEDIATELY AFTER a frame, or "" for none.
+    ##
+    ## It exists for one thing, and it is the one thing `FramePrologue`
+    ## deliberately cannot do: MOVE THE CURSOR. CTUI-10's Tier-2 case asserts
+    ## that a `:` prompt "is visible to the terminal via `cursorPosition`", and
+    ## a prompt whose cursor is parked on the bottom-right cell is not visible
+    ## as a prompt at all — the shape and the visibility say COMMAND (that is
+    ## CTUI-9's prologue) but the POSITION says nothing.
+    ##
+    ## **AN APP THAT USES THIS BREAKS `dual_snap.waitForCompleteFrame`, and
+    ## that is not a defect but the price.** The barrier is "the cursor rests
+    ## at `(rows-1, cols-1)`", and an epilogue that moves it means the barrier
+    ## can never be satisfied. A parent driving such an app waits on
+    ## `dual_snap.waitForCursorAt(row, col)` instead — the SAME barrier
+    ## argument, at the position the epilogue parks on, and equally exact: the
+    ## cursor cannot be there before the whole frame and the epilogue have been
+    ## parsed.
+    ##
+    ## `nil` for every CTUI-2 through CTUI-9 app, and with it the byte stream
+    ## is unchanged for all of them — `tests/real_terminal/
+    ## test_cross_tier_snapshot_equivalence.nim` is what keeps that true.
+
   LinkProvider* = proc(cols, rows: int): seq[PaneHyperlink] {.closure.}
     ## CTUI-6. Where the OSC 8 links go on the frame about to be painted.
     ##
@@ -443,7 +466,8 @@ proc isCsiFinal(c: char): bool =
 proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
                      input: InputHandler = nil;
                      links: LinkProvider = nil;
-                     prologue: FramePrologue = nil): int =
+                     prologue: FramePrologue = nil;
+                     epilogue: FrameEpilogue = nil): int =
   ## Paint `build`'s tree at `opts.cols` x `opts.rows` — or, under `--reflow`,
   ## at whatever size the tty reports — then serve the parent until it says to
   ## quit. Returns the process's exit status; the caller is the only thing that
@@ -502,6 +526,12 @@ proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
       emit(frameBytes(h.driver.buffer))
     else:
       emit(frameBytesWithHyperlinks(h.driver.buffer, links(cols, rows)))
+    if not epilogue.isNil:
+      # CTUI-10's cursor PARK. After the frame, because its whole purpose is
+      # to move the cursor off the barrier — see `FrameEpilogue`.
+      let post = epilogue(cols, rows)
+      if post.len > 0:
+        emit(post)
 
   proc repaint() =
     ## A fresh harness, because the driver's buffer is the diff base and a
@@ -620,29 +650,32 @@ proc runSnapshotApp*(build: SteppedTreeBuilder; opts: TestAppOptions;
 proc runSnapshotApp*(build: SizedTreeBuilder; opts: TestAppOptions;
                      input: InputHandler = nil;
                      links: LinkProvider = nil;
-                     prologue: FramePrologue = nil): int =
+                     prologue: FramePrologue = nil;
+                     epilogue: FrameEpilogue = nil): int =
   ## The SIZED shape, in terms of the stepped one. A builder that does not
   ## depend on the step paints the same tree however often F10 is pressed.
   runSnapshotApp(
     proc(r: TerminalRenderer; cols, rows, step: int): TerminalNode =
-      build(r, cols, rows), opts, input, links, prologue)
+      build(r, cols, rows), opts, input, links, prologue, epilogue)
 
 proc runSnapshotApp*(build: proc(r: TerminalRenderer): TerminalNode;
                      opts: TestAppOptions;
                      input: InputHandler = nil;
                      links: LinkProvider = nil;
-                     prologue: FramePrologue = nil): int =
+                     prologue: FramePrologue = nil;
+                     epilogue: FrameEpilogue = nil): int =
   ## The fixed-size shape, in terms of the sized one. Two paint paths would be
   ## two things to keep true, and the CTUI-2 apps are the ones the cross-tier
   ## equality rests on.
   runSnapshotApp(
     proc(r: TerminalRenderer; cols, rows: int): TerminalNode = build(r), opts,
-    input, links, prologue)
+    input, links, prologue, epilogue)
 
 proc snapshotAppMain*(build: SteppedTreeBuilder; args: seq[string];
                       input: InputHandler = nil;
                       links: LinkProvider = nil;
-                      prologue: FramePrologue = nil): int =
+                      prologue: FramePrologue = nil;
+                      epilogue: FrameEpilogue = nil): int =
   ## `runSnapshotApp` plus argument parsing, as one function of `argv` that
   ## returns a status. Every `apps/*.nim` main block is one call to this.
   ##
@@ -652,7 +685,7 @@ proc snapshotAppMain*(build: SteppedTreeBuilder; args: seq[string];
   ## makes about it.
   try:
     let opts = parseTestAppArgs(args)
-    runSnapshotApp(build, opts, input, links, prologue)
+    runSnapshotApp(build, opts, input, links, prologue, epilogue)
   except TestAppUsageError as e:
     stderr.writeLine("snapshot-app: " & e.msg)
     TestAppExitUsage
@@ -660,18 +693,20 @@ proc snapshotAppMain*(build: SteppedTreeBuilder; args: seq[string];
 proc snapshotAppMain*(build: SizedTreeBuilder; args: seq[string];
                       input: InputHandler = nil;
                       links: LinkProvider = nil;
-                      prologue: FramePrologue = nil): int =
+                      prologue: FramePrologue = nil;
+                      epilogue: FrameEpilogue = nil): int =
   ## The SIZED shape of `snapshotAppMain`.
   snapshotAppMain(
     proc(r: TerminalRenderer; cols, rows, step: int): TerminalNode =
-      build(r, cols, rows), args, input, links, prologue)
+      build(r, cols, rows), args, input, links, prologue, epilogue)
 
 proc snapshotAppMain*(build: proc(r: TerminalRenderer): TerminalNode;
                       args: seq[string];
                       input: InputHandler = nil;
                       links: LinkProvider = nil;
-                      prologue: FramePrologue = nil): int =
+                      prologue: FramePrologue = nil;
+                      epilogue: FrameEpilogue = nil): int =
   ## The fixed-size shape of `snapshotAppMain`.
   snapshotAppMain(
     proc(r: TerminalRenderer; cols, rows: int): TerminalNode = build(r), args,
-    input, links, prologue)
+    input, links, prologue, epilogue)

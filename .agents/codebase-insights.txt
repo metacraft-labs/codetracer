@@ -3283,3 +3283,46 @@ commands.
     pre-input screen. The child must NAME the new frame — `testing/
     test_app_runtime.nim` increments its step counter on any input-driven
     repaint so the parent can wait for `<label>-stepN`.
+  * **`OriginChainVM` IS populated on a real replay session — it is NOT a
+    fifth unfilled ViewModel field.** Measured on `noir_space_ship` through a
+    real `replay-server`, 2026-09-06: `ct/originChain` is a real dispatch arm
+    (`dap_server.rs` -> `Handler::origin_chain`), and the chain comes back on
+    the `ct/updated-origin-chain` EVENT that `respond_origin_chain` emits
+    beside the response — exactly one event per query. `remaining_shield` at
+    tick 283 (`shield.nr:6`) answers one `okComputational` hop at tick 220,
+    confidence 0.9; `mass` answers four. Three of six locals at that stop have
+    a classified hop. `onShowOrigin` DISCARDS `send`'s future by design, so the
+    event is the only place the answer is readable from a host — that is the
+    documented event-driven path, not a workaround.
+  * **An origin hop's `sourceText` and its `location.line` disagree, and
+    `db.rs` says why: the fallback that finds the producing line THROWS THE
+    STEP AWAY.** In `db.rs`'s `origin_chain_inferred_with_metadata`, step "(2)
+    Resolve the source line", pass one takes the line of `last_change_step`;
+    when that line does not parse as an assignment naming the target, pass two
+    retries the immediately preceding step in the same frame — the case of a
+    recorder that snapshots variables at line entry, which Noir's is. Pass two
+    assigns only `line_text`; the step it found is bound as `_prev_step` and
+    DISCARDED, so `location` still names the later step. For `remaining_shield`
+    above: `sourceText` is `remaining_shield += regeneration;` (line 12 of
+    `shield.nr`), `location.line` is 14 (`status_report(…)`).
+    Navigate by `location` — it is the only one of the two that names a tick,
+    and `location.rrTicks` / `location.path` / `location.line` / `stackTrace`
+    are mutually consistent — but KNOW THAT IT LANDS ONE RECORDED STEP AFTER
+    THE WRITE for such recorders. Fixing it means keeping `_prev_step` and
+    reporting its location.
+  * **`keyName(" ")` is `"Space"`, and that made a space untypeable at a text
+    prompt until CTUI-10.** The shadowing rule in `tui/app/input/keymap.resolve`
+    used to ask `isPrintableKey`, which is false for a five-letter name, so a
+    space in COMMAND/SEARCH resolved to `krNone` and was lost. Use
+    `keymap.isTextKey` / `KeyResolution.character`, never `KeyResolution.key`,
+    when inserting into a buffer.
+  * **`unicode.strip` returns an ALL-whitespace string unchanged; `strutils.strip`
+    returns `""`.** Measured on nim 2.2.8. Any file that imports both — seven
+    of the ten Tier-2 TUI suites do, for `Rune` — gets `unicode.strip` on an
+    unqualified call, so a blank terminal row reads as 100 characters. Qualify
+    `strutils.strip` in any helper that trims a terminal row.
+  * **A snapshot app may park the cursor off the frame barrier.**
+    `testing/test_app_runtime.FrameEpilogue` writes bytes AFTER the frame — its
+    one use is a CUP into a `:` prompt so `cursorPosition` can be asserted —
+    and a parent driving such an app waits on `dual_snap.waitForCursorAt`
+    rather than `waitForCompleteFrame`.

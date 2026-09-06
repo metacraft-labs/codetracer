@@ -826,6 +826,42 @@ proc waitForCompleteFrame*(sess: var TuiTestSession; cols, rows: int;
     $(rows - 1) & "," & $(cols - 1) & "); child alive=" & $sess.isAlive &
     "; screen: " & screenDigest(sess))
 
+proc waitForCursorAt*(sess: var TuiTestSession; row, col: int;
+                      timeoutMs = 15000) =
+  ## `waitForCompleteFrame`'s barrier, at a position the app CHOSE.
+  ##
+  ## CTUI-10. An app that installs a `test_app_runtime.FrameEpilogue` parks the
+  ## cursor somewhere other than the bottom-right cell — a `:` prompt, so the
+  ## prompt is visible to the terminal as a POSITION and not only as a shape.
+  ## The barrier argument is unchanged and equally exact: the epilogue is
+  ## written after the last cell of the last row, so the cursor cannot be at
+  ## `(row, col)` before the whole frame has been parsed.
+  ##
+  ## The failure is the same DIAGNOSIS `waitForCompleteFrame` gives: the
+  ## position actually observed, whether the child is alive, and the screen.
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  var lastPos = (row: -1, col: -1)
+  while getMonoTime() < deadline:
+    discard sess.drainOutput(20)
+    lastPos = sess.cursorPosition()
+    if lastPos.row == row and lastPos.col == col:
+      return
+    if not sess.isAlive:
+      discard sess.drainOutput(50)
+      lastPos = sess.cursorPosition()
+      if lastPos.row == row and lastPos.col == col:
+        return
+      raise newException(DualSnapError,
+        "the child exited before parking the cursor: it rested at (" &
+        $lastPos.row & "," & $lastPos.col & "), expected (" & $row & "," &
+        $col & "); exit code " & $sess.exitCode() & "; screen: " &
+        screenDigest(sess))
+  raise newException(DualSnapError,
+    "the child never parked the cursor within " & $timeoutMs & " ms: it " &
+    "rested at (" & $lastPos.row & "," & $lastPos.col & "), expected (" &
+    $row & "," & $col & "); child alive=" & $sess.isAlive & "; screen: " &
+    screenDigest(sess))
+
 proc waitForSnapshotLabel*(sess: var TuiTestSession; label: string;
                            timeoutMs = 5000): ScreenSnapshot =
   ## Block until the child has asked the harness to record `label`.

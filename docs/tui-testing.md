@@ -548,6 +548,47 @@ xterm's modified sequence yourself: `ESC [ 2 1 ; 2 ~` (the parameter is
 `1 + Shift`). CTUI-9 drives both and asserts the consequence of each, rather
 than working around the harness silently.
 
+### Parking the cursor somewhere else (CTUI-10)
+
+CTUI-10 added one more additive hook to `testing/test_app_runtime.nim`, and it
+is the only one that **moves the cursor**.
+
+* **`FrameEpilogue`**, bytes written immediately *after* a frame. It exists for
+  §3.3.6's prompt: a `:` prompt is a prompt only if the terminal's own cursor is
+  sitting in it, and "cursor position" is a row of the table above. `nil` for
+  every CTUI-2 through CTUI-9 app, and with it the byte stream is unchanged for
+  all of them — the cross-tier suite is what keeps that true.
+
+> **An app that installs a `FrameEpilogue` breaks `waitForCompleteFrame`.**
+> The barrier is "the cursor rests at `(rows-1, cols-1)`", and an epilogue that
+> moves it means that can never be satisfied. Wait on
+> `dual_snap.waitForCursorAt(row, col)` instead: the same barrier argument at
+> the position the epilogue parks on, and equally exact, because the CUP is
+> written after the last cell of the last row. `apps/app_command_mode.nim`
+> returns `""` from its epilogue whenever no prompt is open, so its NORMAL
+> frames still use the ordinary barrier and only its prompt frames need the
+> other one.
+
+### `unicode.strip` does not strip an all-whitespace string
+
+A Tier-2 suite that reads rows off the terminal almost always trims the
+right-hand padding, and almost always imports `std/unicode` for `Rune`. Those
+two facts collide:
+
+```nim
+import std/[strutils, unicode]
+let blank = repeat(' ', 10)
+blank.strip(leading = false)            # ten spaces — unicode.strip wins the overload
+strutils.strip(blank, leading = false)  # ""
+```
+
+Measured on nim 2.2.8. `unicode.strip` returns an **all**-whitespace string
+unchanged; `strutils.strip` returns `""`. Every assertion about a row *with
+content* passes either way, so this only ever shows up as "a blank row is 100
+characters long" — which is how it was found, in
+`tests/real_terminal/test_real_command_mode.nim`. **Qualify `strutils.strip` in
+any helper that reads a terminal row.**
+
 ### Test-only flags on the snapshot runtime
 
 `testing/test_app_runtime.nim` parses three flags no shipped binary may know:
