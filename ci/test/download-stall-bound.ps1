@@ -485,6 +485,70 @@ try {
   }
 
   # -------------------------------------------------------------------------
+  # Part 6c - the total budget is shared across RETRIES.
+  #
+  # This is the check that nearly did not exist, and it matters more than it
+  # looks. Bounding a single attempt is not the same as bounding the operation:
+  # Invoke-WithRetry makes 4 attempts, so a per-attempt budget would give a
+  # worst case of 4 x the budget plus backoff. With the shipped defaults that is
+  # ~120 minutes for one component -- longer than the job cap the Windows jobs
+  # carry, which means the job would be killed with no error at all. That is the
+  # exact failure mode the rest of this file exists to eliminate, reintroduced
+  # by the retry wrapper.
+  # -------------------------------------------------------------------------
+
+  Write-Host "== the total budget is shared across retries, not per attempt"
+
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+  Assert-Equal -Expected 0 -Actual (Get-DownloadDeadlineSeconds -Elapsed $sw -Budget 0 -Url "http://x") `
+    -Message "a deferred budget (0) stays deferred rather than becoming a deadline"
+
+  $remaining = Get-DownloadDeadlineSeconds -Elapsed $sw -Budget 100 -Url "http://x"
+  Assert-True -Condition ($remaining -gt 90 -and $remaining -le 100) `
+    -Message "the first attempt gets essentially the whole budget (got ${remaining}s of 100s)"
+
+  # A stopwatch that has already run past the budget stands in for "three
+  # attempts have already been made"; the fourth must be refused outright
+  # rather than handed another full budget.
+  $spent = [System.Diagnostics.Stopwatch]::StartNew()
+  Start-Sleep -Milliseconds 1200
+  $refused = $false
+  $message = ""
+  try {
+    Get-DownloadDeadlineSeconds -Elapsed $spent -Budget 1 -Url "http://example.invalid/a.bin" | Out-Null
+  } catch {
+    $refused = $true
+    $message = [string]$_.Exception.Message
+  }
+  Assert-True -Condition $refused `
+    -Message "once the shared budget is spent, a further attempt is REFUSED rather than given a fresh one"
+  Assert-True -Condition ($message -match "across retries") `
+    -Message "and the error says the budget was exhausted across retries: '$message'"
+
+  # End to end: a permanently stalled server must not be able to consume
+  # attempts x budget. With a 4s shared budget and a 2s stall bound, all four
+  # attempts together have to finish inside the budget plus backoff, NOT inside
+  # 4 x budget.
+  $server = $null
+  try {
+    $server = Start-StallServer -Mode "trickle"
+    $out = Join-Path $scratchRoot "sharedbudget.bin"
+    [Environment]::SetEnvironmentVariable("WINDOWS_DIY_DOWNLOAD_TIMEOUT_SECONDS", "4")
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $threw = $false
+    try { Download-File -Url $server.Url -OutFile $out } catch { $threw = $true }
+    $sw.Stop()
+
+    Assert-True -Condition $threw -Message "a trickling server still fails Download-File"
+    Assert-True -Condition ($sw.Elapsed.TotalSeconds -lt 20) `
+      -Message "and all retries together stay near the SHARED budget, not 4x it (took $([int]$sw.Elapsed.TotalSeconds)s, budget 4s)"
+  } finally {
+    [Environment]::SetEnvironmentVariable("WINDOWS_DIY_DOWNLOAD_TIMEOUT_SECONDS", $null)
+    Stop-StallServer -Server $server
+  }
+
+  # -------------------------------------------------------------------------
   # Part 7 - the debugger cannot strand a job.
   # -------------------------------------------------------------------------
 
