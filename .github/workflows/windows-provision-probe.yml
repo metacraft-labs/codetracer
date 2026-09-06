@@ -1,0 +1,220 @@
+# A SINGLE-JOB PROBE OF THE FULL WINDOWS `env.ps1` PROVISION.
+#
+# WHY THIS EXISTS.
+#
+# `windows-rust-components` in `codetracer.yml` is the lane that provisions the
+# Windows toolchain, and it is the lane whose provisioning cost and install-root
+# size everything else is sized against. Those numbers can only be produced by a
+# run that actually provisions, so they cannot be obtained locally at all.
+#
+# Dispatching `codetracer.yml` to get them is a poor trade: it has no dispatch
+# inputs, so it starts the widest matrix in this repository, several jobs of
+# which contend for the same scarce `eph-win-x64` runners. This workflow runs
+# ONE job on ONE Windows runner and carries the provisioning prefix of
+# `windows-rust-components` verbatim -- same bootstrap, same checkout, same
+# `setup-dev-env` inputs, same `env.ps1`, NO `WINDOWS_DIY_ONLY` and NO
+# `WINDOWS_DIY_SKIP_*`. It is narrower in what runs AFTER provisioning, not in
+# the provisioning itself; a probe that provisioned less would answer a
+# different question than the one being asked.
+#
+# WHY IT IS NOT `workflow_dispatch`-ONLY. `workflow_dispatch` only registers for
+# a workflow present on the repository's DEFAULT branch, which here is `stable`.
+# A dispatch-only workflow added on a feature branch is therefore not
+# dispatchable at all -- the API returns 404 for it. A `push` filter naming this
+# branch is the only trigger that reaches a Windows runner from here. Every
+# other push-triggered workflow in this repository filters to
+# `main`/`dev`/`stable`/`cloud`, so a push to this branch starts this job and
+# nothing else.
+#
+# ci-mainline-exempt: a single-purpose provisioning probe on its own branch; it must not run on a mainline push
+#
+# The `branches:` filter below deliberately names no mainline. This job exists
+# to consume one contended Windows slot on request, and adding it to `dev` would
+# make every mainline push pay for it.
+name: Windows provision probe
+
+on:
+  push:
+    branches:
+      - ci/windows-provision-probe
+  workflow_dispatch:
+
+concurrency:
+  group: windows-provision-probe-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-provision:
+    runs-on: eph-win-x64  # DIY-Windows (env.ps1) -> eph-win-x64
+    # The same cap `windows-rust-components` carries. Matching it deliberately:
+    # this probe's whole purpose is to say something about THAT lane, and a
+    # provision that fits here fits there. Omitting it would mean GitHub's
+    # 360-minute default, which is how an unbounded bootstrap step turns into a
+    # six-hour non-answer.
+    timeout-minutes: 75
+    steps:
+      # Verbatim from `windows-rust-components`: `actions/checkout` needs a real
+      # git on PATH on these guests, and `submodules: recursive` cannot be
+      # honoured through its REST fallback.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      # Cheap, hermetic, and it runs the download/native-command bounds' own
+      # NEGATIVE tests on a real Windows host rather than only on Linux pwsh.
+      # If a bound behaves differently here than it does on Linux, that matters
+      # more than the provisioning result and is worth 2 minutes to learn first.
+      - name: Validate download and native-command bounds on this host
+        shell: pwsh
+        timeout-minutes: 10
+        run: pwsh -File ci/test/download-stall-bound.ps1
+
+      # Also cheap, and it pins the claim the decomposition below depends on:
+      # that every gated component in `env.ps1` really goes through the
+      # instrumented wrapper, so the table cannot silently omit one.
+      - name: Validate the component-decomposition coverage gate
+        shell: pwsh
+        timeout-minutes: 10
+        run: pwsh -File ci/test/bootstrap-decomposition.ps1
+
+      - name: Setup dev env
+        # Byte-identical to `windows-rust-components`' step: same action ref,
+        # same flavor, same siblings at the same refs. This is the step under
+        # test and the step the measurement comes from.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: windows-diy
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          siblings: |
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            codetracer-native-recorder=dev
+
+      - name: Upload env.ps1 component decomposition
+        # `if: always()` because `env.ps1` emits the report from a `finally`: a
+        # run that dies mid-bootstrap still publishes a partial table naming the
+        # component it died in and what everything before it cost.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-env-decomposition
+          path: .tmp/windows-diy/windows-env-decomposition.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Summarise the decomposition
+        # The report is already printed to the bootstrap log, but that log is
+        # long and this makes the two numbers that matter -- per-component wall
+        # clock and the install-root total -- readable without downloading an
+        # artifact. `if: always()` for the same reason as the upload above.
+        if: always()
+        shell: pwsh
+        run: |
+          $path = ".tmp/windows-diy/windows-env-decomposition.json"
+          if (-not (Test-Path -LiteralPath $path)) {
+            Write-Host "No decomposition written: the bootstrap did not reach the report."
+            return
+          }
+          $report = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+          $lines = @()
+          $lines += "| component | status | seconds | MB | class | note |"
+          $lines += "|---|---|---:|---:|---|---|"
+          foreach ($c in ($report.components | Sort-Object -Property seconds -Descending)) {
+            $note = if ($c.error) { $c.error } elseif ($c.skip_reason) { $c.skip_reason } else { "" }
+            $lines += ("| {0} | {1} | {2:N1} | {3:N1} | {4} | {5} |" -f `
+              $c.step, $c.status, $c.seconds, ($c.bytes / 1MB), $c.relocatability, $note)
+          }
+          $lines += ""
+          $lines += ("install_root_bytes: {0} ({1:N1} MB in {2:N0} files)" -f `
+            $report.install_root_bytes, ($report.install_root_bytes / 1MB), $report.install_root_files)
+          $lines += ("total_seconds: {0}   complete: {1}" -f $report.total_seconds, $report.complete)
+          $lines += ("skipped: [{0}]  failed: [{1}]" -f `
+            ($report.skipped_steps -join ","), ($report.failed_steps -join ","))
+          $text = $lines -join "`n"
+          Write-Host $text
+          if ($env:GITHUB_STEP_SUMMARY) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $text
+          }
+
+      # From here down: enough of `windows-rust-components` to establish that
+      # provisioning really did leave the runner able to start a build. The bar
+      # is REACHING the first build step, not the build passing -- a
+      # pre-existing build failure is a different question and must not be
+      # imported into this one, which is why the build below is
+      # `continue-on-error`.
+      - name: Remove WSL bash stub from System32
+        shell: pwsh
+        run: |
+          $wslStub = "$env:SystemRoot\System32\bash.exe"
+          if (Test-Path $wslStub) {
+            takeown /f $wslStub | Out-Null
+            icacls $wslStub /grant "Administrators:(F)" | Out-Null
+            Remove-Item -Force $wslStub
+          }
+          $gitForWindowsBin = "C:\Program Files\Git\bin"
+          if (Test-Path -LiteralPath $gitForWindowsBin -PathType Container) {
+            Add-Content -Path $env:GITHUB_PATH -Value $gitForWindowsBin
+          }
+          $bash = Get-Command bash -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $bash) {
+            throw "No bash on PATH after provisioning; every build step below needs it."
+          }
+          Write-Host "Using bash from $($bash.Source)"
+
+      - name: Generate tree-sitter-nim parser
+        shell: pwsh
+        run: |
+          npm install -g tree-sitter-cli
+          cd libs/tree-sitter-nim
+          tree-sitter generate
+
+      - name: Build db-backend (reached-the-build-step evidence only)
+        continue-on-error: true
+        working-directory: src/db-backend
+        shell: bash
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: dev-exec cargo build
