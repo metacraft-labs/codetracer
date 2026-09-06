@@ -389,6 +389,41 @@ function Invoke-BoundedDownload {
   }
 }
 
+# THE TOTAL BUDGET IS SHARED ACROSS RETRIES, AND THAT IS NOT A DETAIL.
+#
+# `Invoke-WithRetry` makes 4 attempts. If each attempt were given the FULL
+# total budget, the worst case would be 4 x 1800s plus backoff = ~120 minutes
+# for a single component -- longer than the `timeout-minutes` the eph-win-x64
+# jobs now carry. The job cap would fire first, killing the job with no error
+# and no indication of which download was responsible, which is precisely the
+# failure this whole change exists to remove. Bounding one attempt is not the
+# same as bounding the operation.
+#
+# So the deadline is computed ONCE, outside the retry loop, and each attempt is
+# given only the time that remains. The retries still buy what they are for --
+# a connection reset or a 5xx fails fast and is worth re-trying -- without the
+# multiplier turning a bounded download back into an unbounded one.
+#
+# The stall clock is deliberately NOT shared: it is a per-attempt inactivity
+# bound, and re-arming it on a fresh connection is the correct behaviour.
+function Get-DownloadDeadlineSeconds {
+  param(
+    [Parameter(Mandatory = $true)][System.Diagnostics.Stopwatch]$Elapsed,
+    [Parameter(Mandatory = $true)][int]$Budget,
+    [Parameter(Mandatory = $true)][string]$Url
+  )
+
+  # 0 means "defer to Invoke-BoundedDownload's own default/override"; there is
+  # no shared deadline to enforce in that case beyond what it applies itself.
+  if ($Budget -le 0) { return 0 }
+
+  $remaining = [int][Math]::Floor($Budget - $Elapsed.Elapsed.TotalSeconds)
+  if ($remaining -le 0) {
+    throw "Download of '$Url' exhausted its total budget of ${Budget}s across retries."
+  }
+  return $remaining
+}
+
 function Download-File {
   param(
     [Parameter(Mandatory = $true)][string]$Url,
@@ -396,8 +431,10 @@ function Download-File {
   )
 
   $timeoutSeconds = Get-DownloadTimeoutSeconds
+  $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
   Invoke-WithRetry -Script {
-    Invoke-BoundedDownload -Url $Url -OutFile $OutFile -TotalSeconds $timeoutSeconds
+    $remaining = Get-DownloadDeadlineSeconds -Elapsed $elapsed -Budget $timeoutSeconds -Url $Url
+    Invoke-BoundedDownload -Url $Url -OutFile $OutFile -TotalSeconds $remaining
   } | Out-Null
 }
 
@@ -405,10 +442,13 @@ function Download-String {
   param([Parameter(Mandatory = $true)][string]$Url)
 
   $timeoutSeconds = Get-DownloadTimeoutSeconds
+  $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
   $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("ct-download-" + [Guid]::NewGuid().ToString("N"))
   try {
     Invoke-WithRetry -Script {
-      Invoke-BoundedDownload -Url $Url -OutFile $scratch -TotalSeconds $timeoutSeconds
+      # Shared across retries -- see the note above Download-File.
+      $remaining = Get-DownloadDeadlineSeconds -Elapsed $elapsed -Budget $timeoutSeconds -Url $Url
+      Invoke-BoundedDownload -Url $Url -OutFile $scratch -TotalSeconds $remaining
     } | Out-Null
     $content = [System.IO.File]::ReadAllBytes($scratch)
   } finally {

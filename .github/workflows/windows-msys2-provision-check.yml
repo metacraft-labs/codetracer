@@ -9,9 +9,9 @@
 #
 # But `codetracer.yml` has no `workflow_dispatch` inputs, so dispatching it
 # starts the widest matrix in this repository, several jobs of which contend
-# for the same two Windows runner slots. That is a poor trade for exercising
-# one component, and on a lane whose known failure mode is a multi-hour hang it
-# is an actively bad one.
+# for the same scarce Windows runners. That is a poor trade for exercising one
+# component, and on a lane whose known failure mode is a long hang it is an
+# actively bad one.
 #
 # `WINDOWS_DIY_ONLY=NIM` reduces the bootstrap to the single phase that reaches
 # `Ensure-Nim` -> `Ensure-TupMsys2BuildPrereqs`, which is exactly the code under
