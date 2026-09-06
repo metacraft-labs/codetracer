@@ -162,9 +162,21 @@ const report = {
   editorRejected: [],
   editorWidgetCount: -1,
   stepButtonPresent: false,
+  // THE CONTROL THIS PROBE ACTUALLY PRESSES, reported separately from the one
+  // whose appearance marks the toolbar as mounted. The stepping loop drives
+  // `#step-in-image`, so "the toolbar came up" and "the gesture under test is
+  // reachable" are two claims and get two fields.
+  stepInButtonPresent: false,
   stepButtonWaitMs: -1,
   debugHost: '',
   caretPositions: [],
+  // THE PER-STEP RECORD. `caretSamples` names, for each step, the line the
+  // ENGINE reported and the line the EDITOR painted; `caretFollowed` counts the
+  // steps where those agreed and `stepsTaken` how many steps were driven, so
+  // "every step followed" cannot be satisfied by a run that drove none.
+  caretSamples: [],
+  caretFollowed: 0,
+  stepsTaken: 0,
   gestureError: '',
   noSourceVisible: false,
   openTabTitles: [],
@@ -373,11 +385,16 @@ try {
   // Let the engine finish `launch` / `configurationDone` and the first move.
   await page.waitForTimeout(6000);
 
-  // STEP, by clicking the product's own control. `.step-forward` is the ▶ in
-  // `isonim_debug_controls_view.nim`, so what is exercised is the gesture a
-  // user makes rather than a ViewModel call a user cannot reach. A shortcut
-  // was the first shape and it measured Mousetrap's `stopCallback` more than
-  // it measured the debugger.
+  // STEP, by clicking the product's own control — `#step-in-image`, the STEP
+  // IN button in `isonim_debug_controls_view.nim`, so what is exercised is the
+  // gesture a user makes rather than a ViewModel call a user cannot reach. A
+  // shortcut was the first shape and it measured Mousetrap's `stopCallback`
+  // more than it measured the debugger.
+  //
+  // `#next-image` is still what the WAIT below settles on, because its
+  // appearance is the toolbar-is-mounted signal this file has always used and
+  // the two buttons mount together. It is no longer what gets PRESSED: see the
+  // stepping loop for the measurement that ended that.
   // WAITED FOR, NOT SAMPLED ONCE. The debug toolbar mounts when the layout
   // swap has rebuilt the menu shell and the repair has re-run, which is
   // several asynchronous steps after the `start` message this probe settles
@@ -406,6 +423,17 @@ try {
     // user performs to step over.
     report.stepButtonPresent = await page.evaluate(
       () => !!document.querySelector('#next-image'));
+    // AND THE CONTROL THIS PROBE PRESSES, asked for by its own name.
+    //
+    // The stepping loop below drives `#step-in-image`, not `#next-image`, and a
+    // probe that gates its loop on the presence of a DIFFERENT button reports
+    // "the gesture failed" for a control that was never there. Both are
+    // rendered by the same `isonim_debug_controls_view.nim` toolbar, so this is
+    // one read rather than a second wait — but it is the read the loop is
+    // guarded on, because absence of the button pressed and absence of the
+    // toolbar need different fixes.
+    report.stepInButtonPresent = await page.evaluate(
+      () => !!document.querySelector('#step-in-image'));
     // WHAT IS ACTUALLY IN THE HOST. The toolbar reports `mount COMPLETE` and
     // stays mounted, so "no `.step-forward`" is a claim about the mounted
     // CONTENT, not about whether a mount happened — and those need different
@@ -427,61 +455,117 @@ try {
   // harness failure: whether a replay session brings the debugger panes up is
   // itself part of what this gate measures, and a probe that forced them open
   // would be measuring its own click.
-  // WHERE THE CARET IS, read the way a user sees it. `editor.nim:675` gives
-  // the current step's line the Monaco decoration class `on`, so the overlay
-  // element carrying it IS the highlight on screen. Its vertical offset is
-  // recorded after every step: a set of distinct offsets larger than one is
-  // the caret having MOVED, which is the gesture under test — "a step control
-  // exists" and "stepping moves the caret in the painted editor" are different
-  // claims, and only the second is a debugger.
-  const caretTop = () => page.evaluate(() => {
+  // WHERE THE CARET IS, READ AS THE LINE IT DECORATES RATHER THAN AS A PIXEL.
+  //
+  // This used to return `getBoundingClientRect().y` — a VIEWPORT coordinate —
+  // and a viewport coordinate is not a proxy for a source position.
+  // `editor.nim:705` reveals the current line with
+  // `revealLineInCenterIfOutsideViewport`, so once the caret reaches the middle
+  // of a pane the editor SCROLLS BY EXACTLY THE DISTANCE THE CARET MOVED and
+  // the pixel does not change at all.
+  //
+  // MEASURED on the deployed build (ide.codetracer.com/noir/demo, step-in x12):
+  // four consecutive genuine moves — aggregate.nr lines 46, 47, 48, 50 — every
+  // one of them at `y=521`, while the editor's `scrollTop` went 629 -> 653 ->
+  // 677 -> 725. Four distinct source positions, one pixel. A `Set` of those
+  // pixels counts ONE, so "the caret moved through N positions" was reading a
+  // number a correct product can hold constant while stepping perfectly.
+  //
+  // `editor.nim:682` already writes the decoration as `class: "on on-<line>"`,
+  // so the LINE is in the DOM and needs no geometry. That reading is
+  // scroll-invariant, and it is the same quantity `web_replay_host.nim:155`
+  // reports in `codetracer-replay: move <path>:<line>` — which is what lets the
+  // two be COMPARED rather than merely both recorded.
+  //
+  // The `on-<line>` form is required, not optional: `editor.nim:698` puts a
+  // bare `on` on the CALLTRACE view, with no line, and a bare `.on` selector
+  // can reach it first. A marker without a line number is not this subject.
+  const caretMark = () => page.evaluate(() => {
     const marks = document.querySelectorAll('.view-overlays .on, .view-line .on, .on');
     for (const m of marks) {
       const r = m.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
-      return Math.round(r.y);
+      const hit = String(m.className || '').match(/\bon-(\d+)\b/);
+      if (!hit) continue;
+      // WHICH editor holds it, so a position is a FILE and a line rather than a
+      // line: stepping crosses files (main.nr -> utils.nr) and line 7 of one is
+      // not line 7 of the other.
+      let uri = '';
+      try {
+        const eds = (window.monaco && window.monaco.editor
+          && window.monaco.editor.getEditors()) || [];
+        for (const e of eds) {
+          const dom = e.getDomNode && e.getDomNode();
+          if (dom && dom.contains(m)) {
+            const mod = e.getModel && e.getModel();
+            if (mod) uri = String(mod.uri);
+            break;
+          }
+        }
+      } catch (err) { /* the position still carries its line */ }
+      return { line: Number(hit[1]), uri, pos: `${uri}:${hit[1]}` };
     }
-    return -1;
+    return { line: -1, uri: '', pos: '' };
   });
 
-  if (report.stepButtonPresent) {
+  if (report.stepInButtonPresent) {
+    // ONLY THE POSITIONS THE STEPS REACHED. This set used to be seeded with a
+    // read taken BEFORE the first step, so "the caret moved through 2
+    // positions" could mean "it started somewhere and moved once". The steps
+    // must span the positions on their own.
     const tops = new Set();
-    // The engine's own account of each step, kept beside the caret pixels so a
-    // failure can say whether the move was never reported or was reported and
-    // landed where it started.
+    // The engine's own account of each step, kept beside the paint so a failure
+    // can say whether the move was never reported or was reported and the caret
+    // did not go there.
     report.caretMoveLines = [];
-    const first = await caretTop();
-    if (first >= 0) tops.add(first);
+    const caretSamples = [];
     for (let i = 0; i < steps; i += 1) {
       const movesBefore = consoleLines.length;
       try {
-        await page.click('#next-image', { timeout: 3000 });
+        // STEP IN, NOT STEP OVER, AND THE DIFFERENCE IS THE WHOLE LEG.
+        //
+        // `#next-image` is step-OVER, and the session opens in a synthetic
+        // `<toplevel>` frame at `main.nr:1`. Stepping OVER at that position
+        // means "run the rest of the program", so ONE press takes the session
+        // from the first tick to the last and the trace is then exhausted:
+        // every later press is a no-op.
+        //
+        // MEASURED ON THIS GATE'S OWN SUBJECT, not deduced. Six presses of
+        // `#next-image` against `/noir`, read off the host's own log:
+        //
+        //     press 1    move /hello_noir/src/main.nr:11
+        //     press 2..6 move /hello_noir/src/main.nr:11   (nothing left)
+        //
+        // One press took the session from `main.nr:1` to `main.nr:11` — the
+        // whole program — and five were no-ops. So the only reason the position
+        // set ever held two entries was the pre-step seed removed above, and
+        // the gate's own engine-side `distinctLines` said so all along: 2.
+        //
+        // `#step-in-image` advances the session by exactly ONE tick per press.
+        // Same subject, same six presses: main.nr 9, 9, 10, 10, 11 then
+        // utils.nr 6 — `distinctLines` 5 instead of 2, real progress across two
+        // files, and two legitimate same-line repeats, which is exactly the mix
+        // that tells a caret that FOLLOWS from one that merely CHANGES.
+        await page.click('#step-in-image', { timeout: 3000 });
       } catch (e) {
         report.gestureError = String((e && e.message) || e).slice(0, 200);
         break;
       }
       // WAIT FOR THE MOVE THE ENGINE REPORTS, not for 900ms and a hope.
       //
-      // 900ms was chosen against nothing, and the reading it guards is a
-      // PIXEL — the caret's `y` — which is exactly the kind of value that is
-      // wrong rather than absent when it is read early: a caret read mid-step
-      // returns the PREVIOUS position's offset, and `tops` is a Set, so an
-      // early read silently collapses two distinct positions into one and the
-      // journey concludes the caret did not move.
-      //
-      // `ui/web_replay_host.nim` already reports every completed move:
+      // `ui/web_replay_host.nim:155` reports every completed move:
       //
       //     codetracer-replay: move <path>:<line> missingPath=<bool>
       //
       // emitted on every `ct/complete-move`, WHETHER OR NOT the position
-      // changed. That is the distinction a DOM poll cannot draw and the reason
-      // this is not "wait until the caret differs": a step that lands on the
-      // same line is a RESULT, and a step still in flight is a WAIT, and they
-      // look identical from the caret alone.
+      // changed — which its own comment says two lines above. The probe already
+      // captured this line (it applies no severity filter) and never used it.
       //
-      // The probe already captured this line — it applies no severity filter —
-      // so nothing about the product changes here. The signal was present and
-      // unused.
+      // IT IS USED NOW, AS THE EXPECTED VALUE THE PAINT IS COMPARED TO. The
+      // engine names the line it moved to; the editor paints a line. Those are
+      // two readings of one quantity, and asserting they AGREE is the claim
+      // "the caret follows the session" — which is what this leg is named for
+      // and had no way to check while it read pixels.
       const moveDeadline = Date.now() + 15000;
       let moveLine = '';
       while (Date.now() < moveDeadline) {
@@ -491,12 +575,55 @@ try {
         await page.waitForTimeout(100);
       }
       report.caretMoveLines.push(moveLine || '(no move reported within 15s)');
-      const t = await caretTop();
-      if (t >= 0) tops.add(t);
+
+      // AND THEN WAIT FOR THE PAINT TO REACH THE LINE THE ENGINE NAMED.
+      //
+      // Not "wait until the caret differs". A source line spans several trace
+      // ticks, so consecutive step-ins land on the same line all the time —
+      // measured on `/noir`: steps 1 and 2 are both `main.nr:9`, steps 3 and 4
+      // are both `main.nr:10`. A wait for the caret to LEAVE its line can only
+      // time out over a step that correctly stayed. And it can be satisfied
+      // WITHOUT a step, because the pixel it watched moves when the pane
+      // scrolls or relayouts.
+      //
+      // The condition is POSITIVE and specific: poll until the painted line
+      // EQUALS the line the engine just reported. THE DEADLINE BOUNDS IT RATHER
+      // THAN RESCUING IT — a caret that never arrives records `followed: false`
+      // and the shell fails the leg on it.
+      const want = /move ([^ ]+):(\d+)/.exec(moveLine);
+      const wantPath = want ? want[1] : '';
+      const wantLine = want ? Number(want[2]) : -1;
+      const caretStart = Date.now();
+      const caretDeadline = caretStart + 5000;
+      let mark = await caretMark();
+      let polls = 1;
+      while (mark.line !== wantLine && Date.now() < caretDeadline) {
+        await page.waitForTimeout(50);
+        mark = await caretMark();
+        polls += 1;
+      }
+      const settledMs = Date.now() - caretStart;
+      if (mark.line >= 0) tops.add(mark.pos);
+      caretSamples.push({
+        step: i + 1,
+        polls,
+        settledMs,
+        wantPath,
+        wantLine,
+        paintedLine: mark.line,
+        pos: mark.pos,
+        followed: wantLine >= 0 && mark.line === wantLine,
+      });
     }
+    // DISTINCT SOURCE POSITIONS, `<model uri>:<line>` — not distinct pixels.
+    // Stepping crosses files, so the file is part of the identity: line 7 of
+    // `main.nr` and line 7 of `utils.nr` are two positions and one number.
     report.caretPositions = Array.from(tops);
+    report.caretSamples = caretSamples;
+    report.caretFollowed = caretSamples.filter((s) => s.followed).length;
+    report.stepsTaken = caretSamples.length;
   } else {
-    report.gestureError = 'no #next-image control is mounted in this layout';
+    report.gestureError = 'no #step-in-image control is mounted in this layout';
   }
 
   // MEASURED TWICE, BEFORE AND AFTER THE USER'S NEXT GESTURE.

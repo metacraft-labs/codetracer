@@ -80,6 +80,14 @@ cache="$(ct_nim_cache_root "${repo_root}")/noir-replay-in-browser"
 rm -rf "${cache}"
 mkdir -p "${cache}"
 
+# THE NUMBER OF STEPS, named here because the shell now ASSERTS over it.
+#
+# It used to be a literal `6` inside `run_probe` and nothing downstream knew it,
+# so "every step followed the session" could not be distinguished from "no step
+# was driven and every one of zero followed". The count is compared against
+# `stepsTaken` below, which is what makes that claim non-vacuous.
+steps_per_probe="${CT_REPLAY_STEPS:-6}"
+
 checks=0
 failures=0
 
@@ -278,7 +286,7 @@ run_probe() {
 		return 1
 	}
 	node ci/test/noir_replay_probe.mjs "http://127.0.0.1:${port}/noir" \
-		60000 6 >"${out}" 2>"${out}.err"
+		60000 "${steps_per_probe}" >"${out}" 2>"${out}.err"
 	local rc=$?
 	stop_server
 	return ${rc}
@@ -334,19 +342,79 @@ ck "$([ "${missing}" -eq 0 ] && echo ok || echo no)" \
 ck "$([ "${distinct}" -gt 1 ] && echo ok || echo no)" \
 	"stepping advanced through ${distinct} distinct position(s)"
 
-# AND THE CARET MOVED IN THE EDITOR THE USER IS LOOKING AT. `editor.nim:675`
-# gives the current step's line the Monaco class `on`, so this reads the
-# highlight itself rather than the engine's opinion of where it is. "A step
+# AND THE CARET MOVED IN THE EDITOR THE USER IS LOOKING AT. `editor.nim:682`
+# gives the current step's line the Monaco class `on on-<line>`, so this reads
+# the highlight itself rather than the engine's opinion of where it is. "A step
 # control exists" and "stepping moves the caret in the painted editor" are
 # different claims, and only the second is a debugger — a session can advance
 # its position and leave the editor on line 1 forever.
 step_button="$(field "${control}" '.stepButtonPresent')"
+step_in_button="$(field "${control}" '.stepInButtonPresent')"
 carets="$(field "${control}" '.caretPositions | length')"
+followed="$(field "${control}" '.caretFollowed')"
+taken="$(field "${control}" '.stepsTaken')"
 wait_ms="$(field "${control}" '.stepButtonWaitMs')"
 ck "$([ "${step_button}" = true ] && echo ok || echo no)" \
 	"the debugger's step control is mounted (Run leaves edit mode), after ${wait_ms}ms"
+# THE CONTROL THE PROBE ACTUALLY PRESSES, asserted by its own name. The
+# stepping loop drives `#step-in-image`; a gate that only ever established
+# `#next-image` was mounted would report every stepping failure as a gesture
+# error over a button it never asked for.
+ck "$([ "${step_in_button}" = true ] && echo ok || echo no)" \
+	"and the STEP IN control — the one the steps below press — is mounted too"
+# THE SAMPLE SERIES, named before the assertions that read it, so a red says
+# WHICH step disagreed and by how much rather than only that one did.
+note "caret settle — $(jq -r '[.caretSamples[]? | "step\(.step): \(.settledMs)ms/\(.polls) polls engine=\(.wantLine) painted=\(.paintedLine)\(if .followed then "" else " MISMATCH" end)"] | join(", ")' <"${control}")"
+# THE SAME THRESHOLD, OVER A READING THAT MEANS WHAT IT SAYS. `> 1` is
+# untouched. What changed is that a "position" is now `<model uri>:<line>` and
+# not a viewport pixel — see the probe's `caretMark` for the measurement that
+# forced it: four consecutive genuine moves at one identical `y`, because
+# revealing a line by centring it scrolls the pane by exactly the distance the
+# caret travelled. The set is also no longer seeded with a pre-step read, so
+# the STEPS must span these positions on their own.
+#
+# THAT IS WHAT THIS NUMBER USED TO BE. On the run before this change it was
+# exactly 2, and both entries were accidents: `[70, 310]` — the pixel of the
+# pre-step seed and the pixel of the ONE line the six step-OVER presses
+# reached. Driving the old gesture through the new reader reports 1, and this
+# check fails, which is the point.
 ck "$([ "${carets}" -gt 1 ] && echo ok || echo no)" \
-	"and stepping moved the painted caret through ${carets} position(s)"
+	"and stepping moved the painted caret through ${carets} distinct source position(s)"
+# AND THE CARET WENT WHERE THE SESSION WENT, EVERY STEP.
+#
+# This is the claim the gate is named for and could not make. Reading a pixel,
+# "the caret followed" was inferred from "some pixel differed from some other
+# pixel"; here the editor's painted line is compared against the line
+# `web_replay_host.nim:155` reported for that same step, and every step must
+# agree. A caret that follows the first step and then stops — the defect shape
+# this gate exists to catch — fails this and cannot fail the threshold above,
+# which a single early move already satisfies.
+#
+# `-eq taken` and `taken -eq steps_per_probe` together, because "all the steps
+# followed" is vacuous over zero steps.
+ck "$([ "${taken}" -eq "${steps_per_probe}" ] && [ "${followed}" -eq "${taken}" ] &&
+	echo ok || echo no)" \
+	"and the caret painted the engine's line on every one of ${taken} step(s) (${followed} followed) — the caret follows the session, not merely some pixel that changed"
+# THE HOST ANSWERED EVERY PRESS — AND THAT IS ALL THIS ARM SAYS.
+#
+# `caretMoveLines` has been collected since this probe was written and never
+# read. It is read now, and DEMOTED in its wording on arrival, because it
+# cannot carry the claim it looks like it carries:
+# `ui/web_replay_host.nim:155` logs `move` on every `ct/complete-move` WHETHER
+# OR NOT THE POSITION CHANGED, which its own comment says two lines above. A
+# session sitting on the last tick of the trace, going nowhere, reports a move
+# per press and satisfies this. MEASURED HERE, on this gate's own subject:
+# driving the old `#next-image` gesture six times ran the whole program on
+# press 1 and did nothing at all on presses 2-6, yet all six logged
+# `move /hello_noir/src/main.nr:11` and this arm reads 6 step(s), 0 unreported.
+#
+# It is worth asserting because a SILENT host is a real failure and it names
+# which half broke when the arm above goes red; it is not worth asserting as
+# evidence that the session moved.
+move_reports="$(field "${control}" '.caretMoveLines | length')"
+unreported="$(jq -r '[.caretMoveLines[]? | select(startswith("(no move reported"))] | length' <"${control}")"
+ck "$([ "${move_reports}" -gt 0 ] && [ "${unreported}" -eq 0 ] && echo ok || echo no)" \
+	"and the engine reported a move for every one of ${move_reports} step(s) (${unreported} unreported) — the host answered each press"
 
 painted_chars="$(field "${control}" '.editorPaintedChars')"
 raw_lines="$(field "${control}" '.editorRawLineCount')"
@@ -570,8 +638,16 @@ if run_probe "${arm_a}" "${arm_a_out}"; then
 	# nothing either — a vacuous arm that became visible the moment the
 	# control went green. The caret is the discriminating signal: it moves
 	# only when a live engine answers a step.
+	#
+	# THE READING UNDER IT CHANGED AND THIS ARM WAS RE-MEASURED ACROSS THE
+	# CHANGE. A position is now `<model uri>:<line>` rather than a viewport
+	# pixel, so "the caret never moved" is now a claim about SOURCE POSITIONS.
+	# It kills for the same reason it always did and not by accident of the
+	# old instrument: with no engine there is no `on-<line>` decoration at all,
+	# so the set is EMPTY — 0, not 1 — which is a stronger reading than a
+	# single pixel that happened not to change.
 	ck "$([ "${a_carets}" -le 1 ] && echo ok || echo no)" \
-		"arm A: and the caret never moved (${a_carets} position(s))"
+		"arm A: and the caret never moved (${a_carets} distinct source position(s))"
 	note "arm A engine requests:"
 	jq -r '.engineRequests[] | "        \(.status) \(.contentType) \(.bytes) \(.url)"' <"${arm_a_out}"
 	note "arm A milestones:"
@@ -597,9 +673,10 @@ if run_probe "${arm_b}" "${arm_b_out}"; then
 	b_carets="$(field "${arm_b_out}" '.caretPositions | length')"
 	ck "$([ "${b_resolved}" -eq 0 ] && echo ok || echo no)" \
 		"arm B: the session resolved nothing (${b_resolved})"
-	# Same correction as arm A, and for the same reason.
+	# Same correction as arm A, and for the same reason — including the
+	# re-measurement across the pixel-to-source-position change.
 	ck "$([ "${b_carets}" -le 1 ] && echo ok || echo no)" \
-		"arm B: and the caret never moved (${b_carets} position(s))"
+		"arm B: and the caret never moved (${b_carets} distinct source position(s))"
 else
 	ck no "arm B: the probe did not complete"
 fi
