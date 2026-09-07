@@ -21,10 +21,18 @@
 ## asserts the layer above it — that a DECODED event becomes the right layout
 ## command — and it feeds the decoder the exact bytes `TermAssert.sendMouseClick`
 ## writes, which is the same standard `app/tests/test_call_stack_keys.nim` holds
-## itself to for the same decoder. A pty case that drives a layout gesture end
-## to end needs the product's input loop to route mouse reports into a
-## `LayoutBinding`, and `src/frontend/tui/main.nim` does not do that yet; that
-## is recorded in PLAT-6's status rather than papered over here.
+## itself to for the same decoder.
+##
+## **The pty case that this note used to say did not exist now does.** It said:
+## "a pty case that drives a layout gesture end to end needs the product's input
+## loop to route mouse reports into a `LayoutBinding`, and
+## `src/frontend/tui/main.nim` does not do that yet". `app/runtime.handleToken`
+## routes them as of PLAT-6's fourth pass; `app/tests/
+## test_layout_command_routing.nim` owns the in-process half of that wiring and
+## `tests/real_terminal/test_real_layout_mouse.nim` drags a pane onto a dock
+## edge through a real pty. What stays here is unchanged and is still the right
+## tier: every gesture asserted on the resulting `Layout`, and the hit-test swept
+## cell by cell.
 ##
 ## ## No mocks
 ##

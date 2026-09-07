@@ -304,6 +304,72 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   if result.dispatch.status == drDone:
     outcome.awaitsMove = true
 
+proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
+                      outcome: var RuntimeOutcome) =
+  ## **PLAT-6's MOUSE HALF.** One decoded SGR-1006 report, as a layout gesture.
+  ##
+  ## This is the twin of `runPromptLine`'s layout-verb prefix and it closes the
+  ## same kind of gap: `binding.onMouse`, `beginDrag`, `hoverAt` and `dropDrag`
+  ## were reachable only from a test that constructed a `LayoutBinding`, so with
+  ## `--layout-binding` on a typed `:dock bottom` rearranged a real terminal and
+  ## a mouse drag did nothing. `host/terminal_driver` already enables SGR-1006
+  ## when the capability was negotiated, already frames a whole report into one
+  ## token, and `app/input/mouse.decodeMouse` already parses it; the only thing
+  ## missing was this call.
+  ##
+  ## ## PRECEDENCE, WHICH IS THE PART THAT IS A DECISION RATHER THAN A WIRING
+  ##
+  ## **Nothing else in this front-end consumes a mouse report today**, and that
+  ## is measured rather than assumed. CTUI-6's `input/call_stack_keys.applyMouse`
+  ## and CTUI-8's `input/timeline_keys.applyMouse` exist and are asserted, and
+  ## each is reached from exactly one place: its own module's `applyKey` /
+  ## `applyToken`, which in turn is called only from `tests/apps/
+  ## app_call_stack.nim` and `tests/apps/app_timeline.nim`. No path from this
+  ## module reaches either. So there is no contest to resolve, and the rule
+  ## below is written for when there is one:
+  ##
+  ##   * **The layout binding is offered the report first, and consumes it.**
+  ##     Every cell of the body belongs to the layout — a dock strip, a tab
+  ##     strip, a pane's title row, or a pane's body — and `onMouse` already
+  ##     distinguishes them. In the last case what it does is FOCUS that pane,
+  ##     which is what a pane-level consumer would need to have happened first
+  ##     in any case.
+  ##   * **`lasNoGesture` is the seam.** It is the value that means "the layout
+  ##     did not act on this", and it is where a pane router belongs when a pane
+  ##     grows a mouse contract — a wheel over a pane body already answers it by
+  ##     name, precisely so scrolling can be handed on rather than stolen.
+  ##
+  ## ## THE TWO FOCUS NOTIONS ARE SYNCHRONISED IN BOTH DIRECTIONS
+  ##
+  ## `LayoutBinding.focus` is what a drop acts on and `PaneFocus` is what `Tab`
+  ## and `Ctrl+w` move, exactly as in `runPromptLine` — so the binding is told
+  ## where the keyboard's focus is BEFORE the gesture. Unlike a typed verb, a
+  ## mouse press also MOVES the binding's focus (pressing in a pane's body is
+  ## how a user focuses it with a pointer), so the answer is carried BACK
+  ## afterwards. Without the return leg, clicking a pane and then pressing `Tab`
+  ## would continue the ring from wherever the keyboard had left it and the
+  ## status bar would name a pane the user is not on.
+  let binding = rt.app.layoutBinding
+  let (had, focused) = rt.focus.focusedPane()
+  if had:
+    binding.focus = focused
+  let acted = binding.onMouse(rt.layoutGeometry(), event)
+  outcome.detail = acted.message
+  rt.note(acted.message)
+  # A gesture can take a pane off the screen (a drop on a dock strip) or put one
+  # back, so the ring is re-derived from the arrangement the NEXT frame will
+  # paint — the same reason `runPromptLine` rebuilds it after a layout command —
+  # and only then is the gesture's own pane carried into it.
+  rt.rebuildFocus()
+  discard rt.focus.focusPaneKind(binding.focus)
+  # EVERY REPORT THE BINDING WAS OFFERED REPAINTS, and that is not a shrug.
+  # `LayoutAction.message` is never empty by that type's own contract — "an
+  # unknown command reports it; it never silently does nothing" — and the
+  # message has just been written to the status line, so the screen has changed
+  # whatever the binding decided. `main.nim`'s write coalescing is what keeps a
+  # dragged pointer from costing a frame per report.
+  outcome.repaint = true
+
 proc movesTheDebugger*(action: KeyAction): bool =
   ## Whether firing `action` sends a navigation command the host must pump.
   ##
@@ -392,6 +458,13 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   ## The order is the §4.1/§4.2 order and each step is here because leaving it
   ## out changes an observable behaviour:
   ##
+  ##   0. **A mouse report is not a key, and it goes to the layout binding.**
+  ##      PLAT-6, and only when a binding is enabled — see `routeMouseReport`
+  ##      for the precedence rule and `enableLayoutBinding` for the opt-in.
+  ##      Ahead of the prompt because a report is not a prompt key and
+  ##      `command_line.applyKey` answers `claUnhandled` for one (its printable
+  ##      arm requires `token.len == 1`), so taking it here removes nothing from
+  ##      an open prompt.
   ##   1. **An open prompt owns its keys first.** `command_line.applyKey`
   ##      answers `claUnhandled` for anything that is not a prompt key, so this
   ##      is a filter and not a swallow — but `Esc`, `Enter`, `Backspace`,
@@ -407,6 +480,17 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
                           action: kaNone, detail: "")
   rt.lastToken = token
   rt.lastKey = keyName(token)
+
+  # PLAT-6's MOUSE HALF, ROUTED HERE AND ONLY WHEN A BINDING IS ENABLED. The
+  # decoder is not even CALLED without one, so with the flag off this is one
+  # predicate on a nil field and the token takes exactly the path it has always
+  # taken: `keyName` answers "" for a mouse report and `keymap.resolve` reports
+  # `krNone`, which is why a mouse has been inert in this front-end until now.
+  if rt.layoutBindingEnabled():
+    let (isMouse, event) = decodeMouse(token)
+    if isMouse:
+      rt.routeMouseReport(event, result)
+      return
 
   if rt.prompt.open:
     let before = rt.prompt.buffer

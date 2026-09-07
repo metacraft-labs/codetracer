@@ -9,12 +9,14 @@ PLAT-4 owns and this binding depends on) and requires that the **named** case
 fails. A mutation killed only by some other case is MISDIRECTED and is a
 failure of this harness, not a pass.
 
-FOUR SUITES, TWO TIERS. Each arm names the suite it is graded against:
+FIVE SUITES, TWO TIERS. Each arm names the suite it is graded against:
 
   test_layout_binding.nim          Tier 1 — the binding itself
-  test_layout_command_routing.nim  Tier 1 — the opt-in and the `:` routing
-  test_real_layout_gestures.nim    Tier 2 — a gesture through a real pty
+  test_layout_command_routing.nim  Tier 1 — the opt-in, the `:` routing and
+                                            the MOUSE routing
+  test_real_layout_gestures.nim    Tier 2 — a KEYBOARD gesture through a pty
   test_real_layout_transients.nim  Tier 2 — cross-tier snapshot equivalence
+  test_real_layout_mouse.nim       Tier 2 — a MOUSE gesture through a pty
 
 The Tier-2 arms are slow — a suite compile, a CHILD compile and a handful of
 pty round trips apiece — and they are here anyway, because the two rows PLAT-6
@@ -44,10 +46,17 @@ signal read is an exit status, and reporting it as "killed" credits an arm that
 was never executed. **Verdicts are parsed from `[OK]` / `[FAILED]` lines and
 never from an exit status**, because a compile error also exits non-zero.
 
-DECLARED SURVIVORS ARE A DELIVERABLE. A harness that kills everything says as
-little as one that kills nothing, so two arms below are behaviour-preserving
-rewrites that MUST survive; an arm that starts being killed is reported as a
-problem in its own right.
+DECLARED SURVIVORS ARE A DELIVERABLE, AND EVERY KILL ARM ADDED SINCE M30 NAMES
+ITS OWN. A harness that kills everything says as little as one that kills
+nothing, so the arms at the bottom are behaviour-preserving rewrites that MUST
+survive; an arm that starts being killed is reported as a problem in its own
+right. The pairing is written at both ends: M5/M26 ← S3, M30 ← S9, M33/M33B ← S5,
+M34 ← S6, M35 and M31 ← S8, M36 ← S7. Without the control, "the case reddens
+when this line changes" is all an arm establishes.
+
+S9 is here because M30 shipped WITHOUT a control and an independent pass had to
+write one by hand, off the record. An arm that lives only in somebody's terminal
+is not part of the harness, so it is spelled out below.
 
 `test_layout_binding.nim`'s last case asserts a RUNTIME ASSERTION COUNT, so an
 arm that changes how many `ck`s run reddens that case as well as its own. That
@@ -78,6 +87,7 @@ SUITE = "src/frontend/tui/app/tests/test_layout_binding.nim"
 ROUTE = "src/frontend/tui/app/tests/test_layout_command_routing.nim"
 GEST = "src/frontend/tui/tests/real_terminal/test_real_layout_gestures.nim"
 TRANS = "src/frontend/tui/tests/real_terminal/test_real_layout_transients.nim"
+MOUSE_SUITE = "src/frontend/tui/tests/real_terminal/test_real_layout_mouse.nim"
 
 BIND = "src/frontend/tui/app/layout/binding.nim"
 TABS = "src/frontend/tui/app/layout/tab_strip.nim"
@@ -86,7 +96,8 @@ RUNTIME = "src/frontend/tui/app/runtime.nim"
 INTER = "src/frontend/headless_app/layout_interaction.nim"
 MODEL = "src/frontend/headless_app/layout_model.nim"
 
-TOUCHED = [SUITE, ROUTE, GEST, TRANS, BIND, TABS, MOUSE, RUNTIME, INTER, MODEL]
+TOUCHED = [SUITE, ROUTE, GEST, TRANS, MOUSE_SUITE, BIND, TABS, MOUSE, RUNTIME,
+           INTER, MODEL]
 
 # THE TWO TIER-2 SUITES NEED THREE MORE `--path`s and they spawn a child in a
 # real pty, so an arm against one costs a compile, a CHILD compile and a
@@ -94,7 +105,7 @@ TOUCHED = [SUITE, ROUTE, GEST, TRANS, BIND, TABS, MOUSE, RUNTIME, INTER, MODEL]
 # milestone gives: the rows PLAT-6 left open were "a gesture through a real
 # pty" and "cross-tier snapshot equivalence", and an arm that only ever runs
 # the Tier-1 suite cannot say whether either of those checks has teeth.
-TIER2 = {GEST, TRANS}
+TIER2 = {GEST, TRANS, MOUSE_SUITE}
 TIER2_PATHS = ["--path:../TermAssert/src", "--path:../TermAssertClient/src",
                "--path:../nim-libvterm/src"]
 
@@ -131,8 +142,20 @@ R_SPEC43 = "\u00a74.3 is untouched: its own commands still reach the interpreter
 R_VERBS = "every verb is reachable from the prompt, and none of them is silent"
 R_RESIZE = "a resize re-flows an untouched arrangement and leaves a gestured one"
 
+# The MOUSE half of the routing suite, added when `handleToken` started routing
+# mouse reports into the binding — the row PLAT-6 stayed `partial` for a second
+# time.
+R_MOUSEOFF = "OFF BY DEFAULT: a mouse report is the inert token it always was"
+R_MOUSEDRAG = "a mouse DRAG docks the pane it picked up, through handleToken"
+R_MOUSEFOCUS = "a mouse press moves the focus RING, not only the binding's focus"
+R_CLICKWHEEL = ("a click activates a tab and a wheel scrolls the strip, "
+                "through handleToken")
+R_PROMPT = "a mouse report does not disturb an open prompt"
+R_EDGES = "which dock edges a real drag can reach, measured rather than argued"
+
 ROUTE_CASES = [R_OFF, R_SAME, R_DOCK, R_FOCUS, R_SPEC43, R_VERBS, R_RESIZE,
-               C_COUNT]
+               R_MOUSEOFF, R_MOUSEDRAG, R_MOUSEFOCUS, R_CLICKWHEEL, R_PROMPT,
+               R_EDGES, C_COUNT]
 
 # The gesture suite (Tier 2) — a real pty.
 G_DOCK = "`:dock bottom` typed as real bytes rearranges a real terminal"
@@ -149,11 +172,20 @@ T_ARM = "MUTATION ARM: a changed cell fails the comparison and names it"
 
 TRANS_CASES = [T_EQUAL, T_MODEL, T_ARM, C_COUNT]
 
+# The mouse suite (Tier 2) — a real drag on a real pty, and beside it the
+# absolute probe that survives both tiers being wrong together.
+M_DRAG = "a mouse DRAG typed as real bytes docks a pane on a real terminal"
+M_MODEL = "the decorations a mouse gesture draws are what the MODEL says"
+M_BYTES = "the bytes this file writes are the bytes the harness writes"
+
+MOUSE_CASES = [M_DRAG, M_MODEL, M_BYTES, C_COUNT]
+
 SUITE_CASES = {
     SUITE: PLAT6_CASES,
     ROUTE: ROUTE_CASES,
     GEST: GEST_CASES,
     TRANS: TRANS_CASES,
+    MOUSE_SUITE: MOUSE_CASES,
 }
 
 
@@ -528,6 +560,89 @@ MUTATIONS = [
         "stay at the size the session started on",
         suite=ROUTE,
     ),
+    # --- the MOUSE half of the routing (PLAT-6's second follow-up) ---------
+    #
+    # `binding.onMouse`, `beginDrag`, `hoverAt` and `dropDrag` had no caller
+    # outside their own module and `test_layout_binding.nim`; `handleToken`
+    # routed the twelve `:` verbs and no mouse report. These four arms grade
+    # the wiring that closes that, and EVERY ONE OF THEM HAS A NAMED
+    # BEHAVIOUR-PRESERVING CONTROL below — M33/M33B ← S5, M34 ← S6, M35 ← S8,
+    # M36 ← S7 — so that "the case reddens when this neighbourhood is edited"
+    # is excluded rather than assumed. M30 shipped without one and a verifier
+    # had to add it.
+    Mutation(
+        "M33", RUNTIME,
+        "    if isMouse:",
+        "    if false:",
+        R_MOUSEDRAG,
+        "`handleToken` stops offering a decoded mouse report to the binding, "
+        "which is the state PLAT-6 landed in",
+        suite=ROUTE,
+    ),
+    Mutation(
+        "M33B", RUNTIME,
+        "    if isMouse:",
+        "    if false:",
+        M_DRAG,
+        "the same defect, seen from a REAL PTY: a press and a release written "
+        "as SGR-1006 bytes no longer rearrange the terminal. THE SAME "
+        "MUTATION AS M33 AT THE OTHER TIER, which is what says the pty case "
+        "is load-bearing rather than a slow restatement of the in-process one",
+        suite=MOUSE_SUITE,
+    ),
+    Mutation(
+        "M34", RUNTIME,
+        "  discard rt.focus.focusPaneKind(binding.focus)",
+        "  discard binding.focus",
+        R_MOUSEFOCUS,
+        "the RETURN LEG of the focus synchronisation goes. A mouse press moves "
+        "the binding's focus and the ring never hears about it, so `Tab` "
+        "continues from where the keyboard left off and a verb typed after a "
+        "click acts on the wrong pane",
+        suite=ROUTE,
+    ),
+    Mutation(
+        "M35", BIND,
+        "    let glyph = glyphFor(d.kind)",
+        "    let glyph = DockStripGlyph",
+        M_MODEL,
+        "M31's defect, graded against the MOUSE suite: every decoration is "
+        "painted with one glyph. Both tiers paint the same wrong screen, so "
+        "the cell-for-cell comparison is DECLARED SPARED and stays green; only "
+        "the absolute probe — each decoration's rectangle from "
+        "`decorationsFor`, required to carry THAT KIND's glyph on the real "
+        "terminal — dies. The drag reaches two kinds with two glyphs, which is "
+        "what makes that possible at all",
+        suite=MOUSE_SUITE,
+        spares=(M_DRAG,),
+    ),
+    Mutation(
+        "M36", BIND,
+        "  var best = dl\n"
+        "  var zone = dzOutsideLeft\n"
+        "  if dr < best:\n"
+        "    best = dr\n"
+        "    zone = dzOutsideRight\n"
+        "  if dt < best:\n"
+        "    best = dt\n"
+        "    zone = dzOutsideTop\n"
+        "  if db < best:\n"
+        "    zone = dzOutsideBottom\n"
+        "  zone",
+        "  var best = dl\n"
+        "  var zone = dzOutsideLeft\n"
+        "  discard best\n"
+        "  discard dr\n"
+        "  discard dt\n"
+        "  discard db\n"
+        "  zone",
+        R_EDGES,
+        "every cell outside the tree area resolves to the LEFT dock edge. The "
+        "arm for the medium claim PLAT-6 recorded and this pass re-measured: "
+        "a sweep that reported the wrong set of reachable edges would be "
+        "indistinguishable from one that reported the right one without it",
+        suite=ROUTE,
+    ),
 ]
 
 DECLARED_SURVIVORS = [
@@ -574,6 +689,77 @@ DECLARED_SURVIVORS = [
         "asserts the OFF arm at three geometries and the ON arm at twenty, so "
         "a suite that reddened here would be reporting the spelling rather "
         "than the behaviour.",
+        suite=ROUTE,
+    ),
+    # --- the controls for the four mouse arms ------------------------------
+    Mutation(
+        "S5", RUNTIME,
+        "    let (isMouse, event) = decodeMouse(token)\n"
+        "    if isMouse:\n"
+        "      rt.routeMouseReport(event, result)\n"
+        "      return",
+        "    let decoded = decodeMouse(token)\n"
+        "    if decoded[0]:\n"
+        "      rt.routeMouseReport(decoded[1], result)\n"
+        "      return",
+        "",
+        "The decoder's answer destructured by index rather than by name — the "
+        "same two values, the same call. IT MUST SURVIVE, and it is THE "
+        "CONTROL FOR M33 AND M33B: both edit this branch, so a suite that "
+        "reddened on any edit to it would make neither of them evidence about "
+        "the routing rather than about the spelling.",
+        suite=ROUTE,
+    ),
+    Mutation(
+        "S6", RUNTIME,
+        "  rt.rebuildFocus()\n"
+        "  discard rt.focus.focusPaneKind(binding.focus)",
+        "  rt.rebuildFocus()\n"
+        "  let carried = rt.focus.focusPaneKind(binding.focus)\n"
+        "  discard carried",
+        "",
+        "The return leg's result named before it is discarded. IT MUST "
+        "SURVIVE, and it is THE CONTROL FOR M34, which deletes the call on "
+        "this very line.",
+        suite=ROUTE,
+    ),
+    Mutation(
+        "S7", BIND,
+        "  let db = body.row + body.height - 1 - row",
+        "  let db = (body.row + body.height) - (row + 1)",
+        "",
+        "The bottom distance re-associated — the same integer for every input. "
+        "IT MUST SURVIVE, and it is THE CONTROL FOR M36, which rewrites the "
+        "comparison chain these four distances feed.",
+        suite=ROUTE,
+    ),
+    Mutation(
+        "S8", BIND,
+        "    let right = d.area.col + d.area.width",
+        "    let right = d.area.width + d.area.col",
+        "",
+        "The decoration's right edge with the addition commuted. IT MUST "
+        "SURVIVE, and it is THE CONTROL FOR M35 (and, retrospectively, for "
+        "M31): both edit `paintDecorations`' per-decoration preamble, so an "
+        "absolute probe that reddened on any edit there would be reporting the "
+        "neighbourhood rather than the glyph table.",
+        suite=MOUSE_SUITE,
+    ),
+    Mutation(
+        "S9", RUNTIME,
+        "      let (had, focused) = rt.focus.focusedPane()\n"
+        "      if had:\n"
+        "        rt.app.layoutBinding.focus = focused",
+        "      let picked = rt.focus.focusedPane()\n"
+        "      if picked[0]:\n"
+        "        rt.app.layoutBinding.focus = picked[1]",
+        "",
+        "The `:` prompt's focus copy destructured by index rather than by name. "
+        "IT MUST SURVIVE, and it is THE CONTROL FOR M30, which deletes the "
+        "copy on these very lines. M30 shipped without one; an independent "
+        "pass wrote this arm by hand and it was never added, so a re-run of "
+        "the harness could not reproduce the finding that M30 measures "
+        "behaviour rather than an edit to its neighbourhood.",
         suite=ROUTE,
     ),
 ]

@@ -3701,17 +3701,33 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     is a CLONE of the session's, so enabling one by default would give the
     terminal two layout authorities; flipping it needs `HeadlessSessionSlot` to
     hold a `Layout` rather than a `LayoutNode`.
-  * ONLY THE `:` VERBS ARE ROUTED INTO THE LAYOUT BINDING.  `binding.onMouse`,
-    `beginDrag`, `hoverAt` and `dropDrag` have NO caller outside
-    `app/layout/binding.nim` and `app/tests/test_layout_binding.nim`:
-    `runtime.handleToken` routes no mouse report into the binding, so with
-    `--layout-binding` on a typed `:dock bottom` rearranges the panes and a
-    MOUSE DRAG DOES NOTHING.  Mouse tokens do reach the app —
-    `call_stack_keys` and `timeline_keys` each call `decodeMouse` for their own
-    pane — so wiring it is small; what is NOT small is deciding precedence
-    against those two.  Do not read the Tier-1 mouse cases as evidence that the
-    gesture works in the product: they decode the SGR bytes themselves and hand
-    the event straight to `onMouse`.
+  * BOTH HALVES OF THE LAYOUT GESTURE SURFACE ARE ROUTED, behind the same
+    `--layout-binding` opt-in: `runPromptLine` takes the twelve `:` verbs and
+    `handleToken` -> `routeMouseReport` takes a decoded SGR-1006 report into
+    `binding.onMouse`.  With the flag OFF `decodeMouse` is not even called and a
+    mouse report takes the path it always took — `keyName` answers "" and
+    `keymap.resolve` reports `krNone`.
+    THE LAYOUT BINDING IS THE ONLY MOUSE CONSUMER IN THIS FRONT-END, and that
+    was measured rather than assumed: `call_stack_keys.applyMouse` and
+    `timeline_keys.applyMouse` are each reached only from their own module's
+    `applyKey` / `applyToken`, and those only from `tests/apps/app_call_stack
+    .nim` and `tests/apps/app_timeline.nim`.  (An earlier note here called that
+    precedence question "the part that is NOT small"; there was no contest at
+    all.)  `lasNoGesture` is the seam a pane's own mouse contract belongs at
+    when one is wired.
+  * A MOUSE GESTURE'S FOCUS SYNC HAS A RETURN LEG THE `:` PATH DOES NOT NEED.
+    A typed verb cannot move `LayoutBinding.focus`; a mouse press can, so
+    `routeMouseReport` rebuilds the ring and then carries the binding's answer
+    back into it.  KNOWN GAP, recorded 2026-09-07: the REBUILD on the mouse
+    path has no arm — deleting `rt.rebuildFocus()` there leaves `Tab` offering a
+    pane a drop just docked away and every case stays green.  The `:` path does
+    assert it ("the pane a verb acts on is the one Tab moved to" ends with
+    `offered == 0`); the mouse path does not.
+  * A REARRANGED TERMINAL LAYOUT IS NOT PERSISTED.  `binding.saveDocument` and
+    `restoreDocument` wrap PLAT-4's `saveLayout` / `restoreLayoutDocument` and
+    have no caller outside the two Tier-1 suites — nothing in `runtime.nim`,
+    `main.nim` or `host/` writes one or reads one back, so an arrangement does
+    not survive a restart.
   * `LayoutBinding.focus` AND `TuiRuntime.focus` ARE TWO DIFFERENT FOCUS
     NOTIONS, and `runPromptLine` synchronises them before every layout command.
     `PaneFocus` is what `Tab` / `Ctrl+w` move; `LayoutBinding.focus` is what

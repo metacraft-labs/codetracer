@@ -14,6 +14,25 @@
 ## through a real pty. This one owns the parts a terminal cannot answer: the
 ## resulting `Layout`, and the screen a NON-bound runtime paints.
 ##
+## ## THE MOUSE HALF, ADDED AFTER THE FIRST CLOSING PASS
+##
+## PLAT-6 stayed `partial` a second time for a row nobody had ticked honestly:
+## `binding.onMouse`, `beginDrag`, `hoverAt` and `dropDrag` had no caller
+## outside their own module and `test_layout_binding.nim`. `handleToken` routed
+## the twelve `:` verbs and NO mouse report, so with `--layout-binding` on a
+## typed `:dock bottom` rearranged a real terminal and a mouse drag did nothing.
+## `runtime.routeMouseReport` is the wiring; the cases below are its Tier-1
+## half, and `tests/real_terminal/test_real_layout_mouse.nim` drives the same
+## drag through a real pty.
+##
+## One of them is a RECHECK rather than a new assertion. The milestone recorded
+## that a mouse drop can reach only the top and the bottom dock edges until
+## something is docked left or right — a claim written about a gesture no input
+## path reached. "which dock edges a real drag can reach" sweeps every cell of
+## the screen for the set, commits four aimed drags through `handleToken`, and
+## then asserts the claim's second half by docking one pane left and sweeping
+## again.
+##
 ## ## THE HALF THAT MATTERS MOST IS THE OFF ARM
 ##
 ## The binding is an OPT-IN and PLAT-6's whole "byte-identical screens" claim
@@ -50,7 +69,7 @@
 ## that calls `check` is a `template`; the ones that are `proc`s return values
 ## and call `check` nowhere.
 
-import std/[json, options, strutils, unittest]
+import std/[algorithm, json, options, strutils, unittest]
 
 import headless_app/layout_model
 
@@ -60,7 +79,7 @@ import ../theme/capabilities
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 288
+const ExpectedAssertions = 402
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -104,6 +123,53 @@ proc focusedPaneOf(rt: TuiRuntime): PaneKind =
 
 proc bodyRows(rt: TuiRuntime): seq[string] =
   rt.shellScreenOf().rows
+
+proc sgrReport(button, row, col: int; pressed: bool): string =
+  ## One SGR-1006 report, in the EXACT bytes a terminal puts on the wire.
+  ##
+  ## Written out here rather than taken from a helper, and both halves of that
+  ## matter. `TermAssert.sendMouseClick` can only write a press and a release at
+  ## the SAME cell — which is a click, not a drag — so a drag has to be spelled
+  ## by hand whatever this file does; and Verification-Harness-Traps §9 is about
+  ## exactly the cost of trusting an input helper that quietly narrows what it
+  ## was asked for. The coordinates are ONE-BASED on the wire (`app/input/
+  ## mouse.nim`'s header), which is why every argument here is zero-based and
+  ## every field below is `+ 1`: a decoder that stopped subtracting would agree
+  ## with a test that had also stopped adding, so the offset is written on the
+  ## far side of the decoder from the assertion.
+  "\x1b[<" & $button & ";" & $(col + 1) & ";" & $(row + 1) &
+    (if pressed: "M" else: "m")
+
+proc dockedEdgeOf(rt: TuiRuntime; pane: PaneKind): (bool, LayoutEdge) =
+  ## Which edge `pane` is auto-hidden on, read from the layout itself.
+  for edge in [leLeft, leRight, leTop, leBottom]:
+    for d in rt.app.layoutBinding.layout.dockedAt(edge):
+      if d.pane == pane:
+        return (true, edge)
+  (false, leLeft)
+
+proc dockEdgesADropCanReach(rt: TuiRuntime; dragged: PaneKind;
+                            cols, rows: int): seq[string] =
+  ## Every dock edge a DROP can land on, swept over every cell of the screen.
+  ##
+  ## The gesture is begun and cancelled per cell, so nothing is committed and
+  ## the geometry the sweep measures against cannot move underneath it.
+  ## `cancel` takes no layout and therefore cannot have changed one — the
+  ## binding's own suite asserts that separately.
+  result = @[]
+  let b = rt.app.layoutBinding
+  let geom = rt.layoutGeometry()
+  for row in 0 ..< rows:
+    for col in 0 ..< cols:
+      discard b.beginDrag(dragged)
+      discard b.hoverAt(geom, row, col)
+      if b.interaction.hover.isSome and
+         b.interaction.hover.get.kind == dtDockEdge:
+        let side = $b.interaction.hover.get.region.side
+        if side notin result:
+          result.add side
+      discard b.cancelGesture()
+  result.sort()
 
 proc dockStripRowOf(rt: TuiRuntime): int =
   ## The row a BOTTOM dock strip occupies, read from the binding's own geometry
@@ -373,6 +439,238 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
       # the screen still has the right number of them.
       ck rt.dockStripRowOf() >= 0
       ck rt.bodyRows().len == 60
+
+  test "OFF BY DEFAULT: a mouse report is the inert token it always was":
+    # THE MOUSE HALF'S OFF ARM, and it is the same statement the verb arm above
+    # makes: without a binding the decoder is not even CALLED, `keyName` answers
+    # "" for a mouse report, `keymap.resolve` reports `krNone`, and nothing
+    # happens — which is what a mouse has done in this front-end since CTUI-6
+    # extracted the decoder.
+    var tokensChecked = 0
+    for g in Geometries:
+      let rt = newRuntime(g.cols, g.rows)
+      ck not rt.layoutBindingEnabled()
+      let before = rt.bodyRows()
+      for token in [sgrReport(0, 2, 2, true), sgrReport(0, 5, 9, false),
+                    sgrReport(65, 3, 3, true), sgrReport(64, 3, 3, true)]:
+        inc tokensChecked
+        let outcome = rt.handleToken(token, 0'i64)
+        ck not outcome.repaint
+        ck not outcome.quit
+        ck outcome.detail.len == 0
+        ck outcome.action == kaNone
+      ck rt.app.notification.len == 0
+      ck rt.app.layoutBinding.isNil
+      ck rt.bodyRows() == before
+    checkpoint("mouse tokens delivered with no binding: " & $tokensChecked)
+    ck tokensChecked == 4 * Geometries.len
+
+  test "a mouse DRAG docks the pane it picked up, through handleToken":
+    # **THE ROW PLAT-6 STAYED `partial` FOR.** `binding.onMouse`, `beginDrag`,
+    # `hoverAt` and `dropDrag` had no caller outside their own module and its
+    # own suite: `handleToken` routed the twelve `:` verbs and no mouse report,
+    # so with `--layout-binding` on a typed command rearranged a terminal and a
+    # drag did nothing. This is the gesture, driven the way the product drives
+    # it — the exact bytes a terminal delivers, through `handleToken`.
+    let rt = newRuntime(80, 24)
+    discard rt.enableLayoutBinding()
+    let source = rt.layoutGeometry().regionOfPane(paneCalltrace)
+    checkpoint("the call-stack pane is at " & $source)
+    ck not source.isEmptyArea
+    ck rt.focusedPaneOf() == paneCalltrace
+    ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) < 0
+
+    # PRESS on a bare pane's own title row picks it up.
+    let pressed = rt.handleToken(
+      sgrReport(0, source.row, source.col, true), 0'i64)
+    checkpoint("press -> " & pressed.detail)
+    ck pressed.repaint
+    ck not pressed.quit
+    ck rt.app.layoutBinding.interaction.kind == ikDraggingTab
+    ck rt.app.layoutBinding.interaction.source == paneCalltrace
+    # …and the drag GHOST is on the frame the next paint would produce, which
+    # is the half an assertion about the model alone would miss.
+    var ghosts = 0
+    for d in rt.shellScreenOf().decorations:
+      if d.kind == ldDragGhost:
+        inc ghosts
+    ck ghosts == 1
+
+    # RELEASE outside the tree area — the header row — docks it.
+    let dropped = rt.handleToken(sgrReport(0, 0, 40, false), 0'i64)
+    checkpoint("release on the header row -> " & dropped.detail)
+    ck dropped.repaint
+    ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) >= 0
+    ck not rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
+    ck rt.app.layoutBinding.userModified
+    ck rt.app.layoutBinding.interaction.kind == ikNone
+    let (docked, edge) = rt.dockedEdgeOf(paneCalltrace)
+    ck docked
+    ck edge == leTop
+    # THE SCREEN. A top strip exists, one row deep, carrying the pane's title.
+    var strips = 0
+    for d in rt.shellScreenOf().decorations:
+      if d.kind == ldDockStrip:
+        inc strips
+        ck d.area.height == DockStripThickness
+    ck strips == 1
+
+    # …AND `:undo-layout`, through the prompt, puts it back — which says the
+    # gesture went onto the SAME undo log a typed verb uses rather than beside
+    # it.
+    discard rt.typeLine("undo-layout")
+    ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) < 0
+    ck rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
+
+  test "a mouse press moves the focus RING, not only the binding's focus":
+    # THE RETURN LEG OF THE FOCUS SYNCHRONISATION. `runPromptLine` only has to
+    # push `PaneFocus` into the binding, because a typed verb cannot move the
+    # binding's focus; a mouse press CAN — pressing in a pane's body is how a
+    # user focuses it with a pointer — so `routeMouseReport` carries the answer
+    # back. Without the return leg `Tab` continues the ring from wherever the
+    # keyboard left it and the status bar names a pane the user is not on.
+    let rt = newRuntime(80, 24)
+    discard rt.enableLayoutBinding()
+    ck rt.focusedPaneOf() == paneCalltrace
+    let editor = rt.layoutGeometry().regionOfPane(paneEditor)
+    checkpoint("the editor pane is at " & $editor)
+    ck not editor.isEmptyArea
+    ck editor.height > 1
+
+    # INSIDE THE BODY, not on the title row: a press on the title row picks the
+    # pane UP, and the arm under test here is the other one.
+    let o = rt.handleToken(
+      sgrReport(0, editor.row + 1, editor.col + 1, true), 0'i64)
+    checkpoint("press inside the editor -> " & o.detail)
+    ck o.repaint
+    ck rt.app.layoutBinding.interaction.kind == ikNone
+    ck rt.app.layoutBinding.focus == paneEditor
+    ck rt.focusedPaneOf() == paneEditor
+    # AND THE TWO NOTIONS ARE ONE: a verb typed straight afterwards acts on the
+    # pane the POINTER chose.
+    discard rt.typeLine("dock bottom")
+    ck rt.app.layoutBinding.layout.dockedIndex(paneEditor) >= 0
+    ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) < 0
+
+  test "a click activates a tab and a wheel scrolls the strip, through handleToken":
+    # PRESS AND RELEASE ON ONE CELL IS A CLICK — which is exactly what
+    # `TermAssert.sendMouseClick` writes — and buttons 64/65 are the wheel on
+    # the same protocol. Both reach the binding through `handleToken` here.
+    let rt = newRuntime(80, 24)
+    discard rt.enableLayoutBinding()
+    var stackRow = -1
+    var stackCol = -1
+    var tabs: seq[string] = @[]
+    var active = -1
+    for r in rt.layoutGeometry().projection.regions:
+      if r.activeTab >= 0 and r.tabs.len > 0:
+        stackRow = r.area.row
+        stackCol = r.area.col
+        tabs = r.tabs
+        active = r.activeTab
+        break
+    checkpoint("the Compact profile's stack is " & $tabs & ", active " & $active)
+    ck tabs.len >= 3
+    ck active == 0
+    ck stackRow >= 0
+
+    # A CLICK on the second tab.
+    let spans = tabSpans(tabs, active)
+    ck spans.len == tabs.len
+    let secondCol = stackCol + spans[1].startCol + 1
+    discard rt.handleToken(sgrReport(0, stackRow, secondCol, true), 0'i64)
+    let clicked = rt.handleToken(sgrReport(0, stackRow, secondCol, false), 0'i64)
+    checkpoint("click on tab 1 -> " & clicked.detail)
+    ck clicked.repaint
+    ck clicked.detail.contains("activateTab")
+    ck rt.app.layoutBinding.interaction.kind == ikNone
+    var activeNow = -1
+    for r in rt.layoutGeometry().projection.regions:
+      if r.activeTab >= 0 and r.tabs.len > 0:
+        activeNow = r.activeTab
+        break
+    ck activeNow == 1
+
+    # A WHEEL on the same strip moves it on again.
+    let scrolled = rt.handleToken(sgrReport(65, stackRow, stackCol, true), 0'i64)
+    checkpoint("wheel down on the strip -> " & scrolled.detail)
+    ck scrolled.repaint
+    var activeAfter = -1
+    for r in rt.layoutGeometry().projection.regions:
+      if r.activeTab >= 0 and r.tabs.len > 0:
+        activeAfter = r.activeTab
+        break
+    ck activeAfter == 2
+
+  test "a mouse report does not disturb an open prompt":
+    # THE PRECEDENCE, ASSERTED RATHER THAN DOCUMENTED. A report is routed AHEAD
+    # of the prompt because it is not a prompt key — `command_line.applyKey`
+    # answers `claUnhandled` for one, its printable arm requiring
+    # `token.len == 1` — so the prompt keeps its buffer and stays open while the
+    # gesture happens underneath it.
+    let rt = newRuntime(80, 24)
+    discard rt.enableLayoutBinding()
+    discard rt.handleToken(":", 0'i64)
+    for ch in "dock bo":
+      discard rt.handleToken($ch, 0'i64)
+    ck rt.prompt.open
+    ck rt.prompt.buffer == "dock bo"
+    let source = rt.layoutGeometry().regionOfPane(paneCalltrace)
+    discard rt.handleToken(sgrReport(0, source.row, source.col, true), 0'i64)
+    ck rt.prompt.open
+    ck rt.prompt.buffer == "dock bo"
+    ck rt.app.layoutBinding.interaction.kind == ikDraggingTab
+    discard rt.handleToken(sgrReport(0, 0, 40, false), 0'i64)
+    ck rt.prompt.buffer == "dock bo"
+    ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) >= 0
+
+  test "which dock edges a real drag can reach, measured rather than argued":
+    # **PLAT-6's MEDIUM CLAIM, RECHECKED NOW THAT THE GESTURE IS REACHABLE.**
+    # The milestone recorded, as a property of the medium rather than a gap in
+    # the model, that a mouse drop can reach only the TOP and the BOTTOM dock
+    # edges until something is docked left or right — a drop docks when it
+    # lands outside the tree area, and a terminal has no column left of column
+    # 0. That was written about a gesture no input path reached. It is swept
+    # here over every cell of the screen and then COMMITTED for real.
+    let rt = newRuntime(80, 24)
+    discard rt.enableLayoutBinding()
+    let reached = rt.dockEdgesADropCanReach(paneCalltrace, 80, 24)
+    checkpoint("with nothing docked, a drop reaches: " & $reached)
+    # EXACT, not "does not contain left" — trap 4's rule: a sweep that resolved
+    # nothing would satisfy every negative assertion over it, and the set's
+    # membership is knowable.
+    ck reached == @["bottom", "top"]
+
+    # COMMITTED THROUGH `handleToken`, so the sweep above is not the only
+    # witness. Four aimed drags: the two rows outside the body dock, and the
+    # two columns a user would aim at for `left` and `right` do not.
+    var dragsMade = 0
+    for probe in [(0, 40, true, "the header row"),
+                  (23, 40, true, "the status row"),
+                  (12, 0, false, "column 0, mid-height"),
+                  (12, 79, false, "the last column, mid-height")]:
+      inc dragsMade
+      let r = newRuntime(80, 24)
+      discard r.enableLayoutBinding()
+      let src = r.layoutGeometry().regionOfPane(paneCalltrace)
+      discard r.handleToken(sgrReport(0, src.row, src.col, true), 0'i64)
+      let o = r.handleToken(sgrReport(0, probe[0], probe[1], false), 0'i64)
+      checkpoint("a drag onto " & probe[3] & " -> " & o.detail)
+      ck (r.app.layoutBinding.layout.dockedIndex(paneCalltrace) >= 0) == probe[2]
+    ck dragsMade == 4
+
+    # THE CLAIM'S SECOND HALF, and it is the positive twin that stops the first
+    # from being a statement about a sweep that reaches nothing: `:dock left` is
+    # how that edge is first reached, and once a strip is there a drop onto it
+    # works like any other.
+    let after = newRuntime(80, 24)
+    discard after.enableLayoutBinding()
+    discard after.typeLine("dock left")
+    checkpoint(":dock left -> " & after.app.notification)
+    ck after.app.layoutBinding.layout.dockedAt(leLeft).len == 1
+    let now = after.dockEdgesADropCanReach(paneEditor, 80, 24)
+    checkpoint("with one pane docked left, a drop reaches: " & $now)
+    ck now == @["bottom", "left", "top"]
 
   test "assertion count":
     checkpoint("CHECKS: " & $countedAssertions)

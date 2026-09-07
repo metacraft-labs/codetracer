@@ -1053,6 +1053,14 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
   ## existing left or right strip works like any other. That is a property of
   ## the medium, not a gap in the model: a pixel front-end has margin outside
   ## its layout area and reaches all four the same way.
+  ##
+  ## That paragraph was written before anything called this routine, and it has
+  ## since been MEASURED rather than left as reasoning: `app/tests/
+  ## test_layout_command_routing.nim`'s "which dock edges a real drag can reach"
+  ## sweeps every cell of an 80x24 screen through `hoverAt` (the set is exactly
+  ## `{top, bottom}`), commits four aimed drags through `runtime.handleToken`,
+  ## and sweeps again after one `:dock left` (the set becomes
+  ## `{bottom, left, top}`).
   case event.button
   of mbWheelUp, mbWheelDown:
     if event.kind != mekPress:

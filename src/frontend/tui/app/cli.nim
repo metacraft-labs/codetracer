@@ -113,10 +113,15 @@ type
         ## A MODE RATHER THAN A CAPABILITY, which is why it is a `bool` here
         ## and not a field of `CapabilityFlags`: it says nothing about what the
         ## terminal can do. With it the front-end gives itself a
-        ## `LayoutBinding` (`app/runtime.enableLayoutBinding`) and the `:`
+        ## `LayoutBinding` (`app/runtime.enableLayoutBinding`), the `:`
         ## prompt's twelve layout verbs — `:move-tab`, `:dock`, `:resize`, … —
-        ## reach it; without it the shell paints the session's own `LayoutNode`
-        ## exactly as CTUI-3 painted it and those words are unknown commands.
+        ## reach it, and so does the MOUSE: `runtime.handleToken` decodes an
+        ## SGR-1006 report and hands it to `binding.onMouse`, so a tab can be
+        ## dragged, a pane docked and a tab strip scrolled with a pointer.
+        ## Without it the shell paints the session's own `LayoutNode` exactly as
+        ## CTUI-3 painted it, those words are unknown commands, and a mouse
+        ## report is the inert token it has always been — the decoder is not
+        ## even called.
         ##
         ## OPT-IN, and the reason is recorded at `app/runtime
         ## .enableLayoutBinding`: a binding's tree is a CLONE of the session's,
@@ -264,7 +269,7 @@ options:
   --goto=TICK        seek to TICK before the first debugger frame
   --record-keys=FILE write every input token to FILE, one per line
   --replay-keys=FILE read input from FILE instead of the keyboard, then exit
-  --layout-binding   let : rearrange the panes (:dock, :move-tab, :resize, …)
+  --layout-binding   let : and the mouse rearrange the panes (:dock, drag, …)
   --headless         render one screen as plain text and exit — for CI
 
 The capability flags always beat the environment probe. With none of them, the
