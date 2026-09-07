@@ -45,6 +45,7 @@ import {
   threeTraceRecordingRoot,
   threeTraceSourceRoot,
 } from "../../lib/value-origin-fixtures";
+import { loadTimePrerequisite } from "../../lib/load-time-prerequisite";
 
 /**
  * The recordings, produced from this tree when the spec loads. The
@@ -56,8 +57,18 @@ import {
  * here that the recordings are the current pipeline's: a committed copy
  * would let the whole chain keep rendering after the recorder that
  * produced it had been replaced.
+ *
+ * Wrapped because it records DURING IMPORT, and a throw during import
+ * aborts Playwright's collection of the whole suite rather than this file
+ * (see `lib/load-time-prerequisite.ts`). A failure still fails every test
+ * below, with the recorder's own diagnostic.
  */
-const recordingRoot = threeTraceRecordingRoot();
+const recordingRoot = loadTimePrerequisite(
+  test,
+  "the cross-process three-trace recording",
+  threeTraceRecordingRoot,
+  "",
+);
 
 /** The demo's sources, which stay in the repository. */
 const sourceRoot = threeTraceSourceRoot();

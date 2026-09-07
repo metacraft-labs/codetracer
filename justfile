@@ -650,7 +650,22 @@ ensure-storybook-static *args:
   done
 
   if [ "$needs_storybook" -eq 1 ]; then
-    just storybook-build
+    # NOT FATAL, and this is the whole point of the recipe's placement.
+    # `just test-e2e` calls this under `set -e` BEFORE `npx playwright test`,
+    # so for as long as a failed storybook build aborted here, a broken
+    # storybook cost the run EVERY test -- 776 of them across 153 spec files
+    # -- rather than the four `*storybook*.spec.ts` that need the artefact.
+    # That is how the nixos leg reported a red Playwright step having
+    # executed nothing at all.
+    #
+    # Nothing is softened by continuing. Each of those four specs already
+    # asserts the artefact in its own `beforeAll`
+    # ("Missing StoryBook static build. Run `just storybook-build` first.")
+    # so they go red, by name, with a diagnostic that says what to run --
+    # and the other 772 tests get to answer for themselves.
+    if ! just storybook-build; then
+      echo "::error::just storybook-build failed; the *storybook*.spec.ts specs will fail on the missing storybook-static. Continuing so the rest of the suite still runs." >&2
+    fi
   fi
 
 serve-docs hostname="localhost" port="3000":

@@ -1,5 +1,6 @@
 import { test, expect } from "../../lib/fixtures";
 import { resolveRealVisualTracePath } from "../../lib/real-visual-trace";
+import { loadTimePrerequisite } from "../../lib/load-time-prerequisite";
 
 /**
  * Real-recording end-to-end smoke test for the M3+ Video Player chrome.
@@ -33,7 +34,17 @@ import { resolveRealVisualTracePath } from "../../lib/real-visual-trace";
  * ``lib/real-visual-trace.ts``.
  */
 
-const visualTracePath = resolveRealVisualTracePath();
+// Wrapped because those binary prerequisites are resolved AT IMPORT, and a
+// throw during import aborts Playwright's collection of the whole suite
+// rather than this file (see `lib/load-time-prerequisite.ts`). `ct_gfx_player`
+// is built by a macOS-only CI step, so on the nixos leg this throw alone
+// discovered 0 tests in 0 files across all 152 spec files.
+const visualTracePath = loadTimePrerequisite(
+  test,
+  "a recorded GL trace and the ct_gfx_player binaries behind it",
+  resolveRealVisualTracePath,
+  "",
+);
 
 test.describe("MCR visual replay real recording GUI integration", () => {
   test.describe.configure({ mode: "serial" });

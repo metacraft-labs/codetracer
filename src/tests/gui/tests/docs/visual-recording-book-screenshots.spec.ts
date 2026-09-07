@@ -3,9 +3,18 @@ import * as path from "node:path";
 
 import { test, expect } from "../../lib/fixtures";
 import { resolveRealVisualTracePath } from "../../lib/real-visual-trace";
+import { loadTimePrerequisite } from "../../lib/load-time-prerequisite";
 import type { Locator, Page } from "@playwright/test";
 
-const visualTracePath = resolveRealVisualTracePath();
+// Wrapped because those binary prerequisites are resolved AT IMPORT, and a
+// throw during import aborts Playwright's collection of the whole suite
+// rather than this file (see `lib/load-time-prerequisite.ts`).
+const visualTracePath = loadTimePrerequisite(
+  test,
+  "a recorded GL trace and the ct_gfx_player binaries behind it",
+  resolveRealVisualTracePath,
+  "",
+);
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
 const outputDir = process.env.CODETRACER_BOOK_SCREENSHOT_DIR
   ?? path.join(repoRoot, "docs", "book", "src", "generated", "visual_recordings");
