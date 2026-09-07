@@ -3646,3 +3646,23 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     `fitProvenance`).  A narrow pane shows the SHORT form or nothing, never a
     clipped one — `builtin.reco…` names a presenter nobody can grep for.  The
     desktop has no equivalent affordance yet.
+  * THE TRANSIENT LAYOUT MACHINE IS A SEPARATE MODULE ON PURPOSE.
+    `headless_app/layout_interaction.nim` (PLAT-5) imports
+    `headless_app/layout_model.nim`, so a `Layout` field of type
+    `Interaction`/`DropTarget` is an IMPORT CYCLE Nim rejects — that is the
+    structural check, not a review convention.  `Layout` is passed BY VALUE
+    but `Layout.tree` is a `ref`, so a routine that looks pure can still
+    write through it; the "cancelled drag is byte-identical" case compares
+    `$saveLayout(...)` for exactly that reason, and two mutation arms
+    (P3/P5 in `run-plat5-mutations.py`) plant that leak.
+  * `commit` DOES NOT DECIDE WHAT "NOTHING HAPPENED" MEANS.  It hands the
+    command to `apply` and yields `some` only on `loApplied`, so its `none`
+    and `loNoOp` cannot drift.  That is why `lcSplit`'s move arm has its own
+    `loNoOp` (via `equalTrees`) in `layout_model` rather than a shape
+    comparison in the transient layer.
+  * `lcSplit` HAS A `splitMovesPane` FLAG.  False (every PLAT-4 caller) means
+    the new pane must NOT be in the tree; true means it must be, and the
+    split MOVES it.  It exists because `commit` yields ONE command and
+    "drag a tab onto a pane's edge" had no single-command spelling.  A
+    DOCKED source still has none — `lcSplit` refuses a pane in `docked`, so
+    `dropTargetsFor` offers a docked pane no split target at all.

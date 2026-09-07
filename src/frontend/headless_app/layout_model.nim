@@ -317,6 +317,21 @@ type
       splitNewTitle*: string
       splitAxis*: SplitAxis
       splitSide*: SplitSide
+      splitMovesPane*: bool
+        ## PLAT-5. When false — every PLAT-4 caller — `splitNewPane` must NOT
+        ## be in the tree and a duplicate is `lpDuplicatePane`. When true it
+        ## must ALREADY be, and the split MOVES it: detach (§2.4's collapse
+        ## rules), then split the target with the pane that came out.
+        ##
+        ## THE FLAG EXISTS BECAUSE `commit` YIELDS ONE COMMAND. Dragging a tab
+        ## onto the edge of another pane is the headline drop gesture, and
+        ## expressing it as remove-then-add would make the transient layer a
+        ## second place that sequences layout changes — exactly what
+        ## Layout-ViewModel §4.3 forbids by saying commit produces a
+        ## `LayoutCommand` and `apply` remains the only thing that changes a
+        ## layout. The same shape as `mergeWholeRegion`: a flag on the command
+        ## rather than a tenth command kind, because it is the same operation
+        ## with a different source of the pane.
     of lcMergeIntoStack:
       mergedPane*: PaneKind
       mergeBeside*: PaneKind
@@ -588,6 +603,30 @@ proc find*(node: LayoutNode; kind: PaneKind): LayoutNode =
       return hit
   nil
 
+proc equalTrees*(a, b: LayoutNode): bool =
+  ## Structural equality over exactly the fields `toJson` writes.
+  ##
+  ## It exists so that "the command produced the layout it was already in" is
+  ## answerable for the commands whose no-op case is not a single field
+  ## comparison — `lcSplit` with `splitMovesPane`, where the pane is detached
+  ## and re-attached and only the resulting SHAPE says whether anything moved.
+  ## `apply` is the only caller, which is what keeps `loNoOp` a single
+  ## authority rather than something a transient layer decides for itself.
+  if a.isNil or b.isNil:
+    return a.isNil and b.isNil
+  if a.kind != b.kind or a.title != b.title or a.weight != b.weight:
+    return false
+  if a.kind == lnPane:
+    return a.pane == b.pane
+  if a.kind == lnStack and a.activeIndex != b.activeIndex:
+    return false
+  if a.children.len != b.children.len:
+    return false
+  for i in 0 ..< a.children.len:
+    if not equalTrees(a.children[i], b.children[i]):
+      return false
+  true
+
 # ---------------------------------------------------------------------------
 # §2.4 — the collapse rules, stated once
 #
@@ -606,7 +645,7 @@ proc activate*(node: LayoutNode; kind: PaneKind): bool
   ## more than the number of behaviours the desktop and the terminal are
   ## allowed to have.
 
-proc effectiveWeight(n: LayoutNode): float =
+proc effectiveWeight*(n: LayoutNode): float =
   ## What a renderer would actually divide by. `layout_model` documents `0` as
   ## "equal share with the other zero-weighted siblings" and one is the
   ## neutral share, so that is what a zero means here — the same rule
@@ -910,7 +949,17 @@ proc cmdMoveTab*(pane: PaneKind; beside: PaneKind; index: int): LayoutCommand =
 proc cmdSplit*(target: PaneKind; newPane: PaneKind; axis: SplitAxis;
                side: SplitSide = ssAfter; title = ""): LayoutCommand =
   LayoutCommand(kind: lcSplit, splitTarget: target, splitNewPane: newPane,
-                splitNewTitle: title, splitAxis: axis, splitSide: side)
+                splitNewTitle: title, splitAxis: axis, splitSide: side,
+                splitMovesPane: false)
+
+proc cmdSplitMove*(target: PaneKind; movedPane: PaneKind; axis: SplitAxis;
+                   side: SplitSide = ssAfter; title = ""): LayoutCommand =
+  ## `lcSplit` over a pane that is ALREADY in the tree: the drop gesture
+  ## "drag this tab to the right-hand edge of that pane". See
+  ## `splitMovesPane`.
+  LayoutCommand(kind: lcSplit, splitTarget: target, splitNewPane: movedPane,
+                splitNewTitle: title, splitAxis: axis, splitSide: side,
+                splitMovesPane: true)
 
 proc cmdMergeIntoStack*(pane: PaneKind; beside: PaneKind;
                         wholeRegion = false): LayoutCommand =
@@ -952,7 +1001,8 @@ proc `$`*(cmd: LayoutCommand): string =
     "moveTab(" & $cmd.movedPane & " -> beside " & $cmd.moveBeside & " @" &
       $cmd.moveIndex & ")"
   of lcSplit:
-    "split(" & $cmd.splitTarget & ", " & $cmd.splitNewPane & ", " &
+    (if cmd.splitMovesPane: "splitMove(" else: "split(") &
+      $cmd.splitTarget & ", " & $cmd.splitNewPane & ", " &
       $cmd.splitAxis & ", " & $cmd.splitSide & ")"
   of lcMergeIntoStack:
     "mergeIntoStack(" & $cmd.mergedPane & " -> " & $cmd.mergeBeside &
@@ -1108,10 +1158,34 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     return appliedTo(next)
 
   of lcSplit:
-    if tree.contains(cmd.splitNewPane):
-      return refusedFor(lpDuplicatePane, cmd.splitNewPane)
-    if next.dockedIndex(cmd.splitNewPane) >= 0:
-      return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
+    var movedTitle = cmd.splitNewTitle
+    if cmd.splitMovesPane:
+      # PLAT-5's drop gesture: the pane is already placed and the split MOVES
+      # it. Every guard here is the mirror of the branch below — "must not be
+      # in the tree" becomes "must be", and the detach brings §2.4's collapse
+      # rules with it exactly as `lcMoveTab`'s cross-stack path does.
+      if cmd.splitNewPane == cmd.splitTarget:
+        return refusedFor(lpDuplicatePane, cmd.splitNewPane)
+      if next.dockedIndex(cmd.splitNewPane) >= 0:
+        return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
+      let moving = tree.find(cmd.splitNewPane)
+      if moving.isNil:
+        return refusedFor(lpPaneNotPlaced, cmd.splitNewPane)
+      if tree.find(cmd.splitTarget).isNil:
+        return refusedFor(lpPaneNotPlaced, cmd.splitTarget)
+      if movedTitle.len == 0:
+        movedTitle = moving.title
+      discard detachPane(tree, cmd.splitNewPane)
+      if not normaliseInPlace(tree):
+        return refusedFor(lpEmptyRoot, cmd.splitNewPane)
+    else:
+      if tree.contains(cmd.splitNewPane):
+        return refusedFor(lpDuplicatePane, cmd.splitNewPane)
+      if next.dockedIndex(cmd.splitNewPane) >= 0:
+        return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
+    # RE-FOUND AFTER THE DETACH, for `lcMoveTab`'s reason: collapsing can
+    # rewrite a container in place, so a ref taken before it may no longer be
+    # in the tree. The target pane is unique, so finding it again is exact.
     let leaf = tree.find(cmd.splitTarget)
     if leaf.isNil:
       return refusedFor(lpPaneNotPlaced, cmd.splitTarget)
@@ -1125,12 +1199,18 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       replaced = leafParent
     let share = replaced.weight
     let inner = copyOf(replaced)
-    let fresh = pane(cmd.splitNewPane, cmd.splitNewTitle, share)
+    let fresh = pane(cmd.splitNewPane, movedTitle, share)
     let kids =
       if cmd.splitSide == ssBefore: @[fresh, inner] else: @[inner, fresh]
     let containerKind = if cmd.splitAxis == saRow: lnRow else: lnColumn
     replaced.becomes(LayoutNode(kind: containerKind, weight: share,
                                 children: kids))
+    if cmd.splitMovesPane and equalTrees(tree, layout.tree):
+      # A drag that ended where it began. §2.3's `loNoOp`, decided HERE —
+      # `apply` is the one authority on "nothing happened", so PLAT-5's
+      # `commit` can define its `none` as "`apply` did not say `loApplied`"
+      # rather than forming a second opinion.
+      return noOp()
     return appliedTo(next)
 
   of lcMergeIntoStack:
