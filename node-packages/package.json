@@ -107,5 +107,9 @@
       ]
     }
   },
+  "resolutions": {
+    "engine.io-client/ws": "~8.21.0",
+    "socket.io-adapter/ws": "~8.21.0"
+  },
   "packageManager": "yarn@4.5.0"
 }
