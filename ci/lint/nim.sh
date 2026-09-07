@@ -289,6 +289,15 @@ lint_step "Value presentation boundary: contract suite" \
 lint_step "Value presentation boundary: one pipeline, pure, with no surface bypassing it" \
 	bash ci/test/value-presentation-boundary.sh
 
+# PLAT-6's residue: the TUI's decide/perform split was a FACT and not an
+# ENFORCED one. `app/layout/persistence.nim`'s header says it imports no
+# `std/os` and nothing checked it — `test_tui_facade_boundary.nim` forbids
+# `std/osproc`, `std/posix` and `host/` imports under `app/`, and `std/os` is
+# legal there. Same shape as the two guards above, and in the same place for the
+# same reason: the answer arrives in the lint stage rather than after a build.
+lint_step "TUI layer split: the decision half of each decide/perform pair does no I/O" \
+	bash ci/test/tui-layer-split-boundary.sh
+
 # `VALID_DAP_COMMANDS` against the tables it mirrors, in BOTH directions. The
 # allow-list is hand-written but no longer hand-CHECKED: the guard derives the
 # engine's dispatch from `src/db-backend/src/dap_server.rs` and the event

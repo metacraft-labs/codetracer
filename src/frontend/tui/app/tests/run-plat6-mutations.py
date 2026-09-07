@@ -56,12 +56,19 @@ nothing, so the arms at the bottom are behaviour-preserving rewrites that MUST
 survive; an arm that starts being killed is reported as a problem in its own
 right. The pairing is written at both ends: M5/M26 ← S3, M30 ← S9, M33/M33B ← S5,
 M34 ← S6, M35 and M31 ← S8, M36 ← S7, M37 ← S10, M38/M38B ← S11, M39 ← S12,
-M40 ← S13, M41 ← S14, M42 ← S15, M43 ← S16, M44 ← S17. Without the control,
-"the case reddens when this line changes" is all an arm establishes.
+M40 ← S13, M41 ← S14, M42 ← S15, M43 ← S16, M44 ← S17, M45 ← S18. Without the
+control, "the case reddens when this line changes" is all an arm establishes.
 
 S9 is here because M30 shipped WITHOUT a control and an independent pass had to
 write one by hand, off the record. An arm that lives only in somebody's terminal
 is not part of the harness, so it is spelled out below.
+
+M45 ← S18 is the newest pair and it has the same provenance as M37 ← S10: a
+verification pass found a real defect that SURVIVED the whole harness, because
+the property it breaks — "a document that would not open is left alone" — was
+not named by any suite. Both arms exist because the code was right and nothing
+measured it, which is the failure mode this file is least able to report on its
+own: an arm nobody wrote cannot be a survivor.
 
 `test_layout_binding.nim`'s last case asserts a RUNTIME ASSERTION COUNT, so an
 arm that changes how many `ck`s run reddens that case as well as its own. That
@@ -106,8 +113,58 @@ STORE = "src/frontend/tui/host/layout_store.nim"
 INTER = "src/frontend/headless_app/layout_interaction.nim"
 MODEL = "src/frontend/headless_app/layout_model.nim"
 
+# THE HARNESS'S OWN INSTRUMENTS, held to the same restoration check as the
+# subject (Verification-Harness-Traps §7: an instrument is the last thing anyone
+# re-reads, and a defect there is a wrong answer with a green tick next to it).
+#
+# `dual_snap.nim` is the one that made this necessary and it is not a
+# hypothetical. It decides whether a Tier-2 arm is graded against a FRESHLY
+# BUILT child: `newestSourceTime` stamps the app source, `test_app_runtime.nim`,
+# `app/` and `host/`, and `compileChildApp` rebuilds only when the binary is
+# older than that stamp. PLAT-6's verification reverted the stamp to its
+# `app/`-only form and re-ran M38B — a real defect in `host/layout_store.nim`,
+# graded at Tier 2 — and it **SURVIVED**, because the child was never rebuilt
+# and a stale binary graded as a passing one. That is a false GREEN produced by
+# an edit to a file the per-arm SHA-256 check did not cover, so the file that
+# decides whether a grade is real is now covered by it.
+#
+# The same argument reaches three more files, and they are here for it rather
+# than for tidiness — each is compiled INTO the child binary a Tier-2 arm is
+# graded by, so an edit left behind in one of them mis-grades every arm after
+# it exactly as a `dual_snap` edit would:
+DUAL = "src/frontend/tui/testing/dual_snap.nim"
+APPRT = "src/frontend/tui/testing/test_app_runtime.nim"
+APP_GEST = "src/frontend/tui/tests/apps/app_layout_gestures.nim"
+APP_MOUSE = "src/frontend/tui/tests/apps/app_layout_mouse.nim"
+APP_PERSIST = "src/frontend/tui/tests/apps/app_layout_persist.nim"
+APP_TRANS = "src/frontend/tui/tests/apps/app_layout_transients.nim"
+
+HARNESS = [DUAL, APPRT, APP_GEST, APP_MOUSE, APP_PERSIST, APP_TRANS]
+
+# WHAT IS STILL OUTSIDE THIS LIST, said rather than left to be found — the
+# subject of a check is a claim (Verification-Harness-Traps §6), and this one's
+# claim is "every SOURCE FILE OF THIS REPOSITORY that an arm's verdict depends
+# on". Three things are outside it, each for a different reason:
+#
+#   * THE BUILT ARTEFACTS. `build/nimcache/plat6-mutations-*`,
+#     `/tmp/plat6-mutation-*`, and the Tier-2 child binaries `dual_snap` builds.
+#     A hash over a build output would move on every arm by construction and
+#     would report nothing. What makes them safe is `dual_snap`'s own staleness
+#     stamp — which is exactly why that file had to come inside this list first,
+#     and the one place a defect here has already produced a false GREEN.
+#   * `build/grammars/`, read by `link_flags()` and by the archive path below.
+#     Also a build output, and produced by `scripts/build-tui-grammars.sh`
+#     rather than by anything an arm touches.
+#   * THE SIBLING REPOSITORIES. The four Tier-2 suites import `term_assert`,
+#     which `TIER2_PATHS` resolves into `../TermAssert/`, `../TermAssertClient/`
+#     and `../nim-libvterm/`. Those are separate checkouts with their own
+#     history, and a per-arm hash here could notice a change but could not
+#     restore one, so this file does not claim them. A harness's bug report
+#     arrives disguised as your own code failing (§9-11); if a Tier-2 arm starts
+#     behaving oddly with no local edit to explain it, those three are where to
+#     look.
 TOUCHED = [SUITE, ROUTE, PERSIST, GEST, TRANS, MOUSE_SUITE, RELAUNCH, BIND,
-           TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL]
+           TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL] + HARNESS
 
 # THE TWO TIER-2 SUITES NEED THREE MORE `--path`s and they spawn a child in a
 # real pty, so an arm against one costs a compile, a CHILD compile and a
@@ -186,7 +243,21 @@ P_RESET = "no gesture, no document — and `:reset-layout` deletes a stale one"
 P_OFF = ("OFF BY DEFAULT: with no binding nothing is read and nothing is "
          "written")
 
-PERSIST_CASES = [P_KEY, P_TRIP, P_FREEZE, P_BAD, P_RESET, P_OFF, C_COUNT]
+# THE PROPERTY GUARDING THE USER'S FILE ON THE ONE PATH `adoptLayoutDocument`
+# CANNOT REACH. Every other unreadable arm sets the quarantine flag inside
+# `adoptLayoutDocument`; a file that will not OPEN never gets there, so
+# `host/layout_store.nim` calls `runtime.markLayoutDocumentUnreadable` by hand
+# and NOTHING else in the product calls it. PLAT-6's verification neutered that
+# call and measured the consequence on a real file with its permissions
+# removed: the user is still told, `quarantined` is false, the plan is `remove`
+# and the exit DELETES the document. A transient `EACCES` therefore costs a
+# user their arrangement permanently. M45 is the arm; this is the case that
+# kills it.
+P_EACCES = ("a document that will not OPEN is quarantined and survives "
+            "byte-identical")
+
+PERSIST_CASES = [P_KEY, P_TRIP, P_FREEZE, P_BAD, P_EACCES, P_RESET, P_OFF,
+                 C_COUNT]
 
 # The relaunch suite (Tier 2) — two processes, one recording.
 L_RELAUNCH = "a pane docked on a real pty is still docked in the NEXT process"
@@ -808,6 +879,46 @@ MUTATIONS = [
         "90-character path is a warning nobody can see",
         suite=RELAUNCH,
     ),
+    # --- the one call that stands between an EACCES and a deleted file ------
+    #
+    # PLAT-6's verification of the persistence pass recorded this as Y2: a real
+    # defect that SURVIVED THE WHOLE HARNESS, because no suite named
+    # `UnreadableFile` and no arm touched the call. The code was right and the
+    # property was unmeasured — which is the same shape as M37's, one milestone
+    # later, and with a worse consequence: not a stale focus ring but a user's
+    # arrangement deleted by a transient `EACCES`.
+    #
+    # It is graded at TIER 1 and NOT at Tier 2, deliberately. The condition has
+    # to be a REAL permission removal — injecting a `readFile` failure would
+    # grade this module against a fake — and a Tier-1 case owns a temporary
+    # directory it created, whereas the pty child's state root is handed to it
+    # through an environment variable and a `chmod` between the two processes
+    # would be racing the child's own startup.
+    #
+    # AND THIS HARNESS REFUSES TO GRADE THE ARM ON A HOST WHERE THE PROPERTY
+    # CANNOT BE MEASURED, without anything being added for it. The case makes a
+    # real permission removal and checks that it actually denied reading; where
+    # it did not — root, or a filesystem that does not enforce permissions — it
+    # reports `[SKIPPED]`, which `RESULT_LINE` matches as neither `[OK]` nor
+    # `[FAILED]`. So the case is absent from `control.passed`, the control step
+    # prints `CONTROL DID NOT RUN 1 NAMED CASES` and the run stops before a
+    # single arm is applied. A killed verdict from an unmeasurable arm is
+    # exactly the "reporting a state it did not reach" failure
+    # Verification-Harness-Traps calls the common thread.
+    Mutation(
+        "M45", RUNTIME,
+        "  ## out.\n"
+        "  rt.layoutDocumentQuarantined = true",
+        "  ## out.\n"
+        "  discard rt",
+        P_EACCES,
+        "the quarantine is NOT recorded for a file that would not open, so the "
+        "session's plan is `remove` and exiting DELETES a document it never "
+        "managed to read. The report is unchanged — the user is still told the "
+        "file was left alone — which is why the case that kills this asserts "
+        "the FILE rather than the message",
+        suite=PERSIST,
+    ),
 ]
 
 DECLARED_SURVIVORS = [
@@ -1023,6 +1134,22 @@ DECLARED_SURVIVORS = [
         "nothing about the case that has to redden.",
         suite=RELAUNCH,
     ),
+    Mutation(
+        "S18", RUNTIME,
+        "  ## out.\n"
+        "  rt.layoutDocumentQuarantined = true",
+        "  ## out.\n"
+        "  let unreadable = true\n"
+        "  rt.layoutDocumentQuarantined = unreadable",
+        "",
+        "The quarantine named before it is assigned — the same field, the same "
+        "value, the same one-statement body. IT MUST SURVIVE, and it is THE "
+        "CONTROL FOR M45, which deletes that very assignment: without it, 'the "
+        "case reddens when this line is edited' is all M45 would establish, "
+        "and the property M45 exists to grade is precisely a property nothing "
+        "had graded before.",
+        suite=PERSIST,
+    ),
 ]
 
 RESULT_LINE = re.compile(r"^\s*\[(OK|FAILED)\]\s+(.*?)\s*$")
@@ -1094,7 +1221,7 @@ def run_suite(suite: str = SUITE) -> RunResult:
 
 def main() -> int:
     # An optional arm filter, so a re-run after fixing ONE arm costs one
-    # compile rather than sixty-four. The control still runs: an arm graded
+    # compile rather than sixty-six. The control still runs: an arm graded
     # against a suite nobody checked is not graded.
     only = set(sys.argv[1:])
     baseline = {p: digest(p) for p in TOUCHED}

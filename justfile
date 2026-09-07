@@ -2916,6 +2916,16 @@ test-value-presentation-boundary:
   bash ci/test/value-presentation-boundary-test.sh
   bash ci/test/value-presentation-boundary.sh
 
+# PLAT-6's layer rule, enforced: the DECISION half of each declared
+# decide/perform pair under `src/frontend/tui/` does no I/O — no effectful
+# import, no `host/` import, no I/O call site.  Pure bash, about a second, and
+# it carries its own positive controls (a real `app/` module that DOES import
+# `std/os`, and the two performers that DO make the calls), so a scanner that
+# had stopped matching reddens rather than reporting a clean sweep.  Wired into
+# `ci/lint/nim.sh`; this recipe is for running it alone.
+test-tui-layer-split-boundary:
+  bash ci/test/tui-layer-split-boundary.sh
+
 # Print what each lane runs, without running anything.  Useful when deciding
 # where a new test file belongs.
 test-lanes:

@@ -22,6 +22,11 @@
 ##   * **the failure arms** — corrupt bytes, an empty file, a schema version
 ##     from a newer build, a pane this build does not have — each of which must
 ##     be REPORTED BY KIND and must leave the document untouched;
+##   * **the file that will not OPEN** — the fifth arm, and the only one whose
+##     quarantine depends on `runtime.markLayoutDocumentUnreadable`. It is
+##     reproduced with a REAL permission removal rather than by injecting a
+##     return value, because the failure being defended against is a transient
+##     `EACCES` on a document that is perfectly good;
 ##   * **the flag-off arm**, where nothing is read, nothing is written and the
 ##     state directory is not touched at all.
 ##
@@ -65,9 +70,37 @@ import ../host/layout_store
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 202
+const ExpectedAssertions = 217
+
+const UnreadableFileArmAssertions = 15
+  ## What the `UnreadableFile` case contributes to the count above.
+  ##
+  ## Subtracted from the total — and only from it — on a host where the case
+  ## cannot run at all, so the count stays EXACT in both worlds rather than
+  ## being relaxed into a range. See `UnreadablePreconditionBanner`.
+
+const UnreadablePreconditionBanner =
+  "PRECONDITION NOT MET: removing every permission from a file this process " &
+  "OWNS did not deny reading it — this run is privileged (root), or the " &
+  "state directory is on a filesystem that does not enforce permissions. " &
+  "THE `UnreadableFile` QUARANTINE WAS NOT MEASURED by this run. Re-run the " &
+  "suite as an unprivileged user on a permission-enforcing filesystem."
+  ## The loud half of a loud skip.
+  ##
+  ## `Silent-Self-Pass-Audit-2026-08-23.md`'s rule is that a missing
+  ## prerequisite is made LOUD and the assertion is never weakened. So the case
+  ## below neither weakens to "unreadable OR restored" nor returns quietly: it
+  ## prints this line on stdout, where the lane transcript carries it, and calls
+  ## `unittest.skip()` so the case reports `[SKIPPED]` rather than `[OK]` —
+  ## which moves the lane's own SKIPPED tally and is therefore visible in the
+  ## summary as well as in the transcript.
 
 var countedAssertions = 0
+
+var unreadableFileArmRan = true
+  ## Whether the permission removal actually denied reading. Read by the
+  ## assertion-count case, which is the only thing that may treat the two worlds
+  ## differently.
 
 template ck(condition: untyped) =
   inc countedAssertions
@@ -180,6 +213,22 @@ proc newSandbox(tag: string): Sandbox =
 
 proc documentOf(box: Sandbox): string =
   layoutDocumentPathFor(box.trace)
+
+proc allowReading(path: string) =
+  ## Put a document's ordinary permissions back.
+  ##
+  ## **It does nothing when the file is gone, and that is the point.** The case
+  ## below removes every permission from a real file, and the defect it grades
+  ## DELETES that file — so a restore written as a bare `setFilePermissions`
+  ## would raise an `OSError` on the mutated tree, abort the case before its
+  ## remaining assertions ran, and take the suite's assertion count down with
+  ## it. The mutation would still be killed, but by two cases instead of one,
+  ## and "which case saw it" is the whole verdict a mutation arm reports.
+  ##
+  ## Called from a `finally` as well as from the body, so a case that fails
+  ## part way through does not leave an unreadable file for the next run.
+  if fileExists(path):
+    setFilePermissions(path, {fpUserRead, fpUserWrite})
 
 proc dispose(box: Sandbox) =
   delEnv(LayoutDirEnvVar)
@@ -450,6 +499,109 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
     finally:
       box.dispose()
 
+  test "a document that will not OPEN is quarantined and survives byte-identical":
+    # **THE ARM ONLY `runtime.markLayoutDocumentUnreadable` DEFENDS.** Every
+    # other way a document can be unreadable goes through
+    # `adoptLayoutDocument`, which sets the quarantine flag itself; a file that
+    # will not open never reaches the decoder, so `host/layout_store.nim` has to
+    # set the flag by hand — and that one call is the only thing standing
+    # between a transient `EACCES` and a DELETED arrangement.
+    #
+    # Measured, with the call neutered: the user is still TOLD
+    # (`kind='UnreadableFile'`), the session is still usable — and
+    # `quarantined` is false, so the persist plan is `remove` and the exit
+    # DELETES a document that was never even opened. The user loses an
+    # arrangement they spent a session building because the file was busy for a
+    # moment. That is why this case asserts the FILE rather than the report.
+    #
+    # THE CONDITION IS REPRODUCED, NOT INJECTED. A stub that made `readFile`
+    # raise would grade this module against a fake; a real file with its
+    # permissions removed is the failure as it actually arrives, and it is the
+    # only way the `except CatchableError` arm in `restoreLayoutForSession` is
+    # entered by the thing it was written for.
+    let box = newSandbox("eacces")
+    let doc = box.documentOf()
+    createDir(doc.parentDir)
+    # A document THIS BUILD CAN READ. The permission is the only thing wrong
+    # with it, which is what makes the failure transient and the deletion
+    # expensive — and it is what lets the positive twin at the bottom of this
+    # case run against the very same bytes.
+    let planted = """{"version": 2,
+  "layout": {"kind": "pane", "pane": "calltrace"},
+  "docked": []}
+"""
+    writeFile(doc, planted)
+    try:
+      setFilePermissions(doc, {})
+      try:
+        # THE PRECONDITION, MEASURED RATHER THAN ASSUMED. `chmod 000` does not
+        # deny root anything, and some filesystems do not enforce permissions
+        # at all. On such a host this case would read the file, restore it
+        # happily, and report `[OK]` over a property it never reached — the
+        # silent self-pass shape exactly.
+        var denied = false
+        try:
+          discard readFile(doc)
+        except CatchableError:
+          denied = true
+        if not denied:
+          echo UnreadablePreconditionBanner
+          checkpoint(UnreadablePreconditionBanner)
+          unreadableFileArmRan = false
+          skip()
+        else:
+          let rt = newBoundRuntime(80, 24)
+          let report = restoreLayoutForSession(rt, box.trace)
+          checkpoint("restore -> " & $report.status & " [" & report.kind &
+                     "] " & report.message)
+          # THE USER IS TOLD, in the same vocabulary the four decoder arms use
+          # — `UnreadableFile` is a kind beside `NotJson` and `UnknownVersion`
+          # rather than a second, differently-worded failure.
+          ck report.status == lrsUnreadable
+          ck report.kind == UnreadableFileKind
+          ck report.message.startsWith(
+            "saved layout ignored (" & UnreadableFileKind & ")")
+          ck report.message.contains(doc)
+          # THE SESSION IS USABLE, on the profile's own arrangement.
+          ck rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
+          ck rt.stripsOnScreen() == 0
+          ck rt.titleRowsFor("CALL STACK") == 1
+          # THE FLAG NOTHING ELSE ON THIS PATH SETS, and the plan that follows
+          # from it. Asserted as two facts because `markLayoutDocumentUnreadable`
+          # sets the first and `layoutPersistPlan` reads it: a defect in either
+          # half reaches the file below, and only one of them is this call.
+          ck rt.layoutDocumentQuarantined
+          ck rt.layoutPersistPlanOf().intent == lpiQuarantine
+          let persisted = persistLayoutForSession(rt)
+          checkpoint("persist -> " & $persisted.outcome)
+          ck persisted.outcome == lpoQuarantined
+
+          # **THE PROPERTY THAT MATTERS: THE DOCUMENT IS STILL THERE, BYTE FOR
+          # BYTE.** The header's promise is "AND THE DOCUMENT IS LEFT ALONE",
+          # and this is that sentence as a measurement rather than as prose.
+          ck fileExists(doc)
+          ck filesUnder(box.root) ==
+            @[LayoutDocumentDirName / doc.extractFilename]
+          allowReading(doc)
+          let survived = if fileExists(doc): readFile(doc) else: ""
+          ck survived == planted
+
+          # THE POSITIVE TWIN, THROUGH THE SAME TWO CALLS AND THE SAME FILE.
+          # Without it, every assertion above is also satisfied by a store that
+          # refuses this particular document for some reason of its own: the
+          # permission is now back and NOTHING else changed, so the same path
+          # RESTORES and does NOT quarantine. That is what says the arm above is
+          # about the open failing.
+          let after = newBoundRuntime(80, 24)
+          let good = restoreLayoutForSession(after, box.trace)
+          checkpoint("with the permission back, restore -> " & $good.status)
+          ck good.status == lrsRestored
+          ck not after.layoutDocumentQuarantined
+      finally:
+        allowReading(doc)
+    finally:
+      box.dispose()
+
   test "no gesture, no document — and `:reset-layout` deletes a stale one":
     # THE OTHER HALF OF THE FREEZE DECISION. Persisting a profile DEFAULT would
     # freeze the profile on the next launch, so opening a recording once in an
@@ -538,4 +690,14 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
   test "assertion count":
     checkpoint("CHECKS: " & $countedAssertions)
     echo "CHECKS: ", countedAssertions
-    check countedAssertions == ExpectedAssertions
+    # ONE BRANCH, AND IT IS NOT A RELAXATION. The expected number is still
+    # exact; what moves is which of two exact numbers applies, and the only
+    # thing that may move it is the permission probe above, which announces
+    # itself twice on the way past.
+    if unreadableFileArmRan:
+      check countedAssertions == ExpectedAssertions
+    else:
+      echo UnreadablePreconditionBanner
+      checkpoint(UnreadablePreconditionBanner)
+      check countedAssertions ==
+        ExpectedAssertions - UnreadableFileArmAssertions

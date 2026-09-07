@@ -3753,18 +3753,32 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
         path, so the state directory is not touched, not even by a `stat`.
     `CODETRACER_TUI_LAYOUT_DIR` overrides the state root; that is how the two
     persistence suites point a real spawned binary at a directory of their own.
-    KNOWN GAP, recorded 2026-09-08: the "file would not OPEN at all" path is
-    unmeasured.  `runtime.markLayoutDocumentUnreadable` is what quarantines it —
-    the other failure arms set the flag inside `adoptLayoutDocument` — and
-    neutering it survives the whole 64-arm harness.  Measured consequence on a
-    real file with its permissions removed: the user is still told
-    (`UnreadableFile`), but the plan becomes `lpiRemove` and THE DOCUMENT IS
-    DELETED, so a transient `EACCES` would cost a user their arrangement.  No
-    suite names `UnreadableFile`.
-    AND THE `app/` -> `host/` SPLIT IS A FACT RATHER THAN AN ENFORCED RULE:
-    `persistence.nim` imports no `std/os`, and nothing checks that it does not.
-    `test_tui_facade_boundary.nim` forbids `std/osproc`, `std/posix` and `host/`
-    imports under `app/` — `std/os` is legal there.
+    THE "file would not OPEN at all" PATH IS THE ONE ONLY
+    `runtime.markLayoutDocumentUnreadable` DEFENDS — the other failure arms set
+    the flag inside `adoptLayoutDocument` — and neutering it DELETES the
+    document (the plan becomes `lpiRemove`) while the report stays exactly the
+    same, still saying "the file was left alone".  So the case that grades it
+    asserts THE FILE, never the message: `test_layout_persistence.nim`'s "a
+    document that will not OPEN is quarantined and survives byte-identical",
+    with a real `setFilePermissions(doc, {})`, a positive twin that puts the
+    permission back, and a LOUD skip (banner + `unittest.skip()` + a second
+    exact assertion count) on a host where root or the filesystem will not deny
+    the read.  M45 is the arm, S18 its control.
+    KNOWN GAP, recorded 2026-09-08: THE PRECEDENCE is still unmeasured.
+    `layoutPersistPlan` tests `quarantined` BEFORE `userModified`, which is what
+    stops an older build that could not read a newer-schema document from
+    overwriting it after the user rearranges a pane.  Weakening that branch to
+    `quarantined and not userModified` survives the whole 66-arm harness, and
+    the measured consequence is a `version: 99` document replaced by a
+    `version: 2` one.  The grading case plants an unreadable document and never
+    gestures, so it cannot reach the combination.
+    The `app/` -> `host/` split IS enforced now, by
+    `ci/test/tui-layer-split-boundary.sh` (wired into `ci/lint/nim.sh`); note
+    its subject is the DECISION HALF OF A DECLARED PAIR and not all of `app/`,
+    because `app/input/keymap.nim` legitimately imports `std/os` and calls
+    `readFile`.  Its rule and its positive control must go through ONE scanner —
+    they were two copies of a regex until 2026-09-08, and breaking only the
+    rule's copy left every check green over a planted violation.
   * `LayoutBinding.focus` AND `TuiRuntime.focus` ARE TWO DIFFERENT FOCUS
     NOTIONS, and `runPromptLine` synchronises them before every layout command.
     `PaneFocus` is what `Tab` / `Ctrl+w` move; `LayoutBinding.focus` is what

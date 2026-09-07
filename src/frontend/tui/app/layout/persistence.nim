@@ -84,6 +84,38 @@
 ## here, and a build that answered by overwriting it would destroy the user's
 ## arrangement simply because they opened an older binary once.
 ##
+## ### `UnreadableFile` IS THE ARM WHERE "LEFT ALONE" IS NOT AUTOMATIC
+##
+## The sentence above is one guarantee with two implementations, and only one
+## of them is inside this module. `adoptLayoutDocument` sets the session's
+## quarantine flag for every failure it can see — `NotJson`, `EmptyDocument`,
+## `UnknownVersion`, `UnknownPane` — because the bytes reached it. **The fifth
+## failure never reaches it**: a file that would not OPEN at all, which
+## `host/layout_store.restoreLayoutForSession` meets on its `readFile` and
+## reports through `unreadableLayoutDocument` above. On that one path the flag
+## is set by a SEPARATE call, `runtime.markLayoutDocumentUnreadable`, and
+## nothing else in the product sets it.
+##
+## Delete that call and the difference is not a worse message — it is the
+## user's file. Measured, on a real document with its permissions removed:
+##
+## ```
+##   restore -> unreadable kind='UnreadableFile'   (the user is still told)
+##   quarantined=false  ->  plan intent=remove  ->  persist -> removed
+##   0 files left — the document is DELETED
+## ```
+##
+## So a **transient `EACCES` costs a user their arrangement permanently**,
+## while the report they see says the file was left alone. The report and the
+## quarantine are two facts and only the first of them is composed here.
+##
+## `tests/test_layout_persistence.nim`'s case *"a document that will not OPEN
+## is quarantined and survives byte-identical"* is the measurement — it removes
+## the permissions from a real file rather than injecting a failure, and it
+## asserts the FILE (still present, byte-identical) rather than the report,
+## because the report survives the defect. `M45` in
+## `app/tests/run-plat6-mutations.py` is the arm, with `S18` as its control.
+##
 ## ## `revealed` IS NOT PERSISTED, AND THAT IS INHERITED RATHER THAN RESTATED
 ##
 ## Layout-ViewModel §3.2 says a revealed dock overlay is interaction state.
