@@ -3901,6 +3901,45 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Provision dependency siblings from repro.lock
+        # THIS JOB HAD NO SIBLING PROVISIONING AT ALL, and was green anyway --
+        # by inheriting another job's leftovers off a persistent runner.
+        #
+        # `repro build .#macos-app` compiles Nim OUTSIDE the Nix sandbox, in
+        # this checkout, so the frontend and `ct` targets resolve
+        # `isonim/...` / `nim_everywhere` through codetracer's own
+        # `config.nims`:
+        #
+        #     config.nims:41  addPathIfDir(workspaceRoot / "isonim/src")
+        #     config.nims:50  addPathIfDir(workspaceRoot / "nim-everywhere/src")
+        #
+        # `workspaceRoot` is the checkout's PARENT -- on a self-hosted runner,
+        # the REUSED per-repository work directory that every codetracer job
+        # on that host shares. No step in this job ever put anything there, and
+        # `repro.nim` does not clone either (`siblingPath` only tests
+        # `dirExists`). So every green this job has had was reading siblings
+        # some OTHER job left in that directory, which is state this job
+        # neither creates nor can observe.
+        #
+        # It is not hypothetical that the state varies. Same commit family,
+        # same recipe, different host:
+        #
+        #   run 34066040001  m3-mcl-004  dmg-build  GREEN
+        #   run 34072935418  m3-mcl-003  dmg-build  RED, at the first Nim action:
+        #     src/frontend/ui/auto_hide.nim(61, 20)
+        #       Error: cannot open file: isonim/web/web_renderer
+        #     src/ct/review_session.nim(270, 10)
+        #       Error: cannot open file: nim_everywhere
+        #
+        # Provisioning the siblings here makes the build state its own
+        # dependency rather than inherit it. It is what the other reprobuild /
+        # build-once lanes already do (dev-build, appimage-build, test-non-gui,
+        # test-ui-tests, viewmodel-tests, cross-process-linux).
+        #
+        # After ``Install Nix``: the action reaches ``repro`` through this
+        # repo's own ``devShells.ci``.
+        uses: ./.github/actions/provision-repro-lock-siblings
+
       - name: "Import GPG key for signing commits"
         id: import-gpg
         uses: crazy-max/ghaction-import-gpg@v6
@@ -5118,6 +5157,23 @@ jobs:
           path: ${{ github.workspace }}/../codetracer-trace-format-nim
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Clone codetracer-native-recorder (macOS)
+        # The macOS half of the requirement the nixos leg's ``siblings:`` list
+        # carries: this job's ``./ci/test/non-gui.sh`` compiles
+        # ``src/db-backend/build.rs``, which panics at build.rs:170 without
+        # this checkout. This leg provisions siblings with per-repo
+        # ``clone-repo`` steps rather than setup-dev-env, so the entry has to
+        # be spelled here as well as there. Only the CHECKOUT is needed --
+        # build.rs resolves the ``ct_emulator/`` directory; nothing on this
+        # leg builds the recorder.
+        if: matrix.platform == 'macos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -5255,10 +5311,50 @@ jobs:
           # (run 31719867246, job 94513828226). Pinned by the
           # "codetracer-trace-format implies codetracer-trace-format-nim"
           # assertion in ci/test/sibling-provisioning-test.sh.
+          #
+          # codetracer-native-recorder is REQUIRED, not an extra. This job's
+          # `./ci/test/non-gui.sh` runs `just test` -> `just test-rust` ->
+          # `cargo test --bin replay-server`, which compiles
+          # `src/db-backend/build.rs`; that script resolves the Nim MCR
+          # emulator as a sibling of the checkout and PANICS without it
+          # (build.rs:170), because `src/lib.rs` exports `emulator_ffi`,
+          # `emulator_origin`, `emulator_session` and `data_watch`
+          # unconditionally. Run 34072935418, both legs:
+          #
+          #   thread 'main' panicked at build.rs:170:5:
+          #   db-backend requires the sibling `codetracer-native-recorder`
+          #   checkout, and it was not found.
+          #
+          # Zero tests ran on either leg as a result. `ci/test/
+          # sibling-provisioning-test.sh` § 2b states this contract already --
+          # "every job that runs cargo against src/db-backend provisions
+          # codetracer-native-recorder" -- but its scanner only matched call
+          # sites spelled in the YAML (`cd src/db-backend`, `--manifest-path
+          # src/db-backend`, `run-cross-repo-tests.sh`), and this job reaches
+          # the same build.rs through a shell script and a justfile recipe. The
+          # scanner now matches that route too, so this entry is pinned.
+          #
+          # SPELLED BARE, WITHOUT `=dev`, AND THAT IS THE POINT. A bare name is
+          # resolved against the per-commit workspace lock, which is both the
+          # documented form (`.github/sibling-repos`: "ONE REPO NAME PER LINE,
+          # NO REVISIONS") and the reproducible one -- re-running an old
+          # commit's job then clones the revision that commit was built
+          # against. The lock does pin this repo; run 34072935418 shows the
+          # other legs overriding it and being told so:
+          #
+          #   metacraft-labs/codetracer-native-recorder -> dev (override)
+          #     <- UNACKNOWLEDGED; the lock pins de0edc7e897222050c3b0b421a5c0b330a106ce6
+          #
+          # Writing `=dev` here would add a 57th branch-tip pin against a
+          # ceiling of 56 that `ci/test/sibling-provisioning-test.sh` says is
+          # "lowered as blocks are converted and never raised", and would earn
+          # that same warning. The three entries above are pre-existing
+          # overrides and are left alone; converting them is their own change.
           siblings: |
             codetracer-beam-recorder=dev
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
+            codetracer-native-recorder
 
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``

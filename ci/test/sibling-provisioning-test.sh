@@ -915,6 +915,12 @@ echo "db-backend cargo legs provision codetracer-native-recorder"
 # anchor turns "nothing forbidden was found" into a FAILURE instead of a
 # vacuous pass. Two vacuous greens have already been paid for in this file.
 readonly DB_BACKEND_ANCHOR='cross-repo-tests.yml:shell-recorder-tests'
+# The indirect route needs its own anchor for exactly the same reason. The
+# direct-form anchor above cannot detect a regression in the wrapper pattern:
+# it would keep matching `shell-recorder-tests` and report "ok" while
+# `test-non-gui` -- the only job that reaches build.rs through a script --
+# silently left the population again. One anchor per detection route.
+readonly DB_BACKEND_ANCHOR_INDIRECT='codetracer.yml:test-non-gui'
 
 # A job satisfies this contract by naming the composite instead of the repo --
 # which is the shape this contract WANTS, and also a way to launder the defect
@@ -1002,15 +1008,35 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		case "$stripped_line" in
 		"- '"* | '- "'*) continue ;;
 		esac
+		# A comment naming a script is PROSE, not a call site -- the mirror of
+		# the rule two blocks up, which already refuses to let a comment naming
+		# the recorder count as provisioning it. Without this the two rules
+		# disagree: prose cannot satisfy the contract but could impose it, so
+		# the paragraph EXPLAINING why a job needs the sibling registers as a
+		# fourth call site, attributed to whatever job the comment sits in and
+		# to the line the comment is on rather than the line that builds
+		# anything. Documenting the contract must not be what violates it.
+		case "$stripped_line" in
+		'#'*) continue ;;
+		esac
 		# The cargo invocations that compile `src/db-backend/build.rs`: a `run:`
 		# step that `cd`s in, an out-of-tree invocation naming the manifest, and
 		# the cross-repo driver, whose `run_db_backend_test` does
 		# `cd "$REPO_ROOT/src/db-backend"; cargo test` (scripts/
 		# run-cross-repo-tests.sh:446).
+		# `ci/test/non-gui.sh` reaches the SAME build.rs without naming it:
+		# it runs `just test` -> `just test-rust` -> `cargo test --bin
+		# replay-server`, with the manifest resolved inside the recipe. That
+		# indirection is why `codetracer.yml:test-non-gui` sat outside this
+		# contract while panicking at build.rs:170 on both legs for months
+		# (run 34072935418, and every sampled run back to 32963460652) -- the
+		# job was never counted as a call site, so "no missing sites" was true
+		# and meaningless. A wrapper that compiles the crate IS a call site;
+		# what varies is only how many layers down the cargo line is written.
 		case "$stripped_line" in
 		'cd src/db-backend' | 'cd src/db-backend '* | "cd 'src/db-backend'"* | \
 			*'--manifest-path src/db-backend'* | *'--manifest-path=src/db-backend'* | \
-			*'run-cross-repo-tests.sh'*)
+			*'run-cross-repo-tests.sh'* | *'ci/test/non-gui.sh'*)
 			db_backend_sites+=("$wf_name:$job")
 			if [ "$seen_recorder" -eq 0 ]; then
 				db_backend_missing+=("$wf_name:$line_no: job '$job' builds src/db-backend with no codetracer-native-recorder sibling before it")
@@ -1021,10 +1047,26 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 done
 
 _anchor_found=0
+_anchor_indirect_found=0
 for _s in "${db_backend_sites[@]}"; do
 	[ "$_s" = "$DB_BACKEND_ANCHOR" ] && _anchor_found=1
+	[ "$_s" = "$DB_BACKEND_ANCHOR_INDIRECT" ] && _anchor_indirect_found=1
 done
 unset _s
+
+if [ "$_anchor_indirect_found" -eq 1 ]; then
+	ok "the db-backend scanner still matches its INDIRECT anchor ($DB_BACKEND_ANCHOR_INDIRECT)"
+else
+	fail "the db-backend scanner still matches its INDIRECT anchor" \
+		"expected a db-backend call site at '$DB_BACKEND_ANCHOR_INDIRECT', reached" \
+		"through ci/test/non-gui.sh rather than a cargo line in the YAML, and did not" \
+		"find one. Either that job was removed, or the wrapper pattern stopped" \
+		"matching -- which would silently drop every script-mediated call site from" \
+		"this contract, the exact hole that let test-non-gui panic in build.rs on" \
+		"every run for months." \
+		"found: ${db_backend_sites[*]:-<none>}"
+fi
+unset _anchor_indirect_found
 
 if [ "$_anchor_found" -eq 1 ]; then
 	ok "the db-backend cargo scanner still matches its anchor (${#db_backend_sites[@]} call site(s))"
@@ -1546,7 +1588,9 @@ echo
 # four about the lock and the action that reads it (the action still runs the
 # command, it hand-writes no set or revision, the lock declares the set, and
 # every member is pinned to a 40-hex SHA).
-readonly EXPECTED_ASSERTIONS=27
+# 27 + the indirect-route anchor added with the `ci/test/non-gui.sh` call-site
+# pattern (one anchor per detection route; see DB_BACKEND_ANCHOR_INDIRECT).
+readonly EXPECTED_ASSERTIONS=28
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
