@@ -114,7 +114,7 @@ function candidateStyleDirs(repoRoot) {
  *     the built stylesheet `default_dark_theme_electron.css` is STALE — it is
  *     older than src/frontend/styles/generated/index.styl
  *       stylesheet: …/result/frontend/styles/default_dark_theme_electron.css
- *                   (built 1980-01-01T00:00:01.000Z)
+ *                   (built 1970-01-01T00:00:01.000Z)
  *       source:     …/src/frontend/styles/generated/index.styl
  *                   (edited 2026-09-06T21:43:24.887Z)
  *
