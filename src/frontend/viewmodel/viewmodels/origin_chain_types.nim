@@ -22,7 +22,7 @@
 ## - §4.1 core types            — wire-shape mirror.
 ## - §5.3 DAP request           — `originChainArgs` / `originSummaryArgs`.
 
-import std/[json, options, tables, hashes, strutils]
+import std/[json, options, tables, hashes, strutils, unicode]
 
 # Re-export ``std/options`` so downstream modules that import
 # ``origin_chain_types`` reach ``Option`` / ``some`` / ``none`` /
@@ -641,18 +641,38 @@ proc abbreviateExpr*(s: string; style: OriginExpressionStyle;
   ## ultra-narrow contexts. The legacy renderer applies the same
   ## function before painting the badge text so the user-visible string
   ## drifts in lock-step with the preference.
+  ## ## THIS IS NOT ON PLAT-2'S VALUE PIPELINE, AND IT IS NOT A VALUE
+  ##
+  ## PLAT-2 collapsed every "recorded value -> string" formatter into
+  ## `common/value_presentation/`, with a per-surface `Budget` doing the
+  ## truncating. What `s` is here is a SOURCE EXPRESSION — the text of the
+  ## expression an origin badge attributes a value to (`a.b[i].len`), read from
+  ## the origin chain, not decoded from a `Value`. There is no `PValue` for it
+  ## and no `PresentationClass` describes it. The three styles below are a USER
+  ## PREFERENCE (`originBadge.expressionStyle`, spec §3.7) rather than a
+  ## surface's declaration of what it can hold, which is what a `Budget` is.
+  ##
+  ## WHAT WAS A DEFECT, AND IS FIXED: `oesFull` and `oesAbbreviated` indexed `s`
+  ## by BYTES, so an expression containing any non-ASCII identifier — legal in
+  ## Python, Nim, Rust and every language CodeTracer records — was cut in the
+  ## middle of a UTF-8 sequence, and `s.len <= maxLen` compared a byte count
+  ## against a limit the preference's author wrote meaning characters. Both
+  ## count RUNES now. This is the same correction made in
+  ## `event_log_vm.summarise`; those two were the last byte-indexed truncations
+  ## the PLAT-2 survey found.
   if s.len == 0:
     return s
   case style
   of oesFull:
-    if s.len <= maxLen: return s
+    let total = s.runeLen
+    if total <= maxLen: return s
     let keep = (maxLen - 1) div 2
-    let tailStart = s.len - keep
+    let tailStart = total - keep
     if keep <= 0 or tailStart <= keep + 1: return s
-    s[0 ..< keep] & "…" & s[tailStart .. ^1]
+    s.runeSubStr(0, keep) & "…" & s.runeSubStr(tailStart, total - tailStart)
   of oesAbbreviated:
-    if s.len <= 16: return s
-    s[0 ..< 16] & "…"
+    if s.runeLen <= 16: return s
+    s.runeSubStr(0, 16) & "…"
   of oesHash:
     # Short SHA-style — `hash[$Hash]` is deterministic and avoids
     # pulling crypto into the renderer. Eight hex digits is enough

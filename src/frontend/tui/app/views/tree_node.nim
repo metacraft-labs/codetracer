@@ -48,6 +48,7 @@
 
 import std/[strutils, unicode]
 
+import ../../../../common/value_presentation
 import ../formatters/type_formatters
 import ./diff_highlighter
 import ./styled_row
@@ -90,9 +91,22 @@ type
     memberCount*: int
       ## Members this node has, whether or not any are materialised. `-1` when
       ## unknown.
-    byteBuffer*: seq[int]
-      ## Set when the node's members are bytes; see
-      ## `type_formatters.byteBufferOf`.
+    presented*: PValue
+      ## PLAT-2: THE VALUE, not a rendering of it.
+      ##
+      ## This field replaced `byteBuffer: seq[int]`, and the replacement is the
+      ## milestone in one row. `byteBuffer` existed because this pane could only
+      ## see `value: string` — so "is this a buffer of bytes?" had to be
+      ## answered by re-parsing the members' RENDERED text one directory away
+      ## (`variables_binding.byteBufferFor`), and the answer had to be carried
+      ## down here as a separate field because the row could not work it out
+      ## for itself. With the value present, `presenter.resolve` answers it, in
+      ## the same table that answers every other "which presenter" question,
+      ## and the row does not carry a second copy of a fact about its own value.
+      ##
+      ## Nil for a scope header and for a `… n more` marker, which have no
+      ## value. `value` above remains, and is what the row shows when
+      ## `presented` is nil.
     width*: int
 
 const
@@ -165,27 +179,41 @@ proc nameStyleFor*(spec: TreeRowSpec): CellStyle =
   of trkVariable:
     if spec.modified: ModifiedNameStyle else: NameStyle
 
-proc valueClassOf*(spec: TreeRowSpec): ValueClass =
-  ## What the row's value IS. A byte buffer is decided by its members and
-  ## everything else by `classifyValue`.
-  if spec.byteBuffer.len > 0: vcByteBuffer
-  else: classifyValue(spec.typeName, spec.value)
-
-proc formattedValue*(spec: TreeRowSpec): string =
-  ## The value as this row would show it before truncation.
+proc valueClassOf*(spec: TreeRowSpec): PresentationClass =
+  ## What the row's value IS, as the ONE presenter says.
   ##
-  ## Four §3.3.4 rules meet here, and they are applied in the order a reader
-  ## would state them: a byte buffer is a hex dump, a compound object gets its
-  ## type name in front of its member list, a focused number gains its second
-  ## base, and everything else is the engine's own rendering with a `0x…`
-  ## literal's padding removed.
-  let class = spec.valueClassOf()
-  if class == vcByteBuffer:
-    return formatByteBuffer(spec.byteBuffer, ByteDumpBytes)
-  if class == vcStruct:
-    return compactStructSummary(spec.typeName, spec.value)
-  if spec.focused: focusedValue(class, spec.value)
-  else: compactValue(class, spec.value)
+  ## Was `classifyValue(typeName, value)` — an inference from the SHAPE of an
+  ## already-rendered string (`"…"` is a string, `{…}` a struct, `[…]` a
+  ## sequence). That inference existed because a string was all this pane had,
+  ## and it was wrong in a way nothing could see: a value whose type name was
+  ## not recognised and whose rendering carried no recognisable bracket
+  ## classified as `vcUnknown` and was painted in the default colour, which is
+  ## indistinguishable from a correctly classified one.
+  classOf(spec.presented)
+
+proc valueBudget*(spec: TreeRowSpec; cells: int): Budget =
+  ## The budget THIS ROW declares. One line, this many cells, and the second
+  ## numeric rendering when the row is focused.
+  tuiRowBudget(cells, spec.focused)
+
+proc formattedValue*(spec: TreeRowSpec; cells: int): string =
+  ## The value as this row shows it, ALREADY FITTED.
+  ##
+  ## The signature is the deliverable: it takes the cells the row has and
+  ## returns what fits. `formattedValue(spec)` used to return an unbounded
+  ## string that `treeRow` then handed to `truncateValue` — render everything,
+  ## clip afterwards. The presenter now stops at the budget, which is why a
+  ## 600-entry mapping costs the width of the column rather than 12 KB.
+  ##
+  ## §3.3.4's four rules still meet here; they are just no longer implemented
+  ## here. A byte buffer is a hex dump (`builtin.byte-buffer`), a compound gets
+  ## its type name in front of its member list (`builtin.record`), a focused
+  ## number gains its second base (`Budget.annotated`), and a `0x…` literal
+  ## loses its padding (`normalisedHexLiteral`) — all inside the pipeline, so
+  ## every other surface gets them too.
+  if spec.presented.isNil:
+    return truncateToCells(spec.value, cells)
+  present(spec.presented, spec.valueBudget(cells), measure = terminalMeasure).root.text
 
 proc valueStyleFor*(spec: TreeRowSpec): CellStyle =
   if spec.kind == trkVariable: valueStyle(spec.valueClassOf())
@@ -265,18 +293,18 @@ proc treeRow*(spec: TreeRowSpec): StyledRow =
     put(indent & spec.name, NoteStyle)
   of trkVariable:
     let nameText = indent & spec.name
-    put(truncateValue(nameText, widths.name), nameStyleFor(spec))
+    put(truncateToCells(nameText, widths.name), nameStyleFor(spec))
     if used < NameFieldCol + widths.name:
       put(repeat(' ', NameFieldCol + widths.name - used), DefaultCellStyle)
     put(" ", DefaultCellStyle)
     if widths.typ > 0:
-      let typeText = truncateValue(spec.typeName, widths.typ)
+      let typeText = truncateToCells(spec.typeName, widths.typ)
       put(typeText, TypeStyle)
       let typeEnd = NameFieldCol + widths.name + 1 + widths.typ
       if used < typeEnd:
         put(repeat(' ', typeEnd - used), DefaultCellStyle)
       put(" ", DefaultCellStyle)
-    put(truncateValue(formattedValue(spec), widths.value), valueStyleFor(spec))
+    put(formattedValue(spec, widths.value), valueStyleFor(spec))
 
   if used < width:
     put(repeat(' ', width - used), DefaultCellStyle)

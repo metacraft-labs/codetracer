@@ -26,6 +26,7 @@ from trace import getConfiguration
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/flow_vm import
   FlowVM, createFlowVM
@@ -441,11 +442,21 @@ proc stepValueIsVisible(self: FlowComponent, step: FlowStep): bool =
     self.editorUI.monacoEditor.config.layoutInfo.minimapLeft.float -
     self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
 
+proc flowValueWidth*(value: Value): int =
+  ## How many characters this value occupies IN A FLOW CHIP.
+  ##
+  ## PLAT-2: measured on the presenter's answer at the `flow` budget, which is
+  ## already bounded at `FLOW_VALUE_LIMIT` cells. Every call site below used to
+  ## render the value and take `.len` of an UNBOUNDED string — so the width
+  ## arithmetic for a 600-entry mapping was driven by a 12 KB rendering that the
+  ## CSS then clipped to thirty columns.
+  flowValue(value).root.text.len
+
 proc getStepMaxValueWidth(self: FlowComponent, step: FlowStep): int =
   var maxValueWidth = 0
 
   for expression, value in step.beforeValues:
-    let valueWidth = value.textRepr(compact=true).len * self.pixelsPerSymbol
+    let valueWidth = flowValueWidth(value) * self.pixelsPerSymbol
     if valueWidth > maxValueWidth:
       maxValueWidth = valueWidth
 
@@ -457,7 +468,7 @@ proc stepValueIndentation(
   value: Value,
   container: kdom.Node
 ): float =
-  let valueTextWidth = value.textRepr(compact=true).len*self.pixelsPerSymbol
+  let valueTextWidth = flowValueWidth(value) * self.pixelsPerSymbol
   let monacoLayout = self.editorUI.monacoEditor.config.layoutInfo
   let flowViewStart = self.flowLines[step.position].baseOffsetLeft.float
   let flowViewEnd = monacoLayout.contentWidth.float
@@ -1740,17 +1751,22 @@ proc flowSimpleValue*(
     # appearance" is one implementation rather than two that agree today.
     # Everything below it here is behaviour this host has and the review does
     # not: the jump, the context menu and the tooltip.
+    # PLAT-2: ONE presentation, at the `flow` budget, reused.
+    #
+    # This rendered the value TWICE — once for the text and once to decide the
+    # width — so every flow chip paid for two renderings per paint and threw the
+    # second away after comparing its `.len`. `Presentation.truncated` is the
+    # presenter's own answer to the same question and costs nothing.
+    let presentation = flowValue(value)
     let valueSpan = flowValueBoxDom(
       id = id,
       className = cstring(className),
-      text = value.textRepr(compact = true),
+      text = presentation.root.text,
       iteration = self.flow.steps[stepCount].iteration,
       style = style,
       maxWidth =
-        if value.textRepr(compact = true).len() > FLOW_VALUE_LIMIT:
-          cstring(FLOW_VALUE_MAX_WIDTH)
-        else:
-          cstring"")
+        if presentation.truncated: cstring(FLOW_VALUE_MAX_WIDTH)
+        else: cstring"")
     valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
       onMouseDown(e, value)
     )
@@ -1771,15 +1787,18 @@ proc flowSimpleValue*(
 
   result = flowValueContainerDom(style)
 
+  # PLAT-2: "does it fit" is `Presentation.truncated`, the presenter's answer,
+  # rather than a length this module measured against a constant it also owned.
   case flowValueMode:
   of BeforeValueMode:
-    if beforeValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+    if flowValue(beforeValue).truncated:
       result.appendChild(renderViewOption(beforeValue))
   of AfterValueMode:
-    if afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+    if flowValue(afterValue).truncated:
       result.appendChild(renderViewOption(afterValue))
   of BeforeAndAfterValueMode:
-    if beforeValue.textRepr(compact=true).len() + afterValue.textRepr(compact=true).len() > FLOW_VALUE_LIMIT:
+    if flowValue(beforeValue).truncated or flowValue(afterValue).truncated or
+       flowValueWidth(beforeValue) + flowValueWidth(afterValue) > FLOW_VALUE_LIMIT:
       # The "after" value is the one the step produced, so it is the one
       # the popup opens on when both halves are drawn.
       result.appendChild(renderViewOption(afterValue))
@@ -4601,13 +4620,13 @@ proc calculateLayout*(self: FlowComponent) =
 
                     case self.valueMode:
                     of BeforeValueMode:
-                      valueCharactersLength += before.textRepr(compact=true).len
+                      valueCharactersLength += flowValueWidth(before)
 
                     of AfterValueMode:
-                      valueCharactersLength += after.textRepr(compact=true).len
+                      valueCharactersLength += flowValueWidth(after)
 
                     of BeforeAndAfterValueMode:
-                       valueCharactersLength += before.textRepr(compact=true).len + after.textRepr(compact=true).len
+                       valueCharactersLength += flowValueWidth(before) + flowValueWidth(after)
 
                     valueWidth += (valueCharactersLength + 1).float * 4.0
                 else:
@@ -4621,13 +4640,13 @@ proc calculateLayout*(self: FlowComponent) =
 
                       case self.valueMode:
                       of BeforeValueMode:
-                        valueCharactersLength += before.textRepr(compact=true).len
+                        valueCharactersLength += flowValueWidth(before)
 
                       of AfterValueMode:
-                        valueCharactersLength += after.textRepr(compact=true).len
+                        valueCharactersLength += flowValueWidth(after)
 
                       of BeforeAndAfterValueMode:
-                        valueCharactersLength += before.textRepr(compact=true).len + after.textRepr(compact=true).len
+                        valueCharactersLength += flowValueWidth(before) + flowValueWidth(after)
 
                       if valueWidth < width:
                         valueWidth = width

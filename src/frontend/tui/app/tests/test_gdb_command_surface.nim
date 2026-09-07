@@ -176,7 +176,13 @@ const
     ## `tests/test_capability_resolution.nim` rather than into a new file. A
     ## removal is re-counted exactly as an addition is.
 
-  ExpectedStyleLiterals = 165
+  ExpectedStyleLiterals = 166
+    ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour
+    ## a `pcMedia` value is painted in. The rest of that module's 514 lines went
+    ## to `common/value_presentation/`, and none of them was a `CellStyle` — the
+    ## style table is the part that is genuinely terminal and it stayed. A
+    ## number that moved by one for a stated reason is what this constant is
+    ## for; see the re-count notes above.
   ExpectedStyledFiles = 20
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##

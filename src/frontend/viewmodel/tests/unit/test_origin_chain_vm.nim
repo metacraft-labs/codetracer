@@ -32,7 +32,7 @@
 ## Compile + run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_origin_chain_vm.nim
 
-import std/[json, options, sets, strutils, tables, unittest]
+import std/[json, options, sets, strutils, tables, unicode, unittest]
 
 import isonim/core/async_compat
 import isonim/core/[signals, computation, owner]
@@ -451,6 +451,30 @@ suite "M4 — expressionStyle preference cycles":
     let hashed = abbreviateExpr(long, oesHash)
     check hashed.len == 9    # "#" + 8 hex digits
     check hashed.startsWith("#")
+
+  test "test_preference_expression_style_counts_runes_not_bytes":
+    # An expression with a non-ASCII identifier — legal in every language
+    # CodeTracer records. `abbreviateExpr` used to index by BYTE, so both
+    # styles cut mid-UTF-8-sequence and emitted an invalid string, and both
+    # compared a byte count against a limit written in characters.
+    let long = "μεταβλητή_με_πολύ_μεγάλο_όνομα_που_δεν_χωράει"
+    check long.runeLen < long.len            # the premise: multi-byte
+
+    let full = abbreviateExpr(long, oesFull)
+    check full.contains("…")
+    check validateUtf8(full) == -1
+    check full.runeLen < long.runeLen
+
+    let abbr = abbreviateExpr(long, oesAbbreviated)
+    check validateUtf8(abbr) == -1
+    check abbr.endsWith("…")
+    # SIXTEEN CHARACTERS plus the ellipsis, which is what the doc comment
+    # ("keeps the first ~16 characters") says. The byte-indexed version kept
+    # eight characters here and corrupted the ninth.
+    check abbr.runeLen == 17
+
+    # Shorter in runes than the limit, longer in bytes: not abbreviated.
+    check abbreviateExpr("αβγδε", oesAbbreviated) == "αβγδε"
 
 # ---------------------------------------------------------------------------
 # M4 V#14: test_preference_batch_fill_visible_triggers_lazy_load_on_scroll

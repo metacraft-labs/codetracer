@@ -18,6 +18,7 @@ import ui_imports, value, ../[types, utils, communication]
 
 import std/[algorithm, json]
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
   StepLine, StepLineKind, StepLineLocation, StepLineFlowValue
@@ -68,11 +69,16 @@ proc lineStepKindToVm(kind: LineStepKind): StepLineKind =
   of LineStepKind.Return: slkReturn
 
 proc lineStepValueToVm(v: LineStepValue): StepLineFlowValue =
-  ## Pre-render the ``Value`` to its text repr so the view layer does
-  ## not have to depend on the JS-only ``Value`` type tree.
+  ## Pre-render the ``Value`` so the view layer does not have to depend on the
+  ## JS-only ``Value`` type tree.
+  ##
+  ## PLAT-2: at the `tracepoint` budget. A step-list row is one line of a
+  ## tracepoint's answer — the same surface and therefore the same budget,
+  ## stated here rather than left implicit, because a seventh budget for a
+  ## surface that is a sixth one's row is how six formatters became seven.
   StepLineFlowValue(
     expression: safeStr(cast[cstring](v.expression)),
-    value: safeStr(v.value.textRepr))
+    value: safeStr(tracepointValue(v.value).root.text))
 
 proc locationToVm(loc: types.Location): StepLineLocation =
   StepLineLocation(

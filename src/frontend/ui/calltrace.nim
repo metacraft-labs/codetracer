@@ -2,6 +2,10 @@ import
   ui_imports, value, ../utils, isonim_panel_mount,
   ../communication, ../../common/ct_event
 
+# PLAT-2: the ONE door every `src/frontend/ui/` surface reaches the value
+# presenter through. See `callArgText` below.
+import presented_value
+
 from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
 
 # ---------------------------------------------------------------------------
@@ -511,46 +515,53 @@ proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
   #
   # We collect both and feed the merged table into the store; rows
   # without args entries simply render no ``.call-arg`` children.
-  proc safeCallArgText(arg: CallArg): string =
+  proc callArgText(arg: CallArg): string =
+    ## ONE call argument, rendered by PLAT-2's pipeline at the
+    ## `calltrace-arg` budget (`common/value_presentation/surfaces.nim`).
+    ##
+    ## WHAT WAS HERE, AND WHY IT HAD TO GO. This used to be
+    ## `safeCallArgText`: thirty lines of `case arg.value.kind` over ten
+    ## SCALAR `TypeKind`s, with `else: ""`. It was the fifth of the seven
+    ## independent "value -> string" implementations PLAT-2 measured, and it
+    ## survived the milestone's first pass — this file is byte-identical to
+    ## the pre-PLAT-2 tree apart from this block.
+    ##
+    ## It was not inert. Its output is written into the ViewModel store as a
+    ## `vm_types.CallArg`, and `viewmodel/views/isonim_calltrace_view.nim`'s
+    ## "Add value to scratchpad" wraps that STRING back into a
+    ## `TypeKind.Raw` `Value` and pushes it into the scratchpad — a surface
+    ## already on the pipeline. So one pane showed the same value spelled two
+    ## ways depending on which half of it the reader looked at, which is
+    ## precisely the risk PLAT-2's brief names ("a migration that leaves two
+    ## paths, so a visualiser works in some surfaces").
+    ##
+    ## `else: ""` was the visible half of that: a call argument that was a
+    ## sequence, an instance, a tuple, a table, a variant, a pointer or an
+    ## enum rendered as a BLANK chip. It reads like every other surface now.
     if arg.isNil:
       return ""
     if ($arg.text).len > 0:
+      # The ENGINE's own pre-rendered spelling, kept as-is and not re-rendered.
+      #
+      # Every path the Rust engine has writes `text: ""` here
+      # (`db-backend/src/db.rs::to_call_arg` and
+      # `trace_reader.rs::to_call_arg`), so on a real recording this branch
+      # never fires and the presenter below renders every argument. What does
+      # populate it is `frontend/storybook_components.nim`, which builds
+      # `CallArg(name: …, text: …)` fixtures with no `value` at all — there is
+      # nothing for the presenter to render there, and dropping the branch
+      # would blank the storybook.
       return $arg.text
     if arg.value.isNil:
       return ""
-    case arg.value.kind:
-    of Int:
-      $arg.value.i
-    of Float:
-      $arg.value.f
-    of String:
-      "\"" & $arg.value.text & "\""
-    of CString:
-      "\"" & $arg.value.cText & "\""
-    of Char:
-      "'" & $arg.value.c & "'"
-    of Bool:
-      $arg.value.b
-    of Raw:
-      $arg.value.r
-    of Error:
-      $arg.value.msg
-    of FunctionKind:
-      if ($arg.value.functionLabel).len > 0:
-        "function<" & $arg.value.functionLabel & ">"
-      else:
-        "function"
-    of TypeKind.None:
-      "nil"
-    else:
-      ""
+    callArgValue(arg.value).root.text
 
   proc convertCallArgs(args: seq[CallArg]): seq[vm_types.CallArg] =
     result = @[]
     for arg in args:
       # Pre-rendering the text here keeps the view layer pure and avoids
       # re-evaluating recursive ``Value`` trees on every reactive update.
-      let rendered = safeCallArgText(arg)
+      let rendered = callArgText(arg)
       result.add(makeCallArg($arg.name, rendered))
 
   var vmArgs = initTable[string, seq[vm_types.CallArg]]()

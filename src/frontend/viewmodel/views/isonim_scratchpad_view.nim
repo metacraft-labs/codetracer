@@ -164,17 +164,22 @@ proc rowClass*(isError: bool): string =
 proc rowClass*(row: ScratchpadRowView): string =
   rowClass(row.isError)
 
+# PLAT-2: THE `<error: …>` WRAPPER IS GONE FROM HERE.
+#
+# It used to be applied at this layer, over a `valueText` whose producer
+# (`ui/scratchpad.valueTextRepr`) had ALREADY decided what an error looks like
+# — and decided differently, returning the bare `msg`. So one value's error
+# rendering was assembled from two modules' halves, and the scratchpad's answer
+# differed from the state panel's (bare `msg`) and from the trace log's
+# (`<span class="error-trace">`). The presenter now renders `<error: msg>` once,
+# for every surface, and `isError` remains only as the flag the CSS modifier
+# keys on (`rowClass` above).
+
 proc cellText*(entry: ScratchpadValueEntry): string =
-  if entry.isError:
-    "<error: " & entry.valueText & ">"
-  else:
-    entry.valueText
+  entry.valueText
 
 proc cellText*(row: ScratchpadRowView): string =
-  if row.isError:
-    "<error: " & row.valueText & ">"
-  else:
-    row.valueText
+  row.valueText
 
 proc valueExpandedClass*(): string =
   "value-expanded border-value-0 value-expanded-name"

@@ -5,6 +5,8 @@ import
   ../../common/ct_event,
   origin_chain_runtime
 
+import ./presented_value
+
 let ATOM_KINDS = {
   Int, Float, String, CString, Char, Bool, Enum, Enum16, Enum32,
   types.Error, TypeKind.Raw, FunctionKind, TypeKind.None
@@ -566,7 +568,7 @@ proc renderHistoryTableDom(self: ValueComponent, expression: cstring, chart: Cha
         ev.preventDefault()
         self.historyContextAction(historyEvent, ev)
       )
-      valueNode.appendText(historyEvent.value.textRepr)
+      valueNode.appendText(statePanelValue(historyEvent.value).root.text)
 
       # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 1) —
       # attach the icon-only origin badge per entry.  The per-entry
@@ -770,41 +772,25 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
 
 
 proc atomValueTextAndClass(value: Value): (string, string) =
-  case value.kind:
-  of Int, Float, String, CString, Char, Bool:
-    ($value, toLowerAscii($value.kind))
-
-  of Enum, Enum16, Enum32:
-    (value.readableEnum(), "enum")
-
-  of FunctionKind:
-    (value.textRepr, "function")
-
-  of types.None:
-    ("nil", "nil")
-
-  else:
-    ("", "empty")
+  ## PLAT-2: one presentation, at the state panel's budget, plus the CSS class
+  ## the same presentation reports.
+  ##
+  ## THREE SEPARATE FORMATTERS MET IN THE OLD BODY OF THIS PROC, which is why
+  ## the state panel's cells and its popup could disagree about one value:
+  ## `$value` (the multi-line DIAGNOSTIC DUMP) for six scalar kinds,
+  ## `readableEnum` for three, `textRepr` for functions, a literal `"nil"`, and
+  ## `("", "empty")` for everything else — an EMPTY CELL for `Literal`, `Slice`,
+  ## `Any`, `Recursion`, `Html` and `C`. The class strings were hand-written
+  ## beside each arm and are now `presentationClassName`'s, keyed on the same
+  ## `PresentationClass` the terminal colours by.
+  let presentation = statePanelValue(value)
+  (presentation.root.text, presentationClassName(presentation.root.class))
 
 proc collapsedValueTextAndClass(value: Value): (string, string) =
-  case value.kind:
-  of Pointer:
-    ($value.textRepr, "pointer")
-
-  of Seq, Set, HashSet, OrderedSet, Array, Varargs:
-    ($value.textRepr, "seq")
-
-  of Variant:
-    ($value.textRepr, "variant")
-
-  of TableKind:
-    ($value.textRepr, "table")
-
-  of Instance, Union, Tuple:
-    ($value.textRepr, "instance")
-
-  else:
-    atomValueTextAndClass(value)
+  ## The collapsed rendering of a compound value. Identical to the atom case
+  ## since PLAT-2 — the split existed only because the two halves reached two
+  ## different formatters, and they now reach one.
+  atomValueTextAndClass(value)
 
 proc inlineHistoryVisible(self: ValueComponent, expression: cstring): bool =
   self.charts.hasKey(expression) and
@@ -1080,7 +1066,9 @@ proc renderValueContentDom(
 
   of types.Error:
     result = newElement(cstring"div", cstring"value-error value-expanded-text")
-    result.appendText(value.msg)
+    # PLAT-2: the presenter's `<error: msg>`, the same bytes every other
+    # surface shows. The CSS class is what makes it read as a refusal here.
+    result.appendText(statePanelValue(value).root.text)
 
   of Ref:
     result = newElement(cstring"div", cstring"value-bug")

@@ -25,7 +25,7 @@
 ## Compile + run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_event_log_marker_vm.nim
 
-import std/[json, options, strutils, tables, unittest]
+import std/[json, options, strutils, tables, unicode, unittest]
 
 import isonim/core/async_compat
 import isonim/core/[signals, computation]
@@ -163,6 +163,39 @@ suite "M25b — EventLogVM populates marker row metadata":
     let truncated = formatShowValue(summaryRow)
     check truncated.contains("…")
     check truncated.len < summaryRow.showValue.len
+    # `summary:<n>` means n CHARACTERS. It used to mean "n minus the ellipsis's
+    # three BYTES", which is not a unit anybody wrote into a marker.
+    check truncated.runeLen == 10
+
+    # THE UTF-8 ARM. This is the defect PLAT-2's survey named — "BYTES with a
+    # middle ellipsis" — asserted rather than described. The previous
+    # implementation sliced `base` by byte index, so a multi-byte payload was
+    # cut mid-sequence and invalid UTF-8 reached the renderer.
+    let utf8Row = MarkerEventRow(
+      keyValue: "k",
+      showValue: "αβγδεζηθικλμνξοπρστυφχψω",   # 24 runes, 48 bytes
+      format: "summary:10",
+    )
+    let utf8Truncated = formatShowValue(utf8Row)
+    check utf8Truncated.contains("…")
+    check utf8Truncated.runeLen == 10
+    # `validateUtf8` returns -1 for a well-formed string, or the byte index of
+    # the first invalid sequence. The byte-indexed version returned 4 here.
+    check validateUtf8(utf8Truncated) == -1
+    # 10 characters = 5 of prefix, the ellipsis, 4 of suffix (the prefix is
+    # biased larger for odd widths).
+    check utf8Truncated.startsWith("αβγδε")
+    check utf8Truncated.endsWith("φχψω")
+
+    # A payload SHORTER than the limit in runes but LONGER in bytes is not
+    # truncated at all. The byte-indexed version truncated it, because it
+    # compared `base.len` (bytes) against the user's character limit.
+    let shortUtf8Row = MarkerEventRow(
+      keyValue: "k",
+      showValue: "αβγδε",                       # 5 runes, 10 bytes
+      format: "summary:8",
+    )
+    check formatShowValue(shortUtf8Row) == "αβγδε"
 
     let hexRow = MarkerEventRow(
       keyValue: "k",

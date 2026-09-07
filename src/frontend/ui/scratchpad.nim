@@ -41,6 +41,7 @@ import
 
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import ScratchpadValueEntry
 from ../viewmodel/viewmodels/scratchpad_vm import
@@ -130,24 +131,28 @@ proc isLiveScratchpadComponent(self: ScratchpadComponent): bool =
   scratchpadComponentRef.isNil or scratchpadComponentRef == self
 
 proc valueTextRepr*(value: Value): string =
-  ## Produce a short single-line text representation of a ``Value``
-  ## ref-object suitable for the IsoNim placeholder cell.  Mirrors the
-  ## branches the legacy ``ValueComponent`` collapsed view used:
-  ## literal strings render bare, errors render as ``msg``, and every
-  ## other value defers to the canonical ``textRepr`` (which the
-  ## legacy column-4 renderer in trace_log §1.69 also relied on).
+  ## A single-line rendering of a ``Value`` for the IsoNim scratchpad cell.
   ##
   ## The IsoNim view layer applies the ``expression: <text>`` shape
-  ## (``cellText`` in ``isonim_scratchpad_view``) — this proc only
-  ## returns the value half so the same helper is reusable for the
-  ## eventual rich ``ValueComponent`` follow-up.
+  ## (``cellText`` in ``isonim_scratchpad_view``) — this proc returns the value
+  ## half only.
+  ##
+  ## PLAT-2: one call, at the `scratchpad` budget.
+  ##
+  ## The three-arm ladder this replaced is why the milestone exists. Its
+  ## `Error` arm returned the bare `msg` — which the IsoNim view then wrapped in
+  ## `<error: …>` itself (`isonim_scratchpad_view.cellText`), so the SAME
+  ## decision was made twice, in two modules, in two spellings, and the pane's
+  ## error rendering differed from the state panel's (bare `msg`) and from the
+  ## trace log's (`<span class="error-trace">`). The presenter renders
+  ## `<error: msg>` for every surface; the view's own wrapper is removed.
   if value.isNil:
     return ""
-  if value.kind == types.Error:
-    return safeStr(value.msg)
   if value.isLiteral and value.kind == types.String:
+    # A literal string in the scratchpad is the text the user typed, not a
+    # recorded value being quoted back at them. A fact about this pane.
     return safeStr(value.text)
-  value.textRepr
+  scratchpadValue(value).root.text
 
 proc legacyValueToVm(expression: cstring; value: Value): ScratchpadValueEntry =
   ## Map a legacy ``(expression, Value)`` pair to the platform-neutral

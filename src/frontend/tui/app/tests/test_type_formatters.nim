@@ -10,6 +10,22 @@
 ## this workspace emits one. They are exercised here, on constructed values,
 ## exactly as CTUI-6 exercised the `lib` badge it had no trace for.
 ##
+## ## PLAT-2 MOVED THE SUBJECT, AND THIS SUITE FOLLOWED IT
+##
+## `type_formatters` no longer classifies, truncates, dumps bytes or produces
+## hexadecimal companions; `common/value_presentation/` does, for all seven
+## surfaces, and `src/common/value_presentation_test.nim` is where those rules
+## are asserted. What is asserted HERE is what is still this front-end's:
+##
+##   * that the terminal's own measure (`terminalMeasure`) is what the presenter
+##     truncates by, so a row's value column is right in CELLS and not in runes;
+##   * that a row asks the presenter for the width it actually has, rather than
+##     receiving an unbounded string and clipping it;
+##   * that the class -> colour table covers the vocabulary.
+##
+## The four fixture-less arms are still exercised here, through the ROW, which
+## is the level at which this front-end owns the answer.
+##
 ## Three more things live here for the same reason: they are PURE, and a real
 ## trace could not make them fail more precisely.
 ##
@@ -43,6 +59,7 @@ import isonim_tui
 
 import headless_app/layout_model
 
+import ../../../../common/value_presentation
 import ../formatters/type_formatters
 import ../views/shell
 import ../views/tree_node
@@ -51,7 +68,7 @@ import ../views/variables
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 155
+const ExpectedAssertions = 146
 
 var countedAssertions = 0
 
@@ -95,149 +112,156 @@ proc cellAt(row: string; index: int): string =
 # Assertion templates. Every helper that calls `check` is a TEMPLATE.
 # ---------------------------------------------------------------------------
 
-template checkClass(typeName, value: string; want: ValueClass) =
-  let got = classifyValue(typeName, value)
-  checkpoint("classifyValue('" & typeName & "', '" & value & "') = " & $got &
-             ", wanted " & $want)
-  ck got == want
+proc pv(kind: PValueKind; text, typeName, sourceKind: string): PValue =
+  PValue(kind: kind, text: text, typeName: typeName, sourceKind: sourceKind)
 
-template checkRoundTrip(decimal, hex: string) =
-  ## The two renderings of one number agree in BOTH directions, which is what
-  ## §3.3.4's "simultaneously" means and what a one-way table would not give.
-  ck toHexLiteral(decimal) == hex
-  ck fromHexLiteral(hex) == decimal.strip(chars = {'-'})
+proc rowSpec(pval: PValue; focused = false; cells = 40): TreeRowSpec =
+  ## One variable row over a value, at a stated width. The width is the point:
+  ## `formattedValue` takes it and returns what fits.
+  TreeRowSpec(kind: trkVariable, name: "v",
+              typeName: (if pval.isNil: "" else: pval.typeName),
+              value: present(pval, tuiValueBudget()).root.text,
+              presented: pval, depth: 1, focused: focused, width: cells)
+
+template checkClass(pval: PValue; want: PresentationClass) =
+  let got = valueClassOf(rowSpec(pval))
+  checkpoint("class = " & $got & ", wanted " & $want)
+  ck got == want
 
 # ---------------------------------------------------------------------------
 
-suite "CTUI-7: the type formatters, on the arms no fixture produces":
+suite "CTUI-7 after PLAT-2: what is still this front-end's":
 
-  test "every value class is recognised from its shape":
-    # The shapes CTUI-1's corpus really produces (measured 2026-09-06)…
-    checkClass("Int", "600", vcInteger)
-    checkClass("Float", "0.5", vcFloat)
-    checkClass("String", "\"shield online\"", vcString)
-    checkClass("Bool", "true", vcBoolean)
-    checkClass("Bool", "false", vcBoolean)
-    checkClass("NoneType", "nil", vcNone)
-    checkClass("Dict", "[(\"key_000\", 0)]", vcSequence)
-    checkClass("Tuple", "(\"key_000\", 0)", vcTuple)
-    checkClass("Object", "<function main at 0x7f00>", vcOpaque)
-    checkClass("Field",
-               "\"0x0000000000000000000000000000000000000000000000000000000000002710\"",
-               vcHexLiteral)
-    # …and the four the corpus does NOT produce.
-    checkClass("Point", "{x: 10, y: 20}", vcStruct)
-    checkClass("Pointer", "0x7ffd0000 -> (42)", vcPointer)
-    checkClass("Pointer", "NULL", vcPointer)
-    checkClass("Colour", "Colour::Red(1)", vcEnum)
-    checkClass("Error", "<error: unreadable>", vcError)
-    checkClass("Char", "'x'", vcChar)
-    # A value the engine rendered as nothing falls back to the TYPE NAME, which
-    # is the only case the name decides.
-    checkClass("Bool", "", vcBoolean)
-    checkClass("uint32", "", vcInteger)
-    checkClass("u64", "", vcInteger)
-    checkClass("Vec<u8>", "", vcSequence)
-    checkClass("", "", vcUnknown)
-    # THE NEGATIVE TWIN for the name fallback, through the same function: a
-    # name that suggests nothing must NOT be forced into a class. `NoneType`
-    # contains `one` and `Object` contains nothing; neither may match `int`.
-    checkClass("Object", "", vcUnknown)
-    checkClass("Widget", "", vcUnknown)
-    # …and a name is never allowed to override a shape the engine gave.
-    checkClass("Int", "\"not a number\"", vcString)
+  test "a row's class comes from the presenter, including the arms no fixture produces":
+    # BEFORE PLAT-2 this was `classifyValue(typeName, value)` — an inference
+    # from the SHAPE of an already-rendered string, which was all this pane had.
+    # It is now the kind the engine reported, so a value whose rendering carries
+    # no recognisable bracket is classified correctly instead of silently
+    # landing on `vcUnknown` and being painted in the default colour.
+    checkClass(pv(pvkInt, "600", "Int", "Int"), pcInteger)
+    checkClass(pv(pvkFloat, "0.5", "Float", "Float"), pcFloat)
+    checkClass(pv(pvkString, "shield online", "String", "String"), pcString)
+    checkClass(pv(pvkBool, "true", "Bool", "Bool"), pcBoolean)
+    checkClass(pv(pvkNil, "", "NoneType", "None"), pcNone)
+    checkClass(pv(pvkChar, "x", "Char", "Char"), pcChar)
+    checkClass(pv(pvkRaw, "<function main at 0x7f00>", "Object", "Raw"), pcOpaque)
+    checkClass(pv(pvkString,
+      "0x0000000000000000000000000000000000000000000000000000000000002710",
+      "Field", "String"), pcHexLiteral)
+    checkClass(pv(pvkError, "unreadable", "Error", "Error"), pcError)
+    checkClass(pv(pvkPointer, "0x7ffd0000", "Pointer", "Pointer"), pcPointer)
+    checkClass(pv(pvkEnum, "1", "Colour", "Enum"), pcEnum)
+    # A record and a tuple are DIFFERENT classes now. They used to be told apart
+    # by whether the rendering started with `{` or `(`, which is why
+    # `headless_session`'s decoder deliberately wrote a struct `{…}` where the
+    # desktop wrote `Type(…)` — a wire-level divergence introduced to feed a
+    # string-shape classifier. Both are gone.
+    checkClass(PValue(kind: pvkRecord, typeName: "Point", sourceKind: "Instance",
+                      members: @[member("x", pv(pvkInt, "10", "Int", "Int"))]),
+               pcRecord)
+    checkClass(PValue(kind: pvkTuple, typeName: "Tuple", sourceKind: "Tuple",
+                      members: @[member("", pv(pvkInt, "10", "Int", "Int"))]),
+               pcTuple)
+    # A row with no value at all — a scope header — is still a row.
+    checkClass(nil, pcNone)
 
-  test "numbers carry both bases, and only when both are exact":
-    checkRoundTrip("42", "0x2a")
-    checkRoundTrip("306", "0x132")
-    checkRoundTrip("0", "0x0")
-    checkRoundTrip("255", "0xff")
-    # Negative decimals get a signed hex; the reverse direction has no sign to
-    # read, which is why `checkRoundTrip` compares the magnitude.
-    ck toHexLiteral("-42") == "-0x2a"
-    # A VALUE TOO WIDE FOR A `BiggestInt` ANSWERS NOTHING rather than a wrapped
-    # one — the whole point of printing two bases is that they say the same
-    # thing.
-    ck toHexLiteral("99999999999999999999999999") == ""
-    ck fromHexLiteral(
-      "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff") == ""
-    # …and the bound is on the VALUE, not on the literal's width: a Noir field
-    # element is 64 hex digits whatever it holds, so a padded small one still
-    # gets its decimal.
-    ck fromHexLiteral(
-      "0x0000000000000000000000000000000000000000000000000000000000002710") ==
-      "10000"
-    ck fromHexLiteral("0x2710") == "10000"
-    ck toHexLiteral("not a number") == ""
-    ck fromHexLiteral("2710") == ""
-    # THE FOCUS RULE, from both sides.
-    ck focusedValue(vcInteger, "306") == "306 (0x132)"
-    ck focusedValue(vcHexLiteral, "\"0x00002710\"") == "0x2710 (10000)"
-    # A padded 32-byte field element keeps both: the padding goes and the
-    # decimal appears, which is what a reader of a Noir pane needs.
-    ck focusedValue(vcHexLiteral,
-      "\"0x0000000000000000000000000000000000000000000000000000000000002710\"") ==
-      "0x2710 (10000)"
-    # …and one whose VALUE does not fit shows the literal alone rather than a
-    # wrong number.
-    ck focusedValue(vcHexLiteral,
-      "\"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"") ==
-      "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-    # …and a class with no second rendering is returned untouched.
-    ck focusedValue(vcString, "\"x\"") == "\"x\""
-    ck focusedValue(vcBoolean, "true") == "true"
-    # UNFOCUSED, a hex literal loses its padding and nothing else changes.
-    ck compactValue(vcHexLiteral, "\"0x00002710\"") == "0x2710"
-    ck compactValue(vcInteger, "306") == "306"
-    ck normalisedHexLiteral("0x00000000") == "0x0"
-    ck normalisedHexLiteral("not hex") == "not hex"
+  test "the class -> colour table covers the vocabulary":
+    # Every class must have a style, or a value would be painted in whatever the
+    # previous span left behind. Asserted by ENUMERATION, so a class added by
+    # PLAT-3 or PLAT-12 cannot arrive unstyled.
+    var styled = 0
+    for class in PresentationClass:
+      let style = valueStyle(class)
+      ck style.fg.len > 0
+      inc styled
+    ck styled == 20
+    ck valueStyle(pcInteger) == NumberStyle
+    ck valueStyle(pcHexLiteral) == NumberStyle
+    ck valueStyle(pcString) == StringStyle
+    ck valueStyle(pcError) == ErrorStyle
+    ck valueStyle(pcMedia) == MediaStyle
 
-  test "strings and byte buffers truncate cleanly, and say how much was cut":
-    ck truncateValue("abcdef", 6) == "abcdef"
-    ck truncateValue("abcdef", 5) == "abcd" & Ellipsis
-    ck truncateValue("abcdef", 1) == Ellipsis
-    ck truncateValue("abcdef", 0) == ""
-    # BY CELL, not by rune: a wide glyph takes two columns and a truncation that
-    # counted runes would overflow the field by one column per glyph.
-    ck cellWidthOf(truncateValue("世界世界", 5)) <= 5
-    ck truncateValue("世界世界", 5).endsWith(Ellipsis)
-    ck stringDetail("\"hello\"") == "5 chars"
-    ck stringDetail("\"世界\"") == "2 chars"
+  test "the terminal's measure is in CELLS, and it is what the presenter clips by":
+    # THE MEASURE IS THIS FRONT-END'S CONTRIBUTION TO THE PIPELINE. A truncation
+    # that counted runes would overflow the value column by one cell per wide
+    # glyph, and a pane whose value column overflows corrupts every column after
+    # it.
+    ck terminalMeasure("abc") == 3
+    ck terminalMeasure("世界") == 4
+    ck terminalMeasure("") == 0
+    ck terminalMeasure("世") == 2
+    # …and the row's own value, asked for at five cells, comes back at five.
+    let wide = pv(pvkString, "世界世界", "String", "String")
+    let shown = formattedValue(rowSpec(wide, cells = 5), 5)
+    checkpoint("clipped: '" & shown & "' = " & $terminalMeasure(shown) & " cells")
+    ck terminalMeasure(shown) <= 5
+    ck shown.endsWith("…")
+    # The same value at a width that fits is NOT clipped.
+    let full = formattedValue(rowSpec(wide, cells = 20), 20)
+    ck full == "\"世界世界\""
+    ck not full.endsWith("…")
 
-    # A BYTE BUFFER IS DECIDED BY ITS MEMBERS. The positive and the negative go
-    # through the same function.
-    ck byteBufferOf(@["0", "17", "255"]) == @[0, 17, 255]
-    ck byteBufferOf(@["0", "17", "256"]).len == 0
-    ck byteBufferOf(@["0", "-1"]).len == 0
-    ck byteBufferOf(@["0", "x"]).len == 0
-    ck byteBufferOf(@[]).len == 0
-    ck byteBufferOf(@["7"]) == @[7]
-    let dump = formatByteBuffer(@[0, 17, 34, 255], 8)
+  test "a row asks for the width it has, rather than clipping what it was given":
+    # THE DELIVERABLE, at the row. `formattedValue(spec, cells)` returns what
+    # fits; there is no `truncate(formattedValue(spec))` anywhere, and
+    # `ci/test/value-presentation-boundary.sh` fails if one appears.
+    var members: seq[PMember] = @[]
+    for k in 0 ..< 600:
+      members.add member("", pv(pvkInt, $(1000 + k), "Int", "Int"))
+    let wideValue = PValue(kind: pvkSequence, typeName: "list",
+                           sourceKind: "Seq", members: members)
+    for cells in [4, 8, 20, 40]:
+      let text = formattedValue(rowSpec(wideValue, cells = cells), cells)
+      checkpoint("at " & $cells & " cells: '" & text & "'")
+      ck terminalMeasure(text) <= cells
+
+  test "the focused row carries the second numeric base, and only when focused":
+    let n = pv(pvkInt, "306", "Int", "Int")
+    ck formattedValue(rowSpec(n, focused = false), 40) == "306"
+    ck formattedValue(rowSpec(n, focused = true), 40) == "306 (0x132)"
+    let field = pv(pvkString,
+      "0x0000000000000000000000000000000000000000000000000000000000002710",
+      "Field", "String")
+    ck formattedValue(rowSpec(field, focused = true), 40) == "0x2710 (10000)"
+    # A class with no second rendering is unchanged by focus.
+    let s2 = pv(pvkString, "x", "String", "String")
+    ck formattedValue(rowSpec(s2, focused = true), 40) ==
+       formattedValue(rowSpec(s2, focused = false), 40)
+
+  test "a byte buffer is decided by its members, and the length is always reported":
+    var bytes: seq[PMember] = @[]
+    for b in [0, 17, 34, 255]:
+      bytes.add member("", pv(pvkInt, $b, "Int", "Int"))
+    let buffer = PValue(kind: pvkSequence, typeName: "Bytes",
+                        sourceKind: "Seq", members: bytes)
+    let dump = formattedValue(rowSpec(buffer, cells = 60), 60)
     checkpoint("byte dump: '" & dump & "'")
     ck dump == "00 11 22 ff (4 bytes)"
-    let clipped = formatByteBuffer(@[1, 2, 3, 4], 2)
-    checkpoint("clipped dump: '" & clipped & "'")
-    ck clipped == "01 02 " & Ellipsis & " (4 bytes)"
-    # THE LENGTH IS ALWAYS REPORTED, so the bound cannot be mistaken for the
-    # buffer — which is the whole difference between a summary and a lie.
-    ck clipped.contains("4 bytes")
+    ck valueClassOf(rowSpec(buffer)) == pcSequence
+    # WHICH PRESENTER ANSWERED, reportably — PLAT-2's fourth deliverable, at
+    # the row a user is looking at.
+    let attribution = present(buffer, tuiRowBudget(60, false)).attribution
+    ck attribution.presenter == "builtin.byte-buffer"
+    ck "builtin.sequence" in attribution.candidates
+    # One member out of range takes the same value to the other presenter.
+    var notBytes = bytes
+    notBytes.add member("", pv(pvkInt, "300", "Int", "Int"))
+    let notBuffer = PValue(kind: pvkSequence, typeName: "Bytes",
+                           sourceKind: "Seq", members: notBytes)
+    ck present(notBuffer, tuiRowBudget(60, false)).attribution.presenter ==
+       "builtin.sequence"
 
-  test "a compound value gets the summary §3.3.4 asks for":
-    ck compactStructSummary("Point", "{x: 10, y: 20}") == "Point {x: 10, y: 20}"
-    # A value that is not brace-wrapped is left alone: the type name leads a
-    # RECORD, and prefixing it onto a list would read as a cast.
-    ck compactStructSummary("Dict", "[1, 2]") == "[1, 2]"
-    ck compactStructSummary("", "{x: 1}") == "{x: 1}"
-    ck memberCountSuffix(600, "entry", "entries") == " (600 entries)"
-    ck memberCountSuffix(1, "entry", "entries") == " (1 entry)"
-    ck memberCountSuffix(0, "entry", "entries") == ""
+  test "the string detail this pane offers is still this pane's":
+    ck stringDetail("\"hello\"") == "5 chars"
+    ck stringDetail("\"世界\"") == "2 chars"
 
 suite "CTUI-7: one row of the tree, and where its fields land":
 
   test "the marker columns are the same on every kind of row":
     let leaf = TreeRowSpec(kind: trkVariable, name: "counter",
-                           typeName: "Int", value: "41", depth: 1,
-                           width: RowWidth)
+                           typeName: "Int", value: "41",
+                           presented: pv(pvkInt, "41", "Int", "Int"),
+                           depth: 1, width: RowWidth)
     var expandable = leaf
     expandable.name = "point"
     expandable.expandable = true

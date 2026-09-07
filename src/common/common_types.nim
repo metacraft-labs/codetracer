@@ -11,6 +11,18 @@ import task_and_event
 import flow_mode_wire
 export flow_mode_wire
 
+# PLAT-2's value-presentation pipeline. A NORMAL import, unlike everything in
+# the `include` list below, because `PValue` and `Presentation` are plain trees
+# of `string` and therefore have exactly one spelling whichever way `langstring`
+# is bound. That is the whole point: the terminal reaches the same presenter
+# through `value_presentation/json_adapter`, and one type meets in the middle.
+#
+# Re-exported so every consumer of `common/types` or `frontend/types` — which is
+# every surface — can name `Budget`, `Presentation` and the per-surface budgets
+# without a second import.
+import value_presentation
+export value_presentation
+
 # this module is used in codetracer and core and in the nim plugin so
 # it needs to support both C and JavaScript
 # try to use langstring when something is
@@ -30,7 +42,8 @@ include
 export task_and_event
 
 include
-  common_types/utils/[ errors, meta, text_representation, timer ]
+  common_types/utils/[ errors, meta, text_representation, timer,
+                       value_presentation_bridge ]
 
 # TODO: think if this is useful/where to put validation or type safety
 # type

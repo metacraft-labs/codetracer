@@ -6,6 +6,15 @@
 ## avoid circular imports and keep the ViewModel layer self-contained.
 ## They represent the "clean" domain model that panels and view-models
 ## consume via reactive signals.
+##
+## The ONE exception to "independent of the legacy frontend types" is
+## `value_presentation`, imported below. It is not a legacy type and importing
+## it introduces no cycle: the package depends on `std/strutils` and
+## `std/unicode` and on nothing in this repository. It is here because
+## `Variable.presented` carries a `PValue` — see that field.
+
+import ../../../common/value_presentation
+export value_presentation
 
 type
   LoadingState* = enum
@@ -196,6 +205,25 @@ type
     ## A local / global variable entry (recursive for compound types).
     name*: string
     value*: string
+      ## the presenter's answer at the `tui-value` budget
+      ## (`common/value_presentation/surfaces.tuiValueBudget`). Kept as a plain
+      ## string because a great deal of this layer compares rows by their
+      ## rendering — diff highlighting, inline annotations — and because a row
+      ## that has been paged out of the store still has to say what it said.
+    presented*: PValue
+      ## PLAT-2: THE VALUE ITSELF, normalised.
+      ##
+      ## `value` above is ONE rendering at ONE budget. A pane that knows its own
+      ## width — the variables tree, whose value column is
+      ## `tree_node.fieldWidths(width).value` cells wide — asks the presenter
+      ## for a rendering that fits IT, from this field. Before PLAT-2 it could
+      ## not: all it had was a string somebody else had already rendered, so
+      ## the only thing it could do was clip, which is exactly the "each
+      ## surface truncating" the milestone removes.
+      ##
+      ## Nil for a row that did not come from a recorded value (a synthetic
+      ## scope header, a "… n more" marker). Every consumer therefore has to
+      ## tolerate nil, and `presenter.present` does: it answers `nil`.
     typeName*: string
     hasChildren*: bool
     children*: seq[Variable]

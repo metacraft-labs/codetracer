@@ -58,6 +58,12 @@ import isonim_tui
 
 import ./styled_row
 
+# `TerminalAmbiguousWidth` is the PINNED ambiguous-width policy. See
+# `cellWidth` below: this front-end measures cells under one policy in one
+# place, rather than under whatever `isonim_tui`'s `ambiguousWidth` threadvar
+# happens to hold.
+from ../formatters/type_formatters import TerminalAmbiguousWidth
+
 type
   Annotation* = object
     ## One `name: value` pair as it will appear on screen.
@@ -137,15 +143,66 @@ proc annotationText*(values: openArray[Annotation]): string =
     parts.add v.name & ": " & v.value
   AnnotationOpen & parts.join(AnnotationSeparator) & AnnotationClose
 
-proc cellWidth(s: string): int =
+func cellWidth(s: string): int =
+  ## Cells, under the front-end's PINNED ambiguous-width policy.
+  ##
+  ## `displayWidth($r)` — the threadvar-reading spelling — was here until
+  ## PLAT-2. It is the same divergence `type_formatters.TerminalAmbiguousWidth`
+  ## records: `isonim_tui`'s no-policy overloads read
+  ## `text/width.ambiguousWidth`, a thread-local anyone may set at runtime, so
+  ## the number of cells a rendering was clipped at depended on mutable global
+  ## state. `awNarrow` is both the library's default and the constant
+  ## `terminalMeasure` pins, so nothing on screen moves; what changes is that
+  ## the two cell measures this front-end uses can no longer disagree.
+  ##
+  ## THE STRING OVERLOAD, NOT THE `Rune` ONE, AND THAT IS NOT A STYLE CHOICE.
+  ## `displayWidth($r, …)` is the only spelling that is MEASURABLY a no-op here.
+  ## Swept over all 1 112 064 codepoints: `displayWidth($r, awNarrow)` agrees
+  ## with the old `displayWidth($r)` on every one of them, while
+  ## `displayWidth(r, awNarrow)` — the `Rune` overload — disagrees on
+  ## TWENTY-SIX, U+1F1E6 … U+1F1FF, the regional indicators. The string overload
+  ## runs the grapheme-cluster path and scores a lone flag letter 2; the `Rune`
+  ## overload scores it 1. Neither is right for this loop, which iterates RUNES
+  ## and so scores a two-letter flag 4 or 2 where the cluster is 2 — but
+  ## changing WHICH way it is wrong is a rendering change, and moving off the
+  ## threadvar is supposed not to be one. Making this loop cluster-correct is a
+  ## separate change and needs its own test.
   for r in runes(s):
-    result += max(1, displayWidth($r))
+    result += max(1, displayWidth($r, TerminalAmbiguousWidth))
 
 proc fitAnnotation*(text: string; room: int): string =
   ## `text` truncated to `room` cells, with `…` marking the loss.
   ##
   ## Returns "" when there is not room for a legible annotation at all
   ## (`MinAnnotationCells`), so a two-column remainder does not become `/`.
+  ##
+  ## ## THIS IS A TRUNCATION OF PRESENTER OUTPUT, AND IT IS RETAINED. WHY.
+  ##
+  ## PLAT-2's rule is "the presenter returns what fits; a surface never
+  ## truncates afterwards", and `ci/test/value-presentation-boundary.sh` has a
+  ## check (`budget-not-post-filter`) that fires on exactly this shape. This
+  ## site is not in that gate's subject and would not pass it, so the reason it
+  ## survives is written here rather than left to be discovered:
+  ##
+  ##   * WHAT IS CUT IS NOT A VALUE. `annotationText` above JOINS several
+  ##     `name: value` pairs with `, ` and wraps the result in `/* */`. Each
+  ##     `value` in it already came from the presenter at the `tui-row`
+  ##     budget — the per-value truncation IS the budget's, and is not
+  ##     duplicated here. What this cuts is the assembled COMMENT: the chrome,
+  ##     the separators and however many pairs fit.
+  ##   * THE BUDGET COULD NOT KNOW THE NUMBER. `room` is
+  ##     `annotationRoom(codeWidth, renderedCells)` — what is left of the code
+  ##     column AFTER the source line has been painted. It is not a property of
+  ##     any value, it is a property of the line the value happens to sit
+  ##     beside, and it is not known until the pane has drawn the code. A
+  ##     `Budget` is resolved before the presenter runs.
+  ##   * IT IS RUNE-INDEXED AND CELL-MEASURED, so it shares none of the defects
+  ##     of the byte-indexed truncations PLAT-2's survey found: it cannot split
+  ##     a UTF-8 sequence, and it cannot overrun the column by a wide glyph.
+  ##
+  ## If a second surface ever needs "clip a joined multi-value line to a width
+  ## known only at paint time", that is a budget-shaped question and this
+  ## should move into the pipeline. One is not a pattern.
   if text.len == 0 or room < MinAnnotationCells:
     return ""
   if cellWidth(text) <= room:
@@ -154,7 +211,7 @@ proc fitAnnotation*(text: string; room: int): string =
   var cells = 0
   let budget = room - cellWidth(AnnotationEllipsis)
   for r in runes(text):
-    let w = max(1, displayWidth($r))
+    let w = max(1, displayWidth($r, TerminalAmbiguousWidth))
     if cells + w > budget:
       break
     kept.add $r

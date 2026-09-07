@@ -2905,6 +2905,17 @@ test-vm: test-vm-native test-vm-js
 test-lane-coverage:
   bash ci/test/test-lane-coverage.sh
 
+# PLAT-2's verification gate, and the contract suite that proves it can say no.
+# Both are pure bash (the contract suite additionally uses `nim check` for the
+# purity arm, and says NOT RUN by name if `nim` is absent), and both are wired
+# into `ci/lint/nim.sh`; this recipe exists so a developer can run them without
+# the whole lint stage.
+test-value-presentation-boundary:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  bash ci/test/value-presentation-boundary-test.sh
+  bash ci/test/value-presentation-boundary.sh
+
 # Print what each lane runs, without running anything.  Useful when deciding
 # where a new test file belongs.
 test-lanes:

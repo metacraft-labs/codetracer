@@ -97,16 +97,6 @@ proc `$`*(value: Value): string =
   except:
     return "<error>"
 
-proc readableEnum*(value: Value): string =
-  ## Textual representation of an enum value
-  if value.kind in {Enum, Enum16, Enum32}:
-    if value.enumInt <= value.typ.enumNames.high:
-      result = $value.typ.enumNames[value.enumInt]
-    else:
-      result = $value.enumInt
-  else:
-    result = ""
-
 proc toLangType*(typ: Type, lang: Lang): string =
   ## Original language textual representation of Type object, according to Lang
   if typ.isNil:
@@ -138,11 +128,38 @@ proc toLangType*(typ: Type, lang: Lang): string =
   else:
     result = "!unimplemented"
 
-func textReprDefault(value: Value, depth: int = 10): string
-
-func textReprRust(value: Value, depth: int = 10, compact: bool = false): string
-
-proc textRepr*(value: Value, depth: int = 10, lang: Lang = LangUnknown, compact: bool = false): string #{.exportc.}
+# PLAT-2 REMOVED `textRepr`, `textReprDefault`, `textReprRust` AND
+# `readableEnum` FROM THIS MODULE.
+#
+# They were the desktop's value formatter — one of seven implementations of
+# "value -> string" in this repository — and every surface that called them now
+# calls `common/value_presentation/presenter.present` through
+# `common_types/utils/value_presentation_bridge.presentValue`. They are DELETED
+# rather than deprecated, because a migration that leaves two paths is the
+# specific failure PLAT-2's verification gate exists to prevent: a per-type
+# visualiser would work in whichever surfaces happened to be on the new path.
+# `ci/test/value-presentation-boundary.sh` fails on any reappearance.
+#
+# `text` / `$` BELOW ARE KEPT, and they are not a second formatter. `$value` is
+# a multi-line DIAGNOSTIC DUMP — `"Sequence(Seq [Field; 4]):\n  100\n…"` — used
+# by `echo` and by error messages, never by a pane. It was reached by a pane
+# exactly once (`ui/state.valueDisplayText`, as a fallback for the kinds
+# `textReprDefault` rendered as ""), and that call site is gone.
+#
+# THE BOUNDARY GUARD DOES *NOT* CATCH `$value`, and an earlier version of this
+# comment claimed it did. A rule banning `$value` inside a surface was written,
+# run, and REMOVED: all five of its hits were in `src/frontend/ui/value.nim` and
+# all five were false positives — `$value` over a `float` in a chart histogram,
+# and `$value.typ.langType`, which is a type NAME. `$` is not lexically
+# separable from `$`-on-anything-else, so `ci/test/value-presentation-boundary.sh`
+# declares this as a bound in its header rather than claiming it.
+#
+# What covers it instead, and the limit of that: the dump is VISIBLY multi-line,
+# so a pane reaching it fails that pane's own rendering assertions rather than
+# any structural gate. If you are adding a fallback in `ui/state.nim` or
+# anywhere else that renders a value, NOTHING WILL STOP YOU writing `$v` here —
+# reach for `ui/presented_value.nim` instead. This is also recorded in
+# `.agents/codebase-insights.txt`.
 
 proc testEq*(a: Value, b: Value, langType: bool = true): bool =
   ## Compare two values for equality
@@ -257,212 +274,3 @@ iterator unionChildren*(value: Value): (defaultstring, Value) =
   else:
     discard
 
-func textReprDefault(value: Value, depth: int = 10): string =
-  # a repr of a language value, we probably have to do this for each lang:
-  # TODO language-specific display?
-  # for now we mostly use the same repr
-  if value.isNil:
-    return "nil"
-  if depth <= 0:
-    return "#"
-  result = case value.kind:
-  of Int:
-    $value.i
-  of String:
-    "\"" & $value.text & "\""
-  of Bool:
-    $value.b
-  of Float:
-    $value.f
-  of Char:
-    "'" & $value.c & "'"
-  of CString:
-    "\"" & $value.cText & "\""
-  of Enum:
-    if value.enumInt < value.typ.enumNames.len:
-      $value.typ.enumNames[value.enumInt]
-    else:
-      &"{value.typ.langType}({value.enumInt})"
-  of Seq, Set, HashSet, OrderedSet, Array, Varargs:
-    let elements = value.elements
-    var l = ""
-    let e = elements.mapIt(textReprDefault(it, depth - 1)).join(", ")
-    let openText: array[6, string] = ["@[", "{", "HashSet{", "OrderedSet{", "[", "varargs["]
-    let closeText: array[6, string] = ["]", "}", "}", "}", "]", "]"]
-    let more = if value.partiallyExpanded: ".." else: ""
-    l = openText[value.kind.int - Seq.int] & e
-    l = l & more & closeText[value.kind.int - Seq.int]
-    l
-  of Instance:
-    var record = ""
-    for i, field in value.elements:
-      if showable(field):
-        record.add(&"{value.typ.labels[i]}:{textReprDefault(field, depth - 1)}")
-        record.add(",")
-      else:
-        record.add(&"{value.typ.labels[i]}:..")
-    if record.len > 0:
-      record.setLen(record.len - 1)
-    record = &"{value.typ.langType}({record})"
-    record
-  of Union:
-    var record = ""
-    for name, field in unionChildren(value):
-      # echo "textRepr ", name
-      # if showable(field):
-      record.add(&"{name}:{textReprDefault(field, depth - 1)}")
-      record.add(", ")
-      # else:
-        # record.add(&"{name}:..")
-    if record.len > 0:
-      record.setLen(record.len - 1)
-    record = &"#{value.kindValue.textReprDefault}({record})"
-    record
-  of Ref:
-    textReprDefault(value.refValue, depth)
-  of Pointer:
-    let address = formatPointerAddress(value.address)
-    if not value.refValue.isNil: &"{address} -> ({textReprDefault(value.refValue)})" else: "NULL"
-  of Recursion:
-    "this"
-  of Raw:
-    "raw:" & $value.r
-  of C:
-    "c"
-  of TableKind:
-    let items = value.items
-    var l = ""
-    let more = if value.partiallyExpanded: ".." else: ""
-    for item in items:
-      l &= item.mapIt(textReprDefault(it, depth - 1)).join(": ") & " "
-    l & more
-    # $value.typ.langType & SUMMARY_EXPAND
-  of Error:
-    $value.msg
-  of FunctionKind:
-    &"function<{value.functionLabel}>" # $value.signature
-  of TypeValue:
-    $value.base
-  of Tuple:
-    var l = ""
-    let elements = value.elements.mapIt(textReprDefault(it, depth - 1)).join(", ")
-    l = "(" & elements & ")"
-    l
-  of Variant:
-    var res: seq[string]
-    if not value.activeVariantValue.isNil:
-      fmt"""{value.typ.langType}::{textReprDefault(value.activeVariantValue)}"""
-    elif value.activeFields.len != 0:
-      var elements = value.elements[1..^1]
-      var fieldsText: seq[string]
-      fieldsText = elements.mapIt(textReprDefault(it, depth - 1))
-      for i, v in fieldsText:
-        res.add(fmt"{value.activeFields[i+1]}: {v}")
-      fmt"""{value.typ.langType}::{textReprDefault(value.elements[0])}({res.join(", ")})"""
-    else:
-      var elements = value.elements
-      res = value.elements.mapIt(textReprDefault(it, depth - 1))
-      fmt"""{value.typ.langType}::{value.activeVariant}({res.join(", ")})"""
-  of Html:
-    "html"
-  of TypeKind.None:
-    "nil"
-  of NonExpanded:
-    ".."
-  else:
-    ""
-
-func textReprRust(value: Value, depth: int = 10, compact: bool = false): string =
-  let langType = if compact:
-                   strutils.join(value.typ.langType.split("::")[1..^1], "::")
-                 else:
-                   $value.typ.langType
-  if value.isNil:
-    return "nil"
-  if depth <= 0:
-    return "#"
-  result = case value.kind:
-  of Int:
-    if compact:
-      fmt"{value.i}"
-    else:
-      fmt"{value.i}{value.typ.cType}"
-  of String:
-    "\"" & $value.text & "\""
-  of Float:
-    if compact:
-      fmt"{value.f}"
-    else:
-      fmt"{value.f}{value.typ.cType}"
-  of Seq, Array:
-    let elements = value.elements
-    var l = ""
-    let e = elements.mapIt(textReprRust(it, depth - 1, compact)).join(", ")
-    let more = if value.partiallyExpanded: ".." else: ""
-    if (value.kind == Seq):
-      l = "vec![" & e & more & "]"
-    else:
-      l = "[" & e & more & "]"
-    l
-  of Instance:
-    var record = "{"
-    for i, field in value.elements:
-      if showable(field):
-        record.add(&"{value.typ.labels[i]}:{textReprRust(field, depth - 1, compact)}")
-        record.add(",")
-      else:
-        record.add(&"{value.typ.labels[i]}:..")
-    if record.len > 0:
-      record.setLen(record.len - 1)
-    record.add("}")
-    record = &"{langType}{record}"
-    record
-  of Ref:
-     &"ref {langType}: {textReprRust(value.refValue, depth, compact)}"
-  of Pointer:
-    let address = formatPointerAddress(value.address)
-    if not value.refValue.isNil: &"{address} -> {textReprRust(value.refValue, depth, compact)}" else: "NULL"
-  of FunctionKind:
-    &"fn {value.functionLabel}: {value.signature}" # $value.signature
-  of Tuple:
-    let elements = value.elements.mapIt(textReprRust(it, depth - 1, compact)).join(", ")
-    "(" & elements & ")"
-  of Variant:
-    if value.activeVariantValue.kind == Instance:
-      var record = "{"
-      for i, field in value.activeVariantValue.elements:
-        if showable(field):
-          record.add(&"{value.activeVariantValue.typ.labels[i]}:{textReprRust(field, depth - 1, compact)}")
-          record.add(",")
-        else:
-          record.add(&"{value.activeVariantValue.typ.labels[i]}:..")
-      if record.len > 1: # has at least something else than `{`
-        record.setLen(record.len - 1)
-        record.add("}")
-      else:
-        record = "" # e.g. Node Nil, with Nil having no fields => Node::Nil, not Node::Nil{}
-      fmt"""{value.activeVariant}{record}"""
-    elif value.activeVariantValue.kind == Variant and value.activeVariantValue.activeVariantValue.kind == Instance:
-      fmt"""{textReprRust(value.activeVariantValue, depth, compact)}"""
-    elif value.activeVariantValue.kind == None:
-      fmt"""{langType}::{value.activeVariant}"""
-    elif value.activeVariantValue.kind == Tuple:
-      # tuples already have ()
-      fmt"""{value.activeVariant}{textReprRust(value.activeVariantValue, depth, compact)}"""
-    else:
-      fmt"""{value.activeVariant}({textReprRust(value.activeVariantValue, depth, compact)})"""
-  else:
-    textReprDefault(value, depth)
-
-proc textRepr*(value: Value, depth: int = 10, lang: Lang = LangUnknown, compact: bool = false): string = #{.exportc.} =
-  ## Text representation of Value, depending on lang
-  case lang:
-    of LangUnknown:
-      if CURRENT_LANG != LangUnknown:
-        textRepr(value, depth, CURRENT_LANG, compact)
-      else:
-        textReprDefault(value, depth)
-    of LangRust:
-      textReprRust(value, depth, compact)
-    else:
-      textReprDefault(value, depth)

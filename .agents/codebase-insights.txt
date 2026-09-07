@@ -3503,3 +3503,96 @@ commands.
     launchd's `PATH`. That is the behaviour those flags were written for, but
     it is a change and not a no-op — do not describe the lazy conversion as
     value-preserving without this caveat.
+
+## Value presentation is ONE pipeline now (PLAT-2, 2026-09-07)
+
+There used to be seven implementations of "recorded value -> string" in this
+tree.  There is one: `src/common/value_presentation/`.  If you are about to
+render a value on any surface, do NOT write a formatter.
+
+  * `presenter.present(v: PValue, budget: Budget, lang, measure) -> Presentation`
+    is the only entry point.  `Presentation.root.text` is the one-line
+    rendering; `.children` is the tree; `.class` is the semantic class a
+    front-end colours by; `.attribution` says which presenter answered and
+    what else matched.
+  * Values arrive through ONE OF TWO ADAPTERS and never any other way:
+    `value_presentation/json_adapter.toPValue` for the wire (this is what the
+    TUI, the headless app and the Embed SDK see) and
+    `common_types/utils/value_presentation_bridge.toPValue` for the desktop's
+    `Value`.  The bridge is `include`d into `common_types`, not imported,
+    because `Value` exists TWICE under different `langstring` bindings — see
+    that file's header.
+  * The desktop reaches all of it through `src/frontend/ui/presented_value.nim`
+    and nothing else.  That is enforced:
+    `ci/test/value-presentation-boundary.sh` (ten checks, wired into
+    `ci/lint/nim.sh`) fails on any surface that names a deleted formatter,
+    that does not import the pipeline, or that clips a presentation after
+    receiving it.
+  * TRUNCATION IS A BUDGET, NOT A POST-FILTER.  Each surface declares one in
+    `surfaces.nim`; the presenter returns what fits.  Do not add a
+    `truncate(present(v))` — the gate has a case for exactly that, in both
+    orders, and its contract suite proves it fires.
+  * THE PIPELINE IS `func` THROUGHOUT.  A presenter that reads the CLOCK, the
+    FILESYSTEM or a module-level `var` does not compile.  This is what
+    replaced `textRepr`'s read of the `CURRENT_LANG` global; the language is a
+    PARAMETER with no ambient default, and `ui/presented_value.sessionLang`
+    is the one place the session's language is read.
+
+    THE ENVIRONMENT IS THE EXCEPTION, and this file said otherwise until
+    2026-09-07.  `std/envvars.getEnv` carries `ReadEnvEffect` as a TAG rather
+    than as a side effect, so it COMPILES inside a `func`:
+
+        import std/envvars
+        func f*(s: string): string = s & getEnv("HOME")   # nim check accepts
+
+    What keeps it out of the pipeline is the IMPORT LINT — `envvars` is in
+    `ci/test/value-presentation-boundary.sh`'s `FORBIDDEN_PIPELINE_IMPORTS`.
+    The contract suite has an arm that plants the import and watches the gate
+    fire, and another that asserts the compiler's acceptance, so the split
+    cannot quietly become wrong again in either direction.
+  * `$value` ON A `Value` IS A MULTI-LINE DIAGNOSTIC DUMP, AND NOTHING WILL
+    STOP YOU WRITING IT.  `common_types/utils/text_representation` still
+    defines `$` / `text` — `"Sequence(Seq [Field; 4]):\n  100\n…"` — for `echo`
+    and error messages.  A pane reached it exactly once (`ui/state.nim`'s
+    `valueDisplayText` fallback) and that call site is gone.  A gate rule
+    banning `$value` inside a surface WAS written, run, and REMOVED: all five
+    hits were false positives in `ui/value.nim` (`$value` over a float in a
+    chart histogram; `$value.typ.langType`, a type NAME).  `$` is not lexically
+    separable, so the boundary gate declares this as a bound instead of
+    claiming it.  If you are adding a fallback anywhere that renders a value —
+    `ui/state.nim` especially — reach for `ui/presented_value.nim`.  Nothing
+    else is watching.
+  * THE GATE IS A NAME BLOCKLIST OVER A HAND-WRITTEN FILE LIST.  Read its
+    header before trusting a green run: four bypass shapes are declared as
+    bounds rather than caught — a surface that keeps the import and formats by
+    hand under a fresh name, a formatter in a module the `SURFACES` list does
+    not name, a cut placed more than three lines below the presentation, and
+    `$value`.  The second is not hypothetical: `ui/calltrace.nim` carried
+    `safeCallArgText` through the whole of PLAT-2's first pass while the gate
+    reported ten checks and zero failures.  ADDING A SURFACE TO THIS PRODUCT
+    MEANS ADDING IT TO `SURFACES` BY HAND.
+  * A useful side effect worth knowing: `isonim_tui.displayWidth(s)` reads a
+    threadvar (the ambiguous-width policy).  Use the `func` overload
+    `displayWidth(s, ambiguous)` from anything that has to be pure —
+    `tui/app/formatters/type_formatters.terminalMeasure` and
+    `tui/app/views/inline_annotations.cellWidth` are the two, and both pin
+    `type_formatters.TerminalAmbiguousWidth` (= `awNarrow`).
+
+    A LATENT SPLIT THIS CREATES.  isonim-tui's OWN render stack — compositor,
+    layout, `Content` wrapping, the widgets — still calls the threadvar
+    spellings, so it honours `setAmbiguousWidth` at runtime while CodeTracer's
+    measure does not.  In a process that called `setAmbiguousWidth(awWide)`,
+    the library would lay a value out at one width while the presenter
+    budgeted it at another, and a value column that overflows by one cell
+    corrupts every column after it.  Nothing calls the setter today, so this
+    is a note and not a bug — but if you ever want `awWide`, thread the policy
+    through isonim-tui's render stack rather than unpinning the measure here.
+  * THREE VALUE-ADJACENT TRUNCATIONS ARE NOT ON THE BUDGET, on purpose.
+    `event_log_vm.summarise` (a marker's `summary:<n>`, which cuts a string
+    the instrumented program chose, not a `Value`),
+    `origin_chain_types.abbreviateExpr` (a SOURCE EXPRESSION, under a user
+    preference) and `inline_annotations.fitAnnotation` (a JOIN of several
+    already-budgeted values, clipped to room known only after the code line is
+    painted).  Each carries its reason in its own doc comment.  The first two
+    used to index by BYTE over UTF-8 and now count runes; do not reintroduce
+    that.

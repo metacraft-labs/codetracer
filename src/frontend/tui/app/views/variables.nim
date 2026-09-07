@@ -72,6 +72,7 @@ import std/[strutils, tables]
 
 import isonim_tui
 
+import ../../../../common/value_presentation
 import ../layout/profile
 import ./styled_row
 import ./tree_node
@@ -104,11 +105,18 @@ type
     name*: string
     typeName*: string
     value*: string
-      ## The engine's own rendering. `tree_node.formattedValue` decides how it
-      ## is shown; nothing here reformats it, so two panes cannot disagree.
+      ## The presenter's answer at the `tui-value` budget. Carried for the rows
+      ## that have no `presented` (a scope header, a `… n more` marker) and as
+      ## what a diff compares; `tree_node.formattedValue` re-presents from
+      ## `presented` at the ROW's budget, so nothing here reformats and two
+      ## panes cannot disagree.
     memberCount*: int
       ## Members this node has. `0` for a leaf.
-    byteBuffer*: seq[int]
+    presented*: PValue
+      ## PLAT-2: the normalised value, so the row can ask the presenter for a
+      ## rendering that fits its own column. Replaced `byteBuffer: seq[int]` —
+      ## see `tree_node.TreeRowSpec.presented` for why that field existed and
+      ## why it does not need to.
 
   NodeChildren* = proc(path: string; offset, limit: int):
       tuple[nodes: seq[VarNode]; total: int] {.closure.}
@@ -439,7 +447,7 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
       selected: model.selected == row.node.path,
       modified: model.diff.isModified(variablePathOf(row.node.path)),
       focused: model.focused == row.node.path,
-      memberCount: row.node.memberCount, byteBuffer: row.node.byteBuffer,
+      memberCount: row.node.memberCount, presented: row.node.presented,
       width: width)
 
 # ---------------------------------------------------------------------------

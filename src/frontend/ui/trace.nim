@@ -11,6 +11,7 @@ import
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/timeline_vm import
   TimelineVM, createTimelineVM
@@ -576,17 +577,23 @@ proc updateViewZoneHeight(self: TraceComponent, newHeight: int) =
     self.focusTraceEditorAfterLayout()
 
 proc convertTracepointEventToProgramEvent(tracepointEvent: Stop): ProgramEvent =
+  # PLAT-2: the value half is the pipeline's, at the `tracepoint` budget. The
+  # `<span class=error-trace>` wrapper stays here — it is DOM, and this is the
+  # layer that has one — but it now wraps the presenter's `<error: msg>` and is
+  # applied on `PresentationClass == pcError` rather than on a `TypeKind`
+  # comparison this module made for itself.
   var res: cstring
   if tracepointEvent.errorMessage == "":
     for (name, value) in tracepointEvent.locals:
-      if value.kind != types.Error:
-        if value.isLiteral and value.kind == types.String:
-          res.add(value.text & cstring" ")
-        else:
-          res.add(name & cstring"=" & textRepr(value).cstring & cstring"; ")
-      else:
-        res.add(name & cstring"=" & cstring"<span class=error-trace>" & value.msg & cstring"</span>")
+      let presentation = tracepointValue(value)
+      if presentation.root.class == pcError:
+        res.add(name & cstring"=" & cstring"<span class=error-trace>" &
+                presentation.root.text.cstring & cstring"</span>")
         res.add(cstring" ")
+      elif (not value.isNil) and value.isLiteral and value.kind == types.String:
+        res.add(value.text & cstring" ")
+      else:
+        res.add(name & cstring"=" & presentation.root.text.cstring & cstring"; ")
   else:
     res.add(cstring"<span class=error-trace>" & tracepointEvent.errorMessage & cstring"</span>")
 

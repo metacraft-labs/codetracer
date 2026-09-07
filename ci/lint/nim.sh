@@ -277,6 +277,18 @@ lint_step "SDK facade boundary: contract suite" \
 lint_step "SDK facade boundary: no reach past the facade, no chain concept inside it" \
 	bash ci/test/sdk-facade-boundary.sh
 
+# PLAT-2's verification gate: no surface formats a value by a path that
+# bypasses the one presenter, and the presenter is pure.
+# CodeTracer-Platform.milestones.org asks for it "in the shape
+# sdk-facade-boundary.sh already uses", which is why it sits here, in that
+# order: the contract suite runs before the guard it covers, because a guard
+# nobody has watched fail is not evidence.
+lint_step "Value presentation boundary: contract suite" \
+	bash ci/test/value-presentation-boundary-test.sh
+
+lint_step "Value presentation boundary: one pipeline, pure, with no surface bypassing it" \
+	bash ci/test/value-presentation-boundary.sh
+
 # `VALID_DAP_COMMANDS` against the tables it mirrors, in BOTH directions. The
 # allow-list is hand-written but no longer hand-CHECKED: the guard derives the
 # engine's dispatch from `src/db-backend/src/dap_server.rs` and the event

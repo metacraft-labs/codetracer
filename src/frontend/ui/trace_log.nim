@@ -34,6 +34,7 @@ import
 
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import TraceLogEntry
 from ../viewmodel/viewmodels/trace_log_vm import
@@ -83,20 +84,31 @@ proc localsToText(locals: seq[(cstring, Value)]): string =
   ## text (e.g. ``$msg`` arguments to ``log``); error values are
   ## prefixed with ``name=`` and surrounded by an
   ## ``<span class="error-trace">`` marker so CSS can style them; all
-  ## other values render as ``name=textRepr(value)``.  The IsoNim
+  ## other values render as ``name=<the presenter's answer>``.  The IsoNim
   ## view emits this string verbatim into a ``trace-col-locals``
   ## ``<div>`` — CSS handles the colour rules for ``error-trace``.
+  ## PLAT-2: THE VALUE HALF IS THE PIPELINE'S; THE ROW SHAPE IS THIS PANE'S.
+  ##
+  ## `name=<span class="error-trace">msg</span>` used to be built HERE, which
+  ## put HTML inside a value: the markup travelled with the string into
+  ## `ProgramEvent.content`, through the event log, into a DataTable cell and
+  ## out again — and the terminal front-end, which renders the same values,
+  ## had no way to strip it. The error is now a `PresentationClass` the
+  ## presenter reports (`pcError`), and the span is applied by this pane, which
+  ## is the only layer that has a DOM.
   var parts: seq[string] = @[]
   for (rawName, value) in locals:
     let name = safeStr(rawName)
-    if value.kind != types.Error:
-      if value.isLiteral and value.kind == types.String:
-        parts.add(safeStr(value.text))
-      else:
-        parts.add(name & "=" & value.textRepr)
-    else:
+    let presentation = eventLogValue(value)
+    if presentation.root.class == pcError:
       parts.add(name & "=<span class=\"error-trace\">" &
-                safeStr(value.msg) & "</span>")
+                presentation.root.text & "</span>")
+    elif (not value.isNil) and value.isLiteral and value.kind == types.String:
+      # A `log("…")` argument is the message itself, not `msg="…"`. Kept: it is
+      # a fact about what a TRACEPOINT ROW is, not about how a string renders.
+      parts.add(safeStr(value.text))
+    else:
+      parts.add(name & "=" & presentation.root.text)
   parts.join(" ")
 
 proc legacyStopToVm(stop: Stop;

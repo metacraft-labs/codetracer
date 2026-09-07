@@ -55,7 +55,7 @@
 ##   vm.nextPage()
 ##   echo vm.totalPages.val       # derived from store data
 
-import std/[json, options, strutils, tables]
+import std/[json, options, strutils, tables, unicode]
 
 import isonim/core/[signals, computation, owner]
 import isonim/core/async_compat
@@ -397,6 +397,56 @@ proc rowFromJson*(node: JsonNode): MarkerEventRow =
   if node.hasKey("recordingId") and node["recordingId"].kind == JString:
     result.recordingId = node["recordingId"].getStr
 
+func summarise*(base: string; width: int): string =
+  ## `base` reduced to at most `width` CHARACTERS, with a middle ellipsis.
+  ##
+  ## ## WHY THIS IS NOT ON PLAT-2'S PIPELINE, AND WHY IT IS STILL NOT THE
+  ## ## BYTE-INDEXED TRUNCATION THE MILESTONE'S SURVEY COMPLAINS ABOUT
+  ##
+  ## PLAT-2 collapsed seven "recorded value -> string" implementations into one
+  ## presenter with a per-surface BUDGET, and its survey of what it replaced
+  ## names "BYTES with a middle ellipsis" as one of the eleven inconsistent
+  ## truncation policies. This function was that policy's last site, and it is
+  ## retained rather than migrated for a reason that is about WHAT IT CUTS:
+  ##
+  ##   * `row.showValue` IS NOT A RECORDED `Value`. It is a string a marker
+  ##     event carries on the wire, chosen by the instrumented program (§5.2's
+  ##     `show` argument). Nothing decodes it into a `PValue`, no
+  ##     `PresentationClass` describes it, and there is no adapter that could
+  ##     produce one: the format hints beside it are `text`, `json` and `hex`,
+  ##     which are string-to-string transforms of an opaque payload.
+  ##   * `summary:<n>` IS A USER-FACING FORMAT SPEC, not a surface budget. The
+  ##     `<n>` comes from the recorded marker, not from the pane, and the SAME
+  ##     `n` must produce the same answer in the Electron renderer and in the
+  ##     VS Code surface. A `Budget` is the SURFACE's declaration of what it can
+  ##     hold, which is the opposite arrangement.
+  ##   * The MIDDLE ellipsis is the spec's, and it is load-bearing here in a way
+  ##     a budget's trailing ellipsis is not: a marker payload's identifying
+  ##     part is very often its tail (an id, a status, a closing brace).
+  ##
+  ## WHAT WAS A DEFECT, AND IS FIXED: the previous implementation indexed
+  ## `base` by BYTES (`base[0 ..< prefixLen]`, `base[^suffixLen .. ^1]`), so on
+  ## any non-ASCII payload it cut in the middle of a UTF-8 sequence and emitted
+  ## invalid UTF-8 to the renderer — and it compared `base.len`, a byte count,
+  ## against a width the user wrote meaning characters. It counts RUNES now.
+  ## `width` is in characters because that is what a person writing
+  ## `summary:80` in their program means; cells are a terminal concept and this
+  ## value's surfaces are a DOM.
+  const Ellipsis = "…"
+  let total = base.runeLen
+  if total <= width:
+    return base
+  let usable = max(width - 1, 1)   ## 1 = the ellipsis, in characters
+  # The prefix is biased larger for odd widths, so a 9-character limit on
+  # "1234567890" yields "1234…7890" rather than "123…67890".
+  let prefixLen = (usable + 1) div 2
+  let suffixLen = usable - prefixLen
+  if prefixLen + suffixLen >= total:
+    return base
+  result = base.runeSubStr(0, prefixLen) & Ellipsis
+  if suffixLen > 0:
+    result.add base.runeSubStr(total - suffixLen, suffixLen)
+
 proc formatShowValue*(row: MarkerEventRow): string =
   ## Apply the §5.2 format hint to the row's `showValue`. The
   ## supported specs are `text`, `json`, `hex`, and `summary:<n>` —
@@ -428,18 +478,9 @@ proc formatShowValue*(row: MarkerEventRow): string =
       width = parseInt(rest)
     except ValueError:
       width = 80
-    if width <= 0 or base.len <= width:
+    if width <= 0:
       return base
-    # Middle-ellipsis truncation. We bias the prefix slightly larger
-    # than the suffix for odd widths so a 9-char limit on
-    # "1234567890" yields "1234…7890" rather than "123…67890".
-    let ellipsis = "…"
-    let usable = max(width - ellipsis.len, 1)
-    let prefixLen = (usable + 1) div 2
-    let suffixLen = usable - prefixLen
-    if prefixLen + suffixLen >= base.len:
-      return base
-    return base[0 ..< prefixLen] & ellipsis & base[^suffixLen .. ^1]
+    return summarise(base, width)
   base
 
 proc counterpartKey*(row: MarkerEventRow): CounterpartKey =

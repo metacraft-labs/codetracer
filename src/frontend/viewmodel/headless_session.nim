@@ -33,6 +33,12 @@ import backend/stdio_backend
 export stdio_backend.DapReadBound, stdio_backend.DapStalledError,
        stdio_backend.DapInterruptedError
 import store/[replay_data_store, types]
+# PLAT-2's value-presentation pipeline. `json_adapter` is qualified at its call
+# sites because `toPValue` also exists on the `Value` side of the bridge, and a
+# reader of `headless_session` has to be able to tell which one is meant — this
+# module is precisely the one that cannot see the other.
+import ../../common/value_presentation
+import ../../common/value_presentation/json_adapter
 import session_vm
 import app/app_vm
 import sdk/[debugger_session, trace_source]
@@ -491,294 +497,89 @@ proc getDebuggerStatus*(s: HeadlessDebugSession): DebuggerStatus =
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# `ct/load-locals` value decoding
+# `ct/load-locals` value decoding — PLAT-2
 #
-# THE ORDINALS BELOW ARE THE WIRE'S, AND THEY ARE NAMED BECAUSE THE PREVIOUS
-# SET WAS WRONG.
+# THIS MODULE NO LONGER RENDERS VALUES. It decodes the wire into `PValue` and
+# hands it to the ONE presenter, at a budget it declares by name.
 #
-# `Value.kind` is serialised by `serde` from the Rust `TypeKind`, whose
-# discriminants come from `codetracer-trace-format`'s Cap'n Proto schema —
-# `Seq = 0 … Slice = 33`, generated into
-# `src/db-backend/target/*/build/codetracer_trace_format_capnp-*/out/src/
-# trace_capnp.rs`. The constants here are that list, transcribed, and the
-# spelling is deliberately `tk*` so a reader can grep both sides.
+# What used to be here was `extractValueText`: a 130-line, kind-directed
+# renderer that reproduced `common_types/utils/text_representation.textRepr`'s
+# conventions over `JsonNode` because it could not import them (`common_types`
+# is `include`d twice under incompatible `langstring` bindings). It was the
+# FOURTH of seven independent implementations of "value -> string" in this
+# repository, and the divergences were not stylistic: it wrote a struct `{…}`
+# where the desktop wrote `Type(…)`, it had no member cap at all, and it was
+# not language-aware, so a Rust `Vec` read `[…]` in the terminal and `vec![…]`
+# in the desktop.
 #
-# The mapping this replaces was written from a different enumeration and
-# disagreed on SIX kinds, which is not a cosmetic difference — it decided what
-# a debugger showed for a string and for a boolean. Measured on CTUI-1's corpus
-# (2026-09-06), before the fix:
-#
-#   * a `String` (kind 9) was decoded as a `Seq`, so `__doc__` came back as
-#     `[]` — an empty LIST where the program has text;
-#   * a `Bool` (kind 12) matched nothing and came back as `""`;
-#   * a `Tuple` (kind 27) and a `Seq` (kind 0) matched nothing, so
-#     `wide_state`'s 600-entry `wide_mapping` — a `Seq` of `Tuple`s — decoded
-#     to `""` with 600 children that were all `""` as well;
-#   * a `Raw` (kind 16) matched nothing and came back as `""`, which is every
-#     Python function, class and module object in the corpus — `<function add
-#     at 0x…>` and its 3935 siblings;
-#   * an `Error` (kind 24) matched nothing and came back as `""` too.
-#
-# THOSE ARE THE SIX, AND THEY ARE ALL OF THEM: the corpus produces exactly
-# eight `TypeKind`s — 0, 7, 9, 12, 16, 24, 27, 30 — and the old mapping agreed
-# with the wire on only `Int` (7) and `None` (30).
-#
-# The `""` cases are the dangerous ones. `app/source_binding.annotationsFrom`
-# DROPS a variable with an empty value on the grounds that "the formatter had
-# nothing to print", and a step-to-step diff over rendered text cannot see a
-# change between two values that both render as `[]` — so a `symbol` moving
-# from `"+"` to `"-"` was invisible to anything comparing what the pane shows.
+# `../../common/value_presentation/json_adapter.toPValue` is the decode half of
+# that function with the renderer removed. The wire ordinals it needs moved
+# with it — `src/common/value_presentation_bridge_test.nim` asserts the
+# transcription still matches `TypeKind` (suite "PLAT-2: the wire ordinals in
+# json_adapter ARE TypeKind's", which walks every member of the enum and
+# asserts the COUNT is 34). That is the check that was missing when the
+# PREVIOUS set of ordinals was wrong on six kinds; the sixty lines of
+# measurement that used to stand here are preserved in that file's header,
+# where the assertion that would catch a recurrence now lives beside them.
 # ---------------------------------------------------------------------------
-
-const
-  tkSeq* = 0
-  tkSet* = 1
-  tkHashSet* = 2
-  tkOrderedSet* = 3
-  tkArray* = 4
-  tkVarargs* = 5
-  tkStruct* = 6
-  tkInt* = 7
-  tkFloat* = 8
-  tkString* = 9
-  tkCString* = 10
-  tkChar* = 11
-  tkBool* = 12
-  tkLiteral* = 13
-  tkRef* = 14
-  tkRecursion* = 15
-  tkRaw* = 16
-  tkEnum* = 17
-  tkEnum16* = 18
-  tkEnum32* = 19
-  tkC* = 20
-  tkTable* = 21
-  tkUnion* = 22
-  tkPointer* = 23
-  tkError* = 24
-  tkFunction* = 25
-  tkTypeValue* = 26
-  tkTuple* = 27
-  tkVariant* = 28
-  tkHtml* = 29
-  tkNone* = 30
-  tkNonExpanded* = 31
-  tkAny* = 32
-  tkSlice* = 33
-
-  SequenceKinds* = {tkSeq, tkSet, tkHashSet, tkOrderedSet, tkArray, tkVarargs,
-                    tkSlice}
-    ## Kinds rendered `[a, b, c]`. A `Dict` arrives as one of these carrying
-    ## `Tuple` elements — that is how `wide_state`'s `wide_mapping` is on the
-    ## wire, measured rather than assumed.
-  CompoundKinds* = SequenceKinds + {tkStruct, tkTuple, tkUnion, tkVariant}
-    ## Kinds whose `elements` are the value's own members, so a tree view can
-    ## expand them.
-
-  ValueDecodeDepth* = 16
-    ## Bound on the recursion below. The engine already bounds the answer with
-    ## `depthLimit` (7 in every request this module makes), so this is a guard
-    ## against a malformed response rather than a display policy — a cycle in
-    ## the JSON would otherwise not terminate.
 
 proc valueTypeName*(valueNode: JsonNode): string =
   ## `Value.typ.langType`, or "" when the response carries no type.
-  if valueNode.isNil or valueNode.kind != JObject:
-    return ""
-  let typ = valueNode.getOrDefault("typ")
-  if typ.isNil or typ.kind != JObject:
-    return ""
-  typ.getOrDefault("langType").getStr("")
+  json_adapter.typeNameOf(valueNode)
 
-proc valueLabels(valueNode: JsonNode): seq[string] =
-  ## `Value.typ.labels`, verbatim. For a struct these are its field names; for
-  ## an enum they are its member names; for a tuple the wire fills them with
-  ## the members' own indices.
-  result = @[]
-  if valueNode.isNil or valueNode.kind != JObject:
-    return
-  let typ = valueNode.getOrDefault("typ")
-  if typ.isNil or typ.kind != JObject:
-    return
-  let labels = typ.getOrDefault("labels")
-  if labels.isNil or labels.kind != JArray:
-    return
-  for label in labels:
-    result.add label.getStr("")
+proc valuePresentation*(valueNode: JsonNode; budget: Budget): Presentation =
+  ## One wire value, presented at `budget`. THE decoding entry point.
+  present(json_adapter.toPValue(valueNode), budget)
 
-proc memberLabels(valueNode: JsonNode): seq[string] =
-  ## The labels a compound value's MEMBERS are named by — a struct's, and
-  ## nothing else's.
-  ##
-  ## A decision rather than an observation: the wire puts `["0", "1"]` in a
-  ## tuple's labels, so honouring them everywhere would render `wide_state`'s
-  ## dictionary entries as `(0: "key_000", 1: 0)` — a positional pair dressed
-  ## up as a record whose fields are named after their own indices.
-  ## `textReprDefault` (`common_types/utils/text_representation.nim`) uses
-  ## labels for `Instance` and for nothing else, and this follows it.
-  if valueNode.isNil or valueNode.kind != JObject:
-    return @[]
-  if valueNode.getOrDefault("kind").getInt(-1) != tkStruct:
-    return @[]
-  valueLabels(valueNode)
+proc presentedValueText*(valueNode: JsonNode;
+                         budget: Budget = tuiValueBudget()): string =
+  ## The single-line rendering a `store/types.Variable` carries.
+  valuePresentation(valueNode, budget).root.text
 
-proc valueElements(valueNode: JsonNode): JsonNode =
-  ## `Value.elements`, or nil.
-  if valueNode.isNil or valueNode.kind != JObject:
-    return nil
-  let elements = valueNode.getOrDefault("elements")
-  if elements.isNil or elements.kind != JArray: nil else: elements
 
-proc extractValueText*(valueNode: JsonNode;
-                       depth: int = ValueDecodeDepth): string =
-  ## A human-readable rendering of one `ct/load-locals` `Value`.
-  ##
-  ## Mirrors the engine's own `Value::text_repr`
-  ## (`src/db-backend/src/value.rs`) for every kind that function defines, and
-  ## `common_types/utils/text_representation.textReprDefault` for the ones it
-  ## leaves as a Rust `{:?}` debug print (tuples, enums, pointers, variants).
-  ## That module cannot be imported here — see `viewmodels/state_vm.nim`'s
-  ## header on the double-inclusion of `common_types` — so the conventions are
-  ## reproduced rather than shared, and the two are listed side by side above.
-  ##
-  ## ONE DELIBERATE DEPARTURE, and it is the brackets: `Value::text_repr` wraps
-  ## a `Struct` in `(…)` and `textReprDefault` writes it `Type(field:…)`, while
-  ## this writes `{…}`. A reader of a value column has to tell a record from a
-  ## positional tuple by looking at it, and the TUI's own
-  ## `app/formatters/type_formatters.classifyValue` reads exactly that shape —
-  ## `{…}` is `vcStruct` and `(…)` is `vcTuple`. Rendering both with parens
-  ## would make the two indistinguishable downstream.
-  if valueNode.isNil or valueNode.kind != JObject:
-    return ""
-  if depth <= 0:
-    return "#"
-  let kind = valueNode.getOrDefault("kind").getInt(-1)
-
-  template joinElements(sep: string): string =
-    var parts: seq[string] = @[]
-    let elements = valueElements(valueNode)
-    if not elements.isNil:
-      let labels = memberLabels(valueNode)
-      for idx in 0 ..< elements.len:
-        let childRepr = extractValueText(elements[idx], depth - 1)
-        if idx < labels.len and labels[idx].len > 0:
-          parts.add labels[idx] & ": " & childRepr
-        else:
-          parts.add childRepr
-    parts.join(sep)
-
-  case kind
-  of tkInt:
-    valueNode.getOrDefault("i").getStr("")
-  of tkFloat:
-    valueNode.getOrDefault("f").getStr("")
-  of tkString:
-    "\"" & valueNode.getOrDefault("text").getStr("") & "\""
-  of tkCString:
-    "\"" & valueNode.getOrDefault("cText").getStr("") & "\""
-  of tkChar:
-    "'" & valueNode.getOrDefault("c").getStr("") & "'"
-  of tkBool:
-    if valueNode.getOrDefault("b").getBool(false): "true" else: "false"
-  of tkSeq, tkSet, tkHashSet, tkOrderedSet, tkArray, tkVarargs, tkSlice:
-    "[" & joinElements(", ") & "]"
-  of tkStruct:
-    "{" & joinElements(", ") & "}"
-  of tkTuple:
-    "(" & joinElements(", ") & ")"
-  of tkUnion, tkVariant:
-    # `textReprDefault` renders a variant as `Type::variant(fields…)`. The
-    # active variant's own value is a sibling field rather than an element.
-    let variant = valueNode.getOrDefault("activeVariant").getStr("")
-    let active = valueNode.getOrDefault("activeVariantValue")
-    let head = valueTypeName(valueNode) & "::" &
-               (if variant.len > 0: variant else: "?")
-    if not active.isNil and active.kind == JObject:
-      head & "(" & extractValueText(active, depth - 1) & ")"
-    else:
-      head & "(" & joinElements(", ") & ")"
-  of tkEnum, tkEnum16, tkEnum32:
-    # The wire carries the ordinal in `i` and the member names in
-    # `typ.labels`. Out of range, the ordinal is printed with the type's own
-    # name — `textReprDefault`'s `{langType}({enumInt})` — because a bare
-    # number beside a name-shaped column reads as an integer variable.
-    let ordinalText = valueNode.getOrDefault("i").getStr("")
-    let labels = valueLabels(valueNode)
-    var ordinal = -1
-    try:
-      ordinal = parseInt(ordinalText)
-    except ValueError:
-      ordinal = -1
-    if ordinal >= 0 and ordinal < labels.len and labels[ordinal].len > 0:
-      labels[ordinal]
-    else:
-      valueTypeName(valueNode) & "(" & ordinalText & ")"
-  of tkRef:
-    # A reference renders as the thing it refers to, which is what
-    # `textReprDefault` does: the indirection is not information a reader of a
-    # value column wants repeated on every row.
-    let target = valueNode.getOrDefault("refValue")
-    if target.isNil or target.kind != JObject: "nil"
-    else: extractValueText(target, depth - 1)
-  of tkPointer:
-    let address = valueNode.getOrDefault("address").getStr("")
-    let target = valueNode.getOrDefault("refValue")
-    if address.len == 0:
-      "NULL"
-    elif target.isNil or target.kind != JObject:
-      address
-    else:
-      address & " -> (" & extractValueText(target, depth - 1) & ")"
-  of tkRecursion:
-    "this"
-  of tkRaw:
-    valueNode.getOrDefault("r").getStr("")
-  of tkError:
-    "<error: " & valueNode.getOrDefault("msg").getStr("") & ">"
-  of tkFunction:
-    "function<" & valueTypeName(valueNode) & ">"
-  of tkNone:
-    "nil"
-  of tkNonExpanded:
-    ".."
-  else:
-    # An unknown kind is reported as whatever scalar payload the response
-    # carried rather than as "", because "" is indistinguishable from "the
-    # debugger has no value for this" everywhere downstream.
-    let i = valueNode.getOrDefault("i").getStr("")
-    if i.len > 0: i
-    else: valueNode.getOrDefault("text").getStr("")
-
-proc variableFromValue*(name: string; valueNode: JsonNode;
-                        depth: int = ValueDecodeDepth): Variable =
+proc variableFromPValue*(name: string; pv: PValue): Variable =
   ## One `Variable` and, RECURSIVELY, its members.
   ##
   ## THE RECURSION IS THE POINT, and its absence was a real limitation rather
-  ## than a simplification: the previous implementation built children with
+  ## than a simplification: an earlier implementation built children with
   ## neither `hasChildren` nor `children` set, so a compound member — every
   ## entry of `wide_state`'s `wide_mapping`, which is a `(key, value)` tuple —
   ## arrived at a tree view as a leaf that could not be opened. The engine's
   ## own answer already carries the whole subtree (bounded by the request's
   ## `depthLimit`), so nothing extra is fetched; it was being discarded.
-  result = Variable(name: name, value: extractValueText(valueNode, depth),
-                    typeName: valueTypeName(valueNode))
-  if depth <= 0:
+  ##
+  ## PLAT-2: THE ROW CARRIES THE VALUE, NOT ONLY ITS RENDERING. `presented` is
+  ## the normalised value, so a pane that knows its own width can ask the
+  ## presenter for a rendering that fits IT rather than clipping a string
+  ## rendered for somebody else. `value` remains, and is the presenter's answer
+  ## at `tui-value` — it is pipeline output, not a second formatter.
+  result = Variable(name: name,
+                    value: present(pv, tuiValueBudget()).root.text,
+                    typeName: (if pv.isNil: "" else: pv.typeName),
+                    presented: pv)
+  if pv.isNil:
     return
-  let kind =
-    if valueNode.isNil or valueNode.kind != JObject: -1
-    else: valueNode.getOrDefault("kind").getInt(-1)
-  if kind notin CompoundKinds:
+  if pv.kind == pvkMap:
+    if pv.entries.len == 0:
+      return
+    result.hasChildren = true
+    for idx, entry in pv.entries:
+      # A map's child is named by its KEY's own rendering, at the same budget
+      # the row uses. Before PLAT-2 a map had no children at all here: the
+      # decoder looked for `elements`, and a `TableKind` carries `items`.
+      result.children.add variableFromPValue(
+        present(entry.key, tuiValueBudget()).root.text, entry.val)
     return
-  let elements = valueElements(valueNode)
-  if elements.isNil or elements.len == 0:
+  if not isContainer(pv.kind) or pv.members.len == 0:
     return
-  let labels = memberLabels(valueNode)
   result.hasChildren = true
-  for idx in 0 ..< elements.len:
-    let childName =
-      if idx < labels.len and labels[idx].len > 0: labels[idx]
-      else: "[" & $idx & "]"
-    result.children.add variableFromValue(childName, elements[idx], depth - 1)
+  for idx, m in pv.members:
+    let childName = if m.label.len > 0: m.label else: "[" & $idx & "]"
+    result.children.add variableFromPValue(childName, m.value)
+
+proc variableFromValue*(name: string; valueNode: JsonNode): Variable =
+  ## One wire variable, decoded and presented.
+  variableFromPValue(name, json_adapter.toPValue(valueNode))
 
 proc parseVariable(localNode: JsonNode): Variable =
   ## Parse a single variable entry from the ct/load-locals response.
@@ -1279,7 +1080,7 @@ proc runTracepoints*(s: HeadlessDebugSession;
         # — a tuple struct, so the names are positional and not descriptive.
         let name = pair.getOrDefault("Field0").getStr("")
         let value = pair.getOrDefault("Field1")
-        hit.values.add (name, extractValueText(value))
+        hit.values.add (name, presentedValueText(value, TracepointBudget))
     result.add hit
 
 # ---------------------------------------------------------------------------

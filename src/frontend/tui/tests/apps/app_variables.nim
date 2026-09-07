@@ -41,7 +41,22 @@ import std/[strutils, tables]
 import isonim_tui
 
 import ../../app/views/variables
+import ../../../../common/value_presentation
 
+## ## PLAT-2: THE CONSTANT IS A VALUE NOW, NOT A RENDERING OF ONE
+##
+## Every `VarNode` below used to carry a hand-written `value: string` — the
+## rendering somebody typed out, which the pane then classified by looking at
+## its brackets. The screen was therefore produced from bytes no decoder had
+## ever emitted, and the one thing a snapshot app exists to check — that the
+## pane draws what the product draws — was true only as far as the typing was.
+##
+## Each row now carries a `PValue`, built the same way
+## `value_presentation/json_adapter.toPValue` builds one from a `ct/load-locals`
+## response, and `value` is `presenter.present`'s answer at the `tui-value`
+## budget: the same call `headless_session.variableFromPValue` makes. So a
+## change to the presenter moves this screen, which is the property that makes
+## the Tier-2 case evidence about the product rather than about this file.
 const
   WideMemberCount* = 600
     ## The `wide_state` fixture's own member count, so the pagination the pane
@@ -56,61 +71,114 @@ const
   CurrentTick* = 101'u64
 
   StructTypeName* = "Point"
-  PointerValue* = "0x7ffd0000 -> (42)"
-  FieldValue* = "\"0x00000000000000000000000000000000000000000000000000000000000007d0\""
-    ## A Noir field element, byte for byte as `noir_space_ship` records one.
+  PointerAddress* = "0x7ffd0000"
+  FieldText* = "0x00000000000000000000000000000000000000000000000000000000000007d0"
+    ## A Noir field element, byte for byte as `noir_space_ship` records one —
+    ## the raw payload, unquoted. `noir_space_ship` records it as a `String`,
+    ## so the quotation marks on screen are the STRING presenter's and are not
+    ## part of the value.
 
-proc byteValues(): seq[string] =
+proc byteValues(): seq[int] =
   result = @[]
   for i in 0 ..< ByteCount:
-    result.add $(i * 17 mod 256)
+    result.add(i * 17 mod 256)
+
+proc intValue(text, typeName: string): PValue =
+  PValue(kind: pvkInt, text: text, typeName: typeName, sourceKind: "Int")
+
+proc pointerValueOf*(): PValue =
+  ## A pointer with a dereferenced target. CTUI-1's corpus produces none, which
+  ## is why it is constructed — see this module's header.
+  PValue(kind: pvkPointer, typeName: "Pointer", sourceKind: "Pointer",
+         text: PointerAddress, target: intValue("42", "Int"))
+
+proc fieldValueOf*(): PValue =
+  ## A Noir field element. Recorded as a `String` whose text is a `0x…` literal,
+  ## which is why `value_model.classOf` reads the SPELLING for this one case.
+  PValue(kind: pvkString, typeName: "Field", sourceKind: "String",
+         text: FieldText)
+
+let
+  PointerValue* = present(pointerValueOf(), tuiValueBudget()).root.text
+  FieldValue* = present(fieldValueOf(), tuiValueBudget()).root.text
+    ## Exported for the Tier-2 case, which asserts these strings appear on a
+    ## real terminal. DERIVED rather than written down: a hand-written copy
+    ## would keep the case green through a change to the presenter, which is
+    ## precisely the regression the case exists to catch.
+
+proc bufferValueOf(): PValue =
+  var members: seq[PMember] = @[]
+  for b in byteValues():
+    members.add member("", intValue($b, "Int"))
+  PValue(kind: pvkSequence, typeName: "Bytes", sourceKind: "Seq",
+         members: members)
+
+proc pointValueOf(): PValue =
+  PValue(kind: pvkRecord, typeName: StructTypeName, sourceKind: "Instance",
+         members: @[member("x", intValue("10", "Int")),
+                    member("y", intValue("20", "Int"))])
+
+proc wideEntry(index: int): PValue =
+  let key = "key_" & align($index, 3, '0')
+  PValue(kind: pvkTuple, typeName: "Tuple", sourceKind: "Tuple",
+         members: @[
+           member("", PValue(kind: pvkString, text: key, typeName: "String",
+                             sourceKind: "String")),
+           member("", intValue($(index * 2), "Int"))])
+
+proc wideValueOf(): PValue =
+  ## The `wide_state` fixture's 600-entry mapping, on the wire as a `Seq` of
+  ## `Tuple`s — which is how a Python dict actually arrives, measured rather
+  ## than assumed (`headless_session`'s note on `SequenceKinds`).
+  var members: seq[PMember] = @[]
+  for i in 0 ..< WideMemberCount:
+    members.add member("", wideEntry(i))
+  PValue(kind: pvkSequence, typeName: "Dict", sourceKind: "Seq",
+         members: members)
+
+proc node(path, name: string; pv: PValue; memberCount = 0): VarNode =
+  ## One row, with `value` DERIVED from `pv` by the same call the product makes.
+  VarNode(path: path, name: name,
+          typeName: (if pv.isNil: "" else: pv.typeName),
+          value: present(pv, tuiValueBudget()).root.text,
+          memberCount: memberCount, presented: pv)
 
 proc localRoots(): seq[VarNode] =
-  ## The top-level variables. One per formatter arm.
+  ## The top-level variables. One per presenter.
   @[
-    VarNode(path: "@Locals.counter", name: "counter", typeName: "Int",
-            value: "41"),
-    VarNode(path: "@Locals.total", name: "total", typeName: "Int",
-            value: "306"),
-    VarNode(path: "@Locals.label", name: "label", typeName: "String",
-            value: "\"shield online\""),
-    VarNode(path: "@Locals.ratio", name: "ratio", typeName: "Float",
-            value: "0.5"),
-    VarNode(path: "@Locals.flag", name: "flag", typeName: "Bool",
-            value: "true"),
-    VarNode(path: "@Locals.missing", name: "missing", typeName: "NoneType",
-            value: "nil"),
-    VarNode(path: "@Locals.handle", name: "handle", typeName: "Pointer",
-            value: PointerValue),
-    VarNode(path: "@Locals.field", name: "field", typeName: "Field",
-            value: FieldValue),
-    VarNode(path: "@Locals.buffer", name: "buffer", typeName: "Bytes",
-            value: "[" & byteValues().join(", ") & "]",
-            memberCount: ByteCount,
-            byteBuffer: byteBufferOf(byteValues())),
-    VarNode(path: "@Locals.point", name: "point", typeName: StructTypeName,
-            value: "{x: 10, y: 20}", memberCount: PointMemberCount),
-    VarNode(path: "@Locals.wide", name: "wide", typeName: "Dict",
-            value: "[(\"key_000\", 0), (\"key_001\", 2)]",
-            memberCount: WideMemberCount),
+    node("@Locals.counter", "counter", intValue("41", "Int")),
+    node("@Locals.total", "total", intValue("306", "Int")),
+    node("@Locals.label", "label",
+         PValue(kind: pvkString, text: "shield online", typeName: "String",
+                sourceKind: "String")),
+    node("@Locals.ratio", "ratio",
+         PValue(kind: pvkFloat, text: "0.5", typeName: "Float",
+                sourceKind: "Float")),
+    node("@Locals.flag", "flag",
+         PValue(kind: pvkBool, text: "true", typeName: "Bool",
+                sourceKind: "Bool")),
+    node("@Locals.missing", "missing",
+         PValue(kind: pvkNil, typeName: "NoneType", sourceKind: "None")),
+    node("@Locals.handle", "handle", pointerValueOf()),
+    node("@Locals.field", "field", fieldValueOf()),
+    node("@Locals.buffer", "buffer", bufferValueOf(), ByteCount),
+    node("@Locals.point", "point", pointValueOf(), PointMemberCount),
+    node("@Locals.wide", "wide", wideValueOf(), WideMemberCount),
   ]
 
 proc pointMembers(): seq[VarNode] =
   @[
-    VarNode(path: "@Locals.point.x", name: "x", typeName: "Int", value: "10"),
-    VarNode(path: "@Locals.point.y", name: "y", typeName: "Int", value: "20"),
+    node("@Locals.point.x", "x", intValue("10", "Int")),
+    node("@Locals.point.y", "y", intValue("20", "Int")),
   ]
 
 proc wideMember(index: int): VarNode =
-  let key = "key_" & align($index, 3, '0')
-  VarNode(path: "@Locals.wide.[" & $index & "]", name: "[" & $index & "]",
-          typeName: "Tuple",
-          value: "(\"" & key & "\", " & $(index * 2) & ")",
-          memberCount: 2)
+  node("@Locals.wide.[" & $index & "]", "[" & $index & "]",
+       wideEntry(index), 2)
 
 proc byteMember(index: int): VarNode =
-  VarNode(path: "@Locals.buffer.[" & $index & "]", name: "[" & $index & "]",
-          typeName: "Int", value: byteValues()[index])
+  node("@Locals.buffer.[" & $index & "]", "[" & $index & "]",
+       intValue($byteValues()[index], "Int"))
 
 proc sampleChildren*(): NodeChildren =
   ## The lazy-population seam, over the constant above.

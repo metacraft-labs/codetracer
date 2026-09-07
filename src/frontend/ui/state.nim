@@ -15,6 +15,7 @@ from std / dom import nil # imports dom, without directly its items: you need to
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as store_types import nil
 import ../viewmodel/viewmodels/state_vm
@@ -489,53 +490,31 @@ proc initStateVM() =
 proc valueDisplayText*(v: Value): string =
   ## What the State pane's value cell says a recorded value IS.
   ##
-  ## THERE ARE TWO RENDERINGS OF A `Value` AND THIS PANE HAD THE WRONG
-  ## ONE. `common_types/utils/text_representation.nim` defines both:
+  ## PLAT-2: ONE CALL, TO THE ONE PRESENTER, AT THIS SURFACE'S DECLARED BUDGET.
   ##
-  ##   * `textRepr` — the value's own representation. A sequence is
-  ##     `@[100, 2000, 200, 14]`, a record is `Point(x:3,y:7)`, an enum is
-  ##     its NAME, and it is language-aware (`vec![...]` under Rust). This
-  ##     is what every other pane in the product paints: `ui/value.nim`'s
-  ##     `collapsedValueTextAndClass` feeds the Editor's inline view, Call
-  ##     Trace, Flow and Trace from it.
-  ##   * `text` / `$value` — a multi-line diagnostic DUMP *about* a value.
-  ##     The same sequence becomes the literal string
-  ##     `"Sequence(Seq [Field; 4]):\n  100\n  2000\n  200\n  14"`, and the
-  ##     same record becomes `"Instance(Point):\nx: 3\ny: 7"`.
+  ## What it replaced was a three-way choice this pane made for itself, and the
+  ## history is worth keeping because each arm was a real defect:
   ##
-  ## This proc used to be `$v`. So a recorded structure arrived at the
-  ## pane intact and was displayed as prose describing itself, inside the
-  ## single `span.value-expanded-text` that `isonim_state_view.nim` gives
-  ## the value cell — while the caret beside it already offered the real
-  ## children, built by `toVariableChildren` below. The reader was shown
-  ## the dump and the tree at once.
+  ##   * it was `$v` — `text_representation.text`, a multi-line diagnostic DUMP.
+  ##     A recorded sequence arrived intact and was displayed as the prose
+  ##     `"Sequence(Seq [Field; 4]):\n  100\n  2000\n…"` inside the single
+  ##     `span.value-expanded-text` the IsoNim view gives the value cell — while
+  ##     the caret beside it already offered the real children.
+  ##   * `$v` also LOST REFUSALS: `text()` has no `of Error` branch, so a watch
+  ##     refusal — whose `msg` IS the explanation — reached the user as the four
+  ##     characters `Error`.
+  ##   * the fix was `textRepr` with a `$v` FALLBACK, because `textReprDefault`'s
+  ##     `case` ends in `else: ""` and `Enum16`, `Enum32`, `Literal`, `Slice` and
+  ##     `Any` fell through it into an EMPTY CELL. So the pane carried a
+  ##     two-formatter ladder to work around a hole in one of them.
   ##
-  ## AND `$v` LOSES REFUSALS OUTRIGHT. `text()`'s `case` has no `of Error`
-  ## branch, so an `Error` value falls through to `else: $value.kind` and
-  ## paints the bare word "Error". Watch refusals are `Error` values whose
-  ## `msg` IS the explanation — "cannot evaluate `initial_shield + 1`: `+`
-  ## would have to be computed, and a recording only holds the values that
-  ## were actually recorded" — and every one of them reached the user as
-  ## four characters saying nothing. `textRepr` has `of Error: $value.msg`.
-  ##
-  ## THE `$v` FALLBACK IS NOT DECORATION. `textReprDefault`'s `case` ends
-  ## in `else: ""`, so kinds it does not name — `Enum16`, `Enum32`,
-  ## `Literal`, `Slice`, `Any` — would render as an EMPTY cell. Blank rows
-  ## are exactly the regression this proc was last changed to remove (see
-  ## `syncStoreLocals` on `value.text`), so an empty result falls back to
-  ## the dump: something imperfect beats nothing.
-  ##
-  ## Atoms are unaffected, which is why this is safe. For `Int`, `Float`,
-  ## `Bool`, `String`, `Char`, `CString` and `FunctionKind` the two procs
-  ## are character-for-character identical — both read `value.i`,
-  ## `value.f`, `value.b` and so on per kind, which is the property the
-  ## wasm/db-trace fix depended on.
+  ## The presenter is total — every `PValue` kind renders to something, and
+  ## `value_presentation_test` asserts exactly that over the whole enum — so
+  ## there is no hole to work around and no ladder. `Error` renders
+  ## `<error: msg>` here and on all five other surfaces.
   if v.isNil:
     return ""
-  let structured = v.textRepr
-  if structured.len > 0:
-    return structured
-  $v
+  statePanelValue(v).root.text
 
 proc valueDisplayType*(v: Value): string =
   ## Original-language type name (``i32``, ``int``, ``string`` …)
@@ -861,7 +840,7 @@ proc toValueHistoryRows(results: seq[HistoryResult]): seq[ValueHistoryRow] =
   for i, r in results:
     result[i] = ValueHistoryRow(
       locationTicks: BiggestInt(r.location.rrTicks),
-      valueText: if r.value.isNil: "" else: r.value.textRepr)
+      valueText: if r.value.isNil: "" else: statePanelValue(r.value).root.text)
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
   self.api = api

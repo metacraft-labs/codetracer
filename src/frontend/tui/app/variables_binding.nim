@@ -160,15 +160,13 @@ proc rootsFor*(vm: StateVM; scope: ScopeKind): seq[Variable] =
 # Variables -> VarNode
 # ---------------------------------------------------------------------------
 
-proc byteBufferFor(v: Variable): seq[int] =
-  ## The bytes `v`'s members are, if they are bytes. See
-  ## `formatters/type_formatters.byteBufferOf`.
-  if v.children.len == 0:
-    return @[]
-  var members: seq[string] = @[]
-  for child in v.children:
-    members.add child.value
-  byteBufferOf(members)
+# PLAT-2 removed `byteBufferFor`. It re-parsed each member's RENDERED text to
+# decide whether the members were bytes, which was the only thing it could do
+# from a `Variable` that carried strings: a member rendered `"7"` (a string) was
+# indistinguishable from one rendered `7` (an integer), so the predicate had to
+# be conservative about a question the engine had already answered. The answer
+# now comes from `presenter.resolve`, which reads `Variable.presented` and puts
+# `builtin.byte-buffer` in the row's `candidates` list where a reader can see it.
 
 proc varNodeFor*(parentPath: string; v: Variable): VarNode =
   ## One `store/types.Variable` as a tree node. NOT its members — those arrive
@@ -179,7 +177,7 @@ proc varNodeFor*(parentPath: string; v: Variable): VarNode =
     typeName: v.typeName,
     value: v.value,
     memberCount: v.children.len,
-    byteBuffer: byteBufferFor(v))
+    presented: v.presented)
 
 proc findVariable(roots: seq[Variable]; segments: openArray[string]): Variable =
   ## Walk `segments` down `roots` by NAME.
