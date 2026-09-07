@@ -491,6 +491,13 @@ jobs:
             "non-nix-build/windows/ensure-ct-remote.ps1",
             "non-nix-build/windows/ensure-nargo.ps1",
             "non-nix-build/windows/ensure-ttd.ps1",
+            # The three components whose junction arms were converted to
+            # relocatable installs. They were absent from this list, so a
+            # syntax error in any of them reached a real provisioning run
+            # before anything noticed.
+            "non-nix-build/windows/ensure-gcc.ps1",
+            "non-nix-build/windows/ensure-llvm.ps1",
+            "non-nix-build/windows/ensure-zstd.ps1",
             "non-nix-build/windows/validate-toolchain-versions.ps1",
             "non-nix-build/windows/validate-env-path-entries.ps1",
             "non-nix-build/windows/validate-install-root.ps1"
@@ -526,6 +533,30 @@ jobs:
         # belongs in this smoke job rather than behind a real provision.
         run: |
           pwsh -File ci/test/bootstrap-decomposition.ps1
+
+      - name: Validate Windows store relocatability and the store-root delete guard
+        shell: pwsh
+        # The gate for the toolchain store's relocatability. A component tree
+        # is published from one machine and materialised on another, so a
+        # baked absolute path does not produce a broken install -- it produces
+        # a working-looking one that resolves against the publisher's
+        # directories and is inherited silently by every later consumer.
+        #
+        # The check is therefore a real round trip and not a string
+        # comparison: component trees are materialised at one root, moved to a
+        # second, the FIRST ROOT IS DESTROYED, and the tools are then resolved
+        # and EXECUTED at the second. It also covers the store-root delete
+        # guard (both arms), the junction conversions (by walking the tree,
+        # never by reading the scripts), the rustup settings.toml repair, and
+        # the FPC/MSVC exclusion list cross-checked against env.ps1's own
+        # dispatch block.
+        #
+        # Hermetic and cheap: temp directories, two-line executables, no
+        # downloads, no toolchain. It runs on this Windows job because that is
+        # where junctions are real; the file is deliberately pwsh-portable so
+        # the same suite can be run on a Linux host during development.
+        run: |
+          pwsh -File ci/test/windows-store-relocation.ps1
 
       - name: Validate bootstrap download and native-command bounds
         shell: pwsh
