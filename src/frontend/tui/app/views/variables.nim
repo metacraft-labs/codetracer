@@ -203,6 +203,19 @@ type
     nameColumn*: int
 
 const
+  ProvenanceBudgetCells* = 40
+    ## The cell budget `provenanceOf` presents the cursor's value under.
+    ##
+    ## A CONSTANT rather than the pane's actual value column, and the reason is
+    ## the question being answered: "which presenter drew this" is a fact about
+    ## the RESOLUTION, and the resolution does not depend on the width. What
+    ## does depend on the width is whether the presenter had to clip, which
+    ## `describeAttribution` reports as `truncated` — so a budget that changed
+    ## with the pane would make that word flicker as the reader resized. 40 is
+    ## the width at which the corpus suite exercises `tui-row`.
+  MinimumRuleCells* = 4
+    ## Cells the trailing rule keeps for itself. Below this the title stops
+    ## looking like a titled pane, so the provenance is dropped instead.
   VariablesTitle* = "VARIABLES"
     ## Contains the string CTUI-3's own pane title produced
     ## (`shell.paneTitle(paneState)` uppercased), so every CTUI-3 assertion that
@@ -454,12 +467,99 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
 # Painting
 # ---------------------------------------------------------------------------
 
+proc selectedPresented*(model: VariablesModel): PValue =
+  ## The recorded value under the inspection cursor, or `nil`.
+  ##
+  ## Nil for a scope header, for a `… n more` marker, for a note, and when
+  ## nothing is selected — none of which is a value.
+  if model.selected.len == 0:
+    return nil
+  for row in model.paneRows():
+    if row.kind == vrkVariable and row.node.path == model.selected:
+      return row.node.presented
+  nil
+
+proc provenanceOf*(model: VariablesModel): string =
+  ## PLAT-2 deliverable 4, made reachable: WHICH PRESENTER rendered the value
+  ## under the inspection cursor, in one line.
+  ##
+  ## ## WHY THIS EXISTS, AND WHY HERE
+  ##
+  ## `Attribution` has ridden every `Presentation` since PLAT-2 and
+  ## `describeAttribution` has rendered it since PLAT-2, and until now NOTHING
+  ## IN THE PRODUCT CALLED EITHER. Project-Definitions §5.4's reason for the
+  ## field is that "a formatting layer that cannot explain itself becomes
+  ## untrustworthy the first time it is wrong" — which is a claim about a
+  ## reader, so a field only a test can reach does not satisfy it.
+  ##
+  ## The variables pane is where it belongs rather than a new command or a new
+  ## key, and that is a decision rather than a convenience. §4.2's key table
+  ## and §4.3's sixteen commands are PUBLISHED sets asserted against the
+  ## specification in BOTH directions: `tests/test_gdb_command_surface.nim`
+  ## parses §4.3 and asserts `CommandKind` and the published rows are equal as
+  ## sequences (so a seventeenth command with no row, or a row with no command,
+  ## is red), and `tests/test_keymap_no_conflicts.nim` parses §4.2's 33 rows
+  ## and asserts the three non-§4.2 actions by name. Adding a seventeenth
+  ## command or a fourth such action to surface a debugging detail would be a
+  ## specification change made sideways. The pane's title row
+  ## already carries muted DETAIL spans — the name count, the changed count,
+  ## the tick label — and "which presenter drew the row you are on" is exactly
+  ## that kind of detail.
+  ##
+  ## THE BUDGET IS THE ROW'S. The same value at two budgets is two different
+  ## byte strings, so an attribution that named a budget the reader is not
+  ## looking at would be answering a different question; `describeAttribution`
+  ## prints the budget name for that reason and this passes the one the pane
+  ## actually painted with.
+  let presented = model.selectedPresented()
+  if presented.isNil:
+    return ""
+  let spec = TreeRowSpec(kind: trkVariable, presented: presented,
+                         focused: model.focused == model.selected)
+  describeAttribution(
+    present(presented, spec.valueBudget(ProvenanceBudgetCells),
+            measure = terminalMeasure))
+
+proc provenanceBadgeOf*(model: VariablesModel): string =
+  ## The short form — `via builtin.record` — for a title row with too few
+  ## cells for the full line. See `vocabulary.attributionBadge` on why a
+  ## caller short of room shows the shortest TRUE answer rather than a clipped
+  ## one.
+  let presented = model.selectedPresented()
+  if presented.isNil:
+    return ""
+  let spec = TreeRowSpec(kind: trkVariable, presented: presented,
+                         focused: model.focused == model.selected)
+  attributionBadge(
+    present(presented, spec.valueBudget(ProvenanceBudgetCells),
+            measure = terminalMeasure))
+
+proc fitProvenance*(model: VariablesModel; width, usedByTitle: int): string =
+  ## The longest TRUE provenance that fits, or "".
+  ##
+  ## Three answers, in order: the full `describeAttribution` line, the short
+  ## `via <presenter>` badge, and nothing. Never a clipped line — see
+  ## `vocabulary.attributionBadge`.
+  let room = width - usedByTitle - MinimumRuleCells
+  if room <= 0:
+    return ""
+  let full = model.provenanceOf()
+  if full.len == 0:
+    return ""
+  if cellWidthOf("  " & full) <= room:
+    return "  " & full
+  let badge = model.provenanceBadgeOf()
+  if cellWidthOf("  " & badge) <= room:
+    return "  " & badge
+  ""
+
 proc titleRowSpans*(model: VariablesModel; width: int): StyledRow =
-  ## `VARIABLES 22 name(s) 1 changed ────`.
+  ## `VARIABLES 22 name(s) 1 changed  builtin.record tier=builtin … ────`.
   ##
   ## The two numbers are the facts the suites assert against data they derived
   ## themselves: how many top-level names the engine reported for the FIRST
-  ## available scope, and how many of them this step changed.
+  ## available scope, and how many of them this step changed. The trailing
+  ## detail is PLAT-2 deliverable 4's affordance; see `provenanceOf`.
   result = @[]
   if width <= 0:
     return
@@ -480,6 +580,16 @@ proc titleRowSpans*(model: VariablesModel; width: int): StyledRow =
   if model.tickLabel.len > 0:
     parts.add StyledSpan(text: " " & model.tickLabel, style: TitleDetailStyle)
   var used = 0
+  # The provenance is fitted BEFORE the rule rather than truncated with the
+  # rest: `fitProvenance` chooses the longest form that fits and drops the span
+  # entirely when neither does, so what the pane shows is always a presenter id
+  # a reader can grep for.
+  var titleCells = 0
+  for part in parts:
+    titleCells += cellWidthOf(part.text)
+  let provenance = fitProvenance(model, width, titleCells)
+  if provenance.len > 0:
+    parts.add StyledSpan(text: provenance, style: TitleDetailStyle)
   for part in parts:
     if used >= width:
       break

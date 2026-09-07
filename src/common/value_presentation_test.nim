@@ -37,8 +37,13 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 179
+const ExpectedAssertions = 242
   ## Written from a run. See the final case.
+  ##
+  ## Was 179 before 2026-09-07. PLAT-3 extended `PresentationKind` from five
+  ## entries to sixteen (+11, from the loop in the first case) and added the
+  ## "the presenter's range is still PLAT-2's five" case (+52), which is the
+  ## case that keeps the extension from widening what a VALUE can become.
 
 # ---------------------------------------------------------------------------
 # Values. Built the way an adapter builds them, so a test value and a recorded
@@ -95,7 +100,15 @@ suite "PLAT-2: the vocabulary slice is PLAT-3's, and it is closed":
       ck name in Plat3Vocabulary
       inc checked
     # The COUNT, not "at least one" — Verification-Harness-Traps §4b.
-    ck checked == 5
+    #
+    # THIS NUMBER WAS 5 UNTIL 2026-09-07 AND IS NOW 16, and the change is the
+    # visible half of PLAT-3 landing. PLAT-2 wrote in `vocabulary.nim`'s
+    # header that "PLAT-3 adds the eleven entries this module does not name,
+    # and renames nothing"; PLAT-3 added them to this enum, so this case went
+    # red on the extension and was updated deliberately rather than the enum
+    # being extended somewhere this case could not see.
+    ck checked == 16
+    ck checked == Plat3Vocabulary.len
 
   test "each value kind lands on a vocabulary entry, and the mapping is total":
     var seen: set[PresentationKind] = {}
@@ -112,6 +125,26 @@ suite "PLAT-2: the vocabulary slice is PLAT-3's, and it is closed":
     ck pkList in seen
     ck pkTree in seen
     ck pkTable in seen
+
+  test "the presenter's range is still PLAT-2's five":
+    # PLAT-3 widened `PresentationKind` from five entries to sixteen. What it
+    # did NOT widen is what a recorded VALUE can become: a value has no
+    # actuation, so no presenter may return `pkButton`, `pkModal` or any of
+    # the other nine interaction/chrome entries. Asserted over every
+    # `PValueKind` at two budgets, because a presenter reached only at one
+    # budget is a presenter this case would not see.
+    const ValueKinds = {pkText, pkList, pkTree, pkTable, pkImage}
+    var reached = 0
+    for k in PValueKind:
+      for budget in [TracepointBudget, StatePanelBudget]:
+        let p = present(PValue(kind: k), budget)
+        ck p.root.kind in ValueKinds
+        inc reached
+    ck reached == 2 * (ord(high(PValueKind)) - ord(low(PValueKind)) + 1)
+    # And the structured values this file builds, which reach kinds the bare
+    # `PValue(kind: k)` above cannot.
+    for v in [pointOf(), mapOf(), mediaOf(), bigSeq(3), str("x"), i("1")]:
+      ck present(v, StatePanelBudget).root.kind in ValueKinds
 
   test "an Image carries a MIME type and degrades to a line where there are no pixels":
     let p = present(mediaOf(), TracepointBudget)

@@ -3596,3 +3596,53 @@ render a value on any surface, do NOT write a formatter.
     painted).  Each carries its reason in its own doc comment.  The first two
     used to index by BYTE over UTF-8 and now count runes; do not reintroduce
     that.
+
+PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
+  * THERE IS ONE VOCABULARY ENUM AND IT LIVES ON THE VALUE SIDE.
+    `common/value_presentation/vocabulary.PresentationKind` carries all
+    SIXTEEN of PLAT-3's entries (`pkText` … `pkMarkdown`);
+    `common/view_vocabulary/vocabulary.ViewKind` is an ALIAS of it, not a
+    second enum.  PLAT-2 opened the enum with five entries and PLAT-3 added
+    eleven, renaming nothing.  If you find yourself declaring a second `Text`,
+    stop.
+    The PRESENTER's range is still the five a recorded value can inhabit;
+    `value_presentation_test`'s "the presenter's range is still PLAT-2's five"
+    case is what keeps the widening of the enum from widening what a value
+    becomes.
+  * `applyKey` IS THE ONLY DEFINITION OF WHAT A KEY DOES, and the terminal
+    binding DELIBERATELY DOES NOT CALL IT.  `frontend/view_vocabulary/
+    terminal_binding.nim` fires a real `keydown` at a real isonim-tui widget
+    and reads the answer out of the widget's own fields, which is what makes
+    `tui/tests/test_view_vocabulary_cross_medium.nim` an independent check
+    rather than a function compared with itself.  Do not "simplify" it by
+    routing the terminal arm through `applyKey`; the suite would still be
+    green and would no longer mean anything.
+  * `isonim_tui.TabsWidget` WRAPS AND NO OTHER WIDGET DOES.  `moveRight` on
+    the last tab sets the first.  ListView, OptionList, Tree, DataTable,
+    RadioSet, ContentSwitcher and MarkdownViewer all CLAMP — read one by one,
+    NOT grepped: `grep -n wrap widgets/*.nim` returns 34 lines and all but two
+    are text wrapping or the word `wrapper`, so that grep proves nothing.
+    Outside `widgets/`, `command/palette.nim` moves `selectedIdx` modularly
+    and `focus/manager.nim` wraps Tab traversal, so the claim is about
+    widgets, not the library.  The vocabulary's `Tabs` does
+    not wrap; the divergence is ASSERTED in the cross-medium suite and
+    `mappings.terminalMapping(pkTabs)` is `msPartial` because of it.  If you
+    change either side, that case is where you will hear about it.
+  * `unittest.check` INSIDE A PLAIN `proc` CANNOT FAIL THE TEST.  Nim's
+    `unittest` injects `testStatusIMPL` as a local in the `test` template AND
+    declares a global fallback, so an assertion helper written as a `proc`
+    compiles, prints `Check failed`, and the test still reports `[OK]`.
+    Measured here: the cross-medium suite's Tabs case printed a failed
+    comparison and passed.  Write assertion helpers as TEMPLATES.
+  * THREE VOCABULARY ENTRIES HAVE NO GPUI TAG AT ALL — `Table`, `Modal`,
+    `ProgressIndicator`.  `isonim-gpui`'s `tagMap` has 35 keys and none of
+    `table`/`tr`/`td`/`dialog`/`progress` is among them; `mapTag` passes an
+    unknown tag through unchanged.  `mappings.GpuiTagMap` is a COPY of those
+    keys (isonim_gpui dlopens a Rust cdylib at module init, so it cannot be
+    imported from a unit test) and `view_vocabulary_test` verifies the copy
+    against isonim-gpui's source with a count assertion.
+  * PLAT-2's ATTRIBUTION NOW HAS A PRODUCT CALL SITE: the TUI variables
+    pane's title row (`views/variables.provenanceOf` / `provenanceBadgeOf` /
+    `fitProvenance`).  A narrow pane shows the SHORT form or nothing, never a
+    clipped one — `builtin.reco…` names a presenter nobody can grep for.  The
+    desktop has no equivalent affordance yet.

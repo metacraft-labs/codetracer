@@ -156,12 +156,14 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 58
-    ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED twice
-    ## since: after CTUI-11, which added six (`theme/capabilities.nim`,
+  ExpectedAppModules = 59
+    ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED three
+    ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
-    ## suites under `tests/`), and after CTUI-12, which added one —
-    ## `tests/test_caps_file_shape.nim`.
+    ## suites under `tests/`); after CTUI-12, which added one —
+    ## `tests/test_caps_file_shape.nim`; and on 2026-09-07, when the variables
+    ## pane's presenter-provenance affordance added
+    ## `tests/test_value_provenance_affordance.nim`.
     ##
     ## The number is deliberately brittle, and every one of those bumps is the
     ## shape it is meant to have: a new file under `app/` reddens this case on

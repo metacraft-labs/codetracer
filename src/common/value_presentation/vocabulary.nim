@@ -1,20 +1,22 @@
-## value_presentation/vocabulary.nim — PLAT-2's slice of PLAT-3's abstract view
-## vocabulary, plus the budget and the attribution a presentation carries.
+## value_presentation/vocabulary.nim — PLAT-3's abstract view vocabulary (the
+## closed set of sixteen), plus the budget and the attribution a presentation
+## carries.
 ##
-## ## WHY A SLICE, AND WHY THESE FIVE
+## ## WHAT PLAT-3 CHANGED HERE, AND WHAT IT DID NOT
 ##
-## PLAT-3 (`codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org`)
-## declares a closed set of sixteen platform-agnostic views: `Text`, `Button`,
-## `Checkbox`, `Toggle`, `Input`, `Select`, `List`, `Tree`, `Table`, `Tabs`,
-## `Collapsible`, `Modal`, `Menu`, `ProgressIndicator`, `Image`, `Markdown`.
-## PLAT-3 is not implemented. PLAT-2 needs `Presentation` expressed in that
-## vocabulary *now*, so this module introduces the smallest subset a recorded
-## VALUE can inhabit — and every entry below is one of PLAT-3's sixteen, spelled
-## with a `pk` prefix. That is the property that makes PLAT-3 an EXTENSION of
-## this file rather than a replacement of it: PLAT-3 adds the eleven entries this
-## module does not name, and renames nothing.
+## PLAT-2 introduced FIVE of PLAT-3's sixteen entries under PLAT-3's own names
+## and wrote, in this header, that "PLAT-3 adds the eleven entries this module
+## does not name, and renames nothing". That is what happened, on 2026-09-07:
+## the eleven are now in `PresentationKind` beside the five, nothing was
+## renamed, and no second `Text` exists anywhere in the tree.
 ##
-## The eleven deliberately absent, with the reason:
+## What did NOT change is the PRESENTER'S range. `present` still returns only
+## the five a recorded VALUE can inhabit; the eleven are reachable only by a
+## VIEW (`common/view_vocabulary/`). `value_presentation_test`'s "the
+## presenter's range is still PLAT-2's five" case asserts that over every
+## `PValueKind`, so the widening of the enum is not a widening of what a value
+## becomes. The reasons the eleven are not value shapes are unchanged and are
+## kept here because they are the reasons that case exists:
 ##
 ##   `Button` `Checkbox` `Toggle` `Input` `Select` `Menu`  — interaction forms.
 ##       A value presentation has no actuation; the surface that embeds it does.
@@ -23,12 +25,13 @@
 ##       three a value needs; the other two are pane-level, not value-level.
 ##   `ProgressIndicator`                                    — no recorded value
 ##       is a progress.
-##   `Markdown`                                             — see `pkImage`: the
-##       media carrier below takes a MIME type, so `text/markdown` arrives
-##       through it. PLAT-3 may split it out; nothing here has to change if it
-##       does, because the MIME type is the discriminator either way.
+##   `Markdown`                                             — a value carrying
+##       `text/markdown` arrives through `pkImage`'s MIME type. PLAT-3 splits
+##       `Markdown` out as a VIEW (a rendered document with its own structure),
+##       which is a different question from how a value announces its media
+##       type, and nothing here had to change for it.
 ##
-## ## THE FIVE, EACH WITH WHAT MADE IT UNAVOIDABLE
+## ## THE FIVE A VALUE CAN INHABIT, EACH WITH WHAT MADE IT UNAVOIDABLE
 ##
 ##   `pkText`   Every scalar. Unavoidable: an `Int`, a `Bool` and a `String`
 ##              have exactly one medium-independent rendering, and every
@@ -82,13 +85,46 @@ import std/[strutils, unicode]
 
 type
   PresentationKind* = enum
-    ## PLAT-2's slice of PLAT-3's vocabulary. See the header for the eleven
-    ## entries deliberately absent and why each is.
-    pkText   ## PLAT-3 `Text`
-    pkList   ## PLAT-3 `List`
-    pkTree   ## PLAT-3 `Tree`
-    pkTable  ## PLAT-3 `Table`
-    pkImage  ## PLAT-3 `Image`, generalised to any MIME type
+    ## PLAT-3's abstract view vocabulary — the closed set of sixteen.
+    ##
+    ## PLAT-2 declared five of them and wrote, in this file's header, that
+    ## "PLAT-3 adds the eleven entries this module does not name, and renames
+    ## nothing". PLAT-3 did exactly that: the eleven are below, in the enum
+    ## PLAT-2 opened, so there is ONE spelling of `Text` in the tree and the
+    ## extension is an extension rather than a second vocabulary. The header's
+    ## "why these five" section is preserved verbatim above, because it still
+    ## records why the five a VALUE can inhabit are those five.
+    ##
+    ## THE ENUM IS THE VOCABULARY; THE NODE TYPE IS NOT. A `Presentation` and a
+    ## `ViewNode` (`common/view_vocabulary/`) are different objects carrying
+    ## different state and they share this enum, which is what lets PLAT-12
+    ## template a value into a view without a translation table between two
+    ## enumerations that would drift.
+    ##
+    ## THE PRESENTER'S RANGE IS STILL THE FIVE. `presenter.present` cannot
+    ## return any of the eleven — a recorded value has no actuation — and
+    ## `value_presentation_test`'s "the presenter's range is still PLAT-2's
+    ## five" case asserts it over every `PValueKind`, so extending the enum did
+    ## not widen what a value can become.
+    ##
+    ## `common/view_vocabulary/vocabulary.nim` re-exports this type as
+    ## `ViewKind` and specifies each entry by behaviour and state.
+    pkText             ## PLAT-3 `Text`
+    pkButton           ## PLAT-3 `Button`
+    pkCheckbox         ## PLAT-3 `Checkbox`
+    pkToggle           ## PLAT-3 `Toggle`
+    pkInput            ## PLAT-3 `Input`
+    pkSelect           ## PLAT-3 `Select`
+    pkList             ## PLAT-3 `List`
+    pkTree             ## PLAT-3 `Tree`
+    pkTable            ## PLAT-3 `Table`
+    pkTabs             ## PLAT-3 `Tabs`
+    pkCollapsible      ## PLAT-3 `Collapsible`
+    pkModal            ## PLAT-3 `Modal`
+    pkMenu             ## PLAT-3 `Menu`
+    pkProgressIndicator## PLAT-3 `ProgressIndicator`
+    pkImage            ## PLAT-3 `Image`, generalised to any MIME type
+    pkMarkdown         ## PLAT-3 `Markdown`
 
   PresentationClass* = enum
     ## What the node IS, semantically — the thing a front-end maps onto a
@@ -334,6 +370,22 @@ func clipToCells*(ctx: PresentationContext; s: string; cells: int): tuple[text: 
     kept += w
     keptBytes += piece.len
   (s[0 ..< keptBytes] & Ellipsis, true)
+
+func attributionBadge*(p: Presentation): string =
+  ## The SHORT form of the answer: `via builtin.record`.
+  ##
+  ## PLAT-2 deliverable 4 asks that a user be able to ask which presenter
+  ## rendered a value. `describeAttribution` below is the full answer and is
+  ## one line long; a pane title, a status line or a chip may not have that
+  ## many cells, and a caller with too few cells for the full form should show
+  ## the SHORTEST TRUE answer rather than a clipped one. A clipped attribution
+  ## is worse than a short one: `builtin.byte-buf…` reads like a presenter
+  ## nobody can grep for.
+  ##
+  ## The two forms are here rather than at a call site because two surfaces
+  ## abbreviating the same fact differently is how PLAT-2's survey found five
+  ## spellings of one error value.
+  "via " & p.attribution.presenter
 
 func describeAttribution*(p: Presentation): string =
   ## PLAT-2 deliverable 4, rendered.
