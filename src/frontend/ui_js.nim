@@ -6061,8 +6061,14 @@ when defined(ctWeb) and not defined(ctInExtension):
           # introduced to fix. Installation is necessarily against the instance
           # that exists now; only the two callbacks below can defer their read,
           # and they do.
+          # AND THE RUNNER ANSWERS. `RunTestsProc` returns the sentence saying
+          # why a run did not start, and `startRun` files it into the pane's
+          # `.test-results-failure` block. Nothing is discarded here: the three
+          # states `startNoirTests` declines in — a build already running, no
+          # project, no build view-model — are all states in which `canRun` is
+          # TRUE, so the ▶ was live, took the click, and moved nothing.
           test_results.testResultsVMInstance.setRunTests(
-            proc() = web_noir_build.startNoirTests())
+            proc(): string = web_noir_build.startNoirTests())
 
           # THE TWO PER-ROW CONTROLS, pointed at the two things they mean.
           #
@@ -6084,10 +6090,19 @@ when defined(ctWeb) and not defined(ctInExtension):
           # than a flag on the recorder: a flag could be got wrong and still
           # look right, whereas a proc with no `dispatch` in it cannot re-run a
           # test by accident.
+          # THE TWO RECORDING ACTIONS SAY WHY THEY DID NOT RUN, exactly as
+          # `openExisting` below already did. They reach
+          # `startNoirTestRecording`, whose five refusals used to be console
+          # lines — so `⟳` over a project with a Build in flight was a click
+          # that changed nothing on screen.
           test_results.testResultsVMInstance.setRowActions(
             refresh = proc(testId, selector: string) =
-              web_noir_build.startNoirTestRecording(
-                selector, newSessionTab = false, openWhenDone = false),
+              let refusal = web_noir_build.startNoirTestRecording(
+                selector, newSessionTab = false, openWhenDone = false)
+              if refusal.len > 0 and
+                 not test_results.testResultsVMInstance.isNil:
+                test_results.testResultsVMInstance.noteRowActionRefusal(
+                  refusal),
             openExisting = proc(testId, selector: string) =
               let refusal = web_noir_build.openRetainedTestRecording(selector)
               if refusal.len > 0 and
@@ -6103,8 +6118,12 @@ when defined(ctWeb) and not defined(ctInExtension):
                 test_results.testResultsVMInstance.noteRowActionRefusal(
                   refusal),
             recordAndOpen = proc(testId, selector: string) =
-              web_noir_build.startNoirTestRecording(
-                selector, newSessionTab = false, openWhenDone = true))
+              let refusal = web_noir_build.startNoirTestRecording(
+                selector, newSessionTab = false, openWhenDone = true)
+              if refusal.len > 0 and
+                 not test_results.testResultsVMInstance.isNil:
+                test_results.testResultsVMInstance.noteRowActionRefusal(
+                  refusal))
 
           # AND THE PANE IS TOLD WHICH RECORDING NOW EXISTS.
           #
@@ -6280,8 +6299,17 @@ when defined(ctWeb) and not defined(ctInExtension):
             # the test executes, its execution is captured, and the user lands
             # in a time-travel session on it — the verdict arrives first and
             # fills the Test Results pane, the session is what was asked for.
-            web_noir_build.startNoirTestRecording($selector)
-            cstring""
+            #
+            # AND ITS REFUSAL IS THE HOOK'S ANSWER. This used to dispatch and
+            # then return `cstring""` unconditionally — "accepted" — whatever
+            # the host had just decided. `runTestFromGutter` reads that as
+            # consent: it keeps the spinner it armed, sets a two-minute
+            # deadline and posts `"<selector>" started`. So a run declined
+            # inside this call left the slot spinning for two minutes under a
+            # message saying it had begun, which is the reported defect
+            # verbatim. Returning the sentence takes the branch beside it,
+            # which unwinds the spinner and shows the reason.
+            cstring(web_noir_build.startNoirTestRecording($selector))
 
         # AND RE-DERIVE, because the catalog has almost certainly already
         # arrived. `enterTemplateEditMode` above installs the pane host, which
