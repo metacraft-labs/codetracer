@@ -2,10 +2,19 @@
 //!
 //! - `get_value_origin` MCP tool — registration, schema, description.
 //! - `resolve_variable_step` MCP tool — registration + schema.
-//! - `ct trace origin` CLI subcommand — registration only (the full
-//!   roundtrip needs a live daemon + recorder).
+//! - `ct trace origin` CLI subcommand — the full `--format
+//!   json|markdown|text` roundtrip against a live daemon + a real
+//!   recording.
 //! - End-to-end runs of both tools against the canonical
 //!   `simple_trivial_chain` Python fixture, recorded for real.
+//!
+//! The `--format` tests exist because `run_trace_origin`'s three output
+//! arms had no coverage of any kind: `render_text` / `render_markdown`
+//! are unit-tested inside `origin_renderer.rs` against a hand-built
+//! `json!` fixture, but nothing proved the CLI selects the right arm,
+//! and `--format json` has no renderer function at all — it is an
+//! inline `serde_json::to_string_pretty` in `main.rs` that no test ever
+//! looked at. These drive the real binary over a real chain.
 //!
 //! The end-to-end tests drive the actual `backend-manager` binary as a
 //! subprocess speaking the MCP JSON-RPC protocol on stdin/stdout,
@@ -37,6 +46,9 @@ use serde_json::{Value, json};
 fn skip(reason: &str) {
     eprintln!("SKIPPED: {reason}");
 }
+
+/// Discriminator for per-test fixture roots — see `record_python_fixture`.
+static FIXTURE_SEQ: AtomicI64 = AtomicI64::new(0);
 
 /// Find the `backend-manager` binary under the workspace's `target/`
 /// directory. Returns `None` (with a SKIP line printed) when the binary
@@ -427,8 +439,18 @@ fn record_python_fixture(scenario: &str) -> Option<PathBuf> {
 
     // Short path: the daemon's Unix socket lives beside the trace, and an
     // over-long socket path fails with `SUN_LEN`.
-    let root =
-        PathBuf::from("/tmp").join(format!("ct-mcp-origin-{}-{}", std::process::id(), scenario));
+    //
+    // The sequence number matters: `cargo test` runs the tests in this
+    // file on parallel threads of ONE process, so a root keyed only by
+    // pid + scenario is shared by every test asking for the same
+    // fixture — and the `remove_dir_all` below would delete a trace
+    // another thread's daemon has open.
+    let seq = FIXTURE_SEQ.fetch_add(1, Ordering::SeqCst);
+    let root = PathBuf::from("/tmp").join(format!(
+        "ct-mcp-origin-{}-{}-{seq}",
+        std::process::id(),
+        scenario
+    ));
     let _ = std::fs::remove_dir_all(&root);
     let trace_dir = root.join("trace");
     std::fs::create_dir_all(&trace_dir).expect("cannot create trace dir");
@@ -858,10 +880,17 @@ fn test_mcp_exec_script_trace_value_origin_returns_chain() {
         return;
     };
 
-    // Step 7 is the `print(c)` step for this fixture — the same query
-    // point `get_value_origin` reaches via its breakpoint.
+    // Step 9 is the `print(c)` step for this fixture — the same query
+    // point `get_value_origin` reaches via its breakpoint, and the last
+    // step the recorder emits (`--step 10` answers "out of range").
+    //
+    // It was `goto_ticks(7)` when this test landed, which is inside the
+    // `a = 10 / b = a / c = b` run: the walk found `c` unassigned and
+    // answered `hops=0 terminator=parameterAtRecordStart` — an answer
+    // this test's `HOPS 3` assertion rejects. It has been failing on
+    // `dev` since, independently of the CLI work here.
     let script = r#"
-trace.goto_ticks(7)
+trace.goto_ticks(9)
 chain = trace.value_origin("c")
 print("HOPS", len(chain.hops))
 print("TERMINATOR", chain.terminator.kind.value)
@@ -917,5 +946,378 @@ fn test_cli_trace_exec_script_value_origin() {
     assert!(
         help.contains("<TRACE_PATH>") || help.to_lowercase().contains("trace_path"),
         "`ct trace exec` should take a trace path positional: {help}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `ct trace origin --format {json,markdown,text}` — the CLI output arms.
+//
+// `run_trace_origin` in `main.rs` dispatches on `--format` into three
+// output paths.  Two of them call `origin_renderer::render_text` /
+// `render_markdown`, whose *rendering* is unit-tested in
+// `src/origin_renderer.rs` against a hand-written `json!` fixture.  The
+// third — `json` — has no renderer function at all; it is an inline
+// `serde_json::to_string_pretty(&body)` that nothing has ever asserted
+// on.
+//
+// What no test covered on any arm is the CLI itself: that `--format`
+// selects the matching arm, and that the chain the daemon actually
+// returns for a real recording renders the way the spec says.  Four
+// stub tests (`test_cli_trace_origin_{json,markdown,text,...}_output`)
+// held those slots while always returning early, and were deleted when
+// their harness was found to be vacuous.  These replace them for real.
+//
+// The expected chain is the canonical one from
+// `src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/ANSWERS.md`:
+// `c -> b -> a`, terminating at the literal `10`.
+//
+// Note on the rendered locations.  A hop's `sourceText` is the statement
+// that *produced* the value; its `location` is where that value is
+// *read* — one statement later.  So the chain queried at `print(c)`
+// (`main.py:12`) renders as:
+//
+//     main.py:12  c = b      (c is read at the print)
+//     main.py:11  b = a      (b is read at `c = b`)
+//     main.py:10  a = 10     (a is read at `b = a`)
+//
+// The pairing, not just the set of lines, is what these tests pin: a
+// renderer that dropped `sourceText` and printed `targetExpr = sourceExpr`
+// instead — its documented fallback — would still emit three plausible
+// rows, and would fail here.
+// ---------------------------------------------------------------------------
+
+/// The `print(c)` step in a `simple_trivial_chain` recording.
+///
+/// It is the last step the recorder emits for this fixture (`--step 10`
+/// answers `step_id 10 is out of range`), which is what makes the
+/// constant stable: the fixture's final statement *is* the query point
+/// the ANSWERS.md chain is stated for.
+const PRINT_C_STEP: &str = "9";
+
+/// A recorded trace plus a live daemon, for driving the `ct trace
+/// origin` *client* (as opposed to the MCP server).
+struct CliOriginHarness {
+    _daemon: TestDaemon,
+    binary: PathBuf,
+    root: PathBuf,
+    trace_path: String,
+}
+
+impl CliOriginHarness {
+    /// Run `ct trace origin <trace> --variable c --step 9 --format <format>`
+    /// against this harness's daemon and return its stdout.
+    ///
+    /// `CODETRACER_TMP_PATH` is what the CLI client resolves its daemon
+    /// socket from (`paths::Paths::default`), and it is the same
+    /// `<root>/daemon.sock` that `start_daemon` created — so the client
+    /// joins the harness daemon instead of auto-starting a stray one
+    /// against the user's real socket.
+    fn run_origin(&self, format: &str) -> String {
+        let output = Command::new(&self.binary)
+            .args([
+                "trace",
+                "origin",
+                &self.trace_path,
+                "--variable",
+                "c",
+                "--step",
+                PRINT_C_STEP,
+                "--format",
+                format,
+            ])
+            .env("CODETRACER_TMP_PATH", &self.root)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap_or_else(|e| panic!("cannot run `ct trace origin --format {format}`: {e}"));
+
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(
+            output.status.success(),
+            "`ct trace origin --format {format}` exited with {}\nstdout: {stdout}\nstderr: {stderr}",
+            output.status
+        );
+        stdout
+    }
+}
+
+/// Build the CLI harness for `scenario`, or return `None` after emitting
+/// a `SKIPPED:` line naming precisely what was missing.
+fn cli_origin_harness(scenario: &str) -> Option<CliOriginHarness> {
+    let binary = match find_binary() {
+        Some(b) => b,
+        None => {
+            skip("backend-manager binary not yet built");
+            return None;
+        }
+    };
+    let trace_dir = record_python_fixture(scenario)?;
+    let root = trace_dir
+        .parent()
+        .expect("trace dir has a parent")
+        .to_path_buf();
+    let daemon = start_daemon(&binary, &root)?;
+
+    Some(CliOriginHarness {
+        _daemon: daemon,
+        binary,
+        root,
+        trace_path: trace_dir.to_string_lossy().to_string(),
+    })
+}
+
+/// Extract the string field `field` from each hop, trimmed.
+fn hop_strings(hops: &[Value], field: &str) -> Vec<String> {
+    hops.iter()
+        .map(|h| {
+            h.get(field)
+                .and_then(Value::as_str)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| format!("<missing {field}>"))
+        })
+        .collect()
+}
+
+/// `--format json` must emit the canonical wire chain, parseable and
+/// carrying the documented keys — not a rendered report, and not an
+/// abbreviation of the body.
+#[test]
+fn test_cli_trace_origin_json_output() {
+    let Some(harness) = cli_origin_harness("simple_trivial_chain") else {
+        return;
+    };
+    let stdout = harness.run_origin("json");
+
+    let chain: Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+        panic!("`--format json` did not emit parseable JSON ({e}); stdout was:\n{stdout}")
+    });
+
+    assert_eq!(
+        chain.get("queryVariable").and_then(Value::as_str),
+        Some("c"),
+        "the JSON body must name the queried variable: {chain}"
+    );
+
+    let hops = chain
+        .get("hops")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("`--format json` emitted no `hops` array: {chain}"));
+    assert_eq!(
+        hops.len(),
+        3,
+        "ANSWERS.md expects c -> b -> a; got {} hops: {chain}",
+        hops.len()
+    );
+    assert_eq!(
+        hop_strings(hops, "kind"),
+        vec!["trivialCopy", "trivialCopy", "literal"],
+        "unexpected hop kinds in `--format json`: {chain}"
+    );
+    assert_eq!(
+        hop_strings(hops, "sourceText"),
+        vec!["c = b", "b = a", "a = 10"],
+        "unexpected assigning statements in `--format json`: {chain}"
+    );
+    let lines: Vec<i64> = hops
+        .iter()
+        .map(|h| {
+            h.get("location")
+                .and_then(|l| l.get("line"))
+                .and_then(Value::as_i64)
+                .unwrap_or(-1)
+        })
+        .collect();
+    assert_eq!(
+        lines,
+        vec![12, 11, 10],
+        "hops must carry the fixture's read sites, newest first: {chain}"
+    );
+
+    assert_eq!(
+        chain
+            .get("terminator")
+            .and_then(|t| t.get("kind"))
+            .and_then(Value::as_str),
+        Some("literal"),
+        "ANSWERS.md expects a Literal terminator: {chain}"
+    );
+    assert_eq!(
+        chain
+            .get("terminator")
+            .and_then(|t| t.get("expression"))
+            .and_then(Value::as_str),
+        Some("10"),
+        "ANSWERS.md expects the chain to terminate at the literal 10: {chain}"
+    );
+    assert_eq!(
+        chain.get("truncated").and_then(Value::as_bool),
+        Some(false),
+        "a three-hop chain under the default --max-hops 16 is not truncated: {chain}"
+    );
+
+    // `main.rs` promises pretty-printed, diffable JSON on this arm.  A
+    // single-line `body.to_string()` would still parse, so parsing alone
+    // cannot see a regression here.
+    assert!(
+        stdout.contains("\n  \"hops\""),
+        "`--format json` must pretty-print (2-space indent), not emit one line; stdout was:\n{stdout}"
+    );
+}
+
+/// `--format markdown` must emit the report layout: heading, terminator
+/// bullets, and one table row per hop in walk order.
+#[test]
+fn test_cli_trace_origin_markdown_output() {
+    let Some(harness) = cli_origin_harness("simple_trivial_chain") else {
+        return;
+    };
+    let stdout = harness.run_origin("markdown");
+
+    assert!(
+        stdout.contains("### Origin chain — `c` @ step `"),
+        "markdown must open with the chain heading naming `c`; stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("| # | Kind | Location | Source | Confidence |"),
+        "markdown must carry the hop table header; stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("- **Hops:** 3"),
+        "markdown must report three hops; stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("- **Truncated:** no"),
+        "markdown must report the chain as complete; stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("- **Terminator:** `literal` — `10`"),
+        "markdown must name the Literal 10 terminator; stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("- **Terminator function:** `main`"),
+        "markdown must name the function the chain terminates in; stdout was:\n{stdout}"
+    );
+
+    // Each hop is a row, and the rows appear in walk order (newest
+    // first).  Asserting the offsets rather than mere containment is
+    // what makes a reordered or reversed chain fail here.
+    let mut offsets = Vec::new();
+    for row in [
+        "| 0 | `trivialCopy` | `main.py:12` | `c = b` |",
+        "| 1 | `trivialCopy` | `main.py:11` | `b = a` |",
+        "| 2 | `literal` | `main.py:10` | `a = 10` |",
+    ] {
+        let at = stdout.find(row).unwrap_or_else(|| {
+            panic!("markdown is missing the row `{row}`; stdout was:\n{stdout}")
+        });
+        offsets.push(at);
+    }
+    assert!(
+        offsets[0] < offsets[1] && offsets[1] < offsets[2],
+        "markdown hop rows must render in walk order c -> b -> a, got offsets {offsets:?}; \
+         stdout was:\n{stdout}"
+    );
+}
+
+/// `--format text` must emit the spec §3.2.2 ASCII layout: header,
+/// summary line, one glyph-tagged hop block per hop in walk order, and
+/// the terminator row last.
+#[test]
+fn test_cli_trace_origin_text_output_matches_spec_layout() {
+    let Some(harness) = cli_origin_harness("simple_trivial_chain") else {
+        return;
+    };
+    let stdout = harness.run_origin("text");
+
+    assert!(
+        stdout.starts_with("Origin chain for 'c' @ step="),
+        "text must open with the spec header line; stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("  hops=3 terminator=literal truncated=no"),
+        "text must carry the spec summary line; stdout was:\n{stdout}"
+    );
+
+    // Hop blocks: the glyph, the location, and the assigning statement
+    // on the following line — in walk order.
+    let mut offsets = Vec::new();
+    for block in [
+        "  0. [=] main.py:12\n     c = b",
+        "  1. [=] main.py:11\n     b = a",
+        "  2. [L] main.py:10\n     a = 10",
+    ] {
+        let at = stdout.find(block).unwrap_or_else(|| {
+            panic!("text is missing the hop block:\n{block}\nstdout was:\n{stdout}")
+        });
+        offsets.push(at);
+    }
+    assert!(
+        offsets[0] < offsets[1] && offsets[1] < offsets[2],
+        "text hop blocks must render in walk order c -> b -> a, got offsets {offsets:?}; \
+         stdout was:\n{stdout}"
+    );
+
+    // The terminator row closes the chain, after the last hop.
+    let terminator_at = stdout.find("  [lit] 10").unwrap_or_else(|| {
+        panic!("text is missing the `[lit] 10` terminator; stdout was:\n{stdout}")
+    });
+    assert!(
+        terminator_at > offsets[2],
+        "the terminator row must come after the final hop; stdout was:\n{stdout}"
+    );
+    // …and is annotated with the function it terminates in.
+    let function_at = stdout.find("      @ main").unwrap_or_else(|| {
+        panic!("text is missing the `@ main` annotation; stdout was:\n{stdout}")
+    });
+    assert!(
+        function_at > terminator_at,
+        "the function annotation belongs under the terminator; stdout was:\n{stdout}"
+    );
+}
+
+/// The three arms must be three *different* renderings.
+///
+/// Each test above would pass if its own arm were correct while another
+/// fell through to it; only comparing the arms pins the `match format`
+/// in `run_trace_origin` itself.  The fall-through is not hypothetical:
+/// the `_` arm is the text renderer, so a mis-spelled `"markdown"`
+/// pattern would silently downgrade markdown to text.
+#[test]
+fn test_cli_trace_origin_formats_are_distinct() {
+    let Some(harness) = cli_origin_harness("simple_trivial_chain") else {
+        return;
+    };
+    let json = harness.run_origin("json");
+    let markdown = harness.run_origin("markdown");
+    let text = harness.run_origin("text");
+
+    assert_ne!(
+        json.trim(),
+        text.trim(),
+        "`--format json` fell through to the text arm"
+    );
+    assert_ne!(
+        markdown.trim(),
+        text.trim(),
+        "`--format markdown` fell through to the text arm"
+    );
+    assert_ne!(
+        json.trim(),
+        markdown.trim(),
+        "`--format json` and `--format markdown` produced identical output"
+    );
+
+    // And each is recognisably its own shape.
+    assert!(
+        json.trim_start().starts_with('{'),
+        "the json arm must emit a JSON object: {json}"
+    );
+    assert!(
+        markdown.starts_with("### "),
+        "the markdown arm must emit a markdown heading: {markdown}"
+    );
+    assert!(
+        text.starts_with("Origin chain for "),
+        "the text arm must emit the ASCII layout: {text}"
     );
 }
