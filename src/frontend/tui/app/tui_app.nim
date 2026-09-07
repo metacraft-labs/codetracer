@@ -98,6 +98,20 @@ type
     notification*: string
       ## §3.3.6's message line. Owned here rather than recomputed per frame so
       ## the answer to the last command survives until the next one.
+    layoutBinding*: LayoutBinding
+      ## PLAT-6's terminal layout binding: the committed `Layout` with its undo
+      ## log, the gesture in flight, and the responsive-profile freeze.
+      ##
+      ## **`nil` BY DEFAULT, and that is what keeps CTUI-3's screens byte
+      ## identical.** With no binding, `shellModel` carries the session's own
+      ## `LayoutNode` and an empty `docked`, which is exactly the model CTUI-3
+      ## built — so a host that never calls `enableLayoutBinding` paints the
+      ## screen it painted before, and every golden written against it still
+      ## reads.
+      ##
+      ## With one, the binding's `Layout` is what is drawn AND what gestures
+      ## change, so a moved tab survives the next repaint rather than being
+      ## re-derived from the profile.
     traceName*: string
     tick*: int
     totalTicks*: int
@@ -178,11 +192,22 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
       header.sessions.add SessionTab(
         title: (if s.title.len > 0: s.title else: $s.id),
         active: s.id == app.shell.activeSessionId())
+  # PLAT-6: when a layout binding is enabled it is the authority on the
+  # arrangement — the session's tree is what it was CREATED from, and letting
+  # the session's node win here would throw away every gesture on the next
+  # repaint, which is the same divergence CTUI-3 refused for `activate`.
+  let bound = not app.layoutBinding.isNil
+  let boundLayout = if bound: app.layoutBinding.layout else: initLayout(nil)
   result = ShellModel(
     header: header,
     status: initStatusBarModel(mode = umNormal, profile = selected,
                                notification = app.notification),
-    layout: (if active.isNil: profileLayout(selected) else: active.layout),
+    layout: (if bound: boundLayout.tree
+             elif active.isNil: profileLayout(selected)
+             else: active.layout),
+    docked: (if bound: boundLayout.docked else: @[]),
+    interaction: (if bound: app.layoutBinding.interaction
+                  else: noInteraction()),
     profile: selected,
     source: app.source,
     highlighting: app.highlighting,
@@ -190,6 +215,26 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     variables: app.variables,
     timeline: app.timeline,
     eventLog: app.eventLog)
+
+proc enableLayoutBinding*(app: TuiApp; width, height: int): LayoutBinding =
+  ## Give this application a layout the user can rearrange (PLAT-6).
+  ##
+  ## Seeded from the ACTIVE SESSION's own tree when there is one, so enabling
+  ## the binding changes nothing on screen at the moment it is enabled: the
+  ## first frame after this call is the frame that would have been painted
+  ## without it. With no session open it starts from the profile's default,
+  ## which is what `shellModel` would have drawn anyway.
+  ##
+  ## Explicit rather than automatic in `newTuiApp`, because a host that has not
+  ## wired the gesture surface would otherwise gain a layout nothing can drive
+  ## and, with it, a second thing that decides what the screen shows.
+  let selected = selectProfile(width, height)
+  let active = app.shell.activeSlot()
+  let seed =
+    if active.isNil or active.layout.isNil: profileLayout(selected)
+    else: active.layout
+  app.layoutBinding = newLayoutBinding(initLayout(seed), selected)
+  app.layoutBinding
 
 proc renderScreen*(app: TuiApp; r: TerminalRenderer;
                    width, height: int): TerminalNode =

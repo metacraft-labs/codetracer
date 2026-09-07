@@ -268,6 +268,87 @@ proc nodeAtPath*(root: LayoutNode; path: string): LayoutNode =
     current = current.children[index]
   current
 
+type
+  NodeInfo* = object
+    ## What a node at a path IS, as a **value**, with no way back to the tree.
+    ##
+    ## ## Why this exists, and what it closes
+    ##
+    ## `nodeAtPath` hands out a live `ref` into the committed tree, so a caller
+    ## holding one can write through it — `node.weight = 3.0` mutates the very
+    ## layout every routine in this module promises not to touch. That is the
+    ## same exposure `layout_model.find` has, and it was recorded rather than
+    ## closed in PLAT-4/PLAT-5 because until PLAT-6 nothing outside the model's
+    ## own suites called either.
+    ##
+    ## PLAT-6 is the first real caller, and it takes this door instead. Every
+    ## field below is a copy of a scalar: there is no `LayoutNode`, no `ref`,
+    ## and no `seq` of children, so `not compiles(info.node)` and a front-end
+    ## PHYSICALLY CANNOT reach the tree through what it was handed. The
+    ## structure of the type is the guarantee, rather than a rule a reviewer
+    ## has to enforce; `app/tests/test_layout_binding.nim` walks the fields and
+    ## asserts none of them is a reference, with a counted control so a walk
+    ## that found nothing cannot pass.
+    ##
+    ## **What this does NOT close, stated rather than implied.** `Layout.tree`
+    ## is itself a public `ref` field, so anybody holding a `Layout` can still
+    ## write `layout.tree.children[0].weight = 3.0` without calling anything
+    ## here. Making `nodeAtPath` private would move that exposure, not remove
+    ## it. Removing it needs `Layout` to stop publishing a mutable tree — a
+    ## change to the persisted model's representation, which is PLAT-4's
+    ## decision and not a binding's to take. What IS true, and is what this
+    ## type buys, is that the terminal binding never holds a node reference at
+    ## all: it resolves paths to `NodeInfo` and panes to `PaneKind`, and its
+    ## whole public surface is free of `LayoutNode`.
+    path*: string
+      ## The path this describes, echoed back so a caller that resolved a
+      ## pointer keeps the two together.
+    kind*: LayoutNodeKind
+    pane*: PaneKind
+      ## Meaningful only when `kind == lnPane`; `PaneKind.low` otherwise, and a
+      ## caller must branch on `kind` first. Not an `Option` because the branch
+      ## is already mandatory for every other field here.
+    title*: string
+    weight*: float
+    childCount*: int
+    activeIndex*: int
+      ## The stack's active child, or -1 for every other kind.
+
+proc nodeInfoAtPath*(root: LayoutNode; path: string): Option[NodeInfo] =
+  ## The node a path names, **copied out**. `none` when the path names
+  ## nothing.
+  ##
+  ## The routine a front-end's hit-test result should be resolved through —
+  ## see `NodeInfo`'s own documentation for why, and for the one exposure this
+  ## does not close.
+  let node = nodeAtPath(root, path)
+  if node.isNil:
+    return none(NodeInfo)
+  some(NodeInfo(
+    path: path, kind: node.kind,
+    pane: (if node.kind == lnPane: node.pane else: PaneKind.low),
+    title: node.title, weight: node.weight, childCount: node.children.len,
+    activeIndex: (if node.kind == lnStack: node.activeIndex else: -1)))
+
+proc parentPath*(path: string): Option[string] =
+  ## The path of the node one level up, or `none` for the root — which has no
+  ## parent and whose path is `""`.
+  ##
+  ## A pure string operation, deliberately: a caller that has a path and wants
+  ## its container should not have to walk the tree (and therefore hold a
+  ## reference) to get one.
+  if path.len == 0:
+    return none(string)
+  let at = path.rfind('/')
+  if at < 0: some("") else: some(path[0 ..< at])
+
+proc childPathOf*(path: string; index: int): string =
+  ## The path of child `index` of the node at `path`. The inverse of
+  ## `parentPath`, and what lets a binding name a stack's HIDDEN tabs — which
+  ## have paths but no projected region, so nothing on screen can point at
+  ## them.
+  childPath(path, index)
+
 proc panePath*(layout: Layout; kind: PaneKind): Option[string] =
   ## The path of the leaf holding `kind`, or `none` when it is not placed.
   let leaf = layout.tree.find(kind)

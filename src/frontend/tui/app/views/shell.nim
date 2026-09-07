@@ -41,8 +41,10 @@ import isonim_tui
 
 import headless_app/layout_model
 
+import ../layout/binding
 import ../layout/profile
 import ../layout/project
+import ../layout/tab_strip
 import ../syntax/highlighter
 import ./call_stack
 import ./event_log
@@ -55,6 +57,12 @@ import ./tracepoint_manager
 import ./variables
 
 export header, status_bar, profile, project, source_pane, styled_row
+# PLAT-6 moved `tabRow` and `PaneRuleGlyph` to `app/layout/tab_strip.nim`, so
+# the painter and the binding's hit-test read ONE answer about where tab `i`
+# sits. Re-exported here because this module declared both before, and every
+# CTUI-3 call site must keep resolving.
+export tab_strip
+export binding
 export call_stack, variables
 export event_log, timeline_bar, tracepoint_manager
 
@@ -126,6 +134,22 @@ type
       ## frame: "parse once per (path, generation) and cache the token spans".
       ## `nil` means parse every frame, which is what the cold-parse benchmark
       ## measures.
+    docked*: seq[DockedPane]
+      ## PLAT-6. The auto-hidden panes beside `layout`, which together with it
+      ## are the `Layout` this screen is a rendering of.
+      ##
+      ## A SECOND FIELD RATHER THAN A `Layout`, and that is not squeamishness:
+      ## `layout` is a `LayoutNode` because CTUI-3 made it the SESSION'S OWN
+      ## tree — the very node `HeadlessApp` created and `saveLayouts`
+      ## persists — and replacing it with a `Layout` value would copy the tree
+      ## per frame and break that identity. `binding.geometryOf` recombines the
+      ## two, and an empty `docked` recombines to exactly the projection CTUI-3
+      ## drew, so every golden written before PLAT-6 is byte-identical.
+    interaction*: Interaction
+      ## PLAT-6. The gesture in flight, READ and never stored: §5's third
+      ## obligation is that a binding draws transient state from `Interaction`,
+      ## and this field is that reading. Its zero value is `ikNone`, so a shell
+      ## that never starts a gesture paints the screen it painted before.
 
   ShellScreen* = object
     ## One painted frame, plus the geometry it was painted from, so a test that
@@ -141,11 +165,16 @@ type
       ## Where the tracepoint dialog was painted, or a zero rectangle when it
       ## was closed. Reported rather than recomputed by the caller, for
       ## `frame_item.FrameItem`'s reason.
+    geometry*: LayoutGeometry
+      ## PLAT-6. The dock strips, the inner area the tree was projected into,
+      ## and the pane->path resolution — reported for the same reason
+      ## `projection` is, so a hit-test in a test reads the coordinates the
+      ## paint used rather than recomputing them and agreeing with itself.
+    decorations*: seq[LayoutDecoration]
+      ## What was painted over the panes: the strips, and whatever the gesture
+      ## in flight asked for. Empty when there is no gesture and nothing docked.
 
 const
-  PaneRuleGlyph* = "─"
-    ## What fills the rest of a pane's title row. One cell wide (U+2500), so
-    ## the row's cell count is its rune count.
   PaneSeparatorGlyph* = "│"
     ## The right-hand edge a pane draws when it is not flush with the body's
     ## right edge.
@@ -244,23 +273,11 @@ proc titleRow(title: string; width: int): string =
     line.add repeatGlyph(PaneRuleGlyph, width - textCells(line))
   fitCells(line, width)
 
-proc tabRow(tabs: seq[string]; active, width: int): string =
-  ## `[Variables] Timeline Tracepoints ─────` — a stack's first row.
-  ##
-  ## The active tab is bracketed, which is exactly what §3.1's Compact drawing
-  ## shows. This row is the ONLY on-screen consequence of `LayoutNode.activate`,
-  ## so `test_layout_profiles.nim` asserts it moves when `activate` is called.
-  if width <= 0:
-    return ""
-  var line = ""
-  for i, t in tabs:
-    if i > 0:
-      line.add " "
-    line.add(if i == active: "[" & t & "]" else: " " & t & " ")
-  if textCells(line) + 1 <= width:
-    line.add " "
-    line.add repeatGlyph(PaneRuleGlyph, width - textCells(line))
-  fitCells(line, width)
+# `tabRow` MOVED to `app/layout/tab_strip.nim` in PLAT-6, unchanged in
+# behaviour: it is now assembled from `tabSpans`, which is also what the
+# terminal binding's hit-test reads, so a column on screen and a tab index
+# cannot come apart. This module re-exports it (see the `export` above), so
+# `paintPane`'s three call sites below are the same call they were.
 
 proc timelineScrubber*(tick, totalTicks, width: int): string =
   ## §3.3.5's scrubber: `[───────▲──────]`, with the marker at the tick's own
@@ -397,12 +414,22 @@ proc shellScreen*(model: ShellModel; width, height: int;
   ## The whole frame: `height` rows of exactly `width` cells, plus the geometry
   ## they were painted from.
   let body = bodyArea(width, height)
-  let projection = projectLayout(model.layout, body, policy)
+  # PLAT-6: the dock strips come out of the body first and the tree is
+  # projected into what is left. With nothing docked, `geometry.inner == body`
+  # and `geometry.projection` is exactly `projectLayout(model.layout, body)` —
+  # so this is the same call CTUI-3 made, and every golden written before
+  # PLAT-6 is byte-identical.
+  let composed = initLayout(model.layout, model.docked)
+  let geometry = geometryOf(composed, body, model.interaction, policy)
+  let projection = geometry.projection
+  let decorations = decorationsFor(composed, geometry, model.interaction,
+                                   policy)
   result = ShellScreen(rows: @[], styledRows: @[], body: body,
                        projection: projection,
                        overlay: (if model.tracepoints.open:
                                    tracepointOverlayArea(body)
-                                 else: CellArea()))
+                                 else: CellArea()),
+                       geometry: geometry, decorations: decorations)
   if width <= 0 or height <= 0:
     return
 
@@ -410,7 +437,7 @@ proc shellScreen*(model: ShellModel; width, height: int;
   g.paint(0, 0, headerText(model.header, width))
 
   for region in projection.regions:
-    paintPane(g, region, model, body)
+    paintPane(g, region, model, geometry.inner)
   if projection.status != prOk and body.height > 0:
     g.paint(body.row, body.col, degradedBanner(projection.status, width))
 
@@ -424,6 +451,14 @@ proc shellScreen*(model: ShellModel; width, height: int;
   if model.tracepoints.open:
     discard paintTracepointManager(g, tracepointOverlayArea(body),
                                    model.tracepoints)
+
+  # PLAT-6's transient state, painted LAST over the body, on exactly the rule
+  # above: the drag ghost, the highlighted drop target, the resize guide, the
+  # dock strips and a revealed dock are all chrome over the arrangement rather
+  # than a share of it. `decorations` is empty when nothing is docked and no
+  # gesture is in flight, so this call paints nothing on a screen CTUI-3 would
+  # have painted and the goldens do not move.
+  paintDecorations(g, decorations)
 
   var status = model.status
   if projection.status != prOk and status.notification.len == 0:

@@ -3666,3 +3666,52 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     "drag a tab onto a pane's edge" had no single-command spelling.  A
     DOCKED source still has none — `lcSplit` refuses a pane in `docked`, so
     `dropTargetsFor` offers a docked pane no split target at all.
+  * THE TERMINAL LAYOUT BINDING (PLAT-6) IS `tui/app/layout/binding.nim`, and
+    the two directions of its hit-test READ ONE TABLE.  `pointerAt` (cells ->
+    `LayoutPointer`) and `cellsFor` (`DropRegion` -> cells) both measure edge
+    bands with `edgeBandCells` against `dropAreaOfPath` — the node's rectangle
+    MINUS its tab strip, because a strip is a drop region of its own and a cell
+    that meant both would make the two directions disagree.  Consequence for a
+    mutation arm: mutating the SHARED helper changes both and the round-trip
+    case stays green, correctly.  To kill it, mutate ONE direction.
+  * `tabRow` LIVES IN `tui/app/layout/tab_strip.nim`, NOT IN `views/shell.nim`.
+    It moved there to sit beside `tabSpans`, the table the hit-test reads, and
+    to share `tabLabel` and `TabGapCells` with it.  IT DOES NOT CALL
+    `tabSpans` — the painter is still its own traversal, so "which tab is at
+    column 34" is one answer by ASSERTION, not by construction:
+    `test_layout_binding.nim` walks every column of a real painted strip
+    against the hit-test, and the mutation harness kills a disagreement
+    introduced from either side.  `views/shell.nim` re-exports the module (and
+    `PaneRuleGlyph`), so every CTUI-3 call site still resolves and the goldens
+    are byte-identical.
+  * `run-plat6-mutations.py` DECODES THE SUITE'S OUTPUT WITH
+    `errors="replace"`.  A mutated suite prints diagnostics about bytes it did
+    not expect, and the tab-strip case slices painted rows — which contain
+    U+2500 — at cell offsets, so a mismatch message can carry a partial rune.
+    Under Python's default strict decode, `subprocess.run` raises and the arm
+    ends in a traceback rather than in one of the harness's three verdicts.
+    Same shape for any harness that reads a child's stdout as text.
+  * A NEW `.nim` FILE ANYWHERE UNDER `src/frontend/tui/app/` — INCLUDING UNDER
+    `app/tests/` — REDDENS `app/tests/test_gdb_command_surface.nim`.  It asserts
+    `ExpectedAppModules` exactly, and that brittleness is deliberate: the count
+    bounds the set its "called from exactly one file" rows are measured over.
+    Re-count in the same change.  The same file also asserts an exact count of
+    `const CellStyle` literals under `app/`, so a new module that paints must
+    move `ExpectedStyleLiterals` too — which is why `binding.nim`'s decorations
+    carry a GLYPH per kind and no style at all.
+  * `layout_interaction.nodeAtPath` HANDS OUT A LIVE `ref` INTO THE COMMITTED
+    TREE.  Use `nodeInfoAtPath`, which returns a `NodeInfo` value with no
+    reference field; `binding.nim` names `nodeAtPath` nowhere and its test
+    asserts that with a source scan plus a `fieldPairs` walk with a counted
+    control.  What is NOT closed: `Layout.tree` is a public `ref`, so any holder
+    of a `Layout` can still write through it.
+  * A TERMINAL CAN ONLY MOUSE-DOCK TO THE TOP AND BOTTOM until something is
+    docked left or right.  A drop docks when it lands outside the tree area, and
+    the only such cells are the dock strips and the header/status rows — there
+    is no column left of column 0.  `:dock left` / `:dock right` reach the other
+    two edges.
+  * THE THREE RESPONSIVE PROFILES ARE DELIBERATELY DIVERGENT FROM
+    `defaultReplayLayout()`, and a user's arrangement FREEZES the profile:
+    `binding.resize` re-selects the profile always but rebuilds the tree only
+    while `userModified` is false.  `:reset-layout` is the way back.  Recorded
+    in Layout-ViewModel §8.2/§8.4 and CodeTracer-TUI.md §3.2.

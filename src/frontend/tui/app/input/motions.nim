@@ -263,25 +263,29 @@ proc directionFor*(action: KeyAction): (bool, FocusDirection) =
   of kaFocusRight: (true, fdRight)
   else: (false, fdLeft)
 
-proc paneInDirection*(pf: PaneFocus; dir: FocusDirection): (bool, PaneKind) =
-  ## Which pane `Ctrl+w <dir>` would land on, without moving focus.
+proc paneInDirection*(regions: seq[PaneRegion]; fromIndex: int;
+                      dir: FocusDirection): (bool, PaneKind) =
+  ## Which pane lies one step `dir` of `regions[fromIndex]`, by geometry alone.
   ##
-  ## Exposed separately from `focusDirection` so a test can assert the CHOICE
-  ## at every geometry without also asserting that focus moved — two facts, and
-  ## a helper that folded them would let a broken chooser hide behind a focus
-  ## call that happened to succeed.
-  let idx = pf.focusedIndex()
-  if idx < 0:
+  ## PLAT-6 EXTRACTED THIS FROM the `PaneFocus` overload below, unchanged line
+  ## for line, and the extraction is the point rather than tidiness: the
+  ## terminal layout binding has to answer "which pane is to the left of the
+  ## focused one" to turn `:move-pane left` into an `lcSplit`, and it holds a
+  ## projection rather than an `isonim-tui` `FocusManager`. A second copy of
+  ## these four comparisons would have been a second directional-navigation
+  ## rule, and the day they disagreed `Ctrl+w h` and `:move-pane left` would
+  ## have named different panes on the same screen.
+  if fromIndex < 0 or fromIndex >= regions.len:
     return (false, paneEditor)
-  let cur = pf.regions[idx].area
+  let cur = regions[fromIndex].area
   var best = -1
-  for i, region in pf.regions:
-    if i == idx or not isBeyond(dir, cur, region.area):
+  for i, region in regions:
+    if i == fromIndex or not isBeyond(dir, cur, region.area):
       continue
     if best < 0:
       best = i
       continue
-    let a = pf.regions[best].area
+    let a = regions[best].area
     let bArea = region.area
     let na = nearness(dir, a)
     let nb = nearness(dir, bArea)
@@ -294,7 +298,16 @@ proc paneInDirection*(pf: PaneFocus; dir: FocusDirection): (bool, PaneKind) =
     # fourth rule in this module's header, and what makes the answer total.
   if best < 0:
     return (false, paneEditor)
-  (true, pf.regions[best].pane)
+  (true, regions[best].pane)
+
+proc paneInDirection*(pf: PaneFocus; dir: FocusDirection): (bool, PaneKind) =
+  ## Which pane `Ctrl+w <dir>` would land on, without moving focus.
+  ##
+  ## Exposed separately from `focusDirection` so a test can assert the CHOICE
+  ## at every geometry without also asserting that focus moved — two facts, and
+  ## a helper that folded them would let a broken chooser hide behind a focus
+  ## call that happened to succeed.
+  paneInDirection(pf.regions, pf.focusedIndex(), dir)
 
 proc focusDirection*(pf: PaneFocus; dir: FocusDirection): (bool, PaneKind) =
   ## Move focus one pane in `dir`. False, and focus UNCHANGED, when there is no
