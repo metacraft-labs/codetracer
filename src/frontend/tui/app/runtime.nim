@@ -41,6 +41,7 @@ import std/strutils
 import ./commands/interpreter
 import ./input/keymap
 import ./input/motions
+import ./layout/persistence
 import ./layout/project
 import ./theme/degradation
 import ./tui_app
@@ -48,6 +49,7 @@ import ./views/command_line
 import ./views/shell
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
+export persistence
 
 type
   RuntimeOutcome* = object
@@ -98,6 +100,25 @@ type
       ## arrived and the canonical name they resolved to.
     width*: int
     height*: int
+    layoutDocument*: string
+      ## PLAT-6's persistence: where THIS session's rearranged layout is saved.
+      ##
+      ## **`""` WHENEVER PERSISTENCE IS OFF, which is every session without
+      ## `--layout-binding` and every host that never named a document.** The
+      ## path is held here rather than recomputed at exit because the two ends
+      ## of a save must be the same file: a session that restored from one path
+      ## and wrote to another would silently keep two arrangements for one
+      ## recording. `host/layout_store.nim` is what fills it, and it is the only
+      ## thing in this front-end that touches a file for this purpose.
+    layoutDocumentQuarantined*: bool
+      ## Whether this session started from a document it could NOT read.
+      ##
+      ## Carried across the whole session for one reason, and it is the
+      ## expensive case the schema chain exists for: a document written by a
+      ## NEWER build decodes as `ldeUnknownVersion` here, and a build that
+      ## answered by overwriting it on exit would destroy a user's arrangement
+      ## because they opened an older binary once. See
+      ## `app/layout/persistence.LayoutPersistIntent`.
 
 const
   QuitDetail* = "quit"
@@ -195,6 +216,78 @@ proc enableLayoutBinding*(rt: TuiRuntime): LayoutBinding =
   let (had, focused) = rt.focus.focusedPane()
   if had:
     result.focus = focused
+
+# ---------------------------------------------------------------------------
+# PLAT-6's persistence. THE DECISIONS ARE `app/layout/persistence.nim`'s and
+# the file itself is `host/layout_store.nim`'s; what is here is the SESSION —
+# which document this runtime is bound to, and what adopting one does to the
+# rest of the runtime's state.
+# ---------------------------------------------------------------------------
+
+proc layoutPersistenceEnabled*(rt: TuiRuntime): bool =
+  ## Whether this session saves and restores its arrangement.
+  ##
+  ## **BOTH HALVES ARE REQUIRED**, and the first is the one that matters: with
+  ## no binding there is no arrangement to save, so `--layout-binding` gates
+  ## persistence exactly as it gates the gestures. A host that enabled the
+  ## binding and named no document gets the behaviour PLAT-6 shipped — a
+  ## rearrangeable session that forgets.
+  rt.layoutBindingEnabled() and rt.layoutDocument.len > 0
+
+proc bindLayoutDocument*(rt: TuiRuntime; path: string) =
+  ## Name the file this session's arrangement is saved to and restored from.
+  ##
+  ## Naming it does not read it: `host/layout_store.nim` does that and hands
+  ## the bytes to `adoptLayoutDocument` below, which is the split
+  ## `host/capabilities` -> `app/theme/capabilities` already uses.
+  rt.layoutDocument = path
+  rt.layoutDocumentQuarantined = false
+
+proc adoptLayoutDocument*(rt: TuiRuntime; path, text: string):
+    LayoutRestoreReport =
+  ## Adopt one saved document into THIS session, and put the runtime back into
+  ## a consistent state around it.
+  ##
+  ## Three things happen here that `persistence.adoptLayoutDocument` cannot do
+  ## from where it sits, and each of them is a defect if it is left out:
+  ##
+  ##   * **the focus ring is rebuilt**, because a restored arrangement may have
+  ##     docked away the pane the ring was seeded with — the same reason
+  ##     `runPromptLine` and `routeMouseReport` rebuild it after a gesture. A
+  ##     ring built from the profile default would hand `Tab` a pane that is
+  ##     not on screen;
+  ##   * **the binding's focus is synchronised to the ring**, so the first
+  ##     typed verb of the session acts on the pane the user can see is
+  ##     focused;
+  ##   * **an unreadable document is remembered**, so exiting leaves it alone.
+  result = rt.app.layoutBinding.adoptLayoutDocument(path, text)
+  rt.layoutDocumentQuarantined = result.status == lrsUnreadable
+  if result.status != lrsRestored:
+    return
+  rt.rebuildFocus()
+  let (had, focused) = rt.focus.focusedPane()
+  if had:
+    rt.app.layoutBinding.focus = focused
+
+proc markLayoutDocumentUnreadable*(rt: TuiRuntime) =
+  ## Record a failure that happened BEFORE the bytes reached the decoder — a
+  ## file that could not be opened at all. `host/layout_store.nim` is the only
+  ## caller, because only it can meet that failure, and the consequence is the
+  ## same one `adoptLayoutDocument` sets: the document is left alone on the way
+  ## out.
+  rt.layoutDocumentQuarantined = true
+
+proc layoutPersistPlanOf*(rt: TuiRuntime): LayoutPersistPlan =
+  ## What exiting should do with this session's document.
+  ##
+  ## `lpiQuarantine` for a session with persistence switched off as well as for
+  ## one that started from an unreadable document, and that is deliberate
+  ## rather than a coincidence of spelling: **quarantine is the intent that
+  ## touches nothing**, which is exactly the answer "the flag is off" needs. A
+  ## host that called this without checking would still write no file.
+  if not rt.layoutPersistenceEnabled():
+    return LayoutPersistPlan(intent: lpiQuarantine, text: "")
+  layoutPersistPlan(rt.app.layoutBinding, rt.layoutDocumentQuarantined)
 
 proc resize*(rt: TuiRuntime; width, height: int) =
   ## Adopt a new terminal geometry, re-deriving the focus ring from the layout

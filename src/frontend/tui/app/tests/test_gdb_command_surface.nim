@@ -156,7 +156,7 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 63
+  ExpectedAppModules = 64
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED four
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -167,7 +167,12 @@ const
     ## when PLAT-6's terminal layout binding added THREE —
     ## `layout/binding.nim`, `layout/tab_strip.nim` (which is `tabRow` moved
     ## out of `views/shell.nim` so the painter and the hit-test read one
-    ## answer) and `tests/test_layout_binding.nim`.
+    ## answer) and `tests/test_layout_binding.nim`; and on 2026-09-07 a fourth
+    ## time that day, when PLAT-6's persistence added
+    ## `layout/persistence.nim` — the file NAME, the meaning of an unreadable
+    ## document and the decision about whether there is anything to write, all
+    ## as values, with `host/layout_store.nim` (outside this walk, by the layer
+    ## rule) doing the reading and writing.
     ##
     ## The number is deliberately brittle, and every one of those bumps is the
     ## shape it is meant to have: a new file under `app/` reddens this case on

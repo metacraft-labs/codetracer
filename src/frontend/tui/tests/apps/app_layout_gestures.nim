@@ -62,6 +62,17 @@ proc negotiated(): TerminalCapabilities =
                     lang = "en_US.UTF-8"),
     initCapabilityFlags())
 
+proc newUnboundRuntime*(cols, rows: int): TuiRuntime =
+  ## The same runtime WITHOUT PLAT-6's binding — what `main.nim` builds when
+  ## `--layout-binding` is absent.
+  ##
+  ## Exported for `apps/app_layout_persist.nim`'s OFF arm, which has to spawn a
+  ## child that differs from the bound one in exactly one call. Constructing a
+  ## second runtime there by hand would let the two arms drift apart in the
+  ## capability set or the app, and then "the flag off changes nothing" would be
+  ## a comparison of two different programs.
+  newTuiRuntime(newTuiApp(), negotiated(), cols, rows)
+
 proc newBoundRuntime*(cols, rows: int): TuiRuntime =
   ## A runtime with PLAT-6's layout binding opted in — the same two calls
   ## `main.nim` makes under `--layout-binding`, in the same order.
@@ -69,7 +80,7 @@ proc newBoundRuntime*(cols, rows: int): TuiRuntime =
   ## Exported so the Tier-2 suite can run the SAME construction in process and
   ## compare the arrangement a gesture produced against the one the terminal
   ## shows.
-  result = newTuiRuntime(newTuiApp(), negotiated(), cols, rows)
+  result = newUnboundRuntime(cols, rows)
   discard result.enableLayoutBinding()
 
 proc ensureRuntime(cols, rows: int) =

@@ -1403,11 +1403,30 @@ proc saveDocument*(b: LayoutBinding): JsonNode =
   ## a `Layout` at all.
   saveLayout(b.layout)
 
-proc restoreDocument*(b: LayoutBinding; doc: JsonNode): LayoutAction =
+proc restoreDocument*(b: LayoutBinding; doc: JsonNode;
+                      problem: var Option[LayoutDecodeErrorKind]):
+    LayoutAction =
   ## Adopt a saved arrangement. A decode failure is REPORTED by kind, never
   ## swallowed: `layout_model` raises `LayoutDecodeError` precisely so a
   ## restore that names an unknown pane is a message rather than a blank
   ## region.
+  ##
+  ## `problem` carries that kind out AS A VALUE, which is the half the message
+  ## cannot serve: a status line needs prose and a check needs a kind, and
+  ## matching a kind out of prose is how a check ends up asserting the wording.
+  ## `app/layout/persistence.adoptLayoutDocument` is the caller that needs it.
+  ##
+  ## **`userModified` IS SET, AND THAT IS A DECISION.** A restored document is
+  ## a user modification made in a previous session, so it freezes the
+  ## responsive profile exactly as this session's own first command would —
+  ## `app/layout/persistence.nim`'s header states the reasoning and
+  ## `:reset-layout` is the way back.
+  ##
+  ## `revealed` cannot come back either, and that needs no rule here:
+  ## `toJson(DockedPane)` never writes it (§3.2) and `interaction` is reset
+  ## below, so an overlay a previous session had open is not expressible in the
+  ## document at all.
+  problem = none(LayoutDecodeErrorKind)
   try:
     let restored = restoreLayoutDocument(doc)
     b.history = newLayoutHistory(restored)
@@ -1415,4 +1434,10 @@ proc restoreDocument*(b: LayoutBinding; doc: JsonNode): LayoutAction =
     b.userModified = true
     action(lasApplied, "layout restored")
   except LayoutDecodeError as e:
+    problem = some(e.kind)
     action(lasBadArgument, "the saved layout could not be read: " & e.msg)
+
+proc restoreDocument*(b: LayoutBinding; doc: JsonNode): LayoutAction =
+  ## The same restore for a caller that only wants the message.
+  var problem = none(LayoutDecodeErrorKind)
+  b.restoreDocument(doc, problem)

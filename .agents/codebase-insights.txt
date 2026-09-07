@@ -3718,16 +3718,53 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
   * A MOUSE GESTURE'S FOCUS SYNC HAS A RETURN LEG THE `:` PATH DOES NOT NEED.
     A typed verb cannot move `LayoutBinding.focus`; a mouse press can, so
     `routeMouseReport` rebuilds the ring and then carries the binding's answer
-    back into it.  KNOWN GAP, recorded 2026-09-07: the REBUILD on the mouse
-    path has no arm — deleting `rt.rebuildFocus()` there leaves `Tab` offering a
-    pane a drop just docked away and every case stays green.  The `:` path does
-    assert it ("the pane a verb acts on is the one Tab moved to" ends with
-    `offered == 0`); the mouse path does not.
-  * A REARRANGED TERMINAL LAYOUT IS NOT PERSISTED.  `binding.saveDocument` and
-    `restoreDocument` wrap PLAT-4's `saveLayout` / `restoreLayoutDocument` and
-    have no caller outside the two Tier-1 suites — nothing in `runtime.nim`,
-    `main.nim` or `host/` writes one or reads one back, so an arrangement does
-    not survive a restart.
+    back into it.  (The gap recorded here on 2026-09-07 — the REBUILD on the
+    mouse path having no arm, so deleting `rt.rebuildFocus()` there left `Tab`
+    offering a pane a drop had just docked away with every case green — is
+    CLOSED: `test_layout_command_routing.nim`'s "a mouse DROP rebuilds the focus
+    ring, so Tab cannot offer a docked pane" is the assertion and M37 is the
+    arm, with S10 as its behaviour-preserving control.)
+  * A REARRANGED TERMINAL LAYOUT IS PERSISTED, PER RECORDING, BEHIND THE SAME
+    `--layout-binding` OPT-IN.  `main.nim` calls
+    `host/layout_store.restoreLayoutForSession` before the first frame and
+    `persistLayoutForSession` after the input loop.  The split is
+    `host/capabilities` -> `app/theme/capabilities` again:
+    `app/layout/persistence.nim` decides the file's NAME, what an unreadable
+    document MEANS and whether there is anything to write, and does NO I/O — no
+    `getEnv`, no file, no fd, no `std/os` in its imports; `host/layout_store.nim`
+    owns the environment, the read, the atomic write (`<path>.new` then
+    `moveFile`) and the remove.  Four rules worth knowing before touching it:
+      - the document is `<state root>/tui-layouts/<slug>-<sha1 prefix>.json`,
+        keyed by the recording's CANONICAL path.  Not in the trace folder (a
+        recording is shared, archived and may be read-only); state rather than
+        config; per recording so one arrangement never silently applies to
+        another.  Slug AND digest, because `/a/calc.ct` and `/b/calc.ct` share a
+        basename and a directory of bare hex is unauditable;
+      - AN UNREADABLE DOCUMENT IS REPORTED BY KIND ON THE STATUS LINE AND LEFT
+        ALONE.  The message leads with the kind because `statusBarText`
+        truncates the tail, and the file is QUARANTINED — a document from a
+        NEWER build is `UnknownVersion` here, and overwriting it would destroy a
+        user's arrangement for having opened an older binary once;
+      - A RESTORED DOCUMENT SETS `userModified`, so it freezes the responsive
+        profile.  Which is why AN UNTOUCHED SESSION WRITES NOTHING: persisting a
+        profile default would pin the Compact tree on a wide terminal for ever.
+        `:reset-layout` clears the flag and the exit DELETES the document;
+      - with the flag off `restoreLayoutForSession` refuses before it computes a
+        path, so the state directory is not touched, not even by a `stat`.
+    `CODETRACER_TUI_LAYOUT_DIR` overrides the state root; that is how the two
+    persistence suites point a real spawned binary at a directory of their own.
+    KNOWN GAP, recorded 2026-09-08: the "file would not OPEN at all" path is
+    unmeasured.  `runtime.markLayoutDocumentUnreadable` is what quarantines it —
+    the other failure arms set the flag inside `adoptLayoutDocument` — and
+    neutering it survives the whole 64-arm harness.  Measured consequence on a
+    real file with its permissions removed: the user is still told
+    (`UnreadableFile`), but the plan becomes `lpiRemove` and THE DOCUMENT IS
+    DELETED, so a transient `EACCES` would cost a user their arrangement.  No
+    suite names `UnreadableFile`.
+    AND THE `app/` -> `host/` SPLIT IS A FACT RATHER THAN AN ENFORCED RULE:
+    `persistence.nim` imports no `std/os`, and nothing checks that it does not.
+    `test_tui_facade_boundary.nim` forbids `std/osproc`, `std/posix` and `host/`
+    imports under `app/` — `std/os` is legal there.
   * `LayoutBinding.focus` AND `TuiRuntime.focus` ARE TWO DIFFERENT FOCUS
     NOTIONS, and `runPromptLine` synchronises them before every layout command.
     `PaneFocus` is what `Tab` / `Ctrl+w` move; `LayoutBinding.focus` is what
@@ -3755,6 +3792,13 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     `const CellStyle` literals under `app/`, so a new module that paints must
     move `ExpectedStyleLiterals` too — which is why `binding.nim`'s decorations
     carry a GLYPH per kind and no style at all.
+  * `testing/dual_snap.newestSourceTime` STAMPS `app/` **AND `host/`**.  A
+    Tier-2 child binary is rebuilt when anything under either moves, and `host/`
+    is in the stamp because `tests/apps/app_layout_persist.nim` calls
+    `host/layout_store`.  Leave it in: without it a mutation arm against a
+    `host/` module is graded by a child built BEFORE the mutation, which is a
+    comparison of two different programs and fails — or passes — for a reason
+    that has nothing to do with the subject.
   * `layout_interaction.nodeAtPath` HANDS OUT A LIVE `ref` INTO THE COMMITTED
     TREE.  Use `nodeInfoAtPath`, which returns a `NodeInfo` value with no
     reference field; `binding.nim` names `nodeAtPath` nowhere and its test

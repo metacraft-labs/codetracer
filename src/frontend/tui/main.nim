@@ -62,6 +62,7 @@ import ./app/tui_app
 import ./host/capabilities
 import ./host/headless
 import ./host/key_journal
+import ./host/layout_store
 import ./host/native_host
 import ./host/terminal_driver
 import ./host/tui_session
@@ -161,8 +162,24 @@ proc interactive(command: TuiCommand): int =
   # own `LayoutNode`, an empty `docked` and no `Interaction`, which is exactly
   # the model CTUI-3 built, and the `:` prompt routes to §4.3's interpreter as
   # it always has.
+  var layoutRestore = LayoutRestoreReport()
   if command.layoutBinding:
     discard rt.enableLayoutBinding()
+    # AND THE ARRANGEMENT COMES BACK. PLAT-6's Goal sentence promises "move
+    # tabs, resize splits, dock panes, SAVE AND RESTORE", and until this line
+    # the fourth clause was the one a user did not get: `binding.saveDocument`
+    # and `binding.restoreDocument` existed and nothing in the product called
+    # either, so an arrangement did not survive a restart.
+    #
+    # KEYED BY THE RECORDING, held under the user's own state directory, and
+    # behind the SAME opt-in as the gestures — with the flag off
+    # `restoreLayoutForSession` computes no path and opens no file at all.
+    # `app/layout/persistence.nim`'s header carries the reasoning for each of
+    # those three; what matters here is that this is the only place a shipped
+    # binary reads one.
+    layoutRestore = restoreLayoutForSession(rt, folder)
+    if layoutRestore.message.len > 0:
+      app.notification = layoutRestore.message
   # FRAME 0, BEFORE THE ENGINE. See this module's header on why the order is
   # this way round.
   paint(driver, rt)
@@ -237,6 +254,16 @@ proc interactive(command: TuiCommand): int =
     app.notification = session.seekToStartupTick(rt, command.gotoTick)
   if journal.isReplaying:
     app.notification = describe(journal)
+  # A SAVED LAYOUT THAT COULD NOT BE READ OUTLIVES THE "opened" MESSAGE, and
+  # that ordering is the whole of the promise `app/layout/persistence.nim`
+  # makes. `describe(session)` above is a routine fact about a recording that
+  # opened correctly; this is a thing the user has to know — they asked for
+  # their arrangement, they did not get it, and without this line the only
+  # evidence would have been erased by the next repaint. A restore that
+  # SUCCEEDED says so on frame 0 and then gets out of the way, which is the
+  # opposite precedence and is also deliberate.
+  if layoutRestore.status == lrsUnreadable:
+    app.notification = layoutRestore.message
   paint(driver, rt)
 
   var running = true
@@ -294,6 +321,27 @@ proc interactive(command: TuiCommand): int =
         if outcome.repaint and
            not driver.holdFrame(journal.pendingReplay > 0):
           paint(driver, rt)
+
+  # THE ARRANGEMENT IS SAVED HERE, AND ONLY IF IT IS THE USER'S. Once per
+  # session rather than once per gesture: a drag is a press and a release, and
+  # writing through on each would put two file writes inside one pointer
+  # movement for a document nobody reads until the next launch.
+  #
+  # `persistLayoutForSession` answers `lpoDisabled` and touches nothing when
+  # `--layout-binding` is off, `lpoQuarantined` when this session started from
+  # a document it could not read, and `lpoRemoved` when the arrangement is the
+  # profile's own — which is what makes `:reset-layout` reach all the way to
+  # the disk instead of leaving a stale document behind.
+  #
+  # BEFORE `driver.stop()` runs from its `defer`, so a failure message is
+  # composed while the screen is still ours; it is REPORTED ON STDERR after the
+  # terminal is given back, for the reason every other diagnosis in this module
+  # is: a message printed onto a claimed alternate screen is a message nobody
+  # reads.
+  let saved = persistLayoutForSession(rt)
+  if saved.outcome == lpoFailed:
+    driver.stop()
+    stderr.writeLine(TuiProgramName & ": " & saved.message)
   ExitOk
 
 proc run(args: seq[string]): int =

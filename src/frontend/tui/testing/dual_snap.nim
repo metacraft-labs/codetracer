@@ -743,6 +743,15 @@ proc newestSourceTime*(stem: string): float =
   ## the sibling libraries are not, and a rebuild on every `isonim-tui` edit
   ## would cost the lane a link per case for a dependency that changes far less
   ## often — that residue is recorded here rather than papered over.
+  ##
+  ## **`host/` IS IN THE STAMP TOO, AS OF PLAT-6's PERSISTENCE**, and it is in
+  ## for the reason above rather than for tidiness: `apps/app_layout_persist
+  ## .nim` calls `host/layout_store.restoreLayoutForSession` and
+  ## `persistLayoutForSession` — the two calls `main.nim` makes — so a mutation
+  ## arm against that module would otherwise be graded by a Tier-2 binary built
+  ## before it, which is exactly the false red this paragraph describes. It is a
+  ## small directory and it changes rarely, so the rebuild cost is nearer to
+  ## `test_app_runtime.nim`'s than to `isonim-tui`'s.
   result = 0.0
   let src = appSourcePath(stem)
   if fileExists(src):
@@ -751,9 +760,10 @@ proc newestSourceTime*(stem: string): float =
   let runtime = tui / "testing" / "test_app_runtime.nim"
   if fileExists(runtime):
     result = max(result, getFileInfo(runtime).lastWriteTime.toUnixFloat())
-  let appDir = tui / "app"
-  if dirExists(appDir):
-    for path in walkDirRec(appDir):
+  for dir in [tui / "app", tui / "host"]:
+    if not dirExists(dir):
+      continue
+    for path in walkDirRec(dir):
       if path.endsWith(".nim"):
         result = max(result, getFileInfo(path).lastWriteTime.toUnixFloat())
 

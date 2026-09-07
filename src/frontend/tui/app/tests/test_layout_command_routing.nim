@@ -25,6 +25,17 @@
 ## half, and `tests/real_terminal/test_real_layout_mouse.nim` drives the same
 ## drag through a real pty.
 ##
+## ## AND ONE PROPERTY THE MOUSE PATH HAD WITHOUT MEASURING
+##
+## PLAT-6's verification of the mouse pass found, by mutation, that deleting
+## `rt.rebuildFocus()` from `routeMouseReport` SURVIVED: M34 deletes the return
+## leg on the line below it and nothing covered the rebuild, so a ring left
+## holding a pane a drop had just docked away — `Tab` offering a pane that is
+## not on screen — was a defect no case here could see. The `:` path had the
+## assertion all along ("the pane a verb acts on is the one Tab moved to" ends
+## with `offered == 0`); "a mouse DROP rebuilds the focus ring" is the mouse
+## path's, and M37 is its arm.
+##
 ## One of them is a RECHECK rather than a new assertion. The milestone recorded
 ## that a mouse drop can reach only the top and the bottom dock edges until
 ## something is docked left or right — a claim written about a gesture no input
@@ -79,7 +90,7 @@ import ../theme/capabilities
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 402
+const ExpectedAssertions = 415
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -551,6 +562,69 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     discard rt.typeLine("dock bottom")
     ck rt.app.layoutBinding.layout.dockedIndex(paneEditor) >= 0
     ck rt.app.layoutBinding.layout.dockedIndex(paneCalltrace) < 0
+
+  test "a mouse DROP rebuilds the focus ring, so Tab cannot offer a docked pane":
+    # **A PROPERTY THE MOUSE PATH HAD AND NOBODY MEASURED.** PLAT-6's own
+    # verification pass found it by mutation: deleting `rt.rebuildFocus()` from
+    # `routeMouseReport` SURVIVED the whole harness. M34 deletes the RETURN LEG
+    # on the line below it and nothing covered the rebuild itself, so the ring
+    # was left holding a pane a drop had just docked away and `Tab` would have
+    # offered a pane that is not on screen. The `:` path asserts exactly this —
+    # "the pane a verb acts on is the one Tab moved to" ends with `offered == 0`
+    # after a `:dock right` — and the mouse path did not. It does now, and
+    # `run-plat6-mutations.py`'s M37 is the arm (control: S10).
+    let rt = newRuntime(80, 24)
+    discard rt.enableLayoutBinding()
+    let dragged = rt.focusedPaneOf()
+    ck dragged == paneCalltrace
+    let source = rt.layoutGeometry().regionOfPane(dragged)
+    ck not source.isEmptyArea
+
+    # THE POSITIVE TWIN, before anything moves: the ring DOES offer this pane
+    # now. Without it, `offered == 0` below is satisfied by a ring that offers
+    # nothing at all — trap 4's empty set, arriving through a focus ring.
+    var offeredBefore = 0
+    for pane in rt.focus.focusOrder():
+      if pane == dragged:
+        inc offeredBefore
+    let ringBefore = rt.focus.focusOrder().len
+    checkpoint("before the drop the ring is " & $rt.focus.focusOrder() &
+               " and offers " & $dragged & " " & $offeredBefore & " time(s)")
+    ck offeredBefore == 1
+    ck ringBefore >= 2
+
+    # PRESS on the pane's own title row, RELEASE on the header row: the drop
+    # docks it, which is what takes it off the screen.
+    discard rt.handleToken(sgrReport(0, source.row, source.col, true), 0'i64)
+    ck rt.app.layoutBinding.interaction.kind == ikDraggingTab
+    let dropped = rt.handleToken(sgrReport(0, 0, 40, false), 0'i64)
+    checkpoint("release on the header row -> " & dropped.detail)
+    ck rt.app.layoutBinding.layout.dockedIndex(dragged) >= 0
+    ck not rt.app.layoutBinding.layout.tree.contains(dragged)
+
+    # THE RING WAS REBUILT FROM THE ARRANGEMENT THE NEXT FRAME WILL PAINT.
+    var offeredAfter = 0
+    for pane in rt.focus.focusOrder():
+      if pane == dragged:
+        inc offeredAfter
+    checkpoint("after the drop the ring is " & $rt.focus.focusOrder())
+    ck offeredAfter == 0
+    ck rt.focusedPaneOf() != dragged
+    # …AND IT IS NOT EMPTY, which is the second half of the same control: a
+    # rebuild that produced nothing would satisfy `offeredAfter == 0` too.
+    ck rt.focus.focusOrder().len == ringBefore - 1
+    # Every pane the ring still offers has a rectangle on this screen, which is
+    # the property "Tab offers a pane that is on screen" actually means.
+    var offScreen = 0
+    for pane in rt.focus.focusOrder():
+      if rt.layoutGeometry().regionOfPane(pane).isEmptyArea:
+        inc offScreen
+        checkpoint("the ring offers " & $pane & ", which has no rectangle")
+    ck offScreen == 0
+    # And `Tab` really lands on one of them rather than on the docked pane.
+    discard rt.handleToken("\t", 0'i64)
+    ck rt.focusedPaneOf() != dragged
+    ck not rt.layoutGeometry().regionOfPane(rt.focusedPaneOf()).isEmptyArea
 
   test "a click activates a tab and a wheel scrolls the strip, through handleToken":
     # PRESS AND RELEASE ON ONE CELL IS A CLICK — which is exactly what

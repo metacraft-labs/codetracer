@@ -591,6 +591,29 @@ is the only one that **moves the cursor**.
 > frames still use the ordinary barrier and only its prompt frames need the
 > other one.
 
+#### Barriers across a RELAUNCH (PLAT-6's persistence)
+
+A test whose subject is *what one process wrote and a different process read*
+needs a barrier for the **second** process, and the two obvious ones are both
+wrong:
+
+- **"the screen has content" is not a barrier.** After a relaunch the pty is
+  fresh, and a blank frame and a restored frame both take time to arrive — only
+  one of them is the subject, and a `screenContents().len > 0` poll cannot tell
+  them apart.
+- **`waitForCompleteFrame` is not one either** for an app with a
+  `FrameEpilogue`, for the reason in the box above.
+
+`apps/app_layout_persist.nim` parks the cursor at `(0, step + 1)` after every
+frame, so the second process's step 0 is `(0, 1)` — a position a freshly spawned
+terminal's cursor was not at a moment earlier, because it starts at `(0, 0)`.
+**The off-by-one IS the barrier**, and `step` is `test_app_runtime`'s own
+counter, which advances only when `handleInput` returns true. That is the
+important half: a child that stopped repainting makes the barrier
+**unreachable** — a named timeout carrying the observed cursor and screen —
+rather than trivially true. Preserve that failure direction in any barrier you
+write.
+
 ### Driving the SHIPPED BINARY on a real trace (CTUI-11)
 
 Until CTUI-11 every Tier-2 case spawned a **snapshot app**: one component tree,

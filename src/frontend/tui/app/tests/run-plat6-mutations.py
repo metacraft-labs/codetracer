@@ -9,14 +9,18 @@ PLAT-4 owns and this binding depends on) and requires that the **named** case
 fails. A mutation killed only by some other case is MISDIRECTED and is a
 failure of this harness, not a pass.
 
-FIVE SUITES, TWO TIERS. Each arm names the suite it is graded against:
+SEVEN SUITES, TWO TIERS. Each arm names the suite it is graded against:
 
   test_layout_binding.nim          Tier 1 — the binding itself
   test_layout_command_routing.nim  Tier 1 — the opt-in, the `:` routing and
                                             the MOUSE routing
+  test_layout_persistence.nim      Tier 1 — the layout DOCUMENT: its key, its
+                                            failure arms and its persist plan
   test_real_layout_gestures.nim    Tier 2 — a KEYBOARD gesture through a pty
   test_real_layout_transients.nim  Tier 2 — cross-tier snapshot equivalence
   test_real_layout_mouse.nim       Tier 2 — a MOUSE gesture through a pty
+  test_real_layout_persistence.nim Tier 2 — an arrangement surviving a RESTART:
+                                            two processes, one recording
 
 The Tier-2 arms are slow — a suite compile, a CHILD compile and a handful of
 pty round trips apiece — and they are here anyway, because the two rows PLAT-6
@@ -51,8 +55,9 @@ ITS OWN. A harness that kills everything says as little as one that kills
 nothing, so the arms at the bottom are behaviour-preserving rewrites that MUST
 survive; an arm that starts being killed is reported as a problem in its own
 right. The pairing is written at both ends: M5/M26 ← S3, M30 ← S9, M33/M33B ← S5,
-M34 ← S6, M35 and M31 ← S8, M36 ← S7. Without the control, "the case reddens
-when this line changes" is all an arm establishes.
+M34 ← S6, M35 and M31 ← S8, M36 ← S7, M37 ← S10, M38/M38B ← S11, M39 ← S12,
+M40 ← S13, M41 ← S14, M42 ← S15, M43 ← S16, M44 ← S17. Without the control,
+"the case reddens when this line changes" is all an arm establishes.
 
 S9 is here because M30 shipped WITHOUT a control and an independent pass had to
 write one by hand, off the record. An arm that lives only in somebody's terminal
@@ -85,19 +90,24 @@ ROOT = HERE.parents[4]
 
 SUITE = "src/frontend/tui/app/tests/test_layout_binding.nim"
 ROUTE = "src/frontend/tui/app/tests/test_layout_command_routing.nim"
+PERSIST = "src/frontend/tui/tests/test_layout_persistence.nim"
 GEST = "src/frontend/tui/tests/real_terminal/test_real_layout_gestures.nim"
 TRANS = "src/frontend/tui/tests/real_terminal/test_real_layout_transients.nim"
 MOUSE_SUITE = "src/frontend/tui/tests/real_terminal/test_real_layout_mouse.nim"
+RELAUNCH = ("src/frontend/tui/tests/real_terminal/"
+            "test_real_layout_persistence.nim")
 
 BIND = "src/frontend/tui/app/layout/binding.nim"
 TABS = "src/frontend/tui/app/layout/tab_strip.nim"
+DOC = "src/frontend/tui/app/layout/persistence.nim"
 MOUSE = "src/frontend/tui/app/input/mouse.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
+STORE = "src/frontend/tui/host/layout_store.nim"
 INTER = "src/frontend/headless_app/layout_interaction.nim"
 MODEL = "src/frontend/headless_app/layout_model.nim"
 
-TOUCHED = [SUITE, ROUTE, GEST, TRANS, MOUSE_SUITE, BIND, TABS, MOUSE, RUNTIME,
-           INTER, MODEL]
+TOUCHED = [SUITE, ROUTE, PERSIST, GEST, TRANS, MOUSE_SUITE, RELAUNCH, BIND,
+           TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL]
 
 # THE TWO TIER-2 SUITES NEED THREE MORE `--path`s and they spawn a child in a
 # real pty, so an arm against one costs a compile, a CHILD compile and a
@@ -105,7 +115,7 @@ TOUCHED = [SUITE, ROUTE, GEST, TRANS, MOUSE_SUITE, BIND, TABS, MOUSE, RUNTIME,
 # milestone gives: the rows PLAT-6 left open were "a gesture through a real
 # pty" and "cross-tier snapshot equivalence", and an arm that only ever runs
 # the Tier-1 suite cannot say whether either of those checks has teeth.
-TIER2 = {GEST, TRANS, MOUSE_SUITE}
+TIER2 = {GEST, TRANS, MOUSE_SUITE, RELAUNCH}
 TIER2_PATHS = ["--path:../TermAssert/src", "--path:../TermAssertClient/src",
                "--path:../nim-libvterm/src"]
 
@@ -153,9 +163,37 @@ R_CLICKWHEEL = ("a click activates a tab and a wheel scrolls the strip, "
 R_PROMPT = "a mouse report does not disturb an open prompt"
 R_EDGES = "which dock edges a real drag can reach, measured rather than argued"
 
+# THE PROPERTY THE MOUSE PATH HAD AND NOBODY MEASURED. PLAT-6's verification of
+# the mouse pass found by mutation that deleting `rt.rebuildFocus()` from
+# `routeMouseReport` SURVIVED — the ring was left holding a pane a drop had just
+# docked away, so `Tab` would offer a pane that is not on screen. M34 deletes
+# the return leg on the line below it and nothing covered the rebuild. M37 is
+# the arm; this is the case that kills it.
+R_MOUSERING = ("a mouse DROP rebuilds the focus ring, so Tab cannot offer a "
+               "docked pane")
+
 ROUTE_CASES = [R_OFF, R_SAME, R_DOCK, R_FOCUS, R_SPEC43, R_VERBS, R_RESIZE,
-               R_MOUSEOFF, R_MOUSEDRAG, R_MOUSEFOCUS, R_CLICKWHEEL, R_PROMPT,
-               R_EDGES, C_COUNT]
+               R_MOUSEOFF, R_MOUSEDRAG, R_MOUSEFOCUS, R_MOUSERING,
+               R_CLICKWHEEL, R_PROMPT, R_EDGES, C_COUNT]
+
+# The persistence suite (Tier 1) — the layout DOCUMENT.
+P_KEY = ("the document is keyed by the recording, so two recordings never "
+         "share one")
+P_TRIP = "a docked pane survives a restart, through the product's own `:` prompt"
+P_FREEZE = "a restored arrangement freezes the responsive profile"
+P_BAD = "an unreadable document is reported BY KIND and is never overwritten"
+P_RESET = "no gesture, no document — and `:reset-layout` deletes a stale one"
+P_OFF = ("OFF BY DEFAULT: with no binding nothing is read and nothing is "
+         "written")
+
+PERSIST_CASES = [P_KEY, P_TRIP, P_FREEZE, P_BAD, P_RESET, P_OFF, C_COUNT]
+
+# The relaunch suite (Tier 2) — two processes, one recording.
+L_RELAUNCH = "a pane docked on a real pty is still docked in the NEXT process"
+L_BAD = "an unreadable document is NAMED on the status row and left alone"
+L_OFF = "OFF: with no binding the child neither reads nor writes a document"
+
+RELAUNCH_CASES = [L_RELAUNCH, L_BAD, L_OFF, C_COUNT]
 
 # The gesture suite (Tier 2) — a real pty.
 G_DOCK = "`:dock bottom` typed as real bytes rearranges a real terminal"
@@ -183,9 +221,11 @@ MOUSE_CASES = [M_DRAG, M_MODEL, M_BYTES, C_COUNT]
 SUITE_CASES = {
     SUITE: PLAT6_CASES,
     ROUTE: ROUTE_CASES,
+    PERSIST: PERSIST_CASES,
     GEST: GEST_CASES,
     TRANS: TRANS_CASES,
     MOUSE_SUITE: MOUSE_CASES,
+    RELAUNCH: RELAUNCH_CASES,
 }
 
 
@@ -643,6 +683,131 @@ MUTATIONS = [
         "indistinguishable from one that reported the right one without it",
         suite=ROUTE,
     ),
+    # --- the property the MOUSE path had and nobody measured ---------------
+    #
+    # PLAT-6's verification of the mouse pass recorded this as a FINDING rather
+    # than a defect: deleting `rt.rebuildFocus()` from `routeMouseReport`
+    # SURVIVED the whole harness. The code was right and the property was
+    # unmeasured — M34 deletes the return leg on the line below it, and nothing
+    # deleted the rebuild. The `:` path has had the assertion since it landed;
+    # the mouse path now has its own, and this is the arm that says so.
+    Mutation(
+        "M37", RUNTIME,
+        "  rt.rebuildFocus()\n"
+        "  discard rt.focus.focusPaneKind(binding.focus)",
+        "  discard rt.focus.focusPaneKind(binding.focus)",
+        R_MOUSERING,
+        "the focus ring is NOT rebuilt after a mouse gesture, so it goes on "
+        "holding the pane a drop just docked away and `Tab` offers a pane that "
+        "is not on the screen",
+        suite=ROUTE,
+    ),
+    # --- PLAT-6's persistence: the arrangement survives a restart ----------
+    #
+    # M38 and M38B are THE SAME MUTATION at the two tiers, on the M29/M29B and
+    # M33/M33B pattern, and it is the only way to say that the RELAUNCH suite is
+    # load-bearing rather than a slow restatement of the in-process one: if the
+    # Tier-1 round trip were the only killer, spawning two real processes would
+    # be buying nothing.
+    Mutation(
+        "M38", STORE,
+        "  rt.adoptLayoutDocument(path, text)",
+        '  LayoutRestoreReport(status: lrsNoDocument, path: path, message: "")',
+        P_TRIP,
+        "the document is read and then NOT adopted — the session reports "
+        "'nothing saved' and opens on the profile default, which is the state "
+        "PLAT-6 landed in",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "M38B", STORE,
+        "  rt.adoptLayoutDocument(path, text)",
+        '  LayoutRestoreReport(status: lrsNoDocument, path: path, message: "")',
+        L_RELAUNCH,
+        "the same defect seen from TWO REAL PROCESSES: the first docks a pane "
+        "and writes the document, and the second opens on the default "
+        "arrangement. THE SAME MUTATION AS M38 AT THE OTHER TIER",
+        suite=RELAUNCH,
+    ),
+    Mutation(
+        "M39", DOC,
+        "  if quarantined:\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
+        "  if false:\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
+        P_BAD,
+        "a session that started from a document it could not read no longer "
+        "leaves it alone. THE EXPENSIVE CASE: a document written by a NEWER "
+        "build is `UnknownVersion` here, and this arm deletes it because the "
+        "user opened an older binary once",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "M40", DOC,
+        '  layoutDocumentSlug(canonicalTraceFolder) & "-" &\n'
+        "    digest[0 ..< min(LayoutKeyDigestChars, digest.len)] & "
+        "LayoutDocumentExt",
+        "  layoutDocumentSlug(canonicalTraceFolder) & LayoutDocumentExt",
+        P_KEY,
+        "the key loses its digest and becomes the recording's BASENAME, so "
+        "`/a/calc.ct` and `/b/calc.ct` share one document and one recording's "
+        "arrangement silently applies to another",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "M41", DOC,
+        "  if b.isNil or not b.userModified:\n"
+        '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
+        "  if b.isNil:\n"
+        '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
+        P_RESET,
+        "an UNTOUCHED session writes its profile default, which freezes the "
+        "profile on the next launch — open a recording once at 80x24 and the "
+        "Compact tree is pinned on a 200x60 terminal for ever. It also stops "
+        "`:reset-layout` from deleting the stale document",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "M42", STORE,
+        "  if not rt.layoutBindingEnabled():\n"
+        "    # WITH THE FLAG OFF NOTHING IS READ, and no path is even computed "
+        "— so the\n"
+        "    # state directory is not touched, not even by a `stat`.\n"
+        '    return LayoutRestoreReport(status: lrsNoDocument, path: "", '
+        'message: "")',
+        "  if false:\n"
+        '    return LayoutRestoreReport(status: lrsNoDocument, path: "", '
+        'message: "")',
+        P_OFF,
+        "the flag-off guard goes, so a session with no `--layout-binding` "
+        "opens the state directory and reads a document it has nowhere to put",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "M43", BIND,
+        "    b.interaction = noInteraction()\n"
+        "    b.userModified = true",
+        "    b.interaction = noInteraction()",
+        P_FREEZE,
+        "a RESTORED document stops counting as a user modification, so the "
+        "next resize re-flows the arrangement a previous session built and the "
+        "profile freeze PLAT-6 decided on stops at the session boundary",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "M44", DOC,
+        '    message: "saved layout ignored (" & kind & "): " & why & '
+        '" — this session " &',
+        '    message: "the layout was not restored: " & why & '
+        '" — this session " &',
+        L_BAD,
+        "the failure message loses the KIND it leads with. Graded at TIER 2 "
+        "because 'the user is told' is a claim about a real screen: "
+        "`status_bar.statusBarText` fits the notification to the columns that "
+        "are left and truncates the tail, so a diagnosis that moved behind a "
+        "90-character path is a warning nobody can see",
+        suite=RELAUNCH,
+    ),
 ]
 
 DECLARED_SURVIVORS = [
@@ -762,6 +927,102 @@ DECLARED_SURVIVORS = [
         "behaviour rather than an edit to its neighbourhood.",
         suite=ROUTE,
     ),
+    # --- the controls for M37 and for the seven persistence arms -----------
+    Mutation(
+        "S10", RUNTIME,
+        "  rt.rebuildFocus()\n"
+        "  discard rt.focus.focusPaneKind(binding.focus)",
+        "  rebuildFocus(rt)\n"
+        "  discard rt.focus.focusPaneKind(binding.focus)",
+        "",
+        "The focus-ring rebuild spelled as a plain call rather than with "
+        "method-call syntax — the same call, the same argument. IT MUST "
+        "SURVIVE, and it is THE CONTROL FOR M37, which deletes that very line: "
+        "without it, 'the case reddens when this line is edited' is all M37 "
+        "would establish.",
+        suite=ROUTE,
+    ),
+    Mutation(
+        "S11", STORE,
+        "  rt.adoptLayoutDocument(path, text)",
+        "  adoptLayoutDocument(rt, path, text)",
+        "",
+        "The adoption spelled as a plain call. IT MUST SURVIVE, and it is THE "
+        "CONTROL FOR M38 AND M38B, which replace that same expression.",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "S12", DOC,
+        "  if quarantined:\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
+        "  if quarantined:\n"
+        '    result = LayoutPersistPlan(intent: lpiQuarantine, text: "")\n'
+        "    return result",
+        "",
+        "The quarantine answer named before it is returned — the same value on "
+        "the same condition. IT MUST SURVIVE, and it is THE CONTROL FOR M39, "
+        "which replaces that condition.",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "S13", DOC,
+        "    digest[0 ..< min(LayoutKeyDigestChars, digest.len)] & "
+        "LayoutDocumentExt",
+        "    digest[0 ..< min(digest.len, LayoutKeyDigestChars)] & "
+        "LayoutDocumentExt",
+        "",
+        "`min`'s arguments commuted — the same integer for every input. IT "
+        "MUST SURVIVE, and it is THE CONTROL FOR M40, which rewrites the "
+        "expression this slice is part of.",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "S14", DOC,
+        "  if b.isNil or not b.userModified:",
+        "  if not (not b.isNil and b.userModified):",
+        "",
+        "De Morgan on the persist plan's guard, short-circuit and all: `not "
+        "b.isNil` is still evaluated first, so a nil binding is still never "
+        "dereferenced. IT MUST SURVIVE, and it is THE CONTROL FOR M41, which "
+        "drops one of these two conditions.",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "S15", STORE,
+        '    return LayoutRestoreReport(status: lrsNoDocument, path: "", '
+        'message: "")',
+        '    return LayoutRestoreReport(path: "", message: "", '
+        "status: lrsNoDocument)",
+        "",
+        "The flag-off answer with its named fields in a different order — the "
+        "same object. IT MUST SURVIVE, and it is THE CONTROL FOR M42, which "
+        "removes the guard in front of this very statement.",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "S16", BIND,
+        "    b.interaction = noInteraction()\n"
+        "    b.userModified = true",
+        "    b.userModified = true\n"
+        "    b.interaction = noInteraction()",
+        "",
+        "The two independent assignments swapped. IT MUST SURVIVE, and it is "
+        "THE CONTROL FOR M43, which deletes the second of them.",
+        suite=PERSIST,
+    ),
+    Mutation(
+        "S17", DOC,
+        '    message: "saved layout ignored (" & kind & "): " & why & '
+        '" — this session " &',
+        '    message: "saved layout ignored (" & kind & ")" & ": " & why & '
+        '" — this session " &',
+        "",
+        "The same message with one concatenation split in two. IT MUST "
+        "SURVIVE, and it is THE CONTROL FOR M44 — graded at TIER 2 like the "
+        "arm it controls, because a control run against a different suite says "
+        "nothing about the case that has to redden.",
+        suite=RELAUNCH,
+    ),
 ]
 
 RESULT_LINE = re.compile(r"^\s*\[(OK|FAILED)\]\s+(.*?)\s*$")
@@ -833,7 +1094,7 @@ def run_suite(suite: str = SUITE) -> RunResult:
 
 def main() -> int:
     # An optional arm filter, so a re-run after fixing ONE arm costs one
-    # compile rather than twenty-seven. The control still runs: an arm graded
+    # compile rather than sixty-four. The control still runs: an arm graded
     # against a suite nobody checked is not graded.
     only = set(sys.argv[1:])
     baseline = {p: digest(p) for p in TOUCHED}
@@ -844,8 +1105,8 @@ def main() -> int:
         print(f"no arm matches {sorted(only)}")
         return 1
     # ONLY THE SUITES THE SELECTED ARMS USE. A filtered re-run of one Tier-1
-    # arm must not pay for two pty controls; a run with no filter pays for all
-    # four, which is the honest price of grading four suites.
+    # arm must not pay for four pty controls; a run with no filter pays for all
+    # seven, which is the honest price of grading seven suites.
     suites = []
     for m in arms:
         if m.suite not in suites:
