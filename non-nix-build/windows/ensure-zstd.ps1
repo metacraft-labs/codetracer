@@ -44,21 +44,31 @@ function Ensure-Zstd {
     }
   }
 
-  # If there is a manual installation at C:\zstd with include/lib, create a junction.
+  # If there is a manual installation at C:\zstd with include/lib, adopt it.
+  #
+  # RELOCATABILITY: this arm used to JUNCTION `$extractDir` at `C:\zstd`. It is
+  # a COPY now, for the same reason as the LLVM system arm -- a junction bakes
+  # an absolute machine-global path into the tree, so the entry only works on
+  # a host that has that exact directory. And as with LLVM, a provisioning run
+  # that reports zero reparse points for ZSTD is reporting that the host had no
+  # `C:\zstd`, i.e. that this branch was never taken -- a host-dependent
+  # observation, not evidence that the branch is safe.
   if ((Test-Path -LiteralPath (Join-Path $manualZstdRoot "include") -PathType Container) -and
       (Test-Path -LiteralPath (Join-Path $manualZstdRoot "lib") -PathType Container)) {
     $parentDir = Split-Path -Parent $zstdVersionRoot
     New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
-    if (Test-Path -LiteralPath $zstdVersionRoot) {
-      Remove-Item -LiteralPath $zstdVersionRoot -Recurse -Force
-    }
-    New-Item -ItemType Directory -Force -Path $zstdVersionRoot | Out-Null
+    Ensure-CleanDirectory -Path $zstdVersionRoot
 
-    if (Test-Path -LiteralPath $extractDir) {
-      Remove-Item -LiteralPath $extractDir -Recurse -Force
-    }
-    New-Item -ItemType Junction -Path $extractDir -Target $manualZstdRoot | Out-Null
-    Write-Host "zstd $version linked from manual install at $manualZstdRoot to $extractDir"
+    Write-Host "Copying manual zstd install from '$manualZstdRoot' into the install root; a junction there would not survive relocation."
+    Copy-Item -LiteralPath $manualZstdRoot -Destination $extractDir -Recurse -Force
+    $relative = Write-InstallPointer -Root $Root -Component "zstd" `
+      -VersionRoot $zstdVersionRoot -InstallDir $extractDir -Metadata @{
+        zstd_version = $version
+        zstd_arch = $zstdArch
+        install_arm = "manual-copy"
+        manual_source = $manualZstdRoot
+      }
+    Write-Host "Installed zstd $version (manual-copy) at $extractDir (install-relative: $relative)"
     return
   }
 
@@ -104,5 +114,12 @@ function Ensure-Zstd {
     Write-Warning "zstd extraction completed at '$zstdVersionRoot' but include/lib directories were not found at expected location '$extractDir'."
   }
 
-  Write-Host "Installed zstd $version to $extractDir"
+  $relative = Write-InstallPointer -Root $Root -Component "zstd" `
+    -VersionRoot $zstdVersionRoot -InstallDir $extractDir -Metadata @{
+      zstd_version = $version
+      zstd_arch = $zstdArch
+      install_arm = "download"
+    }
+
+  Write-Host "Installed zstd $version (download) to $extractDir (install-relative: $relative)"
 }

@@ -95,5 +95,34 @@ function Ensure-Rust {
   }
 
   Ensure-RustComponents -RustupExe $rustupExe -Toolchain $rustToolchain
+
+  # RELOCATABILITY. Rust is one of the two components the decomposition run's
+  # reparse-point check caught declaring `relocatable` while the filesystem
+  # disagreed -- 13 reparse points, the largest count of any component. It is
+  # also the component whose SECOND relocatability defect a reparse count
+  # cannot see: rustup records absolute directory paths as plain text in
+  # `settings.toml`'s `[overrides]` table, and a tree can carry those with
+  # zero reparse points.
+  #
+  # Both are handled here rather than left to a later consumer, because the
+  # point of publish-and-refill is that the tree is archived immediately after
+  # this function returns.
+  $settingsRepair = Repair-RustupSettingsRelocatability -RustupHome $rustupHome
+  if ($settingsRepair.changed) {
+    Write-Host "Removed $($settingsRepair.removed_lines.Count) line(s) of absolute-path overrides from '$($settingsRepair.path)'."
+  }
+
+  $findings = @(Get-InstallTreeRelocatabilityFindings -Root $Root -Path $rustupHome -SkipContentScan |
+    Where-Object { Test-RelocatabilityViolation -Finding $_ })
+  if ($findings.Count -gt 0) {
+    # Reported, not thrown. The 13 reparse points are rustup's own
+    # `toolchains\<name>` layout and converting them is not this function's
+    # call to make unilaterally; what must not happen is that they stay
+    # invisible. `Assert-BootstrapRelocatability` is the gate that decides.
+    foreach ($finding in $findings) {
+      Write-Warning "rustup tree relocatability: $($finding.kind) at '$($finding.path)' -> '$($finding.target)'"
+    }
+  }
+
   Write-Host "Installed Rust toolchain $rustToolchain with rustup $rustupVersion"
 }
