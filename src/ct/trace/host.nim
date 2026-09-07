@@ -1346,7 +1346,7 @@ proc hostCommand*(
     childEnv[key] = value
 
   var process = startProcess(
-    nodeExe,
+    nodeExe(),
     workingDir = codetracerInstallDir,
     args = @[
       codetracerExeDir / "server_index.js",

@@ -21,7 +21,7 @@ proc waitForExitWithin(p: Process, timeoutMs: int): (bool, int) =
 
 suite "ct host idle timeout integration":
   let serverIndex = codetracerExeDir / "server_index.js"
-  let node = nodeExe
+  let node = nodeExe()
   let available = fileExists(serverIndex) and fileExists(node)
 
   # No "skips if server_index missing" case here any more. It asserted

@@ -35,7 +35,7 @@ proc recordSymbols(sourceDir: string, outputFolder: string, lang: Lang) =
 
     ctagsArgs.add(correctSourceDir)
 
-    let data = execProcess(ctagsExe, workingDir=correctSourceDir, args=ctagsArgs, options={poUsePath})
+    let data = execProcess(ctagsExe(), workingDir=correctSourceDir, args=ctagsArgs, options={poUsePath})
     var symbols: seq[Symbol] = @[]
 
     for line in data.split('\n'):
@@ -112,7 +112,7 @@ proc recordNim(
   createDir(traceFolder)
   let ext = program.splitFile.ext.toLowerAscii
 
-  if nimCompilerExe.len == 0:
+  if nimCompilerExe().len == 0:
     echo "error: Nim compiler not found. Set CODETRACER_NIM_EXE_PATH or ensure `nim` is on PATH."
     quit(1)
 
@@ -129,7 +129,7 @@ proc recordNim(
     ]
     nimArgs = nimArgs.concat(args)
     let process = startProcess(
-      nimCompilerExe,
+      nimCompilerExe(),
       args = nimArgs,
       options = {poParentStreams})
     let recordPid = process.processId
@@ -142,7 +142,7 @@ proc recordNim(
 
   # Default (``.nim`` and any other Nim-recognised extension we may add
   # later): compile to a native binary then hand off to MCR.
-  if mcrRecorderExe.len == 0:
+  if mcrRecorderExe().len == 0:
     echo "error: MCR (ct-mcr) not found. Set CODETRACER_CT_MCR_PATH or build " &
         "codetracer-native-recorder/ct_cli/ct_cli and add it to PATH."
     quit(1)
@@ -157,7 +157,7 @@ proc recordNim(
     program
   ]
   let compileProcess = startProcess(
-    nimCompilerExe,
+    nimCompilerExe(),
     args = compileArgs,
     options = {poEchoCmd, poParentStreams})
   let compileExit = waitForExit(compileProcess)
@@ -177,7 +177,7 @@ proc recordNim(
   ]
   recordArgs = recordArgs.concat(args)
   let process = startProcess(
-    mcrRecorderExe,
+    mcrRecorderExe(),
     args = recordArgs,
     options = {poEchoCmd, poParentStreams})
   let recordPid = process.processId
@@ -205,7 +205,7 @@ proc recordNativeServer(
   ## request spans from the recording's own syscall payloads.  That is the
   ## flow `just demo-request-panel native` runs by hand; this is the same
   ## flow behind the flag.
-  if nativeServerRecorderExe.len == 0:
+  if nativeServerRecorderExe().len == 0:
     errorMessage "error: the native server recorder `codetracer-native-recorder` " &
       "was not found, so `ct record --server` cannot record this program."
     errorMessage "help: set CODETRACER_NATIVE_SERVER_RECORDER_PATH=/path/to/it, or"
@@ -219,7 +219,7 @@ proc recordNativeServer(
   flushFile(stdout)
 
   let process = startProcess(
-    nativeServerRecorderExe,
+    nativeServerRecorderExe(),
     args = @["--out-dir", traceFolder, "--", program].concat(args),
     workingDir = getCurrentDir(),
     options = {poParentStreams})
@@ -512,7 +512,7 @@ proc exportRecord(
   try:
     zip.zipFolder(outputFolder, exportZipFullPath)
     # echo "OK"
-  # let process = startProcess(zipExe, workingDir=outputFolder, args = @["-r", exportZipFullPath, "."], options={poParentStreams})
+  # let process = startProcess(zipExe(), workingDir=outputFolder, args = @["-r", exportZipFullPath, "."], options={poParentStreams})
   # let code = waitForExit(process)
   except Exception as e:
     echo "error: ", e.msg, " while trying to zip: maybe archive is not created"

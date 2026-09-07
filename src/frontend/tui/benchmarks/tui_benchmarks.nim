@@ -787,24 +787,53 @@ proc uiHandoffMetric(bench: Bench) =
   let directMedian = medianOf(direct)
   let flagMedian = medianOf(throughFlag)
   let overhead = flagMedian - directMedian
-  # THE LENGTH OF `PATH` IS PART OF THIS FIGURE, and it is published with it.
+  # THE LENGTH OF `PATH` IS PART OF THIS FIGURE, and it is published with it —
+  # because for most of this benchmark's life it was the DOMINANT term.
   #
-  # Measured 2026-09-07: the overhead is 3.5 ms on a two-entry `PATH` and
-  # 18.0 ms on the 193-entry `PATH` a nix dev shell provides — the SAME two
-  # binaries, the same host, minutes apart. `strace -c` on `ct` shows 5,440
-  # `newfstatat` calls of which 5,396 fail, and they come from
-  # `src/common/paths.nim`, which resolves ~28 recorder and tool binaries with
-  # `findTool` (i.e. `findExe`) in a module-level `let` block. That work is
-  # done during Nim's module initialisation, BEFORE `main` and therefore before
-  # the `--ui` prologue can decide anything, and every `ct` invocation pays it.
+  # As first measured, 2026-09-07: 3.5 ms on a two-entry `PATH` and 18.0 ms on
+  # the 193-entry `PATH` a nix dev shell provides — the SAME two binaries, the
+  # same host, minutes apart, against a 10 ms gate. `strace` on `ct` showed
+  # 5,445 `newfstatat` calls before the handoff `execve`, 5,400 of them
+  # failing, and they came from `src/common/paths.nim`, which resolved 38
+  # recorder and tool binaries with `findTool` (i.e. `findExe`) in a
+  # module-level `let` block. That ran during Nim's module initialisation,
+  # BEFORE `main` and therefore before the `--ui` prologue could decide
+  # anything, so every `ct` invocation paid it and then used at most one of the
+  # results.
   #
-  # So this number is not a property of `--ui`'s implementation: the prologue is
-  # the first statement of `codetracer.nim` and reads no file on this path. It
-  # is a property of what `ct` costs to start, which is what ui-selection.md
-  # §3.1 warned about in the same paragraph as the gate ("loading a 25 MB binary
-  # to reach it is not [acceptable]"). Making the gate hold on a long `PATH`
-  # means making those lookups lazy, which is a change to `paths.nim` rather
-  # than to the selector.
+  # The number was therefore never a property of `--ui`'s implementation: the
+  # prologue is the first statement of `codetracer.nim` and reads no file on
+  # this path. It was a property of what `ct` cost to START — which is what
+  # ui-selection.md §3.1 warned about in the same paragraph as the gate
+  # ("loading a 25 MB binary to reach it is not [acceptable]").
+  #
+  # FIXED in `paths.nim` rather than in the selector: those lookups are now
+  # resolved at first use and memoised (`lazyToolPath`), so a `ct` invocation
+  # pays only for the tools it actually uses and a `--ui` handoff — which uses
+  # none — pays for none. Same host, same 193-entry `PATH`: 5,445 pre-handoff
+  # `newfstatat` calls became 46, and this figure went 16.3 ms → 2.6 ms.
+  #
+  # THAT PAIR OF NUMBERS IS FROM A THREE-ARM RUN, and it is worth saying why,
+  # because the two-arm form of this benchmark got it wrong once. Reading a
+  # "before" figure off one run and an "after" figure off another attributes
+  # every drift in the host between them to the change: the first attempt at
+  # this measurement recorded the control arm at 1.54 ms before and 5.47 ms
+  # after, with the load average LOWER in the second, which is not a story
+  # about `PATH` at all — and it understated the improvement as 7.0 ms. The
+  # honest form keeps the pre-change `ct`, the post-change `ct` and the direct
+  # TUI as three arms of ONE interleaved run with the order shuffled per round,
+  # so the per-round difference is paired against the same instant of host
+  # load. 200 rounds, load1 1.00: direct 1.64 ms, pre-change 17.94 ms,
+  # post-change 4.22 ms, median per-round (post − pre) −13.34 ms.
+  #
+  # `src/common/paths_test.nim`'s "no tool is searched for before main" is what
+  # stops it regressing: it reads 1 if ONE value goes back to being eager and
+  # 39 if all 38 do, and it demands 0.
+  #
+  # What is LEFT in this figure is not PATH work: it is the cost of starting a
+  # 25 MB `ct` and reaching its prologue, versus starting the 13 MB TUI
+  # directly. That still scales with the binary, so a `ct` that grows can put
+  # this back over 10 ms without anyone touching `--ui` or `paths.nim`.
   let pathEntries = getEnv("PATH", "").split(PathSep).len
   bench.record("tui/ui-flag-handoff-overhead", "ms", overhead, 10.0,
                samples = samples,
@@ -819,10 +848,15 @@ proc uiHandoffMetric(bench: Bench) =
                        $pathEntries &
                        "; the launcher's own exec is in neither arm because" &
                        " it is in BOTH of the invocations being compared and" &
-                       " cancels. THE FIGURE SCALES WITH len(PATH): ~28" &
+                       " cancels. IT NO LONGER SCALES WITH len(PATH): the 38" &
                        " module-level findExe lookups in src/common/paths.nim" &
-                       " run before main on every ct start (3.5ms at 2 PATH" &
-                       " entries, 18.0ms at 193, measured 2026-09-07)")
+                       " that ran before main on every ct start are resolved" &
+                       " at first use and memoised as of 2026-09-07, taking" &
+                       " pre-handoff newfstatat from 5445 to 46 and this" &
+                       " figure from 16.3ms to 2.6ms at 193 PATH entries," &
+                       " measured as one interleaved three-arm run against" &
+                       " the pre-change binary rather than as two runs." &
+                       " What remains is ct's own start-up as a 25MB binary")
   # THE INPUTS ARE PUBLISHED AS WELL AS THE DIFFERENCE, and not gated: a
   # difference alone cannot be sanity-checked afterwards, and these two are what
   # a reader needs to tell "the handoff got cheaper" from "the front-end got

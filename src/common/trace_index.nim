@@ -1105,7 +1105,7 @@ proc sendEvent(socketPath: string, address: string, rawEvent: string) =
 
   # example: curl --unix-socket /tmp/my_socket.sock http://localhost/api/ping
   let process = startProcess(
-    curlExe,
+    curlExe(),
     args = @[
       "--header", "Content-Type: application/json",
       "--data", rawEvent,

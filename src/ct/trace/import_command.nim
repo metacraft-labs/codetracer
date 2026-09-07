@@ -6,7 +6,7 @@ import
   ../globals
 
 proc importTraceInPreparedFolder(traceZipPath: string, outputFolderFullPath: string) =
-#   let res = execProcess(unzipExe, args = @[traceZipPath, "-d", outputFolderFullPath], options={})
+#   let res = execProcess(unzipExe(), args = @[traceZipPath, "-d", outputFolderFullPath], options={})
 #   echo "unzip: ", res
   zip.unzipIntoFolder(traceZipPath, outputFolderFullPath)
   # M-REC-1.5: bundles must carry a CTFS `.ct` container; metadata comes

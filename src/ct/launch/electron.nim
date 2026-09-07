@@ -56,7 +56,7 @@ proc launchElectron*(
     "log"
   ))
 
-  ensureExists(electronExe)
+  ensureExists(electronExe())
 
   # Build electron args:
   # [runtimeFlags] [entryPoint] [appArgs] [optionalElectronArgs]
@@ -86,12 +86,12 @@ proc launchElectron*(
     # This allows Playwright to connect via CDP to the Electron process.
     let execvArgsCount = electronArgs.len + 1
     var execvArgs = cast[cstringArray](alloc0((execvArgsCount + 1) * sizeof(cstring)))
-    execvArgs[0] = electronExe.cstring
+    execvArgs[0] = electronExe().cstring
     for i, arg in electronArgs:
       execvArgs[i + 1] = arg.cstring
     execvArgs[execvArgsCount] = nil
 
-    discard execv(electronExe.cstring, execvArgs)
+    discard execv(electronExe().cstring, execvArgs)
     # execv only returns on error
     quit(1)
   else:
@@ -101,7 +101,7 @@ proc launchElectron*(
       env[name] = value
 
     var processUI = startProcess(
-      electronExe,
+      electronExe(),
       workingDir = getCurrentDir(),
       args = electronArgs,
       env = env,
@@ -126,12 +126,12 @@ when defined(posix):
     let execvArgsCount = finalArgs.len + 1
 
     var execvArgs = cast[cstringArray](alloc0((execvArgsCount + 1) * sizeof(cstring)))
-    execvArgs[0] = electronExe.cstring
+    execvArgs[0] = electronExe().cstring
     for i, arg in finalArgs:
       execvArgs[i + 1] = arg.cstring
     execvArgs[execvArgsCount] = nil
 
-    discard execv(electronExe.cstring, execvArgs)
+    discard execv(electronExe().cstring, execvArgs)
     # execv only returns on error
     quit(1)
 

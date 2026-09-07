@@ -161,18 +161,18 @@ proc blockchainRecorderSibling*(lang: Lang): string =
 
 proc blockchainRecorderExe*(lang: Lang): string =
   case lang
-  of LangMasm: midenRecorderExe
-  of LangMove: moveRecorderExe
-  of LangSolana: solanaRecorderExe
-  of LangSway: fuelRecorderExe
-  of LangCairo: cairoRecorderExe
-  of LangCircom: circomRecorderExe
-  of LangLeo: leoRecorderExe
-  of LangPolkavm: polkavmRecorderExe
-  of LangTolk: tonRecorderExe
-  of LangAiken: cardanoRecorderExe
-  of LangCadence: flowRecorderExe
-  of LangSolidity: evmRecorderExe
+  of LangMasm: midenRecorderExe()
+  of LangMove: moveRecorderExe()
+  of LangSolana: solanaRecorderExe()
+  of LangSway: fuelRecorderExe()
+  of LangCairo: cairoRecorderExe()
+  of LangCircom: circomRecorderExe()
+  of LangLeo: leoRecorderExe()
+  of LangPolkavm: polkavmRecorderExe()
+  of LangTolk: tonRecorderExe()
+  of LangAiken: cardanoRecorderExe()
+  of LangCadence: flowRecorderExe()
+  of LangSolidity: evmRecorderExe()
   else: ""
 
 proc recorderToolFor*(lang: Lang): RecorderTool =
@@ -438,11 +438,11 @@ proc recorderRequirements*(lang: Lang): seq[RecorderArtifact] =
   if tool.runtimeLabel.len > 0:
     var runtimePath = ""
     case lang
-    of LangRubyDb: runtimePath = rubyExe
-    of LangPhp: runtimePath = phpExe
-    of LangElixir: runtimePath = elixirExe
-    of LangErlang: runtimePath = escriptExe
-    of LangNim: runtimePath = nimCompilerExe
+    of LangRubyDb: runtimePath = rubyExe()
+    of LangPhp: runtimePath = phpExe()
+    of LangElixir: runtimePath = elixirExe()
+    of LangErlang: runtimePath = escriptExe()
+    of LangNim: runtimePath = nimCompilerExe()
     else: discard
     result.add(RecorderArtifact(
       kind: raRuntime, label: tool.runtimeLabel,
@@ -450,21 +450,21 @@ proc recorderRequirements*(lang: Lang): seq[RecorderArtifact] =
 
   var recorderPath = ""
   case lang
-  of LangRubyDb: recorderPath = rubyRecorderPath
-  of LangPythonDb: recorderPath = pythonRecorderExe
-  of LangJavascript: recorderPath = jsRecorderExe
+  of LangRubyDb: recorderPath = rubyRecorderPath()
+  of LangPythonDb: recorderPath = pythonRecorderExe()
+  of LangJavascript: recorderPath = jsRecorderExe()
   of LangPhp:
     # The PHP recorder is a shared object, not an executable, so the
     # existence check is fileExists rather than a PATH search.
     recorderPath = if phpRecorderExtension.len > 0 and
                       fileExists(phpRecorderExtension): phpRecorderExtension
                    else: ""
-  of LangElixir, LangErlang: recorderPath = beamRecorderExe
-  of LangBash: recorderPath = bashRecorderExe
-  of LangZsh: recorderPath = zshRecorderExe
-  of LangNoir: recorderPath = noirExe
-  of LangRustWasm, LangCppWasm: recorderPath = wazeroExe
-  of LangNim: recorderPath = mcrRecorderExe
+  of LangElixir, LangErlang: recorderPath = beamRecorderExe()
+  of LangBash: recorderPath = bashRecorderExe()
+  of LangZsh: recorderPath = zshRecorderExe()
+  of LangNoir: recorderPath = noirExe()
+  of LangRustWasm, LangCppWasm: recorderPath = wazeroExe()
+  of LangNim: recorderPath = mcrRecorderExe()
   else: recorderPath = blockchainRecorderExe(lang)
   result.add(RecorderArtifact(
     kind: raRecorder, label: tool.recorderLabel,
@@ -541,8 +541,8 @@ proc recorderInvocation*(lang: Lang, program: string, traceFolder: string,
     # `ruby <recorder-script> --out-dir <dir> <program>` — the Ruby recorder
     # is a Ruby script, so the process is the interpreter.
     RecorderInvocation(
-      exe: rubyExe,
-      args: @[rubyRecorderPath, "--out-dir", traceFolder, program])
+      exe: rubyExe(),
+      args: @[rubyRecorderPath(), "--out-dir", traceFolder, program])
   of LangPythonDb:
     var args = @["--out-dir", traceFolder]
     if opts.pythonActivationPath.len > 0:
@@ -555,10 +555,10 @@ proc recorderInvocation*(lang: Lang, program: string, traceFolder: string,
       args = args & opts.pythonTestArgs
     else:
       args.add(program)
-    RecorderInvocation(exe: pythonRecorderExe, args: args)
+    RecorderInvocation(exe: pythonRecorderExe(), args: args)
   of LangJavascript:
     RecorderInvocation(
-      exe: jsRecorderExe,
+      exe: jsRecorderExe(),
       args: @["record", "--out-dir", traceFolder, program])
   of LangPhp:
     # EXCEPTION 1: codetracer-php-recorder ships no executable.  The recorder
@@ -575,7 +575,7 @@ proc recorderInvocation*(lang: Lang, program: string, traceFolder: string,
     else:
       env.add(("CODETRACER_TRACE_DIR", traceFolder))
     RecorderInvocation(
-      exe: phpExe,
+      exe: phpExe(),
       args: @["-d", "extension=" & phpRecorderExtension, program],
       env: env)
   of LangElixir:
@@ -584,29 +584,29 @@ proc recorderInvocation*(lang: Lang, program: string, traceFolder: string,
     # tool.  `--source-dir` is what makes the recorder instrument the
     # program's own sources instead of only the runtime's.
     RecorderInvocation(
-      exe: beamRecorderExe,
+      exe: beamRecorderExe(),
       args: @["record", "--out-dir", traceFolder,
               "--source-dir", program.parentDir,
-              "--", elixirExe, program])
+              "--", elixirExe(), program])
   of LangErlang:
     RecorderInvocation(
-      exe: beamRecorderExe,
+      exe: beamRecorderExe(),
       args: @["record", "--out-dir", traceFolder,
               "--source-dir", program.parentDir,
-              "--", escriptExe, program])
+              "--", escriptExe(), program])
   of LangBash:
     RecorderInvocation(
-      exe: bashRecorderExe, args: @["--out-dir", traceFolder, program])
+      exe: bashRecorderExe(), args: @["--out-dir", traceFolder, program])
   of LangZsh:
     RecorderInvocation(
-      exe: zshRecorderExe, args: @["--out-dir", traceFolder, program])
+      exe: zshRecorderExe(), args: @["--out-dir", traceFolder, program])
   of LangNoir:
     # EXCEPTION 3: nargo traces the package it is run INSIDE, so the program
     # is expressed as the working directory rather than an argument.
     let backendArgs = if opts.backend == "plonky2": @["--trace-plonky2"]
                       else: @[]
     RecorderInvocation(
-      exe: noirExe,
+      exe: noirExe(),
       args: @["trace", "--out-dir", traceFolder] & backendArgs,
       workdir: if dirExists(program): program else: program.parentDir)
   of LangRustWasm, LangCppWasm:
@@ -615,7 +615,7 @@ proc recorderInvocation*(lang: Lang, program: string, traceFolder: string,
       args.add("-stylus")
       args.add(opts.stylusTrace)
     args = args & @["--out-dir", traceFolder, program]
-    RecorderInvocation(exe: wazeroExe, args: args)
+    RecorderInvocation(exe: wazeroExe(), args: args)
   of LangMasm, LangMove, LangSolana, LangSway, LangCairo, LangCircom,
      LangLeo, LangPolkavm, LangTolk, LangAiken, LangCadence, LangSolidity:
     RecorderInvocation(

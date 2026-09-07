@@ -3457,3 +3457,49 @@ commands.
     8 MB. It is the only way to assert a PAIRED alternate screen — the
     terminal's live alt-screen state after the child exits is `false` whether
     the child left correctly or never entered, the same trap DEC 2026 has.
+  * **`src/common/paths.nim`'s tool paths are ACCESSORS (`bashExe()`), not
+    `let`s, and the parentheses are load-bearing.** They used to be a
+    module-level `let` block of 38 `findTool`/`findExe` values (39 searches —
+    `mcrRecorderExe` tries `ct-mcr` then `ct_cli`), which Nim runs before
+    `main`, so every `ct` invocation searched `PATH` for all of them and
+    used at most one. `findExe` stats one path per `PATH` entry per absent tool,
+    so the cost scaled with `len(PATH)`: 5,445 `newfstatat` calls (5,400
+    failing) and 16.3 ms on a 193-entry nix dev shell `PATH`, which is what
+    broke PLAT-1's 10 ms `--ui` handoff gate. Now `lazyToolPath` captures the
+    env-var override eagerly (a hash lookup, not a syscall) and defers +
+    memoises the `PATH` search: 46 calls, 2.6 ms. Adding a tool path means
+    adding a `lazyToolPath`, never a `let` — `paths_test.nim`'s "no tool is
+    searched for before main" reads `toolSearchCount()` at module-init time and
+    reddens `common-units` if you do.
+  * **To measure a start-up change, keep the OLD binary and make it a third arm
+    of ONE run.** The `--ui` handoff benchmark is a difference of two medians,
+    and the first attempt at showing the `paths.nim` fix took the "before" from
+    a run made before the change and the "after" from a run made after it. The
+    control arm moved from 1.54 ms to 5.47 ms between them with the load
+    average LOWER in the second, so ~4 ms of unattributable host drift landed
+    in a 10 ms gate, and the improvement was understated as 7.0 ms. Copying the
+    pre-change `ct` aside, then interleaving {direct, pre-change, post-change}
+    with the order shuffled per round, pairs every difference against the same
+    instant of load and gave the real figure: 16.30 ms → 2.58 ms, median
+    per-round delta −13.34 ms over 200 rounds. The build is byte-reproducible
+    (`just build-once` twice gives an identical `ct`), so the old arm is cheap
+    to reconstruct: revert the sources, build, copy the binary out, restore.
+  * **A parameterless Nim proc is NOT transparently a value.** `echo bashExe`
+    passes the *proc* to `varargs[typed]` rather than calling it, so a
+    let-to-accessor conversion that relies on paren-less calls fails in some
+    contexts and silently type-checks in others (`@[a, b]` builds a `seq[proc]`
+    quite happily). Spell the call. The audit for a conversion like this is
+    `grep -P '(?<!\w)(id1|id2|…)\b(?!\s*\()'` over the whole repo, which is
+    what caught the remaining sites; the compiler alone will not.
+  * **`ct` loads `--env-file` / `--env0-file` in `launch.nim` AFTER
+    `paths.nim` has initialised**, so an env file that sets
+    `CODETRACER_RUBY_EXE_PATH` and friends has never affected those values.
+    The lazy conversion deliberately kept it that way by capturing the
+    overrides eagerly — but this is a latent bug on the macOS `open` path,
+    which is the reason env files exist at all. **`PATH` itself is the one
+    exception, and it changed**: the tool search now runs after `loadEnvFiles`,
+    so an env file carrying the user's `PATH` (which the macOS `open` dump
+    does) now steers the recorder lookups where before they ran against
+    launchd's `PATH`. That is the behaviour those flags were written for, but
+    it is a change and not a no-op — do not describe the lazy conversion as
+    value-preserving without this caveat.
