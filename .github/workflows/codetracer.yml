@@ -1129,8 +1129,22 @@ jobs:
           # nothing to do after the checkout and should not outlive it: these
           # runners reuse their work tree, and actions/checkout otherwise
           # leaves the credential in `.git/config` for whatever runs next.
-          # (`nix develop` is unaffected either way -- Nix's fetcher does not
-          # read gitconfig; its credentials come from netrc/access-tokens.)
+          # This used to claim "(`nix develop` is unaffected either way --
+          # Nix's fetcher does not read gitconfig; its credentials come from
+          # netrc/access-tokens.)". THAT IS FALSE, and believing it is why a
+          # `could not read Username` failure naming a PUBLIC repository went
+          # unexplained. Both halves were measured:
+          #   * A `git+https://` flake input is fetched by Nix shelling out to
+          #     `git ls-remote`, and that child git reads system, global AND
+          #     the `.git/config` of its working directory. A repo-local
+          #     catch-all `http.https://github.com/.extraHeader` alone
+          #     reproduces the failure verbatim.
+          #   * Nix's `access-tokens` is NOT applied to `git+https://` fetches
+          #     -- GIT_TRACE_CURL shows no Authorization header sent -- so
+          #     access-tokens does not substitute for correct gitconfig.
+          # `persist-credentials: false` is still right, but it only governs
+          # what THIS checkout leaves behind; see
+          # ci/nix-fetch-credential-preflight.sh for the ambient case.
           persist-credentials: false
 
       - name: Install Rust toolchain
@@ -2323,8 +2337,22 @@ jobs:
           # nothing to do after the checkout and should not outlive it: these
           # runners reuse their work tree, and actions/checkout otherwise
           # leaves the credential in `.git/config` for whatever runs next.
-          # (`nix develop` is unaffected either way -- Nix's fetcher does not
-          # read gitconfig; its credentials come from netrc/access-tokens.)
+          # This used to claim "(`nix develop` is unaffected either way --
+          # Nix's fetcher does not read gitconfig; its credentials come from
+          # netrc/access-tokens.)". THAT IS FALSE, and believing it is why a
+          # `could not read Username` failure naming a PUBLIC repository went
+          # unexplained. Both halves were measured:
+          #   * A `git+https://` flake input is fetched by Nix shelling out to
+          #     `git ls-remote`, and that child git reads system, global AND
+          #     the `.git/config` of its working directory. A repo-local
+          #     catch-all `http.https://github.com/.extraHeader` alone
+          #     reproduces the failure verbatim.
+          #   * Nix's `access-tokens` is NOT applied to `git+https://` fetches
+          #     -- GIT_TRACE_CURL shows no Authorization header sent -- so
+          #     access-tokens does not substitute for correct gitconfig.
+          # `persist-credentials: false` is still right, but it only governs
+          # what THIS checkout leaves behind; see
+          # ci/nix-fetch-credential-preflight.sh for the ambient case.
           persist-credentials: false
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -2531,8 +2559,22 @@ jobs:
           # nothing to do after the checkout and should not outlive it: these
           # runners reuse their work tree, and actions/checkout otherwise
           # leaves the credential in `.git/config` for whatever runs next.
-          # (`nix develop` is unaffected either way -- Nix's fetcher does not
-          # read gitconfig; its credentials come from netrc/access-tokens.)
+          # This used to claim "(`nix develop` is unaffected either way --
+          # Nix's fetcher does not read gitconfig; its credentials come from
+          # netrc/access-tokens.)". THAT IS FALSE, and believing it is why a
+          # `could not read Username` failure naming a PUBLIC repository went
+          # unexplained. Both halves were measured:
+          #   * A `git+https://` flake input is fetched by Nix shelling out to
+          #     `git ls-remote`, and that child git reads system, global AND
+          #     the `.git/config` of its working directory. A repo-local
+          #     catch-all `http.https://github.com/.extraHeader` alone
+          #     reproduces the failure verbatim.
+          #   * Nix's `access-tokens` is NOT applied to `git+https://` fetches
+          #     -- GIT_TRACE_CURL shows no Authorization header sent -- so
+          #     access-tokens does not substitute for correct gitconfig.
+          # `persist-credentials: false` is still right, but it only governs
+          # what THIS checkout leaves behind; see
+          # ci/nix-fetch-credential-preflight.sh for the ambient case.
           persist-credentials: false
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
@@ -3380,8 +3422,22 @@ jobs:
           # nothing to do after the checkout and should not outlive it: these
           # runners reuse their work tree, and actions/checkout otherwise
           # leaves the credential in `.git/config` for whatever runs next.
-          # (`nix develop` is unaffected either way -- Nix's fetcher does not
-          # read gitconfig; its credentials come from netrc/access-tokens.)
+          # This used to claim "(`nix develop` is unaffected either way --
+          # Nix's fetcher does not read gitconfig; its credentials come from
+          # netrc/access-tokens.)". THAT IS FALSE, and believing it is why a
+          # `could not read Username` failure naming a PUBLIC repository went
+          # unexplained. Both halves were measured:
+          #   * A `git+https://` flake input is fetched by Nix shelling out to
+          #     `git ls-remote`, and that child git reads system, global AND
+          #     the `.git/config` of its working directory. A repo-local
+          #     catch-all `http.https://github.com/.extraHeader` alone
+          #     reproduces the failure verbatim.
+          #   * Nix's `access-tokens` is NOT applied to `git+https://` fetches
+          #     -- GIT_TRACE_CURL shows no Authorization header sent -- so
+          #     access-tokens does not substitute for correct gitconfig.
+          # `persist-credentials: false` is still right, but it only governs
+          # what THIS checkout leaves behind; see
+          # ci/nix-fetch-credential-preflight.sh for the ambient case.
           persist-credentials: false
           token: ${{ steps.ci_token.outputs.token }}
       - name: Install Nix
@@ -3445,8 +3501,22 @@ jobs:
           # nothing to do after the checkout and should not outlive it: these
           # runners reuse their work tree, and actions/checkout otherwise
           # leaves the credential in `.git/config` for whatever runs next.
-          # (`nix develop` is unaffected either way -- Nix's fetcher does not
-          # read gitconfig; its credentials come from netrc/access-tokens.)
+          # This used to claim "(`nix develop` is unaffected either way --
+          # Nix's fetcher does not read gitconfig; its credentials come from
+          # netrc/access-tokens.)". THAT IS FALSE, and believing it is why a
+          # `could not read Username` failure naming a PUBLIC repository went
+          # unexplained. Both halves were measured:
+          #   * A `git+https://` flake input is fetched by Nix shelling out to
+          #     `git ls-remote`, and that child git reads system, global AND
+          #     the `.git/config` of its working directory. A repo-local
+          #     catch-all `http.https://github.com/.extraHeader` alone
+          #     reproduces the failure verbatim.
+          #   * Nix's `access-tokens` is NOT applied to `git+https://` fetches
+          #     -- GIT_TRACE_CURL shows no Authorization header sent -- so
+          #     access-tokens does not substitute for correct gitconfig.
+          # `persist-credentials: false` is still right, but it only governs
+          # what THIS checkout leaves behind; see
+          # ci/nix-fetch-credential-preflight.sh for the ambient case.
           persist-credentials: false
           token: ${{ steps.ci_token.outputs.token }}
       - name: Install Nix
@@ -3467,6 +3537,39 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK. Same
+      # unconditional dump the `lint-*` jobs carry, for the same failure: this
+      # job dies inside `nix develop` fetching PUBLIC `anza-xyz/crossbeam`.
+      # It names the config file carrying the offending header, which the
+      # preflight below only summarises. Cannot redden the job, prints no
+      # credential value.
+      - uses: ./.github/actions/dump-git-fetch-env
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Keep ambient github.com credentials out of the Nix git fetcher
+        # `nix develop` below evaluates flake inputs, some of which resolve to
+        # plain `git+https://github.com/...` fetches of THIRD-PARTY PUBLIC
+        # repositories (`anza-xyz/crossbeam` is the one that broke this job).
+        # Nix performs those by shelling out to git, so any catch-all
+        # `http.https://github.com/.extraHeader` in scope -- system, global, or
+        # the persistent work tree's own `.git/config` -- is sent to owners the
+        # token was never valid for. GitHub answers 401 instead of the 200 an
+        # anonymous request gets, and git dies with
+        #
+        #     fatal: could not read Username for 'https://github.com':
+        #            No such device or address
+        #
+        # naming a repository that is public, which reads like a 404 and is
+        # not. This step neutralises only the CATCH-ALL (git resolves
+        # extraHeader by longest URL prefix, so an owner-scoped header is
+        # preserved -- verified) and PRINTS whether a header would be sent and
+        # to whom, so a recurrence explains itself instead of sending the next
+        # reader hunting a nonexistent 404. It never falls back to an
+        # unauthenticated retry: that would convert a hard failure into an
+        # intermittent one, which is this bug.
+        run: ./ci/nix-fetch-credential-preflight.sh
 
       - name: Upload script
         env:
@@ -4678,8 +4781,22 @@ jobs:
           # nothing to do after the checkout and should not outlive it: these
           # runners reuse their work tree, and actions/checkout otherwise
           # leaves the credential in `.git/config` for whatever runs next.
-          # (`nix develop` is unaffected either way -- Nix's fetcher does not
-          # read gitconfig; its credentials come from netrc/access-tokens.)
+          # This used to claim "(`nix develop` is unaffected either way --
+          # Nix's fetcher does not read gitconfig; its credentials come from
+          # netrc/access-tokens.)". THAT IS FALSE, and believing it is why a
+          # `could not read Username` failure naming a PUBLIC repository went
+          # unexplained. Both halves were measured:
+          #   * A `git+https://` flake input is fetched by Nix shelling out to
+          #     `git ls-remote`, and that child git reads system, global AND
+          #     the `.git/config` of its working directory. A repo-local
+          #     catch-all `http.https://github.com/.extraHeader` alone
+          #     reproduces the failure verbatim.
+          #   * Nix's `access-tokens` is NOT applied to `git+https://` fetches
+          #     -- GIT_TRACE_CURL shows no Authorization header sent -- so
+          #     access-tokens does not substitute for correct gitconfig.
+          # `persist-credentials: false` is still right, but it only governs
+          # what THIS checkout leaves behind; see
+          # ci/nix-fetch-credential-preflight.sh for the ambient case.
           persist-credentials: false
 
       - name: Install Nix
@@ -7853,8 +7970,22 @@ jobs:
           # nothing to do after the checkout and should not outlive it: these
           # runners reuse their work tree, and actions/checkout otherwise
           # leaves the credential in `.git/config` for whatever runs next.
-          # (`nix develop` is unaffected either way -- Nix's fetcher does not
-          # read gitconfig; its credentials come from netrc/access-tokens.)
+          # This used to claim "(`nix develop` is unaffected either way --
+          # Nix's fetcher does not read gitconfig; its credentials come from
+          # netrc/access-tokens.)". THAT IS FALSE, and believing it is why a
+          # `could not read Username` failure naming a PUBLIC repository went
+          # unexplained. Both halves were measured:
+          #   * A `git+https://` flake input is fetched by Nix shelling out to
+          #     `git ls-remote`, and that child git reads system, global AND
+          #     the `.git/config` of its working directory. A repo-local
+          #     catch-all `http.https://github.com/.extraHeader` alone
+          #     reproduces the failure verbatim.
+          #   * Nix's `access-tokens` is NOT applied to `git+https://` fetches
+          #     -- GIT_TRACE_CURL shows no Authorization header sent -- so
+          #     access-tokens does not substitute for correct gitconfig.
+          # `persist-credentials: false` is still right, but it only governs
+          # what THIS checkout leaves behind; see
+          # ci/nix-fetch-credential-preflight.sh for the ambient case.
           persist-credentials: false
           submodules: false
 

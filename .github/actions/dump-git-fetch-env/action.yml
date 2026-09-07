@@ -29,17 +29,52 @@ runs:
     # PUBLIC and fetch anonymously at 200 from a workstation. Three explanations
     # have been proposed and all three were DISPROVEN by measurement:
     #
-    #   * `actions/checkout`'s global `http.<url>.extraheader`. It redefines
+    #   * `actions/checkout`'s GLOBAL `http.<url>.extraheader`. It redefines
     #     HOME first ("Temporarily overriding HOME=.../_temp/<uuid>"), so its
     #     `--global` writes land in a throwaway gitconfig this step never reads.
+    #     NOTE: this disproof is about the GLOBAL scope only, and it does not
+    #     clear `actions/checkout`. The header it relies on for the fetch is
+    #     written with `git config --local`, into the `.git/config` of the
+    #     checkout itself, which the HOME override does not touch and which
+    #     these PERSISTENT work trees carry between jobs and runs.
     #   * nix's `access-tokens github.com=`. Tested: `builtins.fetchGit` over an
     #     uncached public repo returns the same rev with and without a foreign
     #     token set, so nix does not inject it into plain `https://` git fetches.
     #   * a pinned rev that no longer exists. Tested: that produces
     #     `Cannot find Git revision …`, a different error entirely.
     #
-    # So the cause is something about the RUNNER that no log so far records.
-    # Guessing a fourth time is not worth anyone's hour; this measures instead.
+    # The nix `access-tokens` disproof above was independently reconfirmed with
+    # GIT_TRACE_CURL: no Authorization header is sent on a `git+https://` fetch
+    # with `access-tokens = github.com=<token>` set. Nix applies it to `github:`
+    # inputs, not to plain git ones.
+    #
+    # THE MECHANISM IS NOW MEASURED, end to end, and it is NOT a 404:
+    #
+    #   * `anza-xyz/crossbeam` is PUBLIC. Anonymous `git ls-remote` returns its
+    #     HEAD at 200. Nothing about it is private or missing.
+    #   * Nix fetches a `git+https://` input by shelling out to git, and that
+    #     child git reads system, global AND the `.git/config` of its working
+    #     directory. The claim that "Nix's fetcher does not read gitconfig" is
+    #     false; a repo-local header alone reproduces the failure.
+    #   * A CATCH-ALL `http.https://github.com/.extraHeader` is sent
+    #     UNCONDITIONALLY to every github.com URL. GitHub answers a token it
+    #     will not honour for that owner with 401 rather than 200, git finds no
+    #     credential helper on the runner, tries to prompt, and dies with
+    #     `could not read Username ... No such device or address` (ENXIO on the
+    #     absent tty). Reproduced verbatim on a workstation.
+    #   * The header must be a CATCH-ALL. Git resolves `http.<url>.extraHeader`
+    #     by LONGEST URL PREFIX, so a `https://github.com/metacraft-labs/`
+    #     header never reaches `anza-xyz` -- also verified.
+    #   * `url.<...>.insteadOf` does NOT cause this: credentials in a rewritten
+    #     URL are only sent after a 401 challenge, which a public repo never
+    #     issues, so a catch-all `insteadOf` fetches such a repo fine.
+    #
+    # The remaining unknown is only WHICH file on the runner carries the
+    # catch-all, which is exactly what this dump names. The fix lives in
+    # ci/nix-fetch-credential-preflight.sh: neutralise the catch-all (an empty
+    # value resets the header list) while leaving owner-scoped credentials
+    # intact. Not an unauthenticated fallback -- that would turn a hard failure
+    # into an intermittent one, which is this bug's whole shape.
     #
     # UNCONDITIONAL, and not behind a `if: runner.debug` or a repo variable. A
     # diagnostic nobody switches on is a diagnostic that reports nothing, which

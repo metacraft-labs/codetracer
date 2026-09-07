@@ -394,6 +394,18 @@ lint_step "contract suite: desktop bundle self-containment" \
 lint_step "contract suite: the read-only-leftovers sweep runs, finds, and fixes" \
 	bash ci/test/readonly-leftovers-sweep-test.sh
 
+# The Nix-fetch credential preflight. Registered here for the same reason as
+# the sweep above: it guards RUNNER state, so no other job exercises it, and an
+# unrun guard is the defect it exists to catch. It asserts on a POISONED
+# fixture (a catch-all `http.https://github.com/.extraHeader`, exactly what
+# reaching a public third-party repo with someone else's token looks like) that
+# the header is both reported and neutralised, AND that an owner-scoped header
+# survives — a reset that wiped every credential would pass a "no header" check
+# while breaking every private input. Pure bash + git over mktemp fixtures; no
+# nix, no network.
+lint_step "contract suite: ambient github.com credentials kept out of nix fetches" \
+	bash ci/test/nix-fetch-credential-preflight-test.sh
+
 # The dev shell's git-hooks guard. Registered here for the same reason as the
 # sweep above: the thing it protects is developer state on a shared checkout, so
 # it is never exercised by any other job, and an unrun guard is exactly the
