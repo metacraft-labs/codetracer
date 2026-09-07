@@ -194,18 +194,59 @@ clone_rr_backend() {
 	)
 }
 
+# THE FLAKE ATTRIBUTE IS `codetracer-rr-support`, NOT `ct-native-replay`.
+#
+# `ct-native-replay` is the CARGO package name and the name of the BINARY the
+# derivation installs (codetracer-native-backend's Cargo.toml: `[package] name
+# = "ct-native-replay"`, `[[bin]] name = "ct-native-replay"`). It has never
+# been a flake output: `nix/packages/default.nix` has exported exactly one
+# attribute, `codetracer-rr-support`, since it was written (5355565b), and
+# `pname` is only derived from Cargo.toml INSIDE that derivation. Asking for
+# `#ct-native-replay` therefore always died with
+#
+#   error: flake '...' does not provide attribute
+#          'packages.x86_64-linux.ct-native-replay',
+#          'legacyPackages.x86_64-linux.ct-native-replay' or 'ct-native-replay'
+#
+# which the `||` below swallowed into the cargo fallback, so the nix build has
+# in fact never run. The `result/bin/ct-native-replay` check further down is
+# unchanged and still correct: that binary is what this attribute installs.
+#
+# EVERY NIX CALL AGAINST THIS CHECKOUT NEEDS `?submodules=1` AND THE OVERRIDES.
+#
+# The native-backend flake declares its two vendored submodules as RELATIVE
+# path inputs -- `rr-soft.url = "path:libs/rr"`, `delve-patched.url =
+# "path:libs/delve"` -- and its flake.lock (version 7) keeps them in the
+# unlocked relative form. Nix resolves a relative path input through the PARENT
+# FLAKE'S SOURCE ACCESSOR, and for a local git checkout that accessor exposes
+# only git-TRACKED files. A submodule contributes exactly ONE tracked entry to
+# its superproject -- the gitlink `libs/delve` (`git ls-files -s libs/delve` ->
+# `160000 174cd263... 0 libs/delve`) -- so `libs/delve/flake.nix` is not a
+# tracked path there and the input cannot be read:
+#
+#   error: Path 'libs/delve/flake.nix' in the repository
+#          ".../codetracer-native-backend" is not tracked by Git.
+#
+# `?submodules=1` is what mounts each submodule's own accessor at its path and
+# makes those files visible. The bare `nix develop "${CLONE_DIR}"` calls below
+# lacked it, so they failed that way even when the build above succeeded --
+# which is the second error in the CI log. The ref and the two absolute-path
+# overrides now travel together on all three invocations.
 build_rr_support() {
 	echo "Building ct-native-replay via nix build..."
 
 	nix build \
-		"${CLONE_DIR}?submodules=1#ct-native-replay" \
+		"${CLONE_DIR}?submodules=1#codetracer-rr-support" \
 		--override-input rr-soft "path:${CLONE_DIR}/libs/rr" \
 		--override-input delve-patched "path:${CLONE_DIR}/libs/delve" \
 		--out-link "${CLONE_DIR}/result" \
 		--print-build-logs ||
 		{
 			echo "nix build failed, falling back to cargo build via nix develop..." >&2
-			nix develop "${CLONE_DIR}" --command \
+			nix develop "${CLONE_DIR}?submodules=1" \
+				--override-input rr-soft "path:${CLONE_DIR}/libs/rr" \
+				--override-input delve-patched "path:${CLONE_DIR}/libs/delve" \
+				--command \
 				bash -c "cd '${CLONE_DIR}' && cargo build"
 		}
 
@@ -231,7 +272,12 @@ resolve_runtime_deps() {
 	# Use markers to extract paths cleanly (nix develop may print banners)
 	local raw
 	# shellcheck disable=SC2016
-	raw="$(nix develop "${CLONE_DIR}" --command bash -c \
+	# Same flakeref + overrides as build_rr_support; see the note there for why
+	# `?submodules=1` is not optional against this checkout.
+	raw="$(nix develop "${CLONE_DIR}?submodules=1" \
+		--override-input rr-soft "path:${CLONE_DIR}/libs/rr" \
+		--override-input delve-patched "path:${CLONE_DIR}/libs/delve" \
+		--command bash -c \
 		'echo "___LD_PATH_START___"; echo "$LD_LIBRARY_PATH"; echo "___LD_PATH_END___";
          echo "___PATH_START___"; echo "$PATH"; echo "___PATH_END___"')"
 
