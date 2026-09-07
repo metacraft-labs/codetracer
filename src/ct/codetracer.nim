@@ -1,7 +1,7 @@
 # Thank you, Lord and GOD Jesus!
 
 import
-  launch/[launch, help_delegate],
+  launch/[launch, help_delegate, ui_dispatch],
   agent_cli,
   cli/e2e_tests,
   ../ct_test/incremental_cli,
@@ -56,8 +56,69 @@ when not defined(js) and not defined(windows):
       putEnv("LD_LIBRARY_PATH", composed)
 
 try:
+  # PLAT-1 (`codetracer-specs/CLI/ct/ui-selection.md`).  `uiCleanArgs` is what
+  # confutils will parse -- argv with `--ui` and `--headless` taken out --
+  # and `uiSelectionValue` is the front-end the line resolved to, which
+  # `ct run` needs because it presents a session only AFTER it has recorded
+  # one.  Declared out here because the `when` below is where they are filled
+  # in and the `CodetracerConf.load` call below is where they are used.
+  var uiCleanArgs: seq[string] = @[]
+  var uiSelectionValue = ""
+
   when not defined(js):
     let args = commandLineParams()
+
+    # THE `--ui` PROLOGUE, AND IT IS FIRST ON PURPOSE.
+    #
+    # ui-selection.md §3.1: "the `--ui` decision is taken in the
+    # argument-parsing prologue, before any window, engine, trace or
+    # configuration file is touched", and "this is the one place a naive
+    # implementation goes wrong, and it will not announce itself: an `--ui`
+    # check placed after configuration loading still *works*."  So it is the
+    # first statement of this block rather than a case inside `runInitial`,
+    # and PLAT-1's verification gate is a BENCHMARK over the resulting handoff
+    # (`src/frontend/tui/benchmarks/tui_benchmarks.nim`,
+    # `tui/ui-flag-handoff-overhead`) rather than a review note.
+    #
+    # The configuration layer of §5 is read here too, and only when the flag
+    # and `CODETRACER_UI` have both declined to answer -- so `ct replay
+    # --ui=tui <trace>`, the invocation the gate measures, still touches no
+    # file.  `ui_dispatch.configuredUiValue` reads ONE key and has no other
+    # effect; `common/config.loadConfig` would create directories and rewrite
+    # the user's file, which is not something a question may do.
+    block uiPrologue:
+      let scan = scanUiArgs(args)
+      let envUi = getEnv(UiEnvVar, "")
+      let configUi =
+        if uiNeedsConfig(scan, envUi): configuredUiValue() else: ""
+      let plan = planUiSelection(args, envUi, configUi)
+      case plan.kind
+      of upkUsageError:
+        # §4.2: never guessed at, never silently defaulted.  One line on
+        # stderr and exit 2, which is what every other usage error in this
+        # product does.
+        stderr.writeLine(plan.message)
+        quit(2)
+      of upkHandoff:
+        let binary = resolveTuiBinary(plan.componentBin)
+        if binary.len == 0:
+          stderr.writeLine(
+            "ct: '--ui=" & $plan.frontEnd & "' needs the '" &
+            plan.componentName & "' component and it is not installed; " &
+            "install it, or set " & tuiBinaryEnvVar & " to its binary")
+          quit(2)
+        execHandoff(binary, plan.handoffArgs)
+      of upkRewrite:
+        # §7.3: `--ui=webui` must not become a SECOND implementation of
+        # hosting.  It is not one: the argv is rewritten into `ct host`'s and
+        # falls through to the same confutils parse and the same
+        # `hostCommand`.
+        uiCleanArgs = plan.rewrittenArgs
+        uiSelectionValue = $plan.frontEnd
+      of upkInProcess:
+        uiCleanArgs = plan.ctArgs
+        uiSelectionValue = $plan.frontEnd
+
     if args.len > 0 and args[0] == "test":
       # M18: `ct test --incremental ...` performs standalone trace-based
       # incremental test selection (record a baseline, decide skip-vs-rerun)
@@ -160,7 +221,12 @@ try:
   # be passed an empty seq -- that would parse nothing at all.)
   var ctArgv: seq[string] = @[]
   when not defined(js):
-    ctArgv = commandLineParams()
+    # `uiCleanArgs` rather than `commandLineParams()`: the `--ui` prologue has
+    # already taken `--ui` (and `--headless`) out, and for `--ui=webui` it has
+    # rewritten the line into `ct host`'s.  When neither applies it IS
+    # `commandLineParams()`, element for element, so the no-`--ui` path
+    # behaves exactly as before.
+    ctArgv = uiCleanArgs
     let sep = ctArgv.find("--")
     if sep >= 0 and ctArgv.len > 0 and ctArgv[0] == "record":
       let rest = ctArgv[sep + 1 .. ^1]
@@ -189,7 +255,7 @@ try:
     conf.recordProgram = childProgram
     conf.recordArgs = childArgs
   customValidateConfig(conf)
-  runInitial(conf)
+  runInitial(conf, uiSelectionValue)
 except CatchableError as ex:
   # An unhandled exception is a failure and has to be reported as one.
   #

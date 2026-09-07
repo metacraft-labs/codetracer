@@ -170,6 +170,7 @@ bpf
 book-isonim
 tui
 tui-real-terminal
+ui-selection
 EOF
 }
 
@@ -207,6 +208,7 @@ test_lane_description() {
 	book-isonim) echo "docs/book-isonim SSG suites" ;;
 	tui) echo "CodeTracer TUI Tier-1 suites (isonim-tui harness, no terminal)" ;;
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
+	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	*)
 		echo "unknown lane '$1'" >&2
 		return 1
@@ -1080,6 +1082,19 @@ test_lane_files() {
 		# (it needs no pty). Tier-1 flags are harmless to it: it links no
 		# grammar archive and imports no `isonim_tui`.
 		_tlf_glob src/tests/launcher 'test_*.nim'
+		;;
+
+	ui-selection)
+		# PLAT-1's end-to-end suites. They live OUTSIDE every discovery glob an
+		# existing lane owns, and that placement is deliberate rather than
+		# tidy-mindedness: both files need artefacts no other lane guarantees --
+		# `src/build-debug/bin/ct`, `build/bin/codetracer-tui`,
+		# `../codetracer-launcher/out/launcher` and `node` -- so putting them
+		# under `src/ct/` or `src/frontend/tui/tests/` would silently add those
+		# prerequisites to a lane whose recipe does not build them, and the
+		# failure would read as a broken test rather than as a missing build.
+		# `just test-ui-selection` names all four.
+		_tlf_find src/tests/ui_selection 'test_*.nim'
 		;;
 
 	tui-real-terminal)

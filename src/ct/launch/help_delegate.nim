@@ -112,6 +112,29 @@ const
     ## handled by the separate commercial rr-backend component, which
     ## declares its own `record-test` file types.
 
+func uiSelectionFlag(): RuntimeFlag =
+  ## PLAT-1's `--ui`, as a flag of the help surface.
+  ##
+  ## IT HAS TO BE ADDED BY HAND, and the reason is the whole shape of the
+  ## feature: `--ui` is intercepted in `codetracer.nim`'s prologue and removed
+  ## from argv BEFORE confutils sees it (ui-selection.md §3.1 requires the
+  ## decision to be taken before anything else), so it is not a field of
+  ## `CodetracerConf` and the compile-time bridge cannot know about it.
+  ## Without this, a published flag would be invisible to `ct --help` and to
+  ## shell completion — which is the "published and undiscoverable" state
+  ## `PlannedOptions` in the TUI's own `app/cli.nim` exists to prevent, one
+  ## binary over.
+  ##
+  ## `gpui` is NOT listed, deliberately: §4.1 keeps it out of the accepted set
+  ## until PLAT-20 makes it work, and a help screen that offered it would be
+  ## advertising a value the binary refuses.
+  newRuntimeFlag(
+    name = "ui",
+    description = "front-end to present the session in: " &
+                  "electron, gui, tui, webui",
+    typeHint = "FRONT-END",
+    default = "electron")
+
 func augmentSelfCommand(cmd: var RuntimeCommand) =
   ## Add file-type and description metadata to commands of the
   ## self-surface that are not captured by the {.command.} discriminator
@@ -119,6 +142,16 @@ func augmentSelfCommand(cmd: var RuntimeCommand) =
   ## or human descriptions for case-object branches). The metadata
   ## values below mirror the spec §2.6 examples for
   ## codetracer-desktop.
+  # PLAT-1 / ui-selection.md §6: the four commands that PRESENT a session, and
+  # only those. A help screen that offered `--ui` on `ct record` would be
+  # advertising a usage error.
+  if cmd.name in ["replay", "run", "edit", "review"]:
+    var declared = false
+    for flag in cmd.flags:
+      if flag.name == "ui":
+        declared = true
+    if not declared:
+      cmd.flags.add uiSelectionFlag()
   case cmd.name
   of "record":
     if cmd.description.len == 0:

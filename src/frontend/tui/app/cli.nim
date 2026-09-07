@@ -135,6 +135,21 @@ const
     ## it unambiguously, the same escape the launcher's own `project ./Makefile`
     ## marker uses.
 
+  DeprecatedCommandNames*: array[2, string] = ["tui", "ct-tui"]
+    ## PLAT-1 (`codetracer-specs/CLI/ct/ui-selection.md` §7.1): the `tui`
+    ## command word is REPLACED by `ct replay --ui=tui`, and kept as a
+    ## deprecated alias **for one release** so every script written between
+    ## CTUI-12 and this change keeps working.
+    ##
+    ## Deliberately a SECOND array with the same members as
+    ## `LauncherCommandNames` rather than an alias of it, because the two say
+    ## different things and stop being the same list at different times: the
+    ## first says "the launcher passes this word through, drop it", which is
+    ## true for as long as the caps file declares the word; the second says
+    ## "warn about this word", which stops being true the release after next
+    ## when the declarations are removed. Aliasing them would make deleting one
+    ## silently delete the other.
+
   NoGotoTick* = -1'i64
     ## `--goto` was not given. See `TuiCommand.gotoTick`.
 
@@ -245,6 +260,31 @@ mutation, gg and G jump to the ends, Tab cycles panes, : opens the command
 prompt and / searches. The full table is §4.2 of
 codetracer-specs/Front-Ends/CodeTracer-TUI.md.
 """
+
+func deprecatedCommandWord*(args: openArray[string]): string =
+  ## The deprecated launcher command word `args` begins with, or "".
+  ##
+  ## FIRST POSITION ONLY, exactly like `parseTuiCommand`'s own stripping — a
+  ## folder called `tui` named later on the line is a folder, not a command
+  ## word, and warning about it would be a message about somebody's directory.
+  ##
+  ## A `func` over an `openArray` and not a side effect: `main.nim` prints the
+  ## line, `app/tests/test_cli_parsing.nim` asserts the decision, and there is
+  ## no arrangement in which the warning can be emitted twice for one argv
+  ## because the only caller is the entrypoint.
+  if args.len == 0:
+    return ""
+  for name in DeprecatedCommandNames:
+    if args[0] == name:
+      return name
+  ""
+
+func deprecationLine*(word: string): string =
+  ## The ONE line §7.1 asks for: it names the replacement and says when the
+  ## alias goes away, and it is a single line because a paragraph on stderr in
+  ## front of a full-screen application is noise a user cannot read anyway.
+  TuiProgramName & ": warning: 'ct " & word & "' is deprecated and will be" &
+  " removed after the next release; use 'ct replay --ui=tui <trace>'"
 
 proc plannedOption(arg: string): (bool, string) =
   ## Whether `arg` names one of §6.2's published-but-unbuilt options, and the

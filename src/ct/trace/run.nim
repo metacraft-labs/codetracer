@@ -41,7 +41,8 @@ proc runWithRestart(
   recordCore: bool = false,
   lang: Lang = LangUnknown,
   recordArgs: seq[string] = @[],
-  newTracePolicy: string = ""
+  newTracePolicy: string = "",
+  uiSelection: string = ""
 ) =
   var afterRestart = false
 
@@ -104,6 +105,17 @@ proc runWithRestart(
       # Always spawn a subprocess for replay so the restart loop can work.
       # (runRecordedTrace uses execv which never returns)
       var replayArgs = @["replay", fmt"--id={recordedTrace.recordingId}"]
+      # PLAT-1 (`codetracer-specs/CLI/ct/ui-selection.md` §6): `ct run` accepts
+      # `--ui`, and this spawn is the point at which it means something --
+      # `ct run` has no session to present until the recording exists, so the
+      # prologue in `codetracer.nim` resolves the value and this is where it is
+      # acted on.  Restated EXPLICITLY on the child's command line rather than
+      # left to the environment: the child would otherwise re-resolve through
+      # `CODETRACER_UI` and the configuration, and a `run` whose front-end
+      # depended on the child's re-reading of a file is one that can disagree
+      # with the parent that recorded for it.
+      if uiSelection.len > 0:
+        replayArgs.add(fmt"--ui={uiSelection}")
       if newTracePolicy == "tab":
         replayArgs.add("--new-tab")
       elif newTracePolicy == "window":
@@ -120,7 +132,8 @@ proc runWithRestart(
       break
 
 proc run*(programArg: string, args: seq[string],
-          newTracePolicy: string = "") =
+          newTracePolicy: string = "",
+          uiSelection: string = "") =
   # run <program> <args>
   # optionally if env variable CODETRACER_RECORD_CORE=true
   # try to record core (dispatcher run) with codetracer
@@ -138,5 +151,6 @@ proc run*(programArg: string, args: seq[string],
     recordCore=recordCore,
     lang=lang,
     newTracePolicy=newTracePolicy,
-    recordArgs=recordArgs
+    recordArgs=recordArgs,
+    uiSelection=uiSelection
   )

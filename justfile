@@ -4184,6 +4184,30 @@ test-tui-real-terminal: build-tui
   exec > >(tee test-logs/test-tui-real-terminal.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh tui-real-terminal
 
+# PLAT-1: `--ui` front-end selection, end to end
+# (codetracer-specs/CLI/ct/ui-selection.md).
+#
+# FOUR REAL ARTEFACTS, and the recipe names the two it can build. The lane
+# drives `codetracer-launcher/out/launcher` -> `src/build-debug/bin/ct` ->
+# `build/bin/codetracer-tui` on a real recording, and separately starts a real
+# `ct host` server (which spawns `node server_index.js`) twice, once by each
+# spelling, and compares the served bytes.
+#
+# `build-tui` and `build-once` are dependencies because the suites ASSERT those
+# binaries exist rather than skipping when they do not (docs/tui-testing.md
+# rule 1), so a lane that did not build them would be red for a reason that is
+# not a defect. The LAUNCHER is deliberately NOT built here: it lives in a
+# sibling repository, PLAT-1's own first test is that this repository has not
+# changed it, and a recipe that rebuilt it would be the one thing able to
+# invalidate that claim. The suite names `cd ../codetracer-launcher && just
+# build` when it is missing.
+test-ui-selection: build-once build-tui
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ui-selection.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ui-selection
+
 
 # RS-M12: assert no recorder writes a sidecar manifest any more.
 #

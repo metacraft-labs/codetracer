@@ -56,7 +56,15 @@ import std/[json, os, strutils, tables, unittest]
 
 # Declared on ONE line because `ci/lib/run-nim-test-lane.sh` reads exactly that
 # spelling; inside a `const` block it is invisible to the lane.
-const ExpectedAssertions = 334
+#
+# IT MOVES WHEN THE ARTIFACT GROWS, and that is the intended coupling rather
+# than a maintenance cost: almost every case below is a sweep over the entries,
+# so the total is `26 * len(entries)` plus the fixed cases. Twelve entries were
+# 334; the three `tui/ui-flag-*` rows took it to 412. A contributor who adds a
+# metric and does not move this number gets a red lane naming both figures,
+# which is the only signal that the artifact and the file that reads it have
+# been changed together.
+const ExpectedAssertions = 412
 
 var countedAssertions = 0
 

@@ -2,73 +2,91 @@
   {
     "name": "tui/cold-start-first-paint",
     "unit": "ms",
-    "value": 4.788727,
-    "extra": "load1=0.47 cpus=24 samples=1 shape=\"ONE spawn, observed once — a cold start is a property of a process's first moments and a second one would not be cold\" process exec to the first ScreenBuffer commit (frame 0, the shell, before replay-server is spawned) target<=50.0 alert-threshold=120% verdict=met"
+    "value": 4.774176,
+    "extra": "load1=4.89 cpus=24 samples=1 shape=\"ONE spawn, observed once — a cold start is a property of a process's first moments and a second one would not be cold\" process exec to the first ScreenBuffer commit (frame 0, the shell, before replay-server is spawned) target<=50.0 alert-threshold=120% verdict=met"
   },
   {
     "name": "tui/time-to-debugger",
     "unit": "ms",
-    "value": 106.372721,
-    "extra": "load1=0.47 cpus=24 samples=1 shape=\"ONE spawn, observed once — the SAME spawn the cold start above was taken from, so the two are stages of one session rather than two cold caches\" GAP 1: process exec to the first frame a user can debug on — not a published §8 row; the target is CTUI-11's measured ~125ms with headroom target<=200.0 alert-threshold=120% verdict=met"
+    "value": 85.782301,
+    "extra": "load1=4.89 cpus=24 samples=1 shape=\"ONE spawn, observed once — the SAME spawn the cold start above was taken from, so the two are stages of one session rather than two cold caches\" GAP 1: process exec to the first frame a user can debug on — not a published §8 row; the target is CTUI-11's measured ~125ms with headroom target<=200.0 alert-threshold=120% verdict=met"
   },
   {
     "name": "tui/steady-state-rss",
     "unit": "MB",
-    "value": 19.50390625,
-    "extra": "load1=0.47 cpus=24 samples=1 shape=\"ONE read of /proc/<pid>/status VmRSS on the same spawn, after the session settled — a resident set is a state and not a distribution\" fixture=calc — §8 states the condition as a 50,000-tick trace; the fixture corpus CTUI-1 produces has no recording that long, so this is the largest available and the CONDITION IS NOT MET even though the number is target<=30.0 alert-threshold=120% verdict=met-CONDITION-NOT-external"
+    "value": 19.4921875,
+    "extra": "load1=4.89 cpus=24 samples=1 shape=\"ONE read of /proc/<pid>/status VmRSS on the same spawn, after the session settled — a resident set is a state and not a distribution\" fixture=calc — §8 states the condition as a 50,000-tick trace; the fixture corpus CTUI-1 produces has no recording that long, so this is the largest available and the CONDITION IS NOT MET even though the number is target<=30.0 alert-threshold=120% verdict=met-CONDITION-NOT-external"
   },
   {
     "name": "tui/idle-cpu",
     "unit": "%",
     "value": 0.0,
-    "extra": "load1=0.52 cpus=24 samples=1 shape=\"ONE utime+stime jiffy delta across ONE 5-second window on the same spawn, which is §8's own stated sampling\" window=5.0s bytes-received-while-idle=0 — a non-zero count there means the app was NOT idle and the figure is not an idle figure target<=0.5 alert-threshold=120% verdict=met"
+    "extra": "load1=4.65 cpus=24 samples=1 shape=\"ONE utime+stime jiffy delta across ONE 5-second window on the same spawn, which is §8's own stated sampling\" window=5.0s bytes-received-while-idle=0 — a non-zero count there means the app was NOT idle and the figure is not an idle figure target<=0.5 alert-threshold=120% verdict=met"
+  },
+  {
+    "name": "tui/ui-flag-handoff-overhead",
+    "unit": "ms",
+    "value": 16.889683,
+    "extra": "load1=4.60 cpus=24 samples=200 shape=\"the DIFFERENCE of two medians over 200 interleaved spawn pairs — one sample is one `codetracer-tui --version` and one `ct replay --ui=tui --version`, run back to back\" PLAT-1's gate (ui-selection.md §3.1). direct=1.540ms through-flag=18.430ms path-entries=193; the launcher's own exec is in neither arm because it is in BOTH of the invocations being compared and cancels. THE FIGURE SCALES WITH len(PATH): ~28 module-level findExe lookups in src/common/paths.nim run before main on every ct start (3.5ms at 2 PATH entries, 18.0ms at 193, measured 2026-09-07) target<=10.0 alert-threshold=105% verdict=NOT-MET"
+  },
+  {
+    "name": "tui/ui-flag-direct-spawn",
+    "unit": "ms",
+    "value": 1.539911,
+    "extra": "load1=4.60 cpus=24 samples=200 shape=\"median of 200 `codetracer-tui --version` spawns\" the control arm of tui/ui-flag-handoff-overhead target<=0.0 alert-threshold=120% verdict=reported-not-gated"
+  },
+  {
+    "name": "tui/ui-flag-handoff-spawn",
+    "unit": "ms",
+    "value": 18.429594,
+    "extra": "load1=4.60 cpus=24 samples=200 shape=\"median of 200 `ct replay --ui=tui --version` spawns\" the measured arm of tui/ui-flag-handoff-overhead target<=0.0 alert-threshold=120% verdict=reported-not-gated"
   },
   {
     "name": "tui/input-latency-p50",
     "unit": "ms",
-    "value": 4.78899,
-    "extra": "load1=0.52 cpus=24 samples=200 shape=\"one key dispatched and one frame composited, in-process; the value is the p50 of them\" fixture=calc key=j/k/Tab target<=16.0 alert-threshold=120% verdict=met"
+    "value": 5.595381,
+    "extra": "load1=4.60 cpus=24 samples=200 shape=\"one key dispatched and one frame composited, in-process; the value is the p50 of them\" fixture=calc key=j/k/Tab target<=16.0 alert-threshold=120% verdict=met"
   },
   {
     "name": "tui/input-latency-p99",
     "unit": "ms",
-    "value": 6.451479,
-    "extra": "load1=0.56 cpus=24 samples=200 shape=\"one key dispatched and one frame composited, in-process; the value is the p99 of them\" fixture=wide_state variables-tree-expanded target<=33.0 alert-threshold=120% verdict=met"
+    "value": 10.869775,
+    "extra": "load1=4.55 cpus=24 samples=200 shape=\"one key dispatched and one frame composited, in-process; the value is the p99 of them\" fixture=wide_state variables-tree-expanded target<=33.0 alert-threshold=120% verdict=met"
   },
   {
     "name": "tui/coalescing-p50-delta",
     "unit": "ms",
-    "value": 0.0006099999999999994,
-    "extra": "load1=0.56 cpus=24 samples=600 shape=\"THREE contiguous blocks of 200 iterations — uncoalesced, uncoalesced again, coalesced; the value is a difference between two of the three p50s and the target is the spread of the other two\" uncoalesced-p50=5.104ms uncoalesced-p50-again=5.123ms coalesced-p50=5.105ms run-to-run-noise=0.018ms — the target IS the noise: the same measurement's own spread between two consecutive blocks on this host at this load target<=0.018197999999999936 alert-threshold=120% verdict=met"
+    "value": -0.14033099999999976,
+    "extra": "load1=4.55 cpus=24 samples=600 shape=\"THREE contiguous blocks of 200 iterations — uncoalesced, uncoalesced again, coalesced; the value is a difference between two of the three p50s and the target is the spread of the other two\" uncoalesced-p50=5.668ms uncoalesced-p50-again=5.600ms coalesced-p50=5.528ms run-to-run-noise=0.068ms — the target IS the noise: the same measurement's own spread between two consecutive blocks on this host at this load target<=0.06797599999999981 alert-threshold=120% verdict=met"
   },
   {
     "name": "tui/single-step-ansi-bytes",
     "unit": "bytes",
     "value": 3637.0,
-    "extra": "load1=0.84 cpus=24 samples=16 shape=\"one `n` step through a real recording, its frame emitted and counted; 40 steps were taken and the ones that changed nothing on the screen are NOT samples of a single line step\" steps=40 that-changed-the-screen=16 unchanged=24 tuned-min=337. tuned-p25=2658. tuned-p99=5145. untuned-median=9569. — the sweep starts at the entry point, where most steps ENTER or LEAVE a function and scroll the source pane; the minimum is what a step within one function costs target<=250.0 alert-threshold=105% verdict=NOT-MET"
+    "extra": "load1=4.50 cpus=24 samples=16 shape=\"one `n` step through a real recording, its frame emitted and counted; 40 steps were taken and the ones that changed nothing on the screen are NOT samples of a single line step\" steps=40 that-changed-the-screen=16 unchanged=24 tuned-min=337. tuned-p25=2658. tuned-p99=5145. untuned-median=9569. — the sweep starts at the entry point, where most steps ENTER or LEAVE a function and scroll the source pane; the minimum is what a step within one function costs target<=250.0 alert-threshold=105% verdict=NOT-MET"
   },
   {
     "name": "tui/single-step-ansi-bytes-untuned",
     "unit": "bytes",
     "value": 9569.0,
-    "extra": "load1=0.84 cpus=24 samples=16 shape=\"the SAME steps as the tuned arm, emitted a second time through a non-diffing emitter that saw the same buffers\" diffing=off — the pre-CTUI-14 emitter. THE CONTROL ARM, not a gate: it is what every release before CTUI-14 sent, and it is here so the tuned figure beside it is a difference rather than a claim target<=250.0 alert-threshold=105% verdict=reported-not-gated"
+    "extra": "load1=4.50 cpus=24 samples=16 shape=\"the SAME steps as the tuned arm, emitted a second time through a non-diffing emitter that saw the same buffers\" diffing=off — the pre-CTUI-14 emitter. THE CONTROL ARM, not a gate: it is what every release before CTUI-14 sent, and it is here so the tuned figure beside it is a difference rather than a claim target<=250.0 alert-threshold=105% verdict=reported-not-gated"
   },
   {
     "name": "tui/resize-reflow-p99",
     "unit": "ms",
-    "value": 8.060689,
-    "extra": "load1=0.84 cpus=24 samples=200 shape=\"one resize, re-layout and composite; the value is the p99 of them\" between lpStandard 120x40 and lpCompact 100x30 target<=20.0 alert-threshold=120% verdict=met"
+    "value": 8.771691,
+    "extra": "load1=4.50 cpus=24 samples=200 shape=\"one resize, re-layout and composite; the value is the p99 of them\" between lpStandard 120x40 and lpCompact 100x30 target<=20.0 alert-threshold=120% verdict=met"
   },
   {
     "name": "tui/strip-cache-hit-rate",
     "unit": "%",
     "value": 98.33333333333333,
-    "extra": "load1=0.84 cpus=24 samples=60 shape=\"ONE ratio accumulated over 60 frames on one persistent compositor — a single hits/(hits+misses) over every strip lookup those frames made, not a per-frame figure with a distribution\" frames=60 hits=29972 misses=508 — measured on a PERSISTENT compositor; the shipped driver builds a fresh one per frame and diffs on the wire instead (ssh_tuning.dirtyRuns). THE CONDITION IS NOT MET EVEN THOUGH THE NUMBER IS: §8 states the condition as steady-state stepping in the product, and terminal_driver.composite builds a fresh Compositor per frame, so THE SHIPPED BINARY'S RATE IS 0% BY CONSTRUCTION — this figure is a property of the compositor and not of the program that ships target>=92.0 alert-threshold=106% verdict=met-CONDITION-NOT-internal"
+    "extra": "load1=4.50 cpus=24 samples=60 shape=\"ONE ratio accumulated over 60 frames on one persistent compositor — a single hits/(hits+misses) over every strip lookup those frames made, not a per-frame figure with a distribution\" frames=60 hits=29972 misses=508 — measured on a PERSISTENT compositor; the shipped driver builds a fresh one per frame and diffs on the wire instead (ssh_tuning.dirtyRuns). THE CONDITION IS NOT MET EVEN THOUGH THE NUMBER IS: §8 states the condition as steady-state stepping in the product, and terminal_driver.composite builds a fresh Compositor per frame, so THE SHIPPED BINARY'S RATE IS 0% BY CONSTRUCTION — this figure is a property of the compositor and not of the program that ships target>=92.0 alert-threshold=106% verdict=met-CONDITION-NOT-internal"
   },
   {
     "name": "tui/command-palette-p99",
     "unit": "ms",
-    "value": 1.08487,
-    "extra": "load1=0.84 cpus=24 samples=400 shape=\"one cold fuzzy search over the whole index; the value is the p99 of them\" build=release symbols=2000 query=shld hits=500 iterations=400 p50=1.007ms max=1.145ms — CTUI-10 measured 3.88ms idle and 7.13ms under 2x oversubscription on a DEBUG build, with 7 of 9 runs over 8ms; GAP 2's answer is to state the gate against this release figure target<=8.0 alert-threshold=120% verdict=met"
+    "value": 1.124784,
+    "extra": "load1=4.50 cpus=24 samples=400 shape=\"one cold fuzzy search over the whole index; the value is the p99 of them\" build=release symbols=2000 query=shld hits=500 iterations=400 p50=1.030ms max=1.188ms — CTUI-10 measured 3.88ms idle and 7.13ms under 2x oversubscription on a DEBUG build, with 7 of 9 runs over 8ms; GAP 2's answer is to state the gate against this release figure target<=8.0 alert-threshold=120% verdict=met"
   }
 ]

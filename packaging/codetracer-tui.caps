@@ -53,5 +53,10 @@ name codetracer-tui
 bin codetracer-tui
 description CodeTracer terminal front-end -- time-travel debugging over SSH
 
+# DEPRECATED, KEPT FOR ONE RELEASE -- PLAT-1, ui-selection.md §7.1.  Replaced
+# by `ct replay --ui=tui`, which codetracer-desktop resolves and hands off with
+# execv, so the launcher still learns nothing about `--ui`.  `main.nim` prints
+# ONE stderr line naming the replacement; delete these two lines and
+# `app/cli.DeprecatedCommandNames` together.
 tui .ct noext
 ct-tui .ct noext

@@ -18,8 +18,8 @@
  .meta { color: #555; }
 </style></head><body>
 <h1>CodeTracer TUI — §8 performance targets</h1>
-<p class="meta">Run 2026-09-06 21:12:27 &middot; 24 CPUs &middot;
- one-minute load at start 0.47 &middot;
+<p class="meta">Run 2026-09-07 05:09:02 &middot; 24 CPUs &middot;
+ one-minute load at start 4.89 &middot;
  loop budget 200 iterations</p>
 <p class="meta"><strong>Every figure carries the host load it was taken
  under, and its own sample count and shape.</strong> A benchmark number
@@ -33,27 +33,27 @@
     <th>verdict</th><th>conditions</th></tr>
     <tr class="met">
       <td class="name">tui/cold-start-first-paint</td>
-      <td class="num">4.789</td>
+      <td class="num">4.774</td>
       <td class="unit">ms</td>
       <td class="num">&le; 50.000</td>
       <td class="verdict">met</td>
-      <td class="extra">load1=0.47 cpus=24 samples=1 shape="ONE spawn, observed once — a cold start is a property of a process's first moments and a second one would not be cold" process exec to the first ScreenBuffer commit (frame 0, the shell, before replay-server is spawned)</td>
+      <td class="extra">load1=4.89 cpus=24 samples=1 shape="ONE spawn, observed once — a cold start is a property of a process's first moments and a second one would not be cold" process exec to the first ScreenBuffer commit (frame 0, the shell, before replay-server is spawned)</td>
     </tr>
     <tr class="met">
       <td class="name">tui/time-to-debugger</td>
-      <td class="num">106.373</td>
+      <td class="num">85.782</td>
       <td class="unit">ms</td>
       <td class="num">&le; 200.000</td>
       <td class="verdict">met</td>
-      <td class="extra">load1=0.47 cpus=24 samples=1 shape="ONE spawn, observed once — the SAME spawn the cold start above was taken from, so the two are stages of one session rather than two cold caches" GAP 1: process exec to the first frame a user can debug on — not a published §8 row; the target is CTUI-11's measured ~125ms with headroom</td>
+      <td class="extra">load1=4.89 cpus=24 samples=1 shape="ONE spawn, observed once — the SAME spawn the cold start above was taken from, so the two are stages of one session rather than two cold caches" GAP 1: process exec to the first frame a user can debug on — not a published §8 row; the target is CTUI-11's measured ~125ms with headroom</td>
     </tr>
     <tr class="condition-not">
       <td class="name">tui/steady-state-rss</td>
-      <td class="num">19.504</td>
+      <td class="num">19.492</td>
       <td class="unit">MB</td>
       <td class="num">&le; 30.000</td>
       <td class="verdict">met, CONDITION NOT (external)</td>
-      <td class="extra">load1=0.47 cpus=24 samples=1 shape="ONE read of /proc/<pid>/status VmRSS on the same spawn, after the session settled — a resident set is a state and not a distribution" fixture=calc — §8 states the condition as a 50,000-tick trace; the fixture corpus CTUI-1 produces has no recording that long, so this is the largest available and the CONDITION IS NOT MET even though the number is</td>
+      <td class="extra">load1=4.89 cpus=24 samples=1 shape="ONE read of /proc/<pid>/status VmRSS on the same spawn, after the session settled — a resident set is a state and not a distribution" fixture=calc — §8 states the condition as a 50,000-tick trace; the fixture corpus CTUI-1 produces has no recording that long, so this is the largest available and the CONDITION IS NOT MET even though the number is</td>
     </tr>
     <tr class="met">
       <td class="name">tui/idle-cpu</td>
@@ -61,31 +61,55 @@
       <td class="unit">%</td>
       <td class="num">&le; 0.500</td>
       <td class="verdict">met</td>
-      <td class="extra">load1=0.52 cpus=24 samples=1 shape="ONE utime+stime jiffy delta across ONE 5-second window on the same spawn, which is §8's own stated sampling" window=5.0s bytes-received-while-idle=0 — a non-zero count there means the app was NOT idle and the figure is not an idle figure</td>
+      <td class="extra">load1=4.65 cpus=24 samples=1 shape="ONE utime+stime jiffy delta across ONE 5-second window on the same spawn, which is §8's own stated sampling" window=5.0s bytes-received-while-idle=0 — a non-zero count there means the app was NOT idle and the figure is not an idle figure</td>
+    </tr>
+    <tr class="not-met">
+      <td class="name">tui/ui-flag-handoff-overhead</td>
+      <td class="num">16.890</td>
+      <td class="unit">ms</td>
+      <td class="num">&le; 10.000</td>
+      <td class="verdict">not-met</td>
+      <td class="extra">load1=4.60 cpus=24 samples=200 shape="the DIFFERENCE of two medians over 200 interleaved spawn pairs — one sample is one `codetracer-tui --version` and one `ct replay --ui=tui --version`, run back to back" PLAT-1's gate (ui-selection.md §3.1). direct=1.540ms through-flag=18.430ms path-entries=193; the launcher's own exec is in neither arm because it is in BOTH of the invocations being compared and cancels. THE FIGURE SCALES WITH len(PATH): ~28 module-level findExe lookups in src/common/paths.nim run before main on every ct start (3.5ms at 2 PATH entries, 18.0ms at 193, measured 2026-09-07)</td>
+    </tr>
+    <tr class="reported">
+      <td class="name">tui/ui-flag-direct-spawn</td>
+      <td class="num">1.540</td>
+      <td class="unit">ms</td>
+      <td class="num">&le; 0.000</td>
+      <td class="verdict">reported</td>
+      <td class="extra">load1=4.60 cpus=24 samples=200 shape="median of 200 `codetracer-tui --version` spawns" the control arm of tui/ui-flag-handoff-overhead</td>
+    </tr>
+    <tr class="reported">
+      <td class="name">tui/ui-flag-handoff-spawn</td>
+      <td class="num">18.430</td>
+      <td class="unit">ms</td>
+      <td class="num">&le; 0.000</td>
+      <td class="verdict">reported</td>
+      <td class="extra">load1=4.60 cpus=24 samples=200 shape="median of 200 `ct replay --ui=tui --version` spawns" the measured arm of tui/ui-flag-handoff-overhead</td>
     </tr>
     <tr class="met">
       <td class="name">tui/input-latency-p50</td>
-      <td class="num">4.789</td>
+      <td class="num">5.595</td>
       <td class="unit">ms</td>
       <td class="num">&le; 16.000</td>
       <td class="verdict">met</td>
-      <td class="extra">load1=0.52 cpus=24 samples=200 shape="one key dispatched and one frame composited, in-process; the value is the p50 of them" fixture=calc key=j/k/Tab</td>
+      <td class="extra">load1=4.60 cpus=24 samples=200 shape="one key dispatched and one frame composited, in-process; the value is the p50 of them" fixture=calc key=j/k/Tab</td>
     </tr>
     <tr class="met">
       <td class="name">tui/input-latency-p99</td>
-      <td class="num">6.451</td>
+      <td class="num">10.870</td>
       <td class="unit">ms</td>
       <td class="num">&le; 33.000</td>
       <td class="verdict">met</td>
-      <td class="extra">load1=0.56 cpus=24 samples=200 shape="one key dispatched and one frame composited, in-process; the value is the p99 of them" fixture=wide_state variables-tree-expanded</td>
+      <td class="extra">load1=4.55 cpus=24 samples=200 shape="one key dispatched and one frame composited, in-process; the value is the p99 of them" fixture=wide_state variables-tree-expanded</td>
     </tr>
     <tr class="met">
       <td class="name">tui/coalescing-p50-delta</td>
-      <td class="num">0.001</td>
+      <td class="num">-0.140</td>
       <td class="unit">ms</td>
-      <td class="num">&le; 0.018</td>
+      <td class="num">&le; 0.068</td>
       <td class="verdict">met</td>
-      <td class="extra">load1=0.56 cpus=24 samples=600 shape="THREE contiguous blocks of 200 iterations — uncoalesced, uncoalesced again, coalesced; the value is a difference between two of the three p50s and the target is the spread of the other two" uncoalesced-p50=5.104ms uncoalesced-p50-again=5.123ms coalesced-p50=5.105ms run-to-run-noise=0.018ms — the target IS the noise: the same measurement's own spread between two consecutive blocks on this host at this load</td>
+      <td class="extra">load1=4.55 cpus=24 samples=600 shape="THREE contiguous blocks of 200 iterations — uncoalesced, uncoalesced again, coalesced; the value is a difference between two of the three p50s and the target is the spread of the other two" uncoalesced-p50=5.668ms uncoalesced-p50-again=5.600ms coalesced-p50=5.528ms run-to-run-noise=0.068ms — the target IS the noise: the same measurement's own spread between two consecutive blocks on this host at this load</td>
     </tr>
     <tr class="not-met">
       <td class="name">tui/single-step-ansi-bytes</td>
@@ -93,7 +117,7 @@
       <td class="unit">bytes</td>
       <td class="num">&le; 250.000</td>
       <td class="verdict">not-met</td>
-      <td class="extra">load1=0.84 cpus=24 samples=16 shape="one `n` step through a real recording, its frame emitted and counted; 40 steps were taken and the ones that changed nothing on the screen are NOT samples of a single line step" steps=40 that-changed-the-screen=16 unchanged=24 tuned-min=337. tuned-p25=2658. tuned-p99=5145. untuned-median=9569. — the sweep starts at the entry point, where most steps ENTER or LEAVE a function and scroll the source pane; the minimum is what a step within one function costs</td>
+      <td class="extra">load1=4.50 cpus=24 samples=16 shape="one `n` step through a real recording, its frame emitted and counted; 40 steps were taken and the ones that changed nothing on the screen are NOT samples of a single line step" steps=40 that-changed-the-screen=16 unchanged=24 tuned-min=337. tuned-p25=2658. tuned-p99=5145. untuned-median=9569. — the sweep starts at the entry point, where most steps ENTER or LEAVE a function and scroll the source pane; the minimum is what a step within one function costs</td>
     </tr>
     <tr class="reported">
       <td class="name">tui/single-step-ansi-bytes-untuned</td>
@@ -101,15 +125,15 @@
       <td class="unit">bytes</td>
       <td class="num">&le; 250.000</td>
       <td class="verdict">reported</td>
-      <td class="extra">load1=0.84 cpus=24 samples=16 shape="the SAME steps as the tuned arm, emitted a second time through a non-diffing emitter that saw the same buffers" diffing=off — the pre-CTUI-14 emitter. THE CONTROL ARM, not a gate: it is what every release before CTUI-14 sent, and it is here so the tuned figure beside it is a difference rather than a claim</td>
+      <td class="extra">load1=4.50 cpus=24 samples=16 shape="the SAME steps as the tuned arm, emitted a second time through a non-diffing emitter that saw the same buffers" diffing=off — the pre-CTUI-14 emitter. THE CONTROL ARM, not a gate: it is what every release before CTUI-14 sent, and it is here so the tuned figure beside it is a difference rather than a claim</td>
     </tr>
     <tr class="met">
       <td class="name">tui/resize-reflow-p99</td>
-      <td class="num">8.061</td>
+      <td class="num">8.772</td>
       <td class="unit">ms</td>
       <td class="num">&le; 20.000</td>
       <td class="verdict">met</td>
-      <td class="extra">load1=0.84 cpus=24 samples=200 shape="one resize, re-layout and composite; the value is the p99 of them" between lpStandard 120x40 and lpCompact 100x30</td>
+      <td class="extra">load1=4.50 cpus=24 samples=200 shape="one resize, re-layout and composite; the value is the p99 of them" between lpStandard 120x40 and lpCompact 100x30</td>
     </tr>
     <tr class="condition-not">
       <td class="name">tui/strip-cache-hit-rate</td>
@@ -117,15 +141,15 @@
       <td class="unit">%</td>
       <td class="num">&ge; 92.000</td>
       <td class="verdict">met, CONDITION NOT (internal)</td>
-      <td class="extra">load1=0.84 cpus=24 samples=60 shape="ONE ratio accumulated over 60 frames on one persistent compositor — a single hits/(hits+misses) over every strip lookup those frames made, not a per-frame figure with a distribution" frames=60 hits=29972 misses=508 — measured on a PERSISTENT compositor; the shipped driver builds a fresh one per frame and diffs on the wire instead (ssh_tuning.dirtyRuns). THE CONDITION IS NOT MET EVEN THOUGH THE NUMBER IS: §8 states the condition as steady-state stepping in the product, and terminal_driver.composite builds a fresh Compositor per frame, so THE SHIPPED BINARY'S RATE IS 0% BY CONSTRUCTION — this figure is a property of the compositor and not of the program that ships</td>
+      <td class="extra">load1=4.50 cpus=24 samples=60 shape="ONE ratio accumulated over 60 frames on one persistent compositor — a single hits/(hits+misses) over every strip lookup those frames made, not a per-frame figure with a distribution" frames=60 hits=29972 misses=508 — measured on a PERSISTENT compositor; the shipped driver builds a fresh one per frame and diffs on the wire instead (ssh_tuning.dirtyRuns). THE CONDITION IS NOT MET EVEN THOUGH THE NUMBER IS: §8 states the condition as steady-state stepping in the product, and terminal_driver.composite builds a fresh Compositor per frame, so THE SHIPPED BINARY'S RATE IS 0% BY CONSTRUCTION — this figure is a property of the compositor and not of the program that ships</td>
     </tr>
     <tr class="met">
       <td class="name">tui/command-palette-p99</td>
-      <td class="num">1.085</td>
+      <td class="num">1.125</td>
       <td class="unit">ms</td>
       <td class="num">&le; 8.000</td>
       <td class="verdict">met</td>
-      <td class="extra">load1=0.84 cpus=24 samples=400 shape="one cold fuzzy search over the whole index; the value is the p99 of them" build=release symbols=2000 query=shld hits=500 iterations=400 p50=1.007ms max=1.145ms — CTUI-10 measured 3.88ms idle and 7.13ms under 2x oversubscription on a DEBUG build, with 7 of 9 runs over 8ms; GAP 2's answer is to state the gate against this release figure</td>
+      <td class="extra">load1=4.50 cpus=24 samples=400 shape="one cold fuzzy search over the whole index; the value is the p99 of them" build=release symbols=2000 query=shld hits=500 iterations=400 p50=1.030ms max=1.188ms — CTUI-10 measured 3.88ms idle and 7.13ms under 2x oversubscription on a DEBUG build, with 7 of 9 runs over 8ms; GAP 2's answer is to state the gate against this release figure</td>
     </tr>
 </table>
 </body></html>

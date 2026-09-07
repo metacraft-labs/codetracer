@@ -293,6 +293,16 @@ proc run(args: seq[string]): int =
   ## that ran `ct` and checked `$?` read crashes as success. So this returns a
   ## status, the wrapper below is the only thing that quits, and the failure
   ## paths are visible in one screen rather than spread across the arms.
+  # PLAT-1 §7.1: `ct tui` is a deprecated alias for `ct replay --ui=tui`, kept
+  # for one release. EXACTLY ONE LINE, on stderr, before anything else — stdout
+  # carries `--version`'s machine-readable answer and the alternate screen's
+  # first frame, and a warning in either would corrupt a parse or be erased by
+  # the first repaint. Emitted here rather than inside `parseTuiCommand`
+  # because printing is a host act and that module does none.
+  let deprecated = deprecatedCommandWord(args)
+  if deprecated.len > 0:
+    stderr.writeLine(deprecationLine(deprecated))
+
   let command = parseTuiCommand(args)
   case command.kind
   of tckHelp:

@@ -68,6 +68,21 @@ type
     ## spawns a new Electron window ("window").  Default: "tab".
     newTracePolicy* {.defaultVal: "tab".}:                string
 
+    ## PLAT-1: the third layer of `--ui`'s resolution order
+    ## (`codetracer-specs/CLI/ct/ui-selection.md` §5) -- one of
+    ## `electron`, `gui`, `tui`, `webui`.  Empty means "not configured",
+    ## which is the state that falls through to the built-in default.
+    ##
+    ## DECLARED HERE EVEN THOUGH THE SELECTOR DOES NOT READ IT FROM
+    ## HERE.  The prologue reads the key with a narrow reader
+    ## (`ct/launch/ui_dispatch.configuredUiValue`) because it runs
+    ## before any configuration is loaded; but NimYAML loads this schema
+    ## strictly, so a user who writes `ui: tui` into their config would
+    ## otherwise make `loadConfig` throw -- and its recovery path COPIES
+    ## THE DEFAULT CONFIG OVER THEIR FILE.  A setting the product
+    ## publishes must not be able to delete the file it is written in.
+    ui* {.defaultVal: "".}:                               string
+
   Config* = ref ConfigObject
 
   FlowUI* = enum FlowParallel, FlowInline, FlowMultiline

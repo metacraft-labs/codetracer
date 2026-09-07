@@ -100,7 +100,16 @@ proc loadEnvFiles(
         except CatchableError:
           discard
 
-proc runInitial*(conf: CodetracerConf) =
+proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
+  ## `uiSelection` is PLAT-1's resolved front-end name (`electron`, `gui`,
+  ## `tui`, `webui`), or "" when the command does not present a session.
+  ##
+  ## Only `ct run` reads it, and the reason it has to be carried this far is
+  ## structural: every other session-presenting command knows what it is
+  ## opening when the prologue runs, so the prologue can hand off there and
+  ## then.  `ct run` RECORDS first, and only afterwards does it have a
+  ## recording to present -- see `trace/run.nim`, which re-enters this binary
+  ## as `ct replay --id=<id>` and therefore has to say `--ui` again.
   # TODO should this be here?
   workaroundIntelECoreProblem()
 
@@ -401,7 +410,8 @@ proc runInitial*(conf: CodetracerConf) =
         elif conf.newWindow: "window"
         else: "" # empty = defer to config/default
       run(conf.runTracePathOrId, conf.runArgs,
-          newTracePolicy = runPolicy)
+          newTracePolicy = runPolicy,
+          uiSelection = uiSelection)
     of StartupCommand.remote:
       quit(runCtRemote(conf.remoteArgs))
     of StartupCommand.arb:

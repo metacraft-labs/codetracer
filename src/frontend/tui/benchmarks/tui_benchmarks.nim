@@ -68,8 +68,8 @@
 when defined(js):
   {.error: "the TUI benchmarks spawn processes and open a real trace.".}
 
-import std/[algorithm, json, monotimes, os, osproc, posix, strformat,
-            strutils, times]
+import std/[algorithm, json, monotimes, os, osproc, posix, streams,
+            strformat, strtabs, strutils, times]
 
 import isonim_tui
 import nim_pty
@@ -667,6 +667,177 @@ proc cpuJiffies(pid: int): int =
     discard
   -1
 
+proc medianOf(samples: seq[float]): float =
+  percentile(samples, 0.50)
+
+proc spawnMillis(exe: string; args: seq[string];
+                 env: seq[(string, string)]): float =
+  ## Wall time from `startProcess` to `waitForExit`, in milliseconds.
+  ##
+  ## Both arms of the handoff measurement below use this ONE function, so the
+  ## spawn overhead the harness itself contributes is the same constant in both
+  ## and cancels in the difference.
+  var table = newStringTable(modeCaseSensitive)
+  for (k, v) in env:
+    table[k] = v
+  let started = getMonoTime()
+  let p = startProcess(exe, args = args, env = table,
+                       options = {poStdErrToStdOut})
+  discard p.outputStream.readAll()
+  discard p.waitForExit()
+  p.close()
+  float((getMonoTime() - started).inNanoseconds) / 1e6
+
+proc uiHandoffMetric(bench: Bench) =
+  ## PLAT-1's VERIFICATION GATE, as a benchmark entry rather than a review note.
+  ##
+  ## `codetracer-specs/CLI/ct/ui-selection.md` §3.1: "the added cost of reaching
+  ## the TUI through `ct replay --ui=tui` rather than directly must stay under
+  ## **10 ms**, measured and benchmarked alongside CTUI-14's
+  ## `tui/cold-start-first-paint`". The milestone restates it: "measured with
+  ## host load stated and benchmarked beside `tui/cold-start-first-paint`".
+  ##
+  ## ## WHAT "THE ADDED COST" IS, EXACTLY
+  ##
+  ## Reaching the TUI directly is `launcher -> codetracer-tui`. Reaching it
+  ## through the flag is `launcher -> ct -> codetracer-tui`. The launcher's own
+  ## exec is in BOTH, so it cancels; what `--ui` adds is one whole `ct` process
+  ## — its dynamic loading, its Nim module initialisation, its prologue, and the
+  ## second `execv`. That is what is measured here: the same front-end binary
+  ## doing the same work in both arms, once reached directly and once reached
+  ## through `ct`.
+  ##
+  ## ## WHY `--version` AND NOT A RECORDING
+  ##
+  ## Verification-Harness-Traps: an inequality between two independently noisy
+  ## measurements, asserted against an exact constant, is a coin flip. A full
+  ## session takes seconds and its variance is seconds; a difference of two such
+  ## numbers cannot resolve 10 ms and would report whichever way the page cache
+  ## fell. `--version` makes the SHARED part of both arms small and nearly
+  ## constant, so the difference is dominated by the thing under measurement.
+  ## The handoff work does not depend on what follows it — the same resolution,
+  ## the same component lookup, the same `execv` — so this measures the whole of
+  ## it and nothing else.
+  ##
+  ## `--version` reaches the front-end as a passed-through option: `ct replay
+  ## --ui=tui --version` resolves the flag, hands the remaining arguments over,
+  ## and `codetracer-tui --version` prints and exits. Asserted rather than
+  ## assumed — the run is abandoned with a diagnosis if either arm's output is
+  ## not the front-end's version line, because two arms that both failed
+  ## quickly would produce a very good number.
+  let root = repoRoot()
+  let tuiBinary = root / "build" / "bin" / "codetracer-tui"
+  let ctBinary = root / "src" / "build-debug" / "bin" / "ct"
+  if not fileExists(tuiBinary):
+    raise newException(IOError,
+      "missing " & tuiBinary & " — run `just build-tui`")
+  if not fileExists(ctBinary):
+    raise newException(IOError,
+      "missing " & ctBinary & " — run `just build-once`; PLAT-1's gate is " &
+      "about the cost of going THROUGH this binary, so it cannot be measured " &
+      "without it")
+
+  var env: seq[(string, string)] = @[]
+  for k, v in envPairs():
+    if k == "CODETRACER_UI":
+      continue
+    env.add (k, v)
+  # The handoff must resolve to the SAME binary the direct arm runs, or the
+  # difference would include a component-directory scan against a different
+  # answer.
+  env.add ("CODETRACER_TUI_BIN", tuiBinary)
+
+  # Both arms are checked ONCE for what they produce, before anything is timed.
+  let expected = "codetracer-tui"
+  block verify:
+    var table = newStringTable(modeCaseSensitive)
+    for (k, v) in env:
+      table[k] = v
+    for (exe, args) in [(tuiBinary, @["--version"]),
+                        (ctBinary, @["replay", "--ui=tui", "--version"])]:
+      let p = startProcess(exe, args = args, env = table,
+                           options = {poStdErrToStdOut})
+      let output = p.outputStream.readAll()
+      let rc = p.waitForExit()
+      p.close()
+      if rc != 0 or not output.contains(expected):
+        raise newException(IOError,
+          "the `--ui` handoff benchmark cannot be measured: `" & exe & " " &
+          args.join(" ") & "` exited " & $rc & " with output '" &
+          output.strip() & "', which does not name " & expected)
+
+  # A WARM-UP THAT IS DISCARDED, in both arms, so the first-touch page faults
+  # of a 13 MB and a 15 MB binary are not attributed to the handoff.
+  for _ in 0 ..< 5:
+    discard spawnMillis(tuiBinary, @["--version"], env)
+    discard spawnMillis(ctBinary, @["replay", "--ui=tui", "--version"], env)
+
+  let samples = if bench.quick: 40 else: 200
+  var direct: seq[float] = @[]
+  var throughFlag: seq[float] = @[]
+  # INTERLEAVED, not one block after the other: a machine that gets busier
+  # halfway through a run would otherwise put all of the extra load into
+  # whichever arm ran second, and the difference would be the load rather than
+  # the handoff.
+  for _ in 0 ..< samples:
+    direct.add spawnMillis(tuiBinary, @["--version"], env)
+    throughFlag.add spawnMillis(ctBinary,
+                                @["replay", "--ui=tui", "--version"], env)
+
+  let directMedian = medianOf(direct)
+  let flagMedian = medianOf(throughFlag)
+  let overhead = flagMedian - directMedian
+  # THE LENGTH OF `PATH` IS PART OF THIS FIGURE, and it is published with it.
+  #
+  # Measured 2026-09-07: the overhead is 3.5 ms on a two-entry `PATH` and
+  # 18.0 ms on the 193-entry `PATH` a nix dev shell provides — the SAME two
+  # binaries, the same host, minutes apart. `strace -c` on `ct` shows 5,440
+  # `newfstatat` calls of which 5,396 fail, and they come from
+  # `src/common/paths.nim`, which resolves ~28 recorder and tool binaries with
+  # `findTool` (i.e. `findExe`) in a module-level `let` block. That work is
+  # done during Nim's module initialisation, BEFORE `main` and therefore before
+  # the `--ui` prologue can decide anything, and every `ct` invocation pays it.
+  #
+  # So this number is not a property of `--ui`'s implementation: the prologue is
+  # the first statement of `codetracer.nim` and reads no file on this path. It
+  # is a property of what `ct` costs to start, which is what ui-selection.md
+  # §3.1 warned about in the same paragraph as the gate ("loading a 25 MB binary
+  # to reach it is not [acceptable]"). Making the gate hold on a long `PATH`
+  # means making those lookups lazy, which is a change to `paths.nim` rather
+  # than to the selector.
+  let pathEntries = getEnv("PATH", "").split(PathSep).len
+  bench.record("tui/ui-flag-handoff-overhead", "ms", overhead, 10.0,
+               samples = samples,
+               conditionGap = cgNone,
+               shape = "the DIFFERENCE of two medians over " & $samples &
+                       " interleaved spawn pairs — one sample is one" &
+                       " `codetracer-tui --version` and one" &
+                       " `ct replay --ui=tui --version`, run back to back",
+               extra = "PLAT-1's gate (ui-selection.md §3.1). direct=" &
+                       (&"{directMedian:.3f}") & "ms through-flag=" &
+                       (&"{flagMedian:.3f}") & "ms path-entries=" &
+                       $pathEntries &
+                       "; the launcher's own exec is in neither arm because" &
+                       " it is in BOTH of the invocations being compared and" &
+                       " cancels. THE FIGURE SCALES WITH len(PATH): ~28" &
+                       " module-level findExe lookups in src/common/paths.nim" &
+                       " run before main on every ct start (3.5ms at 2 PATH" &
+                       " entries, 18.0ms at 193, measured 2026-09-07)")
+  # THE INPUTS ARE PUBLISHED AS WELL AS THE DIFFERENCE, and not gated: a
+  # difference alone cannot be sanity-checked afterwards, and these two are what
+  # a reader needs to tell "the handoff got cheaper" from "the front-end got
+  # slower to start".
+  bench.record("tui/ui-flag-direct-spawn", "ms", directMedian, 0.0,
+               samples = samples, gated = false, conditionGap = cgNone,
+               shape = "median of " & $samples &
+                       " `codetracer-tui --version` spawns",
+               extra = "the control arm of tui/ui-flag-handoff-overhead")
+  bench.record("tui/ui-flag-handoff-spawn", "ms", flagMedian, 0.0,
+               samples = samples, gated = false, conditionGap = cgNone,
+               shape = "median of " & $samples &
+                       " `ct replay --ui=tui --version` spawns",
+               extra = "the measured arm of tui/ui-flag-handoff-overhead")
+
 proc processMetrics(bench: Bench) =
   ## §8 rows 1, 4 and 6, plus GAP 1 — all four properties of a running process.
   ##
@@ -989,6 +1160,8 @@ proc main() =
                      " carries its own load1 and should be read with it")
 
   processMetrics(bench)
+  # PLAT-1's gate, next to the cold-start row its budget is stated against.
+  uiHandoffMetric(bench)
   inputLatencyMetrics(bench)
   coalescingMetric(bench)
   emissionMetrics(bench)
