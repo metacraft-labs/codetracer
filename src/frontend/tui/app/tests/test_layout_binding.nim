@@ -58,7 +58,7 @@ import ../views/shell
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 1515
+const ExpectedAssertions = 2053
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -148,6 +148,59 @@ proc paneOfPathIn(l: Layout; path: string): PaneKind =
   let info = nodeInfoAtPath(l.tree, path)
   if info.isNone or info.get.kind != lnPane: PaneKind.low else: info.get.pane
 
+proc sliceCells(line: string; col, width: int): string =
+  ## `width` cells of `line`, starting at CELL `col`.
+  ##
+  ## BY CELL RATHER THAN BY BYTE, and that is a fix rather than a style choice.
+  ## The painted strip's filler is `─` (U+2500) — three bytes, one cell — so
+  ## `line[col ..< col + width]` compares the wrong bytes the moment a stack
+  ## does not start at column 0 or a pane title is not ASCII, and can cut a rune
+  ## in half. PLAT-6's independent pass recorded that as a residual of the
+  ## tab-strip case; it also produced the partial rune that ended a mutation arm
+  ## in a `UnicodeDecodeError` instead of a verdict.
+  result = ""
+  var at = 0
+  for r in runes(line):
+    if at >= col + width:
+      break
+    if at >= col:
+      result.add $r
+    at += max(1, displayWidth($r))
+
+proc specStrip(tabs: seq[string]; active, width: int): string =
+  ## §3.1's tab strip, WRITTEN FROM THE SPECIFICATION and from nothing in
+  ## `app/layout/tab_strip.nim`: the active tab in brackets, every other one
+  ## padded with one space on each side so the strip does not reflow when a tab
+  ## is activated, one space between neighbours, then a space and the rule glyph
+  ## out to the pane's width.
+  ##
+  ## **THIS IS THE ORACLE THE STRUCTURAL CHANGE MADE NECESSARY.** `tabRow` now
+  ## assembles the row from `tabSpans`, so the painter and the hit-test read one
+  ## table and cannot disagree — which also means a check that compares them
+  ## cannot see a defect IN that table. `TabGapCells` widened to 2 moves the
+  ## paint and the hit-test together and the column-by-column walk below stays
+  ## green; this does not. It calls `tabSpans`, `tabLabel`, `tabStripCells` and
+  ## `TabGapCells` nowhere, which is the whole of its value.
+  if width <= 0:
+    return ""
+  var parts: seq[string] = @[]
+  for i, t in tabs:
+    parts.add(if i == active: "[" & t & "]" else: " " & t & " ")
+  var line = parts.join(" ")
+  if textCells(line) + 1 <= width:
+    line.add " "
+    line.add repeatGlyph(PaneRuleGlyph, width - textCells(line))
+  fitCells(line, width)
+
+proc innerWidthOf(geom: LayoutGeometry; area: CellArea): int =
+  ## The width `views/shell.paintPane` paints a pane's rows at: its whole
+  ## rectangle when it is flush with the inner area's right edge, one cell less
+  ## when it has to draw the `│` separator. Spelled here the way the painter
+  ## spells it, because a comparison against a strip painted at a DIFFERENT
+  ## width is a comparison of two different rows.
+  if area.col + area.width >= geom.inner.col + geom.inner.width: area.width
+  else: area.width - 1
+
 proc shapeOf(l: Layout): string =
   ## The tree as one comparable string, plus the dock list. `$` on a
   ## `LayoutNode` already renders the shape; the docked panes are appended so
@@ -180,30 +233,57 @@ template ckStripsTileTheBody(l: Layout; geom: LayoutGeometry;
   ## The strips and the inner area together are the body EXACTLY: every cell of
   ## the body belongs to the tree or to exactly one strip, and none belongs to
   ## two.
+  ##
+  ## **IT CARRIES ITS OWN POSITIVE CONTROL NOW.** `doubleClaimed == 0` and
+  ## `unowned == 0` are both satisfied by a zero-cell body — a sweep that
+  ## visited nothing finds no double claim and no orphan — and PLAT-6 landed
+  ## this template borrowing `ckPartition`'s control instead, which is only
+  ## load-bearing while a caller happens to run both against a non-empty inner
+  ## area. The four assertions below the sweep are the control: the sweep
+  ## reached every cell of the body, the body has cells, the inner area got
+  ## exactly the ones the projection is total over, and the strips got the rest
+  ## — and the strips have cells exactly when something is docked, which is
+  ## what makes the whole check say something about strips rather than about a
+  ## rectangle no pane was ever hidden into (Verification-Harness-Traps §4b).
   block:
     var owner = newSeq[int](max(0, geom.body.cellCount()))
     for i in 0 ..< owner.len:
       owner[i] = -1
     var doubleClaimed = 0
     var unowned = 0
+    var sweptBodyCells = 0
+    var innerCells = 0
+    var stripCells = 0
     for row in geom.body.row ..< geom.body.row + geom.body.height:
       for col in geom.body.col ..< geom.body.col + geom.body.width:
         let at = (row - geom.body.row) * geom.body.width +
                  (col - geom.body.col)
+        inc sweptBodyCells
         var claims = 0
         if geom.inner.contains(row, col):
           inc claims
+          inc innerCells
           owner[at] = -2
         for si, s in geom.strips:
           if s.area.contains(row, col):
             inc claims
+            inc stripCells
             owner[at] = si
         if claims > 1: inc doubleClaimed
         if claims == 0: inc unowned
     checkpoint(label & ": strips=" & $geom.strips.len & " docked=" &
-               $l.docked.len)
+               $l.docked.len & " swept=" & $sweptBodyCells & " inner=" &
+               $innerCells & " strip=" & $stripCells & " body=" &
+               $geom.body.cellCount())
     ck doubleClaimed == 0
     ck unowned == 0
+    ck sweptBodyCells == geom.body.cellCount()
+    ck geom.body.cellCount() > 0
+    ck innerCells == geom.inner.cellCount()
+    ck innerCells + stripCells == geom.body.cellCount()
+    # BOTH DIRECTIONS, so neither half is free: docked panes mean claimed strip
+    # cells, and nothing docked means none.
+    ck (l.docked.len > 0) == (stripCells > 0)
 
 template ckMessageIsNeverSilent(a: LayoutAction; label: string) =
   block:
@@ -257,13 +337,16 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     # the rectangle `cellsFor` draws for that zone's region, and a cell on a
     # tab produces a caret on that stack's own strip row, within its columns.
     #
-    # The tab-slot arm is the WEAKER of the two on purpose-of-record rather
-    # than by design: the caret for slot `i` is `tabSpans[i].startCol`, so
-    # "inside tab `i`'s own span" is true and is the assertion this arm should
-    # make. It asserts row-and-column containment instead. Left as written
-    # here — strengthening a check is the implementer's call, not the
-    # verifier's — and recorded so the comment does not claim the stronger
-    # property the code does not check.
+    # THE TAB-SLOT ARM NOW ASSERTS THE STRONGER PROPERTY IT USED TO CLAIM.
+    # PLAT-6 landed it checking only that the caret is on the strip's row and
+    # inside the strip's columns, while its comment said the caret "lands
+    # inside tab `i`'s span". The stronger statement does hold — `regionForZone`
+    # turns `dzTabStrip` on tab `i` into slot `i`, and `cellsFor` puts the caret
+    # on that span's own `startCol` — and it is one comparison, so it is made:
+    # the caret column is tab `slot`'s first cell, and hit-testing that column
+    # answers `slot` again. The append slot (`slot == tabs.len`) is the one case
+    # where the caret is deliberately NOT inside any span; it is counted
+    # separately rather than folded in.
     #
     # COUNTS RATHER THAN ONE `check` PER CELL: the sweep is tens of thousands
     # of cells, and a `ck` inside it would make the file's assertion total a
@@ -280,6 +363,9 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
     var wholeNodeChecks = 0
     var nodeStripChecks = 0
     var tabSlotChecks = 0
+    var caretsInsideTheirOwnTab = 0
+    var caretsAtTheAppendSlot = 0
+    var caretsClamped = 0
     var stripHitsInsideTheTree = 0
     var unresolved = 0
     var noTarget = 0
@@ -328,10 +414,13 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
                 $cells & ")"
           of drTabSlot:
             # A caret is an INSERTION POINT, so it is not the cell that was
-            # clicked. What must hold is that it is on the strip's own row and
-            # inside the strip's own columns.
+            # clicked. It must be on the strip's own row, inside the strip's own
+            # columns — and, for every slot but the append one, ON THE FIRST
+            # CELL OF THAT SLOT'S OWN TAB.
             inc tabSlotChecks
             let strip = geom.tabStripOf(hovered.get.region.path)
+            let spans = tabSpans(strip.tabs, strip.active)
+            let slot = hovered.get.region.slot
             if not strip.found:
               mismatches.add at & " named a stack with no strip on screen"
             elif cells.row != strip.area.row:
@@ -341,6 +430,35 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
                  cells.col >= strip.area.col + strip.area.width:
               mismatches.add at & "'s caret is at column " & $cells.col &
                 ", outside " & $strip.area
+            elif slot < 0 or slot > spans.len:
+              mismatches.add at & "'s slot " & $slot &
+                " is outside 0 .. " & $spans.len
+            elif slot == spans.len:
+              # The append slot: one cell past the last label, and therefore
+              # deliberately not inside any span.
+              inc caretsAtTheAppendSlot
+              let want = spans[^1].startCol + spans[^1].width
+              if cells.col - strip.area.col != min(want,
+                                                   max(0, strip.area.width - 1)):
+                mismatches.add at & "'s append caret is at relative column " &
+                  $(cells.col - strip.area.col) & " rather than " & $want
+            elif spans[slot].startCol > max(0, strip.area.width - 1):
+              # `cellsFor` clamps a caret that would fall off a narrow strip.
+              # Counted rather than asserted, so a geometry that only ever
+              # produced clamped carets cannot make the assertion below vacuous.
+              inc caretsClamped
+            elif cells.col != strip.area.col + spans[slot].startCol:
+              mismatches.add at & "'s caret is at relative column " &
+                $(cells.col - strip.area.col) & " rather than on tab " & $slot &
+                "'s first cell (" & $spans[slot].startCol & ")"
+            elif tabSpanAt(strip.tabs, strip.active,
+                           cells.col - strip.area.col) != slot:
+              mismatches.add at & "'s caret column hit-tests to tab " &
+                $tabSpanAt(strip.tabs, strip.active,
+                           cells.col - strip.area.col) &
+                " rather than to slot " & $slot
+            else:
+              inc caretsInsideTheirOwnTab
           of drLayoutStrip:
             mismatches.add at & " offered a dock strip from inside the tree"
     if mismatches.len > 0:
@@ -348,10 +466,18 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
         checkpoint(m)
     checkpoint("wholeNode: " & $wholeNodeChecks & ", nodeStrip: " &
                $nodeStripChecks & ", tabSlot: " & $tabSlotChecks &
-               ", unresolved: " & $unresolved & ", no target: " & $noTarget &
+               " (own tab: " & $caretsInsideTheirOwnTab & ", append: " &
+               $caretsAtTheAppendSlot & ", clamped: " & $caretsClamped &
+               "), unresolved: " & $unresolved & ", no target: " & $noTarget &
                ", strip hits inside the tree: " & $stripHitsInsideTheTree &
                ", mismatches: " & $mismatches.len)
     ck mismatches.len == 0
+    # THE STRONGER TAB-SLOT PROPERTY WAS REACHED, not merely not-violated: a
+    # sweep in which every caret was clamped, or in which the only slot ever
+    # produced was the append one, would satisfy `mismatches.len == 0` for free.
+    ck caretsInsideTheirOwnTab > 0
+    ck caretsInsideTheirOwnTab + caretsAtTheAppendSlot + caretsClamped ==
+       tabSlotChecks
     # THE POSITIVE CONTROLS. Every region kind a node can produce was actually
     # reached, so `mismatches.len == 0` is not the answer to an empty question;
     # and no cell inside the tree resolved to a dock strip or to nothing.
@@ -363,11 +489,28 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
 
   test "the painted tab strip and the hit-test agree, column by column":
     # `tabRow` and `tabSpanAt` are one answer read twice — that is why
-    # `app/layout/tab_strip.nim` exists. This walks every column of a real
-    # painted strip and requires the label the PAINTER put there to be the tab
-    # the HIT-TEST names.
+    # `app/layout/tab_strip.nim` exists, and since PLAT-6's follow-up landed it
+    # is one answer BY CONSTRUCTION: `tabRow` assembles the row from `tabSpans`.
+    #
+    # THAT MAKES THIS CASE TWO CHECKS RATHER THAN ONE, and the second is the
+    # one the construction created the need for:
+    #
+    #   * the DIFFERENTIAL half walks every column of a real painted strip and
+    #     requires the label the PAINTER put there to be the tab the HIT-TEST
+    #     names. It still fails when the painter stops following the span table
+    #     — `run-plat6-mutations.py`'s M5 gives it its own gap back;
+    #   * the ABSOLUTE half compares the painted strip with `specStrip`, §3.1's
+    #     rule written out a second time and calling nothing in the module under
+    #     test. A defect in the SHARED table moves both readers together and the
+    #     differential half stays green; M26 widens `TabGapCells` and only this
+    #     half notices.
+    #
+    # And the slicing is BY CELL. See `sliceCells`: the old byte slice was
+    # correct only because the one stack the profiles produce starts at column 0
+    # with ASCII labels.
     var columnsChecked = 0
     var labelledColumns = 0
+    var stripsComparedAbsolutely = 0
     var disagreements: seq[string] = @[]
     for g in Geometries:
       let profile = selectProfile(g.cols, g.rows)
@@ -400,24 +543,49 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
               disagreements.add where & ": named tab " & $p.get.path &
                 " rather than index " & $span.index
           # …and the label the painter actually wrote is at those columns.
+          # BY CELL, NOT BY BYTE — see `sliceCells`.
           let label = tabLabel(region.tabs[span.index],
                                span.index == region.activeTab)
-          if region.area.col + span.startCol + span.width <= strip.len:
-            inc labelledColumns
-            let onScreen = strip[region.area.col + span.startCol ..<
-                                 region.area.col + span.startCol + span.width]
-            if onScreen != label:
-              disagreements.add "painted '" & onScreen & "' where tab " &
-                $span.index & " should read '" & label & "'"
+          inc labelledColumns
+          let onScreen = sliceCells(strip, region.area.col + span.startCol,
+                                    span.width)
+          if onScreen != label:
+            disagreements.add "painted '" & onScreen & "' where tab " &
+              $span.index & " should read '" & label & "'"
+        # THE ABSOLUTE HALF. The whole painted strip against §3.1's rule,
+        # restated in this file and reading nothing the painter reads.
+        inc stripsComparedAbsolutely
+        let inner = innerWidthOf(geom, region.area)
+        let paintedStrip = sliceCells(strip, region.area.col, inner)
+        let wanted = specStrip(region.tabs, region.activeTab, inner)
+        if paintedStrip != wanted:
+          disagreements.add $g.cols & "x" & $g.rows &
+            ": the painted strip is '" & paintedStrip &
+            "' where §3.1's rule says '" & wanted & "'"
     if disagreements.len > 0:
       for d in disagreements[0 ..< min(8, disagreements.len)]:
         checkpoint(d)
     checkpoint($columnsChecked & " strip column(s) checked, " &
                $labelledColumns & " label(s) compared with the paint, " &
+               $stripsComparedAbsolutely & " strip(s) compared with §3.1, " &
                $disagreements.len & " disagreement(s)")
     ck disagreements.len == 0
     ck columnsChecked > 0
     ck labelledColumns > 0
+    # THE ABSOLUTE HALF RAN. Without this, a geometry sweep that stopped
+    # producing stacks would leave every "no disagreement" above true for free
+    # — which is precisely trap 4 wearing a projection instead of a grep.
+    ck stripsComparedAbsolutely > 0
+    # …and the oracle is not a copy of the subject: it disagrees with the
+    # painter the moment either rule is changed, which is what the two arms in
+    # `run-plat6-mutations.py` measure. Asserted here as a shape rather than
+    # left to the harness: a WIDER gap really does produce a different string.
+    let sample = @["Variables", "Timeline", "Tracepoints"]
+    ck specStrip(sample, 0, 40) == tabRow(sample, 0, 40)
+    ck specStrip(sample, 1, 40) == tabRow(sample, 1, 40)
+    ck specStrip(sample, 0, 40) != specStrip(sample, 1, 40)
+    ck specStrip(sample, 0, 40).startsWith("[Variables]")
+    ck specStrip(sample, 1, 40).contains("[Timeline]")
 
   test "every drop-target kind is reachable THROUGH the binding":
     # PLAT-6: "every drop-target kind … must be exercised through the terminal

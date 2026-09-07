@@ -125,6 +125,77 @@ proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
     lastToken: "", lastKey: "",
     width: width, height: height)
 
+proc layoutBindingEnabled*(rt: TuiRuntime): bool =
+  ## Whether PLAT-6's layout binding is driving this runtime's arrangement.
+  ##
+  ## **OFF BY DEFAULT, AND EVERYTHING BELOW IS GUARDED BY IT.** With no binding
+  ## the model `tui_app.shellModel` builds is the one CTUI-3 built — the
+  ## session's own `LayoutNode`, an empty `docked`, no `Interaction` — so the
+  ## screen is byte-identical and `:move-tab` is the unknown command it has
+  ## always been. That is not a temporary state: see `enableLayoutBinding` for
+  ## what would have to change before the default could flip.
+  not rt.isNil and not rt.app.isNil and not rt.app.layoutBinding.isNil
+
+proc rebuildFocus(rt: TuiRuntime) =
+  ## Re-derive the focus ring from the layout that will be painted next,
+  ## carrying the focused pane if it is still on screen.
+  ##
+  ## Called after a resize AND after a layout command, because both can change
+  ## which panes have a rectangle: `:dock left` takes one off the screen
+  ## entirely, and a focus ring built before it would hand `Tab` a pane that is
+  ## no longer projected.
+  let (had, focused) = rt.focus.focusedPane()
+  let model = rt.app.shellModel(rt.width, rt.height)
+  let projection = projectLayout(model.layout, bodyArea(rt.width, rt.height))
+  rt.focus = newPaneFocus(projection)
+  if had:
+    discard rt.focus.focusPaneKind(focused)
+
+proc layoutGeometry*(rt: TuiRuntime): LayoutGeometry =
+  ## The binding's geometry at this terminal size — the dock strips, the inner
+  ## area and the pane-to-path resolution the next frame will be painted from.
+  ##
+  ## An empty geometry when no binding is enabled, so a caller cannot use this
+  ## to conjure one.
+  if not rt.layoutBindingEnabled():
+    return LayoutGeometry()
+  rt.app.layoutBinding.geometry(bodyArea(rt.width, rt.height))
+
+proc enableLayoutBinding*(rt: TuiRuntime): LayoutBinding =
+  ## **THE OPT-IN.** Give this running front-end a layout the user can
+  ## rearrange, and route `:`'s layout verbs into it (PLAT-6).
+  ##
+  ## OPT-IN RATHER THAN THE DEFAULT, and the reason is one level below this
+  ## module. `headless_app.HeadlessSessionSlot.layout` is a `LayoutNode`;
+  ## a `LayoutBinding` holds a `Layout` whose tree is a CLONE
+  ## (`newLayoutHistory` copies), so with a binding enabled the terminal draws
+  ## the binding's tree and the session's own node is no longer what is on
+  ## screen. Today nothing performs the operation that would make that visible —
+  ## `headless_app.activatePane` has no production caller in this repository,
+  ## its five call sites are all in `test_headless_app_entrypoint.nim`, and no
+  ## key handler here reaches it — so the divergence is LATENT rather than
+  ## current, which is exactly what makes an opt-in the right shape: it buys the
+  ## gesture surface without creating the second authority for anybody who did
+  ## not ask.
+  ##
+  ## **What would have to be true to flip the default:** `HeadlessSessionSlot`
+  ## would have to hold a `Layout` rather than a `LayoutNode`, so that the
+  ## session's arrangement and the binding's are one value and `activate` and a
+  ## gesture cannot disagree. That is a change to the shared shell model — the
+  ## one the desktop persists — and it is PLAT-4-level work rather than a
+  ## binding's to make.
+  ##
+  ## The binding is seeded from the ACTIVE SESSION's own tree, so the first
+  ## frame after this call is the frame that would have been painted without it.
+  result = rt.app.enableLayoutBinding(rt.width, rt.height)
+  # THE FOCUSED PANE IS THE RUNTIME'S, not a second one. `LayoutBinding.focus`
+  # is what `:dock`, `:move-tab` and `:resize` act on, and `Tab` / `Ctrl+w` are
+  # what a user moves it with — so the two are synchronised here and again
+  # before every layout command.
+  let (had, focused) = rt.focus.focusedPane()
+  if had:
+    result.focus = focused
+
 proc resize*(rt: TuiRuntime; width, height: int) =
   ## Adopt a new terminal geometry, re-deriving the focus ring from the layout
   ## the new size projects to.
@@ -133,14 +204,15 @@ proc resize*(rt: TuiRuntime; width, height: int) =
   ## same guard `shell.reprofile` states for the active tab: a resize inside one
   ## profile's band must not silently move the user's focus, and a resize that
   ## crosses a band may legitimately remove the pane they were on.
-  let (had, focused) = rt.focus.focusedPane()
   rt.width = width
   rt.height = height
-  let model = rt.app.shellModel(width, height)
-  let projection = projectLayout(model.layout, bodyArea(width, height))
-  rt.focus = newPaneFocus(projection)
-  if had:
-    discard rt.focus.focusPaneKind(focused)
+  # PLAT-6's responsive-profile decision, when a binding is enabled: the
+  # profile always tracks the size, and the TREE is re-flowed only while the
+  # user has not modified it. Before the model is read, so the focus ring below
+  # is built from the arrangement the next frame will paint.
+  if rt.layoutBindingEnabled():
+    discard rt.app.layoutBinding.resize(width, height)
+  rt.rebuildFocus()
 
 proc note(rt: TuiRuntime; message: string) =
   rt.app.notification = message
@@ -170,6 +242,45 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   if line.strip().len == 0:
     rt.note("")
     return
+
+  # PLAT-6's TWELVE LAYOUT VERBS, ROUTED HERE AND ONLY WHEN A BINDING IS
+  # ENABLED. This is the line that makes a layout gesture reachable from the
+  # product's own input path rather than from a test that constructs a
+  # `LayoutBinding` directly, and it is what a Tier-2 case can drive through a
+  # real pty.
+  #
+  # A SEPARATE SURFACE FROM §4.3, deliberately and structurally — see
+  # `binding.LayoutVerb`: §4.3's sixteen commands are a published table
+  # `app/tests/test_gdb_command_surface.nim` parses out of `CodeTracer-TUI.md`
+  # and compares row by row, so a seventeenth value in that enum is a failing
+  # test by construction. The routing is therefore a PREFIX on this path rather
+  # than an entry in that table.
+  #
+  # WITH NO BINDING NOTHING CHANGES: `:move-tab` falls through to `runCommand`
+  # and is reported as the unknown command it has always been, which is the
+  # behaviour every existing suite asserts.
+  if rt.layoutBindingEnabled():
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    let words = text.splitWhitespace()
+    if words.len > 0 and parseLayoutVerb(words[0])[0]:
+      # The pane a layout verb acts on is THE ONE `Tab` AND `Ctrl+w` MOVED TO.
+      # Synchronised here rather than kept in step by convention, so `:dock
+      # bottom` cannot dock a pane other than the focused one.
+      let (had, focused) = rt.focus.focusedPane()
+      if had:
+        rt.app.layoutBinding.focus = focused
+      let acted = rt.app.layoutBinding.runLayoutCommand(rt.layoutGeometry(),
+                                                        line)
+      outcome.detail = acted.message
+      rt.note(acted.message)
+      # A layout command can take a pane off the screen (`:dock`) or put one
+      # back (`:undock`), so the focus ring is re-derived from the arrangement
+      # the next frame will paint rather than from the one before the command.
+      rt.rebuildFocus()
+      return
+
   let result = runCommand(rt.dispatcher, rt.context, line)
   outcome.detail = result.message
   var text = describeOutcome(result)

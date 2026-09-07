@@ -156,7 +156,7 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 62
+  ExpectedAppModules = 63
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED four
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -175,8 +175,14 @@ const
     ## widening the set the "called from exactly one file" rows below are
     ## measured over.
     ##
-    ## RE-COUNTED AGAIN WHEN CTUI-13 WAS CUT, and it came back to exactly this
-    ## number. The withdrawn web bridge had added three here — `serve_protocol.
+    ## RE-COUNTED AGAIN ON 2026-09-07 for PLAT-6's follow-up, which added ONE:
+    ## `tests/test_layout_command_routing.nim`, the suite for the opt-in that
+    ## gives a running front-end a `LayoutBinding` and routes the `:` prompt's
+    ## twelve layout verbs into it. `app/runtime.nim` and `app/cli.nim` grew
+    ## that wiring and neither is new, so this number moved by exactly one.
+    ##
+    ## RE-COUNTED WHEN CTUI-13 WAS CUT, and it came back to exactly the number
+    ## it had then. The withdrawn web bridge had added three here — `serve_protocol.
     ## nim` and two suites — and all three are gone; `--headless` survived the
     ## cut but lives under `host/`, and its stale-label rule moved into
     ## `tests/test_capability_resolution.nim` rather than into a new file. A

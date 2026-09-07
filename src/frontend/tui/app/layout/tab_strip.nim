@@ -21,22 +21,31 @@
 ## time either changed. So the arithmetic moved here and became a value
 ## (`TabSpan`), which is what the hit-test reads.
 ##
-## **STATED EXACTLY, BECAUSE THE DIFFERENCE MATTERS.** `tabRow` does not call
-## `tabSpans`: it is still its own traversal, and what the two share is
-## `tabLabel` and `TabGapCells` — the label's width and the gap between two
-## labels, which are the only two quantities either of them measures. So the
-## agreement is NOT by construction; it is ASSERTED, and it is asserted the
-## only way that can fail: `app/tests/test_layout_binding.nim` walks every
-## column of a REAL PAINTED strip and requires the label the painter wrote
-## there to be the tab the hit-test names, over every stack shape and width the
-## profiles produce. `tests/run-plat6-mutations.py` carries an arm that widens
-## the paint's gap and an arm that widens `tabSpans`' gap, and the same case
-## kills both — which is what says the check reaches a disagreement introduced
-## from either side.
+## **STATED EXACTLY, BECAUSE THE DIFFERENCE MATTERS. `tabRow` NOW CALLS
+## `tabSpans`.** PLAT-6 landed it as a second traversal that merely SHARED
+## `tabLabel` and `TabGapCells`, so "which tab is at column 34" had one answer
+## by ASSERTION rather than by construction; the follow-up that note named is
+## taken here. The painter walks the span table and fills to each span's
+## `startCol` — it computes no gap of its own and no cursor of its own — so a
+## painted column and a hit-tested column cannot come apart, whatever either
+## quantity is changed to.
 ##
-## Making it structural — `tabRow` assembling the row from `tabSpans` — is a
-## strictly better shape and is left as a follow-up rather than taken here,
-## because it is a change to a painter whose output is a golden.
+## **AND THAT MOVES WHERE THE EVIDENCE HAS TO COME FROM, which is the whole
+## cost of a one-table design.** An agreement asserted between two traversals
+## catches a defect introduced on either side; an agreement CONSTRUCTED from
+## one table is blind to a defect IN that table, exactly as the two directions
+## of `binding.pointerAt` / `binding.cellsFor` are blind to a change in the
+## `edgeBandCells` they share. So `app/tests/test_layout_binding.nim` carries
+## both halves:
+##
+##   * the column-by-column walk of a REAL PAINTED strip against the hit-test,
+##     which still fails if the painter stops following the table (the harness
+##     arm that gives it its own gap back);
+##   * an ABSOLUTE oracle — §3.1's label rule, written out a second time in the
+##     test and calling nothing in this module — which is what fails when the
+##     shared table itself is wrong (the harness arm that widens
+##     `TabGapCells`). A differential check between two readers of one table
+##     cannot see that, and saying so is cheaper than discovering it.
 ##
 ## `app/views/shell.nim` imports and RE-EXPORTS this module, so every CTUI-3
 ## call site — and every golden written against the strings `tabRow` produces —
@@ -50,8 +59,6 @@
 ## reflow when a tab is activated. One space separates neighbouring labels.
 ## That constancy is not cosmetic — it is what makes a drop caret computed on
 ## one frame land on the same column on the next.
-
-import std/strutils
 
 import ../views/header
 import ../views/styled_row
@@ -148,11 +155,21 @@ proc tabSlotCaret*(tabs: seq[string]; active, slot: int): int =
 proc tabRow*(tabs: seq[string]; active, width: int): string =
   ## `[Variables] Timeline Tracepoints ─────` — a stack's first row.
   ##
-  ## CTUI-3 wrote this in `app/views/shell.nim` and PLAT-6 moved it here
-  ## unchanged, line for line, so that it sits beside `tabSpans` — the table the
-  ## hit-test reads — and shares `tabLabel` and `TabGapCells` with it. It is a
-  ## SEPARATE TRAVERSAL, not an assembly of the spans; see the module header for
-  ## what asserts that the two agree and for why that is not the same claim.
+  ## CTUI-3 wrote this in `app/views/shell.nim` and PLAT-6 moved it here beside
+  ## `tabSpans` — the table the hit-test reads. **IT IS ASSEMBLED FROM THAT
+  ## TABLE.** The loop below owns no gap and no cursor of its own: it advances
+  ## to the column `tabSpans` put each label at, so the painted strip is a
+  ## rendering of the same values `tabSpanAt` and `tabSlotCaret` answer from.
+  ## The two cannot disagree, which is a stronger statement than "they are
+  ## asserted to agree" and is why the module header now says what the test has
+  ## to do instead.
+  ##
+  ## Byte-identical to the traversal it replaces, and not by inspection:
+  ## `tabSpans` places span 0 at column 0 and every later span exactly
+  ## `TabGapCells` past the previous one's end, so filling to `startCol`
+  ## produces the same single space the old `repeat(' ', TabGapCells)` did.
+  ## CTUI-3's goldens and `tests/real_terminal/test_real_shell_geometry.nim`
+  ## are what hold that to be true rather than this sentence.
   ##
   ## The active tab is bracketed, which is exactly what §3.1's Compact drawing
   ## shows. This row is the ONLY on-screen consequence of `LayoutNode.activate`,
@@ -160,10 +177,13 @@ proc tabRow*(tabs: seq[string]; active, width: int): string =
   if width <= 0:
     return ""
   var line = ""
-  for i, t in tabs:
-    if i > 0:
-      line.add repeat(' ', TabGapCells)
-    line.add tabLabel(t, i == active)
+  var cursor = 0
+  for span in tabSpans(tabs, active):
+    while cursor < span.startCol:
+      line.add ' '
+      inc cursor
+    line.add tabLabel(tabs[span.index], span.index == active)
+    cursor = span.startCol + span.width
   if textCells(line) + 1 <= width:
     line.add " "
     # `repeatGlyph` rather than `while textCells(line) < width: line.add …` —

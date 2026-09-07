@@ -274,10 +274,13 @@ proc titleRow(title: string; width: int): string =
   fitCells(line, width)
 
 # `tabRow` MOVED to `app/layout/tab_strip.nim` in PLAT-6, unchanged in
-# behaviour: it is now assembled from `tabSpans`, which is also what the
-# terminal binding's hit-test reads, so a column on screen and a tab index
-# cannot come apart. This module re-exports it (see the `export` above), so
-# `paintPane`'s three call sites below are the same call they were.
+# behaviour, and is now ASSEMBLED FROM `tabSpans` — the same table the terminal
+# binding's hit-test reads — so a column on screen and a tab index cannot come
+# apart. (PLAT-6 landed it as a second traversal that only shared `tabLabel`
+# and `TabGapCells`, so the agreement was asserted rather than constructed;
+# that sentence was corrected in the module header before the code caught up
+# with it.) This module re-exports it (see the `export` above), so `paintPane`'s
+# three call sites below are the same call they were.
 
 proc timelineScrubber*(tick, totalTicks, width: int): string =
   ## §3.3.5's scrubber: `[───────▲──────]`, with the marker at the tick's own

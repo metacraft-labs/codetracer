@@ -151,6 +151,18 @@ proc interactive(command: TuiCommand): int =
   let app = newTuiApp()
   app.notification = "opening " & folder & " …"
   let rt = newTuiRuntime(app, caps, size.cols, size.rows)
+  # PLAT-6's OPT-IN, and it is the only thing that turns the layout binding on
+  # in a shipped binary. `app/runtime.enableLayoutBinding` records why it is an
+  # opt-in and what would have to be true to flip the default; what matters
+  # here is the shape: one guarded line, before the first frame, so the binding
+  # is seeded from the arrangement this session would have painted anyway.
+  #
+  # WITHOUT THE FLAG NOTHING BELOW CHANGES. `shellModel` carries the session's
+  # own `LayoutNode`, an empty `docked` and no `Interaction`, which is exactly
+  # the model CTUI-3 built, and the `:` prompt routes to §4.3's interpreter as
+  # it always has.
+  if command.layoutBinding:
+    discard rt.enableLayoutBinding()
   # FRAME 0, BEFORE THE ENGINE. See this module's header on why the order is
   # this way round.
   paint(driver, rt)

@@ -52,7 +52,7 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 345
+const ExpectedAssertions = 362
 
 const
   LandedThroughMilestone = 14
@@ -705,13 +705,14 @@ suite "CTUI-11 Tier 1: capability resolution":
     # command line that cannot do what it says, and it is named individually so
     # the message says which option was the problem.
     var orphanCount = 0
-    for option in ["--goto=1", "--record-keys=/tmp/j", "--replay-keys=/tmp/j"]:
+    for option in ["--goto=1", "--record-keys=/tmp/j", "--replay-keys=/tmp/j",
+                   "--layout-binding"]:
       let orphan = parseTuiCommand([option])
       ck orphan.kind == tckUsageError
       ck orphan.message.contains("trace folder")
       inc orphanCount
     checkpoint("session options refused without a trace: " & $orphanCount)
-    ck orphanCount == 3
+    ck orphanCount == 4
 
   test "--headless refuses the two flags it cannot honour and honours the one it can":
     # THE DEFECT THIS CASE PINS. `--headless` accepted `--goto`,
@@ -766,9 +767,46 @@ suite "CTUI-11 Tier 1: capability resolution":
     ck headlessBadGoto.kind == tckUsageError
     ck headlessBadGoto.message.contains("soon")
 
+  test "PLAT-6's --layout-binding parses, is off by default, and is refused where it cannot act":
+    # THE OPT-IN, AS A VALUE. The flag is what turns PLAT-6's layout binding on
+    # in a shipped binary (`main.nim` calls `runtime.enableLayoutBinding` behind
+    # it), so what has to be asserted here is that it reaches the parsed command
+    # rather than that it "did not produce an error" — the failure mode
+    # `app/cli.nim`'s header names is a flag that parses and is thrown away.
+    let off = parseTuiCommand(["/tmp"])
+    ck off.kind == tckOpenTrace
+    ck not off.layoutBinding
+    let on = parseTuiCommand(["--layout-binding", "/tmp"])
+    checkpoint("--layout-binding -> " & $on.kind & " layoutBinding=" &
+               $on.layoutBinding)
+    ck on.kind == tckOpenTrace
+    ck on.layoutBinding
+    # Order does not matter, and it is idempotent.
+    ck parseTuiCommand(["/tmp", "--layout-binding"]).layoutBinding
+    ck parseTuiCommand(["--layout-binding", "--layout-binding",
+                        "/tmp"]).layoutBinding
+    # IT IS PUBLISHED, so the §6.2 oracle below is reading a document that
+    # describes this parser rather than an older one.
+    ck TuiHelpText.contains("--layout-binding")
+    # AND IT IS REFUSED WHERE IT CANNOT ACT. `--headless` renders one settled
+    # screen and exits, so there is no `:` prompt to rearrange anything from —
+    # the same rule the two journal flags are refused under, and named the same
+    # way, on both sides of the conflict.
+    let headlessClash = parseTuiCommand(["--headless", "--layout-binding",
+                                         "/tmp"])
+    checkpoint("--headless --layout-binding -> " & headlessClash.message)
+    ck headlessClash.kind == tckUsageError
+    ck headlessClash.message.contains("--layout-binding")
+    ck headlessClash.message.contains("--headless")
+    ck parseTuiCommand(["--layout-binding", "--headless",
+                        "/tmp"]).kind == tckUsageError
+    # THE POSITIVE TWIN, through the same parser: `--headless` alone is still a
+    # headless command, so the refusal above is about the COMBINATION.
+    ck parseTuiCommand(["--headless", "/tmp"]).kind == tckHeadless
+
   test "every option §6.2 publishes is accepted, read from the document":
     # THE ORACLE, and the reason `PlannedOptions` being empty is a claim rather
-    # than an absence. §6.2 is a published table of eleven option lines; this
+    # than an absence. §6.2 is a published table of twelve option lines; this
     # reads the option NAMES out of the document and asserts that the shipped
     # parser refuses none of them — neither as "unknown option" nor as "not
     # built yet".
@@ -790,9 +828,11 @@ suite "CTUI-11 Tier 1: capability resolution":
     let options = publishedOptions(section)
     checkpoint("options published in §6.2: " & options.join(" "))
     # THE NON-VACUITY FLOOR. An extractor that matched nothing would satisfy
-    # every acceptance check below for free. Fourteen tokens over eleven lines:
-    # `-h/--help`, `-v/--version` and `-t/--theme` are each written as a pair.
-    ck options.len == 14
+    # every acceptance check below for free. Fifteen tokens over twelve lines:
+    # `-h/--help`, `-v/--version` and `-t/--theme` are each written as a pair,
+    # and PLAT-6 added `--layout-binding`.
+    ck options.len == 15
+    ck "--layout-binding" in options
 
     var accepted = 0
     for option in options:

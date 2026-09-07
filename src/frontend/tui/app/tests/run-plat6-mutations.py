@@ -1,13 +1,34 @@
 #!/usr/bin/env python3
 """Mutation harness for PLAT-6's terminal layout binding.
 
-Every case in `app/tests/test_layout_binding.nim` claims to detect something.
-This script proves it, one case at a time: it patches a single line of the
-SUBJECT (`app/layout/binding.nim`, `app/layout/tab_strip.nim`,
-`app/input/mouse.nim`, or `headless_app/layout_model.nim` where the property is
-one PLAT-4 owns and this binding depends on) and requires that the **named**
-case fails. A mutation killed only by some other case is MISDIRECTED and is a
+Every case in PLAT-6's four suites claims to detect something. This script
+proves it, one case at a time: it patches a single line of the SUBJECT
+(`app/layout/binding.nim`, `app/layout/tab_strip.nim`, `app/input/mouse.nim`,
+`app/runtime.nim`, or `headless_app/layout_model.nim` where the property is one
+PLAT-4 owns and this binding depends on) and requires that the **named** case
+fails. A mutation killed only by some other case is MISDIRECTED and is a
 failure of this harness, not a pass.
+
+FOUR SUITES, TWO TIERS. Each arm names the suite it is graded against:
+
+  test_layout_binding.nim          Tier 1 — the binding itself
+  test_layout_command_routing.nim  Tier 1 — the opt-in and the `:` routing
+  test_real_layout_gestures.nim    Tier 2 — a gesture through a real pty
+  test_real_layout_transients.nim  Tier 2 — cross-tier snapshot equivalence
+
+The Tier-2 arms are slow — a suite compile, a CHILD compile and a handful of
+pty round trips apiece — and they are here anyway, because the two rows PLAT-6
+landed unticked are exactly the two those suites close, and an arm that only
+runs the Tier-1 suite cannot say whether either has teeth. M29 and M29B are the
+SAME mutation graded at the two tiers, which is what makes the pty case
+load-bearing rather than a slow restatement of the Tier-1 one.
+
+AN ARM MAY ALSO NAME CASES THAT MUST STAY GREEN (`spares`). M31 is the reason:
+it makes the painter use one glyph for every decoration, both tiers therefore
+paint the same wrong screen, and the claim being demonstrated is that the
+cell-for-cell equality CANNOT see that while the absolute check can. A spared
+case that dies is reported as a problem, because the claim rather than the
+subject would then be wrong.
 
 THREE VERDICTS, NOT TWO (Verification-Harness-Traps §1). An arm that never ran
 is not a kill:
@@ -54,13 +75,28 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[4]
 
 SUITE = "src/frontend/tui/app/tests/test_layout_binding.nim"
+ROUTE = "src/frontend/tui/app/tests/test_layout_command_routing.nim"
+GEST = "src/frontend/tui/tests/real_terminal/test_real_layout_gestures.nim"
+TRANS = "src/frontend/tui/tests/real_terminal/test_real_layout_transients.nim"
+
 BIND = "src/frontend/tui/app/layout/binding.nim"
 TABS = "src/frontend/tui/app/layout/tab_strip.nim"
 MOUSE = "src/frontend/tui/app/input/mouse.nim"
+RUNTIME = "src/frontend/tui/app/runtime.nim"
 INTER = "src/frontend/headless_app/layout_interaction.nim"
 MODEL = "src/frontend/headless_app/layout_model.nim"
 
-TOUCHED = [SUITE, BIND, TABS, MOUSE, INTER, MODEL]
+TOUCHED = [SUITE, ROUTE, GEST, TRANS, BIND, TABS, MOUSE, RUNTIME, INTER, MODEL]
+
+# THE TWO TIER-2 SUITES NEED THREE MORE `--path`s and they spawn a child in a
+# real pty, so an arm against one costs a compile, a CHILD compile and a
+# handful of pty round trips. They are here anyway, and for the reason the
+# milestone gives: the rows PLAT-6 left open were "a gesture through a real
+# pty" and "cross-tier snapshot equivalence", and an arm that only ever runs
+# the Tier-1 suite cannot say whether either of those checks has teeth.
+TIER2 = {GEST, TRANS}
+TIER2_PATHS = ["--path:../TermAssert/src", "--path:../TermAssertClient/src",
+               "--path:../nim-libvterm/src"]
 
 # The case names, spelled once. A typo here shows up as "the control did not
 # run this case" rather than as a silently unkillable arm.
@@ -85,6 +121,41 @@ PLAT6_CASES = [
     C_CANCEL, C_KEYS, C_SGR, C_PROFILE, C_NOREF, C_COUNT,
 ]
 
+# The routing suite (Tier 1) — the opt-in and the `:` prompt's layout verbs.
+R_OFF = ("OFF BY DEFAULT: a layout verb is the unknown \u00a74.3 command it "
+         "always was")
+R_SAME = "enabling it changes NOTHING on screen, compared as rendered rows"
+R_DOCK = "`:dock bottom` typed at the prompt docks the FOCUSED pane, and shows it"
+R_FOCUS = "the pane a verb acts on is the one Tab moved to"
+R_SPEC43 = "\u00a74.3 is untouched: its own commands still reach the interpreter"
+R_VERBS = "every verb is reachable from the prompt, and none of them is silent"
+R_RESIZE = "a resize re-flows an untouched arrangement and leaves a gestured one"
+
+ROUTE_CASES = [R_OFF, R_SAME, R_DOCK, R_FOCUS, R_SPEC43, R_VERBS, R_RESIZE,
+               C_COUNT]
+
+# The gesture suite (Tier 2) — a real pty.
+G_DOCK = "`:dock bottom` typed as real bytes rearranges a real terminal"
+G_SPEC43 = ("a word that is not a layout verb still reaches \u00a74.3, on the "
+            "terminal")
+
+GEST_CASES = [G_DOCK, G_SPEC43, C_COUNT]
+
+# The transient-state suite (Tier 2) — the cross-tier comparison and, beside
+# it, the absolute check that survives both tiers being wrong together.
+T_EQUAL = "every transient state is the same screen in both tiers, cell for cell"
+T_MODEL = "the decorations are what the MODEL says, on the real terminal"
+T_ARM = "MUTATION ARM: a changed cell fails the comparison and names it"
+
+TRANS_CASES = [T_EQUAL, T_MODEL, T_ARM, C_COUNT]
+
+SUITE_CASES = {
+    SUITE: PLAT6_CASES,
+    ROUTE: ROUTE_CASES,
+    GEST: GEST_CASES,
+    TRANS: TRANS_CASES,
+}
+
 
 @dataclass
 class Mutation:
@@ -94,6 +165,11 @@ class Mutation:
     replace: str
     killer: str
     why: str = ""
+    suite: str = SUITE
+    # Cases that must stay GREEN under this arm. An arm whose whole point is
+    # that one check sees a defect another cannot has to say so mechanically,
+    # or the claim is a sentence in a comment — see M31.
+    spares: tuple = ()
 
 
 MUTATIONS = [
@@ -141,19 +217,68 @@ MUTATIONS = [
         "the right-hand strip is drawn on the left",
     ),
     # --- the painter and the hit-test read one tab-strip answer ------------
+    #
+    # `tabRow` NOW ASSEMBLES THE ROW FROM `tabSpans`, so these two arms are not
+    # the two the milestone landed with. The differential check — every column
+    # of a painted strip against the hit-test — can only see a painter that has
+    # STOPPED following the table (M5); a defect in the table itself moves both
+    # readers together and is invisible to it, which is what M26 demonstrates
+    # and what the case's absolute oracle is for.
     Mutation(
         "M5", TABS,
-        "      line.add repeat(' ', TabGapCells)",
-        "      line.add repeat(' ', TabGapCells + 1)",
+        "  for span in tabSpans(tabs, active):\n"
+        "    while cursor < span.startCol:\n"
+        "      line.add ' '\n"
+        "      inc cursor\n"
+        "    line.add tabLabel(tabs[span.index], span.index == active)\n"
+        "    cursor = span.startCol + span.width",
+        "  for span in tabSpans(tabs, active):\n"
+        "    if span.index > 0:\n"
+        "      line.add \"  \"\n"
+        "    line.add tabLabel(tabs[span.index], span.index == active)\n"
+        "    cursor = span.startCol + span.width",
         C_STRIP,
-        "the paint's gap widens; `tabSpans`, which the hit-test reads, does not",
+        "the painter stops reading the span table and gives itself a gap "
+        "again — the exact defect making the assembly structural removes",
     ),
     Mutation(
         "M6", TABS,
-        "    line.add tabLabel(t, i == active)",
-        "    line.add tabLabel(t, false)",
+        "    line.add tabLabel(tabs[span.index], span.index == active)",
+        "    line.add tabLabel(tabs[span.index], false)",
         C_STRIP,
         "the active tab is painted without its brackets",
+    ),
+    Mutation(
+        "M26", TABS,
+        "  TabGapCells* = 1",
+        "  TabGapCells* = 2",
+        C_STRIP,
+        "THE SHARED TABLE IS WRONG. Painter and hit-test move together, so the "
+        "column-by-column agreement stays green; only the absolute oracle "
+        "(\u00a73.1's rule, restated in the suite) sees it",
+    ),
+    # --- the strips tile the body, with a control of their own -------------
+    Mutation(
+        "M27", BIND,
+        "  of leTop:\n"
+        "    CellArea(col: body.col + left, row: body.row,\n"
+        "             width: body.width - left - right, height: DockStripThickness)",
+        "  of leTop:\n"
+        "    CellArea(col: body.col, row: body.row,\n"
+        "             width: body.width, height: DockStripThickness)",
+        C_ZONES,
+        "the top strip claims the columns the left and right strips already "
+        "have, so the body is double-claimed",
+    ),
+    # --- the caret lands inside the tab it names ---------------------------
+    Mutation(
+        "M28", BIND,
+        "    let caret = tabSlotCaret(strip.tabs, strip.active, region.slot)",
+        "    let caret = tabSlotCaret(strip.tabs, strip.active, region.slot + 1)",
+        C_ROUND,
+        "the drop caret is drawn one slot to the right. THE CHECK PLAT-6 "
+        "LANDED COULD NOT SEE THIS: a caret one tab over is still on the "
+        "strip's row and inside its columns, which is all that arm asserted",
     ),
     # --- every drop-target kind, through the binding -----------------------
     Mutation(
@@ -343,6 +468,66 @@ MUTATIONS = [
         C_NOREF,
         "NodeInfo grows a way back to the tree",
     ),
+    # --- the opt-in and the routing (PLAT-6's follow-up) --------------------
+    #
+    # These are the arms for the two rows the milestone landed unticked. M29
+    # and M29B are THE SAME MUTATION run against the two tiers, which is the
+    # only way to say that the pty case is load-bearing rather than decorative:
+    # if the Tier-1 routing case were the only killer, the Tier-2 one would be
+    # a slow re-statement of it.
+    Mutation(
+        "M29", RUNTIME,
+        "    if words.len > 0 and parseLayoutVerb(words[0])[0]:",
+        "    if false and parseLayoutVerb(words[0])[0]:",
+        R_DOCK,
+        "the `:` prompt stops routing layout verbs into the binding",
+        suite=ROUTE,
+    ),
+    Mutation(
+        "M29B", RUNTIME,
+        "    if words.len > 0 and parseLayoutVerb(words[0])[0]:",
+        "    if false and parseLayoutVerb(words[0])[0]:",
+        G_DOCK,
+        "the same defect, seen from a REAL PTY: `:dock bottom` typed as bytes "
+        "no longer rearranges the terminal",
+        suite=GEST,
+    ),
+    Mutation(
+        "M30", RUNTIME,
+        "      let (had, focused) = rt.focus.focusedPane()\n"
+        "      if had:\n"
+        "        rt.app.layoutBinding.focus = focused",
+        "      let (had, focused) = rt.focus.focusedPane()\n"
+        "      if false and had:\n"
+        "        rt.app.layoutBinding.focus = focused",
+        R_FOCUS,
+        "the binding's focus stops following `Tab`, so a verb acts on whatever "
+        "pane the binding was constructed with",
+        suite=ROUTE,
+    ),
+    Mutation(
+        "M31", BIND,
+        "    let glyph = glyphFor(d.kind)",
+        "    let glyph = DockStripGlyph",
+        T_MODEL,
+        "THE ARM THE CROSS-TIER PAIR EXISTS FOR. Every decoration is painted "
+        "with one glyph. Both tiers paint the same wrong screen, so the "
+        "cell-for-cell equality is GREEN and only the absolute check — the "
+        "model's own `decorationsFor` probed on the real terminal — dies",
+        suite=TRANS,
+        spares=(T_EQUAL,),
+    ),
+    Mutation(
+        "M32", RUNTIME,
+        "  if rt.layoutBindingEnabled():\n"
+        "    discard rt.app.layoutBinding.resize(width, height)",
+        "  if false:\n"
+        "    discard rt.app.layoutBinding.resize(width, height)",
+        R_RESIZE,
+        "a real resize never reaches the binding, so the profile and the tree "
+        "stay at the size the session started on",
+        suite=ROUTE,
+    ),
 ]
 
 DECLARED_SURVIVORS = [
@@ -365,6 +550,31 @@ DECLARED_SURVIVORS = [
         "",
         "The same clamp as one expression. Behaviour-preserving for every "
         "`count >= 1`, and `tabPositionOf` cannot answer with a smaller one.",
+    ),
+    Mutation(
+        "S3", TABS,
+        "    while cursor < span.startCol:\n"
+        "      line.add ' '\n"
+        "      inc cursor",
+        "    for _ in cursor ..< span.startCol:\n"
+        "      line.add ' '\n"
+        "    cursor = span.startCol",
+        "",
+        "The gap fill as a `for` rather than a `while` — the same cells, the "
+        "same cursor. It MUST survive, and it is the control for M5 and M26: "
+        "both of those edit this loop's neighbourhood, so an arm that reddened "
+        "on any edit to `tabRow` would make neither of them evidence.",
+    ),
+    Mutation(
+        "S4", RUNTIME,
+        "  not rt.isNil and not rt.app.isNil and not rt.app.layoutBinding.isNil",
+        "  not (rt.isNil or rt.app.isNil or rt.app.layoutBinding.isNil)",
+        "",
+        "De Morgan on the opt-in test. It MUST survive: the routing suite "
+        "asserts the OFF arm at three geometries and the ON arm at twenty, so "
+        "a suite that reddened here would be reporting the spelling rather "
+        "than the behaviour.",
+        suite=ROUTE,
     ),
 ]
 
@@ -395,13 +605,19 @@ def link_flags():
     return ["--passL:" + f for f in path.read_text().split()]
 
 
-def run_suite() -> RunResult:
+def run_suite(suite: str = SUITE) -> RunResult:
     archive = ROOT / "build" / "grammars" / "libcodetracer_tui_grammars.a"
+    extra = TIER2_PATHS if suite in TIER2 else []
+    stem = Path(suite).stem
     cmd = ["nim", "c", "-r", "--hints:off", "--path:src/frontend/viewmodel",
            f"-d:isonimTuiGrammarArchive={archive}",
            *link_flags(),
-           "--nimcache:build/nimcache/plat6-mutations",
-           "-o:/tmp/plat6-mutation-suite", SUITE]
+           *extra,
+           # ONE NIMCACHE PER SUITE. Sharing it across the four made every arm
+           # a full rebuild of whichever suite ran last, which is minutes on
+           # the Tier-2 pair.
+           f"--nimcache:build/nimcache/plat6-mutations-{stem}",
+           f"-o:/tmp/plat6-mutation-{stem}", suite]
     # `errors="replace"`, NOT the default strict decode. A mutated suite is a
     # suite printing diagnostics about bytes it did not expect, and this one
     # slices painted rows — which contain U+2500 — at cell offsets, so a
@@ -436,22 +652,38 @@ def main() -> int:
     only = set(sys.argv[1:])
     baseline = {p: digest(p) for p in TOUCHED}
 
+    arms = [m for m in MUTATIONS + DECLARED_SURVIVORS
+            if not only or m.id in only]
+    if not arms:
+        print(f"no arm matches {sorted(only)}")
+        return 1
+    # ONLY THE SUITES THE SELECTED ARMS USE. A filtered re-run of one Tier-1
+    # arm must not pay for two pty controls; a run with no filter pays for all
+    # four, which is the honest price of grading four suites.
+    suites = []
+    for m in arms:
+        if m.suite not in suites:
+            suites.append(m.suite)
+
     print("== control ==")
-    control = run_suite()
-    if control.failed or not control.ran:
-        print(f"CONTROL IS NOT GREEN: rc={control.rc} failed={control.failed}")
-        return 1
-    missing = [c for c in PLAT6_CASES if c not in control.passed]
-    if missing:
-        print(f"CONTROL DID NOT RUN {len(missing)} NAMED CASES: {missing}")
-        return 1
-    print(f"control: {control.total} cases, all {len(PLAT6_CASES)} named ones "
-          f"ran, 0 failures\n", flush=True)
+    for suite in suites:
+        control = run_suite(suite)
+        if control.failed or not control.ran:
+            print(f"CONTROL IS NOT GREEN for {suite}: rc={control.rc} "
+                  f"failed={control.failed}")
+            return 1
+        named = SUITE_CASES[suite]
+        missing = [c for c in named if c not in control.passed]
+        if missing:
+            print(f"CONTROL DID NOT RUN {len(missing)} NAMED CASES in "
+                  f"{suite}: {missing}")
+            return 1
+        print(f"control {Path(suite).stem}: {control.total} cases, all "
+              f"{len(named)} named ones ran, 0 failures", flush=True)
+    print(flush=True)
 
     problems = 0
-    for mut in MUTATIONS + DECLARED_SURVIVORS:
-        if only and mut.id not in only:
-            continue
+    for mut in arms:
         path = ROOT / mut.path
         original = path.read_text()
         occurrences = original.count(mut.find)
@@ -462,7 +694,7 @@ def main() -> int:
             continue
         path.write_text(original.replace(mut.find, mut.replace))
         try:
-            res = run_suite()
+            res = run_suite(mut.suite)
         finally:
             path.write_text(original)
             # Restoration is verified, not assumed.
@@ -485,12 +717,26 @@ def main() -> int:
             problems += 1
         elif mut.killer in res.failed:
             others = [f for f in res.failed if f != mut.killer]
-            verdict = "killed"
-            note = mut.killer + (f"  (+{len(others)} more)" if others else "")
+            # A SPARED CASE THAT DIED IS A FAILURE OF THE ARM'S CLAIM, not a
+            # bonus kill. M31 exists to show that the cross-tier equality
+            # CANNOT see a defect both tiers share; if it saw one, the pairing
+            # this milestone argues for would be unnecessary and the comment
+            # would be wrong.
+            broke = [c for c in mut.spares if c in res.failed]
+            if broke:
+                verdict = "SPARED-CASE-DIED"
+                note = f"{broke} should have stayed green under {mut.id}"
+                problems += 1
+            else:
+                verdict = "killed"
+                note = mut.killer + (f"  (+{len(others)} more)" if others else "")
+                if mut.spares:
+                    note += f"  [spared: {len(mut.spares)}]"
         else:
             verdict, note = "MISDIRECTED", f"died in {res.failed}, not {mut.killer!r}"
             problems += 1
-        print(f"{mut.id:<5} {verdict:<20} {note}", flush=True)
+        print(f"{mut.id:<6} {Path(mut.suite).stem[:34]:<34} {verdict:<20} "
+              f"{note}", flush=True)
 
     print(f"\n{problems} problems")
     return 0 if problems == 0 else 1

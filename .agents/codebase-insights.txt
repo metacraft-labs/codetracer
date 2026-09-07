@@ -3674,23 +3674,63 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     that meant both would make the two directions disagree.  Consequence for a
     mutation arm: mutating the SHARED helper changes both and the round-trip
     case stays green, correctly.  To kill it, mutate ONE direction.
-  * `tabRow` LIVES IN `tui/app/layout/tab_strip.nim`, NOT IN `views/shell.nim`.
-    It moved there to sit beside `tabSpans`, the table the hit-test reads, and
-    to share `tabLabel` and `TabGapCells` with it.  IT DOES NOT CALL
-    `tabSpans` — the painter is still its own traversal, so "which tab is at
-    column 34" is one answer by ASSERTION, not by construction:
-    `test_layout_binding.nim` walks every column of a real painted strip
-    against the hit-test, and the mutation harness kills a disagreement
-    introduced from either side.  `views/shell.nim` re-exports the module (and
+  * `tabRow` LIVES IN `tui/app/layout/tab_strip.nim`, NOT IN `views/shell.nim`,
+    AND IT CALLS `tabSpans`.  It walks the span table and fills to each span's
+    `startCol`, owning no gap and no cursor of its own, so "which tab is at
+    column 34" is one answer BY CONSTRUCTION.  (PLAT-6 landed it as a second
+    traversal that only shared `tabLabel` and `TabGapCells`; its follow-up made
+    it structural.)  `views/shell.nim` re-exports the module (and
     `PaneRuleGlyph`), so every CTUI-3 call site still resolves and the goldens
     are byte-identical.
+    CONSEQUENCE FOR A CHECK, and it is the same one the hit-test's shared
+    `edgeBandCells` has: comparing the painter with the span table can no
+    longer see a defect IN the table, because both move together.
+    `test_layout_binding.nim` therefore also carries `specStrip` — §3.1's label
+    rule written out a second time, calling nothing in the module under test.
+    M5 (painter stops following the table) dies in the differential half; M26
+    (`TabGapCells` widened) dies only in the absolute one.
+  * PLAT-6'S LAYOUT BINDING IS AN OPT-IN: `codetracer-tui --layout-binding`.
+    `main.nim` calls `app/runtime.enableLayoutBinding`, and `runPromptLine`
+    then routes the twelve layout verbs (`:dock`, `:move-tab`, `:resize`, …)
+    into `binding.runLayoutCommand` — a PREFIX on the `:` path, deliberately
+    not a seventeenth row in §4.3's published table, which
+    `test_gdb_command_surface.nim` parses out of `CodeTracer-TUI.md`.
+    WITHOUT THE FLAG NOTHING CHANGES: `layoutBinding` is nil, `shellModel`
+    carries the session's own `LayoutNode`, and those words are unknown
+    commands.  It is an opt-in rather than the default because a binding's tree
+    is a CLONE of the session's, so enabling one by default would give the
+    terminal two layout authorities; flipping it needs `HeadlessSessionSlot` to
+    hold a `Layout` rather than a `LayoutNode`.
+  * ONLY THE `:` VERBS ARE ROUTED INTO THE LAYOUT BINDING.  `binding.onMouse`,
+    `beginDrag`, `hoverAt` and `dropDrag` have NO caller outside
+    `app/layout/binding.nim` and `app/tests/test_layout_binding.nim`:
+    `runtime.handleToken` routes no mouse report into the binding, so with
+    `--layout-binding` on a typed `:dock bottom` rearranges the panes and a
+    MOUSE DRAG DOES NOTHING.  Mouse tokens do reach the app —
+    `call_stack_keys` and `timeline_keys` each call `decodeMouse` for their own
+    pane — so wiring it is small; what is NOT small is deciding precedence
+    against those two.  Do not read the Tier-1 mouse cases as evidence that the
+    gesture works in the product: they decode the SGR bytes themselves and hand
+    the event straight to `onMouse`.
+  * `LayoutBinding.focus` AND `TuiRuntime.focus` ARE TWO DIFFERENT FOCUS
+    NOTIONS, and `runPromptLine` synchronises them before every layout command.
+    `PaneFocus` is what `Tab` / `Ctrl+w` move; `LayoutBinding.focus` is what
+    `:dock` and `:move-tab` act on.  Forgetting the copy makes a verb act on
+    whatever pane the binding was constructed with, which is a defect no screen
+    assertion names — `test_layout_command_routing.nim`'s "the pane a verb acts
+    on is the one Tab moved to" is what catches it.
   * `run-plat6-mutations.py` DECODES THE SUITE'S OUTPUT WITH
-    `errors="replace"`.  A mutated suite prints diagnostics about bytes it did
-    not expect, and the tab-strip case slices painted rows — which contain
-    U+2500 — at cell offsets, so a mismatch message can carry a partial rune.
-    Under Python's default strict decode, `subprocess.run` raises and the arm
-    ends in a traceback rather than in one of the harness's three verdicts.
-    Same shape for any harness that reads a child's stdout as text.
+    `errors="replace"`.  A MUTATED suite prints diagnostics about bytes it did
+    not expect, and these suites quote painted rows — which carry U+2500 and
+    U+2591..U+2593 — into their failure messages, so a mutated run's output is
+    not guaranteed to be well-formed UTF-8.  Under Python's default strict
+    decode, `subprocess.run` raises and the arm ends in a TRACEBACK rather than
+    in one of the harness's three verdicts, which is the "no verdict at all"
+    state the three-verdict rule exists to keep visible.  (Found when a
+    tab-strip mutation made the case quote a partial rune, back when it sliced
+    rows by BYTE index at cell offsets; `sliceCells` fixed that particular
+    source, and the decode rule stands regardless.)  Same shape for any harness
+    that reads a child's stdout as text.
   * A NEW `.nim` FILE ANYWHERE UNDER `src/frontend/tui/app/` — INCLUDING UNDER
     `app/tests/` — REDDENS `app/tests/test_gdb_command_surface.nim`.  It asserts
     `ExpectedAppModules` exactly, and that brittleness is deliberate: the count

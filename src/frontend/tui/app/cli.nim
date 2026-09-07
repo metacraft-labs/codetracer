@@ -107,6 +107,23 @@ type
       recordKeys*: string
       replayKeys*: string
         ## `--record-keys=<file>` and `--replay-keys=<file>`, or "".
+      layoutBinding*: bool
+        ## `--layout-binding` — PLAT-6's rearrangeable layout, OFF BY DEFAULT.
+        ##
+        ## A MODE RATHER THAN A CAPABILITY, which is why it is a `bool` here
+        ## and not a field of `CapabilityFlags`: it says nothing about what the
+        ## terminal can do. With it the front-end gives itself a
+        ## `LayoutBinding` (`app/runtime.enableLayoutBinding`) and the `:`
+        ## prompt's twelve layout verbs — `:move-tab`, `:dock`, `:resize`, … —
+        ## reach it; without it the shell paints the session's own `LayoutNode`
+        ## exactly as CTUI-3 painted it and those words are unknown commands.
+        ##
+        ## OPT-IN, and the reason is recorded at `app/runtime
+        ## .enableLayoutBinding`: a binding's tree is a CLONE of the session's,
+        ## so enabling one by default would give the terminal a second layout
+        ## authority. The divergence that would cause is latent today (nothing
+        ## calls `headless_app.activatePane`), and the flag is what keeps it
+        ## latent while the gesture surface is reachable for anybody who asks.
     of tckUsageError:
       message*: string
     else:
@@ -247,6 +264,7 @@ options:
   --goto=TICK        seek to TICK before the first debugger frame
   --record-keys=FILE write every input token to FILE, one per line
   --replay-keys=FILE read input from FILE instead of the keyboard, then exit
+  --layout-binding   let : rearrange the panes (:dock, :move-tab, :resize, …)
   --headless         render one screen as plain text and exit — for CI
 
 The capability flags always beat the environment probe. With none of them, the
@@ -341,6 +359,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var gotoTick = NoGotoTick
   var recordKeys = ""
   var replayKeys = ""
+  var layoutBinding = false
   var i = first
   while i <= high(args):
     let arg = args[i]
@@ -358,6 +377,11 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       flags.asciiBorders = true
     of "--no-mouse":
       flags.noMouse = true
+    of "--layout-binding":
+      # Idempotent, like `--headless`: asking for the same one thing twice is
+      # not a contradiction and there is no second arrangement mode for it to
+      # disagree with.
+      layoutBinding = true
     of "--headless":
       # Idempotent rather than an error: `--headless --headless` asks for the
       # same one thing twice, and there is no second display mode left for it
@@ -511,6 +535,19 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                    " there is no input loop to " &
                    (if option == "--record-keys": "record from"
                     else: "replay into"))
+    # `--layout-binding` IS ON THE SAME LIST AND FOR THE SAME REASON, not
+    # accepted and ignored. What the flag buys is a `:` prompt that rearranges
+    # the panes; `--headless` renders one settled screen and exits, so there is
+    # no prompt to type into and the arrangement it would produce is the
+    # default one it started from. That is precisely "a flag that parses and
+    # silently does nothing" — see `PlannedOptions`' header on why this file
+    # refuses instead.
+    if layoutBinding:
+      return TuiCommand(
+        kind: tckUsageError,
+        message: "'--layout-binding' and '--headless' contradict each other;" &
+                 " --headless renders one settled screen and exits, so there" &
+                 " is no `:` prompt to rearrange anything from")
 
   # THE SAME RULE FOR THE THREE OPTIONS THAT ACT ON A SESSION. `--goto`,
   # `--record-keys` and `--replay-keys` all describe something to do with a
@@ -519,7 +556,8 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   if tracePath.len == 0:
     for (given, option) in [(gotoTick != NoGotoTick, "--goto"),
                             (recordKeys.len > 0, "--record-keys"),
-                            (replayKeys.len > 0, "--replay-keys")]:
+                            (replayKeys.len > 0, "--replay-keys"),
+                            (layoutBinding, "--layout-binding")]:
       if given:
         return TuiCommand(
           kind: tckUsageError,
@@ -537,8 +575,8 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   of tckHeadless:
     TuiCommand(kind: tckHeadless, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
-               replayKeys: replayKeys)
+               replayKeys: replayKeys, layoutBinding: layoutBinding)
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
-               replayKeys: replayKeys)
+               replayKeys: replayKeys, layoutBinding: layoutBinding)
