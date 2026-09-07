@@ -1,3 +1,0 @@
-User-agent: *
-Allow: /
-Sitemap: https://docs.codetracer.com/pr/714/sitemap.xml
