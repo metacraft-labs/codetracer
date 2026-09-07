@@ -5334,27 +5334,47 @@ jobs:
           # the same build.rs through a shell script and a justfile recipe. The
           # scanner now matches that route too, so this entry is pinned.
           #
-          # SPELLED BARE, WITHOUT `=dev`, AND THAT IS THE POINT. A bare name is
-          # resolved against the per-commit workspace lock, which is both the
+          # SPELLED AS AN EXPLICIT 40-HEX REVISION, and the two alternatives
+          # are both closed. This entry was BARE for one run. Bare is the
           # documented form (`.github/sibling-repos`: "ONE REPO NAME PER LINE,
-          # NO REVISIONS") and the reproducible one -- re-running an old
-          # commit's job then clones the revision that commit was built
-          # against. The lock does pin this repo; run 34072935418 shows the
-          # other legs overriding it and being told so:
+          # NO REVISIONS") and resolves against the per-commit WORKSPACE lock,
+          # which is genuinely the more reproducible answer -- when that lock
+          # exists. On run 34154799274 it did not, and this job died two steps
+          # before any of the above mattered:
           #
-          #   metacraft-labs/codetracer-native-recorder -> dev (override)
-          #     <- UNACKNOWLEDGED; the lock pins de0edc7e897222050c3b0b421a5c0b330a106ce6
+          #   resolve-sibling-rev: no workspace lock found for codetracer
+          #     candidate SHAs: e51cd37c48e8ddd4e705723f48e39ceeb12a3eb8
+          #   ##[error]No workspace lock for codetracer ... in
+          #     metacraft-labs/metacraft-manifests@latest
           #
-          # Writing `=dev` here would add a 57th branch-tip pin against a
-          # ceiling of 56 that `ci/test/sibling-provisioning-test.sh` says is
-          # "lowered as blocks are converted and never raised", and would earn
-          # that same warning. The three entries above are pre-existing
-          # overrides and are left alone; converting them is their own change.
+          # That is not a property of this entry. The lock is written by the
+          # local post-commit gate, and that gate DECLINES whenever any repo in
+          # the developer's workspace is dirty -- "NO lock written: dirty
+          # sibling(s): infra, codetracer-trace-format, grip-stdlib-research".
+          # It had declined on every commit made that day. `dev` itself is 26/40
+          # locked over its last 40 commits, and `workspace-lock-freshness`
+          # fails this run on exactly that assertion. So a bare entry makes this
+          # job's green depend on whether some unrelated repo happened to be
+          # clean when the commit was made, which is not a dependency this job
+          # has.
+          #
+          # `=dev` is closed too: it would be a 57th branch-tip pin against
+          # `ci/test/sibling-provisioning-test.sh`'s ceiling of 56, which that
+          # suite says is "lowered as blocks are converted and never raised".
+          #
+          # An explicit 40-hex revision is the third form that suite names --
+          # "A sibling revision must come from the workspace lock or be an
+          # explicit 40-hex commit SHA" -- and it is the only one that is both
+          # under the ceiling and independent of lock publication. The revision
+          # is `dev`'s tip as of this commit, i.e. exactly what the `=dev`
+          # entries above resolve to today, frozen. The three entries above are
+          # pre-existing overrides and are left alone; converting them is their
+          # own change.
           siblings: |
             codetracer-beam-recorder=dev
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
-            codetracer-native-recorder
+            codetracer-native-recorder=b5b8de6eb505dccc42394728b4705c45e0f064ed
 
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``
@@ -5463,9 +5483,45 @@ jobs:
       # are not available. Stylus flow tests are #[ignore] and need a devnode.
       # Cross-repo tests (rr) run in the separate test-ui-tests-rr job.
       - name: Run tests
+        # ``CODETRACER_DB_BACKEND_SKIP_DIRENV`` / ``CT_EMULATOR_EXTRA_NIM_PATHS``
+        # are the second cause behind the missing-sibling one, and only became
+        # reachable once the sibling was actually provisioned. With the
+        # ``codetracer-native-recorder`` checkout now present, ``just test`` ->
+        # ``just test-rust`` -> ``cargo test --bin replay-server`` gets PAST
+        # build.rs:170 and into ``regenerate_c`` at build.rs:972, which takes
+        # the ``direnv exec <recorder-root>`` path on a clone whose .envrc has
+        # never been allowed (run 34154799274, `test-non-gui (macos)`):
+        #
+        #   db-backend build.rs: generated C stale or missing at
+        #     .../codetracer-native-recorder/ct_emulator/build/native_c_files;
+        #     invoking .../build_native_api.sh
+        #   direnv: error .../codetracer-native-recorder/.envrc is blocked.
+        #     Run `direnv allow` to approve its content
+        #   thread 'main' panicked at build.rs:972:17
+        #
+        # Setting the variable rather than adding a ``direnv allow`` step is
+        # this repo's own documented preference -- scripts/build-once.sh:478:
+        # "CT_EMULATOR_EXTRA_NIM_PATHS below already supplies what the direnv
+        # shell was being entered to provide, so the direnv round-trip buys
+        # nothing here and costs a full nested `nix develop` of the recorder's
+        # flake when it does work."
+        #
+        # The pair is copied verbatim from ``origin-dap-macos``, which reaches
+        # the same build.rs through the same ``nix develop . --command just
+        # <recipe>`` shape and is green on this run. ``just test`` does NOT go
+        # through ``scripts/build-once.sh`` (ci/test/non-gui.sh execs ``just
+        # test`` directly), so that script's identical defaults never apply
+        # here and the job env has to carry them.
+        #
+        # The two must move together: skipping direnv means ``nim c`` no longer
+        # inherits the recorder flake's package store, so the vendored
+        # nim-stew / nim-result paths are what let ``syscall_replay.nim``'s
+        # ``import stew/endians2`` resolve.
         run: ./ci/test/non-gui.sh
         env:
           CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
 
   test-ui-tests:
     strategy:
@@ -6253,6 +6309,8 @@ jobs:
           siblings: |
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
+            codetracer-native-recorder=b5b8de6eb505dccc42394728b4705c45e0f064ed
+            runquota=fee60f486616c3ba5ceb5fc741eb70fcb29f17ec
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -6298,6 +6356,44 @@ jobs:
 
       - name: Build CodeTracer
         run: nix build --print-build-logs '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format --override-input codetracer-trace-format-nim path:./libs/codetracer-trace-format-nim
+
+      - name: Provision dependency siblings from repro.lock
+        # The `nix build` above is hermetic and needs none of this. The
+        # PLAYWRIGHT step does: `just test-gui` declares `build-once` as a
+        # just PREREQUISITE (justfile:840), so every run of this job also
+        # performs an out-of-sandbox Nim build, and that build resolves
+        # `isonim/...` / `nim_everywhere` through codetracer's own
+        # `config.nims` against the checkout's PARENT directory.
+        #
+        # Nothing in this job ever populated that directory, so
+        # `scripts/require-siblings.sh` aborted before the first test --
+        # run 34154799274, `test-ui-tests-rr`:
+        #
+        #   Cannot start the CodeTracer build: 7 required sibling repo(s)
+        #   are missing.
+        #     * isonim  * nim-agents  * nim-agent-harbor  * nim-acp
+        #     * nim-everywhere  * codetracer-native-recorder  * runquota
+        #   error: Recipe `build-once` failed on line 5 with exit code 1
+        #
+        # This action supplies the first five, at the 40-hex revisions THIS
+        # commit's own `repro.lock` pins; the two `siblings:` entries added
+        # above supply the rest. Same pairing `test-ui-tests` already
+        # carries -- the closest sibling lane, also Playwright, also on the
+        # GPU host.
+        #
+        # Those two entries are explicit 40-hex revisions rather than `=dev`
+        # or bare, for the reason spelled out at length on `test-non-gui`'s
+        # `siblings:` block: `=dev` would breach the branch-tip ceiling of 56,
+        # and a bare name resolves against a workspace lock that is not
+        # reliably published. A bare entry here would have been strictly worse
+        # than the bug it fixes -- it would move this job's failure from the
+        # Playwright step at the END of the job to `Setup dev env` near the
+        # START, losing every stage in between.
+        #
+        # This failure was invisible until now: the `Setup rr-backend` step
+        # ahead of it used to abort on a flake attribute that never existed,
+        # so no run ever reached the Playwright step to discover it.
+        uses: ./.github/actions/provision-repro-lock-siblings
 
       - name: Setup rr-backend
         # `ci/setup-rr-backend.sh` resolves codetracer-native-backend's revision
