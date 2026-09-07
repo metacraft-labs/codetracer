@@ -99,6 +99,93 @@ function candidateStyleDirs(repoRoot) {
   return dirs;
 }
 
+/**
+ * Nix sets EVERY file it puts in the store to mtime 1970-01-01T00:00:01Z, on
+ * purpose: a build output must not vary with when it was built. So for a
+ * `result/` artefact the file's own mtime is not "old", it is ABSENT, and
+ * comparing it to a source mtime is not a freshness test — it is a test that
+ * always says STALE.
+ *
+ * That is not a hypothetical. On `test-ui-tests (nixos)` the ct binary is
+ * `nix build .#codetracer` output, `CODETRACER_E2E_CT_PATH` points at
+ * `result/bin/ct`, and the last candidate below therefore resolves to
+ * `result/frontend/styles/…`. Run 34026517513, job 101563733984:
+ *
+ *     the built stylesheet `default_dark_theme_electron.css` is STALE — it is
+ *     older than src/frontend/styles/generated/index.styl
+ *       stylesheet: …/result/frontend/styles/default_dark_theme_electron.css
+ *                   (built 1980-01-01T00:00:01.000Z)
+ *       source:     …/src/frontend/styles/generated/index.styl
+ *                   (edited 2026-09-06T21:43:24.887Z)
+ *
+ * 23 failures, all of that shape, all unfixable by any rebuild. And because
+ * the "Run TypeScript Playwright UI tests (DB-based only)" step carries no
+ * `if:`, a red Stylesheet-guards step SKIPS it — so this one comparison cost
+ * the nixos leg the entire Playwright suite. Only the trailing Event Log step,
+ * which is `if: always()` and names a single file, ran at all: 2 tests.
+ */
+const TIMESTAMP_NORMALIZED_MS = 1000;
+
+/**
+ * When the artefact at `candidate` was actually produced, or null if that
+ * cannot be established.
+ *
+ * The ordinary answer is its own mtime. For a timestamp-normalized artefact
+ * the answer is the mtime of the SYMLINK THROUGH WHICH IT WAS REACHED --
+ * `nix build` rewrites `result` on every build, and that symlink lives on the
+ * ordinary filesystem and carries a real timestamp. That is the same question
+ * the mtime asked ("when was this built"), answered where the build system
+ * actually records it.
+ *
+ * The symlink must be one the artefact was reached THROUGH (its target is a
+ * prefix of the artefact's real path) and must not also contain the checkout:
+ * on macOS `/var -> /private/var` satisfies the first test for every path on
+ * the machine, and its mtime means nothing about any build.
+ */
+function artefactBuiltAt(candidate, repoRoot) {
+  const abs = path.resolve(candidate);
+  const direct = fs.statSync(abs).mtimeMs;
+  if (direct > TIMESTAMP_NORMALIZED_MS) {
+    return { mtimeMs: direct, evidence: null };
+  }
+
+  const real = fs.realpathSync(abs);
+  let repoRootReal;
+  try {
+    repoRootReal = fs.realpathSync(path.resolve(repoRoot));
+  } catch {
+    repoRootReal = path.resolve(repoRoot);
+  }
+
+  let dir = abs;
+  for (;;) {
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+
+    let link;
+    try {
+      link = fs.lstatSync(dir);
+    } catch {
+      return null;
+    }
+    if (!link.isSymbolicLink()) continue;
+
+    let target;
+    try {
+      target = fs.realpathSync(dir);
+    } catch {
+      continue;
+    }
+    // Reached through it?
+    if (real !== target && !real.startsWith(target + path.sep)) continue;
+    // A build-output symlink sits inside or at the tree, never above it.
+    if (repoRootReal === target || repoRootReal.startsWith(target + path.sep)) continue;
+
+    return { mtimeMs: link.mtimeMs, evidence: dir };
+  }
+}
+
 /** The newest mtime among the stylus sources, and which file carried it. */
 function newestStylSource(repoRoot) {
   const root = path.join(repoRoot, "src", "frontend", "styles");
@@ -143,15 +230,37 @@ function newestStylSource(repoRoot) {
 function resolveBuiltThemeCss(repoRoot, theme) {
   const tried = [];
   let best = null;
+  const undatable = [];
 
   for (const dir of candidateStyleDirs(repoRoot)) {
     const candidate = path.join(dir, theme);
     tried.push(candidate);
     if (!fs.existsSync(candidate)) continue;
-    const { mtimeMs } = fs.statSync(candidate);
-    if (best === null || mtimeMs > best.mtimeMs) {
-      best = { file: candidate, mtimeMs };
+    const builtAt = artefactBuiltAt(candidate, repoRoot);
+    if (builtAt === null) {
+      // Present, but there is no honest answer to "when was this built".
+      // Recorded rather than dropped: a candidate that silently vanishes here
+      // would surface as the misleading "not found" below.
+      undatable.push(candidate);
+      continue;
     }
+    if (best === null || builtAt.mtimeMs > best.mtimeMs) {
+      best = { file: candidate, mtimeMs: builtAt.mtimeMs, evidence: builtAt.evidence };
+    }
+  }
+
+  if (best === null && undatable.length > 0) {
+    throw new Error(
+      `built theme stylesheet \`${theme}\` cannot be dated, so its freshness ` +
+        `cannot be checked and this spec would measure an artefact of unknown ` +
+        `provenance.\n` +
+        `  found: ${undatable.join("\n         ")}\n` +
+        `Its mtime is the timestamp nix normalizes store files to ` +
+        `(1970-01-01T00:00:01Z), and it was not reached through a build-output ` +
+        `symlink whose own mtime could answer instead. Build with ` +
+        `\`nix build .#codetracer\` so \`result\` exists, or point ` +
+        `CODETRACER_BUILD_DIR at a tup/reprobuild output.`,
+    );
   }
 
   if (best === null) {
@@ -172,7 +281,8 @@ function resolveBuiltThemeCss(repoRoot, theme) {
         `measure the previous build and report green on a change that never ` +
         `reached a browser.\n` +
         `  stylesheet: ${best.file}\n` +
-        `              (built ${new Date(best.mtimeMs).toISOString()})\n` +
+        `              (built ${new Date(best.mtimeMs).toISOString()}` +
+        `${best.evidence ? `, dated from ${best.evidence}` : ""})\n` +
         `  source:     ${newestSource.file}\n` +
         `              (edited ${new Date(newestSource.mtimeMs).toISOString()})\n` +
         `Run \`just build-once\`.`,
