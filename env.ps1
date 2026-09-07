@@ -192,27 +192,16 @@ function Set-EnvDefault {
   }
 }
 
-function Resolve-InstallDirFromRelativePathFile {
-  param(
-    [Parameter(Mandatory = $true)][string]$InstallRoot,
-    [Parameter(Mandatory = $true)][string]$RelativePathFile,
-    [string]$FallbackDir = ""
-  )
-
-  if (Test-Path -LiteralPath $RelativePathFile -PathType Leaf) {
-    $relative = (Get-Content -LiteralPath $RelativePathFile -Raw).Trim()
-    if (-not [string]::IsNullOrWhiteSpace($relative)) {
-      $parts = $relative -split '[\\/]'
-      return (Join-Path $InstallRoot ([System.IO.Path]::Combine($parts)))
-    }
-  }
-
-  if (-not [string]::IsNullOrWhiteSpace($FallbackDir)) {
-    return $FallbackDir
-  }
-
-  return ""
-}
+# `Resolve-InstallDirFromRelativePathFile` MOVED to
+# `non-nix-build/windows/toolchain-utils.ps1`, beside `Write-InstallPointer`
+# and `ConvertTo-InstallRelativePath`.
+#
+# It lived here while `env.ps1` was its only caller. It is not any more: the
+# `Ensure-*` scripts now resolve their own install directory through the same
+# pointer file they write, so the reader and the writer have to sit in the one
+# module both sides dot-source. `env.ps1` sources `toolchain-utils.ps1` at the
+# top of the bootstrap block, well before the first use below, so this is a
+# relocation and not a behaviour change.
 
 function Resolve-DotnetRoot {
   param(
@@ -1274,10 +1263,30 @@ if ($doSync) {
     # A failure to WRITE the report must not mask the failure that caused
     # the run to abort, so this is best-effort and warns rather than throws.
     try {
-      Write-BootstrapStepReport -Root $installRoot -OutputDir $decompositionDir | Out-Null
+      $script:BootstrapReportPath =
+        Write-BootstrapStepReport -Root $installRoot -OutputDir $decompositionDir
     } catch {
       Write-Warning "Failed to write the env.ps1 component decomposition: $($_.Exception.Message)"
+      $script:BootstrapReportPath = ""
     }
+  }
+
+  # OUTSIDE the `finally`, deliberately.
+  #
+  # This is the FAIL half of the relocatability check the report records. It
+  # runs only on a bootstrap that otherwise succeeded, because a
+  # relocatability throw raised from inside that `finally` would replace the
+  # error that actually stopped the run with a downstream one -- and the
+  # blocking component's identity is the single most valuable thing a failed
+  # provision produces.
+  #
+  # It is a failure rather than a warning because the store is published and
+  # refilled across machines: a component that bakes a path produces a tree
+  # that works for the machine that built it and misresolves everywhere else,
+  # silently. A warning nobody must act on is how the next mis-declaration
+  # gets in.
+  if (-not [string]::IsNullOrWhiteSpace($script:BootstrapReportPath)) {
+    Assert-BootstrapRelocatability -ReportPath $script:BootstrapReportPath
   }
 }
 
@@ -1467,7 +1476,17 @@ $shimsDir = Join-Path $installRoot "shims"
 $nargoRoot = Join-Path $installRoot "nargo"
 $nargoDir = Resolve-InstallDirFromRelativePathFile -InstallRoot $installRoot -RelativePathFile (Join-Path $nargoRoot "nargo.install.relative-path")
 
-$gccDir = Join-Path $installRoot ("gcc\" + $toolchain["GCC_VERSION"])
+# GCC resolves through its pointer file since the junction was removed (see the
+# relocatability note at the top of `Ensure-Gcc`). The fallback keeps an
+# install root provisioned by an older revision working: there, `gcc\<version>`
+# is the junction itself, which still resolves ON THE MACHINE THAT MADE IT --
+# which is the whole reason the junction had to go, and also the reason the
+# fallback is safe to keep as a compatibility path.
+$gccVersionRoot = Join-Path $installRoot ("gcc\" + $toolchain["GCC_VERSION"])
+$gccDir = Resolve-InstallDirFromRelativePathFile `
+  -InstallRoot $installRoot `
+  -RelativePathFile (Join-Path $gccVersionRoot "gcc.install.relative-path") `
+  -FallbackDir $gccVersionRoot
 $gccBinDir = Join-Path $gccDir "bin"
 
 $gnatVersion = if (-not [string]::IsNullOrWhiteSpace($toolchain["GNAT_VERSION"])) { $toolchain["GNAT_VERSION"] } else { $toolchain["GCC_VERSION"] }
@@ -1487,8 +1506,15 @@ $vlangBinDir = $vlangDir
 $fpcDir = Join-Path $installRoot ("fpc\" + $toolchain["FPC_VERSION"])
 $fpcBinDir = Join-Path $fpcDir "bin/i386-win32"
 
+# zstd and LLVM resolve through their pointer files since their system/manual
+# junction arms became copies. The fallback is the historical layout, so an
+# install root provisioned before the conversion still resolves.
 $zstdArch = ConvertTo-ZstdFileArch -Arch $arch
-$zstdDir = Join-Path $installRoot ("zstd\" + $toolchain["ZSTD_VERSION"] + "\zstd-v" + $toolchain["ZSTD_VERSION"] + "-" + $zstdArch)
+$zstdVersionRoot = Join-Path $installRoot ("zstd\" + $toolchain["ZSTD_VERSION"])
+$zstdDir = Resolve-InstallDirFromRelativePathFile `
+  -InstallRoot $installRoot `
+  -RelativePathFile (Join-Path $zstdVersionRoot "zstd.install.relative-path") `
+  -FallbackDir (Join-Path $zstdVersionRoot ("zstd-v" + $toolchain["ZSTD_VERSION"] + "-" + $zstdArch))
 
 # zlib install layout is `$installRoot/zlib/<version>/{include,lib}/`. Both
 # subdirs must be added to the toolchain search paths so the MinGW linker can
@@ -1499,7 +1525,17 @@ $zlibIncludeDir = Join-Path $zlibDir "include"
 $zlibLibDir = Join-Path $zlibDir "lib"
 
 $llvmTarget = ConvertTo-LlvmFileArch -Arch $arch
-$llvmDir = Join-Path $installRoot ("llvm\" + $toolchain["LLVM_VERSION"] + "\LLVM-" + $toolchain["LLVM_VERSION"] + "-" + $llvmTarget)
+$llvmVersionRoot = Join-Path $installRoot ("llvm\" + $toolchain["LLVM_VERSION"])
+# The pointer file also settles a directory-name disagreement that predates it:
+# `ensure-llvm.ps1` extracts to `clang+llvm-<ver>-<target>` (the real upstream
+# asset stem; its own comment records that `LLVM-<ver>-<target>` never existed),
+# while the fallback below is the `LLVM-`-prefixed name this line has always
+# used. Reading the pointer means the installer states where it put the tree
+# instead of two files having to agree on a guess.
+$llvmDir = Resolve-InstallDirFromRelativePathFile `
+  -InstallRoot $installRoot `
+  -RelativePathFile (Join-Path $llvmVersionRoot "llvm.install.relative-path") `
+  -FallbackDir (Join-Path $llvmVersionRoot ("LLVM-" + $toolchain["LLVM_VERSION"] + "-" + $llvmTarget))
 $llvmBinDir = Join-Path $llvmDir "bin"
 
 # Clingo install layout produced by ensure-clingo.ps1:

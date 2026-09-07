@@ -604,8 +604,143 @@ function Invoke-BoundedNativeCommand {
   }
 }
 
-function Ensure-CleanDirectory {
+# ---------------------------------------------------------------------------
+# The content-addressed store root, and why a delete must never reach it.
+#
+# Under the chosen provisioning arm the toolchain store is GUEST-LOCAL: one
+# copy per job, refilled over HTTP from a binary cache, and discarded with the
+# ephemeral guest. That removes the shared-store hazard where one job's
+# `Remove-Item -Recurse` took a toolchain out from under seven others -- a
+# private tree has no other readers to harm.
+#
+# What it does NOT remove is the cost. A store entry that a clean-up step
+# deletes has to be refilled over the network the next time something wants
+# it, so a delete under the store root is a cache-miss generator even when it
+# is not a correctness bug. `Ensure-CleanDirectory` is a private-scratch
+# primitive; the store is not private scratch, and the two are only
+# distinguishable by path.
+#
+# The roots are the ones `reprobuild-specs/Local-Content-Addressed-Store.md`
+# specifies under "Store Root": the per-user Windows root
+# `${LOCALAPPDATA}\repro\store\` and the shared cross-user root
+# `${PROGRAMDATA}\repro\store\`. `REPRO_STORE_ROOT` is the store's own
+# override (`repro_local_store/store.nim`'s `StoreRootEnvVar`) and is honoured
+# so a relocated store is still fenced; `CODETRACER_WINDOWS_STORE_ROOT` exists
+# for the same reason on this side of the boundary and is what the tests
+# drive, so the guard can be exercised without depending on a machine having
+# a store installed.
+# ---------------------------------------------------------------------------
+
+function Get-WindowsStoreRoots {
+  <#
+    .SYNOPSIS
+      Every directory a materialised store entry may live under on this host.
+
+    .DESCRIPTION
+      Returned as absolute paths with no trailing separator. Roots whose
+      defining environment variable is unset are omitted rather than guessed
+      at, so this returns an empty array on a host with no store and on
+      non-Windows PowerShell -- which is the correct answer in both cases,
+      not a degraded one.
+  #>
+
+  $roots = New-Object System.Collections.Generic.List[string]
+
+  foreach ($candidate in @(
+      [Environment]::GetEnvironmentVariable("CODETRACER_WINDOWS_STORE_ROOT"),
+      [Environment]::GetEnvironmentVariable("REPRO_STORE_ROOT"))) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+      $roots.Add($candidate.Trim())
+    }
+  }
+
+  foreach ($base in @(
+      [Environment]::GetEnvironmentVariable("LOCALAPPDATA"),
+      [Environment]::GetEnvironmentVariable("ProgramData"))) {
+    if (-not [string]::IsNullOrWhiteSpace($base)) {
+      $roots.Add((Join-Path $base.Trim() "repro/store"))
+    }
+  }
+
+  $normalized = New-Object System.Collections.Generic.List[string]
+  foreach ($root in $roots) {
+    $full = ""
+    try {
+      $full = [System.IO.Path]::GetFullPath($root)
+    } catch {
+      # An unusable value in the environment must not take the bootstrap
+      # down; it simply does not name a root worth fencing.
+      continue
+    }
+    $full = $full.TrimEnd([System.IO.Path]::DirectorySeparatorChar,
+                          [System.IO.Path]::AltDirectorySeparatorChar)
+    if ([string]::IsNullOrWhiteSpace($full)) { continue }
+    if (-not ($normalized -contains $full)) {
+      $normalized.Add($full)
+    }
+  }
+
+  return @($normalized)
+}
+
+function Get-ContainingStoreRoot {
+  <#
+    .SYNOPSIS
+      The store root that contains $Path, or "" when none does.
+
+    .DESCRIPTION
+      A path that IS a store root counts as contained: deleting the root
+      itself is the largest version of the mistake this guard exists to
+      refuse, not an exemption from it.
+
+      Comparison is on the normalised absolute path with a separator
+      appended, so `<root>store-scratch` is not mistaken for a child of
+      `<root>store`. Case-insensitive, because NTFS is.
+  #>
   param([Parameter(Mandatory = $true)][string]$Path)
+
+  $full = ""
+  try {
+    $full = [System.IO.Path]::GetFullPath($Path)
+  } catch {
+    return ""
+  }
+  $full = $full.TrimEnd([System.IO.Path]::DirectorySeparatorChar,
+                        [System.IO.Path]::AltDirectorySeparatorChar)
+
+  foreach ($root in (Get-WindowsStoreRoots)) {
+    if ($full.Equals($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $root
+    }
+    $rootPrefix = $root + [System.IO.Path]::DirectorySeparatorChar
+    if ($full.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $root
+    }
+  }
+
+  return ""
+}
+
+function Ensure-CleanDirectory {
+  <#
+    .SYNOPSIS
+      Replace $Path with an empty directory. PRIVATE SCRATCH ONLY.
+
+    .DESCRIPTION
+      Refuses any path at or under a content-addressed store root, naming
+      both the offending path and the root that fenced it. See the block
+      comment above `Get-WindowsStoreRoots` for why.
+  #>
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $storeRoot = Get-ContainingStoreRoot -Path $Path
+  if (-not [string]::IsNullOrWhiteSpace($storeRoot)) {
+    throw ("Ensure-CleanDirectory refuses to delete '$Path': it is inside the " +
+      "content-addressed store root '$storeRoot'. Store entries are immutable and " +
+      "are refilled from the binary cache, so deleting one is a cache-miss " +
+      "generator rather than a clean-up. Use a private scratch path, or release " +
+      "the store root that holds the entry and let the store's own GC reclaim it.")
+  }
 
   if (Test-Path $Path) {
     Remove-Item -LiteralPath $Path -Recurse -Force
@@ -1087,11 +1222,73 @@ function Write-BootstrapStepReport {
     # Cross-check the declared class against what is on disk. A component
     # declared "relocatable" that produced reparse points is mis-declared,
     # and a later store-safety assumption would inherit the error.
+    #
+    # PROMOTED FROM WARNING TO VIOLATION. The warning form caught GCC and RUST
+    # on the first complete decomposition run without having been designed as
+    # a relocatability gate -- which is the argument for keeping it and the
+    # argument against leaving it a warning. Under publish-and-refill a
+    # mis-declared component is not a note in a log, it is a cache entry that
+    # every later job inherits, so a claim the filesystem contradicts has to
+    # stop the run. `Assert-BootstrapRelocatability` is what does the stopping;
+    # this function only RECORDS, because it runs inside a `finally` whose
+    # whole purpose is to survive a failed provision and must not mask the
+    # failure that got it there.
+    #
+    # The count alone is not the test, and NEITHER IS WHERE THE TARGET
+    # RESOLVES. `Get-ReparsePointFindings` judges the STORED target: an
+    # absolute one is a violation even when it currently points inside the
+    # install root, because a junction records a location and locations do
+    # not travel with the tree. Only a RELATIVE target that stays inside the
+    # root is cleared. Read that function's block comment before changing
+    # anything here -- "it resolves inside the root" is the test that would
+    # have cleared the gcc junction this promotion exists to catch.
+    # The walk is skipped entirely when the count is zero, so the common
+    # case costs nothing.
+    #
+    # WHAT THIS WILL TRIP FIRST, AND IT HAS NOT BEEN MEASURED. On the last
+    # complete decomposition run the install root carried 14 reparse points:
+    # GCC's 1 (now converted away) and RUST's 13, under `rustup\` /
+    # `cargo\`, which `Ensure-Rust` reports but deliberately does not
+    # convert. RUST is still declared `relocatable`, so if those 13 store
+    # ABSOLUTE targets this assertion will stop the first real Windows
+    # provisioning run after this change. That is the gate doing its job
+    # rather than a bug in it -- a component that cannot be relocated must
+    # not go on claiming it can -- but the kind of those 13 targets is
+    # UNKNOWN: it can only be established by a Windows run, and the
+    # increment that armed this was directed not to dispatch one. Whoever
+    # sees that failure should either convert the rustup layout or change
+    # its declaration, not lower this back to a warning.
     $relocatabilityWarning = $null
+    $stepViolations = @()
     if ($record.relocatability -eq "relocatable" -and $reparse -gt 0) {
+      foreach ($dir in $record.created_dirs) {
+        $full = Join-Path $Root $dir
+        foreach ($finding in (Get-ReparsePointFindings -Root $Root -Path $full)) {
+          if (Test-RelocatabilityViolation -Finding $finding) {
+            $stepViolations += [pscustomobject]@{
+              step = $record.step
+              kind = $finding.kind
+              path = $finding.path
+              detail =
+                if ($finding.kind -eq "reparse-absolute-target") {
+                  "reparse point stores the ABSOLUTE target '$($finding.target)', which names the current root and will not follow the tree to another one"
+                } else {
+                  "reparse point targets '$($finding.target)', which resolves outside the install root"
+                }
+            }
+          }
+        }
+      }
       $relocatabilityWarning =
         "declared relocatable but $reparse reparse point(s) found under its install directories"
-      Write-Warning "Bootstrap step '$($record.step)': $relocatabilityWarning"
+      if ($stepViolations.Count -gt 0) {
+        Write-Warning "Bootstrap step '$($record.step)': $relocatabilityWarning; $($stepViolations.Count) of them will not survive relocation (absolute target, or a relative one that escapes the root)"
+      } else {
+        # Worth saying rather than staying silent: the count is non-zero and
+        # the component is still relocatable, which is a different fact from
+        # a zero count and would otherwise be indistinguishable from one.
+        Write-Host "Bootstrap step '$($record.step)': $reparse reparse point(s), all with relative targets inside the install root."
+      }
     }
 
     $rows += [pscustomobject]@{
@@ -1099,6 +1296,7 @@ function Write-BootstrapStepReport {
       status = $record.status
       relocatability = $record.relocatability
       relocatability_warning = $relocatabilityWarning
+      relocatability_violations = @($stepViolations)
       seconds = $record.seconds
       bytes = $bytes
       files = $files
@@ -1116,6 +1314,8 @@ function Write-BootstrapStepReport {
 
   $skipped = @($rows | Where-Object { $_.status -eq "skipped" } | ForEach-Object { $_.step })
   $failed = @($rows | Where-Object { $_.status -eq "failed" } | ForEach-Object { $_.step })
+  $relocatabilityViolations = @($rows | ForEach-Object { $_.relocatability_violations } |
+    Where-Object { $null -ne $_ })
 
   # Architecture is a label on the measurement, not part of it. Get-WindowsArch
   # goes through CIM, which is Windows-only and can fail on a loaded box; a
@@ -1149,6 +1349,10 @@ function Write-BootstrapStepReport {
     complete = ($skipped.Count -eq 0 -and $failed.Count -eq 0)
     skipped_steps = $skipped
     failed_steps = $failed
+    # Components whose declared relocatability the filesystem contradicts.
+    # Empty is the only acceptable steady state; `Assert-BootstrapRelocatability`
+    # is what enforces that, from outside the `finally` this runs in.
+    relocatability_violations = @($relocatabilityViolations)
     unattributed_install_dirs = $unattributed
     components = $rows
   }
@@ -1170,9 +1374,74 @@ function Write-BootstrapStepReport {
     Write-Host ("  NOTE: incomplete run - skipped [{0}] failed [{1}]" -f `
       ($skipped -join ","), ($failed -join ","))
   }
+  if ($relocatabilityViolations.Count -gt 0) {
+    Write-Host ("  RELOCATABILITY: {0} violation(s) - see relocatability_violations" -f `
+      $relocatabilityViolations.Count)
+  }
   Write-Host "Wrote $jsonPath"
 
   return $jsonPath
+}
+
+function Assert-BootstrapRelocatability {
+  <#
+    .SYNOPSIS
+      Fail the run when a component's declared relocatability is contradicted
+      by what it put on disk.
+
+    .DESCRIPTION
+      This is the FAIL half of the check `Write-BootstrapStepReport` records.
+      It is a separate function, called from OUTSIDE the report's `finally`,
+      for one reason: the report exists to survive a failed provision, and a
+      relocatability throw raised from inside it would replace the error that
+      actually stopped the bootstrap with a downstream one. So the report
+      always writes, and this only ever runs on a bootstrap that otherwise
+      succeeded.
+
+      Why this is a failure and not a warning: under publish-and-refill the
+      publisher and the consumer are different machines, so a component that
+      bakes a path into a store entry produces a tree that works for the
+      machine that built it and silently misresolves for every machine that
+      later pulls it. A warning nobody must act on is how the next
+      mis-declaration gets in.
+
+    .PARAMETER ReportPath
+      The `windows-env-decomposition.json` written by
+      `Write-BootstrapStepReport`. A missing or unreadable report is NOT
+      treated as a pass -- it is the absence of evidence, and this throws
+      rather than shrugging.
+  #>
+  param([Parameter(Mandatory = $true)][string]$ReportPath)
+
+  if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
+    throw ("Cannot check relocatability: no decomposition report at '$ReportPath'. " +
+      "A missing report is an unchecked claim, not a passing one.")
+  }
+
+  $report = $null
+  try {
+    $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+  } catch {
+    throw "Cannot check relocatability: '$ReportPath' is not readable JSON: $($_.Exception.Message)"
+  }
+
+  $violations = @()
+  if ($report.PSObject.Properties.Name -contains "relocatability_violations") {
+    $violations = @($report.relocatability_violations | Where-Object { $null -ne $_ })
+  }
+
+  if ($violations.Count -eq 0) {
+    Write-Host "Relocatability check passed: every component declared relocatable resolves inside the install root."
+    return
+  }
+
+  $lines = foreach ($violation in $violations) {
+    "  $($violation.step): $($violation.kind) at '$($violation.path)' - $($violation.detail)"
+  }
+  throw ("Relocatability check FAILED for $($violations.Count) item(s). A component " +
+    "declared relocatable put something in the install root that will not survive " +
+    "being materialised at a different root, which under publish-and-refill poisons " +
+    "the cache entry for every later job:`n" + ($lines -join "`n"))
 }
 
 function ConvertTo-InstallRelativePath {
@@ -1183,13 +1452,578 @@ function ConvertTo-InstallRelativePath {
 
   $absoluteRoot = [System.IO.Path]::GetFullPath($Root)
   $absoluteTarget = [System.IO.Path]::GetFullPath($AbsolutePath)
-  $rootPrefix = if ($absoluteRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) { $absoluteRoot } else { "$absoluteRoot\" }
+  # The separator must be the PLATFORM's, not a literal backslash. The test
+  # for "already ends in a separator" one line down always used
+  # `DirectorySeparatorChar` while the append used `"\"`, so on a host whose
+  # separator is `/` this function rejected every path that was in fact under
+  # the root. That never showed on Windows -- where the two are the same
+  # character -- and it is why the pointer discipline could not be exercised
+  # on Linux pwsh, which is where its tests run.
+  $separator = [System.IO.Path]::DirectorySeparatorChar
+  $rootPrefix =
+    if ($absoluteRoot.EndsWith($separator)) { $absoluteRoot }
+    else { $absoluteRoot + $separator }
 
   if (-not $absoluteTarget.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Expected path '$absoluteTarget' to be under install root '$absoluteRoot'."
   }
 
   return $absoluteTarget.Substring($rootPrefix.Length).Replace("\", "/")
+}
+
+# ---------------------------------------------------------------------------
+# The pointer-file discipline, and the audit that decides whether a component
+# actually earns the word "relocatable".
+#
+# `<component>.install.relative-path` holds a forward-slash-normalised
+# ROOT-RELATIVE path. It is the one mechanism that lets a component tree be
+# archived on the machine that built it and materialised somewhere else at a
+# different root -- which, under publish-and-refill, is the NORMAL case and not
+# a hypothetical: the publisher and the consumer are different machines.
+#
+# A baked absolute path under that arm is not merely awkward. It is a poisoned
+# cache entry: the tree looks correct, resolves against the publisher's paths,
+# and every later job that pulls it inherits the same wrong answer silently.
+#
+# Two checks are needed and neither subsumes the other:
+#
+#   * REPARSE POINTS -- a junction to a target outside the tree does not travel
+#     with the tree. Cheap to check (directory metadata only) and it is what
+#     caught GCC and RUST on the decomposition run's first complete pass.
+#   * CONTENT -- an absolute path baked into a text file has no reparse point
+#     to find. `rustup`'s `settings.toml` is exactly this shape, and it would
+#     have gone unnoticed had rustup not ALSO created junctions. A zero
+#     reparse-point count is a floor, not a clearance.
+# ---------------------------------------------------------------------------
+
+function Resolve-InstallDirFromRelativePathFile {
+  <#
+    .SYNOPSIS
+      Rehydrate an absolute install directory from a root-relative pointer file.
+
+    .DESCRIPTION
+      The read side of `Write-InstallPointer`. Joining a ROOT-RELATIVE path
+      onto whatever root the caller is standing at is the entire relocation
+      mechanism: the same pointer file resolves to the publisher's path on the
+      publisher and to the consumer's path on the consumer, with nothing to
+      rewrite in between.
+
+      `$FallbackDir` exists for components that do not yet write a pointer, so
+      a caller can adopt the discipline without a flag day. It returns "" when
+      there is neither a pointer nor a fallback, which callers must treat as
+      "not installed" rather than as a path.
+
+      MOVED HERE from `env.ps1` when the `Ensure-*` scripts became callers:
+      the reader and the writer belong in the module both sides dot-source.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$InstallRoot,
+    [Parameter(Mandatory = $true)][string]$RelativePathFile,
+    [string]$FallbackDir = ""
+  )
+
+  if (Test-Path -LiteralPath $RelativePathFile -PathType Leaf) {
+    $relative = (Get-Content -LiteralPath $RelativePathFile -Raw).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($relative)) {
+      $parts = $relative -split '[\\/]'
+      return (Join-Path $InstallRoot ([System.IO.Path]::Combine($parts)))
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($FallbackDir)) {
+    return $FallbackDir
+  }
+
+  return ""
+}
+
+function Write-InstallPointer {
+  <#
+    .SYNOPSIS
+      Record where a component's install tree sits, ROOT-RELATIVELY.
+
+    .DESCRIPTION
+      Writes `<VersionRoot>/<Component>.install.relative-path` (and, when
+      metadata is supplied, `<Component>.install.meta`) so
+      `Resolve-InstallDirFromRelativePathFile` can rehydrate the absolute path
+      against whatever root the tree is materialised at.
+
+      `ConvertTo-InstallRelativePath` refuses a target outside the root, so a
+      component that cannot express its install directory relatively fails
+      HERE, at the point the claim is made, rather than at the point a later
+      job discovers the tree does not work.
+
+    .PARAMETER Component
+      The pointer-file stem, e.g. "gcc". Conventionally the lowercase tool
+      name, matching what `env.ps1` reads back.
+
+    .PARAMETER VersionRoot
+      The directory the pointer files live in -- normally
+      `<Root>/<tool>/<version>`.
+
+    .PARAMETER InstallDir
+      The absolute path of the directory the tool is actually installed in.
+
+    .PARAMETER Metadata
+      Extra key/value pairs for `<Component>.install.meta`. `install_relative_path`
+      is added automatically. Pass `$null` to skip the meta file entirely.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][string]$Component,
+    [Parameter(Mandatory = $true)][string]$VersionRoot,
+    [Parameter(Mandatory = $true)][string]$InstallDir,
+    [hashtable]$Metadata = $null
+  )
+
+  $relative = ConvertTo-InstallRelativePath -AbsolutePath $InstallDir -Root $Root
+
+  New-Item -ItemType Directory -Force -Path $VersionRoot | Out-Null
+  $pointerPath = Join-Path $VersionRoot "$Component.install.relative-path"
+  Set-Content -LiteralPath $pointerPath -Value $relative -Encoding ASCII
+
+  if ($null -ne $Metadata) {
+    $values = @{}
+    foreach ($key in $Metadata.Keys) {
+      $values[[string]$key] = [string]$Metadata[$key]
+    }
+    $values["install_relative_path"] = $relative
+    Write-KeyValueFile -Path (Join-Path $VersionRoot "$Component.install.meta") -Values $values
+  }
+
+  return $relative
+}
+
+function Get-ReparsePointFindings {
+  <#
+    .SYNOPSIS
+      Every reparse point under $Path, with a verdict on whether its target
+      escapes $Root.
+
+    .DESCRIPTION
+      Walks directories and files, never FOLLOWING a reparse point -- following
+      one would recurse into whatever it names, which on an escaping junction
+      means walking outside the tree under audit.
+
+      THE TEST IS ON THE STORED TARGET, NOT ON WHERE IT CURRENTLY RESOLVES,
+      and the difference is the whole point. An NTFS junction stores an
+      ABSOLUTE path. `New-Item -ItemType Junction -Path <root>\gcc\15.2.0
+      -Target <root>\gcc\winlibs-15.2.0\mingw64` therefore produces a link
+      whose target is inside the install root TODAY and which still names the
+      OLD root after the tree is materialised somewhere else -- so it survives
+      a "does the target resolve inside the root?" check and does not survive
+      relocation. That is precisely the failure this audit exists to catch,
+      and a resolution-based check would have passed it.
+
+      So the three verdicts are:
+
+        * `reparse-absolute-target` -- a violation unconditionally. The stored
+          path names a location, not a relationship, and locations do not move
+          with the tree.
+        * `reparse-escapes-root` -- a relative target that still climbs out of
+          the root. A violation for the ordinary reason.
+        * `reparse-inside-root` -- a relative target resolving within the root.
+          This one travels, and is reported rather than dropped so that "no
+          reparse points at all" stays distinguishable from "reparse points
+          that are all fine".
+
+      Portable: `LinkTarget` is a PowerShell 7 property present on Linux and
+      macOS too, where symlinks stand in for junctions. That is what lets this
+      be exercised off Windows.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][string]$Path
+  )
+
+  $findings = [System.Collections.Generic.List[object]]::new()
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return @($findings)
+  }
+
+  $absoluteRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar)
+  $rootPrefix = $absoluteRoot + [System.IO.Path]::DirectorySeparatorChar
+
+  $pending = New-Object System.Collections.Generic.Queue[string]
+  $pending.Enqueue($Path)
+
+  while ($pending.Count -gt 0) {
+    $current = $pending.Dequeue()
+    $entries = @()
+    try {
+      $entries = @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)
+    } catch {
+      continue
+    }
+
+    foreach ($entry in $entries) {
+      $isReparse = $false
+      try {
+        $isReparse = $entry.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)
+      } catch {
+        $isReparse = $false
+      }
+
+      if ($isReparse) {
+        $target = ""
+        try { $target = [string]$entry.LinkTarget } catch { $target = "" }
+
+        # A relative link target is resolved against the link's own
+        # directory, which is how a link that travels with the tree is
+        # normally written.
+        $resolved = ""
+        if (-not [string]::IsNullOrWhiteSpace($target)) {
+          try {
+            $resolved = [System.IO.Path]::GetFullPath(
+              [System.IO.Path]::Combine((Split-Path -Parent $entry.FullName), $target))
+          } catch {
+            $resolved = ""
+          }
+        }
+        $resolved = $resolved.TrimEnd([System.IO.Path]::DirectorySeparatorChar,
+                                      [System.IO.Path]::AltDirectorySeparatorChar)
+
+        # An unreadable target is treated as absolute rather than as fine: a
+        # link this audit cannot describe is not a link it may clear.
+        $isAbsolute = $true
+        if (-not [string]::IsNullOrWhiteSpace($target)) {
+          try {
+            $isAbsolute = [System.IO.Path]::IsPathRooted($target)
+          } catch {
+            $isAbsolute = $true
+          }
+        }
+
+        $escapes = $true
+        if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+          $escapes = -not (
+            $resolved.Equals($absoluteRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $resolved.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase))
+        }
+
+        $kind =
+          if ($isAbsolute) { "reparse-absolute-target" }
+          elseif ($escapes) { "reparse-escapes-root" }
+          else { "reparse-inside-root" }
+
+        $findings.Add([pscustomobject]@{
+          kind = $kind
+          path = $entry.FullName
+          target = $target
+          resolved_target = $resolved
+          target_is_absolute = $isAbsolute
+        })
+        # Do NOT descend through it.
+        continue
+      }
+
+      if ($entry.PSIsContainer) {
+        $pending.Enqueue($entry.FullName)
+      }
+    }
+  }
+
+  return @($findings)
+}
+
+function Get-BakedAbsolutePathFindings {
+  <#
+    .SYNOPSIS
+      Files under $Path whose CONTENT contains the absolute path of $Root.
+
+    .DESCRIPTION
+      The check the reparse-point counter cannot make. A component can be
+      non-relocatable with zero reparse points -- rustup's `settings.toml`
+      records absolute `RUSTUP_HOME`/toolchain paths as plain text -- and such
+      a tree is exactly the silent failure publish-and-refill produces: it
+      resolves fine on the machine that wrote it.
+
+      Bytes are searched, not lines, and in BOTH UTF-8 and UTF-16LE, because
+      Windows tools write both and a UTF-16 `settings.toml` would be invisible
+      to a UTF-8-only scan. All three spellings of the root a Windows tool may
+      emit are searched: the native `\` form, the forward-slash form many
+      cross-platform tools normalise to, and the `\\`-escaped form that appears
+      inside JSON and TOML string literals.
+
+      Reparse points are not followed, and files larger than $MaxFileBytes are
+      reported as unscanned rather than silently skipped -- an unscanned file
+      is an unknown, and an unknown recorded as a pass is how this check would
+      become decoration.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][string]$Path,
+    [long]$MaxFileBytes = 33554432
+  )
+
+  $findings = [System.Collections.Generic.List[object]]::new()
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return @($findings)
+  }
+
+  $absoluteRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar)
+
+  $spellings = @($absoluteRoot)
+  $forward = $absoluteRoot.Replace("\", "/")
+  if ($forward -ne $absoluteRoot) { $spellings += $forward }
+  $escaped = $absoluteRoot.Replace("\", "\\")
+  if ($escaped -ne $absoluteRoot) { $spellings += $escaped }
+
+  $needles = [System.Collections.Generic.List[object]]::new()
+  foreach ($spelling in $spellings) {
+    $needles.Add([pscustomobject]@{
+      spelling = $spelling
+      encoding = "utf-8"
+      bytes = [System.Text.Encoding]::UTF8.GetBytes($spelling)
+    })
+    $needles.Add([pscustomobject]@{
+      spelling = $spelling
+      encoding = "utf-16le"
+      bytes = [System.Text.Encoding]::Unicode.GetBytes($spelling)
+    })
+  }
+
+  $pending = New-Object System.Collections.Generic.Queue[string]
+  $pending.Enqueue($Path)
+
+  while ($pending.Count -gt 0) {
+    $current = $pending.Dequeue()
+    $entries = @()
+    try {
+      $entries = @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)
+    } catch {
+      continue
+    }
+
+    foreach ($entry in $entries) {
+      $isReparse = $false
+      try {
+        $isReparse = $entry.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)
+      } catch {
+        $isReparse = $false
+      }
+      if ($isReparse) { continue }
+
+      if ($entry.PSIsContainer) {
+        $pending.Enqueue($entry.FullName)
+        continue
+      }
+
+      if ($entry.Length -gt $MaxFileBytes) {
+        $findings.Add([pscustomobject]@{
+          kind = "unscanned-oversized-file"
+          path = $entry.FullName
+          spelling = ""
+          encoding = ""
+          detail = "file is $($entry.Length) bytes, over the $MaxFileBytes-byte scan limit"
+        })
+        continue
+      }
+
+      $bytes = $null
+      try {
+        $bytes = [System.IO.File]::ReadAllBytes($entry.FullName)
+      } catch {
+        $findings.Add([pscustomobject]@{
+          kind = "unscanned-unreadable-file"
+          path = $entry.FullName
+          spelling = ""
+          encoding = ""
+          detail = "could not be read"
+        })
+        continue
+      }
+
+      foreach ($needle in $needles) {
+        if (Test-ByteSequenceContains -Haystack $bytes -Needle $needle.bytes) {
+          $findings.Add([pscustomobject]@{
+            kind = "baked-absolute-path"
+            path = $entry.FullName
+            spelling = $needle.spelling
+            encoding = $needle.encoding
+            detail = "contains the install root as $($needle.encoding) text"
+          })
+          break
+        }
+      }
+    }
+  }
+
+  return @($findings)
+}
+
+function Test-ByteSequenceContains {
+  <#
+    .SYNOPSIS
+      True when $Needle occurs anywhere in $Haystack.
+
+    .DESCRIPTION
+      A plain byte search rather than a string search, so it is unaffected by
+      how the file's own encoding would decode -- a UTF-16LE path inside an
+      otherwise-binary file is still found.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Haystack,
+    [Parameter(Mandatory = $true)][byte[]]$Needle
+  )
+
+  if ($Needle.Length -eq 0) { return $false }
+  if ($Haystack.Length -lt $Needle.Length) { return $false }
+
+  $last = $Haystack.Length - $Needle.Length
+  $first = $Needle[0]
+  for ($i = 0; $i -le $last; $i++) {
+    if ($Haystack[$i] -ne $first) { continue }
+    $matched = $true
+    for ($j = 1; $j -lt $Needle.Length; $j++) {
+      if ($Haystack[$i + $j] -ne $Needle[$j]) { $matched = $false; break }
+    }
+    if ($matched) { return $true }
+  }
+  return $false
+}
+
+function Get-InstallTreeRelocatabilityFindings {
+  <#
+    .SYNOPSIS
+      Everything that would stop $Path from working after being materialised
+      at a different root.
+
+    .DESCRIPTION
+      The union of the reparse-point audit and the content audit, with only
+      the escaping reparse points and the baked absolute paths counted as
+      violations. `-SkipContentScan` runs the cheap half alone, which is what
+      the provisioning report does by default: the content scan reads every
+      byte of the install root, and that is a deliberate cost to opt into
+      rather than one to impose on every provision.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][string]$Path,
+    [switch]$SkipContentScan
+  )
+
+  $findings = [System.Collections.Generic.List[object]]::new()
+  foreach ($finding in (Get-ReparsePointFindings -Root $Root -Path $Path)) {
+    $findings.Add($finding)
+  }
+  if (-not $SkipContentScan) {
+    foreach ($finding in (Get-BakedAbsolutePathFindings -Root $Root -Path $Path)) {
+      $findings.Add($finding)
+    }
+  }
+  return @($findings)
+}
+
+function Repair-RustupSettingsRelocatability {
+  <#
+    .SYNOPSIS
+      Strip the absolute directory paths rustup bakes into `settings.toml`.
+
+    .DESCRIPTION
+      rustup's `settings.toml` carries an `[overrides]` table whose KEYS are
+      absolute directory paths -- one per `rustup override set` -- recording
+      which toolchain to use under which directory. Nothing else in the file
+      is a path: `version` and `default_toolchain` are opaque identifiers, and
+      `profile` is an enum.
+
+      This is the failure mode a reparse-point count cannot see. A rustup tree
+      can have zero reparse points and still be non-relocatable, because the
+      paths are plain text in a config file, and the entry will look correct
+      on the machine that wrote it and resolve against a stranger's
+      directories anywhere else.
+
+      Overrides are DROPPED rather than rewritten because there is nothing to
+      rewrite them to: an override is a statement about a directory on the
+      publishing machine, and that directory does not exist on the consumer.
+      Dropping them restores the documented default behaviour (use
+      `default_toolchain`), which is what a freshly provisioned tree wants
+      anyway -- `Ensure-Rust` never sets an override.
+
+      PARSING NOTE, stated because it bounds what this may be pointed at: this
+      is a line-oriented transform over the file RUSTUP GENERATES, not a TOML
+      parser. It relies on rustup writing table headers at the start of a line
+      and on `[overrides]` running to the next header or to EOF. Do not reuse
+      it on hand-edited or arbitrary TOML.
+
+    .OUTPUTS
+      An object with `path`, `changed`, and `removed_lines`. A missing file is
+      reported as `changed = $false` rather than as an error: a rustup home
+      with no settings yet is a normal state, not a defect.
+  #>
+  param([Parameter(Mandatory = $true)][string]$RustupHome)
+
+  $settingsPath = Join-Path $RustupHome "settings.toml"
+  $result = [pscustomobject]@{
+    path = $settingsPath
+    changed = $false
+    removed_lines = @()
+  }
+
+  if (-not (Test-Path -LiteralPath $settingsPath -PathType Leaf)) {
+    return $result
+  }
+
+  $lines = @(Get-Content -LiteralPath $settingsPath)
+  $kept = New-Object System.Collections.Generic.List[string]
+  $removed = New-Object System.Collections.Generic.List[string]
+  $inOverrides = $false
+
+  foreach ($line in $lines) {
+    $trimmed = $line.TrimStart()
+    if ($trimmed.StartsWith("[")) {
+      # A new table header always ends the overrides table, including
+      # `[overrides]` itself when it appears twice.
+      $inOverrides = ($trimmed -match '^\[\s*overrides\s*\]')
+      if ($inOverrides) {
+        $removed.Add($line)
+        continue
+      }
+    }
+
+    if ($inOverrides) {
+      $removed.Add($line)
+      continue
+    }
+
+    $kept.Add($line)
+  }
+
+  if ($removed.Count -eq 0) {
+    return $result
+  }
+
+  Set-Content -LiteralPath $settingsPath -Value $kept -Encoding UTF8
+  $result.changed = $true
+  $result.removed_lines = @($removed)
+  return $result
+}
+
+function Test-RelocatabilityViolation {
+  <#
+    .SYNOPSIS
+      True when a finding is a reason to refuse the "relocatable" claim.
+
+    .DESCRIPTION
+      `reparse-inside-root` is not: a RELATIVE link that resolves within the
+      tree travels with it. `reparse-absolute-target` is, even when the target
+      happens to sit inside the root today -- see `Get-ReparsePointFindings`
+      for why that case is the one that gets missed.
+
+      The `unscanned-*` kinds are not violations either -- they are gaps in
+      the evidence, reported so a reader can see the check did not cover
+      everything, and deliberately NOT promoted to failures, because "we could
+      not read it" is a different claim from "it is broken".
+  #>
+  param([Parameter(Mandatory = $true)]$Finding)
+
+  return ($Finding.kind -eq "reparse-absolute-target" -or
+          $Finding.kind -eq "reparse-escapes-root" -or
+          $Finding.kind -eq "baked-absolute-path")
 }
 
 function Get-Sha256HexForString {
