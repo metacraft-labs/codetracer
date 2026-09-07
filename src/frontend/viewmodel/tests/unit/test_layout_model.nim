@@ -184,13 +184,60 @@ suite "Layout model — adding and removing panes":
     check holder.visiblePanes() == @[paneState]
 
   test "removing the last child of a container collapses the container":
+    # PLAT-4 (Layout-ViewModel §2.4) changed what "collapses" means here, and
+    # the change is the milestone's, not an accident. Before, the emptied
+    # column was dropped and the row was left holding ONE child; rule 1 —
+    # "a container with one child is replaced by that child" — now applies
+    # too, so the row is replaced by the editor and the root IS the pane.
+    # A single-child row is `lpSingleChildContainer` at the `Layout` level as
+    # of this milestone, so leaving one behind would be writing a defect.
     let l = row([pane(paneEditor), column([pane(paneState)])])
     check l.removePane(paneState)
-    check l.children.len == 1
+    check l.kind == lnPane
+    check l.children.len == 0
     check l.allPanes() == @[paneEditor]
     # The collapse is what keeps lpEmptyContainer unreachable through
     # ordinary use, so the tree must still validate afterwards.
     check l.validate().len == 0
+    check validate(initLayout(l)).len == 0
+
+  test "removing the last pane is refused rather than emptying the tree":
+    # §2.4 rule 3. There is no valid layout with no panes, and a shell that
+    # reached one would have no way back through the UI.
+    let l = column([pane(paneEditor), pane(paneState)])
+    check l.removePane(paneState)
+    check l.kind == lnPane
+    check not l.removePane(paneEditor)
+    check l.allPanes() == @[paneEditor]
+
+  test "rule 3 holds for a CONTAINER root too, not just a collapsed pane one":
+    # The case above cannot reach rule 3's own gate: by the time it asks for
+    # the last pane the tree has already collapsed to `lnPane`, and
+    # `removePane`'s FIRST guard — "a bare pane has nothing to remove from" —
+    # answers false for an unrelated reason. Deleting the rule-3 gate leaves
+    # it green, so on its own it does not witness the rule.
+    #
+    # A single-TAB STACK is the witness: it is a container, so the first guard
+    # does not fire, and it is an explicitly VALID layout (rule 1 exempts
+    # stacks — a one-tab stack is an arrangement, not a hole). Without the
+    # gate this empties to `stack()`, an empty root.
+    let l = stack([pane(paneEditor)])
+    check initLayout(l).isValid()
+    check not l.removePane(paneEditor)
+    check l.allPanes() == @[paneEditor]
+    check initLayout(l).isValid()
+
+  test "adding a pane that is already placed is refused":
+    let l = column([pane(paneEditor), pane(paneState)])
+    check not l.addPane(pane(paneState))
+    check l.allPanes() == @[paneEditor, paneState]
+
+  test "a negative weight cannot be written through setWeight":
+    # `validate` calls it a defect; the mutator must not be a way to create
+    # one behind `validate`'s back.
+    let l = column([pane(paneEditor), pane(paneState)])
+    check not l.setWeight(paneEditor, -1.0)
+    check l.find(paneEditor).weight == 0.0
 
   test "removing an absent pane reports false and changes nothing":
     let l = defaultReplayLayout()
@@ -261,33 +308,78 @@ suite "Layout model — validation":
       kinds.add(p.kind)
     check lpNegativeWeight in kinds
 
-  test "every problem kind is reachable from some tree":
+  test "every structural problem kind is reachable from some layout":
     # The catalogue must not grow a value nothing can produce: a defect kind
-    # no tree can exhibit is a defect kind no shell will ever handle. The
+    # no layout can exhibit is a defect kind no shell will ever handle. The
     # `case` below is exhaustive, so adding a value to LayoutProblemKind
     # without a witness here is a compile error.
+    #
+    # PLAT-4 SPLIT THE CATALOGUE IN TWO. Some kinds are only ever produced by
+    # `apply` refusing a command — there is no tree that exhibits "you named a
+    # pane that is not placed" — so the witness is an `Option`, and the
+    # assertion is against `problemSources`, which is the model's own
+    # statement about which side of the line each kind falls on. That makes
+    # the two halves check each other: a witness for a kind declared
+    # refusal-only fails here, and a kind declared structural with no witness
+    # fails here too. The refusal half's own exhaustive table is in
+    # `test_layout_algebra.nim`.
+    var structuralCovered = 0
     for kind in LayoutProblemKind:
-      let witness =
+      let witness: Option[Layout] =
         case kind
-        of lpEmptyContainer: column([])
+        of lpEmptyContainer: some(initLayout(column([])))
         of lpPaneWithChildren:
-          LayoutNode(kind: lnPane, pane: paneState,
-                     children: @[pane(paneEventLog)])
+          some(initLayout(LayoutNode(kind: lnPane, pane: paneState,
+                                     children: @[pane(paneEventLog)])))
         of lpContainerWithPaneField:
-          LayoutNode(kind: lnColumn, pane: paneState,
-                     children: @[pane(paneEventLog)])
+          some(initLayout(LayoutNode(kind: lnColumn, pane: paneState,
+                                     children: @[pane(paneEventLog)])))
         of lpStackChildNotPane:
-          stack([pane(paneState), column([pane(paneEventLog)])])
+          some(initLayout(stack([pane(paneState), column([pane(paneEventLog)])])))
         of lpActiveIndexOutOfRange:
-          stack([pane(paneState)], activeIndex = 9)
+          some(initLayout(stack([pane(paneState)], activeIndex = 9)))
         of lpDuplicatePane:
-          row([pane(paneEditor), pane(paneEditor)])
-        of lpNegativeWeight: column([pane(paneEditor, weight = -1.0)])
-      var kinds: seq[LayoutProblemKind] = @[]
-      for p in witness.validate():
-        kinds.add(p.kind)
-      checkpoint("witness for " & $kind & ": " & $witness)
-      check kind in kinds
+          some(initLayout(row([pane(paneEditor), pane(paneEditor)])))
+        of lpNegativeWeight:
+          some(initLayout(column([pane(paneEditor, weight = -1.0)])))
+        of lpSingleChildContainer:
+          some(initLayout(column([pane(paneEditor)])))
+        of lpEmptyRoot: some(initLayout(column([])))
+        of lpDockOrderCollision:
+          some(initLayout(row([pane(paneEditor), pane(paneState)]), @[
+            DockedPane(pane: paneShell, edge: leBottom, order: 0),
+            DockedPane(pane: paneScratchpad, edge: leBottom, order: 0)]))
+        of lpPaneBothPlacedAndDocked:
+          some(initLayout(row([pane(paneEditor), pane(paneState)]), @[
+            DockedPane(pane: paneState, edge: leLeft, order: 0)]))
+        of lpPaneNeitherPlacedNorDocked:
+          some(initLayout(row([pane(paneEditor), pane(paneState)])))
+        of lpPaneNotPlaced, lpPaneNotDocked, lpTargetNotAStack,
+           lpIndexOutOfRange:
+          none(Layout)
+      checkpoint("witness for " & $kind)
+      if lpsStructural in problemSources(kind):
+        check witness.isSome
+        if witness.isSome:
+          inc structuralCovered
+          # `lpPaneNeitherPlacedNorDocked` is the one kind that needs the
+          # shell's own set of owned panes, because nothing in the model can
+          # know it. Passing a non-empty set here is what keeps that check
+          # from being vacuous.
+          var kinds: seq[LayoutProblemKind] = @[]
+          for p in validate(witness.get, owned = {paneEditor, paneState,
+                                                  paneCalltrace}):
+            kinds.add(p.kind)
+          checkpoint("reported: " & $kinds)
+          check kind in kinds
+      else:
+        # A refusal-only kind must NOT have a structural witness, or the
+        # partition `problemSources` claims is not the partition that exists.
+        check witness.isNone
+    # A positive control for the loop above: if `problemSources` ever declared
+    # every kind refusal-only, every branch would be skipped and the test
+    # would still be green (Verification-Harness-Traps §4).
+    check structuralCovered == 12
 
 # ---------------------------------------------------------------------------
 # Serialisation — the replacement for saving a GoldenLayoutResolvedConfig

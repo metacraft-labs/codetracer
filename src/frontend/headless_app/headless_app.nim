@@ -316,11 +316,19 @@ proc restoreLayouts*(app: HeadlessApp; doc: JsonNode): int =
     raise (ref LayoutDecodeError)(
       kind: ldeMissingField, detail: "version",
       msg: "restoreLayouts: missing or non-integer 'version'")
-  if doc["version"].getInt != LayoutSchemaVersion:
+  # A range rather than an equality since PLAT-4 gave `layout_model` a forward
+  # migration chain. This document's per-session payload is a bare node, whose
+  # encoding did not change between schema versions 1 and 2, so a v1 document
+  # is readable here for the same reason `restoreLayoutDocument` can migrate
+  # one. A version ABOVE this build's is still refused, loudly: an older build
+  # meeting a newer layout has nothing to fall forward to.
+  if doc["version"].getInt > LayoutSchemaVersion or
+     doc["version"].getInt < FirstLayoutSchemaVersion:
     raise (ref LayoutDecodeError)(
       kind: ldeUnknownVersion, detail: $doc["version"].getInt,
       msg: "restoreLayouts: schema version " & $doc["version"].getInt &
-           " is not " & $LayoutSchemaVersion)
+           " is outside " & $FirstLayoutSchemaVersion & ".." &
+           $LayoutSchemaVersion)
   if not doc.hasKey("sessions") or doc["sessions"].kind != JArray:
     raise (ref LayoutDecodeError)(
       kind: ldeMissingField, detail: "sessions",
