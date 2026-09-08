@@ -493,7 +493,7 @@ proc startTrace(producer: NoirBuildProducer; tmpl: ProjectTemplate)
 
 proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
               phase: NoirBuildPhase; args: seq[string]; stdin: string;
-              label: string)
+              label: string): string
   ## Forward-declared because `onPhaseExit` chains — `nriTestRecord` runs three
   ## phases and each dispatch happens inside the previous one's exit — and the
   ## definition needs `onPhaseExit` for its own callbacks. `startTrace` above
@@ -564,7 +564,10 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
            "ok=true passed=" & $producer.lastTests.passed &
            " failed=" & $producer.lastTests.failed &
            " recording=" & activeRecordSelector)
-    dispatch(producer, tmpl, nbpTestRecord, noirTestArgs(),
+    # Discarded: this runs inside `onPhaseExit`, with no click waiting on an
+    # answer. A refusal here is painted into the build pane by `onRefusal`,
+    # and the `activeInFlight` check that follows every phase settles the run.
+    discard dispatch(producer, tmpl, nbpTestRecord, noirTestArgs(),
              $noirTestRecordRequest(templateVfsEntries(tmpl), tmpl.name,
                                     activeRecordSelector),
              "nargo test --record " & activeRecordSelector)
@@ -582,7 +585,9 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
       # REFRESH VERSUS ENTER, decided here and carried into the trace phase.
       # The recording is produced either way; only the navigation differs.
       producer.replaySuppressOpen = not activeRecordOpenWhenDone
-      dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
+      # Discarded: same phase-exit continuation, and the `if activeInFlight`
+      # below already branches on whether this posted.
+      discard dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
                $noirTraceRequest(producer.artifact, noirTestRecordInputs),
                "nargo trace " & activeRecordSelector)
       if activeInFlight:
@@ -697,8 +702,26 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
 
 proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
               phase: NoirBuildPhase; args: seq[string]; stdin: string;
-              label: string) =
+              label: string): string =
   ## Post one `start` to the worker, through the platform facade.
+  ##
+  ## RETURNS "" WHEN THE COMMAND WAS POSTED, and otherwise the sentence saying
+  ## why it was not.
+  ##
+  ## The return type is the point, and it is a change from `void`. Both
+  ## refusals below paint their sentence into the build pane through
+  ## `onRefusal` and then `return`, leaving `activeInFlight` false — so the
+  ## only way a caller could learn a dispatch had been declined was to read
+  ## that flag afterwards and infer it. `startNoirTestRecording` DID read it,
+  ## settled the run, and then fell off the end returning the implicit "",
+  ## which its own docstring defines as "the run was dispatched". The editor
+  ## read that "" as consent, armed a spinner and posted `"<test>" started`
+  ## over a run that had been declined before the click finished.
+  ##
+  ## A `void` here cannot be misread, because there is nothing to read; it can
+  ## only be assumed. Handing back the sentence forces all seven call sites to
+  ## say what they do with a refusal, and it hands the one caller that has a
+  ## user waiting on an answer the words to give them.
   ##
   ## `ctPlatform().process.start` and not `run`, because a Run has to be
   ## stoppable: `start` yields a `ProcessHandle` and `run` does not, and the ■
@@ -724,10 +747,10 @@ proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
     # attached `webNoModulesLoaded` as its degradation. That sentence names
     # the deployment rather than the command, which is the true statement
     # here, so it is shown instead of a generic refusal.
-    discard producer.onRefusal(
-      degradedBehaviour(platform.profile, capProcessSpawn))
+    let sentence = degradedBehaviour(platform.profile, capProcessSpawn)
+    discard producer.onRefusal(sentence)
     report($phase & "-refused", "reason=no-spawn")
-    return
+    return sentence
 
   proc onOutput(chunk: ProcessOutputChunk) =
     producer.onOutput(chunk)
@@ -751,12 +774,13 @@ proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
     # describes nothing.
     discard producer.onRefusal($started.error)
     report($phase & "-refused", "reason=" & $started.error.kind)
-    return
+    return $started.error
 
   activeHandle = started.value
   activeInFlight = true
   inc lastStartCount
   report($phase & "-started", "handle=" & $activeHandle)
+  return ""
 
 proc startTrace(producer: NoirBuildProducer; tmpl: ProjectTemplate) =
   let inputs = templateInputs(tmpl)
@@ -765,7 +789,9 @@ proc startTrace(producer: NoirBuildProducer; tmpl: ProjectTemplate) =
     discard producer.traceInputsMissing(noirInputsFile)
     report("trace-refused", "reason=no-inputs")
     return
-  dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
+  # Discarded: `startTrace` is `void` and every caller reaches it from a
+  # phase exit, not from a gesture. The refusal is painted in the pane.
+  discard dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
            $noirTraceRequest(producer.artifact, inputs), "nargo trace")
 
 proc startNoirBuild*(saved: seq[string] = @[]) =
@@ -788,7 +814,10 @@ proc startNoirBuild*(saved: seq[string] = @[]) =
     report("build-refused", "reason=no-build-vm")
     return
   activeIntent = nriBuild
-  dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
+  # Discarded: the Build button's own surface IS the build pane, so a
+  # refusal painted there by `onRefusal` is already in front of the user who
+  # pressed it. Nothing here claims the build started.
+  discard dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
            $noirVfsRequest(templateVfsEntries(tmpl), tmpl.name, nbmProgram),
            savedFilesLabel("nargo compile", saved))
 
@@ -849,7 +878,9 @@ proc startNoirRun*(saved: seq[string] = @[]) =
     report("run-refused", "reason=no-build-vm")
     return
   activeIntent = nriRun
-  dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
+  # Discarded: same as `startNoirBuild` — the Run button's surface is the
+  # build pane, and the refusal lands there.
+  discard dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
            $noirVfsRequest(templateVfsEntries(tmpl), tmpl.name, nbmDebug),
            savedFilesLabel("nargo compile --debug", saved))
 
@@ -933,7 +964,10 @@ proc startNoirTests*(saved: seq[string] = @[];
   let label =
     if only.len == 0: "nargo test"
     else: "nargo test --exact " & only.join(" ")
-  dispatch(producer, tmpl, nbpTest, noirTestArgs(),
+  # Discarded: `startNoirTests` is `void` and its surface is the Test Results
+  # pane, which `onRefusal` has already painted. The settle below is what stops
+  # the pane sitting `inFlight` behind a disabled play control.
+  discard dispatch(producer, tmpl, nbpTest, noirTestArgs(),
            $noirTestRequest(templateVfsEntries(tmpl), tmpl.name, only),
            savedFilesLabel(label, saved))
   if not activeInFlight:
@@ -1094,14 +1128,32 @@ proc startNoirTestRecording*(selector: string;
   activeRecordOpenWhenDone = openWhenDone
   if not noirTestRunStarted.isNil:
     noirTestRunStarted()
-  dispatch(producer, tmpl, nbpTest, noirTestArgs(),
+  let refusal = dispatch(producer, tmpl, nbpTest, noirTestArgs(),
            $noirTestRequest(templateVfsEntries(tmpl), tmpl.name, @[selector]),
            "nargo test --exact " & selector)
   if not activeInFlight:
+    # THE DISPATCH WAS DECLINED. This branch used to settle the run and then
+    # fall off the end returning the implicit "" — which this proc's own
+    # docstring defines as "the run was dispatched". The editor took that ""
+    # for consent, armed a spinner and posted `"<selector>" started`, and the
+    # settle above it had already swept a list the editor had not yet joined.
+    # Two minutes of "Running..." over a run declined before the click
+    # finished: the reported defect, produced here.
+    #
+    # The settle still happens — the pane must not sit `inFlight` behind a
+    # disabled play control — but the SENTENCE is handed back now, so the
+    # caller unwinds what it armed and shows the user the reason instead of a
+    # claim that it started.
     if not noirTestRunSink.isNil:
       noirTestRunSink(producer.lastTests, tmpl.name)
     if not noirTestRunSettled.isNil:
       noirTestRunSettled()
+    if refusal.len > 0:
+      return refusal
+    # `dispatch` posted the command and something else cleared `activeInFlight`
+    # before this line — the run is still over, and saying nothing here would
+    # put the "" back.
+    return "the run was not dispatched; the build pane says why"
 
 proc startNoirTest*(selector: string): string =
   ## Run ONE test — the editor's Run-test control, and the Test Results pane's
