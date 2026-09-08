@@ -47,7 +47,9 @@
     margin-left: 0 !important
     margin-bottom: 0 !important
     padding-left: 0.5em !important
+    // ~35% of a typical 500px panel height; overflow-y:auto adds scrollbar after this cap
     max-height: 12em !important
+    field-sizing: content
     resize: none
     font-size: 1em
     font-family: inherit !important
@@ -582,3 +584,75 @@
   width: 1.75em
   height: 1.75em
   background-repeat: no-repeat
+
+// ---------------------------------------------------------------------------
+// Empty prompt — idle state (shown when the conversation has no messages yet)
+// ---------------------------------------------------------------------------
+
+.agent-idle-state
+  display: flex
+  flex-direction: column
+  align-items: center
+  justify-content: center
+  height: 100%
+  padding: 1.5em 1em
+  gap: 1.25em
+  text-align: center
+
+.agent-idle-header
+  display: flex
+  flex-direction: column
+  align-items: center
+  gap: 0.5em
+
+.agent-idle-heading
+  font-size: 1.25em
+  font-weight: 600
+  color: colors-ui-text-primary-headings
+  font-family: "SpaceGrotesk", sans-serif
+  line-height: 1.3
+
+.agent-idle-subtitle
+  font-size: 0.9em
+  color: colors-ui-text-primary-caption
+  line-height: 1.5
+
+.agent-idle-suggestions
+  display: flex
+  flex-wrap: wrap
+  gap: 0.5em
+  justify-content: center
+
+.agent-idle-chip
+  background: colors-ui-surface-input-default
+  border: 0.0625em solid colors-ui-border-secondary
+  border-radius: 1em
+  color: colors-ui-text-primary-body
+  font-size: 0.8em
+  font-family: inherit
+  padding: 0.4em 1em
+  cursor: pointer
+  transition: background-color 0.15s ease, border-color 0.15s ease
+  white-space: nowrap
+  line-height: 1.5
+
+  &:hover
+    background: colors-ui-surface-primary-secondary
+    border-color: colors-ui-border-primary
+
+// Branch context button in the agent toolbar
+.agent-branch-button
+  justify-content: flex-start
+  gap: 0.375em
+  flex: 1 1 8em !important
+  padding-left: 0.5em !important
+
+.agent-branch-img
+  background-image: AGENT_BRANCH_IMG
+  background-size: 0.875em 0.875em
+  background-position: center
+  background-repeat: no-repeat
+  width: 1em
+  min-width: 1em
+  height: 1em
+  flex-shrink: 0
