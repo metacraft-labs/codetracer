@@ -1106,6 +1106,7 @@ type
     isLoading*: bool
     diffs*: seq[AgentActivityDiffEntry]
     toolName*: string
+    createdAt*: float
       ## AA-3 — the tool this row *is*, when it is a tool call rather than
       ## prose.  Empty for everything else, which is what makes it usable as
       ## the "is this a tool call at all" test.

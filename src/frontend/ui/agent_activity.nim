@@ -154,7 +154,7 @@ proc ensureAgentMessage(self: AgentActivityComponent): seq[AgentMessage] =
 proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent, canceled: bool = false) =
   if messageId notin self.messageOrder:
     try:
-      let message = AgentMessage(id: messageId, content: initialContent, role: role, canceled: canceled, isLoading: false, sessionDiffs: @[])
+      let message = AgentMessage(id: messageId, content: initialContent, role: role, canceled: canceled, isLoading: false, sessionDiffs: @[], createdAt: epochTime() * 1000.0)
       var list = self.ensureAgentMessage()
       list.add(message)
       self.sessionMessageIds[self.sessionId] = list
@@ -341,6 +341,7 @@ proc legacyMessageToVm(message: AgentMessage): AgentActivityMessageEntry =
     canceled: message.canceled,
     isLoading: message.isLoading,
     diffs: diffs,
+    createdAt: message.createdAt,
   )
 
 proc currentMessagesToVm(self: AgentActivityComponent):
@@ -471,7 +472,7 @@ proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
   self.setActiveAgent()
   if self.promptInFlight:
     return
-  self.inputValue = promptText
+  self.inputValue = cstring""
   let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}{self.commandInputId}")
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
@@ -654,6 +655,7 @@ when defined(js):
         })
       self.isLoading = false
       self.promptInFlight = false
+      self.inputValue = cstring""
       self.syncLegacyAgentActivityIntoVM()
     result.onNewAgentInstance = proc() =
       let options = RunTestOptions(

@@ -102,6 +102,15 @@ type
       ## DeepReview-GUI.md §2.1 names that a defect — "it must not silently
       ## render an empty session".  A loaded session that genuinely carries
       ## nothing also sets it, for the same reason.
+    selectedModel*: Signal[string]
+      ## The model name currently active in this agent session, shown in the
+      ## toolbar model button.  "" until the host sets it via setSelectedModel.
+    currentBranch*: Signal[string]
+      ## The branch the agent session is working on.  Shown in the branch button.
+    branches*: Signal[seq[string]]
+      ## Available branches for checkout.
+    branchDropdownOpen*: Signal[bool]
+      ## Whether the branch selector dropdown is open.
 
     messageCount*: Memo[int]
     terminalCount*: Memo[int]
@@ -396,6 +405,17 @@ proc setSessionNotice*(vm: AgentActivityVM; notice: string) =
     return
   vm.sessionNotice.val = notice
 
+proc setSelectedModel*(vm: AgentActivityVM; model: string) =
+  vm.selectedModel.val = model
+
+proc setBranchState*(vm: AgentActivityVM; current: string;
+                     branches: openArray[string]) =
+  vm.currentBranch.val = current
+  vm.branches.val = @branches
+
+proc toggleBranchDropdown*(vm: AgentActivityVM) =
+  vm.branchDropdownOpen.val = not vm.branchDropdownOpen.val
+
 proc clearConversation*(vm: AgentActivityVM) =
   vm.messages.val = @[]
   vm.testRuns.val = @[]
@@ -429,6 +449,10 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let wantsPermission = createSignal(false)
     let sessionKey = createSignal("")
     let sessionNotice = createSignal("")
+    let selectedModel = createSignal("")
+    let currentBranch = createSignal("")
+    let branches = createSignal(newSeq[string]())
+    let branchDropdownOpen = createSignal(false)
 
     let messageCount = createMemo[int] proc(): int =
       messages.val.len
@@ -459,6 +483,10 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       wantsPermission: wantsPermission,
       sessionKey: sessionKey,
       sessionNotice: sessionNotice,
+      selectedModel: selectedModel,
+      currentBranch: currentBranch,
+      branches: branches,
+      branchDropdownOpen: branchDropdownOpen,
       messageCount: messageCount,
       terminalCount: terminalCount,
       hasMessages: hasMessages,
