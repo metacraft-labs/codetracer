@@ -320,8 +320,28 @@ JUSTFILE
 	assert_eq "dep list: lane-c did NOT run — the defect, reproduced" "no" "$(marker "${d}" lane-c)"
 else
 	mode="hermetic"
-	echo "  -- skipped: no real just on PATH (expected in the lint shell);"
-	echo "     sections 1-5 above are hermetic and did run."
+	# Said loudly, and in this repository's own vocabulary, because the thing
+	# that must not happen is that it is dark SILENTLY.
+	#
+	# It cannot be entered in ci/test/shell-gate-coverage.known-dark.txt, and
+	# that is not an oversight: that list is keyed on whole GATES THAT NO LANE
+	# CAN REACH, and it "fails in both directions" -- an entry that becomes
+	# reachable fails the run by name, demanding its line be deleted. This
+	# script IS reachable (ci/lint/bash.sh runs it in lint-bash) and stays
+	# reachable, so a line for it would be false on the day it was written.
+	# Its ceiling is also explicitly reserved for BLOCKED gates, which this is
+	# not. ci/lib/known-test-failures.tsv does not fit either: it registers
+	# cases that FAIL with a matching signature, and requires the failing set to
+	# equal the registered set exactly -- this section does not fail, it does
+	# not run. No registry in the tree has SECTION granularity, so this log line
+	# is the record.
+	echo "  -- DARK IN CI: no real just on PATH, so this section did NOT run."
+	echo "     Missing capability: nix/shells/lint.nix omits just deliberately"
+	echo "     (its package list is derived from commands the lint scripts"
+	echo "     invoke, and its header forbids widening it for a new need)."
+	echo "     What would light it up: any lane running this suite in a shell"
+	echo "     that carries just -- ci-base declares it at nix/shells/ci-base.nix."
+	echo "     Sections 1-5 are hermetic and DID run."
 fi
 
 # =============================================================================
