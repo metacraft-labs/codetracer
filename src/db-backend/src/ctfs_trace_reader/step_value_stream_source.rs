@@ -140,13 +140,21 @@ impl SeekableStepStream {
             Some(reader) => {
                 let record_count = reader.count();
                 let chunk_size = reader.chunk_size();
+                // The container's own path table decides what a line-only
+                // address names, so it is read here rather than left to the
+                // caller to remember — a stream that was not told cannot place
+                // an address at all.
+                let line_space = CtfsReader::open(path)
+                    .ok()
+                    .and_then(|ctfs| super::line_position_space::container_line_space(&ctfs))
+                    .map(Arc::new);
                 Ok(Some(SeekableStepStream {
                     reader: Mutex::new(reader),
                     path: Some(path.to_path_buf()),
                     record_count: AtomicU64::new(record_count),
                     chunk_size,
                     position_decoder: None,
-                    line_space: None,
+                    line_space,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
             }
@@ -177,6 +185,11 @@ impl SeekableStepStream {
             .read_file("steps.idx")
             .map_err(|e| format!("steps.idx missing despite steps.dat presence: {e}"))?;
 
+        // Read the path table through the SAME reader, so the space a line-only
+        // address is inverted through comes from the same bytes the addresses
+        // did.
+        let line_space = super::line_position_space::container_line_space(ctfs).map(Arc::new);
+
         match StepStreamReader::from_files(&super::structural_presence_meta(), dat, idx)? {
             Some(reader) => {
                 let record_count = reader.count();
@@ -187,7 +200,7 @@ impl SeekableStepStream {
                     record_count: AtomicU64::new(record_count),
                     chunk_size,
                     position_decoder: None,
-                    line_space: None,
+                    line_space,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
             }
@@ -250,10 +263,12 @@ impl SeekableStepStream {
         self
     }
 
-    /// Tell this stream the LINE-ONLY address space its records were written
-    /// in, so it resolves them the way they were written.
+    /// Override the LINE-ONLY address space this stream inverts through.
     ///
-    /// The caller must pass a space built from the SAME container's path table.
+    /// Both constructors already read the space from the container they open,
+    /// so this exists for a caller that holds a better one — an eager reader
+    /// that has already built the trace's space, say — and for the follow path,
+    /// where the table is still growing. The space must be the SAME container's.
     /// Passing `None` leaves the stream unable to place a line address, and
     /// [`step_position`](Self::step_position) then reports none.
     #[must_use]
