@@ -50,6 +50,7 @@ use codetracer_trace_writer::step_stream::{StepStreamRecord, unpack_global_line_
 use codetracer_trace_writer::value_stream::ValueStreamEvent;
 
 use super::ctfs_container::CtfsReader;
+use super::line_only_position::LineOnlyPositionSpace;
 
 /// A seekable, on-demand view over a container's `steps.dat` execution stream.
 ///
@@ -77,8 +78,9 @@ pub struct SeekableStepStream {
     /// is READ, and there are two mutually exclusive encodings behind that one
     /// `u64`:
     ///
-    /// * line-only containers store the M23a packed `global_line_index`
-    ///   (`path_id << 32 | line`), whose inverse is `unpack_global_line_index`;
+    /// * line-only containers store a `global_line_index`, one address per
+    ///   line, whose inverse depends on the writer's apportionment of the
+    ///   addresses between files — see [`line_only_space`](Self::line_only_space);
     /// * column-aware containers store a `global_position_index` — a cumulative
     ///   BYTE address across every registered file — which only the per-file
     ///   line-length tables can resolve to `(file, line, column)`.
@@ -95,6 +97,20 @@ pub struct SeekableStepStream {
     /// `None` is the default and is what every legacy / old-format / line-only
     /// container keeps, so those paths are bit-for-bit unchanged.
     position_decoder: Option<Arc<GlobalPositionDecoder>>,
+    /// The address space a LINE-ONLY container's `global_line_index` values
+    /// were encoded in, or `None` to read them as `(path_id << 32) | line`.
+    ///
+    /// The sibling of [`position_decoder`](Self::position_decoder), for the
+    /// other half of the same problem. That field exists because the record
+    /// does not say whether its integer is a line address or a byte address.
+    /// This one exists because, when it IS a line address, the record does not
+    /// say how the addresses were apportioned between files either — and the
+    /// two writers of this format apportion them differently. See
+    /// [`LineOnlyPositionSpace`] for which packing is applied when.
+    ///
+    /// `None` reads every record as the shifted packing, which is what the
+    /// legacy and old-format paths that were never told keep getting.
+    line_only_space: Option<Arc<LineOnlyPositionSpace>>,
     /// Number of *distinct* Zstd chunks this source has had to decompress since
     /// it was opened.
     ///
@@ -136,6 +152,7 @@ impl SeekableStepStream {
                     record_count: AtomicU64::new(record_count),
                     chunk_size,
                     position_decoder: None,
+                    line_only_space: None,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
             }
@@ -176,6 +193,7 @@ impl SeekableStepStream {
                     record_count: AtomicU64::new(record_count),
                     chunk_size,
                     position_decoder: None,
+                    line_only_space: None,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
             }
@@ -215,7 +233,11 @@ impl SeekableStepStream {
     pub fn open_sibling(&self) -> Option<SeekableStepStream> {
         let path = self.path.as_ref()?;
         match SeekableStepStream::open(path) {
-            Ok(Some(sibling)) => Some(sibling.with_position_decoder(self.position_decoder.clone())),
+            Ok(Some(sibling)) => Some(
+                sibling
+                    .with_position_decoder(self.position_decoder.clone())
+                    .with_line_only_space(self.line_only_space.clone()),
+            ),
             _ => None,
         }
     }
@@ -231,6 +253,18 @@ impl SeekableStepStream {
     #[must_use]
     pub fn with_position_decoder(mut self, decoder: Option<Arc<GlobalPositionDecoder>>) -> Self {
         self.position_decoder = decoder;
+        self
+    }
+
+    /// Tell this stream which address space its LINE-ONLY records were encoded
+    /// in, so it resolves them the way they were written.
+    ///
+    /// The caller is responsible for passing a space built from the SAME
+    /// container's path table. Passing `None` leaves the stream reading every
+    /// record as `(path_id << 32) | line`.
+    #[must_use]
+    pub fn with_line_only_space(mut self, space: Option<Arc<LineOnlyPositionSpace>>) -> Self {
+        self.line_only_space = space;
         self
     }
 
@@ -258,10 +292,13 @@ impl SeekableStepStream {
     /// A `Step` record carries ONE integer, and it means one of two different
     /// things depending on the container:
     ///
-    /// * **line-only** — it is the M23a packed `global_line_index`, and
-    ///   [`unpack_global_line_index`] is its exact inverse, so the result is
-    ///   byte-identical to the materialized `DbStep`'s `(path_id, line)`. The
-    ///   column is `None`, matching the legacy semantics.
+    /// * **line-only** — it is a `global_line_index`, an address that names one
+    ///   line. Which `(path_id, line)` it names depends on how the writer
+    ///   apportioned the addresses between files, and the record does not say:
+    ///   [`with_line_only_space`] is how the stream is told, and a stream that
+    ///   has not been told reads the address as `(path_id << 32) | line`. See
+    ///   [`LineOnlyPositionSpace`]. The column is `None`, matching the legacy
+    ///   semantics.
     /// * **column-aware** — it is a `global_position_index`, a cumulative byte
     ///   address across every registered file, and only the per-file
     ///   line-length tables resolve it. `column` is then the real recorded
@@ -271,12 +308,16 @@ impl SeekableStepStream {
     /// stream is told, and a stream that has not been told stays on the
     /// line-only reading.
     ///
-    /// A GLI the decoder rejects (out of range for the container's address
-    /// space — a partial or inconsistent trace) degrades to the line-only
-    /// reading rather than dropping the step, which keeps a damaged container
-    /// steppable instead of blank.
+    /// A GLI the column decoder rejects (out of range for the container's
+    /// address space — a partial or inconsistent trace) degrades to the
+    /// line-only reading rather than dropping the step, which keeps a damaged
+    /// container steppable instead of blank. A GLI the LINE-ONLY space also
+    /// refuses is reported as absent: an address neither packing can place in
+    /// this trace names no location, and answering with one that arithmetic
+    /// produces is what this pair of fields exists to stop.
     ///
     /// [`with_position_decoder`]: Self::with_position_decoder
+    /// [`with_line_only_space`]: Self::with_line_only_space
     pub fn step_position(&self, step_id: StepId) -> Option<(PathId, Line, Option<Line>)> {
         if step_id.0 < 0 || step_id.0 as u64 >= self.record_count.load(Ordering::Relaxed) {
             return None;
@@ -305,8 +346,20 @@ impl SeekableStepStream {
                         Some(Line(i64::from(pos.column))),
                     ));
                 }
-                let (path_id, line) = unpack_global_line_index(global_line_index);
-                Some((PathId(path_id), Line(line), None))
+                match self.line_only_space.as_ref() {
+                    Some(space) => match space.resolve(global_line_index) {
+                        Ok((path_id, line)) => Some((PathId(path_id as usize), Line(line as i64), None)),
+                        // Refused by both packings: report nothing rather than a
+                        // location the container cannot hold. `None` is what the
+                        // caller already gets for a record that carries no source
+                        // line at all.
+                        Err(_) => None,
+                    },
+                    None => {
+                        let (path_id, line) = unpack_global_line_index(global_line_index);
+                        Some((PathId(path_id), Line(line), None))
+                    }
+                }
             }
             // Raise/Catch/ThreadSwitch records carry no source line; the
             // execution stream interleaves them with `Step` records but only

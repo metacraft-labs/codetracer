@@ -39,6 +39,7 @@ pub mod http_range_source;
 pub mod interning_tables;
 pub mod interval_tagged_map;
 pub mod lazy_population_store;
+pub mod line_only_position;
 pub mod linehits_namespace;
 pub mod materialization_cache;
 pub mod memwrites_namespace;
@@ -2236,10 +2237,23 @@ impl CTFSTraceReader {
         // `LazyStepCache` over the seekable stream (plus the cheap, already-computed
         // call-key arrays) and leave `db.steps` / `db.step_map` EMPTY. A step is
         // then reconstructed on first borrow, decompressing only that step's
-        // chunk-aligned RANGE. The reconstructed `DbStep` is byte-identical to what
-        // this loop pushes, because both decode the same packed `(path_id, line)`
-        // (`steps.dat` GLI ↔ the bulk FFI's line-only path) and derive the same
-        // call keys.
+        // chunk-aligned RANGE.
+        //
+        // The reconstructed `DbStep` agrees with what the eager loop pushes
+        // because the two are told the same thing about the container. They are
+        // not the same code: the eager loop asks the Nim reader for
+        // `(path_id, line)` through the bulk FFI, and the lazy path decodes the
+        // `steps.dat` GLI in Rust. A line-only GLI is one address naming one
+        // line, and how the addresses were apportioned between files is a writer
+        // convention the container does not record — the Nim writer packs
+        // `prefix_sum[path_id] + line`, the Rust `codetracer_trace_writer` packs
+        // `(path_id << 32) | line`, and both writers' containers arrive here. So
+        // the lazy stream is HANDED the space to invert through
+        // (`with_line_only_space`), built from this container's own path table,
+        // rather than left to assume one. Before it was, the lazy path read every
+        // Nim-written step outside path 0 as path 0 at a line in the hundred
+        // thousands, and — because the Nim writer always stamps
+        // `has_step_stream` — the lazy path is the one production takes.
         //
         // Column-aware traces are EXCLUDED: their eager path overrides
         // `(path_id, line)` via the pure-Rust `GlobalPositionDecoder` and sets
@@ -2256,6 +2270,13 @@ impl CTFSTraceReader {
                         (step_to_call_key, step_to_global_call_key) =
                             build_step_call_maps(&call_ranges, stream.step_count());
                     }
+                    // A line-only container: every path gets the writer's
+                    // default slot, because per-line tables only exist under
+                    // `meta.dat` bit 4 and this branch is the `!column_aware`
+                    // one.
+                    let stream = stream.with_line_only_space(Some(std::sync::Arc::new(
+                        line_only_position::LineOnlyPositionSpace::uniform(reader.path_count()),
+                    )));
                     let stream = std::sync::Arc::new(stream);
                     info!(
                         "Nim reader: steps served LAZILY (range-aware) from seekable steps.dat \
