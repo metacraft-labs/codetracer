@@ -6,8 +6,17 @@
 ## character-literal opener desyncs on numeric type suffixes such as
 ## ``10485760'i64`` and then silently drops every declaration up to the next
 ## apostrophe — the failure this fixture pins.
+##
+## The import below spans two lines ON PURPOSE, and that is a second pin: a
+## framework scan that reads one physical line and calls it the ``import``
+## statement never sees ``unittest`` here, detects no framework, and so never
+## looks at this file for declarations at all — the whole fixture would
+## silently leave the catalog while every assertion about its *contents* kept
+## passing vacuously. Because this file is compilable, ``nim c -r`` on it is
+## the independent ground truth for what discovery must report.
 
-import std/[strutils, unittest]
+import std/[strutils,
+            unittest]
 
 type MyMeters = distinct int
 
