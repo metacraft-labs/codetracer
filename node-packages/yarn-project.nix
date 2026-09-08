@@ -82,15 +82,14 @@ let
     "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
   cacheOutputHashes = {
-    # DELIBERATELY INVALIDATED -- this is the sentinel, not a stale hash.
-    # The security bumps here (tar, basic-ftp, shell-quote, immutable, ws) all
-    # changed yarn.lock, and `yarn nixify fetch` only populates the cache for
-    # the current architecture, so the Linux value cannot be produced on macOS.
-    # Leaving the *previous* Linux hash in place did not surface a mismatch:
-    # Nix substituted the old cache by that old hash and skipped the builder
-    # entirely (see the note above). The sentinel removes that escape hatch.
-    # Replace with the ``got:`` hash from the CI hash-mismatch error.
-    "x86_64-linux" = sentinelHash;
+    # Measured on CI (run 34233823494) after the sentinel above forced a real
+    # build of yarn-cache.drv on x86_64-linux. Six jobs on eph-linux-x64-g1 --
+    # ViewModel headless tests, test-non-gui (nixos), cross-process
+    # value-origin, ct-test cross-language provider gate, ct-test release gate
+    # and reprobuild-linux-smoke -- each built
+    # /nix/store/lciwdnrgfbdq3k7py1w2n0k58w35svfd-yarn-cache.drv and reported
+    # this identical ``got:`` value.
+    "x86_64-linux" = "sha512-pDrXJGQJBQ9JOXTLlYfA4r7ysQM9JOXoJUQL66a7EsOiyY064EoHKk/wVivpdl9J1PSTXbx19AmwVZDvzr/z6A==";
     "aarch64-darwin" = "sha512-HlfoP0GZumvRJeIlTYag3j+XU2FMT0i3wvrMUNNgEiwvDlO6G8MuSXxpUSgih+6hDA1KceAAgt1kPzRnpYkfFQ==";
   };
 
