@@ -161,6 +161,21 @@ lint_step "shellcheck: build prerequisites checked before tup runs" \
 lint_step "shellcheck: build-alignment harness ('just test' runs it)" \
 	shellcheck scripts/test-build-alignment.sh
 
+# `just test` -- the recipe the line above says runs the build-alignment harness
+# -- is itself an aggregate over seven lanes, and until ci/lib/run-just-lanes.sh
+# existed it was a `set -e` sequence that stopped at the first failing one. Six
+# lanes, including that harness, went unrun and unreported whenever an earlier
+# one broke. `test-bpf` was the same defect spelled as a dependency list.
+#
+# Executed here, and not only linted, for the reason the stale-artefact suite
+# below is: an aggregate that has never been SEEN to report a second failure is
+# indistinguishable from one that still hides it. The suite drives real `just`
+# over throwaway recipes in a temp dir -- no nix, no build, no network, seconds
+# -- and it reproduces BOTH original shapes to prove it can still tell the
+# difference.
+lint_step "contract suite: an aggregate runs every lane and names every failure" \
+	bash ci/test/run-just-lanes-test.sh
+
 # UD-0's visual-design-iteration harness. Neither `tools/` nor `scripts/docs/`
 # is under ci/, so the glob at the top does not reach either; the harness and
 # its contract suite are named here.

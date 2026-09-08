@@ -768,22 +768,44 @@ test-ct-print:
 # test-frontend-js needs npm-installed jsdom (available after tup build, not in bare nix shell).
 # test-python-recorder needs a built ct binary.
 # Both are skipped here; they run in their own CI steps or via dev builds.
+#
+# EVERY LANE RUNS, AND THE AGGREGATE FAILS IF ANY OF THEM DID.
+#
+# This body used to be `set -e` plus a straight sequence of `just <lane>`
+# calls, which meant the FIRST failing lane aborted it and the remaining six
+# never ran at all.  This is the `test-non-gui` CI job (ci/test/non-gui.sh
+# execs `just test` inside the dev shell), so the cost of that was one full
+# round trip of CI — nix dev-shell startup included — per broken lane, and no
+# point at which anyone could see how much was actually broken.
+#
+# ci/lib/run-just-lanes.sh runs them all and then names every failure.  It does
+# not weaken any lane: each still runs the same recipe, each exit status is
+# still load-bearing, and `just test` still exits non-zero if any lane failed.
 test:
   #!/usr/bin/env bash
-  set -e
-  just test-build-alignment
-  just test-flake-pin-alignment
-  just test-python-version-alignment
-  just test-sibling-backend-path
-  just test-agent-api-contract
-  just test-rust
-  just test-nimsuggest
+  set -uo pipefail
+  lanes=(
+    test-build-alignment
+    test-flake-pin-alignment
+    test-python-version-alignment
+    test-sibling-backend-path
+    test-agent-api-contract
+    test-rust
+    test-nimsuggest
+  )
+  # A genuine capability gate, not a hidden failure: the cross-repo tests need
+  # a checkout of codetracer-native-backend, and ci/test/non-gui.sh explicitly
+  # sets CODETRACER_RR_BACKEND_PATH= so they do not run in this CI job.  When
+  # the path IS set the lane is appended to the list above, so it aggregates
+  # exactly like every other lane — it cannot be silently skipped once chosen,
+  # and its failure fails `just test`.
   if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
-    echo "codetracer-native-backend detected — running cross-repo tests..."
-    just cross-test
+    echo "codetracer-native-backend detected — cross-repo tests included"
+    lanes+=(cross-test)
   else
     echo "CODETRACER_RR_BACKEND_PATH not set — skipping cross-repo tests"
   fi
+  bash ci/lib/run-just-lanes.sh test "${lanes[@]}"
 
 # Run all GUI tests headlessly against an already-built CodeTracer binary.
 test-gui-prebuilt *args:
@@ -1308,7 +1330,24 @@ test-bpf-native-integration:
     src/ct/ci/bpf_native_integration_test
 
 # Run all BPF-related tests (unit + native + integration).
-test-bpf: test-bpf-monitor test-bpf-native test-bpf-native-integration test-bpf-integration
+#
+# This was a DEPENDENCY LIST — `test-bpf: test-bpf-monitor test-bpf-native
+# test-bpf-native-integration test-bpf-integration` — and `just` aborts the
+# whole invocation at the first dependency that exits non-zero, so three of the
+# four lanes went unreported whenever the first one broke.  That is not a
+# `set -e` artefact and no shell flag fixes it; the only fix is to stop
+# expressing the aggregate as a dependency list.  The four lanes still run in
+# the same order (they share the built `ct` binary and the BPF programs), each
+# still fails on its own terms, and `just test-bpf` still exits non-zero if any
+# of them did — it now names all of them rather than only the first.
+test-bpf:
+  #!/usr/bin/env bash
+  set -uo pipefail
+  bash ci/lib/run-just-lanes.sh test-bpf \
+    test-bpf-monitor \
+    test-bpf-native \
+    test-bpf-native-integration \
+    test-bpf-integration
 
 # ===========================
 # trace folder helpers
