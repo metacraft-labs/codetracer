@@ -47,8 +47,23 @@ let
   # the fixed-output hash - differs per build platform. Select the hash for the
   # host system; the Linux hash is what CI / the binary cache is built against.
   #
-  # To add a new platform: build once, take the ``got:`` hash from the
-  # "hash mismatch" error, and add it below.
+  # To add a new platform, or to refresh a stale one: you cannot simply build
+  # and wait for a "hash mismatch" error. ``cacheDrv`` is a *fixed-output*
+  # derivation, so its store path is a function of the hash written here, not
+  # of ``yarn.lock``. If the value below is a hash that was ever valid, Nix
+  # finds that exact path in the binary cache, substitutes it, and NEVER RUNS
+  # THE BUILDER -- so no mismatch is ever reported. What you get instead is a
+  # pile of ``YN0056: Cache entry required but missing`` from ``yarn install``
+  # further down the build, naming the packages whose lockfile entries changed.
+  #
+  # To force the real hash out, first invalidate the entry deliberately:
+  #
+  #   "x86_64-linux" = sentinelHash;   # see below
+  #
+  # No substitute can exist for the sentinel path, so the builder runs for
+  # real and the "hash mismatch" error reports the true ``got:`` value. Paste
+  # that in. (``nix-build --rebuild`` is not a substitute for this: it needs a
+  # local realisation of the path to compare against.)
   #
   # NOTE: any change to ``yarn.lock`` invalidates BOTH hashes below, so they
   # have to be refreshed in the same commit range as the lockfile change or
@@ -59,14 +74,23 @@ let
   # to restore it once already. It did it five more times while the security
   # bumps in this branch were being prepared. Always check
   # ``git diff node-packages/yarn-project.nix`` after invoking yarn.
+  # A hash that is valid in form but cannot match any real output, so the
+  # fixed-output store path it names has no substitute anywhere. Assigning it
+  # to a platform below forces that platform's cache to be built for real, and
+  # the resulting "hash mismatch" error prints the true ``got:`` value.
+  sentinelHash =
+    "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+
   cacheOutputHashes = {
-    # STALE -- must be regenerated on an x86_64-linux builder before this
-    # branch merges. The security bumps here (tar, basic-ftp, shell-quote,
-    # immutable, ws) all changed yarn.lock, and `yarn nixify fetch` only
-    # populates the cache for the current architecture, so this value cannot
-    # be produced on macOS. Take the ``got:`` hash from the CI hash-mismatch
-    # error and paste it here.
-    "x86_64-linux" = "sha512-2guUBYTPk7MUt9DfamxnVESTpzx06r7rPnl2GGenNdrXqw3wgIfMZ4dvGHubyj4Lj+m2XVtQNow9hRjUz0cCsg==";
+    # DELIBERATELY INVALIDATED -- this is the sentinel, not a stale hash.
+    # The security bumps here (tar, basic-ftp, shell-quote, immutable, ws) all
+    # changed yarn.lock, and `yarn nixify fetch` only populates the cache for
+    # the current architecture, so the Linux value cannot be produced on macOS.
+    # Leaving the *previous* Linux hash in place did not surface a mismatch:
+    # Nix substituted the old cache by that old hash and skipped the builder
+    # entirely (see the note above). The sentinel removes that escape hatch.
+    # Replace with the ``got:`` hash from the CI hash-mismatch error.
+    "x86_64-linux" = sentinelHash;
     "aarch64-darwin" = "sha512-HlfoP0GZumvRJeIlTYag3j+XU2FMT0i3wvrMUNNgEiwvDlO6G8MuSXxpUSgih+6hDA1KceAAgt1kPzRnpYkfFQ==";
   };
 
