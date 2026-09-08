@@ -1,0 +1,132 @@
+# Test lanes that ci/test/test-lane-job-coverage.sh has found to be invoked by
+# NO CI job, and that are RECORDED rather than fixed today.
+#
+# RECORDED-ORPHAN-CEILING: 16
+#
+# WHAT THIS FILE IS, AND WHAT IT IS NOT
+# -------------------------------------
+# It is NOT an exemption list. Every lane named here is still printed on every
+# run of the guard, still counted in its summary, and still darkness: its tests
+# compile assertions that cannot fail a build. Recording one changes exactly one
+# thing — whether the guard's exit status distinguishes "a lane we know about
+# and have written down" from "a lane that appeared and nobody noticed". The
+# second is the condition the guard exists to catch, and it cannot catch it if
+# the first keeps it permanently red.
+#
+# THE CEILING ABOVE IS AN EQUALITY, checked by the guard. Adding a line here
+# without moving the number is an error, and so is removing one. That is the
+# point: the cheapest way to silence this guard is to append a lane, and the
+# equality makes that a diff which also changes a number a reviewer is looking
+# at. Wiring a lane up means DELETING its entry and LOWERING the ceiling in the
+# same commit.
+#
+# WHY SIXTEEN AND NOT TWELVE. The hand count that prompted this work found 12.
+# The guard finds 16. The four it missed are `frontend-js`, `bpf`,
+# `book-isonim` and `agentic-headless` — and two of those were already recorded
+# as dark in ci/test/shell-gate-coverage.known-dark.txt, as the SCRIPTS
+# `ci/test/frontend-js.sh` and `scripts/test-codetracer-agentic-headless.sh`.
+# The darkness was written down; nobody had connected it to the LANES those
+# scripts run. That is the argument for asking this question in lane terms as
+# well as in script terms, and it is why the number here was measured rather
+# than copied.
+#
+# THE DECISION, PER LANE, IS "WIRE" FOR ALL SIXTEEN. None of them should be
+# deleted, and that is not a dodge — it was checked. Deleting a lane does not
+# delete its test files; it makes them dark, and `ci/test/test-lane-coverage.sh`
+# would immediately fail by name on every one of them. Each lane below runs real
+# suites that somebody wrote and that assert real things. So the question is
+# never "wire or delete", it is "wire now or name what blocks it", and the
+# blocker is named on every line.
+#
+# NOT WIRED IN THE COMMIT THAT ADDED THIS FILE, and the reason is worth stating
+# plainly rather than leaving to be inferred: the author could not measure these
+# lanes in CI's environment. They were measured on macOS/aarch64 against a
+# nix-profile Nim, not inside `nix develop .#devShells.x86_64-linux.default`,
+# and two lanes the justfile currently certifies as "GREEN today and could be
+# promoted as-is" were RED there (`common-units` 2 passed / 3 failed;
+# `ct-cli-units` 1 passed / 4 failed, two of them COMPILE ERRORs). That
+# disagreement is unresolved: it is either a real regression the justfile's note
+# has outlived, or an artefact of building outside the dev shell. Wiring a lane
+# into CI on the strength of a claim that the only available measurement
+# contradicts is how a red lane gets into a required job and breaks every build
+# for everybody — which is the exact thing the justfile's own deferral note
+# warns about. The lanes are recorded, the disagreement is recorded with them,
+# and the next person to run one inside the dev shell can settle it.
+#
+# Format: one lane id per line. Comments and blank lines ignored.
+
+# --- claimed green by justfile, CONTRADICTED by an out-of-shell measurement ---
+# Retire by: running the lane inside the dev shell. If green there, wire it and
+# delete the line. If red, the justfile's "promotable" note is stale and should
+# be corrected in the same commit.
+common-units
+ct-cli-units
+
+# `book-isonim` is in the same justfile "promotable" list and was not measured
+# here at all; it needs docs/book-isonim's own toolchain.
+book-isonim
+
+# Compile-only by design — a live round-trip against the production sharing
+# service must not run in CI. The justfile records it as green since AS-2.
+# Retire by: adding the compile step to a lint or build job; it needs no
+# recorder, no sibling and no display, so it is the cheapest of the sixteen.
+online-sharing-live
+
+# --- red for reasons that are not the lane's, per the justfile's own notes ---
+# Wiring any of these into a required job breaks every build until the named
+# blocker is cleared. Each retires when its blocker does.
+#
+# cross_process_origin_vm_test needs an uncommitted rr/MCR cross-process
+# recording.
+frontend-native-units
+# The collab signal registry has drifted from the ViewModels (30 unclassified,
+# 1 stale) — a real, pre-existing red.
+vm-collab-units
+# test_collab_m8_cross_frontend needs libgpui_nim_shim.so.
+vm-collab-integration
+# test_io_mon_readfiles_materialized asserts an insertion order the
+# implementation returns sorted.
+ct-test-incremental
+# Needs a buildable Python recorder sibling.
+ct-test-incremental-e2e
+# noir_space_ship_test: recorded traces come back "unrecognized format";
+# real_backend_test needs the Python recorder installed.
+vm-gui-headless
+
+# --- red on a small, diagnosed number of checks -------------------------------
+# Both left the justfile's promotable list on 2026-09-01 and are still red on 3
+# checks between them, every one a DEFECTIVE ASSERTION rather than missing
+# product code, each diagnosed at the line in
+# codetracer-specs/Testing/Known-Test-Failures.md. They must NOT be made green
+# by relaxing the assertions; all three are registered in release_gate.nim's
+# CoreViewModelGateTests precisely so that trying fails the m16 lane.
+#
+# These two are the costliest of the sixteen to leave dark: between them they
+# are 117 cases (62 + 55) over the ViewModel unit pyramid, on both backends,
+# including the Embed SDK's own conformance suite.
+# Retire by: correcting the three assertions, then wiring both lanes together —
+# they are a declared parity pair and wiring one without the other reopens the
+# single-backend gap that `test-vm-unit-js` was created to close.
+vm-unit
+vm-unit-js
+
+# --- no documented blocker; needs an owner to look --------------------------
+# Nothing in the justfile or the lane library explains why these run nowhere.
+# That absence is itself the finding — they are not deferred, they were simply
+# never wired, and no note anywhere says so.
+#
+# Runs through ci/test/frontend-js.sh, which shell-gate-coverage.known-dark.txt
+# already records as a dark script. Needs npm-installed jsdom, which exists
+# after a tup build and not in a bare nix shell — that is the likely reason, and
+# it is a guess, not a record.
+frontend-js
+# ct-test test-certificate issuance, verification and conformance vectors.
+ct-test-certificates
+# `just test-bpf` fans out to four recipes; BPF needs privileges CI may not
+# grant, which would be a legitimate reason to keep it out of the default
+# pipeline — but it should then be recorded as such, not left silent.
+bpf
+# The only lane with no `just` recipe at all: a bare script, invoked from
+# `just test-codetracer-agentic-headless-matrix` / `-regression`, neither of
+# which any workflow calls.
+agentic-headless

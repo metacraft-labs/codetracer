@@ -43,6 +43,23 @@ lint_step "test-lane coverage guard: contract suite" \
 lint_step "test-lane coverage: every test-shaped file runs somewhere" \
 	bash ci/test/test-lane-coverage.sh
 
+# THE SAME QUESTION, ONE EDGE FURTHER ALONG. The guard above proves FILE ->
+# LANE: no test-shaped Nim file is missed by every lane. It says nothing about
+# whether a LANE is run by a JOB, and those are different questions with a real
+# gap between them — measured on 2026-09-08, 16 of the 30 declared lanes were
+# invoked by no CI job at all, while passing the guard above on every file they
+# claim. `just test-vm-unit`, 62 cases of ViewModel unit pyramid, had zero hits
+# across all fourteen workflow files.
+#
+# That is why a correctly-assigned test file could pass every gate in this
+# repository and still be executed by nothing, and it is the specific hole this
+# pair closes. Contract suite first, same reason as every other pair here.
+lint_step "test-lane job-coverage guard: contract suite" \
+	bash ci/test/test-lane-job-coverage-test.sh
+
+lint_step "test-lane job coverage: every declared lane is invoked by a CI job" \
+	bash ci/test/test-lane-job-coverage.sh
+
 # THE SAME QUESTION, ONE FILE EXTENSION OVER. `test-lane-coverage.sh` is scoped
 # in its own first line to "any test-shaped **Nim** file", and `ci/test/` holds
 # sixty-three SHELL gates that nothing measured. Twelve of them were reachable

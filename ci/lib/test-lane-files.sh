@@ -271,6 +271,91 @@ test_lane_parity_partner() {
 	esac
 }
 
+# test_lane_entrypoint ID — the ONE command that runs this lane, as either
+# `just:<recipe>` or `script:<path>`.
+#
+# WHY THIS EXISTS
+# ---------------
+# `ci/test/test-lane-coverage.sh` proves FILE -> LANE: every test-shaped Nim
+# file is claimed by some lane. Nothing proved LANE -> JOB. Those are different
+# questions, and the gap between them is not theoretical: measured on this tree
+# on 2026-09-08, 16 of the 30 lanes below were invoked by NO CI job at all, and
+# every one of them looked covered, because `test-lane-coverage.sh` was happy
+# and `ci/test/test-lane-report-test.sh` asserts only that a lane is
+# WELL-FORMED, never that anything runs it. A new test file could therefore be
+# correctly assigned to a lane, pass every gate in the repository, and be
+# executed by nothing. `just test-vm-unit` was in exactly that state: zero hits
+# across all twelve files in .github/workflows.
+#
+# So this accessor is the missing edge, written down where the other lane facts
+# live. `ci/test/test-lane-job-coverage.sh` reads it and fails, BY NAME, on any
+# lane whose entrypoint no workflow can reach.
+#
+# WHY IT IS DECLARED AND ALSO DERIVED
+# -----------------------------------
+# For 21 of the 30 lanes the answer is already discoverable: the recipe body
+# contains `run-nim-test-lane.sh <id>` or `test_lane_files <id>`, and the gate
+# derives it from the justfile. For those, this table is CROSS-CHECKED against
+# the derivation and a disagreement is a hard failure -- so the declaration
+# cannot quietly rot into naming a recipe that stopped running the lane.
+#
+# The remaining nine lanes are the ones whose runners predate the lane library
+# and do not consume it (`test-bpf` shells out to its own scripts,
+# `agentic-headless` is a bare script with no recipe at all, `m16-release-gate`
+# and `ct-providers` are ct-test binaries). Nothing can derive those, so they
+# are declared -- and the gate still proves the declared entrypoint EXISTS and
+# is reachable, which is the half that matters. A declaration can be wrong
+# about which recipe corresponds to a lane; it cannot make an unreachable
+# recipe look reachable.
+#
+# EVERY LANE MUST HAVE ONE. The `*)` arm returns empty and the gate treats an
+# empty answer as a failure, naming the lane. That is deliberate: a new lane
+# added without an entrypoint is precisely the state this file exists to stop,
+# and defaulting to something plausible would recreate it.
+test_lane_entrypoint() {
+	case "$1" in
+	# --- derived and cross-checked (recipe body names the lane id) ---------
+	common-units) echo "just:test-common-units" ;;
+	ct-cli-units) echo "just:test-ct-cli-units" ;;
+	ct-trace-units) echo "just:test-ct-trace-units" ;;
+	mcr-enrichment-units) echo "just:test-mcr-enrichment-units" ;;
+	online-sharing-live) echo "just:test-online-sharing-compile" ;;
+	host-instantiations) echo "just:test-host-instantiations" ;;
+	# Both renderer lanes are compiled by the one recipe; it runs
+	# `run-nim-test-lane.sh renderer-electron` and `... renderer-web` back to
+	# back, which is why two lanes share an entrypoint here.
+	renderer-electron) echo "just:test-renderer-browser" ;;
+	renderer-web) echo "just:test-renderer-browser" ;;
+	frontend-native-units) echo "just:test-frontend-units" ;;
+	vm-unit) echo "just:test-vm-unit" ;;
+	vm-unit-js) echo "just:test-vm-unit-js" ;;
+	vm-collab-units) echo "just:test-vm-collab-units" ;;
+	vm-collab-integration) echo "just:test-vm-collab-integration" ;;
+	vm-native) echo "just:test-vm-native" ;;
+	vm-js) echo "just:test-vm-js" ;;
+	vm-gui-headless) echo "just:test-vm-gui-headless" ;;
+	cli-record) echo "just:test-cli-record" ;;
+	ct-test-incremental) echo "just:test-ct-test-incremental" ;;
+	ct-test-incremental-e2e) echo "just:test-ct-test-incremental-e2e" ;;
+	ct-test-certificates) echo "just:test-ct-test-certificates" ;;
+	vm-recorder-gated) echo "just:test-vm-recorder-gated" ;;
+
+	# --- declared only (runner does not consume this library) --------------
+	frontend-js) echo "just:test-frontend-js" ;;
+	no-sidecar-manifests) echo "just:test-no-sidecar-manifests" ;;
+	m16-release-gate) echo "just:test-m16-release-gate" ;;
+	ct-providers) echo "just:test-ct-providers" ;;
+	visual-replay-gate) echo "just:test-visual-replay-gate" ;;
+	agent-api-contract) echo "just:test-agent-api-contract" ;;
+	bpf) echo "just:test-bpf" ;;
+	book-isonim) echo "just:test-book-isonim" ;;
+	# The only lane with no recipe at all: a bare script, invoked directly.
+	agentic-headless) echo "script:scripts/test-codetracer-agentic-headless.sh" ;;
+
+	*) echo "" ;;
+	esac
+}
+
 # test_lane_extra_flags ID — extra `nim` flags the lane's files need. Each
 # non-empty answer must say what breaks without it.
 test_lane_extra_flags() {
