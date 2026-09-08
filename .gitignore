@@ -38,9 +38,16 @@ gem_home/
 # Direnv or shell hook + Nix Flake generated files
 .direnv/
 result
-result-bin
-result-lib
-result-man
+# `result-*` rather than the four names that used to be listed here
+# (result-bin/lib/man). `nix build` names its out-links `result-1`,
+# `result-2`, ... for a derivation with several outputs, and those were NOT
+# ignored. That is not a cosmetic gap: the lint gates that enumerate
+# `git ls-files --others --exclude-standard` (ci/test/test-lane-coverage.sh,
+# ci/test/sdk-facade-boundary.sh, and now ci/test/grep-q-pipefail-gate.sh and
+# ci/test/sourced-var-collision-gate.sh) rely on .gitignore, and ONLY on
+# .gitignore, to stay out of build output. An unignored `result-1/` is a whole
+# Nix store closure walked by every one of them.
+result-*
 
 docs/book/book
 docs/book/src/generated/

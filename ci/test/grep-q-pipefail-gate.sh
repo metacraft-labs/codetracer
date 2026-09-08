@@ -199,11 +199,44 @@ echo
 # STEP 1: the subject list is non-empty.
 #
 # A scan over no files reports a perfectly clean repository.
+#
+# UNTRACKED-BUT-NOT-IGNORED FILES ARE IN THE SUBJECT LIST, and that is the
+# whole point of this block rather than a refinement of it.
+#
+# This gate used to enumerate `git ls-files` alone. On a developer's machine
+# that is exactly the wrong set: the files a commit is about are the ones still
+# untracked, so the local run skipped precisely the code under test and printed
+# `RESULT: OK — 377 file(s) scanned, ... 0 new`. It read as a clean tree. It was
+# a clean scan OF NOTHING RELEVANT.
+#
+# That is not hypothetical. It is how the three `grep -q` defects inside
+# ci/test/sourced-var-collision-gate.sh reached CI: a local run of THIS gate
+# was consulted first and reported the tree clean, because that gate's files
+# had not been `git add`ed yet. Two of the three sat inside that gate's own
+# self-test assertions, where a pipefail-swallowed match inverts the verdict of
+# the check that exists to stop the gate decaying into a no-op.
+#
+# `--others --exclude-standard` is the safe widening, and the only safe one: it
+# respects .gitignore, so it cannot wander into `node_modules/`, `target/` or a
+# `result*` Nix out-link, and it stays empty on a CI checkout — `actions/checkout`
+# produces a fully-tracked tree, so `subject_count` there is unchanged. A
+# filesystem walk was deliberately NOT used; widening a lint's scan set to the
+# filesystem is what `shopt -s globstar` did in this repository, and it
+# dark-gated every build job for 13 runs.
+#
+# THE COUNT IS THE TELL, NEVER THE VERDICT. `0 new` looks identical whether the
+# scan covered your files or none of them. `subject_count` is printed on the OK
+# path for that reason: it is the only number that distinguishes the two.
 # ---------------------------------------------------------------------------
 echo "Step 1: there is something to scan"
 
-subjects="$(git ls-files -- '*.sh' 'justfile' '.github/workflows/*.yml' '.github/workflows/*.yaml' 2>/dev/null)"
+subject_pathspec=('*.sh' 'justfile' '.github/workflows/*.yml' '.github/workflows/*.yaml')
+subjects="$({
+	git ls-files -- "${subject_pathspec[@]}" 2>/dev/null
+	git ls-files --others --exclude-standard -- "${subject_pathspec[@]}" 2>/dev/null
+} | sort -u)"
 subject_count="$(grep -c . <<<"${subjects}" || true)"
+untracked_count="$(grep -c . <<<"$(git ls-files --others --exclude-standard -- "${subject_pathspec[@]}" 2>/dev/null)" || true)"
 
 if [ "${subject_count}" -lt 100 ]; then
 	bad "found only ${subject_count} shell subject(s); this repository has hundreds"
@@ -211,7 +244,7 @@ if [ "${subject_count}" -lt 100 ]; then
 	echo "RESULT: FAILED — the subject list is implausible, so a clean scan proves nothing"
 	exit 1
 fi
-ok "${subject_count} shell subject(s) to scan"
+ok "${subject_count} shell subject(s) to scan (${untracked_count} untracked, not yet committed)"
 echo
 
 # ---------------------------------------------------------------------------
@@ -285,7 +318,14 @@ if [ -n "${found}" ]; then
 			echo "  whenever the producer is still writing when grep exits. Rewrite each"
 			echo "  of these as a here-string:"
 			echo
-			echo "      grep -q PAT <<<\"\$var\"        or        grep -q PAT <<<\"\$(producer)\""
+			# Literal remedy text, printed verbatim. Single-quoted because
+			# shfmt -s rewrites the double-quoted-with-escapes form to this
+			# one; shellcheck then reads the `$var` it contains as an
+			# unexpanded expression. Both tools run as pre-commit hooks here,
+			# so the pair only settles with the quoting shfmt wants and this
+			# directive for shellcheck.
+			# shellcheck disable=SC2016
+			echo '      grep -q PAT <<<"$var"        or        grep -q PAT <<<"$(producer)"'
 			echo
 		fi
 		printf '    %s\n' "${hit}"
@@ -303,7 +343,7 @@ fi
 # ---------------------------------------------------------------------------
 echo
 if [ "${failures}" -eq 0 ]; then
-	echo "RESULT: OK — ${subject_count} file(s) scanned, ${known_count} recorded site(s), 0 new"
+	echo "RESULT: OK — ${subject_count} file(s) scanned (${untracked_count} untracked), ${known_count} recorded site(s), 0 new"
 	exit 0
 fi
 echo "RESULT: FAILED — ${failures} problem(s)"

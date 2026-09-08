@@ -349,9 +349,53 @@ ci/setup-rr-backend.sh|ci/test/stale-artefact-guards-test.sh|RR_SETUP
 sourced_set_file="$(mktemp)" || exit 2
 trap 'rm -f "${sourced_set_file}"' EXIT
 
+# ---------------------------------------------------------------------------
+# THE SUBJECT LIST, and the reason it is a function rather than three copies of
+# `git ls-files`.
+#
+# It WAS three copies of `git ls-files`, and that made every LOCAL run of this
+# gate vacuous for exactly the files a developer is about to commit: a new
+# script is untracked until it is `git add`ed, so the run that is supposed to
+# clear it scanned everything except it, and printed `RESULT: OK`.
+#
+# The sibling gate ci/test/grep-q-pipefail-gate.sh had the same shape and it
+# cost three real defects — see the comment above `expect_leak` in this file,
+# which records that a local run of that gate reported THIS file clean while
+# the files were untracked, two of the misses landing inside these very
+# self-test assertions.
+#
+# `--others --exclude-standard` is the safe widening: it honours .gitignore, so
+# `node_modules/`, `target/` and `result*` Nix out-links stay out, and it adds
+# nothing at all on a CI checkout, where `actions/checkout` has already made
+# every file tracked. A filesystem walk was deliberately not used — widening a
+# lint to the filesystem is what `shopt -s globstar` did here, and it dark-gated
+# every build job for 13 runs.
+# ---------------------------------------------------------------------------
+subject_files() { # $1... = pathspec
+	{
+		git ls-files -- "$@" 2>/dev/null
+		git ls-files --others --exclude-standard -- "$@" 2>/dev/null
+	} | sort -u
+}
+
+# THE POPULATION IS REPORTED, because `RESULT: OK` is identical whether the
+# scan covered the tree or covered nothing. `check_count` below counts
+# ASSERTIONS, not files, so it cannot tell a reader that the subject list was
+# empty. This line can, and the floor below refuses to report on a scan that is
+# implausibly small rather than calling it clean.
+shell_subjects="$(subject_files '*.sh')"
+shell_subject_count="$(grep -c . <<<"${shell_subjects}" || true)"
+shell_untracked_count="$(grep -c . <<<"$(git ls-files --others --exclude-standard -- '*.sh' 2>/dev/null)" || true)"
+if [ "${shell_subject_count}" -lt 100 ]; then
+	echo "RESULT: FAILED — only ${shell_subject_count} shell subject(s) found; this repository has hundreds."
+	echo "        A scan over an implausible subject list cannot report a clean tree."
+	exit 1
+fi
+echo "subjects: ${shell_subject_count} shell file(s) (${shell_untracked_count} untracked, not yet committed)"
+
 # literal: take every source argument, drop the ${…}/$(…) prefix, keep the
-# literal tail, and match it against tracked files by path suffix.
-git ls-files -- '*.sh' | while IFS= read -r f; do
+# literal tail, and match it against known files by path suffix.
+subject_files '*.sh' | while IFS= read -r f; do
 	awk '
 	/^[ \t]*(source|\.)[ \t]+/ {
 		a = $0
@@ -373,7 +417,7 @@ git ls-files -- '*.sh' | while IFS= read -r f; do
 	' "$f"
 done | sort -u >"${sourced_set_file}.tails"
 
-git ls-files >"${sourced_set_file}.all"
+subject_files >"${sourced_set_file}.all"
 : >"${sourced_set_file}"
 while IFS= read -r tail; do
 	[ -n "${tail}" ] || continue
@@ -487,7 +531,7 @@ fi
 echo
 echo "Step 4 (Arm B): no generic name is used after a source that leaves this repository"
 
-git ls-files -- '*.sh' | while IFS= read -r f; do
+subject_files '*.sh' | while IFS= read -r f; do
 	awk -v file="$f" '
 	/^[ \t]*(source|\.)[ \t]+/ {
 		a = $0
