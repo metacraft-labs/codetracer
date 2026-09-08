@@ -463,4 +463,24 @@ lint_step "shellcheck: Rust test-assertion lint (vendored from codetracer-specs)
 lint_step "contract suite: no Rust test lacks an assertion (enumerated baseline)" \
 	bash ci/test/test-assertion-baseline.sh
 
+# THE RUST TEST-CRATE COVERAGE GATE. The step above asks whether a Rust test
+# ASSERTS anything; this one asks the question underneath it -- whether the test
+# RUNS at all. `ci/test/test-lane-coverage.sh` answers that for Nim and
+# `ci/test/shell-gate-coverage.sh` for shell gates, and neither can answer it for
+# Rust: lanes enumerate FILES, and Rust tests are selected wholesale by
+# `cargo test` with the CRATE as the unit, so a crate nothing runs cargo test in
+# is dark in a way no per-file rule can express. Five were, holding 61 tests.
+#
+# Same lane and the same reason as the assertion baseline: pure bash + awk +
+# git over the committed tree, no nix, no network, no cargo, seconds. It holds
+# the dark set to an ENUMERATED baseline and fails in both directions -- a newly
+# dark crate is a line the baseline lacks, and a crate that gets wired up is a
+# line the actual set lacks, so an entry cannot outlive the defect it records.
+# Its recognition rules are checked against ci/test/rust-test-crate-coverage.
+# fixture.txt before it is allowed to scan, so it cannot rot into a no-op.
+lint_step "shellcheck: Rust test-crate coverage gate" \
+	shellcheck ci/test/rust-test-crate-coverage.sh
+lint_step "contract suite: every Rust crate with tests is run (enumerated baseline)" \
+	bash ci/test/rust-test-crate-coverage.sh
+
 lint_summary
