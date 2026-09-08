@@ -50,21 +50,36 @@ in
     # to the canonical body with exact string equality (`found[name] != body`),
     # so every byte of leading whitespace is contractual.
     #
-    # WHY IT IS SAFE TODAY, AND WHY THAT IS NOT GOOD ENOUGH. The body is
-    # SPACE-indented at 2. shfmt reads .editorconfig, whose `[*]` stanza says
-    # `indent_style = space` / `indent_size = 2`, so shfmt currently rewrites
-    # NOTHING here (`shfmt -l` does not list it). The file is therefore
-    # protected only by a repo-wide style knob that says nothing about this
-    # file's actual contract.
+    # WHY IT IS SAFE TODAY. This exclusion, and only this exclusion.
     #
-    # That protection is one edit away from gone, and the edit is a reasonable
-    # one: 306 of the 366 tracked *.sh files are tab-indented and do NOT match
-    # that `[*]` stanza (shfmt would rewrite them), so aligning .editorconfig
-    # with reality by adding `[*.sh] indent_style = tab` is a cleanup somebody
-    # will eventually make. The moment it lands, shfmt retabs 78 lines of this
-    # file and breaks the equality against all seven copies at once -- and the
-    # breakage would read as a test bug rather than a formatter bug. Dropping
-    # .editorconfig from shfmt's scope does the same thing.
+    # An earlier note here said the file was safe because "shfmt reads
+    # .editorconfig, whose `[*]` stanza says space/2, so shfmt currently
+    # rewrites NOTHING here (`shfmt -l` does not list it)". That is wrong in a
+    # way worth spelling out, because the mistake is easy to repeat: `shfmt -l`
+    # DOES leave this file alone, but the hook does not run `shfmt -l`. It runs
+    # `shfmt -w -l -ln auto -s`, and shfmt consults .editorconfig only when it
+    # is given NO formatting flags -- `-ln` and `-s` each suppress it on their
+    # own. So the hook formats at shfmt's built-in default of `-i 0`, i.e.
+    # TABS, and `shfmt -l -ln auto -s` on this file lists it and wants to
+    # rewrite 84 lines. Reproduce with shfmt 3.12.0, the pinned version:
+    #
+    #     shfmt -l ci/runner/sweep-readonly-leftovers.sh                 # quiet
+    #     shfmt -l -ln auto -s ci/runner/sweep-readonly-leftovers.sh     # lists it
+    #
+    # The consequence is the opposite of what that note predicted. Adding
+    # `[*.sh] indent_style = tab` to .editorconfig is NOT the edit that breaks
+    # the seven copies -- it is a no-op for this hook, which never reads the
+    # file. (It has since been added, for the separate reason documented
+    # there.) The edit that breaks them is deleting the exclusion below.
+    #
+    # The repo-wide hazard runs the other way. Because .editorconfig is
+    # suppressed, its `[*]` = space/2 has never applied to shell scripts, and
+    # 305 of 366 tracked *.sh files are tab-indented in disagreement with it.
+    # Anything that makes shfmt start reading .editorconfig -- dropping `-s`,
+    # dropping `-ln auto`, or an upstream git-hooks.nix bump that rewrites this
+    # entry -- would have reformatted 306 files in one commit. The `[*.sh]`
+    # stanza in .editorconfig now pins the tab default explicitly, which takes
+    # that from 306 files to none.
     #
     # Nor could that be "resolved" by tabbing both sides: YAML block scalars
     # cannot use tabs for indentation at all. Do not fix a future breakage here
@@ -109,7 +124,43 @@ in
       pass_filenames = false;
     };
 
-    # Shell hooks
+    # Shell hooks.
+    #
+    # THESE TWO DISAGREE WITH EACH OTHER ON REAL FILES, AND ONLY ONE OF THEM
+    # RUNS IN CI. shellcheck is enforced by ci/lint/bash.sh (`shellcheck
+    # ci/**/*.sh` and the per-directory steps below it). shfmt is NOT invoked
+    # anywhere in ci/ or .github/ -- pre-commit is its only enforcement, and
+    # pre-commit only ever sees the files a commit touches. So an unformatted
+    # script can sit on dev indefinitely: as of 37fe0a75, 34 of the 366 tracked
+    # *.sh files are listed by `shfmt -l -ln auto -s`.
+    #
+    # That matters because of how the two tools interact. `-s` rewrites an
+    # escaped double-quoted string into a single-quoted one:
+    #
+    #     echo "a \`b\` c"   ->   echo 'a `b` c'
+    #
+    # and if the string also contains a `$`, shellcheck then reports SC2016
+    # ("expressions don't expand in single quotes"). shellcheck exits 1 on a
+    # note, so CI fails. Of the 34 files above, 9 are clean under shellcheck
+    # today and acquire SC2016 the moment shfmt formats them:
+    #
+    #     ci/test/backend-manager-check-phase-test.sh    ci/test/web-bundle-assets.sh
+    #     ci/test/grep-q-pipefail-gate.sh                ci/verdict/workspace-lock-freshness-test.sh
+    #     ci/test/shell-gate-coverage.sh                 scripts/build-desktop-component.sh
+    #     ci/test/shell-gate-coverage-test.sh            scripts/require-runtime-assets.sh
+    #     scripts/test-python-version-alignment.sh
+    #
+    # Each is a trap for whoever next edits one: pre-commit's `shfmt -w`
+    # reformats the file they touched, and CI then fails on an SC2016 they did
+    # not write, in a line they did not change. The fix is per-file and is
+    # already the established pattern here -- accept shfmt's form and add an
+    # explicit `# shellcheck disable=SC2016` with a sentence saying why, as
+    # ci/test/nimsuggest-check.sh, ci/test/windows-install-root-test.sh,
+    # ci/test/stale-artefact-guards-test.sh and ci/test/vm-js-lane-test.sh all
+    # do. Do NOT resolve it by widening an exclusion or lowering shellcheck's
+    # severity; the nine are listed here so the work can be done file by file,
+    # in the change that touches each file anyway, rather than as one
+    # unreviewable whitespace commit.
     shellcheck.enable = true;
     shfmt.enable = true;
 
