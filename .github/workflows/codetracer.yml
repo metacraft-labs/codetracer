@@ -2681,11 +2681,73 @@ jobs:
 
   viewmodel-tests:
     runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # NO GREEN SAMPLE: 0 success in 42 records. Failures stop at step 15 of 31
-    # with 16 real steps skipped, so the 24.3m worst failure covers under half
-    # the body and is a LOWER bound. 75m is ~3x that; the unmeasured half
-    # includes the recorder-gated tests and a `ct` build.
-    timeout-minutes: 75
+    # THIS JOB WAS DARK FROM ITS SIXTEENTH STEP ONWARD, ON EVERY BRANCH.
+    #
+    # Measured on run 34203242916 (`dev`, 37fe0a75), job 101986689946:
+    # `The web bundle mounts a product` failed -- 8 of 89 checks -- and the
+    # TWENTY-ONE steps after it were `skipped`. The last thing that executed
+    # was the mount gate; the next thing was `Upload test logs`, which carries
+    # `if: always()` and was therefore the only survivor. Among the twenty-one
+    # was `Run ViewModel headless tests (native + JS backends)` -- `just
+    # test-vm`, THE SUITE THIS JOB IS NAMED FOR -- plus the ct trace-layer
+    # units, the MCR-enrichment units, the recorder-gated suites and the `ct
+    # record` CLI dispatch tests. None of them had ever run here.
+    #
+    # The eight failures are honest and are NOT to be fixed away.
+    # `CT_NOIR_WASM_COMPILER` is set only in `deploy-web-codetracer.yml`, so
+    # this job always runs with zero wasm modules declared, the Noir run
+    # controls correctly refuse, and eight checks that assert a real run cannot
+    # pass here. That is a true red about a real deployment shape. What was
+    # wrong was not the red -- it was that one honest red bought silence from
+    # twenty-one unrelated gates.
+    #
+    # THE FIX, AND WHY IT IS `!cancelled()` AND NOT `continue-on-error`.
+    # Every step below the mount gate carries `if: ${{ !cancelled() }}`. In
+    # GitHub Actions `if:` decides only whether a step RUNS; it does not touch
+    # how that step's own failure is scored, and it does not un-fail a step
+    # that already failed. So the mount gate keeps a bare, un-suppressed
+    # failure -- it still reddens this job, by itself, exactly as before -- and
+    # the twenty-one steps behind it now execute and report their own verdicts.
+    #
+    # `continue-on-error: true` plus a terminal verdict step was the cheaper-
+    # looking alternative and was rejected: it makes the gate's failure
+    # invisible to the job and then re-derives it from `steps.<id>.outcome`, so
+    # a typo in the id, a missing step, or an `if:` on the verdict step turns
+    # the gate off silently. This campaign has found ~30 gates already silenced
+    # that way. `!cancelled()` needs no id, no outcome plumbing and no second
+    # step, and has no state in which it can suppress a failure.
+    #
+    # A separate job for the gate was the other alternative. It is cleaner in
+    # principle but costs a second full setup -- checkout, Nix, siblings,
+    # renderer build, bundle assembly, ~12 minutes on the run above -- to
+    # isolate one step, and it would need a new entry in
+    # ci/verdict/required-jobs.txt or it would create a fresh dark lane while
+    # closing this one. Not worth it for a guard that shares its bundle with
+    # the thirteen browser gates immediately below it.
+    #
+    # `!cancelled()` rather than `always()` is deliberate: `always()` is true
+    # during a cancellation too, and `concurrency.cancel-in-progress` is `true`
+    # for pull requests (see the block at the top of this file), so `always()`
+    # here would make every superseded PR run drag twenty-one steps to
+    # completion instead of stopping.
+    #
+    # Steps 1-15 are deliberately NOT guarded. Checkout, Nix, the sibling
+    # provisioning and the bundle build are prerequisites, not gates: if the
+    # bundle does not assemble there is nothing for the gates below to read,
+    # and twenty-one cascading failures would be noise rather than coverage.
+    # The guard starts at the first step that asserts something about an
+    # already-built artefact.
+    #
+    # TIMEOUT. 75m was sized against a body that had never run past its
+    # sixteenth step -- the comment it replaces said so itself ("the 24.3m
+    # worst failure covers under half the body and is a LOWER bound"). With the
+    # remaining twenty-one steps now executing, including a `ct` build and a
+    # JS-recorder build, the old ceiling is a guess against a strictly larger
+    # body. Raised to 120m so the first complete run is a measurement rather
+    # than a timeout; it can come back down once there are records to size it
+    # against. A timeout also kills `Upload test logs`, so an undersized
+    # ceiling would destroy the evidence this change exists to produce.
+    timeout-minutes: 120
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
@@ -2938,6 +3000,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-web-renderer-mounts
 
       - name: A test row's two controls, and only one of them re-runs
+        if: ${{ !cancelled() }}
         # The TESTS pane's per-row ⟳ and ⏵, driven in a real browser.
         #
         # The step above asserts that the product MOUNTS. This asserts that one
@@ -2975,6 +3038,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-tests-pane-row-controls
 
       - name: A Low Level Code row click, on the render arm the bundle ships
+        if: ${{ !cancelled() }}
         # THE DIVERGENT-ARMS HAZARD, closed for one gesture.
         #
         # `isonim_low_level_code_view.nim` has TWO row renderers. The headless
@@ -3020,6 +3084,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-low-level-code-row-click
 
       - name: One layout per mode, and it survives a reload
+        if: ${{ !cancelled() }}
         # THE SECOND OF THE THREE GATES NOTHING REFERENCED, and the one whose
         # description in `shell-gate-coverage.known-dark.txt` was half wrong in
         # the useful direction: `ci/test/mode_layout_probe.mjs` DOES measure
@@ -3080,6 +3145,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-mode-layout-in-browser
 
       - name: A typed watch expression, in a browser, showing a correct value
+        if: ${{ !cancelled() }}
         # The STATE pane's Watches tab, opened by a click on the product's own
         # tab button and filled by keystrokes into its own `#watch-0`.
         #
@@ -3122,6 +3188,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-watch-expressions-in-browser
 
       - name: A recorded value reaches the State pane and is shown as the value it is
+        if: ${{ !cancelled() }}
         # The sibling of the step above, and it runs here for the same reasons:
         # same captured `ct/load-locals` body, same three dependencies (`nim
         # js`, stylus, Chromium), no engine on the page and none needed.
@@ -3147,6 +3214,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-state-values-in-browser
 
       - name: A registered known failure signals when it goes green
+        if: ${{ !cancelled() }}
         # The ledger `just test-vm` now consults, gated in both directions.
         #
         # Making `MockBackendService` strict turned eleven silently-wrong
@@ -3169,6 +3237,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-known-failures
 
       - name: One press, one action; one pane id, one node
+        if: ${{ !cancelled() }}
         # Two latent defects that were doing no harm by luck. The pane half is
         # a fixed duplicate-id fall-through in `ui/layout.nim`, with an arm
         # that reddens on the pre-fix bundle. The chord half is a standing
@@ -3184,6 +3253,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-chord-and-pane-uniqueness
 
       - name: A submenu you can click, a bar that does not flicker, one menu on right-click
+        if: ${{ !cancelled() }}
         # Three defects one user reported against the deployed site on
         # 2026-09-02, and the reason none of them was caught here: every
         # existing check asserts markup or a model, and all three defects are
@@ -3210,6 +3280,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-menu-and-context-menu
 
       - name: Editor context menu is the mode's
+        if: ${{ !cancelled() }}
         # The CONTENT of the editor's right-click menu, entry by entry, per
         # mode. The gate above asserts that exactly one menu appears and that
         # its hint row is inert -- and passes unchanged on a menu whose whole
@@ -3230,6 +3301,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-editor-context-menu-modes
 
       - name: Renderer host-reach budget (NS1 residual 1)
+        if: ${{ !cancelled() }}
         # The migration that stands between the web bundle and a rendered pane,
         # as a ratchet rather than a plan. Fails when a module gains a host
         # call, and equally when one loses a host call without the budget being
@@ -3237,6 +3309,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-host-budget
 
       - name: Renderer pane parity (NS2's second half)
+        if: ${{ !cancelled() }}
         # "A pane added to one platform appears in the other" — the half of
         # `test_one_codebase_two_platforms` that had no gate, because comparing
         # two pane sets needs two bundles and until this week there was one.
@@ -3247,6 +3320,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-pane-parity
 
       - name: Identity layer — credentials, escape hatch, WebCrypto seam, mutation proofs (ID1/ID2)
+        if: ${{ !cancelled() }}
         # `viewmodel/identity/token.nim` is the verification library ID1 asks
         # every product to link, and `test_identity_token.nim` runs in
         # `vm-unit` and `vm-unit-js` by the directory glob — this step is the
@@ -3283,6 +3357,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-identity
 
       - name: Noir Studio signed out (NS7a / Identity ID3)
+        if: ${{ !cancelled() }}
         # `test_development_loop_needs_no_account`, as a property of the built
         # product: the arm that carries write, compile, run, record and export
         # reaches NO network primitive, so there is no request for a token to
@@ -3298,9 +3373,63 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-noir-studio-signed-out
 
       - name: Run ViewModel headless tests (native + JS backends)
+        if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
+      - name: Run ViewModel unit suites (C backend)
+        if: ${{ !cancelled() }}
+        # A SECOND DARK LANE, found while fixing the first, and a different
+        # mechanism.
+        #
+        # `just test-vm` above is `test-vm-native` + `test-vm-js`, whose lanes
+        # (`vm-native`, `vm-js`) reach `src/tests/gui/tests` -- NOT
+        # `src/frontend/viewmodel/tests/unit`. That directory belongs to the
+        # `vm-unit` / `vm-unit-js` lanes in ci/lib/test-lane-files.sh, and
+        # `just test-vm-unit` was invoked by NO workflow in this repository:
+        # zero hits for `test-vm-unit` across all twelve files in
+        # .github/workflows. The lanes were defined, documented, self-tested by
+        # ci/test/test-lane-report-test.sh, and run nowhere.
+        #
+        # This is not the same failure as the skipped steps above and would
+        # have survived fixing them. A step that is `skipped` at least leaves a
+        # record; a lane that no job invokes leaves nothing, and the guard that
+        # looks like it should catch this does not: `ci/test/test-lane-
+        # coverage.sh` (run from `ci/lint/nim.sh`, so it does run) asserts that
+        # every test-shaped file is claimed by SOME lane. It says nothing about
+        # whether that lane is claimed by some job. File -> lane was proved;
+        # lane -> job was assumed.
+        #
+        # What it cost, concretely: `test_run_control_refusal_is_shown.nim` --
+        # 337 lines, five suites, written for the reported defect that a Noir
+        # run control takes a click and reaches no runner -- lands in this
+        # directory, is correctly claimed by `vm-unit`, passes the coverage
+        # guard, and would never have executed in CI.
+        #
+        # Guarded like its neighbours, so a red here -- and this lane has never
+        # reported in CI, so a red is entirely possible -- cannot darken the
+        # steps below it.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-unit
+
+      - name: Run ViewModel unit suites (JS backend)
+        if: ${{ !cancelled() }}
+        # The JS half of the lane above, and a SEPARATE STEP on purpose.
+        #
+        # `vm-unit` is a C lane; `vm-unit-js` is the same file set minus what
+        # cannot compile under `nim js`. Front-End-Architecture.md §6 asks for
+        # the Tier-1 pyramid "run on both the C and JS backends", and JS is the
+        # backend BlockTracer actually ships, so the JS result is the one that
+        # speaks about production.
+        #
+        # Written as its own guarded step rather than `... test-vm-unit && ...
+        # test-vm-unit-js` in the step above, because that `&&` is this job's
+        # original defect in one line: the C lane's failure would consume the
+        # JS lane's verdict and report a single red that says nothing about
+        # which backend broke. Two steps, two verdicts, both able to fail the
+        # job independently.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-unit-js
+
       - name: Run ct trace-layer unit tests
+        if: ${{ !cancelled() }}
         # src/ct/trace/*_test.nim (recording-folder shape detection,
         # session-manifest open path, CTFS source materialization, path
         # handling, ct host idle-timeout parsing) is matched by neither
@@ -3309,6 +3438,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-ct-trace-units
 
       - name: Run ct upload MCR-enrichment unit tests
+        if: ${{ !cancelled() }}
         # src/ct/online_sharing/test_mcr_enrichment.nim was matched by no
         # runner at all — 34 assertions that could not fail a build — and the
         # member-check suite alongside it pins that `ct upload` does not
@@ -3318,6 +3448,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-mcr-enrichment-units
 
       - name: Clone codetracer-js-recorder sibling
+        if: ${{ !cancelled() }}
         # The recorder-gated ViewModel tests
         # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,
         # statement_step}_*_vm.nim) drive the real JS recorder to produce a
@@ -3341,6 +3472,7 @@ jobs:
           submodules: 'false'
 
       - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
+        if: ${{ !cancelled() }}
         # Builds the JS recorder sibling via scripts/build-siblings.sh, builds
         # replay-server, then runs the recorder-gated unit VM suites with a
         # zero-test guard that fails if they all skip (so a missing recorder
@@ -3348,6 +3480,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
 
       - name: Clone runquota sibling
+        if: ${{ !cancelled() }}
         # The `just build-once` step below compiles `ct`, whose import chain
         # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
         # src/ct_test/process_exec.nim) starts with `import runquota_process`.
@@ -3363,6 +3496,7 @@ jobs:
           submodules: 'false'
 
       - name: Build ct (needed by the CLI dispatch tests)
+        if: ${{ !cancelled() }}
         # record_missing_recorder_test.nim and record_dispatch_e2e_test.nim
         # drive the SHIPPED `ct` binary rather than importing its modules, so
         # the lane needs a build.  The pure dispatch table test does not, but
@@ -3370,6 +3504,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
       - name: Run ct record CLI dispatch tests
+        if: ${{ !cancelled() }}
         # Asserts that every language detection produces reaches a recorder,
         # that a missing recorder fails non-zero naming the language and the
         # remedy, and that a real `ct record` through the JS recorder sibling
