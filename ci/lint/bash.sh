@@ -169,10 +169,19 @@ lint_step "shellcheck: build-alignment harness ('just test' runs it)" \
 #
 # Executed here, and not only linted, for the reason the stale-artefact suite
 # below is: an aggregate that has never been SEEN to report a second failure is
-# indistinguishable from one that still hides it. The suite drives real `just`
-# over throwaway recipes in a temp dir -- no nix, no build, no network, seconds
-# -- and it reproduces BOTH original shapes to prove it can still tell the
-# difference.
+# indistinguishable from one that still hides it.
+#
+# It is HERMETIC — it stubs `just` on PATH rather than needing the real one —
+# and that is a correctness requirement of running it here, not a convenience.
+# nix/shells/lint.nix carries no `just` on purpose, so the first version of this
+# registration refused to run and turned this job red. The stub costs nothing:
+# ci/lib/run-just-lanes.sh's whole interface to the outside is `just <lane>`,
+# one argument and one exit status. So: no nix, no build, no network, seconds.
+#
+# One section of the suite does need a real `just` (it asserts what `just`
+# itself does with a failing DEPENDENCY, which is why `test-bpf` could not stay
+# a dependency list). That section self-skips here and the suite's expected
+# assertion count drops to match, so a short tally is still a finding.
 lint_step "contract suite: an aggregate runs every lane and names every failure" \
 	bash ci/test/run-just-lanes-test.sh
 
