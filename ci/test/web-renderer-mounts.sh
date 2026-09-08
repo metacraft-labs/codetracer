@@ -1854,13 +1854,28 @@ print(" ".join(r["name"] for r in rows))
 	r_clickerr="$(json route runClick.clickError)"
 	r_started="$(json route runClick.startedLine)"
 	r_refused="$(json route runClick.refusedLine)"
-	# THE SECOND CHANNEL, reported rather than asserted here. This pane's
-	# control refuses through the same `api.errorMessage` path the gutter's
-	# does, so the sentence the user is shown is available — but arm G is where
-	# it is ASSERTED, and adding a second assertion of the same fact here would
-	# inflate the tally without adding power. Carried so a red arm R names what
-	# the user saw instead of guessing.
+	# THE SECOND CHANNEL, reported rather than asserted here — AND EXPECTED TO
+	# BE EMPTY FOR THIS CONTROL, which the previous version of this comment got
+	# backwards. It said the pane's ▶ "refuses through the same
+	# `api.errorMessage` path the gutter's does". It does not, and the commit
+	# that wrote that sentence is the one that made it false:
+	# `test_results_vm.startRun` files the runner's sentence with
+	# `noteRunRefusal`, which appends a diagnostic and renders in the pane's
+	# `.test-results-failure` block. No notification is raised. The gutter's
+	# `runTestFromGutter` is the path that calls `api.errorMessage`.
+	#
+	# So the pane's refusal is read off `r_absence` and the failure block, and a
+	# `none` here is the CORRECT reading for this control rather than a silent
+	# product. Carried anyway, because a notification appearing on this press
+	# would mean the two controls had converged and this comment needs rewriting
+	# again.
 	r_refusenotice="$(json route runClick.refusalNotice)"
+	# The population behind the read — see arm G. `r_noticesbefore` counts the
+	# notifications the page already carried (the storage-durability sentence is
+	# always one of them), which are excluded from `refusalNotice` because they
+	# answer no question the click asked.
+	r_notices="$(json route runClick.notices)"
+	r_noticesbefore="$(json route runClick.noticesBefore)"
 	r_headbefore="$(json route runClick.headlineBefore)"
 	r_headafter="$(json route runClick.headlineAfter)"
 	r_results="$(json route runClick.resultsLine)"
@@ -1888,7 +1903,7 @@ print(" ".join(r["name"] for r in rows))
 		# console, the pane's absence line, the notification — and lets the
 		# reader see which of them were silent, rather than asserting in prose
 		# that all of them were.
-		ck fail "arm R: the click started nothing. Console refusal: '${r_refused:-none}'; on-screen notice: '${r_refusenotice:-none}'; pane absence line: ${r_absence:-0} character(s); headline went '${r_headbefore}' -> '${r_headafter}'. A control that looks live and runs nothing is the dead affordance — and whether the user was told WHY is the ${r_absence:-0}-character absence line and the notice above, not this sentence's assumption"
+		ck fail "arm R: the click started nothing. Console refusal: '${r_refused:-none}'; press-caused notice: '${r_refusenotice:-none}' (${r_notices} caused by the press, ${r_noticesbefore} already on screen and excluded); pane absence line: ${r_absence:-0} character(s); headline went '${r_headbefore}' -> '${r_headafter}'. A control that looks live and runs nothing is the dead affordance — and whether the user was told WHY is the ${r_absence:-0}-character absence line and the pane's failure block, not this sentence's assumption"
 		jsonraw route runClick.newConsole 2>/dev/null | head -3 | sed 's/^/      /'
 	fi
 	# ...AND THE RUN REACHED ITS VERDICTS. `nbpTest-started` proves the worker
@@ -2769,6 +2784,14 @@ print(" | ".join(l.replace("log: codetracer-noir-build: ", "")
 	fi
 
 	g_refusenotice="$(json gutter-run gutterRunClick.refusalNotice)"
+	# THE POPULATION BEHIND THE READ, so an empty `refusalNotice` can be told
+	# apart from a probe that never saw a notification at all. `json` collapses
+	# a list to its length, so these are counts: `g_notices` is what the PRESS
+	# caused, `g_noticesbefore` is what the page was already showing and the
+	# recorder deliberately excluded. Reported because run 34160263480 passed
+	# this arm's second-channel check by quoting one of the excluded ones.
+	g_notices="$(json gutter-run gutterRunClick.notices)"
+	g_noticesbefore="$(json gutter-run gutterRunClick.noticesBefore)"
 	if [ "${g_clicked}" = "true" ] && [ -n "${g_started}" ]; then
 		ck ok "arm G: pressing it STARTED a run — ${g_started}"
 	else
@@ -2817,9 +2840,9 @@ print(" | ".join(l.replace("log: codetracer-noir-build: ", "")
 	if [ -n "${g_started}" ]; then
 		ck ok "arm G: the press started a run, so no refusal was owed — and the product volunteered none (on-screen: ${g_refusenotice:-none})"
 	elif [ -n "${g_refusenotice}" ] || [ -n "${g_refused}" ]; then
-		ck ok "arm G: the press started no run and the product SAID WHY on the surface the user actually reads — on-screen: ${g_refusenotice:-none}; console: '${g_refused}'"
+		ck ok "arm G: the press started no run and the product SAID WHY on the surface the user actually reads — on-screen: ${g_refusenotice:-none}; console: '${g_refused}' (the on-screen sentence is one of ${g_notices} the press CAUSED; ${g_noticesbefore} pre-existing notice(s) were excluded from this read)"
 	else
-		ck fail "arm G: the press started no run and the user was told NOTHING — no console refusal and no notification on screen. Silence after a press is the reported defect in its worst form: the control looks live, does nothing, and states no reason"
+		ck fail "arm G: the press started no run and the user was told NOTHING — no console refusal and no notification caused by the press (${g_notices} press-caused notice(s); ${g_noticesbefore} notice(s) were already on screen before it and are NOT an answer to it). Silence after a press is the reported defect in its worst form: the control looks live, does nothing, and states no reason"
 	fi
 
 	# THE VERDICT, and it must name a passing test. `startNoirTestRecording`
@@ -3037,6 +3060,8 @@ else
 	z_started="$(json gutter-run-no-modules gutterRunClick.startedLine)"
 	z_refused="$(json gutter-run-no-modules gutterRunClick.refusedLine)"
 	z_notice="$(json gutter-run-no-modules gutterRunClick.refusalNotice)"
+	z_notices="$(json gutter-run-no-modules gutterRunClick.notices)"
+	z_noticesbefore="$(json gutter-run-no-modules gutterRunClick.noticesBefore)"
 	z_settled="$(json gutter-run-no-modules gutterRunClick.runningAfterSettle)"
 
 	# 1. THE MUTATION LANDED, and it landed on the RUN rather than on the
@@ -3064,12 +3089,23 @@ else
 	#    armed before the click, so a notification that is dismissed before the
 	#    read is still counted — an empty string here means the product never
 	#    said anything, not that the probe looked late.
+	#
+	#    AND IT MUST BE A NOTICE THE PRESS CAUSED. The page is already showing
+	#    the storage-durability sentence when this arm clicks, and the first
+	#    version of `refusalNotice` returned the first notice on the page that
+	#    was not the timeout — so this check could have been satisfied by a
+	#    notification about STORAGE while the run control said nothing at all.
+	#    That is not a hypothetical: it is how arm G passed on run 34160263480.
+	#    The recorder now keeps the pre-existing notices in a separate list and
+	#    `refusalNotice` is drawn only from what arrived after the press, and
+	#    both counts are printed so this line can be audited rather than
+	#    trusted.
 	if [ -n "${z_notice}" ] && [ "${z_settled}" = "0" ]; then
-		ck ok "arm Z: and the product told the user why, on screen and with no run left spinning — ${z_notice}"
+		ck ok "arm Z: and the product told the user why, on screen and with no run left spinning — ${z_notice} (one of ${z_notices} notice(s) the press caused; ${z_noticesbefore} pre-existing one(s) excluded)"
 	elif [ -n "${z_notice}" ]; then
 		ck fail "arm Z: the product explained itself (${z_notice}) but left ${z_settled} slot(s) spinning — a refusal that still shows a running control is the reported defect with a caption"
 	else
-		ck fail "arm Z: the press started no run, the console said nothing, and the screen said nothing either — this is the dead affordance exactly as reported, and it is invisible to every check that reads the console alone"
+		ck fail "arm Z: the press started no run, the console said nothing, and the screen said nothing either (${z_notices} press-caused notice(s); ${z_noticesbefore} pre-existing one(s) excluded as answering no question the click asked) — this is the dead affordance exactly as reported, and it is invisible to every check that reads the console alone"
 	fi
 fi
 echo
