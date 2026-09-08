@@ -277,6 +277,24 @@ lint_step "SDK facade boundary: contract suite" \
 lint_step "SDK facade boundary: no reach past the facade, no chain concept inside it" \
 	bash ci/test/sdk-facade-boundary.sh
 
+# PLAT-7's verification gate, and it sits HERE rather than anywhere else because
+# it is the other half of the guard above: the facade that
+# `sdk-facade-boundary.sh` holds a consumer to is the same facade that
+# re-exports `isonim/core/[signals, computation, owner]` for §4.1's Mode N
+# consumers — which is how a PLUGIN, a declared consumer of that same facade,
+# ended up with `createEffect` in scope and could run 160 ms on every write
+# without the host budgeting, attributing or suspending it.
+# Extensibility-Model.md §5.3 requires that budget to be "enforced rather than
+# documented"; this is the enforcement.
+#
+# Same order as above and for the same reason: the contract suite runs before
+# the guard it covers, because a guard nobody has watched fail is not evidence.
+lint_step "Plugin reactive boundary: contract suite" \
+	bash ci/test/plugin-reactive-boundary-test.sh
+
+lint_step "Plugin reactive boundary: a plugin cannot reach a raw reactive primitive" \
+	bash ci/test/plugin-reactive-boundary.sh
+
 # PLAT-2's verification gate: no surface formats a value by a path that
 # bypasses the one presenter, and the presenter is pure.
 # CodeTracer-Platform.milestones.org asks for it "in the shape

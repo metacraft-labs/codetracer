@@ -205,6 +205,29 @@ assert_fires "${t}" "consumer-facade-only" \
 	"an import inside a 'when defined(js)' branch does not evade the rule" \
 	"replay_data_store"
 
+# NIM'S NEWLINE-CONTINUED `import`, ADDED 2026-09-08 AND NOT BECAUSE OF A DEFECT
+# HERE. `nim_imports` reads it and always has. What was missing was a case: the
+# form was handled and ungraded, so nothing distinguished "this extractor reads
+# it" from "nobody has tried". That distinction stopped being academic when
+# `ci/test/plugin-reactive-boundary.sh` re-derived its own extractor, got this
+# one form wrong, and walked past the exploit it exists to catch — with 138
+# files under `src/` and 31 under `../isonim/` written this way.
+#
+# The extractor is now ONE function in ci/lib/nim-imports.sh, so it is graded
+# from both sides: arm G13 breaks the continuation branch and this case is what
+# reddens here, while the plugin gate's own newline cases redden there. A shared
+# predicate with a control on one consumer only is half a control.
+t="$(make_tree consumer-reaches-in-newline-continued)"
+mkdir -p "${t}/consumer"
+cat >"${t}/consumer/pane.nim" <<'EOF'
+## SDK-CONSUMER: the module list on the line beneath a bare `import`.
+import
+  ../src/frontend/viewmodel/store/replay_data_store
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"a newline-continued import does not evade the rule (138 files in this repo are written that way)" \
+	"replay_data_store"
+
 # ---------------------------------------------------------------------------
 # consumer-facade-only, THE QUOTED SPELLINGS
 #
@@ -578,6 +601,103 @@ assert_fires "${t}" "import-specs-analysable" \
 	"pane_hash_char.nim" "pane_semi_char.nim" "pane_quote_char.nim" \
 	"character literal"
 
+# THE SAME SELF-CHECK, GRADED FROM THIS SIDE OF THE SHARED EXTRACTOR.
+#
+# `imports_unread` lives in ci/lib/nim-imports.sh, which both boundary gates
+# call, and until 2026-09-08 it fired only when the FIRST TOKEN of the line was
+# `when`/`elif`/`else` — so the same character-literal trick in a later
+# `;`-piece was never examined at all. A shared predicate with a control on one
+# consumer only is half a control (Verification-Harness-Traps §14b), which is
+# why this case exists here as well as in the plugin gate's suite: arm G14b is
+# the same one-line edit, killed from this side.
+t="$(make_tree consumer-conditional-unreadable-in-a-later-piece)"
+mkdir -p "${t}/consumer"
+{
+	printf '## SDK-CONSUMER: the conditional is in the SECOND statement on its line,\n'
+	printf '## so a self-check keyed on the first token never looks at it.\n'
+	printf 'discard 1; when %s == %s: import ../src/frontend/viewmodel/store/replay_data_store\n' "'#'" "'#'"
+} >"${t}/consumer/pane_later_piece.nim"
+assert_fires "${t}" "import-specs-analysable" \
+	"a conditional in a LATER ;-piece is refused too — the self-check is not keyed on the first token of the line" \
+	"pane_later_piece.nim" "discard 1;"
+
+# AND THE GATE ON THAT SELF-CHECK, GRADED FROM THIS SIDE TOO.
+#
+# Making the self-check per-piece did not touch the GATE that decides whether it
+# runs, and a BLOCK COMMENT between the `;` and the `when` walked past it: the
+# raw line does not show `;` followed by whitespace and `when`, while the
+# comment-stripped line does. The gate reads three renderings of the line now —
+# raw, comment-stripped, and block-comments-only — because the first two resolve
+# a `#` in opposite directions, and a fix that merely swapped raw for stripped
+# reopened the `discard <hash-literal>;` spelling below. Arm G16 is that swap,
+# killed from both sides (Verification-Harness-Traps §14b).
+t="$(make_tree consumer-block-comment-defeats-the-gate)"
+mkdir -p "${t}/consumer"
+{
+	printf '## SDK-CONSUMER: a block comment sits between the semicolon and the\n'
+	printf '## when, which is legal nim and is invisible in the raw text only.\n'
+	printf 'discard 1; #[c]# when %s == %s: import ../src/frontend/viewmodel/store/replay_data_store\n' "'#'" "'#'"
+} >"${t}/consumer/pane_block_gate.nim"
+{
+	printf '## SDK-CONSUMER: a leading character literal truncates the comment strip,\n'
+	printf '## so this one is visible in the RAW text only.\n'
+	printf 'discard %s; when %s == %s: import ../src/frontend/viewmodel/store/replay_data_store\n' "'#'" "'#'" "'#'"
+} >"${t}/consumer/pane_raw_gate.nim"
+assert_fires "${t}" "import-specs-analysable" \
+	"a block comment between ';' and 'when', and a leading literal that truncates the strip, are BOTH refused — the gate reads three renderings" \
+	"pane_block_gate.nim" "pane_raw_gate.nim"
+
+# AND THE CALL SITE, GRADED FROM THIS SIDE TOO — the SEVENTH route, 2026-09-08.
+#
+# Five passes hardened the self-check and its gate; none touched how the
+# extractor INVOKES them. It was called as `collecting == 0 && imports_unread(…)`
+# so a CONTINUATION LINE of a multi-line import — the spelling 138 tracked files
+# under `src/` use, and 44 more use for `from … import` with the symbol list on
+# the lines beneath — was never self-checked. No rendering is
+# desynchronised; the check does not run. Arm G18 is that guard put back, killed
+# from both sides (Verification-Harness-Traps §14b).
+t="$(make_tree consumer-conditional-on-a-continuation-line)"
+mkdir -p "${t}/consumer"
+{
+	printf '## SDK-CONSUMER: the conditional rides on the CONTINUATION line of a\n'
+	printf '## multi-line import, where a self-check gated on the collecting flag\n'
+	printf '## never runs at all.\n'
+	printf 'import\n'
+	printf '  ../src/frontend/viewmodel/codetracer_embed; when %s == %s: import ../src/frontend/viewmodel/store/replay_data_store\n' "'#'" "'#'"
+} >"${t}/consumer/pane_continuation.nim"
+assert_fires "${t}" "import-specs-analysable" \
+	"a desynchronised conditional on the CONTINUATION LINE of a multi-line import is refused — the self-check is asked of every line" \
+	"pane_continuation.nim"
+
+# ---------------------------------------------------------------------------
+# CRLF — a line terminator the extractor must not read as part of a keyword.
+#
+# `trim` removes spaces and tabs and not a carriage return, so before
+# 2026-09-08 a bare `import` on a CRLF-terminated line was the string
+# `import\r`: it opened no statement, and `imports_unread` did not count it
+# either, so the module list beneath it was lost in SILENCE. Measured on
+# nim 2.2.8 — the identical file twice, differing only in line endings — both
+# compile and both import usably. This is the negative half; the positive twin
+# below is the same file with its CR intact and a facade-only import, which must
+# stay clean, so "CRs are handled" is not satisfied by an extractor that
+# refuses or reports every CRLF file.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree consumer-crlf-continuation)"
+mkdir -p "${t}/consumer"
+printf '## SDK-CONSUMER: CRLF line endings, module list on the line beneath.\r\nimport\r\n  ../src/frontend/viewmodel/store/replay_data_store\r\n' \
+	>"${t}/consumer/pane_crlf.nim"
+assert_fires "${t}" "consumer-facade-only" \
+	"a newline-continued import in a CRLF-terminated file is still read — a carriage return is a line terminator, not part of the keyword" \
+	"pane_crlf.nim" "store/replay_data_store"
+
+t="$(make_tree consumer-crlf-facade-only-is-clean)"
+mkdir -p "${t}/consumer"
+printf '## SDK-CONSUMER: CRLF line endings, importing exactly what it may.\r\nimport\r\n  ../src/frontend/viewmodel/codetracer_embed\r\n' \
+	>"${t}/consumer/pane_crlf_clean.nim"
+assert_clean "${t}" \
+	"a CRLF-terminated consumer importing only the facade is clean — the CR strip costs nothing"
+
 # ---------------------------------------------------------------------------
 # import-specs-analysable — the refusal, and why it is a failure and not a shrug
 #
@@ -634,6 +754,44 @@ import ../src/frontend/viewmodel/store/replay_data_store
 EOF
 assert_clean "${t}" \
 	"an undeclared file may still import internals (nothing is a consumer by accident)"
+
+# ---------------------------------------------------------------------------
+# The SECOND permitted door: `codetracer_plugin`, the narrowed surface a PLUGIN
+# consumes (PLAT-7 deliverable 6, Extensibility-Model.md §5.3).
+#
+# Two cases, and the second is the one that matters. Admitting a module by name
+# is an exemption, and an exemption matched by prefix or by resemblance lets the
+# next module in silently — the same argument UI_PATH_ALLOWLIST is written with.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree plugin-surface-is-permitted)"
+mkdir -p "${t}/consumer"
+cat >"${t}/src/frontend/viewmodel/codetracer_plugin.nim" <<'EOF'
+## SDK-CONSUMER: the plugin-facing door; held to the facade-only rule itself.
+import codetracer_embed
+export codetracer_embed except createEffect
+const CodeTracerPluginSurfaceModule* = "codetracer_plugin"
+EOF
+cat >"${t}/consumer/plug.nim" <<'EOF'
+## SDK-CONSUMER: a plugin reaches the SDK through the narrowed surface.
+import ../src/frontend/viewmodel/codetracer_plugin
+EOF
+assert_clean "${t}" \
+	"a consumer may import the narrowed plugin surface as well as the facade"
+
+t="$(make_tree plugin-surface-exemption-is-exact)"
+mkdir -p "${t}/consumer"
+cat >"${t}/src/frontend/viewmodel/codetracer_plugin_helpers.nim" <<'EOF'
+## Not the plugin surface. An SDK internal whose name merely starts the same.
+const HelperVersion* = 1
+EOF
+cat >"${t}/consumer/plug.nim" <<'EOF'
+## SDK-CONSUMER: reaches a module that only LOOKS like the plugin surface.
+import ../src/frontend/viewmodel/codetracer_plugin_helpers
+EOF
+assert_fires "${t}" "consumer-facade-only" \
+	"a module that merely resembles the plugin surface is not exempt" \
+	"codetracer_plugin_helpers"
 
 # ---------------------------------------------------------------------------
 # facade-graph-no-rendering

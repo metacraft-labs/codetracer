@@ -421,3 +421,8 @@ repro.paths
 # `src/tests/gui/non-nix-build/tmp/ct-<fixture>-<random>/` per run; they are
 # per-run temporaries with randomized suffixes and must never be committed.
 /src/tests/gui/non-nix-build/
+
+# Run lock for the PLAT-7 boundary mutation harness. Held with flock for the
+# lifetime of a run so a second instance in the same worktree refuses to start;
+# two instances corrupt each other's in-memory restores.
+src/frontend/viewmodel/tests/unit/.plat7-boundary-mutation.lock

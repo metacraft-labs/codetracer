@@ -293,6 +293,29 @@ export debugger_session
 import sdk/trace_source
 export trace_source
 
+# ---------------------------------------------------------------------------
+# The plugin surface (PLAT-7, Extensibility-Model.md §2.1, §4.2, §5)
+#
+# §2.1: "`codetracer_embed.nim` is the sanctioned surface ... **Extensions are
+# declared consumers.**" A plugin therefore reaches the ViewModels and their
+# action procs through this module, exactly as the terminal front-end does —
+# and it needs one thing more that no other consumer needs: the activation
+# scope its subscriptions are owned by, and the budget its synchronous effects
+# are measured against.
+#
+# THIS IS THE DELIBERATE WIDENING §2.1 ASKS FOR, and it is the narrow one.
+# `plugin_host/plugin_api` grants access to NO CodeTracer state: it is the
+# `PluginContext`, `pluginEffect`, `pluginMemo`, `observe`, `checkBudget` and
+# the manifest types, over `isonim/core` and `common/plugin_model`. Every
+# datum a plugin can read still arrives through a ViewModel above.
+#
+# `plugin_host/host` — the registry, the resolver and `activate`/`deactivate`
+# — is deliberately NOT here. A plugin does not load plugins; the application
+# does, and giving a plugin the host would hand it every other plugin's
+# activation scope.
+import plugin_host/plugin_api
+export plugin_api
+
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"
     ## The one module name a consumer may import from this SDK. The import

@@ -1,0 +1,16 @@
+# Control digests for run-plat7-boundary-mutations.py.
+#
+# ABSOLUTE, and that is the point. A baseline taken at start-up
+# cannot tell a clean tree from one a killed run left a mutation
+# in: it reads the mutation as the baseline, every restore then
+# verifies against the mutated bytes, and the only symptom is
+# `CONTROL IS NOT GREEN` — which describes a red suite without
+# naming the cause.
+#
+# Rewrite with --record-control-hashes, deliberately, when a gate
+# or the API changes on purpose.
+
+d921f21211cb8dc8e60911484c24d003ef272f426a4207d93c7b28e7a0d6ae42  src/frontend/viewmodel/plugin_host/plugin_api.nim
+bf542ed6dbbbf7edff51af6f7324d5e5feb9979eef7f5fa6b850b7dc74caa60b  src/frontend/viewmodel/codetracer_plugin.nim
+2cfbd37b2cb0c5c0978a09610a8a53573c5e71acff8174aac816cc6cc251d2d6  ci/test/plugin-reactive-boundary.sh
+05f39b61011e038710d1d84f6a14e2156c783813a74149458bc417033a603cbc  ci/lib/nim-imports.sh

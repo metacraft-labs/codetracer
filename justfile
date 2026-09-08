@@ -2926,6 +2926,21 @@ test-value-presentation-boundary:
 test-tui-layer-split-boundary:
   bash ci/test/tui-layer-split-boundary.sh
 
+# PLAT-7's plugin boundary: a declared plugin cannot reach a raw `isonim`
+# reactive primitive, so Extensibility-Model.md §5.3's synchronous-effect budget
+# is enforcement rather than advice.  `codetracer_plugin.nim` filters the ten
+# denied names out of the facade with `export … except`, which stops the
+# unqualified spelling at compile time; this gate stops the module-qualified one
+# that `except` cannot filter, and the direct import of
+# `isonim/core/{computation,owner}` or of the wider `codetracer_embed`.  Its
+# positive controls run through the rule's own predicates.  Wired into
+# `ci/lint/nim.sh`; this recipe runs the guard and its contract suite alone.
+test-plugin-reactive-boundary:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  bash ci/test/plugin-reactive-boundary-test.sh
+  bash ci/test/plugin-reactive-boundary.sh
+
 # Print what each lane runs, without running anything.  Useful when deciding
 # where a new test file belongs.
 test-lanes:

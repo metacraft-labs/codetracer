@@ -1,0 +1,13 @@
+PLAT-7. These are PLUGINS, and Extensibility-Model.md §2.1 says in as many
+words: "`codetracer_embed.nim` is the sanctioned surface ... **Extensions are
+declared consumers.** An extension reaching `ReplayDataStore` directly would
+couple to internals that the facade exists to keep private."
+
+Declaring the tree here rather than marking each file is the documented use of
+this marker, and it is what makes the rule apply to a plugin somebody adds
+later without remembering to opt in.
+
+The point is not tidiness. These fixtures exist to be driven by
+`test_plugin_lifecycle.nim` and `test_plugin_effect_budget.nim`, and a fixture
+that reached past the facade would be proving the plugin model works over a
+door real plugins will not have.

@@ -198,13 +198,65 @@
 ## So does the closing triple-quote of a multi-line string literal followed by
 ## the same separator. A character literal holding a SEMICOLON or a CLOSING
 ## bracket is read correctly, so the family is not "character literals"; it is
-## "anything that unbalances one of the three scans". The self-check above
-## covers the CONDITIONAL version of every one of them, which is where the
-## realistic evasion is; extending it to any line was measured and rejected:
-## six real prose comments in this repository carry a `;` before the word
-## `from`, eleven further prose lines carry a `:` before `import` or `from`, and
-## all seventeen would go red for nothing — before counting the dozens of lines
-## in THIS file that describe the very forms above.
+## "anything that unbalances one of the three scans". Extending the self-check
+## to any line was measured and rejected: six real prose comments in this
+## repository carry a `;` before the word `from`, eleven further prose lines
+## carry a `:` before `import` or `from`, and all seventeen would go red for
+## nothing — before counting the dozens of lines in THIS file that describe the
+## very forms above.
+##
+## ## THIS SELF-CHECK DOES **NOT** COVER THE CONDITIONAL VERSION OF ALL OF THEM
+##
+## This paragraph asserted that it did — "the self-check above covers the
+## CONDITIONAL version of every one of them, which is where the realistic
+## evasion is" — and that sentence is now known to be false, in FOUR separate
+## ways, so it is withdrawn rather than softened. **Only the sentence is fixed
+## here; the code below is NOT repaired in this diff** (see
+## `Verification-Harness-Traps.md` §14a, instance 2, and PLAT-6). The gap
+## between what this header claims and what the code does is exactly the thing
+## that made the claim dangerous, so it is stated instead of implied.
+##
+## **THE COUNT HAS MOVED TWICE IN TWO PASSES — three on 2026-09-08, then four
+## the same day — and that is the argument for repairing the mirror rather than
+## re-describing it.** A list of gaps in a header is a completeness claim every
+## time it is written, and this one has been wrong on arrival twice:
+##
+##   1. `conditionalImportUnread` keys on `rawLine.strip().isConditionalLine()`,
+##      so a conditional in a LATER `;`-piece is never examined at all —
+##      `discard 1; when '#' == '#': import <helper>` compiles, imports usably,
+##      and passes. The shell mirror lost this on 2026-09-08 and was repaired;
+##      this side was not, so the two implementations disagree.
+##   2. It `return false`s on the first piece that yields an import, so one
+##      readable import on a line clears a line that also lost one. The shell
+##      mirror counts now.
+##   3. Its GATE reads the raw line, so a BLOCK COMMENT between the `;` and the
+##      `when` — legal nim, and removed by any comment stripper — switches the
+##      self-check off entirely. The shell mirror asks three renderings of the
+##      line now. Found 2026-09-08, the sixth route past this boundary found by
+##      the sixth verification pass of this campaign.
+##   4. Its CALL SITE skips a CONTINUATION LINE, exactly as the shell mirror's
+##      did. `conditionalImportUnread` is consulted only where a statement
+##      begins, so the module list beneath a bare `import` is never
+##      self-checked, and a desynchronised conditional riding on it is neither
+##      counted nor refused:
+##
+##        import
+##          <surface>; when <hash-lit> == <hash-lit>: <a second import>
+##
+##      (Written with placeholders on purpose. Spelled out, that line is one the
+##      shell extractor now REFUSES, so writing it here as prose would add a
+##      refusal to the tree — which is exactly how the one refusal this
+##      repository does carry got there, twenty lines above.)
+##
+##      It compiles on nim 2.2.8 and imports usably. The shell mirror was repaired
+##      on 2026-09-08 by the seventh verification pass; this side was not. Note
+##      what distinguishes this one from 1-3: **no rendering is desynchronised**
+##      — every rendering sees the conditional, and the check simply does not
+##      run. See `Verification-Harness-Traps.md` §14d.
+##
+## "It is a mirror, on purpose" is the sentence that keeps a second copy of a
+## predicate from being counted (Verification-Harness-Traps §14). It is counted
+## here.
 ##
 ## And the direction the rest of the residue runs in is worth stating: quote
 ## parity is per line, so lines inside a multi-line string literal are read as

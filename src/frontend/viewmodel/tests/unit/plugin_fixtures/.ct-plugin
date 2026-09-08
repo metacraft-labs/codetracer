@@ -1,0 +1,22 @@
+PLAT-7. These are PLUGINS, and a plugin is not an SDK consumer with extra
+privileges — it is third-party code the product loads into its own process.
+
+Extensibility-Model.md §5.3 requires the synchronous-effect budget to be
+enforced rather than documented. That is only true while a plugin cannot create
+a computation the host did not wrap, and `codetracer_embed.nim` re-exports
+`isonim/core/[signals, computation, owner]` for §4.1's Mode N consumers — so
+until `codetracer_plugin.nim` existed, a plugin importing nothing but the
+sanctioned facade had `createEffect` in scope and could run 160 ms on every
+write, unattributed and unsuspendable.
+
+This marker is what makes `ci/test/plugin-reactive-boundary.sh` apply to
+everything under this directory, including a fixture somebody adds later
+without remembering to opt in — the same argument, and the same two spellings,
+as the `.sdk-consumer` marker beside it.
+
+The two markers are BOTH correct here and neither implies the other:
+`.sdk-consumer` says "may not reach past the facade into SDK internals";
+`.ct-plugin` says "may not reach the raw reactive primitives the facade
+re-exports". A plugin is bound by both. The terminal front-end under
+`src/frontend/tui/app/` is bound by the first and not the second, because it is
+the application rather than an extension of it.
