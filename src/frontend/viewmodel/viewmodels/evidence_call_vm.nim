@@ -136,18 +136,88 @@ proc `==`*(a, b: EvidenceCommand): bool {.noSideEffect.} =
 # Reading a command line
 # ---------------------------------------------------------------------------
 
+const DelimitersAfterBackslash = {' ', '\t', '\n', '\r', '\'', '"'}
+  ## The only characters a backslash may escape — see `splitsTokenAfter`.
+
+proc splitsTokenAfter(c: char): bool {.noSideEffect, inline.} =
+  ## Whether a `\` immediately before `c` is an **escape**, as opposed to a
+  ## literal backslash that happens to precede `c`.
+  ##
+  ## This one predicate is the whole platform question (see
+  ## `splitCommandLine`'s "Whose backslash is it?"), and the answer is: a
+  ## backslash escapes exactly the characters that would otherwise *end or
+  ## delimit the token* — whitespace and the two quote marks.  Before anything
+  ## else, including a letter, a digit, a `.` or another `\`, it is a literal
+  ## backslash.
+  c in DelimitersAfterBackslash
+
 proc splitCommandLine*(line: string): seq[string] {.noSideEffect.} =
-  ## Split a command line into argv the way a POSIX shell would, for the two
-  ## quoting forms an agent's tool title actually uses.
+  ## Split a command line into argv, for the quoting forms an agent's tool
+  ## title actually uses.
   ##
   ## Quoting matters here rather than being pedantry: a path with a space in
   ## it (`"/home/a b/review.json"`) is the case where a naive whitespace split
   ## produces a *wrong but plausible* path, and the reviewer would be told a
-  ## dataset is missing when it is not.  Backslash escaping is honoured
-  ## outside single quotes, as the shell does.
+  ## dataset is missing when it is not.
   ##
   ## An unterminated quote yields the tokens read so far — a partial command
   ## is not evidence, and the caller's own checks reject it.
+  ##
+  ## ## Whose backslash is it?
+  ##
+  ## A command line is just a string, and whether `\` **escapes** the next
+  ## character or **separates** two path components depends on the shell that
+  ## produced it: POSIX shells escape, `cmd.exe` and PowerShell do not.  The
+  ## producer here is an *agent session*, and the reader is whoever opens that
+  ## session afterwards — so the two need not be the same machine, and the
+  ## reported case is precisely the mismatched one: a dataset collected by an
+  ## agent on Windows, opened in a CodeTracer running on Linux.  A
+  ## `when defined(windows)` would therefore key the decision on the wrong
+  ## end of the wire, and would still be wrong for a session copied between
+  ## hosts, or replayed from a trace committed to a repository.  The same
+  ## string must yield the same argv everywhere, so the rule is a property of
+  ## the string alone:
+  ##
+  ## > **A backslash is an escape only when the character after it is one that
+  ## > would otherwise end or delimit the token — whitespace, `'` or `"`.
+  ## > Before anything else it is a literal backslash.**
+  ##
+  ## That is the narrowest rule that still does the job this splitter exists
+  ## for.  Escaping is needed here *only* to stop a delimiter from delimiting;
+  ## for every other character the two readings differ merely in whether a
+  ## literal `\` survives, and keeping it is the only reading that can be
+  ## right for `C:\out\review.json` while staying harmless for a POSIX line
+  ## (a POSIX `\z` is a pointlessly-escaped `z`, which agents do not write —
+  ## whereas `C:\z` is what they do write).
+  ##
+  ## Consequences worth stating, because each was chosen rather than fallen
+  ## into:
+  ##
+  ## * `\\` is **two literal backslashes**, not one.  A UNC output path
+  ##   (`\\build-server\artifacts\review.json`) is a real thing a Windows CI
+  ##   agent writes; a POSIX path containing a deliberately-escaped literal
+  ##   backslash is not.  Collapsing the pair would turn the former into
+  ##   `\build-server\…` — a wrong *but plausible* path, the exact failure
+  ##   this module's quoting exists to prevent.
+  ## * `\ ` (backslash-space) stays a **POSIX escaped space**.  It is the one
+  ##   genuinely ambiguous sequence — it is also a Windows path separator
+  ##   immediately before an argument boundary — and it is resolved toward
+  ##   POSIX because that is the documented reason this escaping exists at all
+  ##   (`/home/a\ b/review.json`), and because the *other* reading is the one
+  ##   that manufactures a plausible-looking wrong path.
+  ## * Inside double quotes the same rule applies, which means
+  ##   `"C:\Program Files\ct\review.json"` survives intact.  POSIX itself
+  ##   already keeps a backslash before most characters inside double quotes;
+  ##   the deviation is that we also keep it before `$` and `` ` ``, which
+  ##   costs nothing because this splitter performs no expansion and so could
+  ##   never have got a `$VAR` path right anyway.
+  ##
+  ## Recorded as a recurring class, not a novelty:
+  ## `windows-porting-initiative-status.md` (§"Regressions found and fixed
+  ## this session", the `env.ps1` entry) has this repo's previous instance —
+  ## "passed a backslash Windows path to bash, mangling it and silently
+  ## skipping tree-sitter-nim parser regeneration" — where the fix was
+  ## likewise to stop letting a POSIX reader eat a Windows path's separators.
   result = @[]
   var current = ""
   var started = false
@@ -162,6 +232,7 @@ proc splitCommandLine*(line: string): seq[string] {.noSideEffect.} =
         started = false
       inc i
     of '\'':
+      # Single quotes are literal through and through, on every shell.
       started = true
       inc i
       while i < line.len and line[i] != '\'':
@@ -172,16 +243,23 @@ proc splitCommandLine*(line: string): seq[string] {.noSideEffect.} =
       started = true
       inc i
       while i < line.len and line[i] != '"':
-        if line[i] == '\\' and i + 1 < line.len:
+        if line[i] == '\\' and i + 1 < line.len and
+            line[i + 1].splitsTokenAfter:
           inc i
         current.add line[i]
         inc i
       inc i
     of '\\':
       started = true
-      if i + 1 < line.len:
+      if i + 1 < line.len and line[i + 1].splitsTokenAfter:
         inc i
         current.add line[i]
+      else:
+        # Not an escape: the backslash is part of the token.  A `\` at the
+        # very end of the line lands here too — an escape with nothing to
+        # escape is a literal, which is also the right answer for a Windows
+        # directory written with its trailing separator (`-o C:\out\`).
+        current.add c
       inc i
     else:
       started = true

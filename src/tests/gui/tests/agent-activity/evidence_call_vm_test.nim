@@ -89,6 +89,21 @@ proc makeStore(): ReplayDataStore =
   createReplayDataStore(
     newMockBackendService(autoRespond = true).toBackendService())
 
+proc recognised(commandLine: string): string =
+  ## `"<kind>:<path>"` for a recognised evidence command, `""` for anything
+  ## else — one total function over the recogniser's whole answer.
+  ##
+  ## Deliberately not `parseEvidenceCommand(…).get.datasetPath` at the call
+  ## sites below: `unittest.check` records a failure and *carries on*, so a
+  ## `.get` guarded only by a preceding `check … .isSome` raises
+  ## `UnpackDefect` the moment that guard is the thing that broke — which
+  ## aborts the process and takes every later case in this binary with it.
+  ## Comparing a string also makes a failure name the wrong answer instead of
+  ## reporting `false`, which matters most for the wrong-*but-plausible*
+  ## paths these cases exist to catch.
+  let parsed = parseEvidenceCommand(commandLine)
+  if parsed.isNone: "" else: $parsed.get.kind & ":" & parsed.get.datasetPath
+
 # ---------------------------------------------------------------------------
 
 suite "AA-3 recognising the evidence handoff in a session":
@@ -156,6 +171,177 @@ suite "AA-3 recognising the evidence handoff in a session":
         "cat review.json",
         "ct test run"]:
       check parseEvidenceCommand(command).isNone
+
+  test "a name that merely contains 'ct' is not ct":
+    # The recogniser scans every token for the binary rather than only argv[0]
+    # (`env FOO=1 ct …`, `nix run … -- ct …`), so the base-name test is the
+    # only thing standing between "the agent ran ct" and "the agent ran
+    # something with ct in its name".
+    for command in [
+        "myct review collect -o review.json",
+        "ctx review collect -o review.json",
+        "ct-wrapper review collect -o review.json",
+        "/opt/myct review collect -o review.json",
+        "/opt/ct-wrapper agent evidence review.json"]:
+      check recognised(command) == ""
+
+suite "AA-3 a Windows command line is not a POSIX one":
+
+  ## A command line is a string, and `\` escapes on POSIX shells but
+  ## *separates* on `cmd.exe` and PowerShell.  The producer is an agent
+  ## session and the reader is whoever opens it later, so the two need not be
+  ## the same machine — every case below is written as a Windows line read on
+  ## whatever host runs this lane, which on both CI lanes is Linux.  That is
+  ## the reported case, and it is why the splitter's rule is a property of the
+  ## string rather than of `defined(windows)`.
+  ##
+  ## Same class as `windows-porting-initiative-status.md`'s `env.ps1` entry —
+  ## "passed a backslash Windows path to bash, mangling it" — which is this
+  ## repo's previous instance of a POSIX reader eating a Windows path's
+  ## separators.
+  ##
+  ## Each case below is scoped to ONE part of the chain, because the parts
+  ## fail independently and a suite whose every case says "a Windows line is
+  ## broken" cannot say *which* part broke.  In particular the argv[0] case is
+  ## kept apart from the path cases: recognising `C:\tools\ct.exe` needs the
+  ## splitter *and* `commandBaseName`, so only the one case that is about
+  ## argv[0] is allowed to depend on both.
+
+  test "a Windows path in the dataset argument keeps its separators":
+    # The splitter alone, with a `ct` that needs no base-name work.  Before
+    # the fix `C:\out\review.json` split to `C:outreview.json`.
+    check splitCommandLine("ct review collect -o C:\\out\\review.json") ==
+      @["ct", "review", "collect", "-o", "C:\\out\\review.json"]
+    check recognised("ct review collect -o C:\\out\\review.json") ==
+      "collect:C:\\out\\review.json"
+    check recognised("ct agent evidence C:\\Users\\dev\\review.json") ==
+      "handoff:C:\\Users\\dev\\review.json"
+    check recognised("ct review collect --output=C:\\out\\r.json") ==
+      "collect:C:\\out\\r.json"
+    check recognised("ct review collect -o out\\review.json") ==
+      "collect:out\\review.json"
+    check recognised("ct review collect -o C:\\out\\") == "collect:C:\\out\\"
+
+  test "a Windows argv[0] is still ct":
+    # The reported line, character for character.  This is the one case that
+    # legitimately depends on the splitter AND on `commandBaseName` stripping
+    # both the directory and the `.exe`; before the fix argv[0] arrived as
+    # `C:toolsct.exe`, which has neither, so the call was not recognised at
+    # all and the agent's dataset never became clickable.
+    check splitCommandLine(
+        "C:\\tools\\ct.exe review collect -o C:\\out\\review.json") ==
+      @["C:\\tools\\ct.exe", "review", "collect", "-o",
+        "C:\\out\\review.json"]
+    check recognised(
+        "C:\\tools\\ct.exe review collect -o C:\\out\\review.json") ==
+      "collect:C:\\out\\review.json"
+    check recognised(
+        "C:\\Users\\dev\\AppData\\Local\\ct\\ct.exe agent evidence " &
+        "C:\\Users\\dev\\review.json") ==
+      "handoff:C:\\Users\\dev\\review.json"
+
+  test "a recognised Windows call never names a wrong-but-plausible path":
+    # The worse half of the defect, and the reason it is worse: with `ct` on
+    # PATH the command *was* recognised, so the card was clickable — and it
+    # pointed at "D:ciartifactsevidence.json", a string that looks like a
+    # path, does not exist, and is not the one the agent wrote.  Asserted as
+    # an inequality as well, because "names the right path" and "does not name
+    # that particular wrong one" are different claims and only the second one
+    # names the failure mode this module exists to prevent.
+    const Line =
+      "ct agent end-of-turn --output D:\\ci\\artifacts\\evidence.json"
+    check recognised(Line) == "collect:D:\\ci\\artifacts\\evidence.json"
+    check recognised(Line) != "collect:D:ciartifactsevidence.json"
+
+  test "a quoted Windows path keeps its separators too":
+    # A path with a space in it is *the* case this splitter's quoting exists
+    # for, and on Windows that path is `C:\Program Files\…`.  The double-quote
+    # arm is a second, separate escaping site: fixing the unquoted one and
+    # leaving this one POSIX would mangle exactly the paths most likely to be
+    # quoted, which is why this case is here and not folded into the first.
+    check recognised(
+        "ct agent evidence \"C:\\Program Files\\ct\\review.json\"") ==
+      "handoff:C:\\Program Files\\ct\\review.json"
+    check recognised(
+        "ct review collect -o \"C:\\Program Files\\out\\review.json\"") ==
+      "collect:C:\\Program Files\\out\\review.json"
+
+  test "a UNC path keeps both of its leading backslashes":
+    # `\\` must be two literal backslashes, not one.  A Windows CI agent
+    # writing its dataset to a share produces exactly this; collapsing the
+    # pair yields `\build-server\…`, which is the wrong-but-plausible shape
+    # again.  This is the case that decides `\\` is NOT an escape.
+    check splitCommandLine("\\\\build-server\\artifacts\\review.json") ==
+      @["\\\\build-server\\artifacts\\review.json"]
+    check recognised(
+        "ct agent evidence \\\\build-server\\artifacts\\review.json") ==
+      "handoff:\\\\build-server\\artifacts\\review.json"
+
+  test "a trailing directory separator is not eaten":
+    # `--output` names a *directory* in the spec's own synopsis
+    # (`CLI-Reference.md` §3.2 — "Output directory for the dataset"), and a
+    # Windows one is commonly written with its trailing separator.  A
+    # backslash with nothing after it is an escape with nothing to escape, so
+    # it is a literal.
+    #
+    # Deliberately a path with NO other backslash in it.  The POSIX reading
+    # already gets a trailing `\` right, by accident (its escape needs a next
+    # character and there is none), so this is the one input that separates
+    # "the splitter recognises a non-escape" from "the splitter then writes
+    # the backslash out" — an implementation that does the first and forgets
+    # the second passes every other case in this suite.
+    check recognised("ct review collect -o out\\") == "collect:out\\"
+
+  test "the .exe suffix is what makes ct.exe ct":
+    # `commandBaseName`'s Windows half, with no backslash anywhere so that
+    # this case can only fail for its own reason.
+    check recognised("ct.exe agent evidence review.json") ==
+      "handoff:review.json"
+    check recognised("ct.exe review collect -o review.json") ==
+      "collect:review.json"
+    # And it is a *suffix* rule, not a substring one: a backup copy of the
+    # binary is not the binary.
+    check recognised("ct.exe.bak agent evidence review.json") == ""
+    check recognised("ctexe agent evidence review.json") == ""
+
+suite "AA-3 POSIX escaping still escapes":
+
+  test "all four ways of writing a path with a space agree":
+    # The guarantee the Windows rule had to be narrowed *around*: escaping is
+    # still honoured for the characters that would otherwise end the token.
+    for command in [
+        "ct agent evidence \"/home/a b/review.json\"",
+        "ct agent evidence '/home/a b/review.json'",
+        "ct agent evidence /home/a\\ b/review.json",
+        "ct agent evidence /home/a\" \"b/review.json"]:
+      check recognised(command) == "handoff:/home/a b/review.json"
+
+  test "an escaped quote is still an escaped quote":
+    # `\"` and `\'` remain escapes, quoted or not — without them a path
+    # containing a quote would terminate its token early, which is the same
+    # wrong-but-plausible truncation as the unquoted space.
+    check recognised("ct agent evidence a\\\"b/review.json") ==
+      "handoff:a\"b/review.json"
+    check recognised("ct agent evidence \"a\\\"b/review.json\"") ==
+      "handoff:a\"b/review.json"
+    check recognised("ct agent evidence /home/u/it\\'s/review.json") ==
+      "handoff:/home/u/it's/review.json"
+
+  test "one line may carry both readings at once":
+    # The rule is per *character*, so there is no whole-string mode to get
+    # wrong: no drive-letter sniff, no "does this line look POSIX" vote.  Any
+    # implementation that decided once per line fails here, because this line
+    # needs the POSIX reading of `\ ` and the literal reading of `C:\out\`
+    # simultaneously.
+    check splitCommandLine(
+        "env CT_LOG=/home/a\\ b/log ct review collect " &
+        "-o C:\\out\\review.json") ==
+      @["env", "CT_LOG=/home/a b/log", "ct", "review", "collect", "-o",
+        "C:\\out\\review.json"]
+    check recognised(
+        "env CT_LOG=/home/a\\ b/log ct review collect " &
+        "-o C:\\out\\review.json") ==
+      "collect:C:\\out\\review.json"
 
 suite "AA-3 only a tool call counts as evidence":
 
