@@ -647,11 +647,35 @@ if (process.env.CT_PROBE_SCREENSHOT) {
 // BEFORE the click, so what it collects is caused by the click. The read also
 // re-scans the live DOM and merges, so a node whose text is filled in after
 // insertion is not missed either.
+// WHAT WAS ALREADY ON SCREEN IS RECORDED SEPARATELY, and this is not a
+// refinement — the first version of this recorder seeded ONE log with
+// `take(document.body)` and then answered `refusalNotice` with the first entry
+// that was not the timeout sentence. The page is never empty of notifications
+// at that moment: `viewmodel/platform/store_durability.nim` raises the storage
+// durability sentence ("Your work is saved in this browser and survives
+// reloads...") when the project loads, long before any control is touched. So
+// the first non-timeout entry was a notice about STORAGE, and run 34160263480
+// duly reported it as the run control's reason:
+//
+//   [OK] arm G: the press started no run and the product SAID WHY ... —
+//        on-screen: Your work is saved in this browser and survives reloads...
+//
+// That check passed while quoting a sentence the click did not cause, about a
+// subject it was not asking about. A green earned by an unrelated notification
+// is worse than a red: the arm claimed to have measured the second channel and
+// had not looked at it.
+//
+// The fix is to keep the two populations apart. `before` is what the page
+// carried at install; the log is what arrived afterwards. `refusalNotice` is
+// then drawn only from notices the press is responsible for, which is what the
+// comment above always claimed and the code did not do.
 const installNoticeRecorder = () => page.evaluate(() => {
   if (window.__ctNoticeLog) return;
+  const before = [];
   const log = [];
+  window.__ctNoticeBefore = before;
   window.__ctNoticeLog = log;
-  const take = (root) => {
+  const take = (root, into) => {
     if (!root || root.nodeType !== 1) return;
     const els = root.matches && root.matches('.notification-message')
       ? [root]
@@ -659,22 +683,37 @@ const installNoticeRecorder = () => page.evaluate(() => {
           ? root.querySelectorAll('.notification-message') : []);
     for (const e of els) {
       const t = (e.textContent || '').trim();
-      if (t && !log.includes(t)) log.push(t);
+      if (t && !into.includes(t)) into.push(t);
     }
   };
-  take(document.body);
+  take(document.body, before);
   new MutationObserver((muts) => {
-    for (const m of muts) for (const n of m.addedNodes) take(n);
+    for (const m of muts) for (const n of m.addedNodes) take(n, log);
   }).observe(document.body, { childList: true, subtree: true });
 });
+// Returns the notices the PRESS caused. The live re-scan is still merged, so a
+// node whose text is filled in after insertion is not missed — but it is
+// filtered by `before` too, otherwise the re-scan would put the durability
+// sentence straight back in by the other door. A notice that was on screen at
+// install and is re-rendered verbatim afterwards stays excluded, which is the
+// right answer: nothing about it tells the user why THIS click did nothing.
 const noticeTexts = () => page.evaluate(() => {
+  const before = window.__ctNoticeBefore || [];
   const log = (window.__ctNoticeLog || []).slice();
   for (const e of document.querySelectorAll('.notification-message')) {
     const t = (e.textContent || '').trim();
     if (t && !log.includes(t)) log.push(t);
   }
-  return log;
+  return log.filter((t) => !before.includes(t));
 });
+// What the page was already showing, reported alongside rather than discarded.
+// An arm that finds no refusal needs to distinguish "the probe saw nothing at
+// all" from "the probe saw notices and none of them was caused by the press",
+// and a filtered-away population that is never reported cannot make that
+// distinction. This is the count that stops a zero being mistaken for a
+// measurement.
+const noticesBeforeTexts = () =>
+  page.evaluate(() => (window.__ctNoticeBefore || []).slice());
 // The two-minute deadline notice is the product GIVING UP, not a refusal, and
 // `timeoutNotice` already carries it. Kept out of `refusalNotice` so the two
 // cannot be confused for one another.
@@ -701,6 +740,7 @@ if (process.env.CT_PROBE_CLICK_RUN) {
     // a different artefact from a refusal the console prints, and this pane's
     // control can produce either.
     notices: [],
+    noticesBefore: [],
     refusalNotice: '',
     resultsLine: '',
     exitLine: '',
@@ -784,6 +824,7 @@ if (process.env.CT_PROBE_CLICK_RUN) {
     }
     // THE SECOND CHANNEL, read last so it covers the whole press.
     runClick.notices = await noticeTexts();
+    runClick.noticesBefore = await noticesBeforeTexts();
     runClick.refusalNotice =
       runClick.notices.find((t) => !t.includes(TIMEOUT_NOTICE)) || '';
   } catch (e) {
@@ -835,6 +876,7 @@ if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
     // user's. For this control they are routinely different — see the comment
     // on `installNoticeRecorder`.
     notices: [],
+    noticesBefore: [],
     refusalNotice: '',
     exitLine: '',
     resultsLine: '',
@@ -1027,6 +1069,7 @@ if (process.env.CT_PROBE_CLICK_GUTTER_RUN) {
       // the live DOM taken BEFORE the settle wait — a deadline notice raised
       // during that wait, or one dismissed before it, both read as absent.
       gutterRunClick.notices = await noticeTexts();
+      gutterRunClick.noticesBefore = await noticesBeforeTexts();
       gutterRunClick.timeoutNotice =
         gutterRunClick.notices.find((t) => t.includes(TIMEOUT_NOTICE)) || '';
       gutterRunClick.refusalNotice =
