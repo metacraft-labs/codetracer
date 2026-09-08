@@ -640,6 +640,29 @@ package codeTracer:
       description = "Run BPF monitor tests",
       activities = ["bpf"]
 
+    # ── single sign-on: consume the workspace's identity server ─────────────
+    #
+    # CodeTracer's web and desktop surfaces authenticate against a shared
+    # identity provider, so working on sign-in needs one running locally. It is
+    # NOT started from here: it is shared by every metacraft product that signs
+    # in, so declaring it in one product's dev environment would give each
+    # product checkout its own instance and lose the very thing the campaign is
+    # about — one provider, one session, one logout across products.
+    #
+    # It is declared once, in the `infra` sibling, and started from there:
+    #
+    #     cd ../infra && repro up --activity sso
+    #
+    # What this repo does is CONSUME it. The server writes its issuer and one
+    # client id per surface to a descriptor file; a dev server reads the issuer
+    # and its own client id out of that instead of hard-coding either. The path
+    # is exported whether or not the server is running, so a consumer can report
+    # "the SSO server is not up" rather than failing to find a name.
+    let infraSibling = siblingPath(workspaceRoot, "infra")
+    if infraSibling.len > 0:
+      setEnv "CODETRACER_SSO_DEV_DESCRIPTOR",
+        infraSibling / ".repro" / "sso" / "sso-dev.json"
+
     diagnostic "CodeTracer dev environment definition loaded"
 
   build:

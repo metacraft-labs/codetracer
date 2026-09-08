@@ -56,7 +56,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}" || exit 2
 
 IDENTITY_DIR="src/frontend/viewmodel/identity"
-EXPECTED_MODULES=4
+# 5 since SSO-M4 added `oidc_redirect.nim` — the Authorization-Code + PKCE
+# redirect flow shared by the web IDE and the desktop app. Like its neighbours
+# it is pure: it imports only std modules, reads no environment variable, and
+# takes its entropy and its SHA-256 digest as ARGUMENTS rather than obtaining
+# either, which is what lets one test suite drive it on both backends against
+# the RFC 7636 published vectors.
+EXPECTED_MODULES=5
 # `when defined(...)` is legitimate here — `webcrypto_verifier.nim` needs it to
 # tell a browser from a native build — but every one of them is a place where
 # two different behaviours ship, so the number is budgeted. A new one is then a
