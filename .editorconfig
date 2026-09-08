@@ -20,3 +20,47 @@ max_line_length = off
 [{Makefile,go.mod,go.sum,*.go,.gitmodules}]
 indent_style = tab
 indent_size = 4
+
+# SHELL SCRIPTS ARE TAB-INDENTED, AND THIS STANZA IS WHAT SAYS SO.
+#
+# 305 of the 366 tracked *.sh files (excluding the libs/ submodules) are
+# tab-indented. Until this stanza existed, nothing in the repository declared
+# that: the `[*]` block above says `space`/2, and the files disagreed with it.
+#
+# They got away with it by accident. The shfmt pre-commit hook runs
+# `shfmt -w -l -ln auto -s`, and shfmt only consults .editorconfig when it is
+# given NO formatting flags -- `-ln` and `-s` each suppress it on their own
+# (verified against shfmt 3.12.0, the version pinned by the hook). So shfmt has
+# been formatting at its built-in default, `-i 0`, which means tabs. The tab
+# convention held because .editorconfig was never read, not because anyone
+# agreed with it.
+#
+# That is one flag away from a 306-file whitespace commit. Drop `-s`, or drop
+# `-ln auto`, or take an upstream git-hooks.nix bump that rewrites the entry,
+# and shfmt starts honouring `[*]` = space/2 and rewrites 306 files at once.
+# With this stanza the same change is a no-op: .editorconfig now says what
+# shfmt was already doing, so it no longer matters whether shfmt reads it.
+[*.sh]
+indent_style = tab
+
+# ...EXCEPT THESE TWO, WHERE SPACE INDENTATION IS A CONTRACT AND NOT A STYLE.
+#
+# Both are excluded from the formatting hooks in nix/pre-commit.nix -- see the
+# `excludes` list there for the full reasoning -- because each is compared
+# byte-for-byte against a copy that lives somewhere a formatter cannot reach:
+#
+#   ci/runner/sweep-readonly-leftovers.sh  its inline body is pasted verbatim
+#                                          into seven `run:` blocks in
+#                                          .github/workflows/codetracer.yml, and
+#                                          YAML block scalars cannot be indented
+#                                          with tabs at all
+#   tools/check-test-assertions.sh         a byte-for-byte vendored copy of the
+#                                          editable original in codetracer-specs
+#
+# Both are 100% space-indented today (0 tab-indented lines in either). The hook
+# exclusions are what protect them from shfmt; this stanza is what protects them
+# from every OTHER tool that reads .editorconfig -- editors, and any future
+# formatter -- now that `[*.sh]` above would otherwise tell those tools to tab.
+[{ci/runner/sweep-readonly-leftovers.sh,tools/check-test-assertions.sh}]
+indent_style = space
+indent_size = 2
