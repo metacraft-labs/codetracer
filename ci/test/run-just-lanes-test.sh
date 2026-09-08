@@ -36,11 +36,18 @@
 #
 # # No mocks of the thing under test
 #
-# The lanes are throwaway `just` recipes in a temporary directory, driven by the
-# real `just` binary and the real ci/lib/run-just-lanes.sh. What is synthetic is
-# the WORK a lane does (`touch` a marker, `exit 3`) — not the aggregation, not
-# the recipe dispatch, and not the exit-status plumbing, which are the whole
-# subject.
+# The thing under test is ci/lib/run-just-lanes.sh, and it is the real script.
+# What is stubbed is `just` — see the long note at the stub itself for why that
+# costs nothing here: the runner's entire interface to the outside is
+# `just <lane>`, one argument and one exit status. What is synthetic is the WORK
+# a lane does (`touch` a marker, `exit 3`); the aggregation, the exit-status
+# capture and the verdict are all real.
+#
+# The stub is also what makes this suite RUNNABLE WHERE IT IS REGISTERED.
+# `lint-bash` runs inside `devShells.x86_64-linux.lint`, which carries no `just`
+# on purpose, and the first version of this file refused to run there and turned
+# that job red. Section 6 is the one part that genuinely needs the real binary;
+# it self-skips, with the expected assertion count dropping to match.
 #
 # The real lanes (`test-rust`, `test-bpf-native`, ...) need a built tree, a nix
 # dev shell, cargo, nim and in the BPF case root-ish capabilities, so this suite
@@ -99,21 +106,16 @@ assert_not_contains() {
 	esac
 }
 
-if ! command -v just >/dev/null 2>&1; then
-	# No backticks in this string on purpose: shfmt -s would rewrite the
-	# double quotes to single ones, and shellcheck then reports SC2016 on the
-	# backticks and exits 1. See the note in nix/pre-commit.nix.
-	echo "run-just-lanes-test: the just binary is not on PATH." >&2
-	echo "  It is declared in nix/shells/ci-base.nix, so its absence means this" >&2
-	echo "  suite is running outside the shell it is specified for. Failing" >&2
-	echo "  rather than skipping: an unrun contract suite must not look green." >&2
-	exit 2
-fi
-
 if [ ! -f "${RUNNER}" ]; then
 	echo "run-just-lanes-test: ${RUNNER} does not exist" >&2
 	exit 2
 fi
+
+# The REAL just, resolved before PATH is rewritten below. Only section 6 needs
+# it; everything else runs against the stub. May legitimately be empty -- see
+# the header note about the lint shell.
+REAL_JUST="$(command -v just 2>/dev/null || true)"
+readonly REAL_JUST
 
 WORK="$(mktemp -d)"
 readonly WORK
@@ -121,33 +123,70 @@ cleanup() { rm -rf "${WORK}"; }
 trap cleanup EXIT
 
 # -----------------------------------------------------------------------------
-# The fixture. Four lanes; each records that it ran by creating a marker file,
-# and lanes named `fail-*` then exit non-zero. The marker is what lets the
-# suite distinguish "ran and failed" from "never ran", which is the entire
-# difference this fix is about.
+# THE STUB LANE RUNNER, AND WHY THIS SUITE IS HERMETIC.
+#
+# The first version of this file drove the real `just` over a throwaway
+# justfile. That made it unrunnable in the one lane it is registered in:
+# `lint-bash` runs `ci/lint/bash.sh` inside `devShells.x86_64-linux.lint`, and
+# nix/shells/lint.nix carries NO `just` -- deliberately. Its package list is
+# derived from "every command in command position across the lint scripts", and
+# its header is explicit that a future need is "a signal to put it in another
+# shell rather than to widen this one". So the suite refused to run, exited 2,
+# and turned a previously-green required job red. Adding `just` to that shell
+# would have been the wrong fix twice over: it widens the shell that exists to
+# be narrow, and it does it to serve a test that does not need the real tool.
+#
+# Because it does not. The ONLY interface ci/lib/run-just-lanes.sh has to the
+# outside world is `"${just_bin}" "${lane}"` -- one argument, one exit status.
+# A stub first on PATH exercises every part of the runner that is ours: the
+# ordering, the per-lane exit-status capture, the failure accumulation and the
+# final verdict. What a stub cannot exercise is whether `just` ITSELF dispatches
+# a recipe correctly, which is not this repository's code and is not what any
+# assertion here claims.
+#
+# The stub takes a lane NAME and behaves the way that lane's recipe would: it
+# records that it ran, then exits 0 or non-zero. The marker file is the whole
+# point -- it is what distinguishes "ran and failed" from "never ran", which is
+# the difference this entire fix is about.
 # -----------------------------------------------------------------------------
+mkdir -p "${WORK}/bin"
+cat >"${WORK}/bin/just" <<'STUB'
+#!/usr/bin/env bash
+# Stub `just` -- see the block comment in ci/test/run-just-lanes-test.sh.
+# Markers land in $PWD, which the runner leaves as the caller's directory, so
+# each fixture gets its own.
+case "$1" in
+lane-a) touch ran-lane-a ;;
+lane-b-fails)
+	touch ran-lane-b
+	exit 3
+	;;
+lane-c) touch ran-lane-c ;;
+lane-d-fails)
+	touch ran-lane-d
+	exit 7
+	;;
+*)
+	echo "stub just: unknown lane '$1'" >&2
+	exit 127
+	;;
+esac
+STUB
+chmod +x "${WORK}/bin/just"
+PATH="${WORK}/bin:${PATH}"
+export PATH
+
+# Prove the stub is the `just` these sections will get. If this ever resolves
+# elsewhere, every marker-based assertion below is measuring something other
+# than what it claims.
+if [ "$(command -v just)" != "${WORK}/bin/just" ]; then
+	echo "run-just-lanes-test: stub not first on PATH (got $(command -v just))" >&2
+	exit 2
+fi
+
 fixture_dir() {
 	local dir="${WORK}/$1"
 	mkdir -p "${dir}"
-	cat >"${dir}/justfile" <<'JUSTFILE'
-lane-a:
-  #!/usr/bin/env bash
-  touch ran-lane-a
-
-lane-b-fails:
-  #!/usr/bin/env bash
-  touch ran-lane-b
-  exit 3
-
-lane-c:
-  #!/usr/bin/env bash
-  touch ran-lane-c
-
-lane-d-fails:
-  #!/usr/bin/env bash
-  touch ran-lane-d
-  exit 7
-JUSTFILE
 	printf '%s' "${dir}"
 }
 
@@ -241,26 +280,65 @@ echo "6. INSTRUMENT CHECK — a just DEPENDENCY LIST hides them too"
 # The `test-bpf` half of the defect. Same fixture, expressed the way `test-bpf`
 # used to be written, to show the dependency-list shape is not fixable by shell
 # flags and had to be converted to a body.
+#
+# THIS IS THE ONE SECTION A STUB CANNOT SERVE. It is a claim about how `just`
+# ITSELF treats a failing dependency, so it needs the real binary and a real
+# justfile. Where there is no `just` -- `lint-bash`, whose shell deliberately
+# omits it -- the section does not run, and the expected assertion count drops
+# to match so that a short tally is still a finding rather than a shrug.
+#
+# That is a real and stated limitation: in CI today this section is exercised by
+# no lane. It is retained because it documents the behaviour that forced
+# `test-bpf` to stop being a dependency list, it runs for anyone local or in any
+# dev-shell context, and the GATE proper -- sections 1 to 4, which assert what
+# the runner does now -- is fully hermetic and always runs.
 # =============================================================================
-d="$(fixture_dir old-deps)"
-cat >>"${d}/justfile" <<'JUSTFILE'
+if [ -n "${REAL_JUST}" ]; then
+	mode="full"
+	d="$(fixture_dir old-deps)"
+	cat >"${d}/justfile" <<'JUSTFILE'
+lane-a:
+  #!/usr/bin/env bash
+  touch ran-lane-a
+
+lane-b-fails:
+  #!/usr/bin/env bash
+  touch ran-lane-b
+  exit 3
+
+lane-c:
+  #!/usr/bin/env bash
+  touch ran-lane-c
 
 agg: lane-a lane-b-fails lane-c
 JUSTFILE
-out="$(cd "${d}" && just agg 2>&1)"
-status=$?
+	out="$(cd "${d}" && "${REAL_JUST}" agg 2>&1)"
+	status=$?
 
-assert_eq "dependency-list aggregate failed" "3" "${status}"
-assert_eq "dep list: lane-b-fails ran" "yes" "$(marker "${d}" lane-b)"
-assert_eq "dep list: lane-c did NOT run — the defect, reproduced" "no" "$(marker "${d}" lane-c)"
+	assert_eq "dependency-list aggregate failed" "3" "${status}"
+	assert_eq "dep list: lane-b-fails ran" "yes" "$(marker "${d}" lane-b)"
+	assert_eq "dep list: lane-c did NOT run — the defect, reproduced" "no" "$(marker "${d}" lane-c)"
+else
+	mode="hermetic"
+	echo "  -- skipped: no real just on PATH (expected in the lint shell);"
+	echo "     sections 1-5 above are hermetic and did run."
+fi
 
 # =============================================================================
 # A short assertion count is itself a finding: if a section stops executing, the
-# suite must not report success on the ones that still did.
+# suite must not report success on the ones that still did. Exact in BOTH modes,
+# so the count still catches a section that silently stopped running.
 # =============================================================================
-# 28 = 8 (section 1) + 6 (2) + 3 (3) + 3 (4) + 5 (5) + 3 (6).
-readonly EXPECTED_ASSERTIONS=28
+# hermetic: 8 (section 1) + 6 (2) + 3 (3) + 3 (4) + 5 (5)        = 25
+# full:     the same, + 3 (section 6, which needs the real just) = 28
+if [ "${mode}" = "full" ]; then
+	EXPECTED_ASSERTIONS=28
+else
+	EXPECTED_ASSERTIONS=25
+fi
+readonly EXPECTED_ASSERTIONS
 echo ""
+echo "run-just-lanes-test: mode=${mode}"
 if [ "${assertions}" -ne "${EXPECTED_ASSERTIONS}" ]; then
 	echo "run-just-lanes-test: ran ${assertions} assertions, expected ${EXPECTED_ASSERTIONS}." >&2
 	echo "  Reconcile the count against the code — do NOT edit the expected" >&2
