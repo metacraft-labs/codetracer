@@ -4408,10 +4408,38 @@ ensure-ct-native-replay:
         # working tree; the ``nix develop ... true`` guard above confirms
         # the devShell actually evaluates before we commit to this branch
         # (the sibling's ``path:libs/...`` flake inputs can fail to lock
-        # under a dirty workspace checkout). ``unset`` clears LLDB/CXX env
-        # leaking from the codetracer shell so the sibling hook owns it.
+        # under a dirty workspace checkout). ``unset`` clears the C/C++
+        # compiler env leaking from the codetracer shell so the sibling
+        # toolchain owns it.
+        #
+        # LLVM_CONFIG / LLDB_LIB_PATH / LLDB_ADDITIONAL_INCLUDE_DIRS are
+        # deliberately NOT unset here, and they used to be. Measured in the
+        # sibling's shell rather than assumed:
+        #
+        #   * LLVM_CONFIG and LLDB_LIB_PATH are exported UNCONDITIONALLY by
+        #     the sibling's shellHook (its nix/shells/main.nix), so by the
+        #     time this bash runs the hook has already replaced whatever
+        #     leaked in -- entering the shell with both set to ``/bogus``
+        #     yields the two nixpkgs store paths. Unsetting them therefore
+        #     discards the sibling's OWN values, never the leaked ones.
+        #   * LLDB_ADDITIONAL_INCLUDE_DIRS is not exported by that hook at
+        #     all; only the sibling's macOS-only ``build-mcr`` recipe
+        #     derives it, and only when it is empty. Unsetting it here can
+        #     at best cost that recipe an extra ``nix build``.
+        #
+        # And the premise the old unset rested on does not hold either: the
+        # codetracer dev shell sets none of the three (it sets CC/CXX), so
+        # there was nothing of ours to clear.
+        #
+        # Dropping the sibling's LLDB paths was harmless on macOS, where
+        # ``backend_target`` is ``build-mcr`` and that recipe re-provisions
+        # each var via ``nix build`` when unset. On Linux ``backend_target``
+        # is ``build`` -- a bare ``cargo build`` with no provisioning -- so
+        # lldb-sys's build script failed with "unable to locate shared
+        # library of liblldb" and ``just test-mcr-dap-flow`` could never
+        # reach the flow tests.
         ( cd "$sibling" && nix develop '.?submodules=1' --command bash -lc \
-            "unset LLVM_CONFIG LLDB_LIB_PATH LLDB_ADDITIONAL_INCLUDE_DIRS CXXFLAGS CC CXX; just $backend_target" )
+            "unset CXXFLAGS CC CXX; just $backend_target" )
     elif command -v just >/dev/null 2>&1; then
         # Fallback: the sibling dev shell could not be evaluated, but we are
         # already inside the codetracer Nix dev shell which provides cargo +
