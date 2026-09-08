@@ -39,12 +39,55 @@
 ## rearranged the panes, the machine went down, and the arrangement came back
 ## corrupt.
 ##
+## **AND THAT IS NOW ASSERTED, POSITIVELY, RATHER THAN PROMISED HERE.** For one
+## milestone the paragraph above was the only thing saying it, and a paragraph
+## costs a defect nothing: collapsing the two lines below to a single
+## `writeFile(path, plan.text)` left all four of PLAT-6's suites at **0
+## failed**, and no arm in the then 83-arm mutation harness touched `moveFile`.
+## The only mentions of `.new` in either suite were NEGATIVE — *"a stray `.new`
+## would mean the rename did not happen"* — and a lone negative assertion has
+## nothing to fail (Verification-Harness-Traps §4a).
+##
+## `tests/test_layout_persistence_matrix.nim`'s case *"DURABILITY: the write is
+## STAGED at `<path>.new` and renamed onto the document"* is the positive twin.
+## It puts a DIRECTORY where the staging file must go and nothing else: the
+## write below cannot open its file, the report names `<path>.new` — which is
+## the assertion that the bytes are staged rather than written in place — and
+## **the previous document is still there byte for byte**, which is the promise
+## itself. Remove the obstruction and the same session's same plan writes and
+## renames. Arm `M58` is the collapse; `S27` is its control.
+##
 ## ## NOTHING IS WRITTEN AND NOTHING IS READ WITH THE FLAG OFF
 ##
 ## Both entry points below refuse on `runtime.layoutPersistenceEnabled`, which
 ## is false whenever there is no layout binding — so a session without
 ## `--layout-binding` neither opens nor creates a file, and `main.nim` does not
 ## have to remember that.
+##
+## ## THE DECISION THIS MODULE CARRIES OUT IS ENUMERATED ELSEWHERE
+##
+## Nothing here decides anything, so nothing here is the place to reason about
+## what a session should do with its document. `app/layout/persistence.nim`'s
+## header holds that table — session wiring x what is on disk x what the user
+## did — and `tests/test_layout_persistence_matrix.nim` asserts every cell of
+## it at the FILE. Two facts from it are about THIS module and are worth having
+## in front of a reader editing it:
+##
+##   * `lpoDisabled` and `lpoQuarantined` are different facts and the ternary
+##     below is the only thing keeping them apart: "this feature is off" and
+##     "this feature refused to save" are not the same report;
+##   * **`lpoFailed` is reached by a table of its own, and both `except` arms
+##     below are in it.** It is not a cell of the session cross, because no
+##     session OBSTRUCTS the filesystem — reaching a failure arm is a fourth
+##     thing to do to the world, not a fourth thing to do in a session — so
+##     `FailureTable` enumerates the two arms beside the cross. Both are
+##     reached on an ordinary `createTempDir()`, with a real obstruction and
+##     never an injected failure: a DIRECTORY at `<path>.new` for the write,
+##     and the state directory stripped of its write permission for the
+##     remove. An earlier version of this comment claimed both arms needed a
+##     filesystem a temporary directory cannot provide; that was false, and the
+##     remove arm uses the very `setFilePermissions` technique the suite's own
+##     `EACCES` lane already runs on this host.
 
 import std/[os, strutils]
 

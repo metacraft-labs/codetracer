@@ -146,6 +146,105 @@
 ## recording once in an 80x24 terminal would pin the Compact tree on a 200x60
 ## one for ever, without the user having touched anything. No gesture, no
 ## document.
+##
+## ## THE DECISION, ENUMERATED — AND WHY A TABLE RATHER THAN MORE CASES
+##
+## Everything above is a REASON. This section is the decision itself, because
+## three separate verification passes each found a different **unmeasured
+## combination** in it, and every one of them destroys a user's file:
+##
+##   1. neuter `runtime.markLayoutDocumentUnreadable` and a transient `EACCES`
+##      DELETES the document — the section above, arm `M45`;
+##   2. delete `rt.rebuildFocus()` from the mouse path and the focus ring goes
+##      on offering a pane a drop has docked away — arm `M37`;
+##   3. weaken the quarantine branch below so it fires only when the session
+##      also left the arrangement alone, and a session that could not read its
+##      document and **then moved a pane** writes over it. Open a recording
+##      with an older build (its document is `version: 99`), rearrange, quit —
+##      and a `version: 2` document is on disk where the user's newer one was.
+##      Permanent loss, not a session's; arms `M46` and `M47`.
+##
+## Each was found by somebody hand-picking one more arm, and the third is the
+## proof that this does not scale: the failure arms had a case, the persist
+## plan had a case, and the COMBINATION of the two had nobody. So the decision
+## is now enumerated rather than sampled.
+## `tests/test_layout_persistence_matrix.nim` holds the table as DATA, asserts
+## its own cardinality and completeness, and asserts every cell **at the FILE**
+## — because in all three findings the report was unchanged while the file
+## moved. Under (1) the message the user still sees says *"the file was left
+## alone"* about a file the program has just removed.
+##
+## ### THE FREE INPUTS ARE THREE, NOT FIVE
+##
+## `userModified` and `quarantined` read like inputs and are not. A restore
+## sets the first (`binding.restoreDocument`) and `:reset-layout` clears it;
+## `bindLayoutDocument` clears the second, `runtime.adoptLayoutDocument` sets
+## it from the restore status, and `markLayoutDocumentUnreadable` sets it on
+## the one path the decoder never sees. Both are OUTPUTS of three things a
+## session is actually handed:
+##
+##   * **how the session is wired** — no binding; a binding with no document
+##     named; or bound. The middle one is the dimension a summary drops, and it
+##     is a real one: `runtime.layoutPersistenceEnabled` needs BOTH halves, so
+##     a host may enable the binding and never name a document — the
+##     "rearrangeable session that forgets";
+##   * **what is at the document's path** — absent, this build's version, an
+##     older version, or unreadable for one of five reasons: the bytes, an
+##     empty file, the schema, the pane vocabulary, or the open itself;
+##   * **what the user did** — nothing, `:reset-layout`, a rearrangement, or a
+##     rearrangement they then reset.
+##
+## ### THE TABLE, FOR A BOUND SESSION
+##
+## | on disk | untouched | `:reset-layout` | rearranged | rearranged, then reset |
+## | --- | --- | --- | --- | --- |
+## | absent | remove (nothing to remove) | remove | **WRITE a new one** | remove |
+## | this build's version | **REWRITE it** | **DELETE it** | **REWRITE it** | **DELETE it** |
+## | an older version | **REWRITE it, migrated forward** | **DELETE it** | **REWRITE it** | **DELETE it** |
+## | unreadable, any of the five | leave alone | leave alone | **leave alone** | leave alone |
+##
+## Two rows repay reading twice:
+##
+##   * **A RESTORE IS A USER MODIFICATION**, so the *untouched* column REWRITES
+##     rather than leaving alone — and on the *older version* row that rewrite
+##     is the v1 → v2 migration reaching the disk: a document REPLACED with no
+##     gesture at all. It is intended (`layout_model` §6 has no backward
+##     migration), and it is written down here because a replacement nobody
+##     wrote down is how the next finding starts.
+##   * **THE BOTTOM ROW IS THE PRECEDENCE, AND IT HAS TWO SIDES.** Its third
+##     cell is where finding (3) lives: `quarantined` and `userModified` are
+##     both true and the two branches below disagree, so weakening the first
+##     one WRITES over the user's document. Its other three cells are what a
+##     REORDERING breaks the opposite way: test the modification first and an
+##     unreadable document is DELETED rather than left. One cell establishes
+##     the rule for one half of the disagreement, which is exactly how the
+##     weakening survived a 66-arm harness.
+##
+## With no binding, or with a binding and no document named, all 32 of the
+## remaining cells answer `disabled` and nothing on disk moves — including for
+## the document states that would make a bound session quarantine or write.
+##
+## The suite carries three smaller tables beside it: `layoutPersistPlan`'s own
+## six cells, two of which no session can present because
+## `runtime.layoutPersistPlanOf` returns first — asserted against that guard
+## rather than claimed; the thirteen values `LayoutRestoreReport.kind` can
+## take, of which eleven are produced and two (`Refused`,
+## `DockedPanesUnsupported`) are unreachable, each with its reason and a
+## measurement that it cannot be constructed; and the two arms that answer
+## `lpoFailed`.
+##
+## **`lpoFailed` IS A TABLE OF ITS OWN, NOT A COLUMN OF THE CROSS.** No cell
+## above reaches it, and that is a property of the cross rather than a gap in
+## it: a failure arm is reached by OBSTRUCTING THE FILESYSTEM, which is a
+## fourth thing to do to the world and not a fourth thing to do in a session,
+## so adding it as a value of a session dimension would have meant 96 cells
+## carrying an obstruction that 94 of them ignore. `FailureTable` enumerates
+## the two arms instead — a directory at `<path>.new` for the write, a state
+## directory with no write permission for the remove — and both are reached on
+## an ordinary `createTempDir()`. An earlier version of this paragraph said
+## they could not be, which was false and was the shape this file exists to
+## refuse: a claim about the population, inside the instrument whose value is
+## its claim to be exhaustive.
 
 # `std/sha1` WARNS THAT IT IS DEPRECATED IN FAVOUR OF `checksums/sha1`, and that
 # package is not in this workspace's Nim distribution — measured, not assumed:

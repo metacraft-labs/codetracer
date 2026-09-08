@@ -34,6 +34,17 @@
 ## docks a pane on a REAL pty, exits, relaunches a second process on the same
 ## recording, and finds the pane still docked.
 ##
+## ## AND `test_layout_persistence_matrix.nim` IS THE EXHAUSTIVE HALF
+##
+## **This suite samples the decision; it does not enumerate it**, and that
+## distinction cost three findings. Each of the cases below is a behaviour
+## somebody named, and a defect that needs two of those behaviours AT ONCE —
+## an unreadable document AND a gesture, say — is invisible to every one of
+## them. `test_layout_persistence_matrix.nim` is the cross: 96 session cells
+## over three dimensions, plus `layoutPersistPlan`'s own six and the thirteen
+## failure kinds, each asserted at the FILE. Add a behavioural case here; add a
+## DIMENSION there.
+##
 ## ## Why this is not under `app/tests/`
 ##
 ## `test_tui_facade_boundary.nim` walks `app/`'s import graph and forbids a host
@@ -324,6 +335,15 @@ suite "PLAT-6: a terminal's arrangement is saved, restored, and never guessed":
       ck fileExists(box.documentOf())
       # EXACTLY ONE FILE. A `.new` left behind would mean the rename did not
       # happen and the next launch would read a half-written document.
+      #
+      # **THIS IS THE NEGATIVE HALF AND IT HAS A TWIN ELSEWHERE.** On its own
+      # it is trap §4a: an implementation that never staged anything satisfies
+      # it completely, and one did — collapsing `layout_store`'s
+      # `writeFile(temp, …); moveFile(temp, path)` to a direct write left this
+      # case, and the other three PLAT-6 suites, entirely green. The positive
+      # twin is `test_layout_persistence_matrix.nim`'s *"DURABILITY: the write
+      # is STAGED at `<path>.new` and renamed onto the document"*, which
+      # obstructs the staging path and requires the write to FAIL. Arm `M58`.
       ck filesUnder(box.root) ==
         @[LayoutDocumentDirName / box.documentOf().extractFilename]
 

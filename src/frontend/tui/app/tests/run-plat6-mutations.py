@@ -9,13 +9,20 @@ PLAT-4 owns and this binding depends on) and requires that the **named** case
 fails. A mutation killed only by some other case is MISDIRECTED and is a
 failure of this harness, not a pass.
 
-SEVEN SUITES, TWO TIERS. Each arm names the suite it is graded against:
+EIGHT SUITES, TWO TIERS. Each arm names the suite it is graded against:
 
   test_layout_binding.nim          Tier 1 — the binding itself
   test_layout_command_routing.nim  Tier 1 — the opt-in, the `:` routing and
                                             the MOUSE routing
   test_layout_persistence.nim      Tier 1 — the layout DOCUMENT: its key, its
                                             failure arms and its persist plan
+  test_layout_persistence_matrix.nim
+                                   Tier 1 — the persistence DECISION,
+                                            ENUMERATED: 96 session cells, 6
+                                            plan cells, 13 failure kinds and
+                                            the 2 arms that answer `lpoFailed`,
+                                            every one of them asserted at the
+                                            FILE rather than at the report
   test_real_layout_gestures.nim    Tier 2 — a KEYBOARD gesture through a pty
   test_real_layout_transients.nim  Tier 2 — cross-tier snapshot equivalence
   test_real_layout_mouse.nim       Tier 2 — a MOUSE gesture through a pty
@@ -56,19 +63,43 @@ nothing, so the arms at the bottom are behaviour-preserving rewrites that MUST
 survive; an arm that starts being killed is reported as a problem in its own
 right. The pairing is written at both ends: M5/M26 ← S3, M30 ← S9, M33/M33B ← S5,
 M34 ← S6, M35 and M31 ← S8, M36 ← S7, M37 ← S10, M38/M38B ← S11, M39 ← S12,
-M40 ← S13, M41 ← S14, M42 ← S15, M43 ← S16, M44 ← S17, M45 ← S18. Without the
-control, "the case reddens when this line changes" is all an arm establishes.
+M40 ← S13, M41 ← S14, M42 ← S15, M43 ← S16, M44 ← S17, M45 ← S18,
+M46/M47 ← S19, M48 ← S20, M49 ← S21, M51 ← S24, M52 ← S22, M55 ← S23,
+M56 ← S25, M57 ← S26, M58 ← S27, M59 ← S28. Without the control, "the case
+reddens when this line changes" is all an arm establishes.
 
 S9 is here because M30 shipped WITHOUT a control and an independent pass had to
 write one by hand, off the record. An arm that lives only in somebody's terminal
 is not part of the harness, so it is spelled out below.
 
-M45 ← S18 is the newest pair and it has the same provenance as M37 ← S10: a
-verification pass found a real defect that SURVIVED the whole harness, because
-the property it breaks — "a document that would not open is left alone" — was
-not named by any suite. Both arms exist because the code was right and nothing
-measured it, which is the failure mode this file is least able to report on its
-own: an arm nobody wrote cannot be a survivor.
+M45 ← S18 had the same provenance as M37 ← S10: a verification pass found a real
+defect that SURVIVED the whole harness, because the property it breaks — "a
+document that would not open is left alone" — was not named by any suite. Both
+arms exist because the code was right and nothing measured it, which is the
+failure mode this file is least able to report on its own: an arm nobody wrote
+cannot be a survivor.
+
+**M46 IS THE THIRD INSTANCE OF THAT SHAPE, AND IT IS WHY THE MATRIX SUITE
+EXISTS.** Weakening `layoutPersistPlan`'s first branch to
+`quarantined and (b.isNil or not b.userModified)` survived all 66 arms this file
+carried, and its measured consequence is a `version: 99` document REPLACED on
+disk by a `version: 2` one — permanent loss, because the user opened an older
+build once and then moved a pane. Three findings in a row arriving the same way
+is a class rather than three bugs, so the answer was not a fourth hand-picked
+arm: `test_layout_persistence_matrix.nim` enumerates the decision's whole input
+space as data and asserts every cell, and M46 … M57 are the arms that say the
+enumeration has teeth. Each names ONE lane of that table, which is what the
+table's lane column is for.
+
+**M58 IS THE FOURTH INSTANCE, AND IT SURVIVED THE TABLE.** The table enumerates
+the DECISION; the rename is not a decision, it is how the decision reaches the
+disk, and `host/layout_store.nim`'s header had promised it since the module was
+written with nothing asserting it. Collapsing the staged write to a direct one
+left all four Tier-1 suites at 0 failed, and no arm among the 83 this file
+carried touched `moveFile` — the suites' only mentions of `.new` were negative,
+which is trap §4a exactly. M58 and M59 are the two `except` arms of
+`persistLayoutForSession`, previously declared unreachable in three headers and
+reached here on an ordinary `createTempDir()`.
 
 `test_layout_binding.nim`'s last case asserts a RUNTIME ASSERTION COUNT, so an
 arm that changes how many `ck`s run reddens that case as well as its own. That
@@ -98,6 +129,7 @@ ROOT = HERE.parents[4]
 SUITE = "src/frontend/tui/app/tests/test_layout_binding.nim"
 ROUTE = "src/frontend/tui/app/tests/test_layout_command_routing.nim"
 PERSIST = "src/frontend/tui/tests/test_layout_persistence.nim"
+MATRIX = "src/frontend/tui/tests/test_layout_persistence_matrix.nim"
 GEST = "src/frontend/tui/tests/real_terminal/test_real_layout_gestures.nim"
 TRANS = "src/frontend/tui/tests/real_terminal/test_real_layout_transients.nim"
 MOUSE_SUITE = "src/frontend/tui/tests/real_terminal/test_real_layout_mouse.nim"
@@ -163,8 +195,8 @@ HARNESS = [DUAL, APPRT, APP_GEST, APP_MOUSE, APP_PERSIST, APP_TRANS]
 #     arrives disguised as your own code failing (§9-11); if a Tier-2 arm starts
 #     behaving oddly with no local edit to explain it, those three are where to
 #     look.
-TOUCHED = [SUITE, ROUTE, PERSIST, GEST, TRANS, MOUSE_SUITE, RELAUNCH, BIND,
-           TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL] + HARNESS
+TOUCHED = [SUITE, ROUTE, PERSIST, MATRIX, GEST, TRANS, MOUSE_SUITE, RELAUNCH,
+           BIND, TABS, DOC, MOUSE, RUNTIME, STORE, INTER, MODEL] + HARNESS
 
 # THE TWO TIER-2 SUITES NEED THREE MORE `--path`s and they spawn a child in a
 # real pty, so an arm against one costs a compile, a CHILD compile and a
@@ -259,6 +291,67 @@ P_EACCES = ("a document that will not OPEN is quarantined and survives "
 PERSIST_CASES = [P_KEY, P_TRIP, P_FREEZE, P_BAD, P_EACCES, P_RESET, P_OFF,
                  C_COUNT]
 
+# THE MATRIX SUITE (Tier 1) — the persistence decision, ENUMERATED.
+#
+# Each case owns one LANE of `SessionMatrix`, plus the two side tables. The
+# lanes are carried as a column of the table rather than derived from the row
+# key precisely so an arm can name exactly one of them: a partition that drifted
+# would move a kill into a case that does not name it, and this harness reports
+# that as MISDIRECTED rather than as a pass.
+X_SPACE = ("the input space: three dimensions, 96 cells, every triple exactly "
+           "once")
+X_OFF = "OFF: with no layout binding, all 32 cells are inert and no file moves"
+X_UNNAMED = ("BOUND BUT UNNAMED: a rearrangeable session with no document "
+             "writes nowhere")
+X_ABSENT = "ABSENT: a first run restores nothing and leaves nothing behind"
+X_READABLE = ("READABLE: a document this build understands is rewritten, or "
+              "deleted by a reset")
+
+# **THE TWO CELLS THE PRECEDENCE RESTS ON.** `quarantined` and `userModified`
+# disagree in both of them, and each is broken by a different edit:
+#
+#   X_PRECMOD    quarantined AND userModified — broken by WEAKENING the first
+#                branch (M46). The document is REPLACED.
+#   X_PRECUNMOD  quarantined and NOT userModified — broken by REORDERING the
+#                two branches (M47). The document is DELETED.
+#
+# One of them alone establishes the precedence for one half of the
+# disagreement, which is how the weakening survived 66 arms.
+X_PRECMOD = ("PRECEDENCE: a session that REARRANGED over an unreadable "
+             "document leaves it alone")
+X_PRECUNMOD = ("PRECEDENCE: a session that did NOT rearrange over an "
+               "unreadable document leaves it alone")
+X_EACCES = ("EACCES: a document that will not OPEN is left alone, whatever "
+            "the session did")
+
+# THE TWO ARMS THAT ANSWER `lpoFailed`, AND THE DURABILITY PROMISE.
+#
+# `X_DURABILITY` does two jobs with one probe, which is why the arm that breaks
+# the staging is killed by a case about a FAILURE. `host/layout_store.nim`
+# promises the document is written to `<path>.new` and MOVED onto `<path>`;
+# nothing asserted it, and collapsing the two lines to a bare
+# `writeFile(path, plan.text)` left all four suites at 0 failed while no arm in
+# this file touched `moveFile`. The only `.new` mentions in either suite were
+# NEGATIVE — "a stray `.new` would mean the rename did not happen" — which is
+# Verification-Harness-Traps §4a: a lone negative with no positive twin has
+# nothing to fail. The case puts a DIRECTORY where the staging file must go, so
+# the write cannot happen at all and the report names `<path>.new`; with the
+# collapse planted the same probe SUCCEEDS and the case reddens. M58 is the
+# arm, S27 its control.
+X_DURABILITY = ("DURABILITY: the write is STAGED at `<path>.new` and renamed "
+                "onto the document")
+X_FAILREMOVE = ("FAILED: a remove the filesystem refuses is reported, and the "
+                "document stays")
+X_PLAN = ("the plan table: six cells, four reachable and two a session cannot "
+          "present")
+X_KINDS = ("the failure-kind table: thirteen kinds, eleven produced and two "
+           "unreachable")
+X_CELLS = "cell count"
+
+MATRIX_CASES = [X_SPACE, X_OFF, X_UNNAMED, X_ABSENT, X_READABLE, X_PRECMOD,
+                X_PRECUNMOD, X_EACCES, X_DURABILITY, X_FAILREMOVE, X_PLAN,
+                X_KINDS, X_CELLS, C_COUNT]
+
 # The relaunch suite (Tier 2) — two processes, one recording.
 L_RELAUNCH = "a pane docked on a real pty is still docked in the NEXT process"
 L_BAD = "an unreadable document is NAMED on the status row and left alone"
@@ -293,6 +386,7 @@ SUITE_CASES = {
     SUITE: PLAT6_CASES,
     ROUTE: ROUTE_CASES,
     PERSIST: PERSIST_CASES,
+    MATRIX: MATRIX_CASES,
     GEST: GEST_CASES,
     TRANS: TRANS_CASES,
     MOUSE_SUITE: MOUSE_CASES,
@@ -919,6 +1013,190 @@ MUTATIONS = [
         "the FILE rather than the message",
         suite=PERSIST,
     ),
+    # --- the persistence DECISION, enumerated: one arm per branch ------------
+    #
+    # M39, M41, M42, M45 above grade the branches that a hand-written case
+    # happened to name. These grade THE WHOLE DECISION, one arm per branch and
+    # per branch ORDERING, each against one lane of `SessionMatrix`. M46 is the
+    # reason the table exists: it is the defect that survived all 66 arms.
+    Mutation(
+        "M46", DOC,
+        "  if quarantined:\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
+        "  if quarantined and (b.isNil or not b.userModified):\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
+        X_PRECMOD,
+        "**THE ARM THIS WHOLE SUITE WAS BUILT FOR.** The quarantine branch is "
+        "weakened so it fires only when the session ALSO left the arrangement "
+        "alone. A session that could not read its document and then moved a "
+        "pane therefore falls through to `lpiWrite`: open a recording with an "
+        "older build (its document is `version: 99`), rearrange a pane, quit — "
+        "and the exit REPLACES the newer document with a `version: 2` one. "
+        "Permanent loss, not a session's. THIS SURVIVED THE ENTIRE 66-ARM "
+        "HARNESS, because no case ever constructed `quarantined` and "
+        "`userModified` together",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "M47", DOC,
+        "  if quarantined:\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")\n'
+        "  if b.isNil or not b.userModified:\n"
+        '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
+        "  if b.isNil or not b.userModified:\n"
+        '    return LayoutPersistPlan(intent: lpiRemove, text: "")\n'
+        "  if quarantined:\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
+        X_PRECUNMOD,
+        "THE PRECEDENCE REVERSED — the OTHER half of the same disagreement, "
+        "and the one M46 cannot see. A session that could not read its "
+        "document and did NOT touch the arrangement now answers `lpiRemove`, "
+        "so the exit DELETES a document this build merely failed to "
+        "understand. Two arms rather than one because a precedence has two "
+        "sides and a case that only builds one of them establishes the rule "
+        "for half the inputs",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "M48", DOC,
+        '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
+        X_READABLE,
+        "the second branch's ANSWER changes: a stale document is left in place "
+        "rather than deleted, so `:reset-layout` no longer reaches the disk "
+        "and the next launch restores an arrangement the user explicitly "
+        "abandoned",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "M49", STORE,
+        "  if not fileExists(path):\n"
+        '    return LayoutRestoreReport(status: lrsNoDocument, path: path, '
+        'message: "")',
+        "  if false:\n"
+        '    return LayoutRestoreReport(status: lrsNoDocument, path: path, '
+        'message: "")',
+        X_ABSENT,
+        "the ABSENT arm goes, so an ordinary first run falls into the "
+        "`readFile` failure and reports `UnreadableFile` at a path where "
+        "nothing was ever saved. The user is warned about a document that does "
+        "not exist, and the session quarantines instead of writing what they "
+        "then arrange",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "M51", RUNTIME,
+        "  rt.layoutDocumentQuarantined = result.status == lrsUnreadable",
+        "  rt.layoutDocumentQuarantined = false",
+        X_PRECMOD,
+        "M45's twin on the OTHER path into the quarantine. `M45` covers the "
+        "flag `host/layout_store.nim` sets by hand; this is the flag "
+        "`adoptLayoutDocument` sets for every failure the DECODER sees — "
+        "corrupt bytes, an empty file, a newer schema, an unknown pane. "
+        "Without it a session that could not read its document and then "
+        "rearranged a pane WRITES over it",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "M52", RUNTIME,
+        "  if not rt.layoutPersistenceEnabled():\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
+        "  if false:\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
+        X_UNNAMED,
+        "the guard in front of the whole decision goes, so a session that was "
+        "never bound to a document — a binding with no `restoreLayoutForSession` "
+        "call, which is the dimension a summary of this decision drops — starts "
+        "planning writes and removes against an EMPTY path",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "M55", STORE,
+        "      outcome: (if rt.layoutPersistenceEnabled(): lpoQuarantined\n"
+        "                else: lpoDisabled),",
+        "      outcome: lpoQuarantined,",
+        X_OFF,
+        "`disabled` and `quarantined` stop being different facts. A session "
+        "with no `--layout-binding` reports that it left a document alone, "
+        "which is a claim about a file it never named — and the two outcomes "
+        "are the only thing distinguishing 'this feature is off' from 'this "
+        "feature refused to save'",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "M56", DOC,
+        "  if b.isNil:\n"
+        "    return unreadableLayoutDocument(path, UnreadableFileKind,\n"
+        '                                   "there is no layout binding")',
+        "  if b.isNil:\n"
+        "    return unreadableLayoutDocument(path, NotJsonKind,\n"
+        '                                   "there is no layout binding")',
+        X_KINDS,
+        "the nil-binding refusal is reported as `NotJson` — a kind that names "
+        "the user's bytes for a failure that is entirely this process's. The "
+        "arm exists to say the kind TABLE reads kinds rather than counting "
+        "them: eleven producers, each required to answer with its own name",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "M57", DOC,
+        "  if b.isNil or not b.userModified:",
+        "  if b.isNil or b.userModified:",
+        X_PLAN,
+        "the second branch's CONDITION is inverted, so an untouched session "
+        "writes and a rearranged one deletes. The arm for the plan table "
+        "itself: six cells over the routine's own two inputs, which is the "
+        "only place `b.isNil` — a value no session can present — is graded at "
+        "all",
+        suite=MATRIX,
+    ),
+    # --- the write is a RENAME, and a refused delete is not a delete ---------
+    #
+    # M58 IS THE FOURTH INSTANCE OF THE SHAPE M37, M45 AND M46 SHARE, and it is
+    # the one that survived the table itself. `host/layout_store.nim`'s header
+    # has promised since the module was written that the document is staged at
+    # `<path>.new` and MOVED onto `<path>`, so a process killed mid-write
+    # leaves the previous arrangement intact. Nothing asserted it: with the two
+    # lines collapsed to a bare `writeFile`, `test_layout_persistence_matrix`,
+    # `test_layout_persistence`, `test_layout_command_routing` and
+    # `test_layout_binding` were ALL at 0 failed, and no arm among the 83 this
+    # file carried touched `moveFile`. The suites' only mentions of `.new` were
+    # negative — trap §4a's lone negative assertion, which nothing can fail.
+    Mutation(
+        "M58", STORE,
+        "      writeFile(temp, plan.text)\n"
+        "      moveFile(temp, path)",
+        "      writeFile(path, plan.text)",
+        X_DURABILITY,
+        "THE ATOMIC WRITE COLLAPSED TO A DIRECT ONE. The bytes go straight to "
+        "the document, so a process killed between the first byte and the last "
+        "leaves a half-written file where the arrangement was — and the next "
+        "launch reports it as `NotJson` and offers the profile default. The "
+        "case that kills this obstructs `<path>.new` with a DIRECTORY: under "
+        "the real module the write cannot open its file and the report names "
+        "the staging path, and under this arm the write succeeds and the "
+        "planted document is replaced",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "M59", STORE,
+        "    except CatchableError as e:\n"
+        "      LayoutPersistReport(\n"
+        "        outcome: lpoFailed, path: path,\n"
+        '        message: "the saved layout could not be removed: " & path & '
+        '": " & e.msg)',
+        "    except CatchableError:\n"
+        '      LayoutPersistReport(outcome: lpoRemoved, path: path, message: "")',
+        X_FAILREMOVE,
+        "a delete the filesystem REFUSED is reported as done. "
+        "`:reset-layout` promises the stale document is gone; this session "
+        "says `removed` over a file still on disk, so the user believes the "
+        "arrangement they abandoned will not come back and the next launch "
+        "restores it. The second of the two `lpoFailed` arms, and the one a "
+        "privileged host cannot measure — which is why its case probes and "
+        "skips LOUDLY rather than weakening",
+        suite=MATRIX,
+    ),
 ]
 
 DECLARED_SURVIVORS = [
@@ -1150,6 +1428,145 @@ DECLARED_SURVIVORS = [
         "had graded before.",
         suite=PERSIST,
     ),
+    # --- the controls for the nine matrix arms ------------------------------
+    #
+    # EVERY ONE OF THEM IS GRADED AGAINST THE MATRIX SUITE, deliberately. S17's
+    # rule: a control run against a different suite says nothing about the case
+    # that has to redden. S14 already De Morgans the same guard M57 inverts, but
+    # it is graded against `test_layout_persistence.nim`, so it cannot say
+    # whether the MATRIX cases redden on any edit to that line — S26 is that
+    # statement, and it is why a near-duplicate arm is worth its compile.
+    Mutation(
+        "S19", DOC,
+        "  if quarantined:\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")\n'
+        "  if b.isNil or not b.userModified:\n"
+        '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
+        "  if quarantined:\n"
+        '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")\n'
+        "  elif b.isNil or not b.userModified:\n"
+        '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
+        "",
+        "The second branch as an `elif` rather than a second `if` — identical, "
+        "because the first branch returns. IT MUST SURVIVE, and it is THE "
+        "CONTROL FOR M46 AND M47: both rewrite exactly these four lines, one "
+        "by weakening the first condition and one by swapping the two "
+        "branches, so a pair of cases that reddened on any edit to this "
+        "neighbourhood would make neither of them evidence about the "
+        "PRECEDENCE. It touches the ordering structure itself and changes "
+        "nothing, which is the only kind of control a precedence arm can have.",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "S20", DOC,
+        '    return LayoutPersistPlan(intent: lpiRemove, text: "")',
+        '    result = LayoutPersistPlan(intent: lpiRemove, text: "")\n'
+        "    return result",
+        "",
+        "The remove answer named before it is returned — the same value on the "
+        "same condition, and the shape S12 already uses for the quarantine "
+        "arm. IT MUST SURVIVE, and it is THE CONTROL FOR M48, which replaces "
+        "that very expression.",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "S21", STORE,
+        "  if not fileExists(path):",
+        "  if not path.fileExists():",
+        "",
+        "The existence test in method-call syntax — the same call on the same "
+        "argument. IT MUST SURVIVE, and it is THE CONTROL FOR M49, which "
+        "removes the guard on that line.",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "S22", RUNTIME,
+        "  if not rt.layoutPersistenceEnabled():",
+        "  if not layoutPersistenceEnabled(rt):",
+        "",
+        "The persistence guard spelled as a plain call. IT MUST SURVIVE, and "
+        "it is THE CONTROL FOR M52, which removes that guard.",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "S23", STORE,
+        "      outcome: (if rt.layoutPersistenceEnabled(): lpoQuarantined\n"
+        "                else: lpoDisabled),",
+        "      outcome: (if not rt.layoutPersistenceEnabled(): lpoDisabled\n"
+        "                else: lpoQuarantined),",
+        "",
+        "The same two-armed choice with the condition negated and the arms "
+        "swapped — the same outcome for every session. IT MUST SURVIVE, and it "
+        "is THE CONTROL FOR M55, which collapses that choice to one arm.",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "S24", RUNTIME,
+        "  rt.layoutDocumentQuarantined = result.status == lrsUnreadable",
+        "  rt.layoutDocumentQuarantined = (result.status == lrsUnreadable)",
+        "",
+        "The quarantine predicate parenthesised — the same comparison, the "
+        "same assignment. IT MUST SURVIVE, and it is THE CONTROL FOR M51, "
+        "which replaces that predicate with `false`.",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "S25", DOC,
+        '                                   "there is no layout binding")',
+        '                                   "there is no " & "layout binding")',
+        "",
+        "The nil-binding message as two literals joined — the same string. IT "
+        "MUST SURVIVE, and it is THE CONTROL FOR M56, which edits the KIND "
+        "argument two lines above it: without this, 'the kind table reddens "
+        "when this call is edited' is all M56 would establish.",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "S26", DOC,
+        "  if b.isNil or not b.userModified:",
+        "  if b.isNil or (not b.userModified):",
+        "",
+        "The second branch's guard parenthesised, short-circuit and all. IT "
+        "MUST SURVIVE, and it is THE CONTROL FOR M57 — S14 makes the same "
+        "point against `test_layout_persistence.nim`, and a control graded "
+        "against a different suite says nothing about the case that has to "
+        "redden.",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "S27", STORE,
+        "      writeFile(temp, plan.text)\n"
+        "      moveFile(temp, path)",
+        "      let staged = temp\n"
+        "      writeFile(staged, plan.text)\n"
+        "      moveFile(staged, path)",
+        "",
+        "The staging path named before it is used — the same two calls on the "
+        "same path, in the same order. IT MUST SURVIVE, and it is THE CONTROL "
+        "FOR M58, which rewrites exactly these two lines into one: without it, "
+        "'the DURABILITY case reddens when this line is edited' is all M58 "
+        "would establish, and the property M58 exists to grade is precisely a "
+        "property that nothing measured until now.",
+        suite=MATRIX,
+    ),
+    Mutation(
+        "S28", STORE,
+        "      LayoutPersistReport(\n"
+        "        outcome: lpoFailed, path: path,\n"
+        '        message: "the saved layout could not be removed: " & path & '
+        '": " & e.msg)',
+        "      let why =\n"
+        '        "the saved layout could not be removed: " & path & ": " & '
+        "e.msg\n"
+        "      LayoutPersistReport(outcome: lpoFailed, path: path, "
+        "message: why)",
+        "",
+        "The remove failure's message named before it is reported — the same "
+        "outcome, the same path, the same string, and the shape S12 and S20 "
+        "already use. IT MUST SURVIVE, and it is THE CONTROL FOR M59, which "
+        "replaces that very expression with a `removed` report.",
+        suite=MATRIX,
+    ),
 ]
 
 RESULT_LINE = re.compile(r"^\s*\[(OK|FAILED)\]\s+(.*?)\s*$")
@@ -1221,7 +1638,7 @@ def run_suite(suite: str = SUITE) -> RunResult:
 
 def main() -> int:
     # An optional arm filter, so a re-run after fixing ONE arm costs one
-    # compile rather than sixty-six. The control still runs: an arm graded
+    # compile rather than all of them. The control still runs: an arm graded
     # against a suite nobody checked is not graded.
     only = set(sys.argv[1:])
     baseline = {p: digest(p) for p in TOUCHED}
@@ -1233,7 +1650,7 @@ def main() -> int:
         return 1
     # ONLY THE SUITES THE SELECTED ARMS USE. A filtered re-run of one Tier-1
     # arm must not pay for four pty controls; a run with no filter pays for all
-    # seven, which is the honest price of grading seven suites.
+    # eight, which is the honest price of grading eight suites.
     suites = []
     for m in arms:
         if m.suite not in suites:
