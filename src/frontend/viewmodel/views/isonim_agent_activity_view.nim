@@ -93,6 +93,9 @@ type
     onNewAgentInstance*: proc()
     onAddFiles*: proc()
     onModelSelect*: proc()
+    onBranchSelect*: proc()
+      ## Callback for the branch context button in the agent toolbar.
+      ## Allows the host to open a branch/worktree selector.
     afterDynamicRender*: proc()
     onOpenTestRecording*: proc(anchorId, testId: string;
                                policy: TraceOpenPolicy)
@@ -553,6 +556,49 @@ proc renderStopButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
            `type` = "button",
            onclick = proc() = callbacks.invokeStop())
 
+proc renderBranchButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
+  ## Branch context selector button in the agent toolbar.
+  ## Shows the active branch and allows the host to open a branch selector.
+  ui(r):
+    button(class = "ct-button-md-secondary agent-button agent-branch-button",
+           `type` = "button",
+           onclick = proc() =
+             if callbacks.onBranchSelect != nil:
+               callbacks.onBranchSelect()):
+      span(class = "agent-branch-img")
+      text "main"
+
+proc renderIdleState[R](r: R; vm: AgentActivityVM;
+                        callbacks: AgentActivityCallbacks): auto =
+  ## Empty prompt — idle state rendered in the conversation area when there
+  ## are no messages yet. Shows a heading, subtitle, and suggestion chips.
+  let chip1 = "Fix a bug in my code"
+  let chip2 = "Explain this codebase"
+  let chip3 = "Write tests for function"
+  ui(r):
+    tdiv(class = "agent-idle-state"):
+      tdiv(class = "agent-idle-header"):
+        tdiv(class = "agent-idle-heading"):
+          text "Start an agent task"
+        tdiv(class = "agent-idle-subtitle"):
+          text "Ask anything about your codebase"
+      tdiv(class = "agent-idle-suggestions"):
+        button(class = "agent-idle-chip", `type` = "button",
+               onclick = proc() =
+                 vm.setInputValue(chip1)
+                 callbacks.invokeFocus()):
+          text chip1
+        button(class = "agent-idle-chip", `type` = "button",
+               onclick = proc() =
+                 vm.setInputValue(chip2)
+                 callbacks.invokeFocus()):
+          text chip2
+        button(class = "agent-idle-chip", `type` = "button",
+               onclick = proc() =
+                 vm.setInputValue(chip3)
+                 callbacks.invokeFocus()):
+          text chip3
+
 proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
     componentId: int; commandInputId: string;
     callbacks: AgentActivityCallbacks): auto =
@@ -585,43 +631,52 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
 
   createRenderEffect proc() =
     r.clearChildren(conversation)
-    # First, and outside the message list: why this conversation looks the way
-    # it does.  A loaded-but-empty session, a pruned one and an agent that
-    # cannot replay sessions all render an identical empty list, so the
-    # sentence is the only thing that tells them apart (§2.1).
-    if vm.sessionNotice.val.len > 0:
-      r.appendRenderedChild(
-        conversation, renderSessionNotice(r, vm.sessionNotice.val))
-    for message in vm.messages.val:
-      # AA-2: a message whose content carried the runner's event stream is
-      # painted as the run's summary card *instead of* as raw output
-      # (§2.1.2).  The lookup is by the message's own id, so the card lands in
-      # the feed position the run happened in and everything around it renders
-      # unchanged.
-      let runIndex = vm.testRunIndex(message.id)
-      # AA-3: and a tool call that handed a review over is painted as an
-      # evidence card instead of as the generic tool-call line (§2.1.1).  Same
-      # anchoring rule, so a session that iterated shows one card per
-      # handoff, each independently selectable, in the order they happened.
-      let evidence = vm.evidenceCallFor(message.id)
-      if runIndex >= 0:
+    let isIdle = vm.sessionNotice.val.len == 0 and
+                 vm.messages.val.len == 0 and
+                 vm.terminals.val.len == 0 and
+                 not vm.wantsPassword.val and
+                 not vm.wantsPermission.val
+    if isIdle:
+      # Empty prompt — idle state: show heading, subtitle, and suggestion chips.
+      r.appendRenderedChild(conversation, renderIdleState(r, vm, callbacks))
+    else:
+      # First, and outside the message list: why this conversation looks the way
+      # it does.  A loaded-but-empty session, a pruned one and an agent that
+      # cannot replay sessions all render an identical empty list, so the
+      # sentence is the only thing that tells them apart (§2.1).
+      if vm.sessionNotice.val.len > 0:
+        r.appendRenderedChild(
+          conversation, renderSessionNotice(r, vm.sessionNotice.val))
+      for message in vm.messages.val:
+        # AA-2: a message whose content carried the runner's event stream is
+        # painted as the run's summary card *instead of* as raw output
+        # (§2.1.2).  The lookup is by the message's own id, so the card lands in
+        # the feed position the run happened in and everything around it renders
+        # unchanged.
+        let runIndex = vm.testRunIndex(message.id)
+        # AA-3: and a tool call that handed a review over is painted as an
+        # evidence card instead of as the generic tool-call line (§2.1.1).  Same
+        # anchoring rule, so a session that iterated shows one card per
+        # handoff, each independently selectable, in the order they happened.
+        let evidence = vm.evidenceCallFor(message.id)
+        if runIndex >= 0:
+          r.appendRenderedChild(
+            conversation,
+            renderTestRun(r, vm, vm.testRuns.val[runIndex], callbacks))
+        elif evidence.isSome:
+          r.appendRenderedChild(
+            conversation, renderEvidenceCall(r, vm, evidence.get, callbacks))
+        else:
+          r.appendRenderedChild(
+            conversation, renderMessage(r, componentId, message))
+      for terminal in vm.terminals.val:
         r.appendRenderedChild(
           conversation,
-          renderTestRun(r, vm, vm.testRuns.val[runIndex], callbacks))
-      elif evidence.isSome:
-        r.appendRenderedChild(
-          conversation, renderEvidenceCall(r, vm, evidence.get, callbacks))
-      else:
-        r.appendRenderedChild(
-          conversation, renderMessage(r, componentId, message))
-    for terminal in vm.terminals.val:
-      r.appendRenderedChild(
-        conversation,
-        renderTerminal(r, terminal, commandInputId))
-    if vm.wantsPassword.val:
-      r.appendRenderedChild(conversation, renderPasswordPrompt(r))
-    if vm.wantsPermission.val:
-      r.appendRenderedChild(conversation, renderPermissionPrompt(r))
+          renderTerminal(r, terminal, commandInputId))
+      if vm.wantsPassword.val:
+        r.appendRenderedChild(conversation, renderPasswordPrompt(r))
+      if vm.wantsPermission.val:
+        r.appendRenderedChild(conversation, renderPermissionPrompt(r))
     if callbacks.afterDynamicRender != nil:
       callbacks.afterDynamicRender()
 
@@ -633,6 +688,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
     else:
       r.appendRenderedChild(buttons, renderProgressButton(r))
     r.appendRenderedChild(buttons, renderAddFilesButton(r, callbacks))
+    r.appendRenderedChild(buttons, renderBranchButton(r, callbacks))
     r.appendRenderedChild(buttons, renderModelButton(r, callbacks))
     if not vm.isLoading.val:
       r.appendRenderedChild(buttons, renderSubmitButton(r, callbacks))
