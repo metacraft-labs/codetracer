@@ -6,6 +6,8 @@
 //! Payload bytes are appended after the page-aligned B-tree image and contain
 //! the varint-encoded step ids for one global line index.
 
+use codetracer_trace_writer::line_position::LinePositionSpace;
+
 use super::cow_namespace_reader::{CowLeafType, CowNamespaceReader, CowNsError};
 use super::cow_namespace_writer::CowNamespaceWriter;
 use super::ctfs_container::{CtfsError, CtfsReader};
@@ -188,28 +190,34 @@ impl<'a> LinehitsNamespace<'a> {
 #[derive(Debug)]
 pub struct OwnedLinehitsNamespace {
     image: Vec<u8>,
+    /// The container's own line-only address space. The writer keys a hit by the
+    /// address of the line it happened on, so a query must build the SAME
+    /// address from `(file_id, line)` or it looks up a key that was never
+    /// written. `None` for a container that registers no paths, where no key can
+    /// be built at all.
+    space: Option<LinePositionSpace>,
 }
 
 impl OwnedLinehitsNamespace {
     /// Read `linehits.tc` from a CTFS container and validate that it is a CoW
     /// namespace image. Missing files surface as the underlying container error.
+    ///
+    /// The container's path table is read at the same time, because the keys in
+    /// this namespace are addresses in the space that table defines.
     pub fn open_from_ctfs(reader: &mut CtfsReader) -> Result<Self, LinehitsNsError> {
         let image = reader.read_file(CTFS_LINEHITS_COW_FILE)?;
         match CowNamespaceReader::open(&image, CowLeafType::TypeB) {
             Ok(_) | Err(CowNsError::Empty) => {}
             Err(e) => return Err(e.into()),
         }
-        Ok(OwnedLinehitsNamespace { image })
+        let space = super::line_position_space::container_line_space(reader);
+        Ok(OwnedLinehitsNamespace { image, space })
     }
 
     /// Return all step ids recorded for `global_line_index`.
     pub fn hits(&self, global_line_index: u64) -> Result<Vec<u64>, LinehitsNsError> {
         LinehitsNamespace::open(&self.image)?.hits(global_line_index)
     }
-}
-
-fn pack_line_key(file_id: u32, line: u32) -> u64 {
-    codetracer_trace_writer::step_stream::pack_global_line_index(file_id as usize, i64::from(line))
 }
 
 impl OmniscientDb for OwnedLinehitsNamespace {
@@ -226,7 +234,18 @@ impl OmniscientDb for OwnedLinehitsNamespace {
     }
 
     fn source_line_hits(&self, file_id: u32, line: u32) -> Vec<Tick> {
-        self.hits(pack_line_key(file_id, line)).unwrap_or_default()
+        // The writer keys a hit by the line's address in the trace's own space
+        // (`linehits_builder.nim` `recordHit`, called with the same
+        // `global_line_index` the step stream carries), so the query must build
+        // that address rather than a differently-shaped integer — which matches
+        // nothing and returns an empty list with no error anywhere.
+        let Some(space) = self.space.as_ref() else {
+            return Vec::new();
+        };
+        let Some(key) = space.global_index_of(file_id as usize, i64::from(line)) else {
+            return Vec::new();
+        };
+        self.hits(key).unwrap_or_default()
     }
 
     fn is_present(&self) -> bool {
@@ -304,16 +323,56 @@ mod tests {
         assert_eq!(ns.hits(404).unwrap(), Vec::<u64>::new());
     }
 
+    /// A query for `(file_id, line)` must build the key the WRITER built for
+    /// that location — the line's address in the trace's own space — or it looks
+    /// up a key nothing wrote and reports no hits without an error anywhere.
     #[test]
     fn omniscient_db_serves_source_line_hits_from_cow_namespace() {
-        let key = pack_line_key(7, 100);
+        let mut space = LinePositionSpace::uniform(8);
+        let key = space.global_index(7, 100);
         let image = image_with_entries(&[(key, vec![11, 13, 21])]);
         let ns = LinehitsNamespace::open(&image).expect("open linehits namespace");
         assert_eq!(ns.hits(key).unwrap(), vec![11, 13, 21]);
 
-        let owned = OwnedLinehitsNamespace { image };
+        let owned = OwnedLinehitsNamespace {
+            image,
+            space: Some(space),
+        };
         assert_eq!(owned.source_line_hits(7, 100), vec![11, 13, 21]);
         assert_eq!(owned.source_line_hits(7, 101), Vec::<u64>::new());
+    }
+
+    /// THE MULTI-PATH ARM. Path 0 is where every apportionment of the address
+    /// space agrees, so a single-file query cannot see a keying disagreement at
+    /// all. Two files, and the hits are on the second.
+    #[test]
+    fn source_line_hits_finds_a_hit_recorded_in_the_second_file() {
+        let mut space = LinePositionSpace::uniform(2);
+        // What the Nim `linehits_builder` writes for a step at (path 1, line 12):
+        // the same `global_line_index` the step stream carries.
+        let key = space.global_index(1, 12);
+        assert_eq!(key, 100_011);
+        let image = image_with_entries(&[(key, vec![4, 9])]);
+
+        let owned = OwnedLinehitsNamespace {
+            image,
+            space: Some(space),
+        };
+        assert_eq!(
+            owned.source_line_hits(1, 12),
+            vec![4, 9],
+            "a breakpoint on the second file's line 12 must find the steps recorded there"
+        );
+        assert_eq!(owned.source_line_hits(0, 12), Vec::<u64>::new());
+    }
+
+    /// A container that registers no paths has no space to key into, and says so
+    /// by reporting no hits rather than keying into an invented one.
+    #[test]
+    fn a_pathless_container_reports_no_hits_rather_than_guessing_a_key() {
+        let image = image_with_entries(&[(0, vec![1])]);
+        let owned = OwnedLinehitsNamespace { image, space: None };
+        assert_eq!(owned.source_line_hits(0, 1), Vec::<u64>::new());
     }
 
     #[test]

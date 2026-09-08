@@ -53,15 +53,26 @@ const BASE40_CHARS: &[u8; 40] = b"\x000123456789abcdefghijklmnopqrstuvwxyz./-";
 /// reader can open the container before any chunk of any stream exists, exactly
 /// as a live recorder creates the directory up front. A stream the test never
 /// flushes simply stays at size 0 (its FileEntry advertises an empty file).
-const FILES: [&str; 7] = [
+const FILES: [&str; 9] = [
     "steps.dat",
     "steps.idx",
     "values.dat",
     "values.idx",
     "calls.dat",
     "calls.idx",
+    "paths.dat",
+    "paths.off",
     "meta.dat",
 ];
+
+/// How many source paths this writer's containers register.
+///
+/// A step's `global_line_index` is a position in the space the path table
+/// defines, so a container with steps and no path table has no space to place
+/// them in and a reader cannot say where any of its steps are. A real recorder
+/// always writes the table; this writer declares a fixed synthetic one so its
+/// containers are containers, and tests may use any path id below this.
+pub const DECLARED_PATH_COUNT: usize = 8;
 
 fn base40_encode(name: &str) -> u64 {
     let mut encoded: u64 = 0;
@@ -149,7 +160,25 @@ impl IncrementalCtfsStreamWriter {
         // per-file root map blocks), zero-filled.
         writer.ensure_len(writer.next_block * BLOCK_SIZE as u64)?;
         writer.flush_block_zero()?;
+        writer.write_path_table()?;
         Ok(writer)
+    }
+
+    /// Write the container's path interning table: `paths.dat` is the
+    /// concatenated raw path bytes and `paths.off` the `count + 1` cumulative
+    /// end-offsets, exactly as the production writers emit a line-only table.
+    fn write_path_table(&mut self) -> std::io::Result<()> {
+        let mut dat = Vec::new();
+        let mut off = Vec::new();
+        off.extend_from_slice(&0u64.to_le_bytes());
+        for id in 0..DECLARED_PATH_COUNT {
+            dat.extend_from_slice(format!("/tmp/stream_writer_src{id}.rs").as_bytes());
+            off.extend_from_slice(&(dat.len() as u64).to_le_bytes());
+        }
+        self.append_to_file("paths.dat", &dat)?;
+        self.append_to_file("paths.off", &off)?;
+        self.flush_block_zero()?;
+        self.file.flush()
     }
 
     /// Encode `new_steps` as the next chunk and append it to `steps.dat` /

@@ -47,7 +47,8 @@ use codetracer_trace_reader::step_stream_reader::decode_chunk_records as decode_
 use codetracer_trace_reader::value_stream_reader::decode_chunk_records as decode_value_chunk_records;
 use codetracer_trace_types::{Line, PathId};
 use codetracer_trace_writer::call_stream::CallStreamRecord;
-use codetracer_trace_writer::step_stream::{StepStreamRecord, unpack_global_line_index};
+use codetracer_trace_writer::line_position::{LinePositionError, LinePositionSpace};
+use codetracer_trace_writer::step_stream::StepStreamRecord;
 use codetracer_trace_writer::value_stream::ValueRecordEntry;
 
 use super::call_stream_source::call_stream_record_to_db_call;
@@ -56,12 +57,45 @@ use super::step_value_stream_source::step_values_to_full_records;
 use crate::db::DbCall;
 use codetracer_trace_types::FullValueRecord;
 
-/// The `(path_id, line)` source location of a single step, decoded from the
+/// The ABSOLUTE source-location address of a single step, decoded from the
 /// follow-tailed execution stream.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// # Why this is an address and not a `(path_id, line)`
+///
+/// A follow reader decodes `steps.dat` chunks as the recorder commits them,
+/// which is *before* the container's path table is complete: the trace is still
+/// running, and files it has not reached yet are not in `paths.dat`. Turning an
+/// address into `(path_id, line)` needs that table, so a follow reader that
+/// answered with a location would be answering from a table it knows is
+/// unfinished — and the answer it produced could not be distinguished from a
+/// real one.
+///
+/// So the follow reader reports the address, which IS complete: an address is a
+/// position in a space whose files are laid out in id order, so a file joining
+/// the table later never moves an earlier file's range, and the address a step
+/// was written at is final the moment it is written. [`FollowStep::resolve`]
+/// turns it into a location, at a caller that has a settled path table and can
+/// say so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FollowStep {
-    pub path_id: PathId,
-    pub line: Line,
+    /// The step's `global_line_index` — its absolute position in the trace's
+    /// line address space.
+    pub global_line_index: u64,
+}
+
+impl FollowStep {
+    /// Resolve this step's address to `(path_id, line)` against a settled path
+    /// table.
+    ///
+    /// `space` must be built from the path table as it stands when the caller
+    /// asks. An address the space cannot place is refused rather than answered:
+    /// on a still-growing trace that is the expected answer for a step in a file
+    /// the table has not reached yet, and the caller should ask again after the
+    /// next refresh rather than show a location the trace does not have.
+    pub fn resolve(&self, space: &LinePositionSpace) -> Result<(PathId, Line), LinePositionError> {
+        let (path_id, line) = space.resolve(self.global_line_index)?;
+        Ok((PathId(path_id), Line(line)))
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -574,21 +608,20 @@ impl FollowReader {
     }
 }
 
-/// Decode every step record in one committed `steps.dat` chunk into
-/// `(path_id, line)` locations, dropping non-`Step` records (markers carry no
+/// Decode every step record in one committed `steps.dat` chunk into absolute
+/// source-location addresses, dropping non-`Step` records (markers carry no
 /// line). Delegates the wire-format decode to the seekable reader's
 /// [`decode_step_chunk_records`] so the follow path and the final-file path can
 /// never diverge.
+///
+/// No location is derived here — see [`FollowStep`] for why a chunk-follow
+/// decode is not in a position to derive one.
 fn decode_step_chunk(compressed: &[u8]) -> Result<Vec<FollowStep>, String> {
     let records = decode_step_chunk_records(compressed)?;
     let mut out = Vec::new();
     for rec in records {
         if let StepStreamRecord::Step { global_line_index } = rec {
-            let (path_id, line) = unpack_global_line_index(global_line_index);
-            out.push(FollowStep {
-                path_id: PathId(path_id),
-                line: Line(line),
-            });
+            out.push(FollowStep { global_line_index });
         }
     }
     Ok(out)

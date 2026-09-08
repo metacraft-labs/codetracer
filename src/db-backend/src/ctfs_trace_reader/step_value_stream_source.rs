@@ -14,7 +14,7 @@
 //!   - [`codetracer_trace_reader::step_stream_reader::StepStreamReader`]
 //!     (`steps.dat`/`steps.idx`): decodes AbsoluteStep/DeltaStep records, each
 //!     carrying an absolute `global_line_index` that
-//!     [`unpack_global_line_index`] turns back into the exact `(path_id, line)`
+//!     [`LinePositionSpace::resolve`] turns back into the exact `(path_id, line)`
 //!     the step had.
 //!   - [`codetracer_trace_reader::value_stream_reader::ValueStreamReader`]
 //!     (`values.dat`/`values.idx`): value record `N` ↔ step `N`; its
@@ -46,7 +46,8 @@ use crate::db::DbStep;
 use codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder;
 use codetracer_trace_reader::step_stream_reader::{StepStreamReader, open_step_stream};
 use codetracer_trace_reader::value_stream_reader::{ValueStreamReader, open_value_stream};
-use codetracer_trace_writer::step_stream::{StepStreamRecord, unpack_global_line_index};
+use codetracer_trace_writer::line_position::LinePositionSpace;
+use codetracer_trace_writer::step_stream::StepStreamRecord;
 use codetracer_trace_writer::value_stream::ValueStreamEvent;
 
 use super::ctfs_container::CtfsReader;
@@ -77,24 +78,33 @@ pub struct SeekableStepStream {
     /// is READ, and there are two mutually exclusive encodings behind that one
     /// `u64`:
     ///
-    /// * line-only containers store the M23a packed `global_line_index`
-    ///   (`path_id << 32 | line`), whose inverse is `unpack_global_line_index`;
+    /// * line-only containers store a `global_line_index` — one address per
+    ///   line — resolved through [`SeekableStepStream::line_space`];
     /// * column-aware containers store a `global_position_index` — a cumulative
     ///   BYTE address across every registered file — which only the per-file
     ///   line-length tables can resolve to `(file, line, column)`.
     ///
-    /// Nothing in the record distinguishes them, so the reader must be told,
-    /// and a reader that is not told reads a byte offset as a line number. That
-    /// is exactly the defect this field exists to fix: the browser's pure-Rust
-    /// reader took the lazy step path unconditionally, `unpack_global_line_index`
-    /// turned a GPI under 2^32 into `path_id = 0` and `line = <the byte
-    /// offset>`, and every step in a column-aware container reported `paths[0]`
-    /// at a four-digit line while the call tree — which comes from `calls.dat`
-    /// and never touches this encoding — stayed perfectly correct.
+    /// Both are prefix sums over the same file order; they differ in what a
+    /// position IS, and nothing in the record distinguishes them, so the reader
+    /// must be told. A reader that is not told reads a byte offset as a line
+    /// number: the browser's pure-Rust reader took the lazy step path
+    /// unconditionally and reported every step in a column-aware container at
+    /// `paths[0]` on a four-digit line, while the call tree — which comes from
+    /// `calls.dat` and never touches this encoding — stayed perfectly correct.
     ///
     /// `None` is the default and is what every legacy / old-format / line-only
-    /// container keeps, so those paths are bit-for-bit unchanged.
+    /// container keeps.
     position_decoder: Option<Arc<GlobalPositionDecoder>>,
+    /// The LINE-ONLY container's address space, built from that container's own
+    /// path table.
+    ///
+    /// The sibling of [`position_decoder`](Self::position_decoder), for the
+    /// other half of the same question: that field says whether the integer is
+    /// a byte address or a line address, and this one says which file a line
+    /// address falls in. A stream that has not been told refuses to place a
+    /// line address rather than guessing, because a guess here is not a
+    /// degraded answer — it is a location the trace never contained.
+    line_space: Option<Arc<LinePositionSpace>>,
     /// Number of *distinct* Zstd chunks this source has had to decompress since
     /// it was opened.
     ///
@@ -136,6 +146,7 @@ impl SeekableStepStream {
                     record_count: AtomicU64::new(record_count),
                     chunk_size,
                     position_decoder: None,
+                    line_space: None,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
             }
@@ -176,6 +187,7 @@ impl SeekableStepStream {
                     record_count: AtomicU64::new(record_count),
                     chunk_size,
                     position_decoder: None,
+                    line_space: None,
                     chunk_decompressions: AtomicU64::new(0),
                 }))
             }
@@ -215,7 +227,11 @@ impl SeekableStepStream {
     pub fn open_sibling(&self) -> Option<SeekableStepStream> {
         let path = self.path.as_ref()?;
         match SeekableStepStream::open(path) {
-            Ok(Some(sibling)) => Some(sibling.with_position_decoder(self.position_decoder.clone())),
+            Ok(Some(sibling)) => Some(
+                sibling
+                    .with_position_decoder(self.position_decoder.clone())
+                    .with_line_space(self.line_space.clone()),
+            ),
             _ => None,
         }
     }
@@ -231,6 +247,18 @@ impl SeekableStepStream {
     #[must_use]
     pub fn with_position_decoder(mut self, decoder: Option<Arc<GlobalPositionDecoder>>) -> Self {
         self.position_decoder = decoder;
+        self
+    }
+
+    /// Tell this stream the LINE-ONLY address space its records were written
+    /// in, so it resolves them the way they were written.
+    ///
+    /// The caller must pass a space built from the SAME container's path table.
+    /// Passing `None` leaves the stream unable to place a line address, and
+    /// [`step_position`](Self::step_position) then reports none.
+    #[must_use]
+    pub fn with_line_space(mut self, space: Option<Arc<LinePositionSpace>>) -> Self {
+        self.line_space = space;
         self
     }
 
@@ -258,8 +286,8 @@ impl SeekableStepStream {
     /// A `Step` record carries ONE integer, and it means one of two different
     /// things depending on the container:
     ///
-    /// * **line-only** — it is the M23a packed `global_line_index`, and
-    ///   [`unpack_global_line_index`] is its exact inverse, so the result is
+    /// * **line-only** — it is a `global_line_index`, one address per line, and
+    ///   [`LinePositionSpace::resolve`] is its exact inverse, so the result is
     ///   byte-identical to the materialized `DbStep`'s `(path_id, line)`. The
     ///   column is `None`, matching the legacy semantics.
     /// * **column-aware** — it is a `global_position_index`, a cumulative byte
@@ -267,16 +295,18 @@ impl SeekableStepStream {
     ///   line-length tables resolve it. `column` is then the real recorded
     ///   1-based column.
     ///
-    /// The record does not say which, so [`with_position_decoder`] is how the
-    /// stream is told, and a stream that has not been told stays on the
-    /// line-only reading.
+    /// The record does not say which, so [`with_position_decoder`] and
+    /// [`with_line_space`] are how the stream is told.
     ///
-    /// A GLI the decoder rejects (out of range for the container's address
-    /// space — a partial or inconsistent trace) degrades to the line-only
-    /// reading rather than dropping the step, which keeps a damaged container
-    /// steppable instead of blank.
+    /// A position neither the column decoder nor the line space can place is
+    /// reported as ABSENT. An address outside the container's own space names
+    /// no location in it, and `None` is what the caller already gets for a
+    /// record that carries no source line at all — whereas an answer produced
+    /// by arithmetic alone is a file and a line the debugger will happily show
+    /// and a breakpoint will never match.
     ///
     /// [`with_position_decoder`]: Self::with_position_decoder
+    /// [`with_line_space`]: Self::with_line_space
     pub fn step_position(&self, step_id: StepId) -> Option<(PathId, Line, Option<Line>)> {
         if step_id.0 < 0 || step_id.0 as u64 >= self.record_count.load(Ordering::Relaxed) {
             return None;
@@ -305,7 +335,8 @@ impl SeekableStepStream {
                         Some(Line(i64::from(pos.column))),
                     ));
                 }
-                let (path_id, line) = unpack_global_line_index(global_line_index);
+                let space = self.line_space.as_ref()?;
+                let (path_id, line) = space.resolve(global_line_index).ok()?;
                 Some((PathId(path_id), Line(line), None))
             }
             // Raise/Catch/ThreadSwitch records carry no source line; the

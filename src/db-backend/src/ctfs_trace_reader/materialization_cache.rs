@@ -57,6 +57,8 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 
+use codetracer_trace_writer::line_position::LinePositionSpace;
+
 use super::block_overlay::{BlockSink, CtfsBlockOverlay};
 use super::collapse::collapse_region;
 use super::coverage_namespace::{Coverage, CoverageMap, CoverageState};
@@ -78,9 +80,13 @@ pub struct MaterializedInterval {
     /// `(address, write)` pairs observed in the interval, in any order — the cache
     /// inserts each into its address-keyed, tick-sorted interval sub-list.
     pub writes: Vec<(u64, MemWriteEntry)>,
-    /// `(global_line_index, hit)` pairs observed in the interval, in any order.
-    /// The cache inserts each into its line-keyed, tick-sorted interval sub-list.
-    pub line_hits: Vec<(u64, LineHitEntry)>,
+    /// `((file_id, line), hit)` pairs observed in the interval, in any order.
+    ///
+    /// The LOCATION, not an address. The cache turns each into an address in its
+    /// own [`LinePositionSpace`] when it ingests it, so every key in the cache —
+    /// and every key in the `linehits.tc` image it collapses to — is built by
+    /// one piece of code, and a query builds the same key it stored.
+    pub line_hits: Vec<((u32, u32), LineHitEntry)>,
 }
 
 impl MaterializedInterval {
@@ -145,6 +151,11 @@ pub struct MaterializationCache {
     memwrites: IntervalTaggedMap<MemWriteEntry>,
     /// `global_line_index → per-interval, tick-sorted source-line hit sub-lists`.
     linehits: IntervalTaggedMap<LineHitEntry>,
+    /// The address space the `linehits` keys are built in — the same prefix sum
+    /// over files a reader rebuilds from a container's `paths.dat`, so the
+    /// `linehits.tc` this cache collapses to is keyed the way a reader queries
+    /// it. Files join it as hits are ingested for them.
+    line_space: LinePositionSpace,
     /// Next `interval_id` to hand out for a freshly-materialized interval.
     next_interval_id: u32,
     /// Maps each materialized `tick_lo` to the `interval_id` it was tagged with,
@@ -191,6 +202,7 @@ impl MaterializationCache {
             interval_ids: BTreeMap::new(),
             collapsed_memwrites_image: None,
             collapsed_linehits_image: None,
+            line_space: LinePositionSpace::new(),
         }
     }
 
@@ -212,6 +224,7 @@ impl MaterializationCache {
             interval_ids: BTreeMap::new(),
             collapsed_memwrites_image: None,
             collapsed_linehits_image: None,
+            line_space: LinePositionSpace::new(),
         }
     }
 
@@ -309,9 +322,10 @@ impl MaterializationCache {
                 self.memwrites.append(*address, interval_id, *write);
             }
         }
-        for (global_line_index, hit) in &materialized.line_hits {
+        for ((file_id, line), hit) in &materialized.line_hits {
             if hit.tick() >= tick_lo && hit.tick() < tick_hi {
-                self.linehits.append(*global_line_index, interval_id, *hit);
+                let key = self.line_space.global_index(*file_id as usize, i64::from(*line));
+                self.linehits.append(key, interval_id, *hit);
             }
         }
         self.interval_ids.insert(tick_lo, interval_id);
@@ -437,8 +451,14 @@ impl MaterializationCache {
             region_hi,
             interval_size,
             |key| {
-                let (file_id, line) = codetracer_trace_writer::step_stream::unpack_global_line_index(key);
-                (file_id as u32, line as u32)
+                // Collapsing rewrites the region's keys, so it must invert the
+                // same space that built them; an address the space cannot place
+                // is left where it is rather than filed under an invented
+                // location.
+                match self.line_space.resolve(key) {
+                    Ok((file_id, line)) => Some((file_id as u32, line as u32)),
+                    Err(_) => None,
+                }
             },
         )?;
         self.collapsed_memwrites_image = collapsed.memwrites;
@@ -537,7 +557,11 @@ impl OmniscientDb for MaterializationCache {
     }
 
     fn source_line_hits(&self, file_id: u32, line: u32) -> Vec<Tick> {
-        let key = codetracer_trace_writer::step_stream::pack_global_line_index(file_id as usize, i64::from(line));
+        // A file the cache has never ingested a hit for is not in its space, and
+        // has no hits by construction; there is no key to look up.
+        let Some(key) = self.line_space.global_index_of(file_id as usize, i64::from(line)) else {
+            return Vec::new();
+        };
         let mut hits: Vec<Tick> = self
             .linehits
             .merge_read(key, &self.covering_interval_ids(), u64::MIN, u64::MAX)
@@ -558,6 +582,16 @@ impl OmniscientDb for MaterializationCache {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    /// The `linehits` key the cache builds for a location — the line's address
+    /// in the trace's own space. Derived through the shared
+    /// [`LinePositionSpace`] rather than restated, so a test cannot pin a key
+    /// the cache would not produce.
+    fn line_key(file_id: u32, line: u32) -> u64 {
+        LinePositionSpace::uniform(file_id as usize + 1)
+            .global_index_of(file_id as usize, i64::from(line))
+            .expect("the file is registered by construction")
+    }
     use crate::ctfs_trace_reader::block_overlay::{FileBlockSink, NoOpBlockSink, OverlayMode};
     use crate::ctfs_trace_reader::coverage_namespace::CTFS_COVERAGE_FILE;
     use crate::ctfs_trace_reader::ctfs_container::{
@@ -587,7 +621,7 @@ mod tests {
         /// keyed by `tick_lo`. Writes outside the range are clipped by the cache.
         canned: BTreeMap<u64, Vec<MemWriteEntry>>,
         /// `(global_line_index, hit_tick)` records to return for each interval.
-        canned_linehits: BTreeMap<u64, Vec<(u64, LineHitEntry)>>,
+        canned_linehits: BTreeMap<u64, Vec<((u32, u32), LineHitEntry)>>,
         /// Number of times `re_execute_and_materialize` was actually called.
         calls: usize,
     }
@@ -606,7 +640,7 @@ mod tests {
             self
         }
 
-        fn with_line_hits(mut self, tick_lo: u64, line_hits: Vec<(u64, LineHitEntry)>) -> Self {
+        fn with_line_hits(mut self, tick_lo: u64, line_hits: Vec<((u32, u32), LineHitEntry)>) -> Self {
             self.canned_linehits.insert(tick_lo, line_hits);
             self
         }
@@ -777,7 +811,7 @@ mod tests {
             cache.writes_in_range(ADDR, 1000, 2000).is_none(),
             "failed materialization must not create a covered-empty memwrites answer"
         );
-        let line_key = codetracer_trace_writer::step_stream::pack_global_line_index(1, 10);
+        let line_key = line_key(1, 10);
         assert!(
             cache.line_hits_for_key_in_range(line_key, 1000, 2000).is_none(),
             "failed materialization must not create a covered-empty linehits answer"
@@ -790,15 +824,15 @@ mod tests {
         let path = dir.path().join("rr-complete-materialization.ct");
         write_minimal_ctfs(&path, &[("stub.dat", &[1u8, 2, 3, 4])]).unwrap();
 
-        let line_key = codetracer_trace_writer::step_stream::pack_global_line_index(9, 77);
+        let line_key = line_key(9, 77);
         let mut cache = MaterializationCache::new();
         let mut rec = FakeRecreator::new()
             .with_interval(200, vec![mw(200, 0x11), mw(201, 0x22)])
             .with_line_hits(
                 200,
                 vec![
-                    (line_key, LineHitEntry { tick: 200 }),
-                    (line_key, LineHitEntry { tick: 201 }),
+                    ((9, 77), LineHitEntry { tick: 200 }),
+                    ((9, 77), LineHitEntry { tick: 201 }),
                 ],
             );
 
@@ -863,7 +897,7 @@ mod tests {
             calls: 0,
             message: "rr frozen emulator boundary: unsupported_instruction partial_memwrites=1 partial_linehits=1",
         };
-        let line_key = codetracer_trace_writer::step_stream::pack_global_line_index(2, 44);
+        let line_key = line_key(2, 44);
 
         let err = cache
             .ensure_interval_materialized(&mut rec, 300, 302)
@@ -890,7 +924,7 @@ mod tests {
 
         let mut success = FakeRecreator::new()
             .with_interval(300, vec![mw(300, 0x55)])
-            .with_line_hits(300, vec![(line_key, LineHitEntry { tick: 300 })]);
+            .with_line_hits(300, vec![((2, 44), LineHitEntry { tick: 300 })]);
         assert_eq!(
             cache.ensure_interval_materialized(&mut success, 300, 302).unwrap(),
             EnsureOutcome::CacheMiss,
@@ -1110,14 +1144,14 @@ mod tests {
         let path = dir.path().join("linehits-live.ct");
         write_minimal_ctfs(&path, &[("stub.dat", &[1u8])]).unwrap();
 
-        let key = codetracer_trace_writer::step_stream::pack_global_line_index(3, 42);
+        let key = line_key(3, 42);
         let mut cache = MaterializationCache::new();
         let mut rec = FakeRecreator::new().with_line_hits(
             0,
             vec![
-                (key, LineHitEntry { tick: 10 }),
-                (key, LineHitEntry { tick: 25 }),
-                (key, LineHitEntry { tick: 1000 }),
+                ((3, 42), LineHitEntry { tick: 10 }),
+                ((3, 42), LineHitEntry { tick: 25 }),
+                ((3, 42), LineHitEntry { tick: 1000 }),
             ],
         );
 
