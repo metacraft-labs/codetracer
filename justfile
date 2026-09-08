@@ -2759,7 +2759,94 @@ test-vm-js: vm-test-prereqs
   bash ci/lib/run-nim-test-lane.sh vm-js
 
 # Run ViewModel headless tests on both native and JS backends.
-test-vm: test-vm-native test-vm-js
+#
+# WHY THIS IS A BODY AND NOT `test-vm: test-vm-native test-vm-js`.
+#
+# It was that dependency list until 2026-09-08, and for as long as it was, THIS
+# LANE REPORTED ONE BACKEND OF THE TWO. `just` runs dependencies in order and
+# STOPS AT THE FIRST ONE THAT FAILS, so `test-vm-js` never started on any run
+# where `test-vm-native` was red — and `test-vm-native` has been red for the
+# whole time the `viewmodel-tests` job has been able to report at all. The
+# first CI measurement of it (2026-09-08, the run that un-darkened this job)
+# was 95 of 100 files passing, 5 failing. Five red files were therefore enough
+# to produce ZERO OUTPUT from the JS backend, on every push, invisibly: the
+# step said "ViewModel headless tests (native + JS backends)" and the log
+# contained only native.
+#
+# That is the worst possible one to lose. The JS backend is what BlockTracer
+# ships; `nim js` is the compiler whose output reaches a browser. The lane
+# closest to the product was dark, one level below a job that had just been
+# un-darkened, and the dependency list is the entire reason.
+#
+# THE FIX IS "RUN BOTH, THEN DECIDE", NOT "IGNORE A FAILURE". `status` starts
+# at 0 and each lane can only ever raise it, so this recipe fails whenever
+# EITHER backend fails — exactly as the dependency list did. What changes is
+# that both have run and both have printed by the time it does. Neither lane is
+# weakened, skipped, or made `continue-on-error`; the native lane's five reds
+# still fail this recipe.
+#
+# `set -e` is deliberately ABSENT and must stay absent. With it, `just
+# test-vm-native` returning non-zero would kill this shell before the JS lane
+# ran, which is the identical defect wearing different syntax. `-u` and
+# `pipefail` are kept; only the exit-on-error is dropped, and every command
+# whose failure matters is checked explicitly.
+#
+# Both lanes are invoked as nested `just` recipes rather than by inlining their
+# `run-nim-test-lane.sh` calls, so there is still exactly ONE definition of
+# what each lane runs and where it logs. Inlining them here would have made
+# this recipe a second copy to drift from — the same mistake `ci/lib/test-lane-
+# files.sh` exists to have stopped.
+#
+# NOTE: the same defect, with a wider blast radius, is still open one level up
+# in the `test` recipe (~line 771): seven `just test-*` lanes under `set -e`,
+# where a red first lane darkens the six behind it. That is the `test-non-gui`
+# job. It is left alone here only because this change is scoped to the
+# ViewModel lanes; it is the same class and wants the same fix.
+test-vm:
+  #!/usr/bin/env bash
+  set -uo pipefail
+
+  status=0
+
+  echo "=== ViewModel backend 1 of 2: native (nim c) ==="
+  just test-vm-native || status=1
+
+  echo ""
+  echo "=== ViewModel backend 2 of 2: JS (nim js + node) ==="
+  # Runs whether or not the native lane above passed. That is the point of
+  # this recipe; see the header.
+  just test-vm-js || status=1
+
+  # A closing summary naming BOTH backends, so a reader of the CI log can see
+  # at a glance which of the two failed rather than inferring it from which
+  # section the log happens to end in. `test-logs/test-vm-native.log` and
+  # `test-logs/test-vm-js.log` hold the full per-file detail either way.
+  echo ""
+  echo "=== ViewModel lane summary ==="
+  # `run-nim-test-lane.sh` closes each lane with an UNINDENTED line
+  #     <lane>: N file(s) passed, M failed, K case(s)
+  # while every per-file verdict it prints is indented by two spaces. Anchoring
+  # on `^<lane>:` is what tells those apart; an earlier draft of this loop
+  # grepped for `^OK|^FAILED|^PARTIAL`, matched neither shape, and would have
+  # printed an empty verdict for both backends — a summary that always agrees
+  # with itself and says nothing.
+  for lane in vm-native vm-js; do
+    log="test-logs/test-${lane}.log"
+    line=""
+    [ -f "${log}" ] && line="$(grep -E "^${lane}: .*file\(s\) passed" "${log}" | tail -1)"
+    if [ -n "${line}" ]; then
+      printf '  %s\n' "${line}"
+    elif [ -f "${log}" ]; then
+      # The log exists but carries no summary line: the lane died before
+      # finishing (compile hang, timeout, signal). Distinct from "ran and
+      # failed", and the distinction is the whole reason this branch exists.
+      printf '  %s: NO SUMMARY LINE — lane started but did not finish (see %s)\n' "${lane}" "${log}"
+    else
+      printf '  %s: NO LOG — lane never started\n' "${lane}"
+    fi
+  done
+
+  exit "${status}"
 
 # ====
 # Lanes converted from hand-maintained path lists to DISCOVERY.
