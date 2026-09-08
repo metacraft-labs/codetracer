@@ -131,6 +131,7 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 #
 #   1223  measured after the equality landed and the dead entry points went
 #   1226  `viewmodel/platform/web_deployment.nim` gained three exports
+#   1243  `viewmodel/identity/oidc_redirect.nim` landed, 17 exports
 #
 # THE 1226 RAISE, ARGUED RATHER THAN ASSUMED. The three are `bundledAssetPaths`
 # and `isBundledAssetPath` (which the guard counts twice — a forward
@@ -144,6 +145,31 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 #
 # The allow-list was considered and refused: it names this shape under WHEN AN
 # ENTRY IS WRONG, and it is right to.
+#
+# THE 1243 RAISE, ARGUED THE SAME WAY AND WITH THE SAME REFUSALS. The 17 are
+# every exported symbol of `viewmodel/identity/oidc_redirect.nim` — the shared
+# Authorization-Code + PKCE redirect core (16 in bucket A plus `AuthSurface`,
+# which the guard buckets separately). The delta was measured, not estimated:
+# this tree reports 1243 and `origin/dev` reports 1226, and `diff` over the two
+# finding lists shows all 17 new entries are in that one file and nothing else
+# moved.
+#
+# WHY NOT "WIRE OR DELETE IT", WHICH IS WHAT THE RATCHET'S OWN MESSAGE SAYS.
+# Deleting is wrong: every one of the 17 is driven by
+# `viewmodel/tests/unit/test_oidc_redirect.nim`, 117 assertions on BOTH
+# backends against the RFC 7636 published vectors, so they are the module's
+# API rather than leftovers, and dropping an `*` would take the check with it.
+# Wiring is right and is NOT done here: the consumer is the Electron
+# main-process and browser-session work (system browser, protocol handler,
+# safeStorage), which does not exist in this tree yet and is a much larger
+# change than the core it would consume. The module is deliberately PURE — it
+# takes entropy and the SHA-256 digest as arguments and performs no I/O —
+# which is what makes it testable on both backends ahead of either host, and
+# also what guarantees no product module reaches it until one is written.
+#
+# The allow-list was considered and refused for the same reason as above: this
+# is a "landed ahead of its consumer" shape, which the allow-list names under
+# WHEN AN ENTRY IS WRONG.
 #
 # AND THE FINDING UNDERNEATH, WHICH IS BIGGER THAN THE RAISE AND IS NOT FIXED
 # HERE. Bucket A prints as "tested, no product module reaches it". For 355 of
@@ -242,8 +268,8 @@ lint_step "reachability ratchet: contract suite (equality, both directions)" \
 lint_step "frontend reachability: the ratchet's prose agrees with its threshold" \
 	assert_reachability_prose_agrees
 
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1226 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1243 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1243 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
