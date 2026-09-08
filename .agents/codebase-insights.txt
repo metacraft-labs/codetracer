@@ -760,6 +760,39 @@ and a correlation marker's counterpart is by definition in another process.
   — which is COMPILABLE, so `nim c -r` on it is an independent ground truth for
   what discovery must report (1 suite + 5 cases).
 
+- 2026-09-08 (ct-test Nim framework detection: a statement is not a line): the
+  framework scan in `frameworks/nim_unittest.nim` read ONE PHYSICAL LINE and
+  called it the `import` statement. A bracketed clause continued on the next
+  line —
+      import std/[os, strutils,
+                  unittest]
+  — therefore never showed `unittest`. That is not a small mis-read: a file
+  whose framework is not detected is never scanned for declarations at all, so
+  it left the catalog whole. Measured on the reprobuild workspace: 46 sources
+  and 200 cases were absent for this reason alone (1,394 -> 1,440 addressable
+  sources, 8,028 -> 8,228 cases), with no file's count moving and no identity
+  changing.
+  The clause extent is now decided by the token stream (`importClauseEnd`): the
+  statement continues while a bracket is open or the line ended on `,`/`/`/`.`,
+  and ends at a line break or a `;`. That also picks up `import` inside a
+  `when …:` branch and two clauses separated by `;`, and makes an `import`
+  written inside a string literal a non-event. STILL NOT COVERED: `include`
+  (the included file's imports are not followed) and `import unittest as u` /
+  `except`, both by design.
+  MIRROR DEFECT, also fixed — and the reason this sat unnoticed: the negative
+  diagnostic was the bare sentence `no Nim unittest imports detected in file`,
+  emitted identically for a file with no test import and for a file whose
+  import the scan failed to read. 206 rows in one workspace report, 46 of them
+  false, indistinguishable. A conclusion with no evidence attached cannot be
+  audited: `noFrameworkMessage` now names the modules the scan actually read,
+  and names any `include` whose imports it did not follow.
+  Regression guards: the `ct-test Nim import clause scanning` and `ct-test Nim
+  unittest detection diagnostics` suites in `nim_unittest_provider_test.nim`
+  (each continuation form paired with a shape that must NOT be swallowed, so
+  neither "join everything" nor "join nothing" passes), plus the fixture
+  `fixtures/nim_unittest_project/tests/test_lexical_edge_cases.nim`, whose
+  import now deliberately spans two lines.
+
 - 2026-08-13 (ct-test silent output truncation): `execCaptured` bounds captured
   child output at `DefaultCaptureLimit` (16 MiB) and used to drop the fact that
   it had cut anything. `CapturedRun` now carries `outputBytes` (the true
