@@ -1280,7 +1280,7 @@ jobs:
           siblings: |
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
 
       - name: Upload env.ps1 component decomposition
         # env.ps1 writes a per-component breakdown of the bootstrap -- wall
@@ -1535,7 +1535,7 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
 
@@ -1854,7 +1854,7 @@ jobs:
           siblings: |
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -4147,7 +4147,7 @@ jobs:
           siblings: |
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
 
       - name: Remove WSL bash stub from System32
         # As in the other eph-win-x64 jobs: let CreateProcessW fall through to
@@ -5362,19 +5362,45 @@ jobs:
           # `ci/test/sibling-provisioning-test.sh`'s ceiling of 56, which that
           # suite says is "lowered as blocks are converted and never raised".
           #
-          # An explicit 40-hex revision is the third form that suite names --
-          # "A sibling revision must come from the workspace lock or be an
-          # explicit 40-hex commit SHA" -- and it is the only one that is both
-          # under the ceiling and independent of lock publication. The revision
-          # is `dev`'s tip as of this commit, i.e. exactly what the `=dev`
-          # entries above resolve to today, frozen. The three entries above are
-          # pre-existing overrides and are left alone; converting them is their
-          # own change.
+          # So an explicit 40-hex revision it is -- the third form that suite
+          # names: "A sibling revision must come from the workspace lock or be
+          # an explicit 40-hex commit SHA".
+          #
+          # WHICH SHA IS NOT FREE, and picking the wrong one is what run
+          # 34159391653 did. `ci/test/sibling-input-branch-test.sh` also reads
+          # this list, and for any repo that is a branch-tracking flake input it
+          # requires the workflow's pin to be EXACTLY the rev `flake.lock` locks
+          # -- "the sibling checkout and the shell the Nix lane builds are the
+          # same tree, by construction". That run pinned
+          # b5b8de6eb505dccc42394728b4705c45e0f064ed (`dev`'s tip that day)
+          # while flake.lock locks 7e0400b3, and earned:
+          #
+          #   FAIL codetracer-native-recorder: the workflow pins a different
+          #     commit than flake.lock locks
+          #
+          # That reddened `lint-bash`, which `nix-build`, `dev-build`,
+          # `dmg-build`, `appimage-*`, `push-tag` and `create-release` all
+          # `needs:`, so ONE assertion took 12 green jobs to `skipped`. The pin
+          # has to be flake.lock's rev, not the branch tip.
+          #
+          # The gate compares the SET of spellings this file gives a repo, so a
+          # lone `=dev` anywhere else re-breaks it: the comparison becomes
+          # {7e0400b3, dev} against a single locked rev and cannot match. Every
+          # `codetracer-native-recorder` entry in this file therefore names this
+          # same revision. That also drops the branch-tip count from 56 to 49,
+          # which is the direction that ceiling is allowed to move.
+          #
+          # 7e0400b3 is corroborated, not merely consistent: it is the revision
+          # `nix build '.?submodules=1#codetracer'` already builds green on this
+          # commit, so it is known to compile against this tree. Moving every
+          # lane to `dev`'s tip instead would require bumping flake.lock, which
+          # puts the currently-green Nix lane at risk to serve lanes that are
+          # already red; that is its own change, with its own validation.
           siblings: |
             codetracer-beam-recorder=dev
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
-            codetracer-native-recorder=b5b8de6eb505dccc42394728b4705c45e0f064ed
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
 
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``
@@ -5743,7 +5769,7 @@ jobs:
           siblings: |
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
             nim-stackable-hooks=dev
             codetracer-visual-replay=dev
             codetracer-native-backend=dev
@@ -6309,7 +6335,7 @@ jobs:
           siblings: |
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
-            codetracer-native-recorder=b5b8de6eb505dccc42394728b4705c45e0f064ed
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
             runquota=fee60f486616c3ba5ceb5fc741eb70fcb29f17ec
 
       - name: Stage codetracer-trace-format into libs/
@@ -6385,10 +6411,19 @@ jobs:
         # or bare, for the reason spelled out at length on `test-non-gui`'s
         # `siblings:` block: `=dev` would breach the branch-tip ceiling of 56,
         # and a bare name resolves against a workspace lock that is not
-        # reliably published. A bare entry here would have been strictly worse
-        # than the bug it fixes -- it would move this job's failure from the
-        # Playwright step at the END of the job to `Setup dev env` near the
-        # START, losing every stage in between.
+        # reliably published -- run 34159391653's own clone step says so of
+        # this very repo, "<- the lock does not pin this repo". A bare entry
+        # here would have been strictly worse than the bug it fixes -- it would
+        # move this job's failure from the Playwright step at the END of the
+        # job to `Setup dev env` near the START, losing every stage in between.
+        #
+        # `codetracer-native-recorder` must name the rev `flake.lock` locks,
+        # for the reason that block also records: it is a branch-tracking flake
+        # input, so `ci/test/sibling-input-branch-test.sh` compares this pin
+        # against flake.lock and reddens `lint-bash` on any other value.
+        # `runquota` is exempt from that comparison -- flake.nix pins it to a
+        # commit rather than a branch, so the suite skips it -- and it is
+        # guarded by `scripts/test-flake-pin-alignment.sh` instead.
         #
         # This failure was invisible until now: the `Setup rr-backend` step
         # ahead of it used to abort on a flake attribute that never existed,
@@ -6688,7 +6723,7 @@ jobs:
             nim-stackable-hooks=dev
             codetracer-visual-replay=dev
             codetracer-native-backend=dev
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
             runquota=dev
@@ -6982,7 +7017,7 @@ jobs:
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
             nim-stackable-hooks=dev
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
             codetracer-js-recorder=dev
             codetracer-ruby-recorder=dev
             codetracer-native-backend=dev
