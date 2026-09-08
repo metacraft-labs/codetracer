@@ -1030,19 +1030,27 @@ function Write-BootstrapStepReport {
     # The walk is skipped entirely when the count is zero, so the common
     # case costs nothing.
     #
-    # WHAT THIS WILL TRIP FIRST, AND IT HAS NOT BEEN MEASURED. On the last
-    # complete decomposition run the install root carried 14 reparse points:
-    # GCC's 1 (now converted away) and RUST's 13, under `rustup\` /
-    # `cargo\`, which `Ensure-Rust` reports but deliberately does not
-    # convert. RUST is still declared `relocatable`, so if those 13 store
-    # ABSOLUTE targets this assertion will stop the first real Windows
-    # provisioning run after this change. That is the gate doing its job
-    # rather than a bug in it -- a component that cannot be relocated must
-    # not go on claiming it can -- but the kind of those 13 targets is
-    # UNKNOWN: it can only be established by a Windows run, and the
-    # increment that armed this was directed not to dispatch one. Whoever
-    # sees that failure should either convert the rustup layout or change
-    # its declaration, not lower this back to a warning.
+    # WHAT THIS LOOKED LIKE IT WOULD TRIP FIRST, AND WHY IT DOES NOT. On the
+    # last complete decomposition run the install root carried 14 reparse
+    # points: GCC's 1 (now converted away) and RUST's 13, under `rustup\` /
+    # `cargo\`. RUST is declared `relocatable`, so if those 13 stored ABSOLUTE
+    # targets, promoting this to a failure would have stopped every Windows
+    # job -- and the count was all anyone had, because the check of the day
+    # was a bare count and no run had ever recorded the targets.
+    #
+    # They are relative. rustup's 13 proxies (`TOOLS` 10 + `DUP_TOOLS` 3) are
+    # same-directory links to `cargo\bin\rustup.exe` and store the bare name
+    # `rustup.exe`, so they classify `reparse-inside-root` and are not
+    # violations; the hardlink-fallback branch produces no reparse points at
+    # all. Both relocate. See the block comment on
+    # `t_win_store_rustup_proxy_layout_is_relocatable` in
+    # `ci/test/windows-store-relocation.ps1`, which pins that shape through
+    # this audit with negative controls, and `Ensure-Rust` for the citations.
+    #
+    # So NO component is exempt from this gate and none needs to be. If a
+    # future rustup starts writing absolute targets, the right response is to
+    # convert the layout or change the declaration -- not to lower this back
+    # to a warning, and not to carve out one component.
     $relocatabilityWarning = $null
     $stepViolations = @()
     if ($record.relocatability -eq "relocatable" -and $reparse -gt 0) {

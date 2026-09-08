@@ -96,13 +96,29 @@ function Ensure-Rust {
 
   Ensure-RustComponents -RustupExe $rustupExe -Toolchain $rustToolchain
 
-  # RELOCATABILITY. Rust is one of the two components the decomposition run's
-  # reparse-point check caught declaring `relocatable` while the filesystem
-  # disagreed -- 13 reparse points, the largest count of any component. It is
-  # also the component whose SECOND relocatability defect a reparse count
-  # cannot see: rustup records absolute directory paths as plain text in
-  # `settings.toml`'s `[overrides]` table, and a tree can carry those with
-  # zero reparse points.
+  # RELOCATABILITY. Rust carried the largest reparse-point count of any
+  # component -- 13 -- and the check that produced that number was a bare
+  # count, so for a long time nothing recorded what those 13 STORED. That
+  # mattered once the audit became a hard failure: 13 junctions with absolute
+  # targets would have been 13 violations and would have stopped every
+  # Windows job.
+  #
+  # THEY ARE NOT VIOLATIONS, and the reason is upstream behaviour rather than
+  # luck. rustup installs `cargo\bin\rustup.exe` as a real copy and links one
+  # proxy per name in its `TOOLS` (10) and `DUP_TOOLS` (3) lists -- exactly 13
+  # -- preferring a symlink and falling back to a hard link. Because link and
+  # target share a directory, `utils::symlink_or_hardlink_file` takes its
+  # same-directory branch and stores the BARE RELATIVE NAME `rustup.exe`
+  # (rust-lang/rustup#4023 made proxies symlink-first in 1.28.0;
+  # rust-lang/rustup#4226 made them relative in 1.28.1). So both branches
+  # relocate: 13 relative in-tree links, or no reparse points at all.
+  # `ci/test/windows-store-relocation.ps1` pins that shape through this same
+  # audit, with negative controls in both violating directions.
+  #
+  # The SECOND relocatability defect is the one a reparse count cannot see at
+  # all, and it is real: rustup records absolute directory paths as plain text
+  # in `settings.toml`'s `[overrides]` table, and a tree can carry those with
+  # zero reparse points. That is what the repair below is for.
   #
   # Both are handled here rather than left to a later consumer, because the
   # point of publish-and-refill is that the tree is archived immediately after
@@ -115,10 +131,15 @@ function Ensure-Rust {
   $findings = @(Get-InstallTreeRelocatabilityFindings -Root $Root -Path $rustupHome -SkipContentScan |
     Where-Object { Test-RelocatabilityViolation -Finding $_ })
   if ($findings.Count -gt 0) {
-    # Reported, not thrown. The 13 reparse points are rustup's own
-    # `toolchains\<name>` layout and converting them is not this function's
-    # call to make unilaterally; what must not happen is that they stay
-    # invisible. `Assert-BootstrapRelocatability` is the gate that decides.
+    # Reported, not thrown, and on the analysis above this should now be
+    # UNREACHABLE for the proxy links -- they classify as `reparse-inside-root`
+    # and `Test-RelocatabilityViolation` filters them out before this line.
+    # It is kept because nothing here creates those links: the layout under
+    # `rustup\` is the vendor's, so a rustup that changed how it writes them
+    # would change this tree without changing this repository, and the one
+    # thing that must not happen is that such a change stays invisible.
+    # `Assert-BootstrapRelocatability` is the gate that decides, and it now
+    # fails the run for any component -- this one included.
     foreach ($finding in $findings) {
       Write-Warning "rustup tree relocatability: $($finding.kind) at '$($finding.path)' -> '$($finding.target)'"
     }

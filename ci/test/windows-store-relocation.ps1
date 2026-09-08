@@ -21,6 +21,7 @@ $ErrorActionPreference = "Stop"
 #   * t_win_store_relocation_roundtrip          (the gate)
 #   * t_win_store_no_delete_under_store_root
 #   * t_win_store_junction_components_converted
+#   * t_win_store_rustup_proxy_layout_is_relocatable
 #   * t_win_store_fpc_and_msvc_documented_exclusions
 #
 # NO MOCKS. Per the workspace policy on mock objects, this file uses none. The
@@ -731,6 +732,189 @@ Assert-Throws -Script { Assert-BootstrapRelocatability -ReportPath (Join-Path $r
   -Message "a missing report is a failure, not a silent pass"
 
 # ---------------------------------------------------------------------------
+# t_win_store_rustup_proxy_layout_is_relocatable
+#
+# THE 13 REPARSE POINTS, IDENTIFIED AND PINNED.
+#
+# The last complete decomposition run recorded RUST at 13 reparse points under
+# `cargo\` / `rustup\` and said nothing about what they stored, because the
+# check of the day was a bare count. That number is the reason the WARN-to-FAIL
+# promotion looked like it might stop every Windows job: 13 junctions with
+# absolute targets would be 13 violations.
+#
+# They are not junctions. rustup 1.28.2 installs `cargo\bin\rustup.exe` as a
+# real copy and then links one proxy per name in its `TOOLS` (10) and
+# `DUP_TOOLS` (3) lists -- exactly 13 -- preferring a SYMLINK and falling back
+# to a hard link (`src/cli/self_update.rs`, `install_proxies_with_opts`; the
+# fallback is forced only by `RUSTUP_HARDLINK_PROXIES`, which `Ensure-Rust`
+# does not set). Because the link and its target are both in `bin_path`,
+# `utils::symlink_or_hardlink_file` takes its same-directory branch and stores
+# the BARE RELATIVE NAME `rustup.exe`:
+#
+#     let symlink_target = if src.parent() == dest.parent() {
+#         src.file_name().map(Path::new).unwrap_or(src)
+#     } else { src };
+#
+# That is deliberate upstream behaviour, not an accident of this install:
+# rustup 1.28.0 switched proxies from hardlink-first to symlink-first
+# (rust-lang/rustup#4023) and 1.28.1 made the symlinks relative
+# (rust-lang/rustup#4226, CHANGELOG "Use relative symlinks for proxies").
+#
+# So BOTH branches are relocatable and neither is a violation: the symlink
+# branch yields 13 relative in-tree links, and the hardlink branch yields no
+# reparse points at all. Which is also why observing exactly 13 is positive
+# evidence that the symlink branch was taken -- the hardlink branch would have
+# recorded 0.
+#
+# WHAT THIS TEST IS FOR. The reasoning above is about a third-party layout that
+# can change under us on any version bump, and a decomposition report can only
+# ever say how MANY. This pins the SHAPE through the production audit: build
+# the layout rustup builds, and assert the audit clears it -- with negative
+# controls in both violating directions, so a pass here means the audit can
+# still fail. On Windows CI these are real NTFS reparse points.
+# ---------------------------------------------------------------------------
+
+Write-Host ""
+Write-Host "== t_win_store_rustup_proxy_layout_is_relocatable"
+
+# rustup's TOOLS ++ DUP_TOOLS at 1.28.2 (src/lib.rs), in full. Written out
+# rather than counted to 13, so that a future rustup adding a proxy is a
+# readable diff against the vendor's list instead of a number nobody can source.
+$rustupProxies = @(
+  "rustc", "rustdoc", "cargo", "rust-lldb", "rust-gdb", "rust-gdbgui",
+  "rls", "cargo-clippy", "clippy-driver", "cargo-miri",
+  "rust-analyzer", "rustfmt", "cargo-fmt")
+
+Assert-Equal -Expected 13 -Actual $rustupProxies.Count `
+  -Message "rustup's proxy list is 13 names, which is the reparse-point count the decomposition measured"
+
+# The relative-symlink behaviour the analysis above rests on arrived in rustup
+# 1.28.1 (rust-lang/rustup#4226); 1.28.0 made proxies symlinks but ABSOLUTE
+# ones. Below 1.28.1 the reasoning in this comment block simply does not hold,
+# so the pinned version is asserted rather than assumed. This is not a general
+# "keep rustup current" check -- it fails only on a DOWNGRADE past the point
+# where the vendor behaviour changes, which is exactly when somebody needs to
+# re-read this section.
+$versionsFile = Join-Path $repoRoot "non-nix-build/windows/toolchain-versions.env"
+$pinnedRustup = ""
+foreach ($line in @(Get-Content -LiteralPath $versionsFile)) {
+  if ($line -match '^\s*RUSTUP_VERSION\s*=\s*(.+?)\s*$') { $pinnedRustup = $Matches[1].Trim('"') }
+}
+Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($pinnedRustup)) `
+  -Message "toolchain-versions.env pins a RUSTUP_VERSION (read: '$pinnedRustup')"
+$parsedRustup = $null
+Assert-True -Condition ([version]::TryParse($pinnedRustup, [ref]$parsedRustup)) `
+  -Message "and it parses as a version"
+if ($null -ne $parsedRustup) {
+  Assert-True -Condition ($parsedRustup -ge [version]"1.28.1") `
+    -Message "the pinned rustup is >= 1.28.1, the release that made proxy symlinks RELATIVE -- below it this test's premise fails"
+}
+
+$rustRoot = Join-Path $scratch "rust-install-root"
+$rustCargoBin = Join-Path $rustRoot "cargo/bin"
+New-Item -ItemType Directory -Force -Path $rustCargoBin | Out-Null
+
+$exeSuffix = if ($isWindowsHost) { ".exe" } else { "" }
+$rustupBinary = Join-Path $rustCargoBin "rustup$exeSuffix"
+Set-Content -LiteralPath $rustupBinary -Value "rustup" -Encoding ASCII
+
+$proxyLinksMade = 0
+foreach ($proxy in $rustupProxies) {
+  $linkPath = Join-Path $rustCargoBin "$proxy$exeSuffix"
+  try {
+    # The RELATIVE, same-directory target rustup stores. Passing the bare name
+    # is the point of the test -- an absolute target here would be the defect.
+    New-Item -ItemType SymbolicLink -Path $linkPath -Target "rustup$exeSuffix" -ErrorAction Stop | Out-Null
+    $proxyLinksMade++
+  } catch {
+    # A host that refuses symlink creation is the hardlink-fallback branch.
+    # Not a test failure -- it is the other real behaviour -- but it must be
+    # visible rather than silently reducing what was checked.
+    Write-Host "  note: symlink creation refused for '$proxy' ($($_.Exception.Message))"
+  }
+}
+
+if ($proxyLinksMade -eq 0) {
+  # The hardlink-fallback branch: no reparse points, so nothing to classify.
+  # Asserted rather than skipped, because "zero reparse points" is exactly the
+  # claim that branch makes and it is worth holding it to.
+  $fallbackFindings = @(Get-ReparsePointFindings -Root $rustRoot -Path (Join-Path $rustRoot "cargo"))
+  Assert-Equal -Expected 0 -Actual $fallbackFindings.Count `
+    -Message "hardlink-fallback branch: a proxy layout with no symlinks has no reparse points to audit"
+} else {
+  Assert-Equal -Expected 13 -Actual $proxyLinksMade `
+    -Message "the fixture built all 13 rustup proxies as links"
+
+  $proxyFindings = @(Get-ReparsePointFindings -Root $rustRoot -Path (Join-Path $rustRoot "cargo"))
+  Assert-Equal -Expected 13 -Actual $proxyFindings.Count `
+    -Message "the audit sees exactly the 13 proxies as reparse points"
+
+  $insideRoot = @($proxyFindings | Where-Object { $_.kind -eq "reparse-inside-root" })
+  Assert-Equal -Expected 13 -Actual $insideRoot.Count `
+    -Message "ALL 13 classify as 'reparse-inside-root' -- relative targets that travel with the tree"
+
+  $storedTargets = @($proxyFindings | ForEach-Object { [string]$_.target } | Sort-Object -Unique)
+  Assert-Equal -Expected 1 -Actual $storedTargets.Count `
+    -Message "every proxy stores the same target"
+  Assert-Equal -Expected "rustup$exeSuffix" -Actual $storedTargets[0] `
+    -Message "and the STORED TARGET is the bare relative name, not a path -- the thing nobody had recorded"
+
+  $absoluteStored = @($proxyFindings | Where-Object { $_.target_is_absolute })
+  Assert-Equal -Expected 0 -Actual $absoluteStored.Count `
+    -Message "not one of the 13 stores an absolute target"
+
+  $proxyViolations = @($proxyFindings | Where-Object { Test-RelocatabilityViolation -Finding $_ })
+  Assert-Equal -Expected 0 -Actual $proxyViolations.Count `
+    -Message "so the rustup proxy layout produces NO relocatability violations, and the gate does not fire on it"
+
+  # NEGATIVE CONTROL 1 -- the shape the promotion exists to catch. Had rustup
+  # stored an absolute target (as an NTFS junction always does, and as
+  # `rustup toolchain link` does), this is what the audit would say. Without
+  # this arm, the zero above would be indistinguishable from an audit that
+  # cannot see these links at all.
+  $poisonedLink = Join-Path $rustCargoBin "poisoned$exeSuffix"
+  $poisonedMade = $false
+  try {
+    New-Item -ItemType SymbolicLink -Path $poisonedLink -Target $rustupBinary -ErrorAction Stop | Out-Null
+    $poisonedMade = $true
+  } catch { $poisonedMade = $false }
+
+  if ($poisonedMade) {
+    $poisonedFindings = @(Get-ReparsePointFindings -Root $rustRoot -Path (Join-Path $rustRoot "cargo") |
+      Where-Object { $_.path -like "*poisoned*" })
+    Assert-Equal -Expected 1 -Actual $poisonedFindings.Count `
+      -Message "NEGATIVE CONTROL: the audit sees a proxy written with an ABSOLUTE target"
+    Assert-Equal -Expected "reparse-absolute-target" -Actual ([string]$poisonedFindings[0].kind) `
+      -Message "NEGATIVE CONTROL: and classifies it as an absolute target, even though it resolves INSIDE the root today"
+    Assert-True -Condition (Test-RelocatabilityViolation -Finding $poisonedFindings[0]) `
+      -Message "NEGATIVE CONTROL: which IS a violation -- so the clean verdict above is a real verdict"
+    Remove-Item -LiteralPath $poisonedLink -Force -ErrorAction SilentlyContinue
+  }
+
+  # NEGATIVE CONTROL 2 -- a relative target that climbs out of the tree. The
+  # other way a link fails to travel, and a different code path from the one
+  # above (relative, but escaping).
+  $escapingLink = Join-Path $rustCargoBin "escaping$exeSuffix"
+  $escapingMade = $false
+  try {
+    New-Item -ItemType SymbolicLink -Path $escapingLink -Target "../../../outside-the-root$exeSuffix" -ErrorAction Stop | Out-Null
+    $escapingMade = $true
+  } catch { $escapingMade = $false }
+
+  if ($escapingMade) {
+    $escapingFindings = @(Get-ReparsePointFindings -Root $rustRoot -Path (Join-Path $rustRoot "cargo") |
+      Where-Object { $_.path -like "*escaping*" })
+    Assert-Equal -Expected 1 -Actual $escapingFindings.Count `
+      -Message "NEGATIVE CONTROL: the audit sees a proxy whose RELATIVE target climbs out of the root"
+    Assert-Equal -Expected "reparse-escapes-root" -Actual ([string]$escapingFindings[0].kind) `
+      -Message "NEGATIVE CONTROL: and classifies it as escaping rather than clearing it for being relative"
+    Assert-True -Condition (Test-RelocatabilityViolation -Finding $escapingFindings[0]) `
+      -Message "NEGATIVE CONTROL: which is also a violation"
+    Remove-Item -LiteralPath $escapingLink -Force -ErrorAction SilentlyContinue
+  }
+}
+
+# ---------------------------------------------------------------------------
 # t_win_store_fpc_and_msvc_documented_exclusions
 #
 # Mechanical, and cross-checked against env.ps1's OWN dispatch block rather
@@ -832,6 +1016,52 @@ foreach ($excluded in $excludedNames) {
   Assert-True -Condition (-not ($relocatableSteps -contains $excluded)) `
     -Message "excluded component '$excluded' is not also declared relocatable in env.ps1"
 }
+
+# THE SWEEP. The promotion from warning to failure is only worth having if it
+# applies to EVERY component, and the two checks above are about the exclusion
+# list rather than about the gate. So every component the dispatch declares
+# `relocatable` -- read from env.ps1's own AST, so a component added later is
+# swept automatically -- is driven through the real assertion with a real
+# violation, and every one of them must fail the run.
+#
+# This is what makes "the gate is hard for all of them" a measured claim about
+# all twenty-odd rather than a sentence in a comment. It is also the check that
+# would catch a future carve-out for any single component, whatever shape
+# somebody reached for.
+$sweepDir = Join-Path $scratch "gate-sweep"
+New-Item -ItemType Directory -Force -Path $sweepDir | Out-Null
+$sweepMissed = @()
+$sweepTested = 0
+foreach ($step in $relocatableSteps) {
+  $sweepTested++
+  $sweepReport = Join-Path $sweepDir "$step.json"
+  @{ relocatability_violations = @(
+      @{ step = $step; kind = "reparse-absolute-target"
+         path = "C:\\dev-deps\\$step\\link"; detail = "stores an absolute target" }) } |
+    ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $sweepReport -Encoding UTF8
+  $sweepThrew = $false
+  try {
+    Assert-BootstrapRelocatability -ReportPath $sweepReport | Out-Null
+  } catch { $sweepThrew = $true }
+  if (-not $sweepThrew) { $sweepMissed += $step }
+}
+Assert-True -Condition ($sweepTested -ge 15) `
+  -Message "the sweep covered every relocatable component in the dispatch ($sweepTested of them)"
+Assert-Equal -Expected 0 -Actual $sweepMissed.Count `
+  -Message "EVERY relocatable component fails the gate on an absolute-target violation -- no component is carved out ($($sweepMissed -join ','))"
+
+# NEGATIVE CONTROL for the sweep: the same loop over a CLEAN report must not
+# throw for any component. Without it, a sweep that threw for an unrelated
+# reason -- a malformed fixture, say -- would report a perfect score.
+$sweepCleanReport = Join-Path $sweepDir "clean.json"
+@{ relocatability_violations = @() } | ConvertTo-Json -Depth 5 |
+  Set-Content -LiteralPath $sweepCleanReport -Encoding UTF8
+$sweepFalsePositives = 0
+try {
+  Assert-BootstrapRelocatability -ReportPath $sweepCleanReport | Out-Null
+} catch { $sweepFalsePositives++ }
+Assert-Equal -Expected 0 -Actual $sweepFalsePositives `
+  -Message "NEGATIVE CONTROL: the same assertion passes a clean report, so the sweep above measured the violation and not the harness"
 
 # MSVC's exclusion is structural: assert it really is absent from the dispatch
 # rather than trusting the note that says so.
