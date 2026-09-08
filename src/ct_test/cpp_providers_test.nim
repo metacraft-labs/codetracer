@@ -332,6 +332,99 @@ Test project /tmp/build
     check runResult.diagnostics.len == 0
     check runResult.value.eventsOfKind(tekTestFinished)[0].status.get == tsPassed
 
+  test "a failing CTest test finishes as failed rather than reporting nothing":
+    ## THE REGRESSION, at the C/C++ seam. `runNativeCommand`'s failure branch
+    ## emitted `tekFailure` + `tekRunFinished` and no `tekTestFinished` — and
+    ## `tekTestFinished` is the only kind `run_orchestration.summarize` and
+    ## `certificate_issuance.recordUnitResult` count. A suite in which every
+    ## gtest/catch2/ctest unit failed therefore reported `executed 0, failed 0`
+    ## and took the "nothing executed" verdict (exit 2) instead of "failed"
+    ## (exit 1) — a real failure reported as an absence, and the one thing exit
+    ## code 2 exists to keep distinct.
+    ##
+    ## Grounded in test-certificates-spec Standard.md §3.1 (`passed` is the
+    ## only value supporting a positive claim) and §8 (a producer must not
+    ## claim targets that did not run).
+    ##
+    ## The fixture is a scratch CTest project rather than the checked-in one:
+    ## the CTest case above pins `cpp_ctest_fallback_project`'s exact test list
+    ## (`fallback_smoke`, `fallback_named_arg`), so adding a failing entry
+    ## there would redden a case that has nothing to do with failure
+    ## reporting. It declares `project(... NONE)` and drives `cmake -E
+    ## false` / `cmake -E true`, so it needs cmake and ctest — which this
+    ## suite already requires — and no C++ compiler, no gtest and no catch2.
+    ## Both statuses are asserted from the same project so a change that
+    ## flipped every unit to failed would be caught too.
+    let root = getTempDir() / ("ct-cpp-ctest-failing-" &
+        $getCurrentProcessId())
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+    writeFile(root / "CMakeLists.txt", """
+cmake_minimum_required(VERSION 3.16)
+project(ct_failing_ctest_fixture NONE)
+enable_testing()
+add_test(NAME deliberate_failure COMMAND ${CMAKE_COMMAND} -E false)
+add_test(NAME deliberate_success COMMAND ${CMAKE_COMMAND} -E true)
+""")
+    let configure = execCmdEx("cmake -S . -B build", options = {poUsePath},
+        workingDir = root)
+    if configure.exitCode != 0:
+      checkpoint(configure.output)
+    require configure.exitCode == 0
+
+    let catalog = ctestProjectCatalog(root).value
+    check catalog.selectors == @["deliberate_failure", "deliberate_success"]
+
+    let failing = newCppCTestM1Provider().provider.run(TestScope(
+      kind: tskSingle,
+      projectRoot: root,
+      selector: "deliberate_failure",
+      testId: catalog.itemBySelector("deliberate_failure").id))
+
+    # Reported in BOTH registers, and neither substitutes for the other: a
+    # diagnostic a human reads, and the finished event the counters read.
+    check failing.diagnostics.len == 1
+    check failing.diagnostics[0].severity == dsError
+    check failing.diagnostics[0].message.contains(
+      "native test execution failed with exit code")
+
+    let failureEvents = failing.value.eventsOfKind(tekFailure)
+    check failureEvents.len == 1
+    if failureEvents.len == 1:
+      check failureEvents[0].status.get == tsFailed
+      check failureEvents[0].message.contains(
+        "native test command exited with")
+
+    let finished = failing.value.eventsOfKind(tekTestFinished)
+    check finished.len == 1
+    if finished.len == 1:
+      check finished[0].status.get == tsFailed
+
+    let runFinished = failing.value.eventsOfKind(tekRunFinished)
+    check runFinished.len == 1
+    if runFinished.len == 1:
+      check runFinished[0].status.get == tsFailed
+
+    for event in failing.value:
+      check event.validateEvent.valid
+
+    # The passing path from the same project, unchanged: one finished test,
+    # `tsPassed`, no failure event and no diagnostic.
+    let passing = newCppCTestM1Provider().provider.run(TestScope(
+      kind: tskSingle,
+      projectRoot: root,
+      selector: "deliberate_success",
+      testId: catalog.itemBySelector("deliberate_success").id))
+    if passing.diagnostics.len > 0:
+      checkpoint($passing.diagnostics)
+    check passing.diagnostics.len == 0
+    check passing.value.eventsOfKind(tekFailure).len == 0
+    let passingFinished = passing.value.eventsOfKind(tekTestFinished)
+    check passingFinished.len == 1
+    if passingFinished.len == 1:
+      check passingFinished[0].status.get == tsPassed
+
   test "default CLI JSON includes C++ providers":
     let executable = compileCtTestBinary("ct-test-m10-cpp-cli")
     let output = execProcess(

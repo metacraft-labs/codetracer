@@ -59,6 +59,53 @@ proc event*(
     trace: none(TraceMetadata),
     diagnostic: none(TestDiagnostic))
 
+proc unitOutcomeEvents*(providerId, runId, testId: string; exitCode: int;
+    failureMessage: string; output = ""; durationMs = 0): seq[TestEvent] =
+  ## The terminal events for a provider that runs one whole unit as a single
+  ## subprocess and has nothing but its exit code to go on.
+  ##
+  ## **``tekTestFinished`` is emitted on BOTH branches, and that is the point.**
+  ## ``run_orchestration.summarize`` and
+  ## ``certificate_issuance.recordUnitResult`` count ``tekTestFinished`` and
+  ## nothing else — ``tekFailure`` and ``tekRunFinished`` are invisible to both.
+  ## A failure branch that emitted only those two therefore contributed *zero*
+  ## to ``executed`` and zero to ``failed``, so a suite in which every unit
+  ## failed reported ``executed 0, failed 0``, took the ``rvNothingExecuted``
+  ## verdict and exited ``ExitNothingExecuted`` (2) instead of
+  ## ``ExitTestsFailed`` (1). That makes a genuinely failing suite
+  ## indistinguishable from one that never ran, which is precisely the
+  ## distinction exit code 2 was introduced to draw. ``ruby_common``'s
+  ## exit-code fallback and ``js_common`` already emit it; the callers of this
+  ## proc did not.
+  ##
+  ## **Granularity: one event per UNIT, not per test.** These providers run a
+  ## whole file (or project) as one subprocess and never see individual test
+  ## results, so the single ``tekTestFinished`` here stands for the unit. A
+  ## reader expecting one event per test case will not find one, and must not
+  ## read the count as a test count. That is the same honest coarse granularity
+  ## ``ruby_common``'s minitest branch reports at; making it finer needs
+  ## per-test parsing in each runner, which is tracked separately.
+  ##
+  ## The ``tekFailure`` carries the reason and the captured output where a
+  ## human looks for it; the ``tekTestFinished`` beside it is what the counters
+  ## read. Both are needed — neither substitutes for the other.
+  ##
+  ## The predicate is "exit code is exactly zero", NOT "exit code is positive":
+  ## ``execCaptured`` — the launch the three C/C++ providers use — reports a
+  ## child killed by a signal as ``-1``, because runquota's
+  ## ``waitForCompletion`` takes the ``WIFSIGNALED`` branch and leaves the
+  ## ``exitCode: -1`` the completion was initialised with. A segfaulting test
+  ## binary must land in ``tsFailed``, not ``tsPassed``.
+  let status = if exitCode == 0: tsPassed else: tsFailed
+  result = @[]
+  if exitCode != 0:
+    result.add event(tekFailure, providerId, runId, testId, some(status),
+        failureMessage, output, durationMs = durationMs)
+  result.add event(tekTestFinished, providerId, runId, testId, some(status),
+      $status, durationMs = durationMs)
+  result.add event(tekRunFinished, providerId, runId, testId, some(status),
+      $status, durationMs = durationMs)
+
 proc runCommand*(providerId: string; scope: TestScope; args,
     nixPackages: seq[string]): ProviderResult[seq[TestEvent]] {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -85,18 +132,15 @@ proc runCommand*(providerId: string; scope: TestScope; args,
     if outcome.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = outcome.output, durationMs = duration)
+    # `go test`, `crystal spec` and `dub test` are each launched once per file
+    # or project here and only their exit code is read, so this contributes one
+    # unit-level `tekTestFinished` on either branch.
+    events.add unitOutcomeEvents(providerId, runId, testId, outcome.exitCode,
+        "test command exited with " & $outcome.exitCode, outcome.output,
+        duration)
     if outcome.exitCode == 0:
-      events.add event(tekTestFinished, providerId, runId, testId,
-          some(tsPassed), "passed", durationMs = duration)
-      events.add event(tekRunFinished, providerId, runId, testId,
-          some(tsPassed), "passed", durationMs = duration)
       ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
     else:
-      events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
-          "test command exited with " & $outcome.exitCode, outcome.output,
-          durationMs = duration)
-      events.add event(tekRunFinished, providerId, runId, testId,
-          some(tsFailed), "failed", durationMs = duration)
       ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "test execution failed with exit code " & $outcome.exitCode,

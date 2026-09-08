@@ -2342,7 +2342,12 @@ runners exit 0 for an all-skipped suite:
 The remaining providers still derive a whole file's status from one subprocess
 exit code (`cpp_common`, `native_m11_common`, `m12_fallback_common`,
 `smart_contract_common`, and `ruby_common`'s minitest branch), so a skip is
-indistinguishable from a pass there. The rest of the registry -- jest, vitest,
+indistinguishable from a pass there. All of them except
+`smart_contract_common` now at least report a FAILURE honestly — see "the
+counters read `tekTestFinished` ONLY" below — but the coarse granularity is
+unchanged either way: one event per file, not per test.
+
+The rest of the registry -- jest, vitest,
 pytest, python-unittest, nim-unittest, rust-libtest -- has no `run` wired at
 all (`unsupportedRun` / a not-implemented stub), so it reports no finished
 test and can claim nothing; do not read it as a third category of gap.
@@ -2373,6 +2378,31 @@ Ruby test FAILED reported `executed 0, failed 0` and exited 2
 on a one-method failing minitest project before the fix. If you add a provider
 branch that means "this did not pass", the `tekTestFinished` is the part that
 counts; the `tekFailure` beside it only carries the reason.
+
+The same hole was open in three more places and is now closed in ONE:
+`cpp_common.runNativeCommand` (cpp-gtest, cpp-catch2, cpp-ctest),
+`native_m11_common.runCommand` (go-test, d-unittest, crystal-spec) and
+`m12_fallback_common.runShellCommand` (pascal, fortran, ada, odin, v, lean,
+julia, assembly) each carried their own copy of the "emit the terminal events"
+tail, and all three failure branches were missing the `tekTestFinished`.
+Measured with the standalone `ct-test` binary (`--mm:orc --threads:on`; the
+`ct` binary is refc and refuses `test run`) on a one-test Go module whose only
+test calls `t.Fatalf`: before, `executed 0, failed 0`, verdict
+"nothing-executed", exit 2, certificate withheld `wrNoTestsExecuted`; after,
+`executed 1, failed 1`, verdict "failed", exit 1, withheld `wrTestsFailed`.
+The three copies are now one emitter — `native_m11_common.unitOutcomeEvents`,
+which cpp_common reaches as `nativeM11.unitOutcomeEvents` and
+m12_fallback_common by plain import — so the failure branch cannot drift from
+the passing one again in any of the fourteen providers.
+
+STILL OPEN, same class, same argument, deliberately out of that change's
+scope: `native_m11_common.recordCommand` (the M11 file-RECORDING path) and
+`smart_contract_common.runRecorderCommand` (the M13 harnesses). Both emit a
+`tekTestFinished(tsPassed)` when the recorder succeeds and none at all when it
+fails or produces no artifact, so a workspace whose M13 fixtures all failed
+still reports `executed 0, failed 0` and exits 2. Do not "grep for the fix" —
+follow the `tekRecordFinished` / `tekRunFinished` emissions and check whether a
+`tekTestFinished` sits beside each of them.
 
 ## The `executed` field means TESTS, and the exit code has three outcomes
 

@@ -190,18 +190,18 @@ proc runShellCommand*(spec: M12FallbackSpec; scope: TestScope;
     if outcome.output.len > 0:
       events.add event(tekOutput, spec.providerId, runId, testId,
           output = outcome.output, durationMs = duration)
+    # Shared with the M11 native and C/C++ providers so the failure branch
+    # cannot drift from the passing one again; see
+    # `native_m11_common.unitOutcomeEvents` for why `tekTestFinished` has to be
+    # on both. The M12 fallback languages have no machine-readable reporter at
+    # all, so this single event stands for the whole file the command ran.
+    events.add unitOutcomeEvents(spec.providerId, runId, testId,
+        outcome.exitCode,
+        "fallback command exited with " & $outcome.exitCode, outcome.output,
+        duration)
     if outcome.exitCode == 0:
-      events.add event(tekTestFinished, spec.providerId, runId, testId,
-          some(tsPassed), "passed", durationMs = duration)
-      events.add event(tekRunFinished, spec.providerId, runId, testId,
-          some(tsPassed), "passed", durationMs = duration)
       ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
     else:
-      events.add event(tekFailure, spec.providerId, runId, testId,
-          some(tsFailed), "fallback command exited with " & $outcome.exitCode,
-          outcome.output, durationMs = duration)
-      events.add event(tekRunFinished, spec.providerId, runId, testId,
-          some(tsFailed), "failed", durationMs = duration)
       ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "fallback execution failed with exit code " & $outcome.exitCode,
