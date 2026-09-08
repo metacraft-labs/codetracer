@@ -1093,6 +1093,7 @@ type
     canceled*: bool
     isLoading*: bool
     sessionDiffs*: seq[DiffPreview]
+    createdAt*: float
 
   AgentTerminal* = object
     id*: cstring

@@ -11,7 +11,7 @@
 ## carries and filled the panel with a summary when what the reviewer came for
 ## is the session itself ("There is no 'DeepReview section' in this panel").
 
-import std/[options, tables]
+import std/[options, tables, math]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -32,7 +32,8 @@ const AgentActivityInputPrefix* = "agent-query-text"
 const AgentActivityMessageContentClass* = "msg-content"
 const AgentActivityDiffEditorPrefix* = "diff-editor"
 const AgentActivityTerminalShellPrefix* = "shellComponent-"
-const AgentActivityPlaceholderText* = "Ask anything"
+const AgentActivityPlaceholderText* = "Ask anything…"
+const AgentActivityFollowUpPlaceholderText* = "Ask for a change, or type a follow-up…"
 
 const AgentActivityTestRunClass* = "agent-test-run"
   ## AA-2 — a `ct test` execution, rendered as a summary of the run *in place
@@ -96,6 +97,10 @@ type
     onBranchSelect*: proc()
       ## Callback for the branch context button in the agent toolbar.
       ## Allows the host to open a branch/worktree selector.
+    onCheckoutBranch*: proc(branch: string)
+      ## Called when the user picks a branch from the dropdown.
+    onSettingsSelect*: proc()
+      ## Callback for the settings button in the agent toolbar.
     afterDynamicRender*: proc()
     onOpenTestRecording*: proc(anchorId, testId: string;
                                policy: TraceOpenPolicy)
@@ -112,6 +117,18 @@ type
       ## Same contract as `onOpenTestRecording`: the view does not decide
       ## whether the dataset can be opened, the VM does
       ## (`AgentActivityVM.openEvidence`), and this fires only when it agreed.
+
+proc dateNowMs(): float {.importjs: "Date.now()".}
+
+proc relativeTime*(createdAtMs: float): string =
+  let nowMs = dateNowMs()
+  let diffSec = (nowMs - createdAtMs) / 1000.0
+  if diffSec < 60.0:
+    "just now"
+  elif diffSec < 3600.0:
+    $int(diffSec / 60.0) & "m ago"
+  else:
+    $int(diffSec / 3600.0) & "h ago"
 
 proc messageWrapperClass*(role: AgentActivityMessageRole): string =
   case role
@@ -167,6 +184,10 @@ proc invokeModelSelect(callbacks: AgentActivityCallbacks) =
   if callbacks.onModelSelect != nil:
     callbacks.onModelSelect()
 
+proc invokeSettingsSelect(callbacks: AgentActivityCallbacks) =
+  if callbacks.onSettingsSelect != nil:
+    callbacks.onSettingsSelect()
+
 proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
   ## Dynamic collection hosts are stable, but their rows are rebuilt from VM
   ## snapshots. The row markup itself stays declarative in helper ui blocks.
@@ -177,6 +198,12 @@ when defined(js):
   proc setInputValue(node: isonim_dom.Element; value: cstring) {.importjs: "#.value = #".}
   proc eventKey(ev: isonim_dom.Event): cstring {.importjs: "(#.key || '')".}
   proc shiftKey(ev: isonim_dom.Event): bool {.importjs: "!!#.shiftKey".}
+  proc preventDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
+  proc jsSetTimeout(fn: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
+  proc clipboardWriteText(text: cstring) {.importjs: "navigator.clipboard.writeText(#)".}
+  proc classListAdd(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.add(#)".}
+  proc classListRemove(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.remove(#)".}
+  proc jsQuerySelector(sel: cstring): isonim_dom.Element {.importjs: "document.querySelector(#)".}
 
   proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
     ## Dynamic collection hosts are stable, but their rows are rebuilt from VM
@@ -220,8 +247,11 @@ when defined(js):
         vm.invokeInputChange(callbacks, readInputValue(isonim_dom.Node(input))))
     isonim_dom.addEventListener(isonim_dom.Node(input), cstring"keydown",
       proc(ev: isonim_dom.Event) =
-        if ev.eventKey() == cstring"Enter" and not ev.shiftKey() and not vm.isLoading.val:
-          callbacks.invokeSubmit())
+        if ev.eventKey() == cstring"Enter" and not ev.shiftKey():
+          ev.preventDefault()
+          if not vm.isLoading.val:
+            callbacks.invokeSubmit()
+            vm.setInputValue(""))
 
 proc renderMessage[R](r: R; componentId: int;
                       message: AgentActivityMessageEntry): auto =
@@ -231,17 +261,33 @@ proc renderMessage[R](r: R; componentId: int;
       tdiv(class = "header-wrapper"):
         tdiv(class = "content-header"):
           tdiv(class = messageAvatarClass(message.role))
-          span(class = (if message.role == aamrAgent: "ai-name" else: "user-name")):
-            text messageName(message.role)
-            if message.canceled:
-              span:
-                text " (canceled)"
+          if message.role == aamrUser:
+            span(class = "user-timestamp"):
+              text relativeTime(message.createdAt)
+              if message.canceled:
+                span:
+                  text " (canceled)"
+          else:
+            span(class = "ai-name"):
+              text messageName(message.role)
+              if message.canceled:
+                span:
+                  text " (canceled)"
           if message.role == aamrAgent and message.isLoading and
              not message.canceled:
             span(class = "ai-status")
         tdiv(class = "msg-controls"):
-          button(class = "ct-button-image-sm-secondary command-palette-copy-button",
-                 `type` = "button")
+          tdiv(class = "agent-user-copy-button",
+               onclick = proc() =
+                 when defined(js):
+                   let content = message.content
+                   clipboardWriteText(cstring(content))
+                   let btn = jsQuerySelector(
+                     cstring(".agent-user-copy-button[data-id='" & message.id & "']"))
+                   if not btn.isNil:
+                     classListAdd(btn, cstring"copied")
+                     jsSetTimeout(proc() = classListRemove(btn, cstring"copied"), 2000),
+               "data-id" = message.id)
       tdiv(class = AgentActivityMessageContentClass, id = contentId):
         text message.content
       for diffValue in message.diffs:
@@ -519,20 +565,27 @@ proc renderProgressButton[R](r: R): auto =
 
 proc renderAddFilesButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
-    button(class = "ct-button-md-secondary agent-button agent-add-context-button",
+    button(class = "ct-button-image-md-tertiary agent-button agent-add-context-button",
            `type` = "button",
-           onclick = proc() = callbacks.invokeAddFiles()):
-      span(class = "add-file-img")
-      text "Add files and more"
+           onclick = proc() = callbacks.invokeAddFiles())
 
-proc renderModelButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
+proc renderModelButton[R](r: R; vm: AgentActivityVM;
+                          callbacks: AgentActivityCallbacks): auto =
+  let modelName = if vm.selectedModel.val.len > 0: vm.selectedModel.val
+                  else: "claude-opus-5"
   ui(r):
-    button(class = "ct-button-md-secondary agent-button agent-model-select",
+    button(class = "ct-button-md-tertiary agent-button agent-model-select",
            `type` = "button",
            onclick = proc() = callbacks.invokeModelSelect()):
-      tdiv:
-        text "GPT 5"
+      span(class = "agent-model-text"):
+        text modelName
       tdiv(class = "agent-model-img")
+
+proc renderSettingsButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
+  ui(r):
+    button(class = "ct-button-image-md-tertiary agent-button agent-settings-button",
+           `type` = "button",
+           onclick = proc() = callbacks.invokeSettingsSelect())
 
 proc renderSessionNotice[R](r: R; notice: string): auto =
   ## One line explaining the state of the review's agent session.
@@ -544,11 +597,14 @@ proc renderSessionNotice[R](r: R; notice: string): auto =
     tdiv(class = AgentActivitySessionNoticeClass):
       text notice
 
-proc renderSubmitButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
+proc renderSubmitButton[R](r: R; vm: AgentActivityVM;
+                           callbacks: AgentActivityCallbacks): auto =
   ui(r):
     button(class = "ct-button-image-md-primary agent-submit-button agent-start-button",
            `type` = "button",
-           onclick = proc() = callbacks.invokeSubmit())
+           onclick = proc() =
+             callbacks.invokeSubmit()
+             vm.setInputValue(""))
 
 proc renderStopButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
@@ -556,17 +612,49 @@ proc renderStopButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
            `type` = "button",
            onclick = proc() = callbacks.invokeStop())
 
-proc renderBranchButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
-  ## Branch context selector button in the agent toolbar.
-  ## Shows the active branch and allows the host to open a branch selector.
+proc renderBranchOption[R](r: R; vm: AgentActivityVM;
+                           callbacks: AgentActivityCallbacks;
+                           branch: string): auto =
+  let branchName = branch
+  let isActive = branchName == vm.currentBranch.val
+  let itemClass = if isActive: "ct-menu-item ct-menu-item--active"
+                  else: "ct-menu-item"
   ui(r):
-    button(class = "ct-button-md-secondary agent-button agent-branch-button",
-           `type` = "button",
-           onclick = proc() =
-             if callbacks.onBranchSelect != nil:
-               callbacks.onBranchSelect()):
-      span(class = "agent-branch-img")
-      text "main"
+    tdiv(class = itemClass,
+         onclick = proc() =
+           vm.branchDropdownOpen.val = false
+           if callbacks.onCheckoutBranch != nil:
+             callbacks.onCheckoutBranch(branchName)):
+      span(class = "ct-menu-item-label"):
+        text branchName
+
+proc renderBranchButton[R](r: R; vm: AgentActivityVM;
+                           callbacks: AgentActivityCallbacks): auto =
+  ## Branch context selector button in the agent toolbar.
+  ## Shows the active branch with an inline dropdown for checkout.
+  var dropdown: typeof(r.createElement("div"))
+  let isOpen = vm.branchDropdownOpen.val
+  let branchName = if vm.currentBranch.val.len > 0: vm.currentBranch.val
+                   else: "main"
+  let panel = ui(r):
+    tdiv(class = "agent-branch-wrapper"):
+      button(class = "ct-button-md-tertiary agent-button agent-branch-button",
+             `type` = "button",
+             onclick = proc() =
+               vm.toggleBranchDropdown()
+               if callbacks.onBranchSelect != nil:
+                 callbacks.onBranchSelect()):
+        span(class = "agent-branch-label"):
+          span(class = "agent-branch-img")
+          span(class = "agent-branch-text"):
+            text branchName
+        tdiv(class = "agent-model-img")
+      if isOpen:
+        tdiv(ref = dropdown, class = "agent-branch-dropdown")
+  if isOpen:
+    for branch in vm.branches.val:
+      r.appendRenderedChild(dropdown, renderBranchOption(r, vm, callbacks, branch))
+  panel
 
 proc renderIdleState[R](r: R; vm: AgentActivityVM;
                         callbacks: AgentActivityCallbacks): auto =
@@ -581,7 +669,7 @@ proc renderIdleState[R](r: R; vm: AgentActivityVM;
         tdiv(class = "agent-idle-heading"):
           text "Start an agent task"
         tdiv(class = "agent-idle-subtitle"):
-          text "Ask anything about your codebase"
+          text "Describe a change, a bug to fix, or a feature to add. The agent works in a sandbox and shows its progress here."
       tdiv(class = "agent-idle-suggestions"):
         button(class = "agent-idle-chip", `type` = "button",
                onclick = proc() =
@@ -628,6 +716,13 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         tdiv(ref = buttons, class = "agent-buttons-container")
 
   r.attachInputEvents(input, vm, callbacks)
+
+  createRenderEffect proc() =
+    let ph = if vm.messages.val.len > 0 or vm.terminals.val.len > 0:
+               AgentActivityFollowUpPlaceholderText
+             else:
+               AgentActivityPlaceholderText
+    r.setAttribute(input, "placeholder", ph)
 
   createRenderEffect proc() =
     r.clearChildren(conversation)
@@ -683,15 +778,16 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
   createRenderEffect proc() =
     r.syncInputValue(input, vm.inputValue.val)
     r.clearChildren(buttons)
-    if not vm.reRecordInProgress.val:
-      r.appendRenderedChild(buttons, renderNewAgentButton(r, callbacks))
-    else:
-      r.appendRenderedChild(buttons, renderProgressButton(r))
+    # if not vm.reRecordInProgress.val:
+    #   r.appendRenderedChild(buttons, renderNewAgentButton(r, callbacks))
+    # else:
+    #   r.appendRenderedChild(buttons, renderProgressButton(r))
     r.appendRenderedChild(buttons, renderAddFilesButton(r, callbacks))
-    r.appendRenderedChild(buttons, renderBranchButton(r, callbacks))
-    r.appendRenderedChild(buttons, renderModelButton(r, callbacks))
+    r.appendRenderedChild(buttons, renderBranchButton(r, vm, callbacks))
+    r.appendRenderedChild(buttons, renderModelButton(r, vm, callbacks))
+    r.appendRenderedChild(buttons, renderSettingsButton(r, callbacks))
     if not vm.isLoading.val:
-      r.appendRenderedChild(buttons, renderSubmitButton(r, callbacks))
+      r.appendRenderedChild(buttons, renderSubmitButton(r, vm, callbacks))
     else:
       r.appendRenderedChild(buttons, renderStopButton(r, callbacks))
 
