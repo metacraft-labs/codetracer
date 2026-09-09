@@ -411,6 +411,71 @@ fn an_empty_set_data_breakpoints_clears_the_watchpoints() {
     );
 }
 
+/// STRICT — reverse Continue is the mirror of forward Continue, and
+/// this test exists so that symmetry is DELIBERATE rather than whatever
+/// the scan happened to do.
+///
+/// Forward, the rule is "stop at the first step whose recorded value
+/// differs from the value carried into it".  Backward it is the same
+/// sentence with the scan running the other way, so from step 7
+/// (`counter == 9`) the walk passes steps 6 and 5 (both 9, no
+/// difference) and stops at step 4, the first step going backwards that
+/// holds a different value (7).
+///
+/// Read positionally: a reverse Continue lands you on the last step at
+/// which `counter` still held its previous value, with the change
+/// immediately ahead of you — the mirror image of forward Continue
+/// landing you on the first step at which the new value is visible,
+/// with the change immediately behind.
+#[test]
+fn reverse_continue_stops_at_the_first_change_walking_backwards() {
+    let mut handler = make_handler("reverse");
+    set_data_breakpoints(&mut handler, serde_json::json!([{ "dataId": "counter" }])).expect("dispatches");
+
+    // Move the REPLAY ENGINE, not just `handler.step_id`.  The two are
+    // separate positions: `Handler::step_continue` calls
+    // `self.replay.step(..)` and only then copies
+    // `self.replay.current_step_id()` back into `handler.step_id`.
+    // Assigning the handler field alone leaves the engine parked at
+    // step 0, and the scan seeds its baseline from the ENGINE's
+    // position -- so the watchpoint would look at the wrong step and
+    // the walk would run off the front of the trace.  (The forward
+    // tests above never noticed because both positions start at 0.)
+    let last = StepId(COUNTER_PLAN.len() as i64 - 1);
+    handler.replay.jump_to(last).expect("jump to the last step");
+    handler.step_id = last;
+
+    let (tx, rx) = mpsc::channel::<DapMessage>();
+    let request = Request {
+        base: ProtocolMessage {
+            seq: 3,
+            type_: "request".to_string(),
+        },
+        command: "reverseContinue".to_string(),
+        arguments: serde_json::json!({}),
+    };
+    let arg = StepArg {
+        action: Action::Continue,
+        reverse: true,
+        repeat: 0,
+        complete: false,
+        skip_internal: false,
+        skip_no_source: false,
+    };
+    handler.step(request, arg, tx).expect("reverse continue succeeds");
+    while rx.try_recv().is_ok() {}
+
+    assert_eq!(
+        handler.step_id,
+        StepId(SECOND_CHANGE - 1),
+        "reverse Continue from the last step (counter == 9) must stop at step {}, the first \
+         step walking backwards whose value differs (7). Landed at {:?}. Step 0 would mean the \
+         watchpoint was ignored and the walk ran off the front of the trace.",
+        SECOND_CHANGE - 1,
+        handler.step_id
+    );
+}
+
 // ── The refusals ────────────────────────────────────────────────────
 
 /// STRICT — a refused entry must come back `verified: false` carrying a
