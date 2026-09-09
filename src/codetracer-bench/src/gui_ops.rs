@@ -182,15 +182,38 @@ impl Operation {
         ]
     }
 
-    /// Operations defined for `backend`. Forward-only backends still
-    /// emit reverse-step + watchpoint as measurable ops — the bench
-    /// shape is round-trip-with-error (the dap-server returns "not
-    /// supported on this backend" but the wall-clock for the rejection
-    /// round-trip still measures the wire loop, which is what the GUI
-    /// experiences when a user clicks reverse-step on a forward-only
-    /// trace). Production wiring of the reverse-execution operations
-    /// happens at the per-backend session-handler layer; the bench
-    /// captures the wire surface latency uniformly across backends.
+    /// Operations defined for `backend`. Every backend emits the full
+    /// set, including reverse-step and watchpoint, because both have a
+    /// single dispatched DAP request on every backend the bench drives
+    /// and the wall-clock of that request is what the GUI experiences.
+    ///
+    /// The two differ in what a non-supporting backend answers, and the
+    /// difference matters when reading a cell:
+    ///
+    /// - `reverse-step` sends `stepBack`, which is dispatched
+    ///   everywhere; a forward-only backend answers a request-level
+    ///   error and the cell measures the rejection round-trip.
+    /// - `watchpoint` sends `setDataBreakpoints`, which is dispatched
+    ///   everywhere too, but answers PER ENTRY. A backend with no
+    ///   per-step value table (MCR/emulator, recreator) still returns a
+    ///   successful response whose single entry is `verified: false`
+    ///   with `refusalCode` 6206 (`backendLacksValueHistory`) — see
+    ///   `libs/ct-data-breakpoints`. That is a real dispatched
+    ///   round-trip, not an "unknown command" fallthrough, so the
+    ///   latency is comparable across the row; only the verdict differs.
+    ///
+    /// HISTORY: this comment used to claim watchpoints surfaced as a
+    /// round-trip-with-error because "the dap-server returns 'not
+    /// supported on this backend'". What it actually returned was the
+    /// free-text `command setDataBreakpoints not supported here` — the
+    /// fallthrough for commands the dispatch had never heard of, on
+    /// EVERY backend including materialized, because there was no
+    /// `setDataBreakpoints` arm at all. The op was PENDed for that
+    /// reason and is measured now.
+    ///
+    /// Production wiring of the reverse-execution operations happens at
+    /// the per-backend session-handler layer; the bench captures the
+    /// wire surface latency uniformly across backends.
     pub fn applicable(_backend: Backend) -> Vec<Operation> {
         Self::all()
     }
@@ -818,11 +841,37 @@ impl DapMeasurementDriver {
             // undo-map fast path (Multi-Core-Recorder.md §6.4
             // Tier-1 lookup).
             Operation::ReverseStep => Some(("stepBack", json!({"threadId": ctx.thread_id}))),
-            // `setDataBreakpoints` is not dispatched by the
-            // dap-server; CodeTracer watchpoints route through
-            // `ct/run-tracepoints` instead.  PEND until that flow
-            // gets a single-call DAP entry.
-            Operation::Watchpoint => None,
+            // `setDataBreakpoints` IS dispatched by the dap-server now
+            // (`db_backend::dap_handler::set_data_breakpoints`, gated by
+            // the shared admission rules in the `ct-data-breakpoints`
+            // crate), so the watchpoint op no longer PENDs — it measures
+            // the real single-call DAP entry the GUI's "break on value
+            // change" affordance uses.  This op used to return `None`
+            // with the note that watchpoints routed through
+            // `ct/run-tracepoints`; that was true of the tracepoint
+            // flow, never of watchpoints, which had no working path at
+            // all.
+            //
+            // `dataId` is a variable NAME here, not an address or an
+            // expression handle: a recording indexes values by variable,
+            // so only a plain identifier is watchable.  `target_variable`
+            // ("e") is the same local the load-history / originChain ops
+            // target, so it is present in every language fixture — which
+            // keeps this a measurement of the accept path rather than of
+            // a `variableNotInTrace` refusal.
+            //
+            // Replace semantics (as with `setBreakpoints`) mean each
+            // iteration re-installs the same one-entry set rather than
+            // accumulating watchpoints across the bench loop.
+            Operation::Watchpoint => Some((
+                "setDataBreakpoints",
+                json!({
+                    "breakpoints": [{
+                        "dataId": ctx.target_variable.clone(),
+                        "accessType": "write",
+                    }],
+                }),
+            )),
         }
     }
 }
@@ -1066,13 +1115,55 @@ pub(crate) fn operation_invariant_ok(operation: Operation, body: &Value) -> Resu
                 ))
             }
         }
-        // jump-to-line / jump-to-call / tracepoint-eval / watchpoint:
-        // the dap-server response is task-specific; success gate
-        // suffices.
-        Operation::JumpToLine
-        | Operation::JumpToCall
-        | Operation::Tracepoint
-        | Operation::Watchpoint => Ok(()),
+        // watchpoint: `setDataBreakpoints` answers PER ENTRY, so the
+        // request-level success gate above says almost nothing — a
+        // response that carried no verdicts at all would still pass it.
+        // The invariant here is therefore structural: the body must
+        // carry a `breakpoints` array with one entry per entry sent
+        // (the bench sends exactly one), each carrying a `verified`
+        // flag.  That is the shape the daemon's
+        // `format_add_watchpoint_response` reads positionally, and it
+        // is what distinguishes a dispatched watchpoint request from a
+        // command the backend merely did not choke on.
+        //
+        // Deliberately NOT gated on `verified == true`.  A refusal is a
+        // legitimate answer here and the reason is backend-dependent:
+        // MCR/emulator and recreator traces keep no per-step value
+        // table and answer `backendLacksValueHistory` (6206) for every
+        // entry.  Failing the cell on that would turn an honest
+        // per-backend capability difference into a bench correctness
+        // error and hide the latency number the row exists to compare.
+        // The verdict semantics themselves are pinned by
+        // `src/db-backend/tests/dap_data_breakpoints_test.rs`, not by a
+        // latency bench.
+        Operation::Watchpoint => {
+            let entries = body
+                .get("breakpoints")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| {
+                    "setDataBreakpoints response missing `breakpoints` array".to_string()
+                })?;
+            match entries.len() {
+                1 => {}
+                n => {
+                    return Err(format!(
+                        "setDataBreakpoints must answer one verdict per requested entry; \
+                         sent 1, got {n}"
+                    ));
+                }
+            }
+            if entries[0].get("verified").and_then(|v| v.as_bool()).is_none() {
+                return Err(
+                    "setDataBreakpoints entry carries no `verified` flag; the daemon reads \
+                     these positionally and cannot tell accepted from refused without it"
+                        .to_string(),
+                );
+            }
+            Ok(())
+        }
+        // jump-to-line / jump-to-call / tracepoint-eval: the dap-server
+        // response is task-specific; success gate suffices.
+        Operation::JumpToLine | Operation::JumpToCall | Operation::Tracepoint => Ok(()),
     }
 }
 

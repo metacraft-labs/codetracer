@@ -1,0 +1,26 @@
+[package]
+name = "ct-data-breakpoints"
+version = "0.1.0"
+edition = "2021"
+description = "The shared admission rules for DAP data breakpoints (watchpoints) in a replay recording."
+
+# A LEAF crate, deliberately.  It is depended on by BOTH `src/db-backend`
+# (the real replay backend that answers `setDataBreakpoints`) and
+# `src/backend-manager` (whose mock DAP backend stands in for it in
+# tests).  It must therefore never depend on either of them.
+#
+# The reason this crate exists at all is a defect, not a design
+# preference: for the whole life of the watchpoint feature the ONLY
+# implementation of `setDataBreakpoints` in the tree was the daemon's
+# mock, which answered `verified: true` unconditionally, while the real
+# backend had no `setDataBreakpoints` arm and refused every request.
+# The test double was more capable than the component it stood in for,
+# so no test could observe the gap.  Sharing the admission rules in one
+# compiled artefact is what makes that class of divergence a compile-
+# time impossibility rather than a convention nobody checks.
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[lints.clippy]
+all = "warn"

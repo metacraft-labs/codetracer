@@ -244,6 +244,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct-data-breakpoints"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -734,6 +741,7 @@ name = "session-manager"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "ct-data-breakpoints",
  "flexi_logger",
  "futures-util",
  "libc",

@@ -156,6 +156,17 @@ ntest = "0.9.3"
 # trail.
 toml = "0.8"
 
+# The admission rules for DAP data breakpoints (watchpoints), shared
+# with `src/backend-manager` — whose MOCK DAP backend must be held to
+# exactly the rules this real backend enforces.  A leaf crate on
+# purpose: for the whole life of the watchpoint feature the mock was
+# the only implementation of `setDataBreakpoints` in the tree and it
+# verified everything unconditionally, while this backend had no arm
+# for the command at all.  Sharing the rules in one compiled artefact
+# is what makes that divergence impossible rather than merely
+# discouraged.
+ct-data-breakpoints = { path = "../../libs/ct-data-breakpoints" }
+
 # tree-sitter dependencies — only needed for syntax highlighting / source
 # analysis.  Gated behind the `syntax-highlight` feature so that WASM builds
 # (which cannot compile the C grammars) can omit them.

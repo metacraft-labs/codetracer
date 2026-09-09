@@ -108,6 +108,24 @@ struct RecordingHeadResponse {
     head: u64,
 }
 
+/// Adapts whichever replay engine is in play to the two questions the
+/// shared data-breakpoint admission rules ask of a backend.
+///
+/// The rules live in `ct-data-breakpoints`, a leaf crate the daemon's
+/// mock DAP backend links against too.  Keeping the backend-dependent
+/// surface down to these two questions is what makes "the mock and the
+/// real backend agree" a checkable property rather than a hope.
+pub struct ReplayVocabulary<'a>(pub &'a dyn crate::replay::ReplaySession);
+
+impl ct_data_breakpoints::TraceVocabulary for ReplayVocabulary<'_> {
+    fn has_per_step_values(&self) -> bool {
+        self.0.has_per_step_values()
+    }
+    fn knows_variable(&self, name: &str) -> bool {
+        self.0.knows_variable(name)
+    }
+}
+
 #[derive(Debug)]
 pub struct Handler {
     /// Abstracted read-only access to trace data.
@@ -4281,6 +4299,157 @@ impl Handler {
             )?;
             Err(err.into())
         }
+    }
+
+    // ── Data breakpoints (watchpoints) ──────────────────────────────
+    //
+    // See `ct_data_breakpoints` for what a data breakpoint means over a
+    // recording, and for why the admission rules live in a crate shared
+    // with the daemon's mock DAP backend rather than here.
+    //
+    // Short version: `setDataBreakpoints` had NO arm in this backend's
+    // dispatch for the whole life of the watchpoint feature.  It fell
+    // through to `dap_command_to_step_action` and came back as the
+    // free-text `command setDataBreakpoints not supported here`.  The
+    // only implementation anywhere in the tree was the daemon's mock,
+    // which answered `verified: true` unconditionally — a test double
+    // more capable than the component it stood in for, which is why no
+    // test could see that watchpoints had never worked.
+
+    /// A `TraceVocabulary` view of whatever replay engine this handler
+    /// is driving.  The admission rules ask a backend exactly two
+    /// questions; everything else about a verdict is a property of the
+    /// request and is therefore identical for every backend, which is
+    /// what lets the mock and the real thing be held to one standard.
+    fn data_breakpoint_vocabulary(&self) -> ReplayVocabulary<'_> {
+        ReplayVocabulary(self.replay.as_ref())
+    }
+
+    /// Decode one DAP `DataBreakpoint` into the shared request shape.
+    fn decode_data_breakpoint(entry: &dap_types::DataBreakpoint) -> ct_data_breakpoints::DataBreakpointRequest {
+        ct_data_breakpoints::DataBreakpointRequest {
+            data_id: entry.data_id.clone(),
+            access_type: entry.access_type.clone(),
+            // Empty-string normalisation, the same back-compat hazard
+            // `SourceBreakpoint.condition` has: a frontend that cannot
+            // elide the key ships `""` to mean "no condition", and
+            // treating that as a condition would refuse every
+            // watchpoint such a client sets.
+            condition: entry.condition.clone().filter(|c| !c.is_empty()),
+            hit_condition: entry.hit_condition.clone().filter(|c| !c.is_empty()),
+        }
+    }
+
+    /// DAP `dataBreakpointInfo` — the handshake a client uses to ask
+    /// "can I watch this?" before setting anything.
+    ///
+    /// Answering it is what makes the feature discoverable: a
+    /// conforming DAP client greys out its "break on value change"
+    /// affordance unless this returns a non-null `dataId`.  A backend
+    /// that never answers it has a feature no client will ever offer.
+    ///
+    /// Per the DAP spec a refusal here is `dataId: null` plus a
+    /// human-readable `description` — NOT an error response.  We add
+    /// `refusalCode` from the closed set beside it, mirroring the
+    /// `originErrorCode` convention, so a caller branches on an
+    /// integer instead of parsing English.
+    pub fn data_breakpoint_info(
+        &mut self,
+        request: dap::Request,
+        args: dap_types::DataBreakpointInfoArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let probe = ct_data_breakpoints::DataBreakpointRequest::new(args.name.clone());
+        let body = match ct_data_breakpoints::verdict(&probe, &self.data_breakpoint_vocabulary()) {
+            Ok(watched) => serde_json::json!({
+                "dataId": watched.name,
+                "description": format!("stop when the value of `{}` changes", watched.name),
+                // `write` and ONLY `write`.  A recording samples what
+                // each variable held at each step; it does not record
+                // reads, which leave no trace in the data.  Advertising
+                // `read` here would put an affordance in front of the
+                // user that can only ever refuse.
+                "accessTypes": ["write"],
+                // A `dataId` here is a variable NAME, which stays
+                // meaningful across sessions over the same recording.
+                "canPersist": true,
+            }),
+            Err(refusal) => serde_json::json!({
+                "dataId": serde_json::Value::Null,
+                "description": refusal.description(),
+                "refusalCode": refusal.as_u32(),
+                "refusal": refusal.token(),
+            }),
+        };
+        self.respond_dap(request, body, sender)
+    }
+
+    /// DAP `setDataBreakpoints` — install the watchpoint set.
+    ///
+    /// Replace semantics, like `setBreakpoints`: this request defines
+    /// the complete set, and an empty `breakpoints` array clears it.
+    ///
+    /// Every entry is answered INDIVIDUALLY with its own `verified`
+    /// flag and, when refused, its own closed-set `refusalCode`.  The
+    /// request as a whole still succeeds — a refusable entry is not a
+    /// malformed request, and collapsing the two would put the daemon
+    /// back to reading a single free-text string for a set of
+    /// watchpoints that may have differing verdicts.
+    ///
+    /// Only admitted entries are installed.  Refusing on the wire and
+    /// watching anyway would be the same class of dishonesty as
+    /// accepting and doing nothing.
+    pub fn set_data_breakpoints(
+        &mut self,
+        request: dap::Request,
+        args: dap_types::SetDataBreakpointsArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut admitted: Vec<String> = Vec::new();
+        let mut results: Vec<serde_json::Value> = Vec::with_capacity(args.breakpoints.len());
+
+        for entry in &args.breakpoints {
+            let decoded = Self::decode_data_breakpoint(entry);
+            match ct_data_breakpoints::verdict(&decoded, &self.data_breakpoint_vocabulary()) {
+                Ok(watched) => {
+                    // 1-based, assigned by position, so the daemon can
+                    // pair each verdict back with the watchpoint id
+                    // that asked for it.  `python_bridge`'s
+                    // `format_add_watchpoint_response` indexes into
+                    // this array by request position.
+                    let id = admitted.len() as i64 + 1;
+                    admitted.push(watched.name.clone());
+                    results.push(serde_json::json!({
+                        "id": id,
+                        "verified": true,
+                        "dataId": watched.name,
+                    }));
+                }
+                Err(refusal) => {
+                    results.push(serde_json::json!({
+                        "verified": false,
+                        "message": refusal.description(),
+                        "refusalCode": refusal.as_u32(),
+                        "refusal": refusal.token(),
+                        "dataId": entry.data_id,
+                    }));
+                }
+            }
+        }
+
+        // Install last, so a backend-level failure cannot leave the
+        // client holding verdicts for a set that was never applied.
+        if let Err(e) = self.replay.set_watchpoints(admitted) {
+            // The engine refused a set the admission rules admitted.
+            // That is a disagreement between this handler and the
+            // engine, not a user error, and it must NOT be reported as
+            // a per-entry refusal — the closed set has no variant for
+            // it because it should not happen.
+            error!("set_watchpoints refused an admitted set: {e}");
+            return Err(e);
+        }
+
+        self.respond_dap(request, serde_json::json!({ "breakpoints": results }), sender)
     }
 
     pub fn set_breakpoints(

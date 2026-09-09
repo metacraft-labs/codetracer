@@ -20,16 +20,50 @@ spec and use the auto-generated DAP types in `src/db-backend/src/dap_types.rs`.
 
 | Request | Arguments type | Response body | Notes |
 | --- | --- | --- | --- |
-| `initialize` | `InitializeRequestArguments` | `Capabilities` | Returns CodeTracer capabilities defined in `src/db-backend/src/dap.rs`. |
+| `initialize` | `InitializeRequestArguments` | `Capabilities` | Returns CodeTracer capabilities defined in `src/db-backend/src/dap.rs`, including `supportsDataBreakpoints: true`. |
 | `launch` | `LaunchRequestArguments` | `{}` | Uses CodeTracer-specific launch fields (see type reference below). |
 | `configurationDone` | none | `{}` | Signals that configuration is complete. |
 | `setBreakpoints` | `SetBreakpointsArguments` | `SetBreakpointsResponseBody` | Clears and re-applies breakpoints each request. |
+| `dataBreakpointInfo` | `DataBreakpointInfoArguments` | `{dataId, description, accessTypes, canPersist}` or `{dataId: null, description, refusalCode, refusal}` | The "can I watch this?" handshake. A watchable variable comes back with its name as the `dataId` and `accessTypes: ["write"]` — a recording does not record reads. Anything unwatchable comes back `dataId: null` with a closed-set refusal (see below). |
+| `setDataBreakpoints` | `SetDataBreakpointsArguments` | `{breakpoints: [...]}` | Value-change watchpoints. Replace semantics like `setBreakpoints`: the request defines the whole set and an empty array clears it. Each entry is answered individually with `verified`, plus `refusalCode` / `refusal` when refused; only admitted entries are installed. |
 | `threads` | `ThreadsArguments` | `ThreadsResponseBody` | Single-threaded model. |
 | `stackTrace` | `StackTraceArguments` | `StackTraceResponseBody` | Uses db-backend call stack. |
 | `scopes` | `ScopesArguments` | `ScopesResponseBody` | Standard variable scopes. |
 | `variables` | `VariablesArguments` | `VariablesResponseBody` | Standard variables resolution. |
 | `restart` | none | `{}` | Mapped to `ct/run-to-entry`. |
 | `stepIn` / `stepOut` / `next` / `continue` / `stepBack` / `reverseContinue` | `StepInArguments` etc. | `{}` | Emit `stopped`, `ct/complete-move`, and `output` events. |
+
+### Data breakpoints are value-change watchpoints
+
+`initialize` advertises `supportsDataBreakpoints: true`. That bit is load-bearing
+rather than decorative: a conforming client greys out its "break on value change"
+affordance unless it is set, so implementing the two commands without advertising
+them would ship a feature no client offers.
+
+A live debugger implements a data breakpoint with a hardware watch register that
+traps on an access to an address. A recording has no CPU — what it has is the
+value each variable held at each recorded step. So what these two commands honour
+is a **value-change watchpoint**: `continue` stops at the first later step at
+which the named variable's recorded value differs from the value it held before.
+
+Everything the recording cannot support is refused through the closed set
+`ct_data_breakpoints::DataBreakpointRefusal` (crate `libs/ct-data-breakpoints`),
+which travels on the wire as an integer `refusalCode` in the 62xx block plus a
+stable camelCase `refusal` token, so a client branches on the code and never on
+the prose:
+
+| Code | `refusal` | Meaning |
+| --- | --- | --- |
+| 6201 | `emptyDataId` | The `dataId` was empty or whitespace. |
+| 6202 | `expressionNotAWatchableVariable` | Not a plain identifier. A recording indexes values by variable, so `obj.field`, `arr[0]`, `*ptr` and `counter + 1` cannot be watched. |
+| 6203 | `accessTypeNotRecorded` | `read` / `readWrite` was asked for. Intrinsic to replay: a recording samples what a variable *held*, not that it was *read*, so `write` is the only access type a value table can answer. |
+| 6204 | `conditionNotSupported` | A `condition` or `hitCondition` was supplied; the value-change scan has no evaluator, and honouring the request while ignoring the condition would stop in the wrong place. |
+| 6205 | `variableNotInTrace` | A well-formed name this recording never captured. |
+| 6206 | `backendLacksValueHistory` | This backend keeps no per-step value table — the MCR/emulator and recreator sessions, which already refuse `ct/load-history` for the same reason. |
+
+The same `ct_data_breakpoints::verdict` function decides for the real backend
+(`dap_handler::set_data_breakpoints`) and for the daemon's mock DAP backend, so a
+test double cannot claim a capability the product lacks.
 
 ## Custom `ct/*` Requests
 

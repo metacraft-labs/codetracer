@@ -170,6 +170,69 @@ pub trait ReplaySession: std::fmt::Debug {
         Ok(true)
     }
 
+    // ── Data breakpoints (watchpoints) ──────────────────────────────
+    //
+    // A live debugger implements a data breakpoint with a hardware
+    // watch register.  A replay recording has no CPU, so what this
+    // backend offers is a VALUE-CHANGE watchpoint over the per-step
+    // variable value table: `continue` stops at the first later step
+    // at which the named variable's recorded value differs from the
+    // value it held at the previous step that recorded it.
+    //
+    // The admission rules live in the `ct-data-breakpoints` crate,
+    // shared with the daemon's mock DAP backend so the mock cannot
+    // claim a capability this backend refuses.  See that crate's
+    // module docs for why it exists.
+
+    /// Does this backend keep a per-step table of variable values?
+    ///
+    /// `true` only for the materialised replay session.  The
+    /// MCR/emulator and recreator sessions do not — they already
+    /// refuse `load_history` for exactly this reason — so a
+    /// value-change watchpoint has no substrate on them.
+    ///
+    /// The default is `false`: a backend must OPT IN to claiming it
+    /// can answer watchpoints.  Defaulting the other way is how the
+    /// mock came to claim more than the product could do.
+    fn has_per_step_values(&self) -> bool {
+        false
+    }
+
+    /// Is `name` a variable recorded anywhere in this trace?
+    ///
+    /// Default `false` — see `has_per_step_values` on why the default
+    /// declines rather than assumes.
+    fn knows_variable(&self, name: &str) -> bool {
+        let _ = name;
+        false
+    }
+
+    /// Install the watchpoint set, replacing any previous one.
+    ///
+    /// DAP `setDataBreakpoints` has replace semantics (the same as
+    /// `setBreakpoints`), so an empty `names` clears every watchpoint.
+    ///
+    /// Callers MUST have run each requested entry through
+    /// `ct_data_breakpoints::verdict` first; this method receives only
+    /// the names that were admitted.
+    ///
+    /// The default implementation refuses, so a backend that has not
+    /// wired watchpoints surfaces a typed refusal rather than silently
+    /// accepting and never firing — which is precisely the failure the
+    /// Python API used to present as an unexplained `StopIteration`.
+    fn set_watchpoints(&mut self, names: Vec<String>) -> Result<(), Box<dyn Error>> {
+        if names.is_empty() {
+            // Clearing a set that was never installed is vacuously
+            // fine, and session teardown issues a blanket clear.
+            return Ok(());
+        }
+        Err(format!(
+            "{} (this backend does not implement value-change watchpoints)",
+            ct_data_breakpoints::DataBreakpointRefusal::BackendLacksValueHistory.description()
+        )
+        .into())
+    }
+
     /// M10 — drain the list of tracepoint hits collected during the
     /// last `step(Action::Continue, ...)` traversal.  Each hit
     /// corresponds to a recorded step the runner passed *through* on

@@ -259,6 +259,21 @@ pub struct Capabilities {
     /// step-in / step-out buttons.
     #[serde(rename = "supportsColumnMotions", skip_serializing_if = "Option::is_none")]
     pub supports_column_motions: Option<bool>,
+    /// DAP standard — this adapter answers `setDataBreakpoints` and
+    /// `dataBreakpointInfo`.
+    ///
+    /// Load-bearing for discoverability, not decorative: a conforming
+    /// DAP client greys out its "break on value change" affordance
+    /// unless this bit is set, so a backend that implements the
+    /// commands but omits the bit has a feature no client will offer.
+    ///
+    /// What is advertised is the value-change (write) watchpoint
+    /// described in `ct_data_breakpoints`.  `dataBreakpointInfo`
+    /// reports `accessTypes: ["write"]` per variable, so a client that
+    /// honours the handshake never offers `read` — which a recording
+    /// cannot answer, because reads leave no trace in the data.
+    #[serde(rename = "supportsDataBreakpoints", skip_serializing_if = "Option::is_none")]
+    pub supports_data_breakpoints: Option<bool>,
 }
 
 pub fn new_dap_variable(name: &str, value: &str, variables_reference: i64) -> dap_types::Variable {

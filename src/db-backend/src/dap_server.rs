@@ -2057,7 +2057,14 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
     }
 }
 
-fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+/// The DAP command dispatch.
+///
+/// `pub` so integration tests can assert which commands this backend
+/// actually dispatches, rather than inferring it.  That distinction is
+/// not academic: `setDataBreakpoints` had no arm here for the whole
+/// life of the watchpoint feature, and the only thing that noticed was
+/// a user whose `continue_forward()` ran off the end of the trace.
+pub fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
     match req.command.as_str() {
         "scopes" => handler.scopes(
             req.clone(),
@@ -2079,6 +2086,25 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "setBreakpoints" => handler.set_breakpoints(
             req.clone(),
             req.load_args::<dap_types::SetBreakpointsArguments>()?,
+            sender.clone(),
+        )?,
+        // Data breakpoints (watchpoints).  These two arms are the
+        // whole reason `Trace.add_watchpoint` can work at all: before
+        // they existed the command fell through to
+        // `dap_command_to_step_action` and came back as the free-text
+        // `command setDataBreakpoints not supported here`, while the
+        // daemon's mock backend — the only implementation in the tree
+        // — answered `verified: true` for everything.  See
+        // `ct_data_breakpoints` for what a data breakpoint means over
+        // a recording and what it genuinely cannot mean.
+        "setDataBreakpoints" => handler.set_data_breakpoints(
+            req.clone(),
+            req.load_args::<dap_types::SetDataBreakpointsArguments>()?,
+            sender.clone(),
+        )?,
+        "dataBreakpointInfo" => handler.data_breakpoint_info(
+            req.clone(),
+            req.load_args::<dap_types::DataBreakpointInfoArguments>()?,
             sender.clone(),
         )?,
         "ct/load-locals" => {
@@ -2497,6 +2523,16 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 supports_disassemble_request: Some(true),
                 supports_log_points: Some(true),
                 supports_restart_request: Some(true),
+                // Watchpoints. Unlike the column bits below, this one
+                // does NOT depend on the loaded trace: the commands are
+                // dispatched unconditionally, and a backend that cannot
+                // honour them (MCR/emulator, recreator — neither keeps a
+                // per-step value table) refuses per entry with
+                // `BackendLacksValueHistory` from the closed set.  A
+                // per-entry refusal a client can read is strictly better
+                // here than a missing capability bit that hides the
+                // affordance and explains nothing.
+                supports_data_breakpoints: Some(true),
                 // M-capability-flags: the `initialize` response is
                 // sent before any trace has been loaded, so we can't
                 // know yet whether per-column affordances should be

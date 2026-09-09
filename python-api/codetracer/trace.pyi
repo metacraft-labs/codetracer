@@ -130,7 +130,23 @@ class Trace:
         ...
 
     def add_watchpoint(self, expression: str) -> int:
-        """Set a watchpoint that triggers when the expression changes."""
+        """Set a value-change watchpoint on a plain variable name.
+
+        The next :meth:`continue_forward` stops at the first later step
+        at which the variable's recorded value differs from the value it
+        held before.  A returned ID means the backend accepted the
+        watchpoint, not merely that the request was sent.
+
+        Only a bare identifier can be watched: a recording indexes
+        values by variable, so ``obj.field``, ``arr[0]``, ``*ptr`` and
+        ``counter + 1`` are refused.  So are reads (a recording samples
+        what a variable held, not that it was read), conditions, names
+        the recording never captured, and traces held by a backend with
+        no per-step value table (MCR/emulator and recreator).  Each
+        refusal raises ``TraceError`` carrying ``refusal`` and
+        ``refusal_code``.  See :meth:`Trace.add_watchpoint` in
+        ``trace.py`` for the full account.
+        """
         ...
 
     def remove_watchpoint(self, wp_id: int) -> None:

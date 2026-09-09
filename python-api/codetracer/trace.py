@@ -760,17 +760,40 @@ class Trace:
         then ran to the end of the trace and raised ``StopIteration``
         with nothing to explain why.)
 
-        .. warning::
+        **What a watchpoint means over a recording.** A live debugger
+        implements one with a hardware watch register that traps on a
+        write to an address.  A recording has no CPU — what it has is
+        the value each variable held at each recorded step.  So this is
+        a **value-change watchpoint**: the next
+        :meth:`continue_forward` stops at the first later step at which
+        ``expression``'s recorded value differs from the value it held
+        before.  Coming into scope is not a change, and a step that
+        does not record the variable leaves the watch undisturbed.
 
-           The replay backend does **not** currently implement
-           ``setDataBreakpoints`` at all, so against a real recording
-           this raises :class:`TraceError` carrying the backend's own
-           refusal.  That is the truthful answer: watchpoints have never
-           worked, and this method used to hide that behind a plausible
-           ID.  Use :meth:`add_breakpoint` instead.
+        **What cannot be watched.** The backend refuses these, each
+        with a distinct reason carried on the :class:`TraceError`:
+
+        * Anything that is not a plain variable name.  A recording
+          indexes values by variable, not by address or expression, so
+          ``obj.field``, ``arr[0]``, ``*ptr`` and ``counter + 1``
+          cannot be watched.
+        * Reads.  A recording samples what a variable *held*; it does
+          not record that a value was *read*, and a read leaves no
+          trace in the data to recover.  Only value changes (writes)
+          can be answered.
+        * Conditions.  :meth:`add_breakpoint` supports them; the
+          value-change scan does not yet, and honouring the request
+          while ignoring the condition would stop in the wrong place
+          with nothing to say so.
+        * Variables this recording never captured.
+        * Recordings held by a backend with no per-step value table —
+          MCR/emulator and recreator traces.  Materialized recordings
+          (the Python/Ruby/Noir DB backends) are the ones that support
+          watchpoints.
 
         Parameters:
-            expression: The expression to watch (e.g., ``"counter"``).
+            expression: The variable to watch (e.g., ``"counter"``).
+                Must be a plain identifier — see above.
 
         Returns:
             A positive integer watchpoint ID that can be passed to
@@ -778,16 +801,28 @@ class Trace:
 
         Raises:
             TraceError: If the daemon reports an error, or if the
-                backend did not accept the watchpoint.
+                backend did not accept the watchpoint.  The message
+                carries the backend's own reason.
         """
         response = self._connection.send_request("ct/py-add-watchpoint", {
             "tracePath": self._path,
             "expression": expression,
         })
         if not response.get("success"):
-            raise TraceError(
+            # A refused watchpoint carries a CLOSED-SET reason beside
+            # the prose (see the "What cannot be watched" list above).
+            # Surface it on the exception so a caller can branch on
+            # `err.refusal` instead of matching on English -- "you named
+            # something this recording never captured" and "this kind of
+            # watchpoint is not possible over a recording at all" have
+            # entirely different fixes.
+            body = response.get("body") or {}
+            error = TraceError(
                 response.get("message", "add_watchpoint() failed")
             )
+            error.refusal = body.get("refusal")
+            error.refusal_code = body.get("refusalCode")
+            raise error
         return response.get("body", {}).get("watchpointId", 0)
 
     def remove_watchpoint(self, wp_id: int) -> None:

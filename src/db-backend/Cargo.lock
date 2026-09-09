@@ -484,6 +484,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct-data-breakpoints"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "ct-lang"
 version = "0.1.0"
 dependencies = [
@@ -1601,6 +1608,7 @@ dependencies = [
  "console_error_panic_hook",
  "criterion",
  "ct-dap-client",
+ "ct-data-breakpoints",
  "ct-lang",
  "env_logger",
  "filetime",

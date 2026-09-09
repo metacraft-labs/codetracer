@@ -1458,6 +1458,20 @@ pub struct MaterializedReplaySession {
     /// coexist on the per-line slot map.
     pub tracepoint_list: Vec<HashMap<(usize, Option<i64>), DapTracepoint>>,
     tracepoint_next_id: i64,
+    /// Registered value-change watchpoints, as resolved `VariableId`s.
+    ///
+    /// A DAP `setDataBreakpoints` replaces this whole set (the same
+    /// semantics `setBreakpoints` has for a source file).  Resolved to
+    /// ids at registration rather than compared by name during the
+    /// scan: `variable_id_for` is O(n) over the interning table, and
+    /// paying that per step per watchpoint would make Continue
+    /// quadratic in the trace length.
+    ///
+    /// Empty is the overwhelmingly common case, and `step_continue`
+    /// checks that before doing any per-step value work — a trace with
+    /// no watchpoints must cost exactly what it cost before
+    /// watchpoints existed.
+    watchpoint_list: Vec<VariableId>,
     /// M10 — buffered tracepoint hits awaiting drain by the DAP
     /// handler.  The handler calls `drain_tracepoint_hits()` after
     /// `step(Action::Continue, ...)` returns and emits one DAP
@@ -1532,6 +1546,7 @@ impl MaterializedReplaySession {
             breakpoint_next_id: 0,
             tracepoint_list,
             tracepoint_next_id: 0,
+            watchpoint_list: Vec::new(),
             pending_tracepoint_hits: Vec::new(),
             breakpoint_suppression: None,
         }
@@ -1922,6 +1937,29 @@ impl MaterializedReplaySession {
         self.pending_tracepoint_hits.clear();
         let breakpoint_active = !self.breakpoint_list.is_empty();
         let tracepoint_active = self.tracepoint_list.iter().any(|per_path| !per_path.is_empty());
+        let watchpoint_active = !self.watchpoint_list.is_empty();
+
+        // Value-change watchpoints: seed each watched variable's
+        // baseline from the step we are STANDING ON, so the first
+        // change reported is a change relative to what the user can
+        // currently see.
+        //
+        // `scan_steps_from` skips the start step (`.skip(1)`), so
+        // without this seed the first scanned step would have no
+        // predecessor to compare against and either fire spuriously or
+        // be silently skipped.  A variable NOT recorded at the current
+        // step gets no baseline entry; the first step that does record
+        // it establishes one WITHOUT firing — appearing for the first
+        // time is not a value change, and reporting it as one would
+        // stop on entry to every function that declares the name.
+        let mut watched_baseline: HashMap<VariableId, ValueRecord> = HashMap::new();
+        if watchpoint_active {
+            for var in self.reader.variables_at(self.step_id).unwrap_or(&[]) {
+                if self.watchpoint_list.contains(&var.variable_id) {
+                    watched_baseline.insert(var.variable_id, var.value.clone());
+                }
+            }
+        }
 
         // M0/3 — walk the steps after (or before) the current one WITHOUT
         // materializing them.
@@ -1955,14 +1993,23 @@ impl MaterializedReplaySession {
             if tracepoint_active && let Some(h) = self.step_matches_any_tracepoint(step) {
                 pending.push(h);
             }
-            if breakpoint_active {
-                if self.step_matches_any_breakpoint(step) {
-                    hit = Some(step.step_id);
-                    return false;
-                }
+            if breakpoint_active && self.step_matches_any_breakpoint(step) {
+                hit = Some(step.step_id);
+                return false;
+            }
+            // Watchpoints are checked AFTER breakpoints so that a step
+            // satisfying both reports as the breakpoint stop — the
+            // explicit, user-placed stop wins over the derived one.
+            // Either way execution parks on the same step, so the
+            // choice only affects which reason is reported.
+            if watchpoint_active && self.step_changes_any_watched_value(step, &mut watched_baseline) {
+                hit = Some(step.step_id);
+                return false;
+            }
+            if breakpoint_active || watchpoint_active {
                 true
             } else {
-                // Neither list is active: there is nothing to look for, so
+                // No list is active: there is nothing to look for, so
                 // Continue runs to the boundary without inspecting steps.
                 tracepoint_active
             }
@@ -2068,6 +2115,61 @@ impl MaterializedReplaySession {
     ///   * a `(line, Some(c))` entry is column-aware — fires only when
     ///     the step's recorded `column == Some(c)`.
     ///
+    /// Does `step` change the recorded value of any watched variable?
+    ///
+    /// This is the whole of the value-change watchpoint.  A live
+    /// debugger would trap on a write to an address; a recording has
+    /// no CPU, but it does have what each variable held at each step,
+    /// and "the value is now different from what it was" is what a
+    /// write is observable as in that data.
+    ///
+    /// `baseline` carries the last value seen for each watched
+    /// variable and is updated in place as the scan walks forward.
+    /// Two rules make the result honest:
+    ///
+    ///   * A variable appearing for the FIRST time (no baseline entry)
+    ///     establishes its baseline WITHOUT firing.  Coming into scope
+    ///     is not a value change; firing on it would stop on entry to
+    ///     every call that declares the name, which is noise the user
+    ///     cannot distinguish from a real write.
+    ///
+    ///   * A step that does not record the variable at all leaves the
+    ///     baseline untouched.  The variable is out of scope there,
+    ///     not changed to nothing — dropping the baseline would make
+    ///     the next step that records it fire spuriously on re-entry.
+    ///
+    /// Comparison is `ValueRecord`'s structural `PartialEq`, so a
+    /// compound value that is rebuilt with identical contents does not
+    /// count as a change.  That is the behaviour a user watching a
+    /// value wants; a user watching an *address* would want the
+    /// opposite, and this backend cannot offer that — see
+    /// `ct_data_breakpoints::DataBreakpointRefusal` for what the
+    /// recording genuinely cannot answer.
+    fn step_changes_any_watched_value(
+        &self,
+        step: &DbStep,
+        baseline: &mut HashMap<VariableId, ValueRecord>,
+    ) -> bool {
+        let mut changed = false;
+        for var in self.reader.variables_at(step.step_id).unwrap_or(&[]) {
+            if !self.watchpoint_list.contains(&var.variable_id) {
+                continue;
+            }
+            match baseline.get(&var.variable_id) {
+                Some(previous) if *previous != var.value => {
+                    baseline.insert(var.variable_id, var.value.clone());
+                    changed = true;
+                }
+                Some(_) => {}
+                None => {
+                    // First sighting: establish the baseline silently.
+                    baseline.insert(var.variable_id, var.value.clone());
+                }
+            }
+        }
+        changed
+    }
+
     /// When BOTH a line-only slot AND a column-aware slot would match
     /// the same step, the column-aware slot wins — it carries more
     /// specific information, so its `log_message` is the more
@@ -2817,6 +2919,50 @@ impl ReplaySession for MaterializedReplaySession {
         self.tracepoint_list.clear();
         self.tracepoint_list.resize_with(self.reader.path_count(), HashMap::new);
         Ok(true)
+    }
+
+    /// The materialised session is the one backend that DOES keep a
+    /// per-step value table — `variables_at(step)` is exactly that —
+    /// so it is the one backend that can answer a value-change
+    /// watchpoint.
+    fn has_per_step_values(&self) -> bool {
+        true
+    }
+
+    fn knows_variable(&self, name: &str) -> bool {
+        self.reader.variable_id_for(name).is_some()
+    }
+
+    /// Install the watchpoint set, replacing any previous one (DAP
+    /// `setDataBreakpoints` replace semantics).
+    ///
+    /// Names are resolved to `VariableId`s here, once, rather than
+    /// compared as strings during the Continue scan: `variable_id_for`
+    /// walks the interning table, and doing that per step per
+    /// watchpoint would make Continue quadratic in the trace length.
+    ///
+    /// A name that fails to resolve is a caller error, not a user
+    /// error — `ct_data_breakpoints::verdict` has already rejected
+    /// unknown names with `VariableNotInTrace` before anything reaches
+    /// here — so it is reported rather than skipped.  Skipping is how
+    /// a watchpoint comes to be registered, reported `verified`, and
+    /// never fire.
+    fn set_watchpoints(&mut self, names: Vec<String>) -> Result<(), Box<dyn Error>> {
+        let mut resolved = Vec::with_capacity(names.len());
+        for name in &names {
+            match self.reader.variable_id_for(name) {
+                Some(id) => resolved.push(id),
+                None => {
+                    return Err(format!(
+                        "watchpoint on `{name}` was admitted but its variable id could not be resolved; \
+                         the admission rules and the trace's name table disagree"
+                    )
+                    .into());
+                }
+            }
+        }
+        self.watchpoint_list = resolved;
+        Ok(())
     }
 
     /// M10 — drain and return the buffered tracepoint hits collected
