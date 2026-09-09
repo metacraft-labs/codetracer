@@ -41,6 +41,31 @@
   gap: 0.5em
   padding: 0.5em
 
+  .agent-input-wrapper
+    position: relative
+    background: colors-ui-surface-base-canvas
+    border-radius: 0.5em
+
+  .agent-input-highlight
+    position: absolute
+    top: 0
+    left: 0
+    right: 0
+    bottom: 0
+    pointer-events: none
+    z-index: 0
+    padding: 0.25em 0.5em
+    font-size: 1em
+    font-family: inherit
+    line-height: 1.5
+    white-space: pre-wrap
+    word-break: break-word
+    overflow: auto
+    scrollbar-width: none
+    color: colors-ui-text-primary-caption
+    &::-webkit-scrollbar
+      display: none
+
   textarea
     width: 100% !important
     min-height: 2.25em
@@ -53,13 +78,16 @@
     resize: none
     font-size: 1em
     font-family: inherit !important
+    line-height: 1.5 !important
     overflow-y: auto !important
     overflow-x: hidden !important
     white-space: pre-wrap !important
-    border-radius: 0.5em !important
+    border-radius: 0 !important
     padding: 0.25em 0.5em
     border: 0 !important
-    background: colors-ui-surface-base-canvas !important
+    background: transparent !important
+    position: relative
+    z-index: 1
 
 
     // &::-webkit-scrollbar-corner
@@ -74,7 +102,8 @@
     //   border: 0.125em solid colors-ui-surface-base-panel !important
 
   .agent-command-input
-    color: colors-ui-text-primary-caption !important
+    color: transparent !important
+    caret-color: colors-ui-text-primary-caption !important
 
     &::placeholder
       color: colors-ui-text-primary-caption
@@ -214,6 +243,147 @@
   border-radius: 0.25em
   background: colors-ui-surface-input-default
   margin-bottom: 0.5em
+
+.agent-thought-wrapper
+  background: transparent !important
+  border: none !important
+
+.agent-thought-header
+  display: flex
+  flex-direction: row
+  align-items: center
+  justify-content: space-between
+  padding: 0.25em 0
+  cursor: pointer
+  user-select: none
+
+  &:hover
+    opacity: 0.85
+
+  .agent-thought-header-left
+    display: flex
+    flex-direction: row
+    align-items: center
+    gap: 0.375em
+
+  .agent-chevron
+    display: inline-block
+    width: 9px
+    height: 5px
+    background-image: url("data:image/svg+xml,%3Csvg width='9' height='5' viewBox='0 0 9 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.353577 0.353516L4.35358 4.35352L8.35358 0.353515' stroke='%23DDDDDD' stroke-linejoin='round'/%3E%3C/svg%3E")
+    background-repeat: no-repeat
+    background-position: center
+    background-size: contain
+    transition: transform 0.15s ease
+    flex-shrink: 0
+
+    &.agent-chevron-collapsed
+      transform: rotate(-90deg)
+
+  .agent-thought-label
+    font-size: 0.8125rem
+    color: colors-ui-text-primary-label
+
+  .agent-thought-timestamp
+    font-size: 0.75rem
+    color: #727272
+    margin-left: auto
+    padding-left: 1em
+
+.agent-thought-collapsed
+  display: none !important
+
+.agent-inline-code
+  display: inline
+  font-family: "SpaceMono", monospace
+  color: colors-editor-action-primary
+  background: colors-ui-surface-primary-secondary
+  border-radius: 0.25em
+  padding: 0.05em 0.25em
+  font-size: 0.875em
+
+.agent-table-wrapper
+  overflow-x: auto
+  margin: 0.75em 0
+
+.agent-table
+  display: table
+  border-collapse: collapse
+  border: 1px solid colors-ui-border-primary
+  border-radius: 0.375em
+  overflow: hidden
+  min-width: 100%
+
+.agent-table-header-row
+  display: table-row
+  background: colors-ui-surface-primary-secondary
+
+.agent-table-header-cell
+  display: table-cell
+  padding: 0.5em 1em
+  border-bottom: 1px solid colors-ui-border-primary
+  border-right: 1px solid colors-ui-border-primary
+  font-weight: 600
+  font-size: 0.875rem
+  white-space: nowrap
+  color: colors-ui-text-primary-label
+  &:last-child
+    border-right: none
+
+.agent-table-row
+  display: table-row
+  border-bottom: 1px solid colors-ui-border-primary
+  &:last-child
+    border-bottom: none
+  &:hover
+    background: colors-ui-surface-primary-secondary
+
+.agent-table-cell
+  display: table-cell
+  padding: 0.5em 1em
+  border-right: 1px solid colors-ui-border-primary
+  font-size: 0.875rem
+  color: colors-ui-text-primary-label
+  vertical-align: top
+  &:last-child
+    border-right: none
+
+.agent-bold
+  font-weight: bold
+
+.agent-italic
+  font-style: italic
+
+.agent-bold-italic
+  font-weight: bold
+  font-style: italic
+
+.agent-strike
+  text-decoration: line-through
+
+.agent-code-block
+  display: block
+  background: colors-ui-surface-primary-secondary
+  border: 1px solid colors-ui-border-primary
+  border-radius: 0.25em
+  margin: 0.5em 0
+  overflow: hidden
+
+  .agent-code-block-lang
+    display: block
+    font-family: "SpaceMono", monospace
+    font-size: 0.75rem
+    color: colors-ui-text-primary-subtle
+    padding: 0.5em 0.75em 0.25em
+
+  .agent-code-block-content
+    display: block
+    font-family: "SpaceMono", monospace
+    color: colors-editor-action-primary
+    font-size: 0.875em
+    padding: 0.25em 0.75em 0.75em
+    white-space: pre
+    overflow-x: auto
 
 // RV-6 — the panel's explanation of a review's agent session: it is empty,
 // it could not be fetched, or the agent cannot replay sessions at all
@@ -507,8 +677,9 @@
 
 .msg-content
   padding: 0.25em 0.5em
-  display: flex
-  flex-direction: column
+  display: block
+  white-space: pre-wrap
+  word-break: break-word
 
 .ai-img
   height: 1.5em
@@ -623,6 +794,57 @@
 
     .user-option
       flex: 0 0 auto !important
+
+.permission-prompt
+  background: colors-ui-surface-primary-default
+  border: 1px solid colors-ui-border-error
+  border-radius: 0.25em
+  display: flex
+  flex-direction: column
+  gap: 0.5em
+  margin-top: 0.5em
+  margin-bottom: 0.5em
+  padding: 0.75em
+
+  .permission-header
+    display: flex
+    flex-direction: row
+    align-items: center
+    gap: 0.375em
+
+  .permission-dot
+    background-image: AGENT_PERMISSION_DOT_IMG
+    background-repeat: no-repeat
+    background-size: contain
+    background-position: center
+    width: 0.4375rem
+    height: 0.4375rem
+    flex-shrink: 0
+
+  .permission-action-label
+    font-size: 0.875rem
+    font-weight: 500
+    color: colors-red-400
+
+  .permission-description
+    font-size: 0.875rem
+    color: colors-ui-text-primary-default
+    line-height: 1.4
+
+  .permission-subtitle
+    font-size: 0.75rem
+    color: colors-ui-icon-primary-subtle
+    line-height: 1.4
+
+  .permission-buttons
+    display: flex
+    flex-direction: row
+    flex-wrap: wrap
+    gap: 0.5em
+    margin-top: 0.25em
+
+    button
+      flex: 0 0 auto !importantimportant
 
 .ai-status
   background-image: AI_LOADING_ANIMATION

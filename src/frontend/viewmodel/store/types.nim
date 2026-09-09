@@ -1107,6 +1107,9 @@ type
     diffs*: seq[AgentActivityDiffEntry]
     toolName*: string
     createdAt*: float
+    duration*: float
+      ## Seconds the agent spent generating this response. Set when stopReason
+      ## arrives; 0.0 while streaming or for user messages.
       ## AA-3 — the tool this row *is*, when it is a tool call rather than
       ## prose.  Empty for everything else, which is what makes it usable as
       ## the "is this a tool call at all" test.

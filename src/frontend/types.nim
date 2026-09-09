@@ -1094,6 +1094,7 @@ type
     isLoading*: bool
     sessionDiffs*: seq[DiffPreview]
     createdAt*: float
+    duration*: float
 
   AgentTerminal* = object
     id*: cstring
@@ -1126,6 +1127,7 @@ type
     reRecordInProgress*: bool
     wantsPassword*: bool
     wantsPermission*: bool
+    permissionDescription*: cstring
     wasCancelled*: bool
     terminals*: JsAssoc[cstring, AgentTerminal]
     terminalOrder*: seq[cstring]

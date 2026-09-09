@@ -11,7 +11,7 @@
 ## carries and filled the panel with a summary when what the reviewer came for
 ## is the session itself ("There is no 'DeepReview section' in this panel").
 
-import std/[options, tables, math]
+import std/[options, tables, math, strutils]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -101,6 +101,9 @@ type
       ## Called when the user picks a branch from the dropdown.
     onSettingsSelect*: proc()
       ## Callback for the settings button in the agent toolbar.
+    onPermissionResponse*: proc(kind: string)
+      ## Called when the user picks Allow once / Allow always / Deny.
+      ## `kind` is one of: "allow_once", "allow_always", "deny".
     afterDynamicRender*: proc()
     onOpenTestRecording*: proc(anchorId, testId: string;
                                policy: TraceOpenPolicy)
@@ -119,6 +122,219 @@ type
       ## (`AgentActivityVM.openEvidence`), and this fires only when it agreed.
 
 proc dateNowMs(): float {.importjs: "Date.now()".}
+proc wallClockTimeJs(ms: float): cstring
+  {.importjs: "new Date(#).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})".}
+
+proc wallClockTime*(createdAtMs: float): string =
+  when defined(js):
+    $wallClockTimeJs(createdAtMs)
+  else:
+    ""
+
+proc thoughtDuration*(durationSec: float): string =
+  if durationSec <= 0.0:
+    "Thinking"
+  elif durationSec < 60.0:
+    "Thought for " & $int(durationSec) & "s"
+  else:
+    let m = int(durationSec / 60.0)
+    let s = int(durationSec) mod 60
+    if s == 0:
+      "Thought for " & $m & "m"
+    else:
+      "Thought for " & $m & "m " & $s & "s"
+
+type
+  MsgSegKind = enum
+    mskText, mskCode, mskCodeBlock,
+    mskBold, mskItalic, mskBoldItalic, mskStrike,
+    mskTable
+
+  MsgSegment = object
+    kind: MsgSegKind
+    content: string
+    lang: string
+    rows: seq[seq[string]]
+
+proc isSeparatorLine(line: string): bool =
+  if line.len == 0 or line[0] != '|': return false
+  var hasDash = false
+  for ch in line:
+    if ch notin {'-', ':', ' ', '|'}: return false
+    if ch == '-': hasDash = true
+  hasDash
+
+proc parsePipeRow(line: string): seq[string] =
+  let parts = line.split('|')
+  for p in parts:
+    let cell = p.strip()
+    if cell.len > 0:
+      result.add(cell)
+
+proc parseInlineCode*(s: string): seq[MsgSegment] =
+  var i = 0
+  var cur = ""
+
+  template flushText() =
+    if cur.len > 0:
+      result.add(MsgSegment(kind: mskText, content: cur))
+      cur = ""
+
+  while i < s.len:
+    # Escape sequences: \* \_ \` \\ \~
+    if s[i] == '\\' and i + 1 < s.len and
+       s[i+1] in {'*', '_', '`', '\\', '~'}:
+      cur.add(s[i+1])
+      inc i, 2
+      continue
+
+    # Triple backtick code block
+    if i + 2 < s.len and s[i] == '`' and s[i+1] == '`' and s[i+2] == '`':
+      flushText()
+      inc i, 3
+      var lang = ""
+      while i < s.len and s[i] != '\n':
+        lang.add(s[i])
+        inc i
+      if i < s.len: inc i
+      var code = ""
+      while i < s.len:
+        if i + 2 < s.len and s[i] == '`' and s[i+1] == '`' and s[i+2] == '`':
+          inc i, 3
+          break
+        code.add(s[i])
+        inc i
+      if code.len > 0 and code[^1] == '\n':
+        code.setLen(code.len - 1)
+      result.add(MsgSegment(kind: mskCodeBlock, content: code, lang: lang))
+
+    # Double-backtick code span: `` content `` (can contain backtick characters)
+    elif i + 1 < s.len and s[i] == '`' and s[i+1] == '`' and
+         (i + 2 >= s.len or s[i+2] != '`'):
+      let j = s.find("``", i + 2)
+      if j >= 0:
+        flushText()
+        var code = s[i+2 ..< j]
+        # CommonMark: strip one leading/trailing space if both present
+        if code.len >= 2 and code[0] == ' ' and code[^1] == ' ':
+          code = code[1 ..< code.len - 1]
+        result.add(MsgSegment(kind: mskCode, content: code))
+        i = j + 2
+      else:
+        cur.add(s[i])
+        inc i
+
+    # Bold+italic ***
+    elif i + 2 < s.len and s[i] == '*' and s[i+1] == '*' and s[i+2] == '*':
+      let j = s.find("***", i + 3)
+      if j >= 0:
+        flushText()
+        result.add(MsgSegment(kind: mskBoldItalic, content: s[i+3 ..< j]))
+        i = j + 3
+      else:
+        cur.add(s[i])
+        inc i
+
+    # Bold **
+    elif i + 1 < s.len and s[i] == '*' and s[i+1] == '*':
+      let j = s.find("**", i + 2)
+      if j >= 0:
+        flushText()
+        result.add(MsgSegment(kind: mskBold, content: s[i+2 ..< j]))
+        i = j + 2
+      else:
+        cur.add(s[i])
+        inc i
+
+    # Italic *
+    elif s[i] == '*':
+      let j = s.find('*', i + 1)
+      if j > i:
+        flushText()
+        result.add(MsgSegment(kind: mskItalic, content: s[i+1 ..< j]))
+        i = j + 1
+      else:
+        cur.add(s[i])
+        inc i
+
+    # Strikethrough ~~
+    elif i + 1 < s.len and s[i] == '~' and s[i+1] == '~':
+      let j = s.find("~~", i + 2)
+      if j >= 0:
+        flushText()
+        result.add(MsgSegment(kind: mskStrike, content: s[i+2 ..< j]))
+        i = j + 2
+      else:
+        cur.add(s[i])
+        inc i
+
+    # Italic _ (only at word boundaries to avoid matching my_var_name)
+    elif s[i] == '_':
+      let prevOk = i == 0 or s[i-1] notin {'a'..'z', 'A'..'Z', '0'..'9', '_'}
+      let nextOk = i + 1 < s.len and s[i+1] notin {' ', '\n', '_'}
+      if prevOk and nextOk:
+        let j = s.find('_', i + 1)
+        let closeOk = j > i and (j + 1 >= s.len or
+          s[j+1] notin {'a'..'z', 'A'..'Z', '0'..'9', '_'})
+        if closeOk:
+          flushText()
+          result.add(MsgSegment(kind: mskItalic, content: s[i+1 ..< j]))
+          i = j + 1
+        else:
+          cur.add(s[i])
+          inc i
+      else:
+        cur.add(s[i])
+        inc i
+
+    # Inline code `
+    elif s[i] == '`':
+      inc i
+      var code = ""
+      while i < s.len and s[i] != '`':
+        code.add(s[i])
+        inc i
+      if i < s.len: inc i
+      if code.len == 0:
+        cur.add("``")
+      else:
+        flushText()
+        result.add(MsgSegment(kind: mskCode, content: code))
+
+    # GFM pipe table (must start at beginning of line)
+    elif s[i] == '|' and (i == 0 or s[i-1] == '\n'):
+      var lineEnd = i
+      while lineEnd < s.len and s[lineEnd] != '\n': inc lineEnd
+      let headerLine = s[i ..< lineEnd]
+      let sepStart = lineEnd + 1
+      if sepStart < s.len and s[sepStart] == '|':
+        var sepEnd = sepStart
+        while sepEnd < s.len and s[sepEnd] != '\n': inc sepEnd
+        let sepLine = s[sepStart ..< sepEnd]
+        if isSeparatorLine(sepLine):
+          flushText()
+          var tableRows: seq[seq[string]] = @[]
+          tableRows.add(parsePipeRow(headerLine))
+          var j = sepEnd + 1
+          while j < s.len and s[j] == '|':
+            var rowEnd = j
+            while rowEnd < s.len and s[rowEnd] != '\n': inc rowEnd
+            tableRows.add(parsePipeRow(s[j ..< rowEnd]))
+            j = if rowEnd < s.len: rowEnd + 1 else: rowEnd
+          result.add(MsgSegment(kind: mskTable, rows: tableRows))
+          i = j
+        else:
+          cur.add(s[i])
+          inc i
+      else:
+        cur.add(s[i])
+        inc i
+
+    else:
+      cur.add(s[i])
+      inc i
+
+  flushText()
 
 proc relativeTime*(createdAtMs: float): string =
   let nowMs = dateNowMs()
@@ -203,7 +419,13 @@ when defined(js):
   proc clipboardWriteText(text: cstring) {.importjs: "navigator.clipboard.writeText(#)".}
   proc classListAdd(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.add(#)".}
   proc classListRemove(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.remove(#)".}
+  proc classListToggle(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.toggle(#)".}
   proc jsQuerySelector(sel: cstring): isonim_dom.Element {.importjs: "document.querySelector(#)".}
+  proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element)
+    {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">'+e(v.slice(i+1,j))+'</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)""".}
+  proc setupInputHighlight(r: WebRenderer; ta: isonim_dom.Element;
+                           hl: isonim_dom.Element) =
+    setupInputHighlightJs(ta, hl)
 
   proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
     ## Dynamic collection hosts are stable, but their rows are rebuilt from VM
@@ -214,11 +436,17 @@ when defined(js):
   proc readInputValue(node: isonim_dom.Node): string =
     $node.inputValue()
 
+  proc dispatchInputEvent(el: isonim_dom.Element)
+    {.importjs: "#.dispatchEvent(new Event('input'))".}
+
   proc setInputElementValue(node: isonim_dom.Element; value: string) =
     node.setInputValue(cstring(value))
+    node.dispatchInputEvent()
 
 proc syncInputValue(r: MockRenderer; input: MockNode; value: string) =
   r.setAttribute(input, "value", value)
+
+proc setupInputHighlight(r: MockRenderer; ta: MockNode; hl: MockNode) = discard
 
 when defined(js):
   proc syncInputValue(r: WebRenderer; input: isonim_dom.Element; value: string) =
@@ -256,49 +484,156 @@ when defined(js):
 proc renderMessage[R](r: R; componentId: int;
                       message: AgentActivityMessageEntry): auto =
   let contentId = AgentActivityMessageContentClass & "-" & message.id
-  ui(r):
-    tdiv(class = messageWrapperClass(message.role)):
-      tdiv(class = "header-wrapper"):
-        tdiv(class = "content-header"):
-          tdiv(class = messageAvatarClass(message.role))
-          if message.role == aamrUser:
+  if message.role == aamrUser:
+    ui(r):
+      tdiv(class = "agent-msg-wrapper user-wrapper"):
+        tdiv(class = "header-wrapper"):
+          tdiv(class = "content-header"):
+            tdiv(class = "user-img")
             span(class = "user-timestamp"):
               text relativeTime(message.createdAt)
               if message.canceled:
-                span:
-                  text " (canceled)"
-          else:
-            span(class = "ai-name"):
-              text messageName(message.role)
+                span: text " (canceled)"
+          tdiv(class = "msg-controls"):
+            tdiv(class = "agent-user-copy-button",
+                 onclick = proc() =
+                   when defined(js):
+                     let content = message.content
+                     clipboardWriteText(cstring(content))
+                     let btn = jsQuerySelector(
+                       cstring(".agent-user-copy-button[data-id='" & message.id & "']"))
+                     if not btn.isNil:
+                       classListAdd(btn, cstring"copied")
+                       jsSetTimeout(proc() = classListRemove(btn, cstring"copied"), 2000),
+                 "data-id" = message.id)
+        tdiv(class = AgentActivityMessageContentClass, id = contentId):
+          for seg in parseInlineCode(message.content):
+            if seg.kind == mskText:
+              text seg.content
+            elif seg.kind == mskCode:
+              span(class = "agent-inline-code"): text seg.content
+            elif seg.kind == mskBold:
+              span(class = "agent-bold"): text seg.content
+            elif seg.kind == mskItalic:
+              span(class = "agent-italic"): text seg.content
+            elif seg.kind == mskBoldItalic:
+              span(class = "agent-bold-italic"): text seg.content
+            elif seg.kind == mskStrike:
+              span(class = "agent-strike"): text seg.content
+            elif seg.kind == mskTable:
+              tdiv(class = "agent-table-wrapper"):
+                tdiv(class = "agent-table"):
+                  if seg.rows.len > 0:
+                    tdiv(class = "agent-table-header-row"):
+                      for cell in seg.rows[0]:
+                        tdiv(class = "agent-table-header-cell"): text cell
+                    for rowIdx in 1 ..< seg.rows.len:
+                      let row = seg.rows[rowIdx]
+                      tdiv(class = "agent-table-row"):
+                        for cell in row:
+                          tdiv(class = "agent-table-cell"):
+                            for cellSeg in parseInlineCode(cell):
+                              if cellSeg.kind == mskText:
+                                text cellSeg.content
+                              elif cellSeg.kind == mskCode:
+                                span(class = "agent-inline-code"): text cellSeg.content
+                              elif cellSeg.kind == mskBold:
+                                span(class = "agent-bold"): text cellSeg.content
+                              elif cellSeg.kind == mskItalic:
+                                span(class = "agent-italic"): text cellSeg.content
+                              elif cellSeg.kind == mskBoldItalic:
+                                span(class = "agent-bold-italic"): text cellSeg.content
+                              elif cellSeg.kind == mskStrike:
+                                span(class = "agent-strike"): text cellSeg.content
+                              else:
+                                text cellSeg.content
+            else:
+              tdiv(class = "agent-code-block"):
+                if seg.lang.len > 0:
+                  span(class = "agent-code-block-lang"): text seg.lang
+                tdiv(class = "agent-code-block-content"): text seg.content
+  else:
+    # Agent message: collapsible thought block
+    let chevronId = "chevron-" & message.id
+    let durationLabel =
+      if message.isLoading and message.duration <= 0.0: "Thinking"
+      else: thoughtDuration(message.duration)
+    ui(r):
+      tdiv(class = "agent-msg-wrapper agent-thought-wrapper"):
+        tdiv(class = "agent-thought-header",
+             onclick = proc() =
+               when defined(js):
+                 let contentEl = jsQuerySelector(cstring("#" & contentId))
+                 let chevronEl = jsQuerySelector(cstring("#" & chevronId))
+                 if not contentEl.isNil:
+                   classListToggle(contentEl, "agent-thought-collapsed")
+                 if not chevronEl.isNil:
+                   classListToggle(chevronEl, "agent-chevron-collapsed")):
+          tdiv(class = "agent-thought-header-left"):
+            span(class = "agent-chevron", id = chevronId)
+            span(class = "agent-thought-label"):
+              text durationLabel
               if message.canceled:
-                span:
-                  text " (canceled)"
-          if message.role == aamrAgent and message.isLoading and
-             not message.canceled:
-            span(class = "ai-status")
-        tdiv(class = "msg-controls"):
-          tdiv(class = "agent-user-copy-button",
-               onclick = proc() =
-                 when defined(js):
-                   let content = message.content
-                   clipboardWriteText(cstring(content))
-                   let btn = jsQuerySelector(
-                     cstring(".agent-user-copy-button[data-id='" & message.id & "']"))
-                   if not btn.isNil:
-                     classListAdd(btn, cstring"copied")
-                     jsSetTimeout(proc() = classListRemove(btn, cstring"copied"), 2000),
-               "data-id" = message.id)
-      tdiv(class = AgentActivityMessageContentClass, id = contentId):
-        text message.content
-      for diffValue in message.diffs:
-        let diff = diffValue
-        tdiv(class = "component-wrapper"):
-          tdiv(class = "header-wrapper"):
-            tdiv(class = "task-name"):
-              text diff.path
-          tdiv(class = "agent-editor-wrapper"):
-            tdiv(class = "agent-editor",
-                 id = diffEditorId(componentId, diff.id))
+                span: text " (canceled)"
+            if message.isLoading and not message.canceled:
+              span(class = "ai-status")
+          span(class = "agent-thought-timestamp"):
+            text wallClockTime(message.createdAt)
+        tdiv(class = AgentActivityMessageContentClass, id = contentId):
+          for seg in parseInlineCode(message.content):
+            if seg.kind == mskText:
+              text seg.content
+            elif seg.kind == mskCode:
+              span(class = "agent-inline-code"): text seg.content
+            elif seg.kind == mskBold:
+              span(class = "agent-bold"): text seg.content
+            elif seg.kind == mskItalic:
+              span(class = "agent-italic"): text seg.content
+            elif seg.kind == mskBoldItalic:
+              span(class = "agent-bold-italic"): text seg.content
+            elif seg.kind == mskStrike:
+              span(class = "agent-strike"): text seg.content
+            elif seg.kind == mskTable:
+              tdiv(class = "agent-table-wrapper"):
+                tdiv(class = "agent-table"):
+                  if seg.rows.len > 0:
+                    tdiv(class = "agent-table-header-row"):
+                      for cell in seg.rows[0]:
+                        tdiv(class = "agent-table-header-cell"): text cell
+                    for rowIdx in 1 ..< seg.rows.len:
+                      let row = seg.rows[rowIdx]
+                      tdiv(class = "agent-table-row"):
+                        for cell in row:
+                          tdiv(class = "agent-table-cell"):
+                            for cellSeg in parseInlineCode(cell):
+                              if cellSeg.kind == mskText:
+                                text cellSeg.content
+                              elif cellSeg.kind == mskCode:
+                                span(class = "agent-inline-code"): text cellSeg.content
+                              elif cellSeg.kind == mskBold:
+                                span(class = "agent-bold"): text cellSeg.content
+                              elif cellSeg.kind == mskItalic:
+                                span(class = "agent-italic"): text cellSeg.content
+                              elif cellSeg.kind == mskBoldItalic:
+                                span(class = "agent-bold-italic"): text cellSeg.content
+                              elif cellSeg.kind == mskStrike:
+                                span(class = "agent-strike"): text cellSeg.content
+                              else:
+                                text cellSeg.content
+            else:
+              tdiv(class = "agent-code-block"):
+                if seg.lang.len > 0:
+                  span(class = "agent-code-block-lang"): text seg.lang
+                tdiv(class = "agent-code-block-content"): text seg.content
+        for diffValue in message.diffs:
+          let diff = diffValue
+          tdiv(class = "component-wrapper"):
+            tdiv(class = "header-wrapper"):
+              tdiv(class = "task-name"):
+                text diff.path
+            tdiv(class = "agent-editor-wrapper"):
+              tdiv(class = "agent-editor",
+                   id = diffEditorId(componentId, diff.id))
 
 proc testRunId*(anchorId: string): string =
   AgentActivityTestRunPrefix & anchorId
@@ -538,18 +873,38 @@ proc renderPasswordPrompt[R](r: R): auto =
                `type` = "button"):
           text "Continue"
 
-proc renderPermissionPrompt[R](r: R): auto =
+proc renderPermissionPrompt[R](r: R; vm: AgentActivityVM;
+                               callbacks: AgentActivityCallbacks): auto =
+  let description =
+    if vm.permissionInfo.val.len > 0: vm.permissionInfo.val
+    else: "The agent wants to perform an action"
   ui(r):
-    tdiv(class = "prompt-wrapper"):
-      tdiv(class = "header-wrapper"):
-        text "How are you"
-      tdiv(class = "user-options-wrapper"):
-        button(class = "ct-button-sm-secondary user-option",
-               `type` = "button"):
-          text "well"
-        button(class = "ct-button-sm-secondary user-option",
-               `type` = "button"):
-          text "bad"
+    tdiv(class = "permission-prompt"):
+      tdiv(class = "permission-header"):
+        tdiv(class = "permission-dot")
+        span(class = "permission-action-label"): text "Action needed"
+      tdiv(class = "permission-description"): text description
+      tdiv(class = "permission-subtitle"):
+        text "Runs in the sandbox · network off · can't touch your machine."
+      tdiv(class = "permission-buttons"):
+        button(class = "ct-button-sm-primary permission-allow-once",
+               `type` = "button",
+               onclick = proc() =
+                 if callbacks.onPermissionResponse != nil:
+                   callbacks.onPermissionResponse("allow_once")):
+          text "Allow once"
+        button(class = "ct-button-sm-secondary permission-allow-always",
+               `type` = "button",
+               onclick = proc() =
+                 if callbacks.onPermissionResponse != nil:
+                   callbacks.onPermissionResponse("allow_always")):
+          text "Allow always"
+        button(class = "ct-button-sm-secondary permission-deny",
+               `type` = "button",
+               onclick = proc() =
+                 if callbacks.onPermissionResponse != nil:
+                   callbacks.onPermissionResponse("deny")):
+          text "Deny"
 
 proc renderNewAgentButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
@@ -692,6 +1047,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
     callbacks: AgentActivityCallbacks): auto =
   var conversation: typeof(r.createElement("div"))
   var input: typeof(r.createElement("textarea"))
+  var highlight: typeof(r.createElement("div"))
   var buttons: typeof(r.createElement("div"))
   let inputIdValue = inputId(componentId, commandInputId)
 
@@ -702,20 +1058,23 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
       # between them any more — the roll-up that used to went with AA-1.
       tdiv(ref = conversation, class = AgentActivityConversationClass)
       tdiv(class = AgentActivityInteractionClass):
-        textarea(ref = input,
-                 `type` = "text",
-                 id = inputIdValue,
-                 name = "agent-query",
-                 placeholder = AgentActivityPlaceholderText,
-                 class = AgentActivityInputClass,
-                 autocomplete = "off",
-                 autocorrect = "off",
-                 autocapitalize = "off",
-                 rows = "1",
-                 spellcheck = "false")
+        tdiv(class = "agent-input-wrapper"):
+          tdiv(ref = highlight, class = "agent-input-highlight")
+          textarea(ref = input,
+                   `type` = "text",
+                   id = inputIdValue,
+                   name = "agent-query",
+                   placeholder = AgentActivityPlaceholderText,
+                   class = AgentActivityInputClass,
+                   autocomplete = "off",
+                   autocorrect = "off",
+                   autocapitalize = "off",
+                   rows = "1",
+                   spellcheck = "false")
         tdiv(ref = buttons, class = "agent-buttons-container")
 
   r.attachInputEvents(input, vm, callbacks)
+  r.setupInputHighlight(input, highlight)
 
   createRenderEffect proc() =
     let ph = if vm.messages.val.len > 0 or vm.terminals.val.len > 0:
@@ -771,7 +1130,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
       if vm.wantsPassword.val:
         r.appendRenderedChild(conversation, renderPasswordPrompt(r))
       if vm.wantsPermission.val:
-        r.appendRenderedChild(conversation, renderPermissionPrompt(r))
+        r.appendRenderedChild(conversation, renderPermissionPrompt(r, vm, callbacks))
     if callbacks.afterDynamicRender != nil:
       callbacks.afterDynamicRender()
 
