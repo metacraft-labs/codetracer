@@ -90,11 +90,14 @@ let
     # procedure above -- the previous values were real, so Nix would have
     # substituted the stale caches from the binary cache and never run the
     # builder, surfacing as ``YN0056: Cache entry required but missing``.
-    # x86_64-linux is left on the sentinel deliberately: this machine is
-    # aarch64-darwin, so the Linux ``got:`` can only be measured on CI. The
-    # first CI run on this branch will fail its Nix jobs with a hash mismatch
-    # and print the true value; paste it here before merging.
-    "x86_64-linux" = sentinelHash;
+    # Measured on CI (run 34337422212) after the sentinel forced a real build of
+    # yarn-cache.drv on x86_64-linux -- no Linux builder is configured on the
+    # machine this branch was prepared on, so this value could not be obtained
+    # locally. Three independent jobs -- test-non-gui (nixos, eph-linux-x64-g1),
+    # reprobuild-linux-smoke, and ct-test release gate (M16 provider matrix) --
+    # each built /nix/store/jkmf1s93nsmg5n2hyxc9hggwyj044yqv-yarn-cache.drv and
+    # reported this identical ``got:`` value.
+    "x86_64-linux" = "sha512-YOh4Lqjn3A2V2gYD+sspl5ZVOZJ+SCRPLHwp+DD03wq9t4eHQv2kXEv6aqhYW4ybT5itznWOe6E1SxfFDC57sg==";
     # Measured locally on aarch64-darwin: the sentinel above forced a real build
     # of yarn-cache.drv (no substitute can exist for it), and the mismatch
     # reported this ``got:``. Re-pinned and rebuilt to confirm it is stable.
