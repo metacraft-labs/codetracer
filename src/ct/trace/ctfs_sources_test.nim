@@ -191,3 +191,103 @@ suite "CTFS source materialization":
       check materializeCtfsSources(ctPath, outDir)
       let got = readFile(outDir / "paths.json")
       check not got.contains("\"" & PathA & "\"")
+
+# ---------------------------------------------------------------------------
+# meta.dat schema version
+# ---------------------------------------------------------------------------
+
+const
+  RecordingId = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb"
+  Program = "/workspace/project/src/main.c"
+  Workdir = "/workspace/project"
+  RecorderId = "ct-test/1.0"
+  SrcPaths = @["/workspace/project/src/main.c",
+               "/workspace/project/src/util.c"]
+
+proc buildMetaDat(version: uint16): string =
+  ## A complete ``meta.dat`` body stamped with an explicit version.
+  ##
+  ## The version is a parameter because the interesting fixture is the
+  ## one no current writer produces: bytes that are correct in every
+  ## other respect and differ only in the schema stamp. That single field
+  ## is the only thing in a container that tells the superseded
+  ## ``global_position_index`` packing apart from the current one, so it
+  ## has to be the only thing that varies here.
+  result.add "CTMD"
+  result.putU16Le(version)
+  result.putU16Le(0)  # flags — no optional blocks
+  result.putVarString(RecordingId)
+  result.putVarString(Program)
+  result.putLeb128(0)  # args
+  result.putVarString(Workdir)
+  result.putVarString(RecorderId)
+  result.putLeb128(uint64(SrcPaths.len))
+  for p in SrcPaths:
+    result.putVarString(p)
+
+proc writeContainerWithMetaDat(root: string, name: string, version: uint16): string =
+  result = root / name
+  writeMinimalCtfs(result, @[("meta.dat", buildMetaDat(version))])
+
+suite "CTFS meta.dat version gate":
+  test "the accepted version is the one with the corrected line encode":
+    ## Literals, not the constants under test: an assertion written as
+    ## `SupportedMetaDatVersion == SupportedMetaDatVersion` is an
+    ## equation nothing can fail.
+    check SupportedMetaDatVersion == 4'u16
+    check LastShiftedGlobalIndexVersion == 3'u16
+    check SupportedMetaDatVersion > LastShiftedGlobalIndexVersion
+
+  test "a current container is read, a superseded one is refused":
+    let root = getTempDir() / "ctfs-metadat-version-" & $getCurrentProcessId()
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+
+    # Both fixtures are byte-identical apart from the version stamp.
+    let currentBytes = buildMetaDat(SupportedMetaDatVersion)
+    let supersededBytes = buildMetaDat(LastShiftedGlobalIndexVersion)
+    check currentBytes.len == supersededBytes.len
+    check currentBytes[6 .. ^1] == supersededBytes[6 .. ^1]
+
+    let currentCt = writeContainerWithMetaDat(root, "current.ct",
+                                              SupportedMetaDatVersion)
+    let parsed = readCtfsMetaDat(currentCt)
+    check parsed.recordingId == RecordingId
+    check parsed.program == Program
+    check parsed.workdir == Workdir
+    check parsed.paths == SrcPaths
+
+    let supersededCt = writeContainerWithMetaDat(root, "superseded.ct",
+                                                 LastShiftedGlobalIndexVersion)
+    var refused = false
+    var message = ""
+    try:
+      discard readCtfsMetaDat(supersededCt)
+    except ValueError as e:
+      refused = true
+      message = e.msg
+    check refused
+    # Refused by name: the message has to say which version it rejected
+    # and why, or the operator is left with a trace that "just fails".
+    check message.contains("unsupported version 3")
+    check message.contains("global_position_index")
+    check message.contains("one line high")
+
+  test "a version past the accepted one is refused without the encode claim":
+    let root = getTempDir() / "ctfs-metadat-future-" & $getCurrentProcessId()
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+
+    let futureCt = writeContainerWithMetaDat(root, "future.ct",
+                                             SupportedMetaDatVersion + 1)
+    var message = ""
+    try:
+      discard readCtfsMetaDat(futureCt)
+    except ValueError as e:
+      message = e.msg
+    check message.contains("unsupported version 5")
+    # A version past the correction does not carry shifted addresses, so
+    # diagnosing it as such would be a guess dressed as a fact.
+    check not message.contains("one line high")

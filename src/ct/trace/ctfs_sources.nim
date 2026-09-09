@@ -2,9 +2,58 @@ import std/[json, os, sets, strutils, sequtils]
 
 import source_paths
 
+const
+  LastShiftedGlobalIndexVersion* = 3'u16
+    ## The highest ``meta.dat`` schema version whose writer packed a
+    ## line-only ``global_position_index`` as ``prefix_sums[file_id] +
+    ## line``.
+    ##
+    ## Named rather than spelled ``3`` at the comparison site so the bound
+    ## and the refusal it drives move together: a later version that
+    ## changed the packing again would raise it, and a reader comparing
+    ## against a stale literal would answer such a container instead of
+    ## refusing it.
+
+  SupportedMetaDatVersion* = 4'u16
+    ## The one ``meta.dat`` schema version this reader accepts.
+    ##
+    ## **One version, and it has to be one.** The tempting alternative —
+    ## accept ``{3, 4}``, since v4 changed no field of the header this
+    ## module decodes — reintroduces the exact defect the bump exists to
+    ## close. v3 and v4 differ not in the bytes of ``meta.dat`` but in
+    ## what the rest of the container's step addresses MEAN: a v3 writer
+    ## packed a line-only ``global_position_index`` as
+    ## ``prefix_sums[file_id] + line``, and v4 packs
+    ## ``prefix_sums[file_id] + (line - 1)``, the exact inverse of the
+    ## ``line = q + 1`` decode. Both land INSIDE the trace's own address
+    ## space, so accepting a v3 container fails nowhere: every step
+    ## resolves to a real file and a real line, each one exactly one line
+    ## above where it was recorded.
+    ##
+    ## The ``paths`` list this module returns is the file table those
+    ## addresses are indexed against, and it is what the importer writes
+    ## into the trace folder's ``paths.json``. Answering a v3 container
+    ## here therefore hands the frontend the file table for an address
+    ## space the backend is about to read one line high — or, since the
+    ## backend refuses v3 outright, a half-imported trace. Nothing else in
+    ## the container distinguishes the two encodes: ``recorder_id`` names
+    ## the producer, not its address packing, and the same recorders span
+    ## the change.
+    ##
+    ## Mirrors ``SUPPORTED_VERSIONS`` in
+    ## ``src/db-backend/src/ctfs_trace_reader/meta_dat.rs`` and
+    ## ``SUPPORTED_META_DAT_VERSIONS`` in
+    ## ``src/backend-manager/src/meta_dat.rs``, both ``&[4]``.
+    ##
+    ## A back-compat shim is not merely unimplemented, it is not
+    ## constructible: subtracting one from every address would correct a
+    ## trace whose writer used the old packing, and the version is
+    ## precisely what would have said that it did. Pre-1.0, v3 containers
+    ## are re-recorded rather than read.
+
 type
   CtfsMetaDat* = object
-    ## Subset of the v3 ``meta.dat`` payload that the Nim importer
+    ## Subset of the ``meta.dat`` payload that the Nim importer
     ## consumes.  Mirrors the fields used to populate the trace index.
     ## M-REC-1.5 made this the canonical metadata source — legacy
     ## ``trace_metadata.json`` and ``trace_db_metadata.json`` sidecars
@@ -65,6 +114,17 @@ proc openCtfs(path: string): CtfsReader =
   for i, b in CtfsMagic:
     if byte(result.data[i].ord) != b:
       raise newException(ValueError, "invalid CTFS magic")
+  # The CTFS *container* version, at offset 5 of the ``.ct`` file. It is a
+  # different number from the ``meta.dat`` schema version that
+  # ``parseCtfsMetaDat`` gates on, and the two move independently.
+  #
+  # A set is right here where a singleton is right there. This byte
+  # describes the block-and-mapping layout that locates internal files;
+  # every version in the set addresses blocks identically, so reading a v2
+  # container yields the same bytes a v4 one would. It says nothing about
+  # what those bytes MEAN — in particular nothing about how a step's
+  # ``global_position_index`` is packed — so it cannot stand in for the
+  # ``meta.dat`` gate, and widening it does not widen that one.
   let version = result.data[5].ord
   if version notin {2, 3, 4}:
     raise newException(ValueError, "unsupported CTFS version")
@@ -444,8 +504,9 @@ proc readVarStringFromMetaDat(data: string, pos: var int): string =
   pos += len
 
 proc parseCtfsMetaDat(data: string): CtfsMetaDat =
-  ## Parse the v3 ``meta.dat`` payload.  Only the fields the importer
-  ## consumes are decoded; the remainder of the block is left untouched.
+  ## Parse the ``meta.dat`` payload at ``SupportedMetaDatVersion``.  Only
+  ## the fields the importer consumes are decoded; the remainder of the
+  ## block is left untouched.
   ##
   ## Wire format reference:
   ## ``codetracer-trace-format-nim/src/codetracer_trace_writer/meta_dat.nim``
@@ -453,7 +514,6 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
   ## sufficient for M-REC-1.5; if more fields ever need surfacing here,
   ## consider promoting the body to the shared trace-format-nim package.
   const Magic: array[4, byte] = [byte 0x43, 0x54, 0x4D, 0x44]
-  const Version: uint16 = 3
   const FlagHasMcrFields: uint16 = 1
   const FlagHasReplayLaunchFields: uint16 = 2
   const FlagHasLayoutSnapshot: uint16 = 4
@@ -465,10 +525,17 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
     if byte(data[i].ord) != Magic[i]:
       raise newException(ValueError, "meta.dat: bad magic")
   let version = uint16(data[4].ord) or (uint16(data[5].ord) shl 8)
-  if version != Version:
+  if version != SupportedMetaDatVersion:
+    let detail =
+      if version <= LastShiftedGlobalIndexVersion:
+        " — its step addresses use the superseded global_position_index " &
+        "packing (prefix_sums[file_id] + line), which the current decode " &
+        "reads one line high; re-record the trace"
+      else:
+        " — this reader predates that version"
     raise newException(ValueError,
       "meta.dat: unsupported version " & $version &
-      " (M-REC-1.5 retired v1/v2; expected " & $Version & ")")
+      " (expected " & $SupportedMetaDatVersion & ")" & detail)
   let flags = uint16(data[6].ord) or (uint16(data[7].ord) shl 8)
 
   var pos = 8
