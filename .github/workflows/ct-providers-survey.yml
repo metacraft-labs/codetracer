@@ -1,0 +1,204 @@
+name: ct-test-providers survey
+
+# TEMPORARY observation harness. Runs ONLY the `ct-test cross-language
+# provider gate` job from codetracer.yml, copied verbatim, so the gate can be
+# observed without occupying runner slots with the other forty-one jobs.
+# This file is never merged to dev.
+on:
+  push:
+    branches:
+      - ci/ct-providers-survey
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  ct-test-providers:
+    runs-on: eph-linux-x64-g1  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # NO GREEN SAMPLE: 0 success in 46 records. Failures stop at step 6 of 11
+    # (the provider gate itself), so 19.3m is a LOWER bound. 60m is ~3.1x it.
+    timeout-minutes: 60
+    name: ct-test cross-language provider gate
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+          skip-token-revoke: false
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup dev env
+        # ci/test/ct-providers.sh requires three recorder siblings checked out
+        # at ../<repo> and builds each through its own pinned dev shell
+        # (scripts/build-siblings.sh -> `direnv exec <repo> just build`). Without
+        # them the script aborts in its very first suite, which is why it could
+        # never simply be dropped into an existing job.
+        #
+        # setup-dev-env clones them adjacent to this checkout at
+        # pinned `dev` refs — the same mechanism
+        # `visual-replay-regression-gate` and `test-non-gui` already use, so
+        # this is not new infrastructure. The trace-format / io-mon /
+        # stackable-hooks / nim-shm-queue entries are the native recorder's own
+        # build dependencies, mirroring the visual gate's sibling list.
+        #
+        # codetracer-native-backend is listed for the NATIVE RECORDER's sake,
+        # not this job's: `build-siblings.sh` runs `just build-ct-mcr`, whose
+        # `build-license-ffi` recipe opens with
+        # `cd ../codetracer-native-backend && ...` to build `ct_license_ffi` out
+        # of the backend checkout. Without it:
+        #
+        #   sh: line 1: cd: ../codetracer-native-backend: No such file or directory
+        #   error: could not find `Cargo.toml` in `.../codetracer-native-recorder`
+        #   error: Recipe `build-license-ffi` failed on line 123 with exit code 101
+        #
+        # The recipe `&&`-chains only its first link and uses `;` after, so the
+        # failed `cd` does not abort it -- cargo just runs in the recorder root,
+        # which has no root Cargo.toml, and the error names the wrong repo.
+        #
+        # A gap in this list, not in the lock: the recipe is byte-identical at
+        # the last lock-pinned recorder revision (196f95c9, 2026-07-07) and at
+        # today's `dev`, and neither revision has a root Cargo.toml, so the
+        # lock-pinned build would have failed the same way. It stayed invisible
+        # because this job could not get past `Setup dev env` to reach it.
+        #
+        # codetracer-visual-replay is here for the same reason, one layer on:
+        # once the backend is present, `build-license-ffi` succeeds and the
+        # build reaches `cd ct_cli && nimble build`, which imports
+        # `gfx_stream/ctfs_visual` -- a module that lives in
+        # codetracer-visual-replay/src/gfx_stream, not in the recorder:
+        #
+        #   ct_cli/src/ct_cli/extract_gfx_cmd.nim(39, 18)
+        #     Error: cannot open file: gfx_stream/ctfs_visual
+        #   error: Recipe `build-ct-mcr` failed on line 43 with exit code 1
+        #
+        # `visual-replay-regression-gate` already lists it. Same missing-sibling
+        # class as the backend above, uncovered only because fixing the first
+        # one let the build run far enough to hit the second.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          siblings: |
+            nim-everywhere=dev
+            codetracer-trace-format=dev
+            codetracer-trace-format-nim=dev
+            io-mon=e2ee15afe8dd7f538ec2ce79af9a1aa512addce2
+            nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
+            nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
+            nim-stackable-hooks=dev
+            codetracer-native-recorder=dev
+            codetracer-js-recorder=dev
+            codetracer-ruby-recorder=dev
+            codetracer-native-backend=dev
+            codetracer-visual-replay=dev
+
+      - name: Allow direnv in the cloned recorder siblings
+        # scripts/build-siblings.sh runs every sibling build as
+        # `direnv exec <repo> …` so the repo's own flake pins its toolchain. A
+        # freshly cloned .envrc is in direnv's "blocked" state, so without this
+        # the build step fails (or silently falls back to the wrong PATH) —
+        # the same hazard `test-non-gui` handles for codetracer-beam-recorder.
+        run: |
+          set -euo pipefail
+          for sibling in codetracer-native-recorder codetracer-js-recorder codetracer-ruby-recorder; do
+            nix develop .#devShells.x86_64-linux.default -c \
+              direnv allow "${{ github.workspace }}/../${sibling}"
+          done
+
+      - name: Run the cross-language ct-test provider gate
+        # No CT_PROVIDERS_ALLOW_MISSING / CT_PROVIDERS_SKIP_SIBLINGS: a missing
+        # or unbuildable recorder must fail this job, not silently degrade the
+        # recording assertions into checks of nothing.
+        env:
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # codetracer-native-recorder depends on the PRIVATE metacraft-labs/lldb-sys.rs.
+          # Cargo's default libgit2 transport does not read gitconfig, so it never
+          # presents the org-scoped extraHeader that `Setup dev env` installs job-wide
+          # (GIT_CONFIG_KEY_0/VALUE_0/COUNT) and reports the resulting 401 as the
+          # misleading "revision ... not found". Forcing the git CLI makes cargo use
+          # that credential, exactly as the dmg-build and visual-replay lanes already do.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        # SURVEY VARIANT. Same siblings, same dev shell, same suites, same
+        # commands as ci/test/ct-providers.sh -- but it does NOT stop at the
+        # first failing suite. The real gate must stop; this harness exists to
+        # enumerate every remaining fault in one run instead of one CI
+        # round-trip per fault. It still exits non-zero if anything failed.
+        run: |
+          nix develop '.?submodules=1' --command bash -euo pipefail -c '
+            source ci/lib/nim-cache-root.sh
+            cache_root="$(ct_nim_cache_root "$PWD")"
+            mkdir -p "$cache_root"
+
+            sibling_status=0
+            for sibling in codetracer-native-recorder codetracer-js-recorder codetracer-ruby-recorder; do
+              if ! bash scripts/build-siblings.sh --only "$sibling"; then
+                echo "SURVEY-SIBLING-FAIL $sibling"
+                sibling_status=1
+              fi
+            done
+
+            suites="
+            src/ct_test/cpp_providers_test.nim
+            src/ct_test/m11_native_languages_test.nim
+            src/ct_test/m12_fallback_languages_test.nim
+            src/ct_test/noir_providers_test.nim
+            src/ct_test/js_providers_test.nim
+            src/ct_test/ruby_providers_test.nim
+            src/ct_test/contracts_test.nim
+            src/ct_test/discovery_test.nim
+            src/ct_test/run_orchestration_test.nim
+            src/ct_test/release_gate_test.nim
+            "
+
+            results=""
+            for suite in $suites; do
+              name="$(basename "$suite" .nim)"
+              echo "===== SURVEY-BEGIN $suite"
+              tunables=""
+              if [ "$name" = "run_orchestration_test" ]; then
+                tunables="glibc.pthread.stack_cache_size=0"
+              fi
+              if GLIBC_TUNABLES="$tunables" nim c -r --hints:off --warnings:off --threads:on \
+                   --nimcache:"$cache_root/ct-providers-$name" \
+                   -o:"$cache_root/ct-providers-$name-bin" \
+                   "$suite"; then
+                echo "===== SURVEY-PASS $suite"
+                results="$results PASS:$name"
+              else
+                echo "===== SURVEY-FAIL $suite"
+                results="$results FAIL:$name"
+              fi
+            done
+
+            echo "===== SURVEY SUMMARY"
+            for r in $results; do echo "  $r"; done
+            case "$results$sibling_status" in
+              *FAIL:*) exit 1 ;;
+            esac
+            [ "$sibling_status" -eq 0 ] || exit 1
+          '
+
+      - name: Upload sibling build logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ct-test-providers-sibling-logs
+          # scripts/build-siblings.sh captures each recorder build into
+          # .tools/build-siblings-logs/<repo>.log (LOG_DIR in that script);
+          # without them a sibling build failure reports only its exit code.
+          path: .tools/build-siblings-logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
