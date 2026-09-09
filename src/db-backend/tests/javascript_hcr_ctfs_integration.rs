@@ -13,72 +13,91 @@
 //! This exercises the trace's ability to capture values across a code reload
 //! boundary within a single recorded execution.
 //!
-//! # CURRENTLY FAILING — this test reports a real product defect (2026-09-09)
+//! # History: two defects this test found, both now fixed (2026-09-09)
 //!
-//! **Do not "fix" this by weakening the assertions.** Until 2026-09-09 this
-//! test passed while asserting nothing: it recorded with a *file* entry, so the
-//! recorded program died at its first `require` (see [`record_hcr_trace`]), and
-//! both value checks sat behind `if let Some(..)` escape hatches whose bodies
-//! never ran. Wall clock was 0.10 s against python's 4.27 s and ruby's 0.37 s.
+//! **Do not weaken these assertions.** They were made unconditional on purpose
+//! and each one caught something real.
 //!
-//! With the recording bug fixed the program now runs to completion (12 steps,
-//! reload at step 7) and the breakpoint resolves to the requested line — but a
-//! recorder-side defect remains:
+//! ## 1. The green that asserted nothing
 //!
-//! > Recording a JavaScript program that **overwrites an already-`require`d
-//! > module file** corrupts cross-file step attribution for the *whole* trace,
-//! > including steps recorded long before the overwrite. Re-`require`ing the
-//! > overwritten module makes it drastically worse.
+//! Until 2026-09-09 this test passed in 0.10 s (python: 4.27 s) while checking
+//! nothing: it recorded with a *file* entry, so the recorded program died at its
+//! first `require` (see [`record_hcr_trace`] for why the entry must be the
+//! program DIRECTORY), and both value checks sat behind `if let Some(..)`
+//! escape hatches whose bodies never ran. The stop line was never asserted
+//! either, so nobody noticed the debugger stopping at `index.js:6` when line 23
+//! had been requested.
 //!
-//! Evidence, all gathered with this exact test body on Linux x86_64
-//! (2026-09-09), varying **only** the fixture's `if (counter === 7)` block and
-//! holding `index.js`'s line numbering fixed. The measurement is the flow
-//! window `ct/load-flow` returns at the step-3 stop, plus whether the test's
-//! pre-reload half survives:
+//! ## 2. The cross-file step mis-attribution it then exposed
 //!
-//! | fixture variant                                       | stop `rr_ticks` | flow steps | pre-reload half |
-//! |-------------------------------------------------------|-----------------|------------|-----------------|
-//! | reload block replaced by no-ops                        | 64              | 170        | PASSES — `value=6`, `counter=3` |
-//! | `require.cache` evict + re-`require`, file NOT changed  | 64              | 172        | PASSES — `value=6`, `counter=3` |
-//! | file overwritten, NOT re-`require`d                    | **11**          | 167        | FAILS — `value` reads back as **2** |
-//! | **both** (the real fixture)                            | 30              | **3**      | FAILS — `value` not readable at all |
+//! With the recording fixed the program ran to completion, and the test went
+//! red against a genuine `codetracer-js-recorder` defect: **every step recorded
+//! outside the first instrumented file was attributed to a line of that first
+//! file.**
 //!
-//! **Read row three carefully: the overwrite alone already corrupts the
-//! trace.** An earlier write-up of this defect asserted that neither half
-//! reproduces on its own and only the combination does; that is wrong, and row
-//! three is the counter-example. What the re-`require` adds is severity.
+//! Mechanically: the instrumenter emits `__ct.step(siteId)` / `__ct.enter(fnId)`
+//! with the ids as bare numeric literals, and the recorder resolves them by
+//! indexing the merged manifest's `sites` / `functions` arrays. But each file
+//! was instrumented with its own `ManifestBuilder`, numbering from zero, and
+//! `mergeManifestSlices` then concatenated the per-file arrays — renumbering the
+//! manifest's internal `fnId` references while the emitted code kept the local
+//! ids. So `mymodule.js`'s `__ct.step(21)` resolved against `index.js`'s site
+//! 21. In this fixture that is `index.js:23` — the breakpoint line — which is
+//! why the debugger stopped on a phantom `index.js:23` step that was really the
+//! `mymodule.js` module-body step from the initial `require`.
 //!
-//! As far as the evidence goes, the shape of the corruption is a **cross-file
-//! step/line mis-attribution**: a step recorded *inside* `mymodule.js` while the
-//! initial `require` runs (`rr_ticks` 6..11, before `index.js:8` at
-//! `rr_ticks=12` — so it cannot be an `index.js` step) surfaces inside
-//! `index.js`'s flow window carrying a **bogus line number** — 19 with the
-//! no-op block, 20 with re-`require`-only, 23 with overwrite-only. 23 is the
-//! breakpoint line, which is why the overwrite-only case stops the debugger on
-//! that phantom step instead of loop iteration 3. So the attribution is already
-//! wrong *with no reload at all*; the fixture only decides which wrong line the
-//! phantom lands on, and therefore whether the test notices.
+//! That also explains the control experiment recorded here earlier: editing the
+//! `if (counter === 7)` block changed *how many sites* `index.js` contributes,
+//! so it moved which wrong line the phantom landed on (19 / 20 / 23) and
+//! therefore whether the test noticed — while adding ~90 bytes to each line of
+//! the same block moved it not at all, because the mapping was by site INDEX,
+//! never by byte offset. The per-path line-length table
+//! (`ManifestBuilder.setLineLengths` → `register_path_with_line_lengths`) was
+//! never implicated.
 //!
-//! **What the evidence does NOT establish is a root cause.** The obvious
-//! suspect is the per-path line-length table the instrumenter records
-//! (`ManifestBuilder.setLineLengths`, forwarded to the writer as
-//! `register_path_with_line_lengths`) and that CTFS uses to resolve
-//! `global_position_index` <-> `(line, column)`. But re-running the no-op and
-//! overwrite-only variants with ~90 extra bytes on each line of the block moved
-//! the phantom's decoded line **not at all** (19 stayed 19, 23 stayed 23),
-//! which is not how a byte-offset decode against a line-length table behaves.
-//! Treat that table as the first hypothesis to test, not as the diagnosis.
+//! **The defect was not HCR-specific, and that is the bigger half of the
+//! finding.** The mechanism needs only more than one instrumented file — no
+//! reload, no overwrite — so *every* multi-file JavaScript recording carried
+//! wrong step attribution. Reproduced on a two-file program with no reload at
+//! all. This test is where it surfaced, not what it was about.
 //!
-//! One cause *is* ruled out: "two instrumented manifest slices for one module
-//! path". Generating the replacement content inline via `fs.writeFileSync`, so
-//! that `mymodule_v2.js` never exists and only one instrumented slice is ever
-//! produced for the reloaded path, reproduces the real fixture's failure
-//! exactly — 3-step flow, same `rr_ticks=30` stop.
+//! Fixed in `codetracer-js-recorder` by minting manifest ids in the merged
+//! numbering at instrumentation time (`InstrumentOptions.idBases` /
+//! `nextManifestIdBases`), with the merge now refusing a slice that would land
+//! anywhere other than its declared base. Pinned there by
+//! `tests/transform/manifest-id-spaces.test.ts`.
 //!
-//! The python and ruby HCR tests do not hit this: their reload mechanisms
-//! (`importlib.reload` / Ruby `load`) do not overwrite a recorded source file
-//! on disk mid-recording. Both are green with the same four assertions
-//! (python 112 flow steps, ruby 135).
+//! Measured after the fix (Linux x86_64, 2026-09-09): 169 flow steps at both
+//! stops, `value=6`/`counter=3` pre-reload and `value=27`/`counter=9`
+//! post-reload. The on-disk step stream now shows the initial `require` as five
+//! `mymodule.js` steps (lines 1, 3, 8, 13, 18) where it previously showed five
+//! `index.js` steps at lines 1, 6, 12, 23, 24.
+//!
+//! The python and ruby HCR tests never hit this — their recorders emit
+//! `(path, line)` per step rather than an index into a merged manifest, so there
+//! is no cross-file id space to get wrong. Both are green with the same four
+//! assertions (python 112 flow steps, ruby 135).
+//!
+//! # A caveat on the 169, and a defect this test does NOT cover
+//!
+//! 169 is not the clean analogue of python's 112. Only **95** of those steps are
+//! `index.js`'s own; the other 74 are `mymodule.js` / `mymodule_v2.js` steps
+//! rendered at `index.js` line numbers. The tell is `index.js:13`, which the flow
+//! reports 24 times for a loop that runs 12 — 12 real `if (counter === 7)` steps
+//! plus 12 `mymodule.js:13` (`function aggregate`) steps collapsed onto the same
+//! number. Python's flow for the same program shape contains no `mymodule.py`
+//! lines at all.
+//!
+//! This is NOT the id-space defect returning: the container decodes every step to
+//! the right path now (verified by dumping `steps.dat` against `paths.dat`). It is
+//! that the JS recorder emits a function's declaration-line step *before* opening
+//! the call, so that step carries the caller's `call_key` — in the container,
+//! `mymodule.js:3` has `call_key=0` (`index.js`'s module frame) while the body
+//! step `mymodule.js:5` that follows has `call_key=2`. `ct/load-flow` filters by
+//! `call_key` correctly and is handed mis-framed steps. Same family of harm, one
+//! layer up, and still open; it is tracked in
+//! `codetracer-specs/Testing/Known-Test-Failures.md`. Do not "fix" the count by
+//! asserting on it here — this test's contract is the four value/line assertions.
 
 mod test_harness;
 
@@ -100,57 +119,6 @@ const PRE_RELOAD_EXPECTED_VALUE: i64 = 6;
 
 /// Expected value of `value` at step 9 (post-reload, v2: 9*3).
 const POST_RELOAD_EXPECTED_VALUE: i64 = 27;
-
-/// Printed after the panic message whenever this test fails, so that a human
-/// scanning a CI log can tell this red apart from one their change caused.
-///
-/// The test is *not* quarantined, and deliberately so.
-///
-/// - This repo's Rust side has no expected-failure registry to reuse. The one
-///   that exists — `ci/lib/known-test-failures.tsv` + `ci/lib/known_failures.py`
-///   — is wired only into the Nim lanes (`ci/lib/run-nim-test-lane.sh`); there
-///   is no nextest/libtest consumer.
-/// - The repo has an explicit written policy *against* the obvious substitute:
-///   see `stylus_flow_dap_test.rs` — "no `#[ignore]`, no silent skips, no
-///   weakened assertions; the failure stays visible and the test stays
-///   authoritative".
-/// - An honest red cannot rot. The day the recorder defect is fixed this test
-///   turns green by itself, with nothing to un-register; a quarantine would
-///   have to be noticed and removed by hand.
-/// - Measured 2026-09-09: **no CI lane goes red on this today.** The lanes that
-///   reach it (`test-non-gui` via `just test-rust`, and `windows-rust-components`
-///   via bare `cargo test`) do not clone or build `codetracer-js-recorder`, so
-///   `find_js_recorder()` returns `None` there and the prerequisite path runs
-///   instead. The red is visible to developers with the sibling built. Wiring
-///   the sibling into one of those lanes is the outstanding work; there is
-///   nothing to gate away in the meantime.
-///
-/// The standing ledger entry lives in
-/// `codetracer-specs/Testing/Known-Test-Failures.md`.
-const KNOWN_DEFECT_NOTE: &str = "\
-\n*** KNOWN, DELIBERATE FAILURE — this test is red on purpose. ***\n\
-*** It reports a codetracer-js-recorder defect: recording a program that overwrites an\n\
-*** already-`require`d module file corrupts cross-file step/line attribution for the\n\
-*** whole trace. See the module header of this file for the control experiment, and\n\
-*** codetracer-specs/Testing/Known-Test-Failures.md for the ledger entry.\n\
-*** Until 2026-09-09 this test was GREEN AND VACUOUS. Do not restore that by weakening\n\
-*** these assertions — the only acceptable ways out are fixing the recorder or\n\
-*** proving the expectation itself wrong.\n";
-
-/// Emits [`KNOWN_DEFECT_NOTE`] if — and only if — the test is unwinding.
-///
-/// A `Drop` guard rather than a suffix on each `assert!` message: it covers
-/// every failure path in the test, including ones added later, and it costs
-/// nothing on a green run.
-struct KnownDefectNote;
-
-impl Drop for KnownDefectNote {
-    fn drop(&mut self) {
-        if std::thread::panicking() {
-            eprintln!("{}", KNOWN_DEFECT_NOTE);
-        }
-    }
-}
 
 /// Return the path to the HCR test program directory (in-repo).
 fn get_hcr_program_dir() -> PathBuf {
@@ -249,11 +217,17 @@ fn record_hcr_trace(
         ));
     }
 
-    // The recorder exits 0 even when the *recorded program* aborts — it only
-    // prints `Warning: recorded program exited with code N` and still writes
-    // the (truncated) trace. Treating that as success is how this test used
-    // to pass against a program that never ran past its first `require`.
-    // Fail loudly instead.
+    // Second, independent check on the same condition. The recorder USED to
+    // exit 0 even when the recorded program aborted — it printed
+    // `Warning: recorded program exited with code N`, still wrote the truncated
+    // trace, and the `status.success()` check above passed. That is how this
+    // test reported success for two months against a program that never ran
+    // past its first `require`.
+    //
+    // The recorder now propagates the child's exit code
+    // (`Recorder-CLI-Conventions.md` §6), so the check above does catch it. This
+    // one stays because it is the only thing that would notice a regression in
+    // that propagation — a status check cannot detect its own blind spot.
     let combined = format!("{}{}", stdout, stderr);
     if combined.contains("recorded program exited with code") {
         return Err(format!(
@@ -359,10 +333,6 @@ fn test_javascript_hcr_ctfs_integration() {
         );
         return;
     }
-
-    // Armed only once the prerequisite is satisfied: a missing recorder is a
-    // skip, not this defect, and must not be labelled as it.
-    let _known_defect_note = KnownDefectNote;
 
     // Get Node.js version for labeling
     let version_label = std::process::Command::new("node")
