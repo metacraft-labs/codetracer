@@ -36,6 +36,13 @@
 #
 #   lint_summary
 #
+# EVERY CALL BELONGS TO ONE SHELL — the one that sourced this file. The report
+# lives in shell arrays, so a `lint_step` inside a pipeline stage or a `while
+# read` loop records into a subshell that then exits, and a `lint_summary` in a
+# pipeline stage has its exit status swallowed. Both are refused rather than
+# documented; see the block above the array declarations for why each one had
+# to be caught where it is.
+#
 # Ordering is still yours to choose, and still matters for a different reason:
 # a reader watching the log should learn about the cheap, always-runnable
 # failures first. Put the pure-bash guards ahead of anything that needs a
@@ -77,9 +84,49 @@ LINT_STEP_QUARANTINE_RC=78
 # contract rather than decoration.
 LINT_SUMMARY_HEADER='=== lint summary ==='
 
-_lint_step_names=()
-_lint_step_verdicts=()
-_lint_step_codes=()
+# THE RECORD, AND THE TWO WAYS A VERDICT COULD STILL GO MISSING
+# -------------------------------------------------------------
+# The block below is the accumulator every verdict has to survive in. Two
+# shapes could empty it, and both reproduced — through this library — exactly
+# the defect the library was written to kill: a step printed `--> FAILED` in
+# the log while the job exited 0.
+#
+#   (1) A SECOND `source`. These three arrays used to be reinitialised on
+#       every source, so a helper that sourced this file after the caller had
+#       already recorded steps silently discarded every one of them. The
+#       initialisation is therefore guarded: sourcing this file again is a
+#       no-op, and a re-source cannot erase a verdict.
+#
+#   (2) A STEP RECORDED IN A SUBSHELL. `lint_step` inside a pipeline stage, a
+#       `while read` loop or a command substitution appends to a COPY of the
+#       arrays that dies with the subshell. Nothing appended there can reach
+#       the parent, so — unlike (1) — this cannot be fixed by making the
+#       record survive; it has to be REFUSED where it happens, which is what
+#       the BASHPID check at the top of lint_step does. lint_summary carries
+#       the mirrored check for the same reason: run as a pipeline stage its
+#       non-zero return is swallowed, and a swallowed verdict is the same bug
+#       wearing the other hat.
+if [ -z "${_LINT_STEPS_SOURCED:-}" ]; then
+	_LINT_STEPS_SOURCED=1
+
+	_lint_step_names=()
+	_lint_step_verdicts=()
+	_lint_step_codes=()
+
+	# The shell that owns the record. Source time is the only moment at which
+	# "the shell whose arrays these are" is knowable, so it is captured here
+	# and compared against BASHPID at every entry point that depends on it.
+	_lint_steps_owner_pid=$BASHPID
+fi
+
+# _lint_in_owner_shell — true when the caller is the shell that owns the record.
+#
+# Defensive about an unset owner pid (someone defining these functions without
+# sourcing the file): with nothing to compare against, the check cannot make a
+# finding and must not manufacture one.
+_lint_in_owner_shell() {
+	[ -z "${_lint_steps_owner_pid:-}" ] || [ "${BASHPID}" = "${_lint_steps_owner_pid}" ]
+}
 
 # _lint_rule — the banner separating steps in the log.
 _lint_rule() {
@@ -103,6 +150,32 @@ _lint_record() {
 # in the summary, and ci/test/lint-step-isolation-test.sh reads the declared
 # names straight out of the script to assert every one of them reported.
 lint_step() {
+	# Refuse to run at all from a subshell. A step recorded here would append
+	# to a copy of the arrays that dies with this shell, so the check would
+	# run, print its verdict, and then be counted by nobody — `--> FAILED` in
+	# the log and `0 FAILED` in the summary. There is no way to push the
+	# record back into the parent, so the only honest thing to do is not
+	# pretend to have recorded it.
+	#
+	# This is the one path that returns non-zero, and the exception is
+	# deliberate: the always-return-0 contract exists so a RED STEP cannot
+	# abort the caller, and this is not a red step, it is a caller-side misuse
+	# with no result at all. Returning non-zero gives the caller's `set -e` /
+	# `pipefail` a chance to turn the misuse into a red job at the point where
+	# it can still be read, instead of a green one at the end.
+	if ! _lint_in_owner_shell; then
+		printf '\n'
+		_lint_rule
+		printf 'lint_step called from a subshell: %s\n' "${1:-<unnamed step>}"
+		_lint_rule
+		printf 'lint-steps: refusing to run this step. lint_step appends to shell\n' >&2
+		printf 'arrays, so a step run inside a pipeline stage, a while-read loop or a\n' >&2
+		printf 'command substitution reports its verdict into a subshell that then exits,\n' >&2
+		printf 'and lint_summary would count the run as if the step had never existed.\n' >&2
+		printf 'Move the lint_step call into the shell that sourced ci/lib/lint-steps.sh.\n' >&2
+		return 2
+	fi
+
 	if [ "$#" -lt 2 ]; then
 		# A step with no command runs an empty subshell and would otherwise be
 		# recorded OK — a refactor that drops the command would go green in
@@ -194,6 +267,23 @@ lint_step() {
 lint_summary() {
 	local failed=0 quarantined=0 passed=0
 	local i
+
+	# The mirrored subshell check. Here the records ARE visible — a subshell
+	# inherits a copy — so the report would read correctly; what gets lost is
+	# the RETURN VALUE, which is the only thing that fails the job. `lint_summary
+	# | tee log` under `set -e` without `pipefail` exits with tee's status, so a
+	# run with failed steps goes green having printed every one of them. Fail
+	# closed rather than warn: the bare-line call is the documented and
+	# guard-enforced form (ci/test/lint-step-isolation-test.sh's B2), so there is
+	# no legitimate caller to break, and an unreliable green is the exact defect
+	# this file exists to make impossible.
+	if ! _lint_in_owner_shell; then
+		printf 'lint-steps: lint_summary ran in a subshell, so its exit status may not\n' >&2
+		printf 'reach the job — a run with failed steps could still report success.\n' >&2
+		printf 'Call it as a bare lint_summary on its own line, in the shell that\n' >&2
+		printf 'sourced ci/lib/lint-steps.sh. Failing the run rather than guessing.\n' >&2
+		return 1
+	fi
 
 	printf '\n'
 	_lint_rule

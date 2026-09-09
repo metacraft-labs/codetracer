@@ -2193,11 +2193,26 @@ Measured, not theorised:
 The fix, and where to look:
 
 * `ci/lib/lint-steps.sh` — `lint_step "<literal name>" cmd...` runs each check in
-  a subshell, records the verdict, and ALWAYS returns 0, so a red step cannot
-  abort a caller running under `set -e`. `lint_summary` prints one verdict line
-  per step and decides the exit status from all of them. A step exiting **78**
+  a subshell, records the verdict, and returns 0 for EVERY verdict, so a red step
+  cannot abort a caller running under `set -e`. `lint_summary` prints one verdict
+  line per step and decides the exit status from all of them. A step exiting **78**
   is QUARANTINED: reported and counted, but not fatal. The library uses shell
   builtins only, on purpose — see the guard.
+
+  **Every call belongs to the shell that sourced the file.** The report lives in
+  shell arrays, so both entry points compare `BASHPID` against the pid captured at
+  source time and refuse a foreign caller. `lint_step` in a pipeline stage, a
+  `while read` loop or a `$(...)` would append to a copy that dies with the
+  subshell — it used to print `--> FAILED` and be counted `0 FAILED` — so it
+  refuses to run the body at all and returns **2**, the single exception to the
+  return-0 rule (a caller-side misuse with no result, not a red step). Under the
+  lint scripts' `set -uo pipefail` that return does not abort anything and does
+  not redden the job on its own; what reddens is `ci/test/lint-step-isolation-test.sh`
+  B3, which asserts no `ci/lint` script emits the refusal banner. `lint_summary`
+  carries the mirrored check because in a subshell it is its RETURN VALUE that is
+  lost, and suppresses the report rather than print one whose status cannot reach
+  the job. Sourcing the file twice is also a no-op now — it used to reinitialise
+  the arrays and discard every verdict recorded so far.
 
   **Do not "simplify" that to `("$@") || rc=$?`.** Bash suppresses errexit
   inside any command that is an operand of `||`, and A SUBSHELL INHERITS THE
@@ -2223,7 +2238,14 @@ The fix, and where to look:
   names every step it declared. Pass old scripts as arguments to see it go red:
   the pre-fix `bash.sh` dies at its first command and never mentions the other
   eight checks. It also runs the lint scripts against a throwaway copy of `ci/`
-  with cwd inside it, because `ci/lint/rust.sh` writes files.
+  with cwd inside it, because `ci/lint/rust.sh` writes files. Part C checks the
+  guard's OWN scanner: it drives this script, as a subprocess, over synthetic
+  lint scripts. Part B's declaration scan is deliberately NOT `^`-anchored — a
+  `lint_step` behind `if …; then` used to be invisible to it, which made the
+  enforcement mechanism the delivery route past every check it makes — so
+  whole-line comments are stripped first and `(^|[^[:alnum:]_])` keeps
+  `maybe_lint_step` from matching. Part C runs only when no targets are given,
+  which is what terminates the recursion.
 * Order still matters, for a different reason: put pure-bash/git guards ahead of
   anything needing a compiler so their answer reaches the log sooner. They just
   no longer HIDE what follows.
