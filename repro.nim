@@ -1656,6 +1656,178 @@ package codeTracer:
       cSudokuObjectWithGeneratedHeader)
 
     # ---------------------------------------------------------------------
+    # CodeTracer's self-contained gate scripts as build-graph edges.
+    #
+    # WHY. Every gate below is reached today only through a `just` recipe
+    # and a CI workflow step, so reprobuild cannot see any of them: it can
+    # neither cache a green verdict nor skip a gate whose inputs did not
+    # move. A full `repro build` of this project schedules 44 actions and
+    # not one of them is a test. One edge per gate is the smallest change
+    # that fixes that, and per-gate is the granularity that pays: the
+    # engine monitors each script's reads, so editing `flake.lock` re-runs
+    # exactly the gates that read it and leaves the rest cached. It is the
+    # same property the `docs-book` edges below were declared for -- "a
+    # tracked graph input instead of a side effect of one shell script".
+    #
+    # NON-DESTRUCTIVE, DELIBERATELY. The scripts stay authoritative and
+    # unmodified: the edge runs the same `bash <script>` the recipe runs,
+    # from the same working directory, and the process's exit status is
+    # the verdict -- so the node cannot disagree with the script it
+    # mirrors. `ci/test/shell-gate-coverage.sh` measures reachability from
+    # CI WORKFLOW LANES (workflows, and the `just` recipes those lanes
+    # call), so these edges neither satisfy that guard nor disturb it: a
+    # gate wired here is still required to be wired there.
+    #
+    # THE COLLECTION SPLIT follows reprobuild-specs/Build-Graph-Collections
+    # .md, which distinguishes `test` ("every test-binary run-edge in the
+    # project") from `lint` ("static-analysis and quality-gate checks ...
+    # lint failures often gate merge but do not exercise behavior"). The
+    # assertion suites drive a routine through pass AND failure arms and
+    # count what they asserted, so they are tests; the consistency and
+    # coverage guards compare declarations across the tree and exercise no
+    # behaviour, so they are lint.
+    #
+    # NEITHER COLLECTION IS REACHABLE FROM A BARE `repro build`. The
+    # default build action is the `codetracer` aggregate declared above,
+    # and every id here is added to `auxiliaryActionIds` so the
+    # source-subset fallback at the bottom of this file does not schedule
+    # them either. That is what Build-Graph-Collections.md's Generic Build
+    # Exclude Rules require: these edges fire only when their collection
+    # (or the edge's own target name) is selected explicitly.
+    #
+    # SELECT THEM AS `repro build .#test` / `repro build .#lint`. The
+    # fragment form is REQUIRED for `test`, not decoration: this repo has a
+    # `test/` directory, and the CLI's path-vs-name classifier resolves a
+    # bare selector that names an existing on-disk path as that path (see
+    # Build-Graph-Collections.md §"CLI Resolution" rule 1). `lint` has no
+    # such directory today, but is spelled the same way so the two lines
+    # cannot drift apart the day one is added. Each edge also carries its
+    # own `target(...)` name so a single gate can be run on its own.
+    #
+    # NO EXISTENCE GUARD, ON PURPOSE. A missing gate script must be a loud
+    # failure naming the path, not an edge that silently disappears from
+    # the graph -- the exact failure mode `ci/test/test-lane-coverage.sh`
+    # and `ci/test/shell-gate-coverage.sh` were both written to prevent.
+    #
+    # `cacheable = true` under `ctShell`'s default automatic-monitor
+    # policy: the engine records every file each gate actually reads, so a
+    # verdict is keyed on observed evidence rather than on the declared
+    # list. The declared inputs are the script itself plus the data files
+    # it is pointless to rediscover; they make the edge order correctly
+    # before any monitored run of it exists.
+    let gateFlakePinAlignment = ctShell(
+      actionIdValue = "codetracer.gate.flake-pin-alignment",
+      commandValue = "bash ci/test/flake-pin-alignment-test.sh",
+      # A CONTRACT SUITE, so its inputs are itself and the guard it drives
+      # over fixtures -- NOT this repo's `flake.nix` / `flake.lock`, which it
+      # never reads. Declaring those would have made every lock bump re-run a
+      # suite whose verdict cannot depend on it.
+      extraInputsValue = @[
+        "ci/test/flake-pin-alignment-test.sh",
+        "scripts/test-flake-pin-alignment.sh"],
+      cacheableValue = true)
+    target("gate-flake-pin-alignment", gateFlakePinAlignment)
+
+    let gatePythonVersionAlignment = ctShell(
+      actionIdValue = "codetracer.gate.python-version-alignment",
+      commandValue = "bash ci/test/python-version-alignment-test.sh",
+      extraInputsValue = @[
+        "ci/test/python-version-alignment-test.sh",
+        "scripts/test-python-version-alignment.sh"],
+      cacheableValue = true)
+    target("gate-python-version-alignment", gatePythonVersionAlignment)
+
+    let gateRequireRuntimeAssets = ctShell(
+      actionIdValue = "codetracer.gate.require-runtime-assets",
+      commandValue = "bash ci/test/require-runtime-assets-test.sh",
+      extraInputsValue = @[
+        "ci/test/require-runtime-assets-test.sh",
+        "scripts/require-runtime-assets.sh"],
+      cacheableValue = true)
+    target("gate-require-runtime-assets", gateRequireRuntimeAssets)
+
+    let gateTestLaneReport = ctShell(
+      actionIdValue = "codetracer.gate.test-lane-report",
+      commandValue = "bash ci/test/test-lane-report-test.sh",
+      extraInputsValue = @[
+        "ci/test/test-lane-report-test.sh", "ci/lib/test-lane-report.sh"],
+      cacheableValue = true)
+    target("gate-test-lane-report", gateTestLaneReport)
+
+    let gateTestLaneCoverageContract = ctShell(
+      actionIdValue = "codetracer.gate.test-lane-coverage-contract",
+      commandValue = "bash ci/test/test-lane-coverage-test.sh",
+      extraInputsValue = @[
+        "ci/test/test-lane-coverage-test.sh", "ci/test/test-lane-coverage.sh"],
+      cacheableValue = true)
+    target("gate-test-lane-coverage-contract", gateTestLaneCoverageContract)
+
+    let gateSiblingPins = ctShell(
+      actionIdValue = "codetracer.gate.sibling-pins",
+      commandValue = "bash ci/test/sibling-pins-test.sh",
+      extraInputsValue = @[
+        "ci/test/sibling-pins-test.sh", "scripts/sibling-pins.sh"],
+      cacheableValue = true)
+    target("gate-sibling-pins", gateSiblingPins)
+
+    let gateKnownFailures = ctShell(
+      actionIdValue = "codetracer.gate.known-failures",
+      commandValue = "bash ci/test/known-failures-gate.sh",
+      # The ledger this drives is a fixture the gate writes into a temp dir;
+      # `ci/lib/known-test-failures.tsv` is deliberately NOT declared because
+      # the gate never reads it.
+      extraInputsValue = @[
+        "ci/test/known-failures-gate.sh", "ci/lib/known_failures.py"],
+      cacheableValue = true)
+    target("gate-known-failures", gateKnownFailures)
+
+    let gateBuildAlignment = ctShell(
+      actionIdValue = "codetracer.gate.build-alignment",
+      commandValue = "bash scripts/test-build-alignment.sh",
+      extraInputsValue = @["scripts/test-build-alignment.sh"],
+      cacheableValue = true)
+    target("gate-build-alignment", gateBuildAlignment)
+
+    let gateRustTestCrateCoverage = ctShell(
+      actionIdValue = "codetracer.gate.rust-test-crate-coverage",
+      commandValue = "bash ci/test/rust-test-crate-coverage.sh",
+      extraInputsValue = @[
+        "ci/test/rust-test-crate-coverage.sh",
+        "ci/test/rust-test-crate-coverage.known-dark.txt",
+        "ci/test/rust-test-crate-coverage.fixture.txt"],
+      cacheableValue = true)
+    target("gate-rust-test-crate-coverage", gateRustTestCrateCoverage)
+
+    let gateTestLaneCoverage = ctShell(
+      actionIdValue = "codetracer.gate.test-lane-coverage",
+      commandValue = "bash ci/test/test-lane-coverage.sh",
+      extraInputsValue = @[
+        "ci/test/test-lane-coverage.sh", "ci/lib/test-lane-files.sh"],
+      cacheableValue = true)
+    target("gate-test-lane-coverage", gateTestLaneCoverage)
+
+    let ctGateTestActions = @[
+      gateFlakePinAlignment,
+      gatePythonVersionAlignment,
+      gateRequireRuntimeAssets,
+      gateTestLaneReport,
+      gateTestLaneCoverageContract,
+      gateSiblingPins,
+      gateKnownFailures]
+    let ctGateLintActions = @[
+      gateBuildAlignment,
+      gateRustTestCrateCoverage,
+      gateTestLaneCoverage]
+
+    for gateAction in ctGateTestActions:
+      auxiliaryActionIds.add(gateAction.id)
+    for gateAction in ctGateLintActions:
+      auxiliaryActionIds.add(gateAction.id)
+
+    discard collect("test", ctGateTestActions)
+    discard collect("lint", ctGateLintActions)
+
+    # ---------------------------------------------------------------------
     # Documentation (docs/book-isonim) as build-graph edges.
     #
     # The book is an isonim-docs SSG site whose build needs eight sibling
