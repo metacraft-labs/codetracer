@@ -36,6 +36,24 @@
 //! rather than a packed global index) and `tests/fixtures/gdscript` (produced
 //! by the patched Godot fork, which is an unstarted deliverable) have no
 //! line-only step stream for this assertion to measure.
+//!
+//! Two of the six request-panel fixtures are in the same position and for
+//! reasons their own README records:
+//!
+//! * `native_nginx/nginx.ct` is a `ct-mcr` capture of a real nginx. It ships
+//!   no `steps.dat` and an EMPTY path table, so there is no `(path, line)`
+//!   anywhere in it to read back. Its span coordinates are GEIDs — positions
+//!   in the recording's event ordering.
+//! * `elixir_plug/app.ct` records an Elixir app through `mix run`, which
+//!   reaches the container as call/return records rather than per-line steps.
+//!   Its step stream is empty (`step(StepId(0))` is `None`), and a span's
+//!   range indexes thread events.
+//!
+//! Both still had to be re-recorded — `meta.dat`'s version gate refuses a v3
+//! container whether or not it carries steps — and both are asserted to open
+//! and to be at the current schema version by
+//! `every_request_panel_fixture_is_at_the_current_schema_version` below, which
+//! is the strongest claim their contents support.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
@@ -166,5 +184,207 @@ fn mixed_trace_fixture_steps_land_on_the_statements_it_documents() {
             actual, *text,
             "{relative}: step {i} is recorded at line {line}, which must be `{text}` in the bundled source"
         );
+    }
+}
+
+// ── The request-panel language-matrix fixtures ────────────────────────────
+//
+// `src/tests/gui/tests/request-panel/fixtures/` holds one real recording per
+// language row, each produced by that language's recorder driving a real HTTP
+// session. They are consumed by the ViewModel tests registered in
+// `src/ct_test/release_gate.nim`'s `CoreViewModelGateTests`.
+//
+// # Why these need an assertion of their own
+//
+// The ViewModel tests next door read spans, routes and statuses. The strongest
+// line-level claim any of them made was `loc.line > 0`, which a reading one
+// line high satisfies — which is why they stayed green for the entire life of
+// the superseded encode. These fixtures are recordings of REAL application
+// source, so the line a step reads back at is checkable against what that
+// source actually does at that line, and that is what is checked here.
+//
+// # Where the expected lines come from
+//
+// Unlike `gdscript_mixed/combined_trace.ct`, these containers bundle no source
+// views — a recording references its sources by the recording machine's
+// absolute paths, and the fixtures deliberately drop the source tree rather
+// than commit one developer's `$HOME` layout. So the expected `(line, text)`
+// pairs below were read off the demo application in each recorder sibling at
+// the moment the fixture was recorded, and the statement text is quoted so a
+// reader can audit the pairing without the sibling checked out.
+//
+// The LINE is what is asserted. That is the number the defect moved, and each
+// table is a contiguous run of a handler's own statements, so a writer that is
+// one line high shifts the whole run and every case here fails. The shift is
+// not subtle in any of the three: it lands the last step of a Python handler
+// on a blank line, a PHP function-entry step on its `{`, and a JS handler's
+// last step on its `});`.
+
+/// A fixture under `src/tests/gui/tests/request-panel/fixtures/`.
+///
+/// These live outside `tests/fixtures/`, so they get their own resolver rather
+/// than a `../` escape through [`fixture`].
+fn request_panel_fixture(relative: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/gui/tests/request-panel/fixtures")
+        .join(relative);
+    assert!(
+        path.is_file(),
+        "committed request-panel fixture missing at {} — this test must NOT silently skip",
+        path.display()
+    );
+    path
+}
+
+/// Require `steps[first + i]` to read back in `source_suffix` at `expected[i]`.
+///
+/// `source_suffix` is matched as a suffix because the recorded path is the
+/// recording machine's absolute one.
+fn assert_request_panel_run(relative: &str, source_suffix: &str, first: i64, expected: &[(i64, &str)]) {
+    let ct = request_panel_fixture(relative);
+    let reader =
+        CTFSTraceReader::open(&ct).unwrap_or_else(|e| panic!("{relative}: the committed fixture must open: {e}"));
+
+    for (i, (line, text)) in expected.iter().enumerate() {
+        let id = first + i as i64;
+        let step = reader
+            .step(StepId(id))
+            .unwrap_or_else(|| panic!("{relative}: step {id} must be present"));
+        let path = &reader.db().paths[step.path_id];
+        assert!(
+            path.ends_with(source_suffix),
+            "{relative}: step {id} was recorded in {source_suffix}, not {path}"
+        );
+        assert_eq!(
+            step.line,
+            Line(*line),
+            "{relative}: step {id} was recorded at line {line} (`{text}`) and must read back there, not at {}",
+            step.line.0
+        );
+    }
+}
+
+/// The Flask row: `create_user`, statement by statement, then the `POST`'s
+/// `after_request` hook.
+///
+/// `codetracer-python-recorder/test-programs/web/flask/app.py`. A one-line-high
+/// reading puts the final `return` on line 38, which is blank.
+#[test]
+fn python_flask_fixture_steps_land_on_the_handler_statements_they_recorded() {
+    assert_request_panel_run(
+        "python_flask/serve.ct",
+        "test-programs/web/flask/app.py",
+        13,
+        &[
+            (32, r#"@app.post("/api/users")"#),
+            (34, "payload = request.get_json(silent=True) or {}"),
+            (35, "new_id = max(USERS) + 1"),
+            (
+                36,
+                r#"USERS[new_id] = {"id": new_id, "name": payload.get("name", "anonymous")}"#,
+            ),
+            (37, "return jsonify(USERS[new_id]), 201"),
+        ],
+    );
+
+    assert_request_panel_run(
+        "python_flask/serve.ct",
+        "test-programs/web/flask/app.py",
+        10,
+        &[
+            (69, "if request.url_rule is not None:"),
+            (70, r#"request.environ["codetracer.route"] = str(request.url_rule)"#),
+            (71, "return response"),
+        ],
+    );
+}
+
+/// The PHP row: the first request's call chain, each step a function entry.
+///
+/// `codetracer-php-recorder/tests/programs/web/app.php`. The demo puts each
+/// function's `{` on the line after its signature, so a one-line-high reading
+/// lands every one of these on a bare brace.
+#[test]
+fn php_builtin_fixture_steps_land_on_the_function_entries_they_recorded() {
+    assert_request_panel_run(
+        "php_builtin/app.ct",
+        "tests/programs/web/app.php",
+        1,
+        &[
+            (128, "function dispatch(string $method, string $path): void"),
+            (29, "function ct_annotate(string $key, string $value): void"),
+            (63, "function handle_list_users(): void"),
+            (29, "function ct_annotate(string $key, string $value): void"),
+            (56, "function json_response(int $status, array $payload): void"),
+        ],
+    );
+}
+
+/// The JavaScript row: the `GET /api/users` handler.
+///
+/// `codetracer-js-recorder/test-programs/web/express/app.js`. Line 44 repeats
+/// because the `sort` comparator on it is called once per comparison — the run
+/// is the handler executing, not a synthetic sequence. A one-line-high reading
+/// ends it on `});`.
+#[test]
+fn js_express_fixture_steps_land_on_the_handler_statements_they_recorded() {
+    assert_request_panel_run(
+        "js_express/index.ct",
+        "test-programs/web/express/app.js",
+        65,
+        &[
+            (43, r#"app.get("/api/users", (req, res) => {"#),
+            (43, r#"app.get("/api/users", (req, res) => {"#),
+            (44, "const users = Object.values(USERS).sort((a, b) => a.id - b.id);"),
+            (44, "const users = Object.values(USERS).sort((a, b) => a.id - b.id);"),
+            (44, "const users = Object.values(USERS).sort((a, b) => a.id - b.id);"),
+            (44, "const users = Object.values(USERS).sort((a, b) => a.id - b.id);"),
+            (45, "res.json(users);"),
+        ],
+    );
+}
+
+/// The Ruby row: the `get '/api/users'` block, statement by statement.
+///
+/// `codetracer-ruby-recorder/test-programs/web/sinatra/app.rb`. This fixture
+/// was regenerated ahead of the other five and is the reference shape the rest
+/// were checked against: under the superseded encode these same steps decoded
+/// to 41..46, ending on line 46, which is blank.
+#[test]
+fn ruby_sinatra_fixture_steps_land_on_the_handler_statements_they_recorded() {
+    assert_request_panel_run(
+        "ruby_sinatra/ruby.ct",
+        "test-programs/web/sinatra/app.rb",
+        60,
+        &[
+            (40, "get '/api/users' do"),
+            (41, "content_type :json"),
+            (42, "users = USERS.values"),
+            (43, "payload = { 'users' => users, 'count' => users.length }"),
+            (44, "JSON.generate(payload)"),
+            (45, "end"),
+        ],
+    );
+}
+
+/// Every request-panel fixture opens under the current schema version.
+///
+/// This is the whole claim for the two rows that carry no per-line steps, and
+/// a floor under the four that do. `CTFSTraceReader::open` is what refuses a
+/// superseded container, so a v3 fixture fails here by name rather than by
+/// reading one line high somewhere downstream.
+#[test]
+fn every_request_panel_fixture_is_at_the_current_schema_version() {
+    for relative in [
+        "python_flask/serve.ct",
+        "ruby_sinatra/ruby.ct",
+        "php_builtin/app.ct",
+        "elixir_plug/app.ct",
+        "js_express/index.ct",
+        "native_nginx/nginx.ct",
+    ] {
+        let ct = request_panel_fixture(relative);
+        CTFSTraceReader::open(&ct)
+            .unwrap_or_else(|e| panic!("{relative}: the committed fixture must open at the current version: {e}"));
     }
 }
