@@ -208,7 +208,10 @@ fn a_current_container_opens_and_its_steps_read_back_where_they_were_recorded() 
     let bytes = std::fs::read(&ct).expect("read container");
 
     let readers = [
-        ("open", CTFSTraceReader::open(&ct).expect("open() must accept a current container")),
+        (
+            "open",
+            CTFSTraceReader::open(&ct).expect("open() must accept a current container"),
+        ),
         (
             "from_bytes",
             CTFSTraceReader::from_bytes(bytes).expect("from_bytes() must accept a current container"),
@@ -225,7 +228,11 @@ fn a_current_container_opens_and_its_steps_read_back_where_they_were_recorded() 
                 "{surface}: step {i} was recorded in {}",
                 SOURCES[*file]
             );
-            assert_eq!(step.line, Line(*line), "{surface}: step {i} was recorded at line {line}");
+            assert_eq!(
+                step.line,
+                Line(*line),
+                "{surface}: step {i} was recorded at line {line}"
+            );
         }
     }
 }
@@ -297,4 +304,3 @@ fn resolving_a_superseded_container_puts_every_step_one_line_high() {
         );
     }
 }
-
