@@ -784,28 +784,38 @@ test-ct-print:
 test:
   #!/usr/bin/env bash
   set -uo pipefail
-  lanes=(
-    test-build-alignment
-    test-flake-pin-alignment
-    test-python-version-alignment
-    test-sibling-backend-path
-    test-agent-api-contract
-    test-rust
-    test-nimsuggest
-  )
   # A genuine capability gate, not a hidden failure: the cross-repo tests need
   # a checkout of codetracer-native-backend, and ci/test/non-gui.sh explicitly
   # sets CODETRACER_RR_BACKEND_PATH= so they do not run in this CI job.  When
-  # the path IS set the lane is appended to the list above, so it aggregates
-  # exactly like every other lane — it cannot be silently skipped once chosen,
-  # and its failure fails `just test`.
+  # the path IS set the lane joins the list below, so it aggregates exactly
+  # like every other lane — it cannot be silently skipped once chosen, and its
+  # failure fails `just test`.
   if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
     echo "codetracer-native-backend detected — cross-repo tests included"
-    lanes+=(cross-test)
+    set -- cross-test
   else
     echo "CODETRACER_RR_BACKEND_PATH not set — skipping cross-repo tests"
+    set --
   fi
-  bash ci/lib/run-just-lanes.sh test "${lanes[@]}"
+  # THE SEVEN LANE NAMES ARE LITERAL ARGUMENTS ON THIS INVOCATION, and that is
+  # load-bearing beyond style.  They used to be built up in a bash array, which
+  # made them invisible to `ci/test/shell-gate-coverage.sh`: its walk reaches a
+  # recipe only through a name it can SEE, and an array element is not one.
+  # `scripts/test-build-alignment.sh` and `ci/test/sibling-backend-path-test.sh`
+  # were reachable through nothing else, so converting this recipe off a
+  # dependency list orphaned them (merge a4681be7, job 102285037564).  Both were
+  # still RUNNING the whole time — the walk had gone blind, not the coverage —
+  # but a reachability guard that cannot see a live edge is exactly the defect
+  # this recipe's own aggregate exists to prevent.  Keep them literal here.
+  bash ci/lib/run-just-lanes.sh test \
+    test-build-alignment \
+    test-flake-pin-alignment \
+    test-python-version-alignment \
+    test-sibling-backend-path \
+    test-agent-api-contract \
+    test-rust \
+    test-nimsuggest \
+    "$@"
 
 # Run all GUI tests headlessly against an already-built CodeTracer binary.
 test-gui-prebuilt *args:
