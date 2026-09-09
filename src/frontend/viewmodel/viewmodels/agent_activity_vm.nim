@@ -89,6 +89,7 @@ type
     reRecordInProgress*: Signal[bool]
     wantsPassword*: Signal[bool]
     wantsPermission*: Signal[bool]
+    permissionInfo*: Signal[string]
     sessionKey*: Signal[string]
     sessionNotice*: Signal[string]
       ## RV-6 — an explicit statement about *why* this panel is showing the
@@ -395,6 +396,9 @@ proc setPromptFlags*(vm: AgentActivityVM; wantsPassword, wantsPermission: bool) 
   vm.wantsPassword.val = wantsPassword
   vm.wantsPermission.val = wantsPermission
 
+proc setPermissionInfo*(vm: AgentActivityVM; info: string) =
+  vm.permissionInfo.val = info
+
 proc setSessionKey*(vm: AgentActivityVM; sessionKey: string) =
   vm.sessionKey.val = sessionKey
 
@@ -431,6 +435,7 @@ proc clearConversation*(vm: AgentActivityVM) =
   vm.reRecordInProgress.val = false
   vm.wantsPassword.val = false
   vm.wantsPermission.val = false
+  vm.permissionInfo.val = ""
   vm.sessionNotice.val = ""
 
 proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
@@ -447,6 +452,7 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let reRecordInProgress = createSignal(false)
     let wantsPassword = createSignal(false)
     let wantsPermission = createSignal(false)
+    let permissionInfo = createSignal("")
     let sessionKey = createSignal("")
     let sessionNotice = createSignal("")
     let selectedModel = createSignal("")
@@ -481,6 +487,7 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       reRecordInProgress: reRecordInProgress,
       wantsPassword: wantsPassword,
       wantsPermission: wantsPermission,
+      permissionInfo: permissionInfo,
       sessionKey: sessionKey,
       sessionNotice: sessionNotice,
       selectedModel: selectedModel,

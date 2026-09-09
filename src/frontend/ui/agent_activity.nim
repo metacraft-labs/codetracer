@@ -10,7 +10,7 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/agent_activity_vm import
   AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
-  setSessionKey, traceOpen, reviewOpen, applyEvidenceDataset,
+  setPermissionInfo, setSessionKey, traceOpen, reviewOpen, applyEvidenceDataset,
   retryPendingEvidenceInspections
 from ../viewmodel/viewmodels/trace_open import
   TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
@@ -342,6 +342,7 @@ proc legacyMessageToVm(message: AgentMessage): AgentActivityMessageEntry =
     isLoading: message.isLoading,
     diffs: diffs,
     createdAt: message.createdAt,
+    duration: message.duration,
   )
 
 proc currentMessagesToVm(self: AgentActivityComponent):
@@ -395,6 +396,7 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   vm.setInputValue(safeStr(self.inputValue))
   vm.setLoading(self.isLoading)
   vm.setReRecordInProgress(self.reRecordInProgress)
+  vm.setPermissionInfo(safeStr(self.permissionDescription))
   vm.setPromptFlags(self.wantsPassword, self.wantsPermission)
   # RV-6 — last, so a review's loaded session survives this sync.
   #
@@ -673,6 +675,15 @@ when defined(js):
       echo "#TODO: add a file"
     result.onModelSelect = proc() =
       echo "#TODO: Open the model table"
+    result.onPermissionResponse = proc(kind: string) =
+      self.wantsPermission = false
+      self.permissionDescription = cstring""
+      self.isLoading = false
+      data.ipc.send("CODETRACER::acp-permission-response", js{
+        "sessionId": self.sessionId,
+        "kind": cstring(kind)
+      })
+      self.syncLegacyAgentActivityIntoVM()
     result.afterDynamicRender = proc() =
       self.afterAgentActivityDynamicRender()
 
@@ -820,6 +831,11 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     self.isLoading = false
     self.sessionMessageIds[self.sessionId][^1].isLoading = false
     self.promptInFlight = false
+    # Record how long the agent spent generating this response.
+    for msg in self.sessionMessageIds[self.sessionId]:
+      if msg.id == messageId:
+        msg.duration = (epochTime() * 1000.0 - msg.createdAt) / 1000.0
+        break
     # Move any diffs captured on the placeholder onto the actual agent message.
     if placeholderDiffs.len > 0 and self.sessionMessageIds.hasKey(self.sessionId):
       var target: AgentMessage = nil
@@ -971,4 +987,20 @@ proc onAcpSessionLoadError*(sender: js, response: JsObject) {.async.} =
   discard
 
 proc onAcpRequestPermission*(sender: js, response: JsObject) {.async.} =
-  discard
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let self = componentBySessionId(sessionId)
+  if self.isNil:
+    return
+  let description =
+    if jsHasKey(response, cstring"description"):
+      response[cstring"description"].to(cstring)
+    else:
+      cstring"The agent wants to perform an action"
+  self.permissionDescription = description
+  self.wantsPermission = true
+  self.isLoading = true
+  self.syncLegacyAgentActivityIntoVM()
