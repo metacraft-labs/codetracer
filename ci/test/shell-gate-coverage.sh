@@ -719,12 +719,44 @@ refs_of_text() {
 
 	# `just <recipe>`, unchanged: a recipe name is not a path and the position
 	# rule above does not apply to it.
-	function justrefs(line,   n, i, j, t, u, arr) {
+	#
+	# AND ONE DISPATCHER, for the same reason the positional-parameter clause
+	# above exists. `ci/lib/run-just-lanes.sh <aggregate> <lane>...` runs each
+	# of its arguments as `just <lane>`; the names are real recipes and it
+	# really does invoke them, but they stand as ARGUMENTS, so a rule about
+	# `just` in command position cannot see them.
+	#
+	# It went blind exactly once and this is the entry: converting `just test`
+	# and `test-bpf` off dependency lists onto that runner left
+	# `scripts/test-build-alignment.sh` and `ci/test/sibling-backend-path-test.sh`
+	# reachable from nothing, and this guard failed them by name (merge
+	# a4681be7, job 102285037564). Both scripts were still RUNNING — the walk
+	# had gone blind, not the coverage. Note the apostrophe-free prose: this
+	# whole awk program is inside a single-quoted shell string, so one
+	# apostrophe in a comment ends it and the file stops parsing.
+	#
+	# Same widening direction as the positional clause, and the same argument
+	# for it: this credits a line that has ALREADY DECLARED it executes its
+	# arguments, and it fires on nothing else. The alternative was to keep the
+	# lane names invisible and record two live gates as dark, which would have
+	# been false in a file that fails in both directions.
+	function justrefs(line,   n, i, j, t, u, arr, dispatch) {
 		n = split(line, arr, /[ \t]+/)
+		dispatch = 0
 		for (i = 1; i <= n; i++) {
 			t = arr[i]
 			gsub(/^[^A-Za-z0-9_.\/-]+/, "", t)
 			gsub(/[^A-Za-z0-9_.\/-]+$/, "", t)
+			# Every name-shaped token after the dispatcher is a recipe it runs.
+			# The first names the aggregate itself, which is simply true too.
+			if (dispatch) {
+				u = t
+				gsub(/^[^A-Za-z0-9_-]+/, "", u)
+				gsub(/[^A-Za-z0-9_-]+$/, "", u)
+				if (u ~ /^[A-Za-z0-9_][A-Za-z0-9_-]*$/) print "J " u
+				continue
+			}
+			if (t ~ /run-just-lanes\.sh$/) { dispatch = 1; continue }
 			if (t != "just") continue
 			# Skip flags, and the VALUE of a flag that takes one — otherwise
 			# `just --justfile X recipe` reports the recipe as `--justfile`.
