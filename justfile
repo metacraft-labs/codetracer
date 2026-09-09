@@ -712,10 +712,19 @@ build-app-image:
   ./appimage-scripts/build_appimage.sh
 
 
-# Run all Rust tests (db-backend unit + integration, backend-manager).
+# Run all Rust tests (db-backend unit + integration, backend-manager,
+# and the shared leaf crates those two both depend on).
 test-rust:
   #!/usr/bin/env bash
   set -e
+  # `libs/ct-data-breakpoints` holds the admission rules for DAP data
+  # breakpoints (watchpoints) and is a plain path dependency of BOTH
+  # src/db-backend and src/backend-manager -- neither of which builds a
+  # dependency's test targets. Without this line its tests are dark, and
+  # its `conformance_cases()` table is exactly what the mock/real parity
+  # tests in those two crates are anchored to. A dark anchor is not an
+  # anchor. (ci/test/rust-test-crate-coverage.sh is the gate that says so.)
+  ( cd libs/ct-data-breakpoints && cargo nextest run --release )
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin replay-server

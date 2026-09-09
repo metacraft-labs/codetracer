@@ -18,11 +18,22 @@ The bench measures the V1 set of 11 user-triggered operations:
 - `tracepoint-eval`
 - `jump-to-line` + `jump-to-call`
 - `reverse-step` (RR / MCR / TTD only)
-- `watchpoint` (RR / MCR / TTD only)
+- `watchpoint` (all backends; only the materialized backend can
+  *accept* one — see below)
 
 …against five backends (`materialized`, `rr`, `mcr-omniscient`,
 `mcr-no-omniscient`, `ttd`) across three platforms (`linux`, `macos`,
 `windows`) and 2 default languages (`python`, `c_plus_plus`).
+
+The `watchpoint` op sends a real DAP `setDataBreakpoints`, which every
+backend dispatches, so the cell is a measurement on every row. What
+differs is the verdict, not whether the request round-trips: a
+materialized recording keeps a per-step value table and can accept a
+value-change watchpoint, while the MCR/emulator and recreator backends
+answer the entry `verified: false` with refusal code 6206
+(`backendLacksValueHistory`). The bench does not fail a cell on a
+refusal — that would turn a per-backend capability difference into a
+correctness error and hide the latency the row exists to compare.
 
 ## Matrix shape
 

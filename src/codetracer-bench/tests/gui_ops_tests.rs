@@ -74,9 +74,19 @@ fn python_materialized_linux_runs_9_operations() {
         &Operation::applicable(Backend::Materialized),
     );
     let total = count_cells(&matrix, Backend::Materialized, Language::Python);
-    // 11 operations apply uniformly — reverse-step + watchpoint
-    // surface as measurable round-trip-with-error cells on
-    // forward-only backends per the bench's wire-loop discipline.
+    // 11 operations apply uniformly.  `Operation::applicable` returns
+    // the full set for every backend, so this count is backend-
+    // independent by construction and the assertion is really "no op
+    // was dropped from the V1 set".
+    //
+    // reverse-step still surfaces as a measurable
+    // round-trip-with-error cell on forward-only backends, per the
+    // bench's wire-loop discipline.  watchpoint no longer does: the
+    // dap-server dispatches `setDataBreakpoints` on every backend now,
+    // so the cell is a successful round-trip whose per-entry verdict
+    // may be a refusal (`backendLacksValueHistory`, 6206, on backends
+    // with no per-step value table).  On Materialized — this test's
+    // backend — the watchpoint is accepted outright.
     assert_eq!(
         total, 11,
         "expected 11 Materialized rows for Python, got {total}"

@@ -16088,41 +16088,57 @@ async fn send_py_add_watchpoint(
     }
 }
 
-/// M5-Custom-1c. `ct/py-add-watchpoint` MUST NOT answer a watchpoint id for
-/// a watchpoint the backend never accepted.
+/// M5-Custom-1c. `ct/py-add-watchpoint` MUST report the REAL backend's own
+/// verdict -- both when it refuses and when it accepts.
 ///
-/// This is the twin of `test_real_custom_add_breakpoint_reports_unresolvable_path`
-/// on the watchpoint surface, and the more severe of the two.  The replay
-/// backend has **no** `setDataBreakpoints` arm in its DAP dispatch
-/// (`src/db-backend/src/dap_server.rs::handle_request`): the command falls
-/// through to `dap_command_to_step_action`, which fails, and
-/// `handle_message_browser` answers
+/// Runs against a real Ruby recording and a real `db-backend`, because the
+/// whole history of this surface is a story about test doubles.
+///
+/// ## History
+///
+/// The replay backend used to have NO `setDataBreakpoints` arm in its DAP
+/// dispatch (`src/db-backend/src/dap_server.rs::handle_request`).  The
+/// command fell through to `dap_command_to_step_action`, which failed, and
+/// the backend answered the free-text
 ///
 ///   success: false,
 ///   message: "command setDataBreakpoints not supported here"
 ///
-/// The daemon used to send that `setDataBreakpoints` fire-and-forget and
-/// answer the Python client `success: true` with a positive `watchpointId`
-/// before the backend had seen the request; the refusal was then swallowed by
-/// the `FireAndForget` arm of the response router.  `Trace.add_watchpoint()`
-/// therefore returned an id for a watchpoint that no component anywhere had
-/// accepted, and the following `continue_forward()` ran to the end of the
-/// trace and raised `StopIteration` with nothing to explain it.
+/// -- the `_` arm meant for commands nobody had thought about.  On top of
+/// that the daemon sent the request fire-and-forget and answered the Python
+/// client `success: true` with a positive `watchpointId` BEFORE the backend
+/// had seen it, swallowing the refusal on the `FireAndForget` arm of the
+/// response router.  `Trace.add_watchpoint()` returned an id for a
+/// watchpoint no component anywhere had accepted, and the following
+/// `continue_forward()` ran to the end of the trace and raised
+/// `StopIteration` with nothing to explain it.
 ///
-/// Note what this test does NOT assert: it does not require the backend to
-/// support watchpoints.  It requires the daemon to report what the backend
-/// actually said.  If `setDataBreakpoints` is implemented later, the first
-/// arm becomes a success and this test's first assertion is the thing that
-/// must then be updated -- deliberately, by someone who has read the new
-/// behaviour, rather than silently.
+/// No test could catch it, because the ONLY implementation of
+/// `setDataBreakpoints` in the tree was the daemon's own mock DAP backend,
+/// which answered `verified: true` unconditionally -- a test double more
+/// capable than the component it stood in for.  Which is why this test
+/// insists on the real backend, and why the earlier version of it asserted
+/// that watchpoints FAIL: at the time, that was the truth.
 ///
-/// The only implementation of `setDataBreakpoints` anywhere in this tree is
-/// the daemon's own mock DAP backend, which answers `verified: true`
-/// unconditionally.  That mismatch -- a test double more capable than the
-/// component it stands in for -- is why no test could have caught this, and
-/// is why this test insists on the real backend.
+/// ## What it asserts now
+///
+/// The backend implements value-change watchpoints (see the
+/// `ct-data-breakpoints` crate), so this test pins both directions against
+/// `RUBY_TEST_PROGRAM`, whose locals are `a`, `result`, `x`, `y`:
+///
+///   * `counter` -- a name this recording never captured -- is REFUSED, and
+///     refused by NAME from the closed set (`variableNotInTrace`), not by
+///     the free-text dispatch fallthrough.  An empty reason here means the
+///     command stopped being dispatched again.
+///   * `x` -- a name it DID capture -- is ACCEPTED, with a positive id.
+///     This assertion is the feature: before the backend had an arm for
+///     `setDataBreakpoints`, no watchpoint could ever be accepted.
+///
+/// The second half also covers the rollback: a watchpoint the backend
+/// refused must be dropped from the daemon's table, or it would be re-sent
+/// with this add and drag its failure along.
 #[tokio::test]
-async fn test_real_py_add_watchpoint_does_not_answer_for_the_backend() {
+async fn test_real_py_add_watchpoint_reports_the_backends_own_verdict() {
     let (test_dir, log_path) = setup_test_dir("real_py_add_watchpoint_verdict");
     let mut success = false;
 
@@ -16132,7 +16148,7 @@ async fn test_real_py_add_watchpoint_does_not_answer_for_the_backend() {
             None => {
                 log_line(&log_path, "SKIP: db-backend not found");
                 println!(
-                    "test_real_py_add_watchpoint_does_not_answer_for_the_backend: \
+                    "test_real_py_add_watchpoint_reports_the_backends_own_verdict: \
                      SKIP (db-backend not found)"
                 );
                 return Ok(());
@@ -16143,7 +16159,7 @@ async fn test_real_py_add_watchpoint_does_not_answer_for_the_backend() {
             None => {
                 log_line(&log_path, "SKIP: ruby recorder not found");
                 println!(
-                    "test_real_py_add_watchpoint_does_not_answer_for_the_backend: \
+                    "test_real_py_add_watchpoint_reports_the_backends_own_verdict: \
                      SKIP (ruby recorder not found)"
                 );
                 return Ok(());
@@ -16169,6 +16185,9 @@ async fn test_real_py_add_watchpoint_does_not_answer_for_the_backend() {
 
         drain_events(&mut client, &log_path).await;
 
+        // `counter` is not a variable of RUBY_TEST_PROGRAM (its locals
+        // are `a`, `result`, `x`, `y`), so the backend must refuse it
+        // -- and must refuse it by NAME, from the closed set.
         let resp =
             send_py_add_watchpoint(&mut client, 26_001, &trace_dir, "counter", &log_path).await?;
 
@@ -16178,24 +16197,34 @@ async fn test_real_py_add_watchpoint_does_not_answer_for_the_backend() {
         assert_eq!(
             reported,
             Some(false),
-            "ct/py-add-watchpoint answered success for a watchpoint the \
-             replay backend never accepted -- it has no setDataBreakpoints \
-             handler at all.  A `watchpointId` here names a watchpoint that \
-             exists nowhere but in the daemon's own table, and the caller's \
-             next `continue_forward()` runs to the end of the trace with \
-             nothing to say why.  got: {resp}"
+            "ct/py-add-watchpoint answered success for `counter`, which this \
+             recording never captured.  A `watchpointId` here names a \
+             watchpoint that exists nowhere but in the daemon's own table, \
+             and the caller's next `continue_forward()` runs to the end of \
+             the trace with nothing to say why.  got: {resp}"
         );
 
-        let message = resp
-            .get("message")
+        // THE REFUSAL MUST COME FROM THE CLOSED SET, not from the
+        // free-text fallthrough.  Before `setDataBreakpoints` was
+        // implemented, this arrived as
+        //   "command setDataBreakpoints not supported here"
+        // -- the `_` arm of the DAP dispatch, meant for commands nobody
+        // had thought about, and indistinguishable from a typo in the
+        // command name.  A caller could not tell "this backend cannot
+        // watch anything" from "your expression was wrong".
+        let refusal = resp
+            .get("body")
+            .and_then(|b| b.get("refusal"))
             .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        assert!(
-            message.contains("setDataBreakpoints"),
-            "the refusal must carry the backend's own sentence, which is what \
-             tells 'this backend cannot watch anything' apart from 'your \
-             expression was wrong'; got message: {message:?}"
+            .unwrap_or("");
+        assert_eq!(
+            refusal,
+            "variableNotInTrace",
+            "a watchpoint on a name this recording never captured must refuse \
+             as `variableNotInTrace` from the closed set.  An empty reason here \
+             means the request fell through to the free-text dispatch \
+             fallthrough again, which is the defect this test exists to pin.  \
+             got: {resp}"
         );
         assert!(
             resp.get("body")
@@ -16206,14 +16235,32 @@ async fn test_real_py_add_watchpoint_does_not_answer_for_the_backend() {
 
         // And the refused watchpoint must be rolled out of the daemon's own
         // table, so the next add for this trace does not re-send it and
-        // inherit its failure.  A second add must fail on its OWN account,
-        // with the same single-entry refusal rather than a stale one.
-        let second =
-            send_py_add_watchpoint(&mut client, 26_002, &trace_dir, "total", &log_path).await?;
+        // inherit its failure.
+        //
+        // `x` IS a local of RUBY_TEST_PROGRAM, so this one must be
+        // ACCEPTED -- against a real Ruby recording and a real replay
+        // backend.  This assertion is the whole feature: before
+        // `setDataBreakpoints` had an arm in the backend's DAP dispatch,
+        // NO watchpoint could ever be accepted, and the previous version
+        // of this test asserted exactly that.
+        let second = send_py_add_watchpoint(&mut client, 26_002, &trace_dir, "x", &log_path).await?;
         assert_eq!(
             second.get("success").and_then(Value::as_bool),
-            Some(false),
-            "got: {second}"
+            Some(true),
+            "a watchpoint on `x` -- a local this recording DOES capture -- must \
+             be accepted by the real backend.  A refusal here means either the \
+             refused `counter` was left in the daemon's table and poisoned the \
+             re-send, or `setDataBreakpoints` is not reaching the backend at \
+             all.  got: {second}"
+        );
+        let wp_id = second
+            .get("body")
+            .and_then(|b| b.get("watchpointId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        assert!(
+            wp_id > 0,
+            "an accepted watchpoint must come back with a positive id; got: {second}"
         );
 
         let _ = daemon.kill().await;
@@ -16227,7 +16274,7 @@ async fn test_real_py_add_watchpoint_does_not_answer_for_the_backend() {
     }
 
     report(
-        "test_real_py_add_watchpoint_does_not_answer_for_the_backend",
+        "test_real_py_add_watchpoint_reports_the_backends_own_verdict",
         &log_path,
         success,
     );

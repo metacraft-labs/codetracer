@@ -4,6 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# The admission rules for DAP data breakpoints (watchpoints), shared
+# with `src/db-backend` — the REAL replay backend this crate's mock DAP
+# backend stands in for.
+#
+# This dependency exists because of a specific defect: the mock used to
+# answer `setDataBreakpoints` with `verified: true` unconditionally,
+# while the real backend had no arm for the command at all and refused
+# every request.  The test double was more capable than the component
+# it stood in for, so every test of the watchpoint path passed against
+# a mock that could do something the product could not, and watchpoints
+# were broken for the whole life of the feature without one test going
+# red.  The mock now asks the same function the real backend asks.
+ct-data-breakpoints = { path = "../../libs/ct-data-breakpoints" }
 clap = { version = "4.5.42", features = ["derive"] }
 libc = "0.2"
 log = "0.4.27"

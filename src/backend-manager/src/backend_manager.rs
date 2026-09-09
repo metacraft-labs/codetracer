@@ -1505,6 +1505,54 @@ impl BackendManager {
                     return;
                 }
 
+                // `ct/py-remove-watchpoint`: the re-sent
+                // `setDataBreakpoints` states the set MINUS the removed
+                // entry, so the removal succeeded iff the backend
+                // accepted the re-send.  A refusal means the engine is
+                // still watching, so the watchpoint goes back into the
+                // daemon's table and the client is told the truth --
+                // NOT `removed: true`, which is what this path used to
+                // answer before the backend saw anything.
+                if let PendingPyRequestKind::RemoveWatchpoint {
+                    trace_path,
+                    wp_id,
+                    expression,
+                } = &pending.kind
+                {
+                    let accepted = msg.get("success").and_then(Value::as_bool).unwrap_or(false);
+                    let py_response = if accepted {
+                        json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": true,
+                            "command": "ct/py-remove-watchpoint",
+                            "body": {"removed": true},
+                        })
+                    } else {
+                        let message = msg
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("backend refused the watchpoint removal");
+                        let message = format!(
+                            "the watchpoint is still live: the backend refused the                              setDataBreakpoints that would have removed it ({message})"
+                        );
+                        if let Some(ds) = self.daemon_state.as_mut() {
+                            ds.py_bridge
+                                .breakpoint_state_mut(trace_path)
+                                .restore_watchpoint(*wp_id, expression);
+                        }
+                        json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": false,
+                            "command": "ct/py-remove-watchpoint",
+                            "message": message,
+                        })
+                    };
+                    self.send_to_client(pending.client_id, py_response);
+                    return;
+                }
+
                 // `ct/py-add-breakpoint` and `ct/py-add-watchpoint`: the
                 // backend's per-entry `verified` flag decides whether
                 // these succeeded, and they are handled here rather than
@@ -1561,7 +1609,7 @@ impl BackendManager {
                             "body": body_or_error,
                         })
                     } else {
-                        serde_json::json!({
+                        let mut refusal = serde_json::json!({
                             "type": "response",
                             "request_seq": pending.original_seq,
                             "success": false,
@@ -1569,7 +1617,23 @@ impl BackendManager {
                             "message": body_or_error.get("message")
                                 .and_then(Value::as_str)
                                 .unwrap_or("unknown error"),
-                        })
+                        });
+                        // Carry the backend's CLOSED-SET refusal code
+                        // through to the client when there is one (see
+                        // `ct_data_breakpoints::DataBreakpointRefusal`).
+                        // Without it the caller has to parse English to
+                        // tell "you named something this recording never
+                        // captured" from "this kind of watchpoint is not
+                        // possible over a recording at all" — two
+                        // refusals with entirely different fixes.
+                        let structured: serde_json::Map<String, Value> = ["refusalCode", "refusal"]
+                            .iter()
+                            .filter_map(|k| body_or_error.get(*k).map(|v| ((*k).to_string(), v.clone())))
+                            .collect();
+                        if !structured.is_empty() {
+                            refusal["body"] = Value::Object(structured);
+                        }
+                        refusal
                     };
                     self.send_to_client(pending.client_id, py_response);
                     return;
@@ -1620,6 +1684,7 @@ impl BackendManager {
                     }
                     PendingPyRequestKind::AddBreakpoint { .. }
                     | PendingPyRequestKind::AddWatchpoint { .. }
+                    | PendingPyRequestKind::RemoveWatchpoint { .. }
                     | PendingPyRequestKind::Unobserved(_) => {
                         // All are answered above; unreachable.
                         return;
@@ -3853,14 +3918,23 @@ impl BackendManager {
 
         // WAIT for the backend, exactly as `ct/py-add-breakpoint` does,
         // and for the same reason: the backend's answer is the only
-        // place that says whether the watchpoint was accepted.  This one
-        // is the more severe of the two — the replay backend has no
-        // `setDataBreakpoints` arm at all and answers
-        // `success: false, "command setDataBreakpoints not supported
-        // here"`.  While this was fire-and-forget that refusal was
-        // discarded and `Trace.add_watchpoint()` returned a positive id
-        // for a watchpoint nothing anywhere had accepted, after which
-        // `continue_forward()` ran to the end of the trace.
+        // place that says whether the watchpoint was accepted.
+        //
+        // HISTORY, because it is why this waits rather than fires and
+        // forgets: the replay backend used to have NO `setDataBreakpoints`
+        // arm at all, and answered the free-text
+        // `command setDataBreakpoints not supported here`.  While this
+        // was fire-and-forget that refusal was discarded and
+        // `Trace.add_watchpoint()` returned a positive id for a
+        // watchpoint nothing anywhere had accepted, after which
+        // `continue_forward()` ran to the end of the trace and raised
+        // `StopIteration` with nothing to explain why.
+        //
+        // The backend implements the command now (value-change
+        // watchpoints — see the `ct-data-breakpoints` crate), so the
+        // answer read here is a real per-entry verdict: `verified: true`
+        // with an id, or `verified: false` with a code from that crate's
+        // closed set naming which of the recording's limits was hit.
         if let Err(e) = self.message(backend_id, dap_request).await {
             // Roll back: nothing was sent, so the daemon must not keep a
             // watchpoint the backend has never heard of.
@@ -3977,10 +4051,14 @@ impl BackendManager {
 
         self.reset_ttl_for_backend_id(backend_id);
 
-        let removal_result = match self.daemon_state.as_mut() {
+        // Read the expression BEFORE removing it: if the backend
+        // refuses the re-send below, this is what gets restored so the
+        // daemon's table and the replay engine still agree.
+        let (removed_expression, removal_result) = match self.daemon_state.as_mut() {
             Some(ds) => {
                 let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
-                bp_state.remove_watchpoint(wp_id)
+                let expression = bp_state.watchpoint_expression(wp_id);
+                (expression, bp_state.remove_watchpoint(wp_id))
             }
             None => return Ok(()),
         };
@@ -4005,28 +4083,48 @@ impl BackendManager {
                         "breakpoints": breakpoints_array,
                     }
                 });
-                let _ = self.message(backend_id, dap_request).await;
+                // WAIT for the backend rather than answering ahead of
+                // it.  This used to be an `Unobserved` fire-and-forget,
+                // justified by the fact that no watchpoint ever bound —
+                // the backend had no `setDataBreakpoints` arm at all —
+                // so none could fail to be removed.  That justification
+                // expired the moment watchpoints started working: a
+                // refused re-send now leaves a live watchpoint in the
+                // replay engine while the client has been told
+                // `removed: true`, and the caller's next
+                // `continue_forward()` stops somewhere it has no reason
+                // to expect.
+                if let Err(e) = self.message(backend_id, dap_request).await {
+                    // The re-send never reached the backend, so the
+                    // engine still holds the watchpoint.  Put it back
+                    // and say so.
+                    if let (Some(ds), Some(expression)) = (self.daemon_state.as_mut(), removed_expression.as_ref()) {
+                        ds.py_bridge
+                            .breakpoint_state_mut(&trace_path)
+                            .restore_watchpoint(wp_id, expression);
+                    }
+                    self.send_py_command_error(
+                        seq,
+                        "ct/py-remove-watchpoint",
+                        &format!("could not send the watchpoint removal to the backend: {e}"),
+                    );
+                    return Ok(());
+                }
+                let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
                 if let Some(ds) = self.daemon_state.as_mut() {
                     ds.py_bridge.pending_requests.push(PendingPyRequest {
-                        kind: PendingPyRequestKind::Unobserved(
-                            python_bridge::UnobservedReason::SetPointsResyncAfterRemoval,
-                        ),
-                        client_id: 0,
-                        original_seq: 0,
+                        kind: PendingPyRequestKind::RemoveWatchpoint {
+                            trace_path: trace_path.clone(),
+                            wp_id,
+                            expression: removed_expression.unwrap_or_default(),
+                        },
+                        client_id,
+                        original_seq: seq,
                         backend_seq: dap_seq,
-                        response_command: String::new(),
+                        response_command: "ct/py-remove-watchpoint".to_string(),
                         expression: String::new(),
                     });
                 }
-
-                let response = json!({
-                    "type": "response",
-                    "request_seq": seq,
-                    "success": true,
-                    "command": "ct/py-remove-watchpoint",
-                    "body": {"removed": true}
-                });
-                self.send_response_for_seq(seq, response);
             }
             None => {
                 self.send_py_command_error(
