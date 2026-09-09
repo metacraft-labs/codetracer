@@ -30,16 +30,39 @@ use db_backend::ctfs_trace_reader::follow_stream_source::{
 };
 use db_backend::trace_reader::TraceReader;
 
+use codetracer_trace_writer::line_position::LinePositionSpace;
+
 mod stream_writer;
 use stream_writer::IncrementalCtfsStreamWriter;
 
-/// The single source path id every fixture step lives in.
+/// The source path ids the fixture's steps live in. TWO of them, alternating:
+/// path 0's base is 0 under every apportionment of the line address space, so a
+/// single-file fixture cannot tell whether the follow reader places an address
+/// in the right file.
 const PATH_ID: usize = 3;
+const OTHER_PATH_ID: usize = 5;
+
+/// How many files the fixture's container registers. The writer addresses a step
+/// in the space of the files it has seen, so the space the assertions resolve
+/// through must cover the highest id used.
+const PATH_COUNT: usize = OTHER_PATH_ID + 1;
+
+/// The address space the fixture's steps are written in, which is what turns a
+/// follow reader's absolute address back into a location.
+fn fixture_space() -> LinePositionSpace {
+    LinePositionSpace::uniform(PATH_COUNT)
+}
 
 /// Build the fixture's expected `(path_id, line)` sequence: `total` steps at
-/// lines `100, 101, 102, …`. Used to drive BOTH the writer and the assertions.
+/// lines `100, 101, 102, …`, alternating between the two source files. Used to
+/// drive BOTH the writer and the assertions.
 fn expected_steps(total: usize) -> Vec<(PathId, Line)> {
-    (0..total).map(|i| (PathId(PATH_ID), Line(100 + i as i64))).collect()
+    (0..total)
+        .map(|i| {
+            let path = if i % 2 == 0 { PATH_ID } else { OTHER_PATH_ID };
+            (PathId(path), Line(100 + i as i64))
+        })
+        .collect()
 }
 
 /// M1 — a growing split-stream `.ct` is live-tailed through the db-backend
@@ -113,8 +136,11 @@ fn e2e_streaming_reader_real_product() {
         let visible = c * CHUNK_SIZE;
         for (i, (pid, line)) in steps[..visible].iter().enumerate() {
             let got = reader.step(i).expect("early step visible before finalization");
-            assert_eq!(got.path_id, *pid, "early step {i} path_id");
-            assert_eq!(got.line, *line, "early step {i} line");
+            assert_eq!(
+                got.resolve(&fixture_space()),
+                Ok((*pid, *line)),
+                "early step {i} must resolve to the location it was recorded at"
+            );
         }
     }
 
@@ -133,8 +159,11 @@ fn e2e_streaming_reader_real_product() {
         let got = reader
             .step(i)
             .unwrap_or_else(|| panic!("step {i} missing after finalization"));
-        assert_eq!(got.path_id, *pid, "step {i} path_id mismatch");
-        assert_eq!(got.line, *line, "step {i} line mismatch");
+        assert_eq!(
+            got.resolve(&fixture_space()),
+            Ok((*pid, *line)),
+            "step {i} must resolve to the location it was recorded at"
+        );
     }
 }
 
@@ -396,7 +425,7 @@ fn e2e_streaming_reader_real_product_all_streams() {
         // Cross-stream byte-exact spot check at the latest visible step.
         let last = visible - 1;
         let step = reader.steps().step(last).expect("step visible");
-        assert_eq!(step.line, Line(100 + last as i64));
+        assert_eq!(step.resolve(&fixture_space()), Ok(steps[last]));
         let vars = reader.values().variables_at(last).expect("values visible");
         assert!(matches!(vars[0].value, ValueRecord::Int { i, .. } if i == (last as i64) * 10));
         let call = reader.calls().call(last).expect("call visible");
@@ -418,8 +447,7 @@ fn e2e_streaming_reader_real_product_all_streams() {
 
     for i in 0..total {
         let step = reader.steps().step(i).unwrap();
-        assert_eq!(step.path_id, PathId(PATH_ID));
-        assert_eq!(step.line, Line(100 + i as i64));
+        assert_eq!(step.resolve(&fixture_space()), Ok(steps[i]));
         let vars = reader.values().variables_at(i).unwrap();
         assert_eq!(vars[0].variable_id.0, i);
         assert!(matches!(vars[0].value, ValueRecord::Int { i: n, .. } if n == (i as i64) * 10));

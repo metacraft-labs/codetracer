@@ -290,7 +290,7 @@ mod tests {
         map.append(ADDR, 1, mw(1100, 2));
         cov.coverage_add(0, 1000, CoverageState::Sparse).unwrap();
         cov.coverage_add(1000, 2000, CoverageState::Sparse).unwrap();
-        let collapsed = collapse_region(&mut cov, &map, &lines, 0, 2000, K, |k| (k as u32, 0)).unwrap();
+        let collapsed = collapse_region(&mut cov, &map, &lines, 0, 2000, K, |k| Some((k as u32, 0))).unwrap();
         (cov, collapsed.memwrites.unwrap())
     }
 

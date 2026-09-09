@@ -67,8 +67,8 @@
 use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
 use num_traits::FromPrimitive;
 
+use codetracer_trace_writer::line_position::LinePositionSpace;
 use codetracer_trace_writer::meta_dat::meta_dat_has_interning_tables;
-use codetracer_trace_writer::step_stream::unpack_global_line_index;
 
 use super::ctfs_container::CtfsReader;
 
@@ -304,11 +304,15 @@ impl InterningTables {
             variable_names.push(String::from_utf8_lossy(varnames_table.record(id)?).into_owned());
         }
 
+        // The structured `funcs.dat` record addresses its declaration site in
+        // this container's own space, so the space is built from the path table
+        // that was just decoded.
+        let line_space = LinePositionSpace::uniform(paths.len());
         let mut functions = Vec::with_capacity(funcs_table.count());
         for id in 0..funcs_table.count() {
             let raw = funcs_table.record(id)?;
             functions.push(match layout {
-                RecordLayout::Structured => decode_func_record(id, raw)?,
+                RecordLayout::Structured => decode_func_record(id, raw, &line_space)?,
                 RecordLayout::Plain => FunctionRecord {
                     name: String::from_utf8_lossy(raw).into_owned(),
                     // Not on disk in this layout. The Nim FFI reader stubs the
@@ -420,10 +424,14 @@ fn decode_column_aware_path(id: usize, raw: &[u8]) -> Result<(String, Vec<u32>),
 
 /// Decode one M23d-layout `funcs.dat` record into a [`FunctionRecord`].
 ///
-/// The record's `global_line_index` is the same packing the step stream uses,
-/// so [`unpack_global_line_index`] recovers the `(path_id, line)` the function
-/// was defined at.
-fn decode_func_record(id: usize, raw: &[u8]) -> Result<FunctionRecord, String> {
+/// The record's `global_line_index` addresses the declaration site in the
+/// container's own position space, the same space the step stream addresses in,
+/// so `space` recovers the `(path_id, line)` the function was defined at.
+///
+/// An address the space cannot place leaves the site at `(0, 0)` — the same
+/// stub the `Plain` layout carries, which every consumer already handles —
+/// rather than a `(path_id, line)` produced by arithmetic alone.
+fn decode_func_record(id: usize, raw: &[u8], space: &LinePositionSpace) -> Result<FunctionRecord, String> {
     let mut pos = 0usize;
     let global_line_index = decode_varint(raw, &mut pos)?;
     let name_len = decode_varint(raw, &mut pos)? as usize;
@@ -431,7 +439,7 @@ fn decode_func_record(id: usize, raw: &[u8]) -> Result<FunctionRecord, String> {
         return Err(format!("funcs.dat: record {id} name extends past record"));
     }
     let name = String::from_utf8_lossy(&raw[pos..pos + name_len]).into_owned();
-    let (path_id, line) = unpack_global_line_index(global_line_index);
+    let (path_id, line) = space.resolve(global_line_index).unwrap_or((0, 0));
     Ok(FunctionRecord {
         name,
         path_id: PathId(path_id),
@@ -528,22 +536,40 @@ mod tests {
         assert!(err.contains("out of range"), "{err}");
     }
 
-    /// A `funcs.dat` record's packed `global_line_index` recovers the real
-    /// definition site — the field the Nim FFI path stubs to `(0, 0)`.
+    /// A `funcs.dat` record's `global_line_index` recovers the real definition
+    /// site — the field the Nim FFI path stubs to `(0, 0)`. The container
+    /// registers eight paths, so path 7 is one it can hold.
     #[test]
     fn func_record_recovers_its_definition_site() {
-        use codetracer_trace_writer::step_stream::pack_global_line_index;
-
-        let gli = pack_global_line_index(7, 42);
+        let mut space = LinePositionSpace::uniform(8);
+        let gli = space.global_index(7, 42);
         let mut raw = Vec::new();
         encode_varint(&mut raw, gli);
         encode_varint(&mut raw, 3);
         raw.extend_from_slice(b"run");
 
-        let record = decode_func_record(0, &raw).unwrap();
+        let record = decode_func_record(0, &raw, &space).unwrap();
         assert_eq!(record.name, "run");
         assert_eq!(record.path_id, PathId(7));
         assert_eq!(record.line, Line(42));
+    }
+
+    /// An address this container's space cannot hold leaves the site stubbed
+    /// rather than answered. A two-path container has no path 7.
+    #[test]
+    fn a_func_address_outside_the_space_is_not_answered() {
+        let mut wide = LinePositionSpace::uniform(8);
+        let gli = wide.global_index(7, 42);
+        let mut raw = Vec::new();
+        encode_varint(&mut raw, gli);
+        encode_varint(&mut raw, 3);
+        raw.extend_from_slice(b"run");
+
+        let narrow = LinePositionSpace::uniform(2);
+        let record = decode_func_record(0, &raw, &narrow).unwrap();
+        assert_eq!(record.name, "run", "the name is still readable");
+        assert_eq!(record.path_id, PathId(0));
+        assert_eq!(record.line, Line(0));
     }
 
     /// A truncated function name is an error naming the record, not a panic.
@@ -553,7 +579,7 @@ mod tests {
         encode_varint(&mut raw, 0);
         encode_varint(&mut raw, 10);
         raw.extend_from_slice(b"ab");
-        let err = decode_func_record(3, &raw).unwrap_err();
+        let err = decode_func_record(3, &raw, &LinePositionSpace::uniform(1)).unwrap_err();
         assert!(err.contains("record 3"), "{err}");
     }
 

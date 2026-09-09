@@ -2,8 +2,8 @@
 //! backend-manager so it can extract per-trace metadata without depending
 //! on the heavier `codetracer_trace_types`/`replay-server` crates.
 //!
-//! The wire format is the v3 layout introduced in M-REC-1 and pinned by
-//! M-REC-1.5: pre-1.0, no backcompat for v1/v2 fixtures.  The canonical
+//! The wire format is the layout introduced in M-REC-1 and pinned by
+//! M-REC-1.5: pre-1.0, no backcompat for superseded versions.  The canonical
 //! reference parser is in
 //! `codetracer/src/db-backend/src/ctfs_trace_reader/meta_dat.rs`; the two
 //! implementations stay byte-compatible by construction (they both
@@ -34,7 +34,8 @@ use std::path::Path;
 /// Magic bytes identifying a `meta.dat` payload: ASCII "CTMD".
 pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 
-/// Canonical meta.dat format version: v3 (M-REC-1, 2026-05-18).
+/// Canonical meta.dat format version: v4 (the global line index
+/// correction).
 ///
 /// Pre-1.0, CodeTracer enforces a strict no-backcompat policy on the
 /// trace format: every recorder is required to track the current
@@ -44,18 +45,35 @@ pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 /// § 3 and the M-REC-1 / M-REC-1.5 milestones for the rationale.
 ///
 /// Concretely this means [`SUPPORTED_META_DAT_VERSIONS`] is a
-/// singleton `&[3]`; any v1/v2 payload encountered in the wild is a
+/// singleton; any older payload encountered in the wild is a
 /// stale build artefact (e.g. an out-of-date
 /// `libcodetracer_trace_writer.a` static library) and must be
 /// rebuilt rather than worked around at the reader.
-pub const META_DAT_VERSION: u16 = 3;
+///
+/// This number must equal the db-backend's
+/// `ctfs_trace_reader::meta_dat::META_DAT_VERSION` and the Nim writer's
+/// `MetaDatVersion`.  The three read the same containers, so a number
+/// that moves in one place and not the others turns "this recording is
+/// too old" into "this tool is too old" for exactly the recordings the
+/// others open — a v4 recording would open in the debugger and be
+/// refused by `ct trace info` on the same file.
+pub const META_DAT_VERSION: u16 = 4;
 
 /// The set of `meta.dat` versions this parser accepts on read.  Kept
 /// as a slice (rather than a single constant) so callers that surface
 /// "unsupported version" errors can enumerate the accepted set in
 /// diagnostics; the slice is intentionally a singleton, mirroring
 /// [`META_DAT_VERSION`].
-pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[3];
+///
+/// v3 and below are refused even though this parser reads no step
+/// addresses and so could decode their header perfectly well.  The
+/// version is what says which line-only `global_position_index` packing
+/// the container's steps use, and at v3 that packing is one the
+/// debugger cannot resolve correctly (db-backend
+/// `ctfs_trace_reader::meta_dat::SUPPORTED_VERSIONS` has the arithmetic).
+/// Reporting on a recording that no reader in this repository can open
+/// is a worse answer than saying it must be re-recorded.
+pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[4];
 
 // The canonical flag list lives in
 // `src/db-backend/src/ctfs_trace_reader/meta_dat.rs` (and mirrors the Nim
@@ -940,7 +958,11 @@ mod tests {
     fn rejects_invalid_recording_id() {
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        // Stamped from the constant, not written out: pinned to a superseded
+        // number this payload would be refused for its VERSION and the
+        // recording-id rule it exists to check would go untested behind a
+        // passing assertion.
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         let bad = "not-a-uuid";
         encode_varint(bad.len() as u64, &mut buf);

@@ -133,8 +133,10 @@ pub fn collapse_memwrites(
 /// layout.
 ///
 /// The `linehits.tc` namespace key is the **global line index**; `key_to_line`
-/// maps it back to the `(file_id, line)` pair the on-disk format stores. (The
-/// global line index is `file_id`-major in the recorder's interning, so the
+/// maps it back to the `(file_id, line)` pair the on-disk format stores, and
+/// returns `None` for a key that names no location in the trace's address space
+/// — such a key is dropped rather than filed under an invented `(file_id,
+/// line)`. (The global line index is a prefix sum in file-id order, so the
 /// ascending key order already yields ascending `(file_id, line)`.)
 ///
 /// Returns `None` when the map has no records for the region.
@@ -146,14 +148,15 @@ pub fn collapse_linehits<F>(
     key_to_line: F,
 ) -> Option<Vec<u8>>
 where
-    F: Fn(u64) -> (u32, u32),
+    F: Fn(u64) -> Option<(u32, u32)>,
 {
     let covering = region_interval_ids(tick_lo, tick_hi, interval_size);
     let mut per_line: Vec<(u32, u32, Vec<LineHitEntry>)> = Vec::new();
     for key in map.keys() {
         let hits = map.merge_read(key, &covering, tick_lo, tick_hi);
-        if !hits.is_empty() {
-            let (file_id, line) = key_to_line(key);
+        if !hits.is_empty()
+            && let Some((file_id, line)) = key_to_line(key)
+        {
             per_line.push((file_id, line, hits));
         }
     }
@@ -190,7 +193,7 @@ pub fn collapse_region<F>(
     key_to_line: F,
 ) -> Result<CollapsedRegion, CollapseError>
 where
-    F: Fn(u64) -> (u32, u32),
+    F: Fn(u64) -> Option<(u32, u32)>,
 {
     if tick_hi <= tick_lo {
         return Err(CollapseError::EmptyRegion { tick_lo, tick_hi });
@@ -272,7 +275,7 @@ mod tests {
         let (mut cov, map) = populate_two_intervals();
         let empty_lines: IntervalTaggedMap<LineHitEntry> = IntervalTaggedMap::new();
 
-        let collapsed = collapse_region(&mut cov, &map, &empty_lines, 0, 2000, K, |k| (k as u32, 0)).unwrap();
+        let collapsed = collapse_region(&mut cov, &map, &empty_lines, 0, 2000, K, |k| Some((k as u32, 0))).unwrap();
         let got = collapsed.memwrites.expect("memwrites image");
 
         // Independent server-prep reference: emulate §6.3 reduce — gather ALL the
@@ -311,7 +314,7 @@ mod tests {
         cov.coverage_add(1000, 2000, CoverageState::Sparse).unwrap();
         let empty_lines: IntervalTaggedMap<LineHitEntry> = IntervalTaggedMap::new();
 
-        let collapsed = collapse_region(&mut cov, &map, &empty_lines, 0, 2000, K, |k| (k as u32, 0)).unwrap();
+        let collapsed = collapse_region(&mut cov, &map, &empty_lines, 0, 2000, K, |k| Some((k as u32, 0))).unwrap();
         let decoded = decode_memwrites(&collapsed.memwrites.unwrap()).unwrap();
         let keyed: Vec<(u64, u64)> = decoded.iter().map(|(a, w)| (*a, w.tick)).collect();
         // 0x1000 (ascending) before 0x9000, each tick-sorted.
@@ -331,7 +334,7 @@ mod tests {
         assert_eq!(rows_before.len(), 2);
         assert!(rows_before.iter().all(|r| r.state == CoverageState::Sparse));
 
-        collapse_region(&mut cov, &map, &empty_lines, 0, 2000, K, |k| (k as u32, 0)).unwrap();
+        collapse_region(&mut cov, &map, &empty_lines, 0, 2000, K, |k| Some((k as u32, 0))).unwrap();
 
         // After: one collapsed_complete row spanning the whole region.
         let rows_after = cov.rows();
@@ -353,7 +356,7 @@ mod tests {
         let lines: IntervalTaggedMap<LineHitEntry> = IntervalTaggedMap::new();
         cov.coverage_add(0, 1000, CoverageState::Sparse).unwrap();
         // [1000, 2000) is NOT covered — there's a hole.
-        let err = collapse_region(&mut cov, &map, &lines, 0, 2000, K, |k| (k as u32, 0)).unwrap_err();
+        let err = collapse_region(&mut cov, &map, &lines, 0, 2000, K, |k| Some((k as u32, 0))).unwrap_err();
         assert!(matches!(err, CollapseError::NotContiguous { .. }));
     }
 
@@ -369,7 +372,10 @@ mod tests {
         cov.coverage_add(0, 1000, CoverageState::Sparse).unwrap();
         cov.coverage_add(1000, 2000, CoverageState::Sparse).unwrap();
 
-        let collapsed = collapse_region(&mut cov, &mem, &lines, 0, 2000, K, |k| ((k >> 16) as u32, k as u32)).unwrap();
+        let collapsed = collapse_region(&mut cov, &mem, &lines, 0, 2000, K, |k| {
+            Some(((k >> 16) as u32, k as u32))
+        })
+        .unwrap();
         let image = collapsed.linehits.expect("linehits image");
         let decoded = decode_linehits(&image).unwrap();
         assert_eq!(decoded.len(), 1);
