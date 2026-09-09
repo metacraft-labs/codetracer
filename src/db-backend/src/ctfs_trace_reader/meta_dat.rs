@@ -88,6 +88,15 @@
 //!   shim — v1/v2 fixtures must be regenerated.  Spec:
 //!   `codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md`
 //!   M-REC-1 / M-REC-1.5.
+//! - **v4** — the line-only `global_position_index` encode became
+//!   `prefix_sum[file_id] + (line - 1)`, where it had been
+//!   `prefix_sum[file_id] + line`.  No field of the header changed; the
+//!   version moved because it is the only thing in a container that
+//!   distinguishes the two encodes, and reading a v3 container under the
+//!   current decode reports every step one line high without failing.
+//!   See [`SUPPORTED_VERSIONS`] for why the accepted set is a singleton.
+//!   Spec: `codetracer-trace-format-spec/internal-files.md` §"Global Line
+//!   Index".
 
 use std::error::Error;
 use std::fmt;
@@ -102,14 +111,47 @@ pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 ///
 /// M-REC-1.5 retired v1 and v2 (pre-1.0, no backcompat).  The reader
 /// rejects any version not listed in [`SUPPORTED_VERSIONS`].
-pub const META_DAT_VERSION: u16 = 3;
+pub const META_DAT_VERSION: u16 = 4;
+
+/// The highest schema version whose writer packed a line-only
+/// `global_position_index` as `prefix_sum[file_id] + line`.
+///
+/// The bound is named rather than written as a literal `3` where it is
+/// used, so that it and the refusal it drives move together: a later
+/// version that changed the packing again would raise it, and a reader
+/// comparing against a stale literal would answer such a container
+/// instead of refusing it.
+pub const LAST_SHIFTED_GLOBAL_INDEX_VERSION: u16 = 3;
 
 /// All `meta.dat` versions this reader can decode.
 ///
-/// v1 and v2 were retired by M-REC-1.5 (pre-1.0; no backwards
-/// compatibility).  v3 (M-REC-1) added the required `recording_id`
-/// UUIDv7 string and trace-filter provenance flag bit.
-pub const SUPPORTED_VERSIONS: &[u16] = &[3];
+/// **A singleton, and it has to be.**  The obvious alternative — accept
+/// `&[3, 4]`, since v4 changed no field of the header — reintroduces the
+/// exact defect the bump exists to close.  v3 and v4 differ not in the
+/// bytes of `meta.dat` but in what the rest of the container's step
+/// addresses MEAN: a v3 writer packed a line-only `global_position_index`
+/// as `prefix_sum[file_id] + line`, and v4 packs
+/// `prefix_sum[file_id] + (line - 1)`, the exact inverse of the decode
+/// [`super::line_position_space`] performs.  Both land INSIDE the trace's
+/// own address space, so accepting a v3 container does not fail anywhere:
+/// every step resolves to a real file and a real line, each one exactly
+/// one line above where it was recorded, and the debugger shows that line
+/// while a breakpoint set on it never matches.  Nothing else in the
+/// container distinguishes the two — `recorder_id` names the producer,
+/// not its address packing, and the same recorders span the change — so
+/// the schema version is the only field that can carry the distinction,
+/// and answering a v3 container at all is answering it wrongly.
+///
+/// A back-compat shim is not merely unimplemented here, it is not
+/// constructible: subtracting one from every address would correct a
+/// trace whose writer used the old packing, and the version is precisely
+/// what would have said that it did.  Pre-1.0, v3 containers are
+/// re-recorded rather than read.
+///
+/// v1 and v2 were retired earlier, by M-REC-1.5, on the same pre-1.0
+/// no-backcompat policy; [`LAST_SHIFTED_GLOBAL_INDEX_VERSION`] covers
+/// them too, since every version at or below it predates the correction.
+pub const SUPPORTED_VERSIONS: &[u16] = &[4];
 
 /// Flag bit 0 — when set, the MCR (Multi-process Concurrent Recording)
 /// fields are appended after the paths block.
@@ -468,6 +510,29 @@ impl fmt::Display for MetaDatError {
                 write!(f, "meta.dat too short: need at least 8 bytes, got {got}")
             }
             MetaDatError::BadMagic => write!(f, "meta.dat: bad magic bytes (expected 'CTMD')"),
+            // A version at or below the correction bound is refused with its
+            // reason spelled out, not with the generic mismatch, because the
+            // consequence of reading one anyway is not a parse failure — it is
+            // a plausible wrong answer at every step, and only naming it tells
+            // a caller that the remedy is to re-record rather than to wait for
+            // a newer reader.
+            //
+            // Phrased about the WRITER rather than about this container's
+            // contents: the gate is on the schema version, so it also refuses
+            // a container at that version holding no steps at all, and "its
+            // steps were packed as" would be a claim about such a trace that
+            // is not true.
+            MetaDatError::UnsupportedVersion(v) if *v <= LAST_SHIFTED_GLOBAL_INDEX_VERSION => write!(
+                f,
+                "meta.dat: schema version {v} predates the global line index correction, and this \
+                 trace cannot be read. Writers at that version packed a line-only step position as \
+                 prefix_sum[file_id] + line; version {META_DAT_VERSION} packs \
+                 prefix_sum[file_id] + (line - 1). Both land inside the trace's address space, so \
+                 a step read under the current decode would come back one line high rather than \
+                 fail, and the container records nothing else that tells the two apart. Re-record \
+                 the trace with a current recorder. Spec: \
+                 codetracer-trace-format-spec/internal-files.md \"Global Line Index\"",
+            ),
             MetaDatError::UnsupportedVersion(v) => {
                 write!(f, "meta.dat: unsupported version {v}, expected {META_DAT_VERSION}")
             }
@@ -1079,7 +1144,7 @@ mod tests {
     ///
     /// ```text
     /// MetaDat {
-    ///     version: 3,
+    ///     version: META_DAT_VERSION,
     ///     flags: 0,
     ///     recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
     ///     program: "hi",
@@ -1100,7 +1165,7 @@ mod tests {
     fn writer_compat_fixture_bytes() -> Vec<u8> {
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC); // "CTMD"
-        buf.extend_from_slice(&3u16.to_le_bytes()); // version
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes()); // version
         buf.extend_from_slice(&0u16.to_le_bytes()); // flags
         encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
         buf.extend_from_slice(TEST_UUID_V7.as_bytes());
@@ -1124,7 +1189,7 @@ mod tests {
         let bytes = writer_compat_fixture_bytes();
         let parsed = parse_meta_dat(&bytes).expect("parse fixture");
         let expected = MetaDat {
-            version: 3,
+            version: META_DAT_VERSION,
             flags: 0,
             recording_id: TEST_UUID_V7.to_owned(),
             program: "hi".to_owned(),
@@ -1167,14 +1232,69 @@ mod tests {
         assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::UnsupportedVersion(2)));
     }
 
-    /// M-REC-1.5 end-to-end: the parser rejects a v3 trace whose
+    /// A header at the last pre-correction schema version is refused, and the
+    /// refusal says what reading it anyway would do.
+    ///
+    /// The fixture is the header this serializer emits with only the version
+    /// field set back, because the serializer can no longer produce one — that
+    /// is what the bump means. Every other byte is what a writer at that
+    /// version wrote, so the container is refused for its VERSION and not for
+    /// some incidental malformation.
+    #[test]
+    fn a_container_from_before_the_line_index_correction_is_refused_by_name() {
+        let mut buf = serialize_meta_dat(&MetaDat {
+            version: META_DAT_VERSION,
+            flags: 0,
+            recording_id: TEST_UUID_V7.to_owned(),
+            program: "prog".to_owned(),
+            args: vec![],
+            workdir: "/w".to_owned(),
+            recorder_id: "r".to_owned(),
+            paths: vec!["/a.py".to_owned(), "/b.py".to_owned()],
+            mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
+        });
+        parse_meta_dat(&buf).expect("the header this serializer emits must parse before it is aged");
+
+        buf[4..6].copy_from_slice(&LAST_SHIFTED_GLOBAL_INDEX_VERSION.to_le_bytes());
+        let err = parse_meta_dat(&buf).expect_err("a pre-correction container must be refused");
+        assert_eq!(err, MetaDatError::UnsupportedVersion(LAST_SHIFTED_GLOBAL_INDEX_VERSION));
+
+        let msg = err.to_string();
+        assert!(msg.contains("one line high"), "must name the consequence: {msg}");
+        assert!(
+            msg.contains("prefix_sum[file_id] + line"),
+            "must name the superseded encode: {msg}"
+        );
+        assert!(msg.contains("Re-record"), "must name the remedy: {msg}");
+    }
+
+    /// The accepted set is exactly the current version. Written as a
+    /// membership check rather than an equality on the slice so it states the
+    /// property that matters: no version at or below the correction bound is
+    /// readable, whatever else the set grows to hold later.
+    #[test]
+    fn no_version_at_or_below_the_correction_bound_is_accepted() {
+        for v in 0..=LAST_SHIFTED_GLOBAL_INDEX_VERSION {
+            assert!(
+                !SUPPORTED_VERSIONS.contains(&v),
+                "version {v} predates the global line index correction and must not be readable"
+            );
+        }
+        assert!(SUPPORTED_VERSIONS.contains(&META_DAT_VERSION));
+    }
+
+    /// M-REC-1.5 end-to-end: the parser rejects a trace whose
     /// recording_id is not a canonical UUIDv7.
     #[test]
     fn rejects_invalid_recording_id() {
         let bad = "not-a-valid-uuid";
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         encode_varint(bad.len() as u64, &mut buf);
         buf.extend_from_slice(bad.as_bytes());
@@ -1466,7 +1586,7 @@ mod tests {
         // string extends past EOF.
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
         buf.extend_from_slice(TEST_UUID_V7.as_bytes());
@@ -1489,7 +1609,7 @@ mod tests {
         // Construct a payload where `program` is two bytes of invalid UTF-8.
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
         buf.extend_from_slice(TEST_UUID_V7.as_bytes());

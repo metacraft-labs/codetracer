@@ -1437,12 +1437,12 @@ mod tests {
         );
     }
 
-    /// Build a minimal valid v3 `meta.dat` payload with the given flags.
+    /// Build a minimal valid current-version `meta.dat` payload with the given flags.
     fn meta_dat_bytes(flags: u16) -> Vec<u8> {
         const TEST_UUID_V7: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
         let mut buf = Vec::new();
         buf.extend_from_slice(&super::super::meta_dat::META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&super::super::meta_dat::META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&flags.to_le_bytes());
         let put_str = |s: &str, out: &mut Vec<u8>| {
             out.push(s.len() as u8);
