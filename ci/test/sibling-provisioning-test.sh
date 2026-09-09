@@ -916,6 +916,15 @@ echo "db-backend cargo legs provision codetracer-native-recorder"
 # vacuous pass. Two vacuous greens have already been paid for in this file.
 readonly DB_BACKEND_ANCHOR='cross-repo-tests.yml:shell-recorder-tests'
 
+# The anchor above is a LITERAL-pattern site (`cd src/db-backend`). It says
+# nothing about the derived half, so if the justfile walk broke -- a recipe
+# renamed, `run-just-lanes.sh` replaced, the seed patterns stopped matching --
+# that anchor would go on passing while every `just`-mediated call site
+# vanished from this contract's scope, which is precisely the eleven-week
+# silence this scanner was extended to end. Anchor the derived half separately,
+# on the site that produced the evidence.
+readonly DB_BACKEND_DERIVED_ANCHOR='codetracer.yml:test-non-gui'
+
 # A job satisfies this contract by naming the composite instead of the repo --
 # which is the shape this contract WANTS, and also a way to launder the defect
 # past it. If `setup-db-backend-siblings` ever stops provisioning
@@ -945,6 +954,139 @@ else
 		"entry gone, that credit is a fiction and the assertion below would pass while" \
 		"every one of those jobs panicked in build.rs."
 fi
+
+# ---------------------------------------------------------------------------
+# The cargo invocation is usually NOT what a workflow step says.
+#
+# The three literal patterns below (`cd src/db-backend`, `--manifest-path
+# src/db-backend`, `run-cross-repo-tests.sh`) are what a step writes when it
+# drives cargo directly. Most steps do not: they say `just <recipe>`, or they
+# name a script under `ci/` that says it. `test-non-gui` runs
+# `./ci/test/non-gui.sh` -> `just test` -> `ci/lib/run-just-lanes.sh test ...
+# test-rust ...` -> `pushd src/db-backend; cargo nextest run --bin
+# replay-server`, and NOTHING in that chain is a string this scanner used to
+# match. So the job compiled build.rs on both legs while this contract reported
+# "ok", and had done since 504274e13 (2026-06-23) dropped its recorder clone in
+# the migration to setup-dev-env -- a regression this file exists to catch and
+# did not, for eleven weeks.
+#
+# Rather than add `just test` as a fourth literal -- which would be the same
+# mistake one indirection later -- derive the recipe set from the justfile:
+#
+#   seed      recipes whose body cd/pushd's into src/db-backend
+#   closure   + recipes that invoke a seeded one, either as `just <recipe>` or
+#             as a lane argument of `ci/lib/run-just-lanes.sh <label> <lane>...`
+#             (the aggregate dispatcher; `just test`'s lane names are literal
+#             arguments there precisely so walks like this one can see them)
+#   scripts   + shell files under ci/ or scripts/ that invoke a closure recipe
+#
+# A step then counts as a db-backend call site if it says `just <closure
+# recipe>` or names one of those scripts. Derived, so a renamed recipe or a new
+# aggregate cannot quietly drop a job out of this contract's scope.
+# ---------------------------------------------------------------------------
+just_names=()
+just_bodies=()
+_cur_recipe=""
+_cur_body=""
+while IFS= read -r line || [ -n "$line" ]; do
+	case "$line" in
+	# A recipe header starts at column 0 and has a colon. Body lines are
+	# indented; comments at column 0 belong to no recipe.
+	[A-Za-z0-9_-]*:*)
+		if [ -n "$_cur_recipe" ]; then
+			just_names+=("$_cur_recipe")
+			just_bodies+=("$_cur_body")
+		fi
+		_cur_recipe="${line%%:*}"
+		_cur_recipe="${_cur_recipe%% *}"
+		# The dependency list after the colon is part of the body: a
+		# recipe that reaches db-backend through a prerequisite reaches it.
+		_cur_body="${line#*:}"
+		;;
+	*)
+		[ -n "$_cur_recipe" ] && _cur_body="$_cur_body
+$line"
+		;;
+	esac
+done <"$REPO_ROOT/justfile"
+if [ -n "$_cur_recipe" ]; then
+	just_names+=("$_cur_recipe")
+	just_bodies+=("$_cur_body")
+fi
+unset _cur_recipe _cur_body
+
+db_recipes=""
+for _i in "${!just_names[@]}"; do
+	case "${just_bodies[$_i]}" in
+	*'cd src/db-backend'* | *'pushd src/db-backend'*)
+		db_recipes="$db_recipes ${just_names[$_i]}"
+		;;
+	esac
+done
+
+_grew=1
+while [ "$_grew" -eq 1 ]; do
+	_grew=0
+	for _i in "${!just_names[@]}"; do
+		case " $db_recipes " in
+		*" ${just_names[$_i]} "*) continue ;;
+		esac
+		# Tokenise the body so a lane name is compared whole: a substring
+		# test would let `test-rust-flow` satisfy a search for `test-rust`.
+		_reaches=0
+		_prev=""
+		_dispatch=0
+		for _tok in ${just_bodies[$_i]}; do
+			# A line-continuation backslash tokenises on its own; skipping
+			# it keeps `just \<newline> test-rust` resolvable. Written
+			# "\\" rather than '\' only to keep shellcheck's SC1003 quiet.
+			case "$_tok" in
+			"\\") continue ;;
+			esac
+			if [ "$_prev" = "just" ]; then
+				case " $db_recipes " in
+				*" $_tok "*) _reaches=1 ;;
+				esac
+			fi
+			if [ "$_dispatch" -eq 1 ]; then
+				case " $db_recipes " in
+				*" $_tok "*) _reaches=1 ;;
+				esac
+			fi
+			case "$_tok" in
+			*run-just-lanes.sh) _dispatch=1 ;;
+			esac
+			_prev="$_tok"
+		done
+		if [ "$_reaches" -eq 1 ]; then
+			db_recipes="$db_recipes ${just_names[$_i]}"
+			_grew=1
+		fi
+	done
+done
+unset _i _grew _tok _prev _dispatch _reaches
+
+# Shell files that invoke one of those recipes. Repo-relative, because that is
+# how a workflow step names them (`./ci/test/non-gui.sh`, `bash ci/...`).
+db_scripts=""
+while IFS= read -r _sh; do
+	_rel="${_sh#"$REPO_ROOT"/}"
+	_prev=""
+	while IFS= read -r line || [ -n "$line" ]; do
+		for _tok in $line; do
+			if [ "$_prev" = "just" ]; then
+				case " $db_recipes " in
+				*" $_tok "*)
+					db_scripts="$db_scripts $_rel"
+					break 3
+					;;
+				esac
+			fi
+			_prev="$_tok"
+		done
+	done <"$_sh"
+done < <(find "$REPO_ROOT/ci" "$REPO_ROOT/scripts" -name '*.sh' -type f 2>/dev/null)
+unset _sh _rel _prev _tok
 
 db_backend_sites=()
 db_backend_missing=()
@@ -986,6 +1128,18 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 			'codetracer-native-recorder='* | 'codetracer-native-recorder')
 				seen_recorder=1
 				;;
+			# A `clone-repo` step provisions the sibling just as a
+			# `siblings:` entry does, and is how the legs that get no
+			# `setup-dev-env` (this job's macOS half; viewmodel-tests
+			# throughout) obtain theirs. Matching only the `siblings:`
+			# spelling made those legs unsatisfiable by any correct fix
+			# -- the contract would have gone on failing after the
+			# provisioning was in place, which is the shape that gets a
+			# contract deleted rather than obeyed.
+			'repo: metacraft-labs/codetracer-native-recorder' | \
+				'repo: '*'/codetracer-native-recorder')
+				seen_recorder=1
+				;;
 			*'setup-db-backend-siblings'*)
 				# The composite provisions the three db-backend siblings --
 				# but only credit the caller while it demonstrably still
@@ -1007,16 +1161,39 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 		# the cross-repo driver, whose `run_db_backend_test` does
 		# `cd "$REPO_ROOT/src/db-backend"; cargo test` (scripts/
 		# run-cross-repo-tests.sh:446).
+		_is_db_site=0
 		case "$stripped_line" in
 		'cd src/db-backend' | 'cd src/db-backend '* | "cd 'src/db-backend'"* | \
 			*'--manifest-path src/db-backend'* | *'--manifest-path=src/db-backend'* | \
 			*'run-cross-repo-tests.sh'*)
+			_is_db_site=1
+			;;
+		esac
+		# The derived half: `just <recipe>` for a recipe that reaches
+		# db-backend, and any ci/ or scripts/ shell file that does.
+		if [ "$_is_db_site" -eq 0 ]; then
+			_prev=""
+			for _tok in $stripped_line; do
+				if [ "$_prev" = "just" ]; then
+					case " $db_recipes " in
+					*" $_tok "*) _is_db_site=1 ;;
+					esac
+				fi
+				for _s in $db_scripts; do
+					case "$_tok" in
+					"$_s" | "./$_s") _is_db_site=1 ;;
+					esac
+				done
+				_prev="$_tok"
+			done
+			unset _prev _tok _s
+		fi
+		if [ "$_is_db_site" -eq 1 ]; then
 			db_backend_sites+=("$wf_name:$job")
 			if [ "$seen_recorder" -eq 0 ]; then
 				db_backend_missing+=("$wf_name:$line_no: job '$job' builds src/db-backend with no codetracer-native-recorder sibling before it")
 			fi
-			;;
-		esac
+		fi
 	done <"$wf"
 done
 
@@ -1037,6 +1214,27 @@ else
 		"found: ${db_backend_sites[*]:-<none>}"
 fi
 unset _anchor_found
+
+_derived_anchor_found=0
+for _s in "${db_backend_sites[@]}"; do
+	[ "$_s" = "$DB_BACKEND_DERIVED_ANCHOR" ] && _derived_anchor_found=1
+done
+unset _s
+
+if [ "$_derived_anchor_found" -eq 1 ]; then
+	ok "the justfile-derived db-backend walk still reaches its anchor (${#db_recipes} chars of recipe closure)"
+else
+	fail "the justfile-derived db-backend walk still reaches its anchor" \
+		"expected '$DB_BACKEND_DERIVED_ANCHOR' among the call sites. That job reaches" \
+		"cargo through ./ci/test/non-gui.sh -> just test -> run-just-lanes.sh ... test-rust" \
+		"-> pushd src/db-backend, and NO link in that chain is a literal this file" \
+		"matches -- it is found only by the derived walk. Losing it means the walk has" \
+		"broken and every just-mediated call site has silently left this contract." \
+		"recipe closure: ${db_recipes:-<empty>}" \
+		"scripts: ${db_scripts:-<none>}" \
+		"found: ${db_backend_sites[*]:-<none>}"
+fi
+unset _derived_anchor_found
 
 if [ "${#db_backend_missing[@]}" -eq 0 ]; then
 	ok "every db-backend cargo leg provisions codetracer-native-recorder first"
@@ -1546,7 +1744,11 @@ echo
 # four about the lock and the action that reads it (the action still runs the
 # command, it hand-writes no set or revision, the lock declares the set, and
 # every member is pinned to a 40-hex SHA).
-readonly EXPECTED_ASSERTIONS=27
+# 27 -> 28: assertion 2b's scanner grew a second, DERIVED half -- the justfile
+# closure that finds `just`-mediated db-backend builds -- and that half needs
+# its own anchor, because the existing one is a literal-pattern site and would
+# keep passing while the derived walk went blind.
+readonly EXPECTED_ASSERTIONS=28
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
