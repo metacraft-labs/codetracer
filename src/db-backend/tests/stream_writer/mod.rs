@@ -299,7 +299,19 @@ impl IncrementalCtfsStreamWriter {
 
     /// Commit `meta.dat` with an explicit capability-flag set.
     fn finalize_with_flags(&mut self, flags: u16) -> std::io::Result<()> {
-        let meta = encode_meta_dat("rec", "prog", &[], "/wd", "test-recorder", &[], flags);
+        // `meta.dat` has required a canonical UUIDv7 `recording_id` since v3,
+        // and the readers validate it. A placeholder here produces a container
+        // the production Nim reader refuses at open, which is what a test using
+        // this writer to stand in for a recorder must not do.
+        let meta = encode_meta_dat(
+            "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
+            "prog",
+            &[],
+            "/wd",
+            "test-recorder",
+            &[],
+            flags,
+        );
         self.append_to_file("meta.dat", &meta)?;
         self.flush_block_zero()?;
         self.file.flush()?;
