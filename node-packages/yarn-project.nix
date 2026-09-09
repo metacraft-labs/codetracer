@@ -82,15 +82,23 @@ let
     "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
   cacheOutputHashes = {
-    # Measured on CI (run 34233823494) after the sentinel above forced a real
-    # build of yarn-cache.drv on x86_64-linux. Six jobs on eph-linux-x64-g1 --
-    # ViewModel headless tests, test-non-gui (nixos), cross-process
-    # value-origin, ct-test cross-language provider gate, ct-test release gate
-    # and reprobuild-linux-smoke -- each built
-    # /nix/store/lciwdnrgfbdq3k7py1w2n0k58w35svfd-yarn-cache.drv and reported
-    # this identical ``got:`` value.
-    "x86_64-linux" = "sha512-pDrXJGQJBQ9JOXTLlYfA4r7ysQM9JOXoJUQL66a7EsOiyY064EoHKk/wVivpdl9J1PSTXbx19AmwVZDvzr/z6A==";
-    "aarch64-darwin" = "sha512-HlfoP0GZumvRJeIlTYag3j+XU2FMT0i3wvrMUNNgEiwvDlO6G8MuSXxpUSgih+6hDA1KceAAgt1kPzRnpYkfFQ==";
+    # Refreshed for the ``electron-rebuild@3.2.9`` -> ``@electron/rebuild@4.2.0``
+    # swap that drops ``tar@6.2.1`` (GHSA-23hp-3jrh-7fpw). That lockfile change
+    # invalidated both hashes below, exactly as the NOTE above warns.
+    #
+    # Forced with ``sentinelHash`` rather than by waiting for a mismatch, per the
+    # procedure above -- the previous values were real, so Nix would have
+    # substituted the stale caches from the binary cache and never run the
+    # builder, surfacing as ``YN0056: Cache entry required but missing``.
+    # x86_64-linux is left on the sentinel deliberately: this machine is
+    # aarch64-darwin, so the Linux ``got:`` can only be measured on CI. The
+    # first CI run on this branch will fail its Nix jobs with a hash mismatch
+    # and print the true value; paste it here before merging.
+    "x86_64-linux" = sentinelHash;
+    # Measured locally on aarch64-darwin: the sentinel above forced a real build
+    # of yarn-cache.drv (no substitute can exist for it), and the mismatch
+    # reported this ``got:``. Re-pinned and rebuilt to confirm it is stable.
+    "aarch64-darwin" = "sha512-rJ3Oka4DrMUZPVorCFF5usgDOBwQaXM/6AfzvVohcMiR7qB1EkYkr+hCNn3AVu+9Hl4TAZ472TBFhfSwxE8XJw==";
   };
 
   cacheOutputHash =
