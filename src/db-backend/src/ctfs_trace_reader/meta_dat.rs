@@ -32,7 +32,8 @@
 //!           bit 11      — FLAG_HAS_IO_EVENT_STREAM (M23c — dedicated events.dat)
 //!           bit 12      — FLAG_HAS_INTERNING_TABLES (M23d — binary varint interning tables)
 //!           bit 13      — FLAG_HAS_SPAN_STREAM (RS-M1 — spans.dat/spans.idx/spantype.ns)
-//!           bits 14..=15 — reserved (must be 0; readers reject if set)
+//!           bit 14      — FLAG_HAS_LINE_COUNT_TABLE (paths.dat records carry line_count)
+//!           bit 15      — reserved (must be 0; readers reject if set)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
 //! varint                       : args_count
@@ -310,6 +311,39 @@ pub const FLAG_HAS_INTERNING_TABLES: u16 = 1 << 12;
 /// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 13.
 pub const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
 
+/// Flag bit 14 — `FLAG_HAS_LINE_COUNT_TABLE`.  When set, every `paths.dat`
+/// record carries the file's line count after the path bytes
+/// (`path_len + path_bytes + line_count`) and the line-only global position
+/// space is laid out from those counts rather than from the
+/// `DEFAULT_LINES_PER_FILE` convention.
+///
+/// This is the container finally *stating* what a line-only reader previously
+/// had to assume.  Spec `trace-events.md` §"Per-File Contiguous Integer Ranges"
+/// sizes a line-only file at `file_size = line_count`, but no line-only
+/// container carried the counts, so a reader could only apply the writer's
+/// convention of 100000 addresses per file — unrecorded, and wrong above its
+/// own ceiling: a file with more lines addresses positions inside the *next*
+/// file's range, which is a well-formed address of a location that was never
+/// recorded and which no reader can detect.
+///
+/// **Mutually exclusive with [`FLAG_HAS_COLUMN_AWARE_STEPS`]**: a Layout A
+/// record already carries `line_count` as the length of its per-line table, and
+/// that mode sizes a file in addressable columns rather than lines.  A header
+/// setting both states the same field under two record layouts, and
+/// [`parse_meta_dat`] rejects it.
+///
+/// **Like bit 13, deliberately NOT backwards compatible.**  A reader whose
+/// [`KNOWN_FLAGS_MASK`] predates it refuses a count-bearing container outright,
+/// which is what makes the record-layout change safe: the alternative is
+/// reading the framed record as bare path bytes and answering with a path that
+/// has its own length prefix glued to the front.  Rollout is therefore
+/// "readers before writers", and no writer sets the bit by default.
+///
+/// Must match `codetracer_trace_writer::meta_dat::FLAG_HAS_LINE_COUNT_TABLE`
+/// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 14
+/// (`FlagHasLineCountTable`).
+pub const FLAG_HAS_LINE_COUNT_TABLE: u16 = 1 << 14;
+
 /// Bitmask of all flag bits this implementation understands.
 ///
 /// Any bit outside this mask is rejected by [`parse_meta_dat`] so future
@@ -327,9 +361,19 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_VALUE_STREAM
     | FLAG_HAS_IO_EVENT_STREAM
     | FLAG_HAS_INTERNING_TABLES
-    | FLAG_HAS_SPAN_STREAM;
+    | FLAG_HAS_SPAN_STREAM
+    | FLAG_HAS_LINE_COUNT_TABLE;
 
 // ── Public types ────────────────────────────────────────────────────────
+
+/// The flag bits this build understands, as a mask.
+///
+/// Exposed so a test in another module can derive a genuinely-unknown bit from
+/// it instead of naming one by hand — a hand-written literal silently stops
+/// probing anything the moment that bit is allocated.
+pub fn known_flags_mask() -> u16 {
+    KNOWN_FLAGS_MASK
+}
 
 /// Decoded contents of a `meta.dat` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -501,6 +545,15 @@ pub enum MetaDatError {
         /// The offending string value (lossy-truncated if oversized).
         value: String,
     },
+    /// The header set both [`FLAG_HAS_COLUMN_AWARE_STEPS`] and
+    /// [`FLAG_HAS_LINE_COUNT_TABLE`], which declare the same `paths.dat` field
+    /// under two incompatible record layouts. Rejected rather than resolved by
+    /// preference: picking one would decode the other layout's records as a
+    /// truncated path with a fabricated count, and answer with no error.
+    ConflictingPathLayouts {
+        /// The full flags field as parsed from the header.
+        flags: u16,
+    },
 }
 
 impl fmt::Display for MetaDatError {
@@ -510,6 +563,14 @@ impl fmt::Display for MetaDatError {
                 write!(f, "meta.dat too short: need at least 8 bytes, got {got}")
             }
             MetaDatError::BadMagic => write!(f, "meta.dat: bad magic bytes (expected 'CTMD')"),
+            MetaDatError::ConflictingPathLayouts { flags } => write!(
+                f,
+                "meta.dat: flags 0x{flags:04x} set both FLAG_HAS_COLUMN_AWARE_STEPS (bit 4) and \
+                 FLAG_HAS_LINE_COUNT_TABLE (bit 14). Each selects a paths.dat record layout and a \
+                 record is in one or the other; a column-aware record already carries the file's \
+                 line_count as the length of its per-line table. Re-record the trace with a \
+                 current recorder"
+            ),
             // A version at or below the correction bound is refused with its
             // reason spelled out, not with the generic mismatch, because the
             // consequence of reading one anyway is not a parse failure — it is
@@ -728,6 +789,14 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     let unknown_bits = flags & !KNOWN_FLAGS_MASK;
     if unknown_bits != 0 {
         return Err(MetaDatError::UnknownFlags { flags, unknown_bits });
+    }
+    // Two known bits that cannot both be honoured: each selects a `paths.dat`
+    // record layout, and a record is in one layout or the other. Refused here,
+    // in front of every consumer, because the wrong choice is not a parse
+    // failure downstream — it is a path string with its own framing inside it
+    // and a per-file size that was never written.
+    if flags & FLAG_HAS_COLUMN_AWARE_STEPS != 0 && flags & FLAG_HAS_LINE_COUNT_TABLE != 0 {
+        return Err(MetaDatError::ConflictingPathLayouts { flags });
     }
 
     let mut pos = 8usize;
@@ -1334,28 +1403,64 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Bit 14 is the lowest still-reserved flag after M17a/M17b allocated
-        // bit 8 (FLAG_HAS_CALL_STREAM), M23a allocated bit 9
-        // (FLAG_HAS_STEP_STREAM), M23b allocated bit 10
-        // (FLAG_HAS_VALUE_STREAM), M23c allocated bit 11
-        // (FLAG_HAS_IO_EVENT_STREAM), M23d allocated bit 12
-        // (FLAG_HAS_INTERNING_TABLES) and RS-M1 allocated bit 13
-        // (FLAG_HAS_SPAN_STREAM).  Bits 0..=13 are FLAG_HAS_MCR_FIELDS /
-        // FLAG_HAS_REPLAY_LAUNCH_FIELDS / FLAG_HAS_LAYOUT_SNAPSHOT /
-        // FLAG_HAS_TRACE_FILTER_PROVENANCE / FLAG_HAS_COLUMN_AWARE_STEPS /
-        // FLAG_HAS_ALTERNATE_SOURCE_VIEWS / FLAG_SUPPORTS_COLUMN_BREAKPOINTS /
-        // FLAG_SUPPORTS_COLUMN_MOTIONS / FLAG_HAS_CALL_STREAM /
-        // FLAG_HAS_STEP_STREAM / FLAG_HAS_VALUE_STREAM / FLAG_HAS_IO_EVENT_STREAM /
-        // FLAG_HAS_INTERNING_TABLES / FLAG_HAS_SPAN_STREAM.
+        // Bit 15 is the lowest — and now the only — still-reserved flag: bits
+        // 0..=14 are all allocated in KNOWN_FLAGS_MASK, most recently bit 14
+        // (FLAG_HAS_LINE_COUNT_TABLE). The probe is pinned to
+        // `!KNOWN_FLAGS_MASK` rather than to a literal so that allocating a
+        // bit cannot leave this test probing a bit the reader now knows, where
+        // it would assert nothing.
+        assert_eq!(
+            !KNOWN_FLAGS_MASK, 0b1000_0000_0000_0000,
+            "bit 15 is the last unallocated flag bit; allocating it means the flag \
+             word has to grow, and this probe has to be rewritten against whatever \
+             that growth defines as unknown"
+        );
+        let probe = !KNOWN_FLAGS_MASK;
         let mut buf = writer_compat_fixture_bytes();
-        buf[6] = 0;
-        buf[7] = 0b0100_0000; // = bit 14, lowest reserved
+        buf[6..8].copy_from_slice(&probe.to_le_bytes());
         match parse_meta_dat(&buf) {
             Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, 0b0100_0000_0000_0000);
-                assert_eq!(unknown_bits, 0b0100_0000_0000_0000);
+                assert_eq!(flags, probe);
+                assert_eq!(unknown_bits, probe);
             }
             other => panic!("expected UnknownFlags, got {other:?}"),
+        }
+    }
+
+    /// Bit 14 is a REJECTING bit, so before this constant existed the
+    /// db-backend refused every count-bearing container outright. Adding it to
+    /// [`KNOWN_FLAGS_MASK`] is what makes such a container openable at all —
+    /// the "readers before writers" rollout, same as bit 13's.
+    #[test]
+    fn accepts_has_line_count_table_flag() {
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6..8].copy_from_slice(&FLAG_HAS_LINE_COUNT_TABLE.to_le_bytes());
+        let meta = parse_meta_dat(&buf).expect("bit 14 must parse cleanly");
+        assert_eq!(meta.flags & FLAG_HAS_LINE_COUNT_TABLE, FLAG_HAS_LINE_COUNT_TABLE);
+        assert_eq!(meta.flags & FLAG_HAS_COLUMN_AWARE_STEPS, 0);
+    }
+
+    /// Bits 4 and 14 each select a `paths.dat` record layout, and a record is
+    /// in one layout or the other. A header setting both is refused in front of
+    /// every consumer rather than resolved by preference: the wrong choice does
+    /// not fail downstream, it answers with a path that has its own length
+    /// prefix inside it and a per-file size that was never written.
+    #[test]
+    fn rejects_both_path_layout_flags() {
+        let both = FLAG_HAS_COLUMN_AWARE_STEPS | FLAG_HAS_LINE_COUNT_TABLE;
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6..8].copy_from_slice(&both.to_le_bytes());
+        match parse_meta_dat(&buf) {
+            Err(MetaDatError::ConflictingPathLayouts { flags }) => assert_eq!(flags, both),
+            other => panic!("expected ConflictingPathLayouts, got {other:?}"),
+        }
+
+        // The control: each bit ALONE parses, so the rejection is about the
+        // combination and not about either bit being unknown.
+        for one in [FLAG_HAS_COLUMN_AWARE_STEPS, FLAG_HAS_LINE_COUNT_TABLE] {
+            let mut solo = writer_compat_fixture_bytes();
+            solo[6..8].copy_from_slice(&one.to_le_bytes());
+            parse_meta_dat(&solo).unwrap_or_else(|e| panic!("flag {one:#06x} alone must parse: {e}"));
         }
     }
 

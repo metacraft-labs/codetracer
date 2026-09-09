@@ -1468,11 +1468,32 @@ mod tests {
     /// not know is not a container this build may read spans out of.  The check
     /// goes through `parse_meta_dat` precisely so `KNOWN_FLAGS_MASK` governs the
     /// span path too.
+    ///
+    /// The probe bit is derived from `KNOWN_FLAGS_MASK` rather than written as a
+    /// literal: allocating a bit would otherwise leave this test probing one the
+    /// reader now knows, where it would assert nothing.  Bit 14 was the literal
+    /// here until `FLAG_HAS_LINE_COUNT_TABLE` took it.
     #[test]
     fn meta_dat_with_an_unknown_bit_alongside_bit_13_is_refused() {
-        const FUTURE_BIT: u16 = 1 << 14;
+        let future_bit = lowest_unknown_flag_bit();
+        assert_ne!(
+            future_bit, 0,
+            "every flag bit is allocated, so there is no unknown bit to probe with — the flag word \
+             has to grow, and this test has to be rewritten against whatever that growth defines \
+             as unknown"
+        );
         assert!(!meta_dat_has_span_stream(&meta_dat_bytes(
-            FLAG_HAS_SPAN_STREAM | FUTURE_BIT
+            FLAG_HAS_SPAN_STREAM | future_bit
         )));
+
+        // The control: bit 13 ALONE is recognised, so the refusal above is
+        // about the unknown bit and not about the span bit itself.
+        assert!(meta_dat_has_span_stream(&meta_dat_bytes(FLAG_HAS_SPAN_STREAM)));
+    }
+
+    /// The lowest flag bit this build does not know, or 0 when it knows them all.
+    fn lowest_unknown_flag_bit() -> u16 {
+        let unknown = !super::super::meta_dat::known_flags_mask();
+        unknown & unknown.wrapping_neg()
     }
 }

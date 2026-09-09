@@ -91,8 +91,8 @@ fn e2e_mcr_streaming_flow_via_unified_reader() {
     // reading of every integer produces a non-negative line, including a wrong
     // one. Resolution against the container's own space is falsifiable — an
     // address from a different scheme lands above the top of it.
-    let ctfs = CtfsReader::open(ct_path).expect("open the MCR .ct for its path table");
-    let space = container_line_space(&ctfs).expect("a recorder-produced .ct registers source paths");
+    let mut ctfs = CtfsReader::open(ct_path).expect("open the MCR .ct for its path table");
+    let space = container_line_space(&mut ctfs).expect("a recorder-produced .ct registers source paths");
     for i in 0..step_count {
         let step = reader.steps().step(i).expect("decoded step");
         let (path_id, line) = step.resolve(&space).unwrap_or_else(|e| panic!("step {i}: {e}"));

@@ -2277,12 +2277,12 @@ impl CTFSTraceReader {
                         (step_to_call_key, step_to_global_call_key) =
                             build_step_call_maps(&call_ranges, stream.step_count());
                     }
-                    // A line-only container: every file gets the writer's
-                    // default slot, because per-file line counts are not
-                    // recorded in `paths.dat` and this branch is the
-                    // `!column_aware` one. The space comes from the container's
-                    // own path table, so the eager and the lazy paths are told
-                    // the same thing.
+                    // A line-only container, so the space is a space of lines:
+                    // each file's own recorded `line_count` when the container
+                    // carries the table (`meta.dat` bit 14), and the writer's
+                    // default slot when it states no sizes. The space comes
+                    // from the container itself, so the eager and the lazy
+                    // paths are told the same thing.
                     let stream = stream
                         .with_line_space(line_position_space::container_line_space(ctfs).map(std::sync::Arc::new));
                     let stream = std::sync::Arc::new(stream);

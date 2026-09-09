@@ -191,6 +191,17 @@ pub struct InterningTables {
     /// on a line-only (non-column-aware) container, which is the signal the
     /// caller uses to leave the legacy decode path exactly as it was.
     pub line_lengths: Vec<Vec<u32>>,
+    /// Per-file line counts, indexed by `PathId` — the count a `paths.dat`
+    /// record carries when the container declares `meta.dat` bit 14
+    /// (`FLAG_HAS_LINE_COUNT_TABLE`).
+    ///
+    /// EMPTY on every container that does not declare the bit, which is what
+    /// distinguishes "this trace states no per-file size" from a size it
+    /// states. The distinction is the point: without it a caller is back to
+    /// assuming 100000 addresses per file, which is wrong for any file with
+    /// more lines than that and undetectable when it is, because the resulting
+    /// address is inside the next file's range.
+    pub line_counts: Vec<u64>,
     /// Which on-disk record layout these tables were decoded from.
     pub layout: RecordLayout,
 }
@@ -276,9 +287,15 @@ impl InterningTables {
         // "Layout A" record; every other table is unaffected. There is no
         // upstream `meta_dat_has_column_aware_steps` helper, so read the bit
         // through this crate's own `meta.dat` parser.
-        let column_aware_paths = super::meta_dat::parse_meta_dat(&meta)
-            .map(|parsed| parsed.flags & super::meta_dat::FLAG_HAS_COLUMN_AWARE_STEPS != 0)
-            .unwrap_or(false);
+        let path_flags = super::meta_dat::parse_meta_dat(&meta)
+            .map(|parsed| parsed.flags)
+            .unwrap_or(0);
+        let column_aware_paths = path_flags & super::meta_dat::FLAG_HAS_COLUMN_AWARE_STEPS != 0;
+        // Bit 14 switches `paths.dat` to the line-count record instead —
+        // Layout A's framing without its trailing per-line table. The two bits
+        // are mutually exclusive and `parse_meta_dat` refuses a header setting
+        // both, so this is an else-branch and not a precedence.
+        let line_count_paths = path_flags & super::meta_dat::FLAG_HAS_LINE_COUNT_TABLE != 0;
 
         let paths_table = Self::load_table(ctfs, "paths")?;
         let funcs_table = Self::load_table(ctfs, "funcs")?;
@@ -287,12 +304,21 @@ impl InterningTables {
 
         let mut paths = Vec::with_capacity(paths_table.count());
         let mut line_lengths = Vec::with_capacity(paths_table.count());
+        let mut line_counts = Vec::new();
+        if line_count_paths {
+            line_counts.reserve(paths_table.count());
+        }
         for id in 0..paths_table.count() {
             let raw = paths_table.record(id)?;
             if column_aware_paths {
                 let (path, lengths) = decode_column_aware_path(id, raw)?;
                 paths.push(path);
                 line_lengths.push(lengths);
+            } else if line_count_paths {
+                let (path, count) = decode_line_count_path(id, raw)?;
+                paths.push(path);
+                line_lengths.push(Vec::new());
+                line_counts.push(count);
             } else {
                 paths.push(String::from_utf8_lossy(raw).into_owned());
                 line_lengths.push(Vec::new());
@@ -307,7 +333,15 @@ impl InterningTables {
         // The structured `funcs.dat` record addresses its declaration site in
         // this container's own space, so the space is built from the path table
         // that was just decoded.
-        let line_space = LinePositionSpace::uniform(paths.len());
+        // The funcs.dat declaration site is an address in THIS container's
+        // space, so it is resolved against the sizes the container states —
+        // the recorded counts when it carries them, the uniform convention
+        // when it does not.
+        let line_space = if line_counts.is_empty() {
+            LinePositionSpace::uniform(paths.len())
+        } else {
+            LinePositionSpace::from_line_counts(&line_counts)
+        };
         let mut functions = Vec::with_capacity(funcs_table.count());
         for id in 0..funcs_table.count() {
             let raw = funcs_table.record(id)?;
@@ -345,6 +379,7 @@ impl InterningTables {
             types,
             variable_names,
             line_lengths,
+            line_counts,
             layout,
         }))
     }
@@ -445,6 +480,40 @@ fn decode_func_record(id: usize, raw: &[u8], space: &LinePositionSpace) -> Resul
         path_id: PathId(path_id),
         line: Line(line),
     })
+}
+
+/// Split a line-count-table `paths.dat` record into its path and its line
+/// count: `path_len + path_bytes + line_count`.
+///
+/// Layout A's framing without the trailing per-line table. Only called on a
+/// container that DECLARED this layout through `meta.dat` bit 14, so a record
+/// that does not decode is corruption and is reported as such — the three
+/// record spaces overlap, and a bare record whose first byte happens to equal
+/// its own remaining length decodes cleanly here into a truncated path and a
+/// fabricated count.
+fn decode_line_count_path(id: usize, raw: &[u8]) -> Result<(String, u64), String> {
+    let mut pos = 0usize;
+    let path_len = decode_varint(raw, &mut pos)? as usize;
+    if pos + path_len > raw.len() {
+        return Err(format!("paths.dat: record {id} path extends past record"));
+    }
+    let path = String::from_utf8_lossy(&raw[pos..pos + path_len]).into_owned();
+    pos += path_len;
+    let count = decode_varint(raw, &mut pos)?;
+    if count == 0 {
+        return Err(format!(
+            "paths.dat: record {id} states line_count 0. A container setting \
+             FLAG_HAS_LINE_COUNT_TABLE states every file's size, and a file sized 0 shares its \
+             base with the next one — the two would be indistinguishable at decode"
+        ));
+    }
+    if pos != raw.len() {
+        return Err(format!(
+            "paths.dat: record {id} has {} trailing byte(s) after line_count",
+            raw.len() - pos
+        ));
+    }
+    Ok((path, count))
 }
 
 /// Decode one `types.dat` record into a [`TypeRecord`].

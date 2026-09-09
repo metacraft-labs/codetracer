@@ -113,6 +113,16 @@ const FLAG_HAS_IO_EVENT_STREAM: u16 = 1 << 11;
 const FLAG_HAS_INTERNING_TABLES: u16 = 1 << 12;
 /// Bit 13 — `spans.dat` / `spans.idx` / `spantype.ns` span stream (RS-M1).
 const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
+/// Bit 14 — every `paths.dat` record carries its file's line count, and the
+/// line-only global position space is laid out from those counts rather than
+/// from the 100000-addresses-per-file convention.
+///
+/// This crate reads `meta.dat` only for the metadata fields it surfaces
+/// (`recording_id`, `program`, `workdir`, `paths`), none of which the bit
+/// changes. It is in the mask because the mask REJECTS what it does not know:
+/// without the constant, every count-bearing container would be refused here
+/// and the trace would look unopenable rather than merely unfamiliar.
+const FLAG_HAS_LINE_COUNT_TABLE: u16 = 1 << 14;
 const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_REPLAY_LAUNCH_FIELDS
     | FLAG_HAS_LAYOUT_SNAPSHOT
@@ -126,7 +136,8 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_VALUE_STREAM
     | FLAG_HAS_IO_EVENT_STREAM
     | FLAG_HAS_INTERNING_TABLES
-    | FLAG_HAS_SPAN_STREAM;
+    | FLAG_HAS_SPAN_STREAM
+    | FLAG_HAS_LINE_COUNT_TABLE;
 
 // ── Public types ─────────────────────────────────────────────────────────
 

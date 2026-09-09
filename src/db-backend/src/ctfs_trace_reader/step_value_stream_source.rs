@@ -146,7 +146,7 @@ impl SeekableStepStream {
                 // an address at all.
                 let line_space = CtfsReader::open(path)
                     .ok()
-                    .and_then(|ctfs| super::line_position_space::container_line_space(&ctfs))
+                    .and_then(|mut ctfs| super::line_position_space::container_line_space(&mut ctfs))
                     .map(Arc::new);
                 Ok(Some(SeekableStepStream {
                     reader: Mutex::new(reader),

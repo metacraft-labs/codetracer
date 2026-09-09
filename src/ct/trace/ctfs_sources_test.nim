@@ -107,3 +107,87 @@ suite "CTFS source materialization":
     check readFile(outDir / "paths.json").contains("/workspace/project/src/main.c")
     check readFile(outDir / "files" / "workspace/project/src/main.c") ==
       "int main(void) { return 0; }\n"
+
+  test "strips the record framing when meta.dat declares a line-count table":
+    ## `paths.dat` records are bare path bytes by default, but `meta.dat`
+    ## bit 14 (FLAG_HAS_LINE_COUNT_TABLE) frames each one as
+    ## `path_len + path_bytes + line_count` so the container states how
+    ## large each file is. Reading such a record whole puts the length
+    ## prefix and the trailing count inside the path string, and the
+    ## frontend then shows a source file under a name no filesystem has.
+    ##
+    ## Which shape a record is in comes from `meta.dat`, never from the
+    ## bytes: the shapes' byte spaces overlap, so a bare path whose first
+    ## byte happens to equal its own remaining length also decodes as a
+    ## framed record.
+    let root = getTempDir() / "ctfs-line-count-test-" & $getCurrentProcessId()
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+
+    const PathA = "/workspace/project/src/main.c"
+    const PathB = "/workspace/project/src/util.c"
+    const CountA = 42'u64
+    const CountB = 17'u64
+
+    proc framedRecord(path: string, lineCount: uint64): string =
+      result.putLeb128(uint64(path.len))
+      result.add path
+      result.putLeb128(lineCount)
+
+    proc pathsTable(records: seq[string]): (string, string) =
+      var dat = ""
+      var off = ""
+      off.putU64Le(0)
+      for r in records:
+        dat.add r
+        off.putU64Le(uint64(dat.len))
+      (dat, off)
+
+    proc metaDatWithFlags(flags: uint16): string =
+      # Only the fixed header is needed: `extractInterningTablePaths`
+      # reads the flag word at offset 6 and nothing else. The body is
+      # deliberately absent so this fixture cannot accidentally be
+      # answered by the `meta.dat`-paths fallback instead.
+      result.add "CTMD"
+      result.putU16Le(4)
+      result.putU16Le(flags)
+
+    let (dat, off) = pathsTable(@[
+      framedRecord(PathA, CountA), framedRecord(PathB, CountB)])
+
+    block declared:
+      let ctPath = root / "declared.ct"
+      let outDir = root / "declared-out"
+      createDir(outDir)
+      writeMinimalCtfs(ctPath, @[
+        ("meta.dat", metaDatWithFlags(0x4000'u16)),
+        ("paths.dat", dat),
+        ("paths.off", off)])
+
+      check materializeCtfsSources(ctPath, outDir)
+      let got = readFile(outDir / "paths.json")
+      check got.contains("\"" & PathA & "\"")
+      check got.contains("\"" & PathB & "\"")
+      # And the framing must NOT be in there: a record read whole ends in
+      # the count byte, so the path would not be followed by a closing
+      # quote.
+      check not got.contains(PathA & "\\u")
+      check not got.contains(PathB & "\\u")
+
+    block undeclared:
+      ## The mutation control. The same records with bit 14 CLEAR are
+      ## read whole, so the paths come back with their framing attached.
+      ## If clearing the bit changed nothing the bit would be decorative
+      ## and the block above would prove nothing about it.
+      let ctPath = root / "undeclared.ct"
+      let outDir = root / "undeclared-out"
+      createDir(outDir)
+      writeMinimalCtfs(ctPath, @[
+        ("meta.dat", metaDatWithFlags(0'u16)),
+        ("paths.dat", dat),
+        ("paths.off", off)])
+
+      check materializeCtfsSources(ctPath, outDir)
+      let got = readFile(outDir / "paths.json")
+      check not got.contains("\"" & PathA & "\"")
