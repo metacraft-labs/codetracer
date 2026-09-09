@@ -61,3 +61,4 @@
 
 * Upgrade `nim` and `nimgraph`: `git pull` from upstream `devel` or a stable version, rebasing and squashing (I use `reset --soft HEAD~` several times for that) to collect most of our changes in single or two patches and push forward
 * Upgrade Electron: change Electron in `package.json`, nvm use 12, `npm install`, `npm install node-abi`, `node_modules/bin/electron-rebuild`
+
