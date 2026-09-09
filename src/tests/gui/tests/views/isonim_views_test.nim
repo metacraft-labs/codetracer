@@ -5656,11 +5656,11 @@ suite "IsoNim Errors Panel — interactions":
 # Cover ``views/isonim_search_results_view.nim``: panel structure, the
 # reactive body's three states (pre-search overlay / loading / results),
 # match-row rendering grouped by file, count badges, query highlighting,
-# filter narrowing, and click → jump-location routing.
+# and click → jump-location routing.
 #
 # VOCABULARY NOTE.  The panel was redesigned by 529c8dd1 / 182f9e6c into a
 # ``fif-*`` (Find In Files) DOM, and these cases were re-expressed against
-# it.  Three things the pre-redesign contract asserted are gone on purpose
+# it.  Four things the pre-redesign contract asserted are gone on purpose
 # and are NOT asserted here:
 #
 #   * ``component-container`` on the panel root — the GoldenLayout host the
@@ -5671,12 +5671,26 @@ suite "IsoNim Errors Panel — interactions":
 #     directly with the search input"); the per-file-group ``fif-file-count``
 #     badge is the count the design shows.
 #   * the ``search-results-active`` / ``search-results-non-active`` root
-#     modifier, whose CSS is ``display: flex`` / ``display: none``.  The panel
-#     now OWNS the query input, so hiding it before a search would hide the
-#     only way to start one.  The state transition it used to express is
-#     asserted through the body (overlay ⇄ file groups) and through
-#     ``vm.active``, which the wiring layer still mirrors
+#     modifier, which used to be ``display: flex`` / ``display: none``.  The
+#     panel now OWNS the query input, so hiding it before a search would hide
+#     the only way to start one.  Nothing has emitted either class since the
+#     redesign and the CSS rules behind them have since been deleted, so the
+#     names survive only in prose like this.  The state transition they used
+#     to express is asserted through the body (overlay ⇄ file groups) and
+#     through ``vm.active``, which the wiring layer still mirrors
 #     (``ui/search_results.nim``'s ``syncLegacySearchResultsIntoVM``).
+#   * FILTER NARROWING.  A "filter behaviour" suite used to live at the end of
+#     this file, driving ``vm.setFilter`` directly and asserting that the view
+#     rendered ``vm.visibleResults`` rather than ``vm.results``.  It was the
+#     only case that could tell those two apart — and it was pinning a
+#     capability the product never had.  The ``Filter results...`` input was
+#     unwired from the initial open-source release onwards (its Karax handler
+#     logged ``TODO find`` and narrowed nothing), the IsoNim migration carried
+#     it over still unwired, and the redesign dropped the input with the rest
+#     of the old DOM.  The VM's ``filter`` / ``setFilter`` / ``visibleResults``
+#     surface has now been retired too, so there is no longer a distinction
+#     for a test to protect; the suite was removed with the code it drove
+#     rather than left asserting a narrowing nothing can request.
 #
 # Two class names are deliberately still asserted in their legacy spelling:
 # ``search-results`` on the root and ``search-results-match-row`` /
@@ -5747,9 +5761,9 @@ suite "IsoNim Search Results Panel — structure":
       let bar = findByClass(panel, "fif-search-bar")
       # The panel's input is the SEARCH input (Enter → `vm.onSearch`), which
       # 529c8dd1 moved into the panel.  It is not the pre-redesign
-      # `search-results-find-query` filter box — no filter input is rendered
-      # any more, though the filter itself is still honoured (see the filter
-      # suite below, which drives `vm.setFilter` directly).
+      # `search-results-find-query` filter box: that box never filtered
+      # anything in any renderer, and both it and the VM machinery it was
+      # meant to drive have been retired (see the VOCABULARY NOTE above).
       let input = findById(panel, "fif-input")
       check input.tag == "input"
       check input.attributes["placeholder"] == "Search in files..."
@@ -6095,88 +6109,6 @@ suite "IsoNim Search Results Panel — query highlighting":
       vm.setResults(@[makeResult(text = "let foo = 1")])
 
       check findByClassOrNil(panel, "search-results-highlight") == nil
-
-      dispose()
-
-# ---------------------------------------------------------------------------
-# Filter behaviour
-# ---------------------------------------------------------------------------
-
-suite "IsoNim Search Results Panel — filter behaviour":
-
-  test "setFilter narrows the visible rows reactively":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createSearchResultsVM(store)
-      let r = MockRenderer()
-
-      let panel = renderSearchResultsPanel(r, vm)
-
-      vm.setResults(@[
-        makeResult(path = "a.nim", line = 1, text = "alpha"),
-        makeResult(path = "b.nim", line = 2, text = "beta"),
-        makeResult(path = "c.nim", line = 3, text = "alpha gamma"),
-      ])
-
-      check findAllByClass(panel, "fif-match-row").len == 3
-
-      vm.setFilter("alpha")
-
-      check findAllByClass(panel, "fif-match-row").len == 2
-      # The excluded row's whole group goes with it.
-      check findAllByClass(panel, "fif-file-group").len == 2
-
-      # The filter narrows DISPLAY only: the panel renders
-      # `vm.visibleResults`, while `vm.resultCount` keeps reporting the
-      # unfiltered total the search service produced (the pre-redesign
-      # header badge asserted the same split).  A view that rendered
-      # `vm.results` instead of `vm.visibleResults` would satisfy every
-      # other case in this file and fail only here.
-      check vm.resultCount.val == 3
-
-      dispose()
-
-  test "filter that excludes everything re-shows the empty overlay":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createSearchResultsVM(store)
-      let r = MockRenderer()
-
-      let panel = renderSearchResultsPanel(r, vm)
-
-      vm.setResults(@[
-        makeResult(path = "a.nim", line = 1, text = "alpha"),
-      ])
-      check findAllByClass(panel, "fif-match-row").len == 1
-
-      vm.setFilter("nothingmatchesthis")
-      let body = findByClass(panel, "fif-body")
-      check body.children.len == 1
-      check "fif-empty" in body.children[0].attributes["class"].split(' ')
-      check findAllByClass(panel, "fif-match-row").len == 0
-      # The results themselves are untouched — only the view narrowed.
-      check vm.resultCount.val == 1
-
-      dispose()
-
-  test "empty filter restores every row":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createSearchResultsVM(store)
-      let r = MockRenderer()
-
-      let panel = renderSearchResultsPanel(r, vm)
-
-      vm.setResults(@[
-        makeResult(path = "a.nim", line = 1, text = "alpha"),
-        makeResult(path = "b.nim", line = 2, text = "beta"),
-      ])
-
-      vm.setFilter("alpha")
-      check findAllByClass(panel, "search-results-match-row").len == 1
-
-      vm.setFilter("")
-      check findAllByClass(panel, "search-results-match-row").len == 2
 
       dispose()
 

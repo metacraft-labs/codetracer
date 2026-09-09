@@ -8,30 +8,37 @@
 ##   the active query.
 ## - The "active" flag — set to true once a search has run, false on
 ##   ``clearResults``.  Mirrors the legacy ``SearchResultsComponent.active``
-##   flag (used by CSS to flip the panel between
-##   ``search-results-active`` and ``search-results-non-active``).
-## - The find/filter sub-query the user types into the ``Filter
-##   results...`` input (``filter`` signal).
+##   field, which the wiring layer still writes; no CSS reads it any
+##   more (see the note on the retired filter below).
 ## - ``loading`` — true while the search is in flight; cleared on the
 ##   first batch of results or when a new search clears the list.
 ## - ``recentSearches`` — list of ``RecentSearch`` entries (query + hit
 ##   count) shown in the empty state before a search is run.
 ##
 ## Derives:
-## - ``visibleResults``: the ``results`` list filtered by the active
-##   ``filter`` value (case-insensitive substring match against any of
-##   ``text`` / ``path`` / ``$line``).  The view consumes this so the
-##   empty-state overlay renders whenever the filter wipes every row
-##   out.
-## - ``resultCount``: convenience alias for ``results.val.len`` —
-##   feeds the header count badge.
-## - ``fileCount``: number of distinct file paths in ``visibleResults``.
+## - ``resultCount``: convenience alias for ``results.val.len``.
+## - ``fileCount``: number of distinct file paths in ``results``.
+##
+## THERE IS NO CLIENT-SIDE RESULT FILTER, and there never was one that
+## worked.  This VM used to carry a ``filter`` signal, a ``setFilter``
+## action and a ``visibleResults`` memo for a ``Filter results...``
+## input whose only handler, from the initial open-source release
+## through the Karax era, logged ``TODO find`` and narrowed nothing.
+## The IsoNim migration carried the input into the new view still
+## unwired, and the Find in Files redesign dropped the input with the
+## rest of the old DOM.  The machinery was retired with it rather than
+## given a first driver here: what the panel needs to search a
+## workspace is a new ripgrep query, which its own input already
+## submits.  The same redesign retired the ``search-results-active`` /
+## ``search-results-non-active`` root modifier (``display: flex`` /
+## ``display: none``) — the panel now owns the query input, so hiding
+## it before a search would hide the only way to start one.
 ##
 ## The VM also carries an ``onSearch`` callback that the wiring layer
 ## installs (``search_results.nim``) so the view can trigger a search
 ## without importing the search service directly.
 
-import std/[json, strutils, tables]
+import std/[json, tables]
 
 import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
@@ -51,16 +58,13 @@ type
     ## Mutable signals:
     ##   query           — the active workspace search query string.
     ##   results         — every match row produced by the search pipeline.
-    ##   active          — true once a search has run (drives the legacy
-    ##                     ``search-results-active`` CSS modifier).
-    ##   filter          — find-results sub-query typed by the user.
+    ##   active          — true once a search has run.
     ##   loading         — true while the search pipeline is running.
     ##   recentSearches  — past searches shown in the empty state.
     ##
     ## Derived memos:
-    ##   visibleResults — ``results`` filtered by ``filter``.
     ##   resultCount    — convenience: ``results.val.len``.
-    ##   fileCount      — distinct file paths in ``visibleResults``.
+    ##   fileCount      — distinct file paths in ``results``.
     ##
     ## Callback:
     ##   onSearch       — installed by the wiring layer; called when the
@@ -71,12 +75,10 @@ type
     query*: Signal[string]
     results*: Signal[seq[SearchResultLine]]
     active*: Signal[bool]
-    filter*: Signal[string]
     loading*: Signal[bool]
     recentSearches*: Signal[seq[RecentSearch]]
 
     # -- Derived state --
-    visibleResults*: Memo[seq[SearchResultLine]]
     resultCount*: Memo[int]
     fileCount*: Memo[int]
 
@@ -129,11 +131,6 @@ proc setActive*(vm: SearchResultsVM; on: bool) =
   ## existing fixed-search input toggles it on focus / blur).
   vm.active.val = on
 
-proc setFilter*(vm: SearchResultsVM; filter: string) =
-  ## Set the active find-results filter string.  Memoed signals
-  ## (``visibleResults``) recompute automatically.
-  vm.filter.val = filter
-
 proc setLoading*(vm: SearchResultsVM; on: bool) =
   ## Show or hide the loading shimmer.  Set to ``true`` when a new
   ## search is submitted; cleared automatically by ``appendResults`` /
@@ -185,21 +182,6 @@ proc jumpToResult*(vm: SearchResultsVM; res: SearchResultLine) =
 # Helpers
 # ---------------------------------------------------------------------------
 
-proc filterRows(rows: seq[SearchResultLine];
-                filter: string): seq[SearchResultLine] =
-  ## Return only the rows that match the active ``filter`` (case-insensitive
-  ## substring against ``text`` / ``path`` / ``$line``).  An empty
-  ## filter is treated as "match everything" so the panel shows the
-  ## full result list while the user is not narrowing further.
-  if filter.len == 0:
-    return rows
-  let needle = filter.toLowerAscii()
-  for r in rows:
-    if needle in r.text.toLowerAscii() or
-       needle in r.path.toLowerAscii() or
-       needle in $r.line:
-      result.add(r)
-
 proc countDistinctPaths(rows: seq[SearchResultLine]): int =
   ## Count the number of unique ``path`` values in ``rows``.
   var seen: Table[string, bool]
@@ -219,35 +201,28 @@ proc createSearchResultsVM*(store: ReplayDataStore): SearchResultsVM =
   ##
   ## Sets up:
   ## 1. Mutable signals with sensible defaults (empty query, empty
-  ##    result list, ``active`` off, empty filter, ``loading`` off).
-  ## 2. Derived memos for ``visibleResults``, ``resultCount``, and
-  ##    ``fileCount``.
+  ##    result list, ``active`` off, ``loading`` off).
+  ## 2. Derived memos for ``resultCount`` and ``fileCount``.
   withViewModel proc(dispose: proc()): SearchResultsVM =
     let query = createSignal("")
     let results = createSignal(newSeq[SearchResultLine]())
     let active = createSignal(false)
-    let filter = createSignal("")
     let loading = createSignal(false)
     let recentSearches = createSignal(newSeq[RecentSearch]())
-
-    let visibleResults = createMemo[seq[SearchResultLine]] proc(): seq[SearchResultLine] =
-      filterRows(results.val, filter.val)
 
     let resultCount = createMemo[int] proc(): int =
       results.val.len
 
     let fileCount = createMemo[int] proc(): int =
-      countDistinctPaths(visibleResults.val)
+      countDistinctPaths(results.val)
 
     SearchResultsVM(
       store: store,
       query: query,
       results: results,
       active: active,
-      filter: filter,
       loading: loading,
       recentSearches: recentSearches,
-      visibleResults: visibleResults,
       resultCount: resultCount,
       fileCount: fileCount,
       disposeProc: dispose,
