@@ -3446,6 +3446,7 @@ jobs:
           # read gitconfig; its credentials come from netrc/access-tokens.)
           persist-credentials: false
           token: ${{ steps.ci_token.outputs.token }}
+
       - name: Install Nix
         # WITHOUT THIS, THIS JOB USES WHATEVER NIX THE RUNNER IMAGE SHIPS.
         # `eph-linux-x64`'s ambient nix.conf does not enable the experimental
@@ -3511,6 +3512,7 @@ jobs:
           # read gitconfig; its credentials come from netrc/access-tokens.)
           persist-credentials: false
           token: ${{ steps.ci_token.outputs.token }}
+
       - name: Install Nix
         # WITHOUT THIS, THIS JOB USES WHATEVER NIX THE RUNNER IMAGE SHIPS.
         # `eph-linux-x64`'s ambient nix.conf does not enable the experimental
