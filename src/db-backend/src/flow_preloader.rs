@@ -1367,6 +1367,37 @@ mod tests {
         }
     }
 
+    /// STRICT — this test double must NOT claim it can answer
+    /// value-change watchpoints.
+    ///
+    /// `ReplaySession::has_per_step_values` defaults to `false`, so a
+    /// backend has to OPT IN to claiming it keeps a per-step variable
+    /// value table.  `MaterializedReplaySession` is the only
+    /// implementation in the tree that does; `MockReplay` here,
+    /// `EmulatorReplaySession` and `RecreatorReplaySession` all inherit
+    /// the refusal.
+    ///
+    /// The default points that way deliberately.  The watchpoint
+    /// feature was broken for its whole life precisely because a test
+    /// double — the daemon's mock DAP backend — answered
+    /// `verified: true` for a command the real backend could not
+    /// handle at all.  A capability that defaults to "yes" makes that
+    /// mistake silent and free; one that defaults to "no" makes it a
+    /// visible line of code someone has to write.
+    ///
+    /// If this test ever needs `MockReplay` to answer watchpoints, the
+    /// honest fix is to implement `set_watchpoints` on it too, not to
+    /// flip the flag.
+    #[test]
+    fn the_flow_test_double_does_not_claim_it_can_answer_watchpoints() {
+        let mock = MockReplay::new(make_location(15, 42, 0), make_location(10, 17, 0));
+        assert!(
+            !mock.has_per_step_values(),
+            "a test double that claims a capability the component it stands in for lacks is \
+             how watchpoints stayed broken through every test in the tree"
+        );
+        assert!(!mock.knows_variable("anything"));
+    }
     #[test]
     fn materialized_call_body_entry_guard_accepts_only_line_only_source_locations() {
         assert!(should_seek_materialized_call_body_from_line_only_location(
