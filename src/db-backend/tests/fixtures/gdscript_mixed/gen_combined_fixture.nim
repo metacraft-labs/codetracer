@@ -31,21 +31,23 @@
 ## ## Step / span layout (documented so the Rust assertions can be reviewed)
 ##
 ## The program is `_ready()` calling `compute()`, which calls `scale()` — three
-## nested GDScript frames.  Steps are 0-based StepIds in emission order:
+## nested GDScript frames.  Steps are 0-based StepIds in emission order; the
+## lines are 1-BASED lines of `GdSource` below, which is what `registerStep`
+## takes and what a reader gives back:
 ##
-##   step 0  outer `_ready`   line 4    (`var total = 0`)
-##   step 1  outer `_ready`   line 5    (`total += 1`)
-##   step 2  outer `_ready`   line 6    (call site: `compute(total)`)
+##   step 0  outer `_ready`   line 5    (`var total = 0`)
+##   step 1  outer `_ready`   line 6    (`total += 1`)
+##   step 2  outer `_ready`   line 7    (call site: `compute(total)`)
 ##   --- registerCall(compute), entryStep = 3 ---
-##   step 3  inner `compute`  line 11   (`var r = n * 2`)
+##   step 3  inner `compute`  line 12   (`var r = n * 2`)
 ##   --- registerCall(scale), entryStep = 4 ---
-##   step 4  inner-inner `scale` line 16 (`var f = 30`)
-##   step 5  inner-inner `scale` line 17 (`return x * f`)
+##   step 4  inner-inner `scale` line 17 (`var f = 30`)
+##   step 5  inner-inner `scale` line 18 (`return x * f`)
 ##   --- registerReturn (scale) ---
-##   step 6  inner `compute`  line 13   (`return r`)
+##   step 6  inner `compute`  line 14   (`return r`)
 ##   --- registerReturn (compute) ---
-##   step 7  outer `_ready`   line 7    (`print(total)`)
-##   step 8  outer `_ready`   line 8    (`queue_free()`)
+##   step 7  outer `_ready`   line 8    (`print(total)`)
+##   step 8  outer `_ready`   line 9    (`queue_free()`)
 ##
 ## Two crossing spans (both `span_type: "gdscript-frame"`, i.e. VM crossings):
 ##
@@ -78,8 +80,9 @@ proc toBytesSeq(s: string): seq[byte] {.raises: [].} =
   for i in 0 ..< s.len:
     result[i] = byte(s[i])
 
-## The bundled GDScript source.  Line numbers here are the ones the steps above
-## reference; keep the two in sync when editing.
+## The bundled GDScript source.  The steps above reference its 1-based line
+## numbers — `extends Node` is line 1 — so inserting or removing a line here
+## moves every step that follows it; keep the two in sync when editing.
 const GdSource = """extends Node
 
 # A tiny mixed-trace demo: _ready -> compute -> scale, three nested GD frames.
@@ -162,19 +165,19 @@ proc writeContainer(outPath: string) {.raises: [].} =
     if r.isErr: fail("registerReturn: " & r.error)
 
   # --- the materialized GDScript program (see the header for the layout) ---
-  step(4'u64)                      # step 0  outer
-  step(5'u64)                      # step 1  outer
-  step(6'u64)                      # step 2  outer (calls compute)
+  step(5'u64)                      # step 0  outer
+  step(6'u64)                      # step 1  outer
+  step(7'u64)                      # step 2  outer (calls compute)
   call(computeFn.get())           #          entryStep = 3
-  step(11'u64)                     # step 3  inner  (calls scale)
+  step(12'u64)                     # step 3  inner  (calls scale)
   call(scaleFn.get())             #          entryStep = 4
-  step(16'u64)                     # step 4  inner-inner
-  step(17'u64)                     # step 5  inner-inner
+  step(17'u64)                     # step 4  inner-inner
+  step(18'u64)                     # step 5  inner-inner
   ret()                            #          scale returns
-  step(13'u64)                     # step 6  inner
+  step(14'u64)                     # step 6  inner
   ret()                            #          compute returns
-  step(7'u64)                      # step 7  outer
-  step(8'u64)                      # step 8  outer
+  step(8'u64)                      # step 7  outer
+  step(9'u64)                      # step 8  outer
 
   # --- one crossing span per VM frame; span 2 nested inside span 1 ---
   let s1 = w.registerSpan(frameSpan(1, 0, 3, 6, "compute()"))
