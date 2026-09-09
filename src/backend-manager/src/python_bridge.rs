@@ -1753,6 +1753,73 @@ mod tests {
         );
     }
 
+    /// STRICT — a per-entry refusal must carry its CLOSED-SET code
+    /// through to the caller, not just the prose.
+    ///
+    /// The backend answers with `refusalCode` / `refusal` from
+    /// `ct_data_breakpoints::DataBreakpointRefusal`.  Dropping them here
+    /// would leave `Trace.add_watchpoint`'s caller parsing English to
+    /// tell "you named something this recording never captured" (retry
+    /// with a different name) from "a recording cannot watch reads at
+    /// all" (stop asking) — two refusals whose fixes have nothing in
+    /// common.  Distinguishing them WITHOUT string matching is the
+    /// entire point of the closed set.
+    #[test]
+    fn test_format_add_watchpoint_response_forwards_the_closed_set_refusal_code() {
+        let answer = json!({
+            "success": true,
+            "body": {"breakpoints": [
+                {
+                    "verified": false,
+                    "dataId": "counter",
+                    "message": "a recording samples what each variable held at each step",
+                    "refusalCode": 6203,
+                    "refusal": "accessTypeNotRecorded",
+                },
+            ]},
+        });
+
+        let (ok, body) = format_add_watchpoint_response(&answer, 0, 7);
+        assert!(!ok);
+        assert_eq!(
+            body.get("refusalCode").and_then(Value::as_u64),
+            Some(6203),
+            "the numeric code must survive the formatter; body: {body}"
+        );
+        assert_eq!(
+            body.get("refusal").and_then(Value::as_str),
+            Some("accessTypeNotRecorded"),
+            "the stable token must survive too, so a log line names the reason; body: {body}"
+        );
+        assert!(
+            body.get("message").and_then(Value::as_str).is_some(),
+            "and the human-readable sentence is still there for people; body: {body}"
+        );
+        assert!(
+            body.get("watchpointId").is_none(),
+            "a refused watchpoint must not hand back an id; body: {body}"
+        );
+    }
+
+    /// STRICT — a backend that supplies no refusal code (an older build,
+    /// or one that refuses at the request level) must still round-trip.
+    /// The code is additive: its ABSENCE must not become an absent
+    /// message, which would put the caller back to a silent failure.
+    #[test]
+    fn test_format_add_watchpoint_response_survives_a_refusal_without_a_code() {
+        let answer = json!({
+            "success": true,
+            "body": {"breakpoints": [
+                {"verified": false, "dataId": "counter", "message": "no reason given"},
+            ]},
+        });
+        let (ok, body) = format_add_watchpoint_response(&answer, 0, 7);
+        assert!(!ok);
+        assert_eq!(body.get("message").and_then(Value::as_str), Some("no reason given"));
+        assert!(body.get("refusalCode").is_none());
+        assert!(body.get("refusal").is_none());
+    }
+
     /// A response that carries no verdict for this watchpoint at all is
     /// a failure that says what was missing — reporting success there
     /// would recreate the exact silence this formatter exists to end.
