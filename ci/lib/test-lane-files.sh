@@ -958,6 +958,7 @@ test_lane_files() {
 			src/ct_test/python_providers_test.nim \
 			src/ct_test/rust_libtest_provider_test.nim \
 			src/ct_test/playwright_provider_test.nim \
+			src/ct_test/m13_harness_outcomes_test.nim \
 			src/frontend/viewmodel/tests/unit/test_test_explorer_vm.nim \
 			src/frontend/viewmodel/tests/unit/test_editor_test_controls_m4.nim \
 			src/ct_test/m13_smart_contract_harnesses_test.nim \

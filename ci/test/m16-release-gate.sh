@@ -79,6 +79,14 @@ run_nim_test src/ct_test/nim_unittest_provider_test.nim
 run_nim_test src/ct_test/python_providers_test.nim
 run_nim_test src/ct_test/rust_libtest_provider_test.nim
 run_nim_test src/ct_test/playwright_provider_test.nim
+# UNGATED ON PURPOSE, unlike its `m13_smart_contract_harnesses_test.nim`
+# sibling below. It writes its own stub recorder and drives `ct test run`
+# in-process, so it needs no recorder sibling, no blockchain toolchain and no
+# `nim c` of the CLI — and what it guards is that a workspace whose M13
+# fixtures all FAILED reports a failure rather than "nothing executed". Behind
+# CT_M16_HEAVY that guard would never run on an ordinary CI run, and a guard
+# that does not run is not a guard.
+run_nim_test src/ct_test/m13_harness_outcomes_test.nim
 
 echo "Running M14/M15 trace-open and editor ViewModel smoke tests"
 run_nim_test src/frontend/viewmodel/tests/unit/test_test_explorer_vm.nim

@@ -2375,10 +2375,9 @@ runners exit 0 for an all-skipped suite:
 The remaining providers still derive a whole file's status from one subprocess
 exit code (`cpp_common`, `native_m11_common`, `m12_fallback_common`,
 `smart_contract_common`, and `ruby_common`'s minitest branch), so a skip is
-indistinguishable from a pass there. All of them except
-`smart_contract_common` now at least report a FAILURE honestly — see "the
-counters read `tekTestFinished` ONLY" below — but the coarse granularity is
-unchanged either way: one event per file, not per test.
+indistinguishable from a pass there. All of them now at least report a FAILURE
+honestly — see "the counters read `tekTestFinished` ONLY" below — but the
+coarse granularity is unchanged either way: one event per file, not per test.
 
 The rest of the registry -- jest, vitest,
 pytest, python-unittest, nim-unittest, rust-libtest -- has no `run` wired at
@@ -2428,14 +2427,47 @@ which cpp_common reaches as `nativeM11.unitOutcomeEvents` and
 m12_fallback_common by plain import — so the failure branch cannot drift from
 the passing one again in any of the fourteen providers.
 
-STILL OPEN, same class, same argument, deliberately out of that change's
-scope: `native_m11_common.recordCommand` (the M11 file-RECORDING path) and
-`smart_contract_common.runRecorderCommand` (the M13 harnesses). Both emit a
-`tekTestFinished(tsPassed)` when the recorder succeeds and none at all when it
-fails or produces no artifact, so a workspace whose M13 fixtures all failed
-still reports `executed 0, failed 0` and exits 2. Do not "grep for the fix" —
-follow the `tekRecordFinished` / `tekRunFinished` emissions and check whether a
-`tekTestFinished` sits beside each of them.
+AND THE SAME HOLE, CLOSED IN TWO MORE PLACES, THROUGH THE SAME EMITTER:
+`smart_contract_common.runRecorderCommand` (the fourteen M13 smart-contract
+and VM harnesses -- and it serves BOTH `run` and `record`, so it was a
+run-path defect for twelve of them; `smart-wasm` and `smart-wasmi` are
+`shrmUnsupported` and never reach it) and `native_m11_common.recordCommand`
+(the M11 file-RECORDING path). Both emitted a `tekTestFinished(tsPassed)` when
+the recorder succeeded and NONE at all when it failed or produced no artifact.
+Measured on a scratch workspace holding one `.cairo` fixture and a stub
+recorder that exits 3, driven through the shipped
+`ct test run --workspace <ws> --summary <path>`: before, `executed 0, failed
+0`, verdict "nothing-executed", exit 2, certificate withheld
+`wrNoTestsExecuted`; after, `executed 1, failed 1`, verdict "failed", exit 1,
+withheld `wrTestsFailed`.
+
+`unitOutcomeEvents` grew a `status` overload for it (the recording paths have
+a THIRD outcome the exit-code overload cannot express -- `tsErrored`, meaning
+the command succeeded and produced no artifact) plus `finishedKind` and
+`trace`, so `tekRecordFinished`-closing callers use the same emitter as
+`tekRunFinished`-closing ones. The exit-code predicate moved out to
+`statusForExitCode`, which is the only place in the family that decides which
+exit codes are a pass.
+
+The M13 provider capabilities the REGISTRY stores are still computed with no
+project root (see the KNOWN GAP note on `newSmartHarnessProvider`), so a
+recorder discoverable only at `<repo>/target/{debug,release}/<binary>` still
+yields units `run_orchestration` marks unrunnable without dispatching. That is
+unchanged, and it is why `m13_harness_outcomes_test.nim`'s CLI case sets
+`<SPEC>_CMD`.
+
+STILL OPEN, same class, same argument, and NOT covered by the change above:
+
+* `js_common.recordCommand` (~:930/:948) and `ruby_common.recordCommand`
+  (~:984/:998) -- the JS and Ruby file-RECORDING paths, both failure branches.
+* `js_playwright.nim:391` -- when the Playwright results JSON cannot be
+  parsed, the provider emits `tekRunFinished(tsErrored)` and no
+  `tekTestFinished`, so an unparseable reporter stream reads as "nothing ran".
+* `noir_nargo.nim:365` and `:386` -- the truncated-output and
+  no-per-test-results branches do the same.
+
+Do not "grep for the fix" — follow the `tekRecordFinished` / `tekRunFinished`
+emissions and check whether a `tekTestFinished` sits beside each of them.
 
 ## The `executed` field means TESTS, and the exit code has three outcomes
 
