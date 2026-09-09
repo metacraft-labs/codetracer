@@ -11,6 +11,12 @@ import
 from ../viewmodel/platform/displayed_build_identity import
   displayedBuildLabel, displayedBuildTitle
 
+# SB-1's test-certificate indicator. Unconditional, like the build identity
+# above and for the same reason: `statusCertificateModel(nil)` answers an empty
+# model on every backend, and an empty model renders no element — so
+# `statusBaseModel` stays backend-neutral instead of growing a `when`.
+from certificate_indicator import statusCertificateModel
+
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
@@ -18,6 +24,9 @@ when defined(js):
     StatusBaseModel, StatusNotificationActionRecord,
     StatusNotificationRecord, StatusShellCallbacks, StatusShellModel,
     renderStatusInto
+  from certificate_indicator import
+    certificateIndicator, ensureCertificateIndicator, selectCertificateIndicator
+  from git_cli import gitWorkingDirectory
 
 const NOTIFICATION_LIMIT = 3
 
@@ -216,7 +225,16 @@ when defined(js):
       # pushed here once by `ui_js.nim`'s web arm, which is the only code that
       # reads the deployment descriptor.
       buildLabel: displayedBuildLabel(),
-      buildTitle: displayedBuildTitle())
+      buildTitle: displayedBuildTitle(),
+      # WHETHER WHAT IS ON DISK IS COVERED BY A TEST CERTIFICATE (SB-1).
+      # An ambient fact about the repository, not about any session — which is
+      # why it is here and not in the Agent Activity panel, where it would be
+      # unavailable exactly when no session is open (Status-Bar.md).
+      #
+      # `certificateIndicator()` is nil until `ensureCertificateIndicator` has
+      # run, and the projection of nil is an empty model that renders nothing,
+      # so the first paint of the bar is never blocked on a filesystem read.
+      certificate: statusCertificateModel(certificateIndicator()))
 
   proc statusShellModel(self: StatusComponent): StatusShellModel =
     var activeNotifications: seq[StatusNotificationRecord] = @[]
@@ -278,7 +296,8 @@ when defined(js):
             self.redraw(),
             2000),
       onSendBugReport: proc(title: string; description: string) =
-        self.sendBugReport(title, description))
+        self.sendBugReport(title, description),
+      onSelectCertificate: proc() = selectCertificateIndicator())
 
   # ---------------------------------------------------------------------
   # Render bookkeeping
@@ -307,6 +326,11 @@ when defined(js):
   var statusShellRebuilds = 0
   var statusRenderScheduled = false
 
+  proc requestStatusRender*(self: StatusComponent)
+    ## Forward-declared: `renderStatusNow` below hands this to the certificate
+    ## indicator as its "the answer moved, draw again" callback, and the two
+    ## are mutually recursive through that callback rather than through a call.
+
   proc renderStatusNow(self: StatusComponent) =
     ## Perform one coalesced render pass. Never call this directly from
     ## event handlers — use `requestStatusRender`.
@@ -317,6 +341,13 @@ when defined(js):
 
     try:
       inc statusRenderPasses
+      # Create the indicator if it does not exist yet, and point it at the
+      # project this window has open. Idempotent — see
+      # `ensureCertificateIndicator` — so calling it from a render pass costs a
+      # string comparison after the first one, and the alternative (a start-up
+      # hook) would have to be added to every entry point the renderer has.
+      ensureCertificateIndicator($gitWorkingDirectory(self.data),
+                                 proc() = self.requestStatusRender())
       let model = self.statusShellModel()
       let r = WebRenderer()
       let rebuilt = renderStatusInto(

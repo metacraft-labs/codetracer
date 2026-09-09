@@ -3044,3 +3044,60 @@ commands.
   through the list in name order, and the dedup (`a.expression ==
   b.expression`) would DELETE a watch whose expression equals a local's
   name — which is the most ordinary watch anyone types.
+- 2026-09-09 (SB-1): **`except CatchableError` / `except Exception` DO NOT
+  CATCH A FOREIGN JS EXCEPTION on the `nim js` backend.** jsgen emits a
+  `catch (e)` that tests `e.m_type` and RE-THROWS when the test fails, and
+  anything thrown by `require('fs')`, `require('child_process')` or any other
+  node API has no `m_type`. Only a BARE `except:` catches it, and
+  `getCurrentExceptionMsg()` then returns the real message
+  (`ENOENT: no such file or directory, scandir '…'`). Measured with a
+  four-line program, not inferred.
+  This is not academic: `viewmodel/host/desktop_electron.nim`'s `jsGuard`
+  template had exactly the two typed arms and no bare one, so **every**
+  `pkNotFound` / `pkAccessDenied` / `errorText()` in that file was dead code
+  for its whole life, and the facade's "failures are values" contract was
+  false on the instantiation the product actually ships. It surfaced only
+  when the status bar's certificate indicator listed a directory most
+  workspaces do not have. If you add a `try` around a host call in a
+  `nim js` module, add a bare arm.
+  AND NOTHING GUARDS THE FIX — checked, not assumed. With the bare arm
+  removed and the frontend rebuilt, `status-bar-render-stability.spec.ts`'s
+  `verify_clean_console_on_trace_open` still passes, because the certificate
+  indicator's own store adapter (`certificate_indicator_source.nim`) wraps
+  every facade call in a bare `except:` and swallows the re-thrown node
+  exception before it can reach `window.onerror`. Measured in the running
+  app: the indicator then reads *unverifiable* for an ordinary
+  store-less workspace with an EMPTY console error bucket — a silently wrong
+  verdict rather than a loud one. `desktop_electron.nim` is `{.error.}` off
+  the JS backend and is imported by no test, so any real guard for it has to
+  run inside Electron and assert the facade's OUTCOME (`fs.listDir` on a
+  missing directory returns `pkNotFound` rather than throwing).
+- 2026-09-09 (SB-1): a CAPTURE-FREE closure literal assigned inside a
+  `std/unittest` `test` body is `jsgen.nim(1239) env is missing
+  [AssertionDefect]` under `nim js` — the file compiles on the C backend and
+  dies in the JS lane. Declare the proc at module level and assign the name
+  instead. Two of the status-bar suites hit this; both now say so at the
+  site.
+- 2026-09-09 (SB-1): `ci/test/frontend-reachability.sh` matches BY NAME
+  across all of `src/frontend`, so adding a symbol anywhere marks every
+  unreached export of the same name as reached — and the ratchet is an
+  EQUALITY, so the count silently drops and the lane demands you lower the
+  ceiling. A drop is therefore not automatically progress: check whether a
+  name went away or merely arrived somewhere else. SB-1 masked
+  `viewmodel/identity/token.nim`'s `SignatureVerifier` (renamed the new type
+  to `CertificateSignatureVerifier` to un-mask it) and still masks that
+  file's `issuedAt`, which cannot be avoided — `issued_at` is the test
+  certificate standard's own field name.
+- 2026-09-09 (SB-1): a refresh driven by "after a render pass" is not a
+  trigger in an idle Electron renderer, because an idle status bar does not
+  render. `ui/certificate_indicator.nim` uses a `setInterval` now. If you need
+  periodic revalidation of anything, do not hang it off a render.
+  MEASURED, with `window.__ctStatusRenderStats()` (status.nim exposes it):
+  across 60 s of untouched idle in edit mode the status bar performed TWO
+  render passes, both inside one 10 s window and none in the other 50. Driving
+  the same change (an edit to a tracked file deep in the tree, which no wired
+  watch can see) the shipped timer moved the label after 15.1 s — one
+  `RevalidateIntervalMs` exactly — and the render-hook design after 29.2 s,
+  and only because a notification happened to draw. So it is not literally
+  "never fires"; its latency is governed by unrelated render activity, which
+  in a quiet window is unbounded.
