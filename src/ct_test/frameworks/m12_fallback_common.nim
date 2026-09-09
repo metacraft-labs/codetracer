@@ -312,6 +312,64 @@ proc fallbackRecord*(spec: M12FallbackSpec; scope: TestScope): ProviderResult[
               some(tsFailed), "Assembly fixture build failed", build.output)])
       return recordCommand(spec.providerId, scope, @[exe], @[],
           normalizedRelative(scope.projectRoot, scope.file))
+    of "ada-fallback":
+      # Ada builds before it records, like Pascal/Fortran/assembly above, and
+      # for the same reason plus one that is specific to it.
+      #
+      # THE GENERAL REASON. `recordFallback`'s tail records
+      # `sh -lc '<fileCommand>'`, so everything the fixture command runs is
+      # recorded, not just the fixture. `adaFileCommand` is the only M12
+      # command that shells out to `rm`, `mkdir` and `cp` — Fortran compiles
+      # and runs, Pascal makes its unit directory in its BUILD command (which
+      # runs here, outside the recording), and assembly assembles. Ada was
+      # never added to this dispatch, so it alone took the tail and recorded
+      # its own scratch-directory setup.
+      #
+      # WHY THAT IS NOT MERELY UNTIDY. Those three utilities are resolved by
+      # the recorded login shell, so they are the platform's, while
+      # `libct_interpose.so` is built from the recorder sibling against the
+      # dev shell's C library. Preloading the second into the first is a
+      # cross-libc load, and on the CI image it fails outright at the first
+      # link of the chain:
+      #
+      #   rm: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
+      #       (required by .../codetracer-native-recorder/ct_cli/libct_interpose.so)
+      #
+      # `&&` then short-circuits, `sh` exits 1, and the provider reports
+      # "native recording failed with exit code 1" with no trace — which reads
+      # as a recorder fault but is the fixture recording the wrong processes.
+      # gnatmake's own output is built by the dev shell's toolchain, so once
+      # only that executable is recorded the preload is same-libc again.
+      #
+      # WHY THE SCRATCH DIRECTORY IS STILL NEEDED. gnatmake writes .ali and .o
+      # beside the source it compiles, so the fixture tree must not be the
+      # build directory. That is a setup concern, and setup belongs here,
+      # where a non-zero exit is reported as a build failure, rather than
+      # inside the recording.
+      let
+        exe = tempExecutable("ct-m12-ada", scope.file)
+        buildDir = exe & "-build"
+        parsed = splitFile(scope.file)
+        buildFile = buildDir / (parsed.name & parsed.ext)
+        buildCommand = commandWithNixShell(
+          "rm -rf " & shellQuote(buildDir) & " && mkdir -p " &
+            shellQuote(buildDir) & " && cp " & shellQuote(scope.file) & " " &
+            shellQuote(buildFile) & " && cd " & shellQuote(buildDir) &
+            " && gnatmake -g -o " & shellQuote(exe) & " " &
+            shellQuote(buildFile),
+          spec.runTool, spec.nixPackages)
+        build = execCapturedShell(buildCommand, cwd = scope.projectRoot)
+      if build.exitCode != 0:
+        return ProviderResult[seq[TestEvent]](
+          diagnostics: @[diagnostic(dsError,
+              "Ada fixture build failed with exit code " & $build.exitCode,
+              scope.file)],
+          value: @[event(tekFailure, spec.providerId,
+              spec.providerId & ":record-build:" & scope.selector,
+              if scope.testId.len > 0: scope.testId else: scope.selector,
+              some(tsFailed), "Ada fixture build failed", build.output)])
+      return recordCommand(spec.providerId, scope, @[exe], @[],
+          normalizedRelative(scope.projectRoot, scope.file))
     of "lean-fallback":
       return recordCommand(spec.providerId, scope, @["lean", "--run",
           scope.file], spec.nixPackages,
