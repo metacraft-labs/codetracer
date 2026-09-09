@@ -228,7 +228,7 @@ pub trait BlockSource: fmt::Debug + Send + Sync {
     }
 
     /// Whether the container is finalized (the writer has committed terminal
-    /// metadata such as `meta.dat`/`meta.json`).
+    /// metadata such as `meta.dat`).
     ///
     /// M0 sources back finalized, fully-written containers, so the default is
     /// `true`; follow-mode (M1) overrides this to surface in-progress
@@ -494,10 +494,9 @@ impl BlockSource for LocalFileSource {
 ///   grows and its companion `steps.idx` gains a new offset entry, so the
 ///   newly-committed records become visible.
 /// - [`is_finalized`](BlockSource::is_finalized) becomes `true` once the
-///   container carries a non-empty `meta.dat` (new split-stream format) or
-///   `meta.json` (legacy format) — the writer commits terminal metadata last,
-///   so its presence means no further growth will occur and a follow reader can
-///   stop polling.
+///   container carries a non-empty `meta.dat` — the writer commits terminal
+///   metadata last, so its presence means no further growth will occur and a
+///   follow reader can stop polling.
 ///
 /// `refresh()` re-reads ONLY Block 0's `FileEntry` array (a single positional
 /// read per entry), never the whole container, so polling a multi-gigabyte
@@ -518,14 +517,18 @@ pub struct FollowFileSource {
     /// the raw container `size`, which only ever grows monotonically as bytes
     /// land on disk.
     file_sizes: HashMap<String, u64>,
-    /// `true` once a non-empty `meta.dat` / `meta.json` is observed.
+    /// `true` once a non-empty `meta.dat` is observed.
     finalized: bool,
 }
 
-/// Names whose non-empty presence seals a recording: the new split-stream
-/// binary metadata (`meta.dat`) and the legacy JSON metadata (`meta.json`).
-/// Either committed and non-empty means the writer has finished.
-const FINALIZATION_META_FILES: [&str; 2] = ["meta.dat", "meta.json"];
+/// Names whose non-empty presence seals a recording: the binary metadata
+/// document, committed and non-empty, means the writer has finished.
+///
+/// The retired `meta.json` used to be listed here too, and removing it was
+/// only safe once every writer emitted `meta.dat` unconditionally — a bundle
+/// with no dedicated streams used to omit it, and would then never have looked
+/// finalized to a follow reader.
+const FINALIZATION_META_FILES: [&str; 1] = ["meta.dat"];
 
 impl FollowFileSource {
     /// Open `path` for follow-mode positional reads and take an initial
@@ -1620,7 +1623,7 @@ mod tests {
         // Open the follow source BEFORE any growth.
         let mut follow = FollowFileSource::open(&path).unwrap();
         assert_eq!(follow.file_size("steps.dat"), Some(100), "initial FileEntry.Size");
-        assert!(!follow.is_finalized(), "no meta.dat/meta.json ⇒ not finalized");
+        assert!(!follow.is_finalized(), "no meta.dat ⇒ not finalized");
         let size_before = follow.current_size();
 
         // ── Simulate a chunk flush that grows "steps.dat" by 50 bytes IN PLACE.
@@ -1687,7 +1690,7 @@ mod tests {
     }
 
     /// M1 — `FollowFileSource.is_finalized()` flips to `true` once a non-empty
-    /// `meta.json` / `meta.dat` is observed on `refresh()`, and not before.
+    /// `meta.dat` is observed on `refresh()`, and not before.
     #[test]
     fn test_followfilesource_finalization_signal() {
         use std::io::{Seek, SeekFrom, Write};
@@ -1695,13 +1698,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("seal.ct");
 
-        // Two entries: a data file and a placeholder meta.json at size 0.
-        write_minimal_ctfs(&path, &[("steps.dat", b"abc"), ("meta.json", &[])]).unwrap();
+        // Two entries: a data file and a placeholder meta.dat at size 0.
+        write_minimal_ctfs(&path, &[("steps.dat", b"abc"), ("meta.dat", &[])]).unwrap();
 
         let mut follow = FollowFileSource::open(&path).unwrap();
-        assert!(!follow.is_finalized(), "meta.json size 0 ⇒ not finalized");
+        assert!(!follow.is_finalized(), "meta.dat size 0 ⇒ not finalized");
 
-        // Bump meta.json's FileEntry.Size to a non-zero value (its entry is the
+        // Bump meta.dat's FileEntry.Size to a non-zero value (its entry is the
         // SECOND in insertion order). We do not need real meta bytes — the
         // finalization signal is "FileEntry.Size > 0".
         let entry_offset = (HEADER_SIZE + EXTENDED_HEADER_SIZE + FILE_ENTRY_SIZE) as u64;
@@ -1714,7 +1717,7 @@ mod tests {
 
         assert!(!follow.is_finalized(), "still not finalized before refresh()");
         follow.refresh().unwrap();
-        assert!(follow.is_finalized(), "non-empty meta.json ⇒ finalized after refresh()");
+        assert!(follow.is_finalized(), "non-empty meta.dat ⇒ finalized after refresh()");
     }
 
     #[test]
