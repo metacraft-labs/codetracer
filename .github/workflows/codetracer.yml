@@ -2784,6 +2784,30 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
+      - name: Clone codetracer-native-recorder sibling
+        # `Run recorder-gated ViewModel tests` below is `just
+        # test-vm-recorder-gated`, whose body does `(cd src/db-backend && cargo
+        # build --bin replay-server)` when no replay-server is already on disk.
+        # `src/db-backend/build.rs` resolves the Nim MCR emulator as a sibling
+        # of this checkout and panics at build.rs:170 without it. This runner is
+        # ephemeral, so there is no leftover clone to make that accidentally
+        # work.
+        #
+        # Latent rather than observed: on the runs inspected, this job died
+        # earlier (`test-web-renderer-mounts`) and never reached the step. It is
+        # the same defect as test-non-gui's, found by the same contract, and
+        # fixing one without the other would leave that contract failing.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          # flake.lock's rev, matching the nixos leg's pinned `siblings:` entry
+          # -- the two legs of one job must not test different recorders.
+          ref: 7e0400b364196ec731967a4dd4a3e931c73732f3
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          # No .gitmodules in that repo; clone-repo's sed is unconditional.
+          submodules: 'false'
+
       - name: Clone runquota sibling
         # The `just build-once` step below compiles `ct`, whose import chain
         # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
@@ -3386,11 +3410,33 @@ jobs:
         # belongs in the same job as the trace-layer units above.
         run: nix develop .#devShells.x86_64-linux.default --command just test-mcr-enrichment-units
 
+      - name: Allow direnv in cloned codetracer-native-recorder
+        # `src/db-backend/build.rs` shells out to `direnv exec <recorder-root>
+        # bash ct_emulator/build_native_api.sh`; a fresh clone's `.envrc` is
+        # blocked, so direnv refuses and the build script panics at
+        # build.rs:972. Idempotent; same step lint-rust carries.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Resolve ct_emulator nimble dependencies
+        # `ct_emulator.nimble` declares `requires "results"`, which a fresh nim
+        # install does not have; without this the generated-C step aborts with
+        # `cannot open file: results`.
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
+
       - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
         # Builds the JS recorder sibling via scripts/build-siblings.sh, builds
         # replay-server, then runs the recorder-gated unit VM suites with a
         # zero-test guard that fails if they all skip (so a missing recorder
         # cannot masquerade as a pass).
+        env:
+          # `syscall_replay.nim` imports `stew/endians2`, undeclared in
+          # `ct_emulator.nimble`; codetracer's pinned submodule copy supplies it.
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
 
       - name: Build ct (needed by the CLI dispatch tests)
@@ -5319,10 +5365,114 @@ jobs:
           # (run 31719867246, job 94513828226). Pinned by the
           # "codetracer-trace-format implies codetracer-trace-format-nim"
           # assertion in ci/test/sibling-provisioning-test.sh.
+          #
+          # codetracer-native-recorder is NOT about the BEAM recorder, and it is
+          # not optional. `Run tests` below is `./ci/test/non-gui.sh` -> `just
+          # test` -> `test-rust` -> `pushd src/db-backend; cargo nextest run
+          # --bin replay-server`, and `src/db-backend/build.rs` resolves the Nim
+          # MCR emulator as a sibling of this checkout and PANICS without it:
+          #
+          #   thread 'main' panicked at build.rs:170:5:
+          #   db-backend requires the sibling `codetracer-native-recorder`
+          #   checkout, and it was not found.
+          #
+          # This job had that clone until 504274e13 (2026-06-23), which migrated
+          # the open-coded resolve-mcr-ref + clone-repo steps to setup-dev-env
+          # and carried the recorder into the new `siblings:` list of every job
+          # that had one EXCEPT this one. Two prose references to the dropped
+          # steps survive in this job's comments ("Same sibling-pin pattern as
+          # codetracer-native-recorder (resolve-mcr-ref + clone-repo + nix-
+          # develop build)", "same idempotent pattern as the
+          # codetracer-native-recorder direnv-allow step above") and are what
+          # made the omission read as deliberate.
           siblings: |
             codetracer-beam-recorder=dev
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
+            # Pinned, not `=dev`: ci/test/sibling-provisioning-test.sh keeps a
+            # ratchet on branch-tip entries that "is lowered as blocks are
+            # converted and is never raised", so a new one has to arrive
+            # already converted. This is flake.lock's
+            # `codetracer-native-recorder` rev -- the revision this repo
+            # already declares, and the same one #720 is converting the other
+            # blocks to.
+            codetracer-native-recorder=7e0400b364196ec731967a4dd4a3e931c73732f3
+
+      - name: Clone codetracer-native-recorder (macOS)
+        # The `Setup dev env (BEAM siblings, nixos)` step above carries
+        # `if: matrix.platform == 'nixos'`, so the macOS leg gets no siblings
+        # from it -- the same asymmetry that left this leg without
+        # codetracer-trace-format for months (see the header of
+        # ci/test/sibling-provisioning-test.sh). Clone the recorder with the
+        # `clone-repo` + `ref: dev` pattern the other macOS siblings in this job
+        # use.
+        #
+        # macOS has NOT been silently fine without it. It is a persistent
+        # self-hosted runner, and a recorder clone left in the shared work
+        # directory by another job is why this leg reaches build.rs:972
+        # (`.envrc is blocked`) instead of build.rs:170 (`not found`). That is a
+        # leftover, not provisioning: it is whatever revision the last job to
+        # want it happened to pin, and it is absent on a fresh host.
+        #
+        # `submodules: 'false'`: codetracer-native-recorder has no .gitmodules,
+        # and clone-repo's sed is unconditional.
+        if: matrix.platform == 'macos'
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          # flake.lock's rev, matching the nixos leg's pinned `siblings:` entry
+          # -- the two legs of one job must not test different recorders.
+          ref: 7e0400b364196ec731967a4dd4a3e931c73732f3
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Allow direnv in cloned codetracer-native-recorder (nixos)
+        # `build.rs` shells out to `direnv exec <recorder-root> bash
+        # ct_emulator/build_native_api.sh` to materialise the generated C before
+        # the Rust build. A fresh clone's `.envrc` is in the "blocked" state, so
+        # direnv refuses and the build script panics at build.rs:972 with
+        # `build_native_api.sh exited with status exit status: 1`. That is the
+        # SECOND failure this job hits, not an alternative to the first: the
+        # macOS leg reaches it today only because the persistent runner still
+        # carries a recorder clone left by another job, so it gets past the
+        # build.rs:170 panic and dies here instead. Both legs need the allow.
+        #
+        # Idempotent, and it persists only in the runner's local direnv state
+        # dir. Same three-step shape lint-rust already uses.
+        if: matrix.platform == 'nixos'
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Allow direnv in cloned codetracer-native-recorder (macOS)
+        # `nix develop .` (not `.#devShells.x86_64-linux.default`): the macOS
+        # leg selects the host-default aarch64-darwin shell, exactly as
+        # ci/test/non-gui.sh does.
+        if: matrix.platform == 'macos'
+        run: |
+          nix develop . -c \
+            direnv allow "${{ github.workspace }}/../codetracer-native-recorder"
+
+      - name: Resolve ct_emulator nimble dependencies (nixos)
+        # `build_native_api.sh` runs `nim c ... ct_emulator.nim`, whose .nimble
+        # declares `requires "results"`. A fresh nim install has no global
+        # `results` package and the script aborts with `cannot open file:
+        # results`. Run `nimble install --depsOnly` once inside the recorder's
+        # own direnv env so nim/nimble resolve from the recorder's flake --
+        # idempotent, and copied from the lint-rust step of the same name.
+        if: matrix.platform == 'nixos'
+        run: |
+          nix develop .#devShells.x86_64-linux.default -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
+
+      - name: Resolve ct_emulator nimble dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          nix develop . -c \
+            direnv exec "${{ github.workspace }}/../codetracer-native-recorder" \
+              bash -c 'cd "${{ github.workspace }}/../codetracer-native-recorder/ct_emulator" && nimble install --depsOnly -y'
 
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``
@@ -5434,6 +5584,14 @@ jobs:
         run: ./ci/test/non-gui.sh
         env:
           CODETRACER_CI_PLATFORM: ${{ matrix.platform }}
+          # The emulator's `syscall_replay.nim` imports `stew/endians2`, which
+          # `ct_emulator.nimble` does not declare, so the `nimble install
+          # --depsOnly` above cannot supply it and a fresh Nim build cannot
+          # resolve the module. Codetracer ships a pinned copy as a submodule;
+          # `build_native_api.sh` picks it up from here as `--path:` flags. Same
+          # variable lint-rust, windows-rust-components and the macOS
+          # db-backend leg already set.
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
 
   test-ui-tests:
     strategy:
