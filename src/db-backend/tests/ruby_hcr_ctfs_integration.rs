@@ -175,11 +175,20 @@ fn extract_var_value_at_stop(flow: &FlowData, var_name: &str, stop_rr_ticks: i64
 
 #[test]
 fn test_ruby_hcr_ctfs_integration() {
-    // -- Guard: skip if recorder unavailable --
+    // -- Guard: prerequisite check. Loud, and fatal when CI says so. --
+    //
+    // A bare `return` here is tallied by cargo/nextest as `1 passed` with zero
+    // assertions run, which is indistinguishable in the summary from a real
+    // verification. `skip_or_fail_missing_prerequisite` prints an unmissable
+    // NOT VERIFIED banner and panics outright under
+    // CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false.
     if find_ruby_recorder().is_none() {
-        eprintln!(
-            "SKIPPED: Ruby recorder not found \
-             (set CODETRACER_RUBY_RECORDER_PATH or check out sibling/submodule)"
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_ruby_hcr_ctfs_integration",
+            "Ruby recorder not found",
+            "set CODETRACER_RUBY_RECORDER_PATH, or build the sibling \
+             (cd ../codetracer-ruby-recorder && cargo build --release in \
+             gems/codetracer-ruby-recorder/ext/native_tracer)",
         );
         return;
     }

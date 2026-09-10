@@ -832,6 +832,7 @@ test_lane_files() {
 		test_lane_files vm-native |
 			_tlf_reject \
 				'/agentic-coding/' \
+				'/status-bar/certificate_indicator_native_test\.nim$' \
 				'/welcome-screen/welcome_screen_recent_folders_test\.nim$' \
 				'/request-panel/demo_recipe_vm_test\.nim$' \
 				'/request-panel/python_request_panel_vm_test\.nim$' \
@@ -843,7 +844,19 @@ test_lane_files() {
 				'/request-panel/remote_request_panel_vm_test\.nim$' \
 				'/request-panel/request_span_conformance_test\.nim$'
 		# agentic-coding/* import std/osproc, whose `quoteShell` does not exist
-		# on the JS target. `welcome_screen_recent_folders_test.nim` is the same
+		# on the JS target. `certificate_indicator_native_test.nim` (SB-1) is the
+		# same error for the same reason and one more besides: it drives the
+		# SHIPPED native platform instantiation (`host/desktop_native.nim`, a
+		# hard `{.error.}` under `nim js`) against a real git repository, which
+		# is the only way to prove the indicator's refresh triggers fire when
+		# real facts move. Its backend-independent half is
+		# `status-bar/certificate_indicator_vm_test.nim`, which carries no host
+		# or filesystem dependency and DOES run in this lane on both backends —
+		# the same split drawn for `test_platform_desktop_native` in `vm-unit`.
+		# Rejecting it here rather than `when defined(js)`-guarding it is
+		# deliberate: a suite compiled with its whole subject elided would report
+		# green having asserted nothing.
+		# `welcome_screen_recent_folders_test.nim` is the same
 		# error through `src/common/trace_index` (osproc + db_sqlite), and it
 		# exists as a separate file precisely so this rejection costs one
 		# genuinely-native case instead of the 44 headless `WelcomeScreenVM`
@@ -958,6 +971,7 @@ test_lane_files() {
 			src/ct_test/python_providers_test.nim \
 			src/ct_test/rust_libtest_provider_test.nim \
 			src/ct_test/playwright_provider_test.nim \
+			src/ct_test/m13_harness_outcomes_test.nim \
 			src/frontend/viewmodel/tests/unit/test_test_explorer_vm.nim \
 			src/frontend/viewmodel/tests/unit/test_editor_test_controls_m4.nim \
 			src/ct_test/m13_smart_contract_harnesses_test.nim \

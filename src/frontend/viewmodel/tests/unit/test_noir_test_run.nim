@@ -524,7 +524,9 @@ fn passes_when_it_should_not() { assert(1 == 1); }
     # No host installed a runner.
     counted not vm.canRun()
     var started = 0
-    vm.setRunTests(proc() = inc started)
+    vm.setRunTests(proc(): string =
+      inc started
+      "")
     counted vm.canRun()
 
     # A deployment that stated a reason.
@@ -569,7 +571,9 @@ fn passes_when_it_should_not() { assert(1 == 1); }
     counted painted[0][1] == "No host in this build can run the tests"
 
     var started = 0
-    vm.setRunTests(proc() = inc started)
+    vm.setRunTests(proc(): string =
+      inc started
+      "")
 
     # The install alone — no other signal written — must have re-rendered.
     counted painted.len == 2

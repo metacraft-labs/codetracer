@@ -43,12 +43,14 @@
 ##
 ## Two things, both worth knowing when reading the assertions:
 ##
-## * **The seek lands exactly on the handler's first line.**  The Python
-##   fixture's parameterised routes seek one step early, because that writer
-##   flushes a synthetic zero-delta column step for the callee's arguments
-##   carrying the previous line.  The Ruby recorder emits a plain LINE event as
-##   the first event inside a Sinatra route block, so every row here resolves
-##   into the demo app on a line that is inside the matched handler.
+## * **The seek lands exactly on the matched route's own declaration line.**
+##   The Python fixture's parameterised routes seek one step early, because that
+##   writer flushes a synthetic zero-delta column step for the callee's
+##   arguments carrying the previous line.  The Ruby recorder emits a plain LINE
+##   event as the first event inside a Sinatra route block, so every row here
+##   resolves into the demo app on its own ``get ... do`` / ``post ... do``
+##   line, which ``ExpectedRow.handlerLine`` names and the assertions compare
+##   against exactly.
 ## * **No trace filter was needed.**  The Ruby recorder's ``should_ignore_path``
 ##   already drops every path containing ``gems/`` or ``lib/ruby``, which is
 ##   where Sinatra, Rack and the middleware live, so the recording contains only
@@ -113,25 +115,46 @@ type
     route*: string
     bucket*: string          ## the panel's status-colour bucket
     hasErrorMessage*: bool   ## a handler that raised must say so
+    handlerLine*: uint32
+      ## The 1-based line of ``app.rb`` on which this row's route block is
+      ## declared — ``get '/api/users' do`` and friends.  A row's seek must
+      ## resolve to EXACTLY this line.
+      ##
+      ## Asserting the number, and not merely that the seek lands somewhere in
+      ## ``app.rb`` above line 0, is what makes the check able to fail for the
+      ## reason it exists.  A container written under the superseded line-index
+      ## encode (``prefix_sum[path_id] + line`` rather than
+      ## ``prefix_sum[path_id] + (line - 1)``) resolves every step one line
+      ## high: still inside ``app.rb``, still a positive line, still a
+      ## different line per row — so it satisfies every weaker form of this
+      ## assertion while pointing one line past every route declaration, into
+      ## the handler body.
+      ##
+      ## Like ``route``, these come from the demo app's source
+      ## (``codetracer-ruby-recorder/test-programs/web/sinatra/app.rb``) and not
+      ## from the container, so the container cannot make them agree with
+      ## itself.  Re-recording on another machine does not move them; editing
+      ## the demo app does, and then this is the line to update.
 
 const
   ExpectedRows: array[8, ExpectedRow] = [
     ExpectedRow(httpMethod: "GET", url: "/api/users", statusCode: 200,
-      route: "/api/users", bucket: "success"),
+      route: "/api/users", bucket: "success", handlerLine: 40),
     ExpectedRow(httpMethod: "POST", url: "/api/users", statusCode: 201,
-      route: "/api/users", bucket: "success"),
+      route: "/api/users", bucket: "success", handlerLine: 47),
     ExpectedRow(httpMethod: "GET", url: "/api/users/2", statusCode: 200,
-      route: "/api/users/:user_id", bucket: "success"),
+      route: "/api/users/:user_id", bucket: "success", handlerLine: 56),
     ExpectedRow(httpMethod: "GET", url: "/static/app.css", statusCode: 304,
-      route: "/static/app.css", bucket: "redirect"),
+      route: "/static/app.css", bucket: "redirect", handlerLine: 70),
     ExpectedRow(httpMethod: "GET", url: "/api/users/999", statusCode: 404,
-      route: "/api/users/:user_id", bucket: "client-error"),
+      route: "/api/users/:user_id", bucket: "client-error", handlerLine: 56),
     ExpectedRow(httpMethod: "GET", url: "/api/reports/slow", statusCode: 200,
-      route: "/api/reports/slow", bucket: "success"),
+      route: "/api/reports/slow", bucket: "success", handlerLine: 77),
     ExpectedRow(httpMethod: "GET", url: "/api/boom", statusCode: 500,
-      route: "/api/boom", bucket: "server-error", hasErrorMessage: true),
+      route: "/api/boom", bucket: "server-error", hasErrorMessage: true,
+      handlerLine: 83),
     ExpectedRow(httpMethod: "GET", url: "/api/users", statusCode: 200,
-      route: "/api/users", bucket: "success"),
+      route: "/api/users", bucket: "success", handlerLine: 40),
   ]
     ## Eight requests covering every status bucket the panel colours (2xx, 3xx,
     ## 4xx, 5xx), two methods, a parameterised route, and a handler that raises.
@@ -221,9 +244,9 @@ proc lineOnlyGli(pathCount: int): GlobalLineIndex =
   ## refuses the container and a step's ``global_position_index`` is instead the
   ## writer's line-only encoding: ``DefaultLinesPerFile`` lines allocated per
   ## file, so the index is ``file_base + line``.  This is precisely what
-  ## ``ct print`` reconstructs (``buildGliFromMeta`` in
-  ## ``codetracer_ct_print_lib``), from the writer's own constant, so this test
-  ## resolves steps the same way the shipped CLI does.
+  ## ``ct print`` reconstructs (``NewTraceReader.globalPositionSpace``, which
+  ## ``codetracer_ct_print_lib`` resolves through), from the writer's own
+  ## constant, so this test resolves steps the same way the shipped CLI does.
   var counts = newSeq[uint64](pathCount)
   for i in 0 ..< pathCount:
     counts[i] = DefaultLinesPerFile
@@ -377,7 +400,7 @@ suite "RS-M6 Ruby request panel":
 
       # The seek target is a step of THIS request — not a shared line, which is
       # the whole point of an inline-bound span — and it resolves into the
-      # recorded demo app rather than into Sinatra's internals or the harness.
+      # recorded demo app, on the exact line that declares the matched route.
       var readerRes = openNewTrace(FixtureContainer)
       check readerRes.isOk
       var reader = readerRes.get()
@@ -389,6 +412,6 @@ suite "RS-M6 Ruby request panel":
         seekTargets.add(span.startStep)
         let loc = sourceOfStep(reader, gliIndex, span.startStep)
         check loc.file.endsWith(DemoAppSuffix)
-        check loc.line > 0'u32
+        check loc.line == ExpectedRows[i].handlerLine
 
       dispose()

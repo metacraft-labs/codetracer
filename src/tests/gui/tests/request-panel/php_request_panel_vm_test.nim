@@ -223,9 +223,9 @@ proc lineOnlyGli(pathCount: int): GlobalLineIndex =
   ## ``global_position_index`` is instead the writer's line-only encoding:
   ## ``DefaultLinesPerFile`` lines allocated per file, so the index is
   ## ``file_base + line``.  This is precisely what ``ct print`` reconstructs
-  ## (``buildGliFromMeta`` in ``codetracer_ct_print_lib``), from the writer's
-  ## own constant, so this test resolves steps the same way the shipped CLI
-  ## does.
+  ## (``NewTraceReader.globalPositionSpace``, which ``codetracer_ct_print_lib``
+  ## resolves through), from the writer's own constant, so this test resolves
+  ## steps the same way the shipped CLI does.
   var counts = newSeq[uint64](pathCount)
   for i in 0 ..< pathCount:
     counts[i] = DefaultLinesPerFile

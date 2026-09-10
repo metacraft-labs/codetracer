@@ -46,11 +46,17 @@ test.describe("Search Results Panel", () => {
     await openBottomPanel(ctPage, "SEARCH RESULTS");
 
     // The search results panel renders `.search-results` inside
-    // `#searchResultsComponent-0`. The `.search-results` element has
-    // `display: none` via `.search-results-non-active` until a search
-    // is performed. Check the container element visibility instead,
-    // which proves the auto-hide tab was activated and the panel was
-    // docked.
+    // `#searchResultsComponent-0`. Check the container element
+    // visibility first, which proves the auto-hide tab was activated and
+    // the panel was docked, and fall back to the panel itself.
+    //
+    // (The container-first order dates from when `.search-results`
+    // carried a `.search-results-non-active` `display: none` modifier
+    // before a search. The Find in Files redesign retired that modifier
+    // — the panel owns the query input, so hiding it would hide the only
+    // way to start a search — so the panel is visible from the start
+    // now. The order is kept because the container is still the thing
+    // that proves the DOCKING, which is what this case is about.)
     const searchContainer = ctPage.locator(
       `${DOCKED_BOTTOM_CONTENT_SELECTOR} #searchResultsComponent-0`,
     );
@@ -87,9 +93,9 @@ test.describe("Search Results Panel", () => {
     await openBottomPanel(ctPage, "SEARCH RESULTS");
 
     // Wait for the panel container to be visible inside the docked panel.
-    // The `.search-results` element has `display: none` via
-    // `.search-results-non-active` until a search is performed, so
-    // check the outer container first.
+    // The container is checked first because it is what proves the
+    // docking; see the note in the case above for why the panel itself
+    // is no longer hidden before a search.
     const searchContainer = ctPage.locator(
       `${DOCKED_BOTTOM_CONTENT_SELECTOR} #searchResultsComponent-0`,
     );

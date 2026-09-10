@@ -1,12 +1,13 @@
 use std::path::Path;
 
-use codetracer_trace_types::Line;
-
 use crate::ctfs_trace_reader::ctfs_container::CtfsError;
-#[derive(Debug, Clone, Copy, PartialEq)]
+
+/// The wasm32 stand-in for the native [`FollowStep`](super::follow_stream_source::FollowStep):
+/// the same shape, so a caller compiles either way, over a source that never
+/// produces one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FollowStep {
-    pub path_id: u32,
-    pub line: Line,
+    pub global_line_index: u64,
 }
 
 #[derive(Debug)]

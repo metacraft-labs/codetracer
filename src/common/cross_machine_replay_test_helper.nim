@@ -64,14 +64,14 @@ import "../ct/trace/storage_and_import"
 import "../ct/trace/ctfs_sources"
 
 # ---------------------------------------------------------------------------
-# Minimal meta.dat v3 + CTFS writer
+# Minimal meta.dat + CTFS writer
 # ---------------------------------------------------------------------------
 #
 # The codetracer source tree does NOT link against
 # ``codetracer-trace-format-nim``'s ``multi_stream_writer`` (the
 # recorder lives in a sibling repo); the production trace-write path is
 # only available via ``ct-mcr``.  To keep the test self-contained and
-# fast, we serialize a meta.dat v3 by hand following the spec at
+# fast, we serialize a meta.dat by hand following the spec at
 # ``codetracer-trace-format-spec/internal-files.md`` § Metadata
 # (meta.dat), and wrap it in the minimal CTFS layout already proven by
 # the sibling ``ctfs_sources_test.nim`` writer.  The acceptance contract
@@ -84,7 +84,13 @@ const
   CtfsMagic = "\xC0\xDE\x72\xAC\xE2"
   CtfsVersion = 3
   CtmdMagic = "CTMD"
-  MetaDatVersion: uint16 = 3
+  MetaDatVersion: uint16 = SupportedMetaDatVersion
+    ## Taken from the reader rather than written as a literal: this is a
+    ## fixture writer whose whole job is to produce containers the
+    ## production reader accepts, so a schema bump must not be able to
+    ## leave it behind stamping a version that is refused. The literal is
+    ## pinned once, in ``ctfs_sources.nim``, where the reasoning for the
+    ## value lives; ``ctfs_sources_test.nim`` asserts it.
   BlockSize = 1024
   MaxEntries = 8
   Base40Alphabet = "\0" & "0123456789abcdefghijklmnopqrstuvwxyz./-"
@@ -131,8 +137,9 @@ proc base40Encode(name: string): uint64 =
 
 proc buildMetaDat(recordingId, program, workdir, recorderId: string;
                   args, srcPaths: seq[string]): string =
-  ## Serialize a meta.dat v3 with the minimum required fields and no
-  ## extended-block flags set.  Field order matches the spec at
+  ## Serialize a meta.dat at ``MetaDatVersion`` with the minimum
+  ## required fields and no extended-block flags set.  Field order
+  ## matches the spec at
   ## ``codetracer-trace-format-spec/internal-files.md`` § Metadata
   ## (recording_id → program → args → workdir → recorder_id → paths).
   result.add CtmdMagic
@@ -204,7 +211,7 @@ proc expectCanonicalUuidV7(id: string) =
     fail("expected canonical UUIDv7; got " & id)
 
 proc writeRecordingFolder(folder, recordingId, program: string) =
-  ## Lay down ``<folder>/trace.ct`` containing a real meta.dat v3 whose
+  ## Lay down ``<folder>/trace.ct`` containing a real meta.dat whose
   ## ``recording_id`` is ``recordingId``.  The orchestrator's ``tar`` of
   ## this folder is exactly what cross-machine ``scp`` would carry.
   let metaDatBytes = buildMetaDat(

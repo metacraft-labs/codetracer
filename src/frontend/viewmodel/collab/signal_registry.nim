@@ -346,9 +346,13 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addEntry("ShellVM", "inputHistory", vscPresenceAwareness,
     "Command history is participant-local awareness, not replayable ViewState.")
 
-  entries.addMany("SearchResultsVM", ["query", "active", "filter"],
+  entries.addMany("SearchResultsVM", ["query", "active"],
     vscSharedSessionViewState,
-    "Global search results panel query/filter/visibility are shared view state.")
+    "Global search results panel query and visibility are shared view state. " &
+    "There is no `filter` alongside them any more: the client-side " &
+    "result-narrowing signal was retired with the Find in Files redesign, " &
+    "which had already dropped the (never-wired) input that was meant to " &
+    "drive it.")
   entries.addEntry("SearchResultsVM", "results", vscBackendAuthoritative,
     "Search result rows are backend/search service output.")
   entries.addEntry("SearchResultsVM", "loading", vscBackendAuthoritative,
@@ -358,8 +362,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "state. Same call as ShellVM.inputHistory: what one person typed is " &
     "theirs, not replayable session state, and publishing it would put " &
     "another participant's search history in front of everyone.")
-  entries.addDerived("SearchResultsVM",
-    ["visibleResults", "resultCount", "fileCount"])
+  entries.addDerived("SearchResultsVM", ["resultCount", "fileCount"])
 
   entries.addMany("TestResultsVM", ["catalog", "summary", "projectName"],
     vscBackendAuthoritative,

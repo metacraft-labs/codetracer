@@ -1001,6 +1001,67 @@ mutate_no_wasm_worker() {
 	[ "${after}" = "0" ]
 }
 
+# Arm Z — THE DEPLOYMENT DECLARES NO WASM MODULES.
+#
+# THE MUTATION THAT GIVES THE SECOND CHANNEL ITS POWER, and it is a different
+# seam from arm P/Q's on purpose.
+#
+# `mutate_no_wasm_worker` deletes the worker SCRIPT, so the registry has modules
+# and cannot start them: the dispatch is refused inside `wasm_registry` and says
+# so ON THE CONSOLE (`nbpTest-refused ... reason=pkCancelled`). This mutation
+# empties `modules[]` in the deployment descriptor instead, which is a step
+# earlier and lands somewhere else entirely:
+#
+#   `web_platform.newWebPlatform` subtracts `capProcessSpawn` when
+#   `registry.modules.len == 0` ("the profile follows the registry",
+#   `web_boot.nim:127-137`), so `web_noir_build.noirTestRunAbsence()` returns
+#   `degradedBehaviour(profile, capProcessSpawn)` — a sentence — and
+#   `editorTestRunHook` returns it BEFORE any dispatch. `runTestFromGutter`
+#   takes its `refusal.len > 0` branch, unwinds the spinner and calls
+#   `self.api.errorMessage($refusal)`.
+#
+# So the product refuses CORRECTLY and tells the user why, and emits NO
+# `codetracer-noir-build:` line at all. That is the blind spot: a probe reading
+# refusals from the console alone sees `refusedLine=''` and cannot distinguish
+# this — a control that refused and explained itself — from the reported defect,
+# a control that took the click and said nothing.
+#
+# It is also the state the `viewmodel-tests` job runs in for real. That job
+# declares no wasm modules, and its arm G reads exactly this: `the press started
+# no run (clicked=true, refusal='')`, over a page that IS showing the sentence.
+#
+# NOT THE SAME AS DELETING `assets/noir_wasm*.wasm`, which arm P's comment
+# records as tried and failed: the registry is built from what the DESCRIPTOR
+# declares, not from what the fetch returns, so removing the file leaves
+# `capProcessSpawn` granted and the dispatch still happens. The descriptor is
+# the only shell-reachable seam that reaches the absence path.
+mutate_no_declared_modules() {
+	local dir="$1"
+	grep -q 'id="codetracer-deployment"' "${dir}/index.html" || return 1
+	python3 - "${dir}/index.html" <<'PY2'
+import json, re, sys
+p = sys.argv[1]
+s = open(p).read()
+m = re.search(r'(<script type="application/json" id="codetracer-deployment">)'
+              r'(.*?)(</script>)', s, re.S)
+assert m, "no deployment descriptor in the entry document"
+# Same escape/unescape dance as `configure_language_host`; see its note.
+raw = m.group(2).replace('\\u003c', '<').replace('\\u003e', '>').replace('\\u0026', '&')
+d = json.loads(raw)
+# A mutation that found nothing to mutate must not report success — the arm
+# would measure an UNMUTATED bundle and call its verdict evidence. A deployment
+# that already declares no modules is exactly that case, and it is a REAL state
+# (the `viewmodel-tests` job), so this refuses loudly rather than passing.
+if not d.get("modules"):
+    sys.stderr.write("the descriptor already declares no modules\n")
+    raise SystemExit(1)
+d["modules"] = []
+out = json.dumps(d, separators=(",", ":"))
+out = out.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+open(p, 'w').write(s[:m.start(2)] + out + s[m.end(2):])
+PY2
+}
+
 mutate_covered_surface() {
 	local dir="$1"
 	grep -q '</div>' "${dir}/index.html" || return 1
@@ -1793,6 +1854,28 @@ print(" ".join(r["name"] for r in rows))
 	r_clickerr="$(json route runClick.clickError)"
 	r_started="$(json route runClick.startedLine)"
 	r_refused="$(json route runClick.refusedLine)"
+	# THE SECOND CHANNEL, reported rather than asserted here — AND EXPECTED TO
+	# BE EMPTY FOR THIS CONTROL, which the previous version of this comment got
+	# backwards. It said the pane's ▶ "refuses through the same
+	# `api.errorMessage` path the gutter's does". It does not, and the commit
+	# that wrote that sentence is the one that made it false:
+	# `test_results_vm.startRun` files the runner's sentence with
+	# `noteRunRefusal`, which appends a diagnostic and renders in the pane's
+	# `.test-results-failure` block. No notification is raised. The gutter's
+	# `runTestFromGutter` is the path that calls `api.errorMessage`.
+	#
+	# So the pane's refusal is read off `r_absence` and the failure block, and a
+	# `none` here is the CORRECT reading for this control rather than a silent
+	# product. Carried anyway, because a notification appearing on this press
+	# would mean the two controls had converged and this comment needs rewriting
+	# again.
+	r_refusenotice="$(json route runClick.refusalNotice)"
+	# The population behind the read — see arm G. `r_noticesbefore` counts the
+	# notifications the page already carried (the storage-durability sentence is
+	# always one of them), which are excluded from `refusalNotice` because they
+	# answer no question the click asked.
+	r_notices="$(json route runClick.notices)"
+	r_noticesbefore="$(json route runClick.noticesBefore)"
 	r_headbefore="$(json route runClick.headlineBefore)"
 	r_headafter="$(json route runClick.headlineAfter)"
 	r_results="$(json route runClick.resultsLine)"
@@ -1804,7 +1887,23 @@ print(" ".join(r["name"] for r in rows))
 	if [ -n "${r_started}" ]; then
 		ck ok "arm R: THE CLICK STARTED A RUN — ${r_started}"
 	else
-		ck fail "arm R: the click started nothing. Refusal line: '${r_refused:-none}'; headline went '${r_headbefore}' -> '${r_headafter}'. A control that looks live and runs nothing is the dead affordance in its worst form, because the pane also states no reason"
+		# WHAT THIS SENTENCE USED TO CLAIM WAS FALSE IN THE RUN THAT PRINTS IT.
+		#
+		# It ended "because the pane also states no reason", and on the job where
+		# this check actually fails — `viewmodel-tests`, zero wasm modules — the
+		# pane states one: `webNoModulesLoaded`, "this page was published without
+		# the Noir compiler, so nothing here can be compiled, run or tested",
+		# ninety-seven characters of it. The absence check forty lines above goes
+		# red in the SAME run for carrying exactly that sentence, so the two
+		# failures contradicted each other in one log.
+		#
+		# The clause was true when it was written, about a pane that said nothing.
+		# It was never re-read after the pane learned to explain itself. So the
+		# message now REPORTS the three channels it can actually see — the
+		# console, the pane's absence line, the notification — and lets the
+		# reader see which of them were silent, rather than asserting in prose
+		# that all of them were.
+		ck fail "arm R: the click started nothing. Console refusal: '${r_refused:-none}'; press-caused notice: '${r_refusenotice:-none}' (${r_notices} caused by the press, ${r_noticesbefore} already on screen and excluded); pane absence line: ${r_absence:-0} character(s); headline went '${r_headbefore}' -> '${r_headafter}'. A control that looks live and runs nothing is the dead affordance — and whether the user was told WHY is the ${r_absence:-0}-character absence line and the pane's failure block, not this sentence's assumption"
 		jsonraw route runClick.newConsole 2>/dev/null | head -3 | sed 's/^/      /'
 	fi
 	# ...AND THE RUN REACHED ITS VERDICTS. `nbpTest-started` proves the worker
@@ -2532,6 +2631,7 @@ if ! run_arm no-worker mutate_no_wasm_worker "/noir"; then
 	ck fail "arm P could not be measured"
 	ck fail "arm P could not be measured (second half)"
 	ck fail "arm P could not be measured (third half)"
+	ck fail "arm P could not be measured (discriminating power)"
 else
 	probe_click_run=""
 	p_runbtn="$(jsonraw no-worker dom.testRunButton.text)"
@@ -2540,6 +2640,31 @@ else
 	p_results="$(json no-worker runClick.resultsLine)"
 	p_headbefore="$(json no-worker runClick.headlineBefore)"
 	p_headafter="$(json no-worker runClick.headlineAfter)"
+	# DID THIS ARM DISCRIMINATE ANYTHING? Read from arm R's own report rather
+	# than from a shell variable set 700 lines earlier, so a reordering cannot
+	# quietly compare against the wrong run.
+	#
+	# THE ARM IT NAMES IS ARM R, AND WHAT IT NAMES IS A DIFFERENCE. Every check
+	# below asserts an ABSOLUTE state — "the click started no run" — and an
+	# absolute state is evidence only when the base run was in a DIFFERENT one.
+	# Measured on `viewmodel-tests` run 34072935418 it was not: that job
+	# declares no wasm modules, arm R's own press started nothing, and this arm
+	# then "killed" arm R's run-start assertion by observing the exact condition
+	# the base was already in. Its `[OK]` line and arm R's `[FAILED]` line
+	# carried the same fact.
+	#
+	# That is the failure this check exists to make impossible. It is not a
+	# statement about the product — it is the arm auditing its own evidence — so
+	# it goes red where the arm is powerless instead of letting the three checks
+	# below report kills they did not earn.
+	p_basestarted="$(json route runClick.startedLine)"
+	if [ -n "${p_basestarted}" ] && [ -z "${p_started}" ]; then
+		ck ok "arm P: the MUTATION is what stopped the run — arm R's base run started (${p_basestarted}) and this one did not, so the three checks below are differences rather than constants"
+	elif [ -n "${p_basestarted}" ]; then
+		ck fail "arm P: arm R's base run started (${p_basestarted}) and so did this one ('${p_started}') — deleting the worker script changed nothing, so this arm is a negative control for nothing"
+	else
+		ck fail "arm P: NO DISCRIMINATING POWER HERE — arm R's base run started nothing either, so removing the worker script produced a state this bundle was ALREADY IN and the checks below cannot tell the mutation from the environment. This is a deployment that declares no wasm modules; the arm needs a bundle that can run a test before it can show what stops one."
+	fi
 	if [ "${p_clicked}" = "true" ] && [ "${p_runbtn}" != "null" ] && [ -n "${p_runbtn}" ]; then
 		ck ok "arm P: the control is still painted (${p_runbtn}) and still takes a real click, so arm R's press check is not what this arm reddens"
 	else
@@ -2613,6 +2738,7 @@ if ! run_arm gutter-run "" "/noir"; then
 	ck fail "arm G could not be measured (third half)"
 	ck fail "arm G could not be measured (fourth half)"
 	ck fail "arm G could not be measured (deadline attribution)"
+	ck fail "arm G could not be measured (the refusal the user is shown)"
 else
 	probe_click_gutter_run=""
 	g_slot="$(python3 -c '
@@ -2657,10 +2783,66 @@ print(" | ".join(l.replace("log: codetracer-noir-build: ", "")
 		ck fail "arm G: the run control is unreachable or shares the breakpoint's hit area — ${g_slot}"
 	fi
 
+	g_refusenotice="$(json gutter-run gutterRunClick.refusalNotice)"
+	# THE POPULATION BEHIND THE READ, so an empty `refusalNotice` can be told
+	# apart from a probe that never saw a notification at all. `json` collapses
+	# a list to its length, so these are counts: `g_notices` is what the PRESS
+	# caused, `g_noticesbefore` is what the page was already showing and the
+	# recorder deliberately excluded. Reported because run 34160263480 passed
+	# this arm's second-channel check by quoting one of the excluded ones.
+	g_notices="$(json gutter-run gutterRunClick.notices)"
+	g_noticesbefore="$(json gutter-run gutterRunClick.noticesBefore)"
 	if [ "${g_clicked}" = "true" ] && [ -n "${g_started}" ]; then
 		ck ok "arm G: pressing it STARTED a run — ${g_started}"
 	else
-		ck fail "arm G: the press started no run (clicked=${g_clicked}, refusal='${g_refused}') — this is the reported defect: a control that takes the click and reaches no runner"
+		ck fail "arm G: the press started no run (clicked=${g_clicked}, console refusal='${g_refused}', on-screen refusal=${g_refusenotice:-none}) — this is the reported defect: a control that takes the click and reaches no runner"
+	fi
+
+	# THE SECOND CHANNEL: A PRESS MUST EITHER RUN OR SAY WHY, and "why" is read
+	# off the SCREEN and not only off the console.
+	#
+	# The check above is about the run. This one is about the answer, and it
+	# exists because the two refusal channels are different artefacts that this
+	# gate used to conflate. `refusedLine` greps the console for
+	# `codetracer-noir-build: ...refused`; the user reads a `.notification-message`.
+	# Every refusal in `runTestFromGutter` produces the second — it answers with
+	# `self.api.errorMessage(...)` on all three of its paths — and only the
+	# dispatch-level ones produce the first.
+	#
+	# So the console-only read had a hole exactly where the product behaves
+	# BEST: the absence path refuses before dispatching, explains itself in a
+	# sentence, and prints nothing. Run 34072935418's arm G reported
+	# `refusal=''` about a page that was showing the user a reason, and the
+	# failure text it printed — "a control that takes the click and reaches no
+	# runner" — described a defect the product did not have there.
+	#
+	# THE DEAD AFFORDANCE IS THE SUBJECT: silence after a press is the reported
+	# bug, and a sentence after a press is the fix.
+	#
+	# WHAT REDDENS THIS CHECK, STATED EXACTLY, because an earlier draft of this
+	# comment said "arm Z below is the mutation that reddens it" and that is not
+	# how the arms are wired. Every arm reads its OWN probe report, so no
+	# mutation applied in arm Z can move a variable arm G computed from
+	# `gutter-run`'s JSON. Arm Z cannot redden this line and never could.
+	#
+	# This check goes red when a press starts no run AND the console is silent
+	# AND the screen is silent — the reported defect exactly. No mutation in
+	# this gate produces that state, because reaching it means breaking the
+	# notification surface itself, which nothing here mutates. So THIS line is a
+	# monitor rather than a controlled assertion, and that is said out loud
+	# instead of implied away.
+	#
+	# The controlled form of the same assertion is ARM Z's third check. Arm Z
+	# empties the descriptor's `modules[]`, which silences the console channel
+	# outright, and then requires the screen to answer. There the assertion has
+	# somewhere to fail from a cause the gate creates, which is what makes the
+	# second channel load-bearing rather than decorative.
+	if [ -n "${g_started}" ]; then
+		ck ok "arm G: the press started a run, so no refusal was owed — and the product volunteered none (on-screen: ${g_refusenotice:-none})"
+	elif [ -n "${g_refusenotice}" ] || [ -n "${g_refused}" ]; then
+		ck ok "arm G: the press started no run and the product SAID WHY on the surface the user actually reads — on-screen: ${g_refusenotice:-none}; console: '${g_refused}' (the on-screen sentence is one of ${g_notices} the press CAUSED; ${g_noticesbefore} pre-existing notice(s) were excluded from this read)"
+	else
+		ck fail "arm G: the press started no run and the user was told NOTHING — no console refusal and no notification caused by the press (${g_notices} press-caused notice(s); ${g_noticesbefore} notice(s) were already on screen before it and are NOT an answer to it). Silence after a press is the reported defect in its worst form: the control looks live, does nothing, and states no reason"
 	fi
 
 	# THE VERDICT, and it must name a passing test. `startNoirTestRecording`
@@ -2740,6 +2922,7 @@ if ! run_arm gutter-run-no-worker mutate_no_wasm_worker "/noir"; then
 	ck fail "arm Q could not be measured"
 	ck fail "arm Q could not be measured (second half)"
 	ck fail "arm Q could not be measured (the slot's running state)"
+	ck fail "arm Q could not be measured (discriminating power)"
 else
 	probe_click_gutter_run=""
 	q_clicked="$(json gutter-run-no-worker gutterRunClick.clicked)"
@@ -2754,6 +2937,43 @@ print("yes" if s and s["width"] and s["height"] else "no")
 	q_refused="$(json gutter-run-no-worker gutterRunClick.refusedLine)"
 	q_settlems="$(json gutter-run-no-worker gutterRunClick.settleWaitMs)"
 	q_budget="$(json gutter-run-no-worker gutterRunClick.settleBudgetMs)"
+	# DID THIS ARM DISCRIMINATE ANYTHING? The same audit arm P now carries, for
+	# the same reason and against arm G's base instead of arm R's.
+	#
+	# THIS IS THE ONE THAT WAS CAUGHT. On `viewmodel-tests` run 34072935418 arm
+	# G failed with
+	#
+	#     arm G: the press started no run (clicked=true, refusal='')
+	#
+	# and arm Q passed, three lines later, with
+	#
+	#     arm Q: and the press started no run and reached no verdict ('none'),
+	#            so arm G's run-start and verdict assertions can fail
+	#
+	# The SAME observation, scored as a defect once and as a kill once. A
+	# negative control that agrees with its positive arm has measured nothing —
+	# the worker script it deleted was irrelevant, because that job declares no
+	# wasm modules and nothing was going to start with or without it.
+	#
+	# Its third check was worse, and is the "a zero is not a measurement" case
+	# exactly: "the control did NOT stay spinning — it cleared in 1ms". Nothing
+	# cleared. The slot never span, because no run was ever dispatched, and an
+	# empty read was reported as a clean settle.
+	#
+	# On the deploy job, where the modules ARE declared, the same arm is sound:
+	# run 33983246277 shows arm G starting a run (`nbpTest-started starts=1`),
+	# reaching a verdict and clearing a slot that really span, and arm Q showing
+	# none of it. The arm was never wrong about the product — it was blind to
+	# whether the environment had already answered for it.
+	q_basestarted="$(json gutter-run gutterRunClick.startedLine)"
+	q_baserunning="$(json gutter-run gutterRunClick.runningAfterClick)"
+	if [ -n "${q_basestarted}" ] && [ -z "${q_started}" ]; then
+		ck ok "arm Q: the MUTATION is what stopped the run — arm G's base press started one (${q_basestarted}) and spun ${q_baserunning} slot(s), and this press did neither, so the checks below are differences rather than constants"
+	elif [ -n "${q_basestarted}" ]; then
+		ck fail "arm Q: arm G's base press started a run (${q_basestarted}) and so did this one ('${q_started}') — deleting the worker script changed nothing, so this arm is a negative control for nothing"
+	else
+		ck fail "arm Q: NO DISCRIMINATING POWER HERE — arm G's base press started nothing either (and span ${q_baserunning} slots), so removing the worker script produced a state this bundle was ALREADY IN. The checks below would report the same verdict over an unmutated bundle, which is what makes them unearned rather than merely weak. This is a deployment that declares no wasm modules; see arm Z, which is the arm aimed AT that state instead of tripping over it."
+	fi
 	if [ "${q_present}" = "yes" ] && [ "${q_clicked}" = "true" ]; then
 		ck ok "arm Q: the control is still painted and still takes a real click, so arm G's press check is not what this arm reddens"
 	else
@@ -2780,10 +3000,112 @@ print("yes" if s and s["width"] and s["height"] else "no")
 	# Measured here at ~30s after the press, which is well inside that deadline:
 	# before the fix this read 1, and the only thing that would have cleared it
 	# is a timeout no user waits through.
+	# THE PEAK IS PRINTED, not just the final zero. "It cleared in 1ms" over a
+	# slot that never span at all is not a settle, and on run 34072935418 that
+	# is exactly what this line reported. The pass condition is unchanged —
+	# tightening it to demand a spin would be a guess about timing this arm has
+	# never measured, and the power check above is what actually stops the
+	# vacuous case — but an empty read can no longer be read as a clean one.
+	q_running="$(json gutter-run-no-worker gutterRunClick.runningAfterClick)"
 	if [ "${q_settled}" = "0" ]; then
-		ck ok "arm Q: and the control did NOT stay spinning over the refusal — it cleared in ${q_settlems}ms, against a ${q_budget}ms budget that is itself well inside the product's two-minute deadline"
+		ck ok "arm Q: and the control did NOT stay spinning over the refusal — peak ${q_running} slot(s) at the press, cleared in ${q_settlems}ms, against a ${q_budget}ms budget that is itself well inside the product's two-minute deadline"
 	else
 		ck fail "arm Q: ${q_settled} slot(s) still spinning after ${q_settlems}ms, over a run refused synchronously ('${q_refused}') — the control is showing a run that is not happening, which is the reported defect"
+	fi
+fi
+echo
+
+# ---------------------------------------------------------------------------
+echo "Arm Z: MUTATION — the deployment declares no wasm modules at all"
+echo "    Arm G's SECOND-CHANNEL control. Expect the press to be refused with"
+echo "    NOTHING on the console and a sentence on the screen — the state in"
+echo "    which a console-only probe is blind."
+# ---------------------------------------------------------------------------
+# WHY THIS ARM EXISTS, and it is not another way to break the run.
+#
+# Arms P and Q delete the worker SCRIPT: the registry holds modules, cannot
+# start them, and refuses ON THE CONSOLE. That is one refusal channel and this
+# gate has always read it. This arm empties `modules[]` in the deployment
+# descriptor, which takes `capProcessSpawn` away from the profile
+# (`web_platform.newWebPlatform` — "the profile follows the registry"), so
+# `noirTestRunAbsence()` answers with a sentence and `editorTestRunHook` returns
+# it BEFORE dispatching anything. Nothing reaches the console. The user gets a
+# notification.
+#
+# So this is the arm that makes the second channel load bearing rather than
+# decorative: it is the one state where the console says nothing and the screen
+# says everything, and before the `refusalNotice` field existed the gate could
+# not tell it from a control that took the click and died silently.
+#
+# IT IS ALSO A REAL DEPLOYMENT AND NOT A CONTRIVANCE. The `viewmodel-tests` job
+# runs the whole gate in exactly this state — zero wasm modules declared — which
+# is why 8 of its 89 checks fail there legitimately. Those failures are the
+# product correctly refusing on a bundle that cannot run tests. This arm asserts
+# that the refusal is COMPETENT: not merely that the run did not happen, but
+# that the user was told, on the surface they are looking at.
+#
+# WHERE IT CANNOT BE MEASURED IT SAYS SO. On a deployment that already declares
+# no modules the mutation has nothing to remove and `run_arm` returns non-zero,
+# which is three explicit failures rather than three quiet passes over an
+# unmutated bundle. That is the same audit arms P and Q now carry.
+probe_click_gutter_run=1
+if ! run_arm gutter-run-no-modules mutate_no_declared_modules "/noir"; then
+	probe_click_gutter_run=""
+	ck fail "arm Z could not be measured (the descriptor declares no modules already, so there is nothing to remove — on this deployment the second channel cannot be exercised)"
+	ck fail "arm Z could not be measured (the console channel)"
+	ck fail "arm Z could not be measured (the on-screen channel)"
+else
+	probe_click_gutter_run=""
+	z_clicked="$(json gutter-run-no-modules gutterRunClick.clicked)"
+	z_started="$(json gutter-run-no-modules gutterRunClick.startedLine)"
+	z_refused="$(json gutter-run-no-modules gutterRunClick.refusedLine)"
+	z_notice="$(json gutter-run-no-modules gutterRunClick.refusalNotice)"
+	z_notices="$(json gutter-run-no-modules gutterRunClick.notices)"
+	z_noticesbefore="$(json gutter-run-no-modules gutterRunClick.noticesBefore)"
+	z_settled="$(json gutter-run-no-modules gutterRunClick.runningAfterSettle)"
+
+	# 1. THE MUTATION LANDED, and it landed on the RUN rather than on the
+	#    control. The press must still be taken — otherwise this is arm B or
+	#    arm V wearing a different label — and no run may start.
+	if [ "${z_clicked}" = "true" ] && [ -z "${z_started}" ]; then
+		ck ok "arm Z: the control still takes a real click and the press started no run, so the refusal is what this arm measures"
+	else
+		ck fail "arm Z: clicked=${z_clicked}, started='${z_started}' — with no modules declared a run must not start, and the control must still be pressable; this arm is measuring something other than the refusal"
+	fi
+
+	# 2. AND THE CONSOLE SAID NOTHING. This is the check that makes the next one
+	#    necessary, and it is the whole reason this arm is separate from arm Q.
+	#    If this ever goes red the blind spot has closed on its own and the
+	#    second channel is redundant — which would be worth knowing, so it is
+	#    asserted rather than assumed.
+	if [ -z "${z_refused}" ]; then
+		ck ok "arm Z: and the CONSOLE carried no refusal at all, which is precisely the state a console-only probe reads as silence — this is the blind spot the second channel exists for"
+	else
+		ck fail "arm Z: the console carried a refusal ('${z_refused}') — the absence path is no longer console-silent, so this arm no longer isolates the on-screen channel and arm G's second-channel check has lost its negative control"
+	fi
+
+	# 3. AND THE USER WAS TOLD, IN A SENTENCE, ON THE SCREEN. The check only the
+	#    new channel can make. `refusalNotice` is recorded by a MutationObserver
+	#    armed before the click, so a notification that is dismissed before the
+	#    read is still counted — an empty string here means the product never
+	#    said anything, not that the probe looked late.
+	#
+	#    AND IT MUST BE A NOTICE THE PRESS CAUSED. The page is already showing
+	#    the storage-durability sentence when this arm clicks, and the first
+	#    version of `refusalNotice` returned the first notice on the page that
+	#    was not the timeout — so this check could have been satisfied by a
+	#    notification about STORAGE while the run control said nothing at all.
+	#    That is not a hypothetical: it is how arm G passed on run 34160263480.
+	#    The recorder now keeps the pre-existing notices in a separate list and
+	#    `refusalNotice` is drawn only from what arrived after the press, and
+	#    both counts are printed so this line can be audited rather than
+	#    trusted.
+	if [ -n "${z_notice}" ] && [ "${z_settled}" = "0" ]; then
+		ck ok "arm Z: and the product told the user why, on screen and with no run left spinning — ${z_notice} (one of ${z_notices} notice(s) the press caused; ${z_noticesbefore} pre-existing one(s) excluded)"
+	elif [ -n "${z_notice}" ]; then
+		ck fail "arm Z: the product explained itself (${z_notice}) but left ${z_settled} slot(s) spinning — a refusal that still shows a running control is the reported defect with a caption"
+	else
+		ck fail "arm Z: the press started no run, the console said nothing, and the screen said nothing either (${z_notices} press-caused notice(s); ${z_noticesbefore} pre-existing one(s) excluded as answering no question the click asked) — this is the dead affordance exactly as reported, and it is invisible to every check that reads the console alone"
 	fi
 fi
 echo
@@ -2843,7 +3165,71 @@ echo
 # all. One per address: the neutral root (control), the path (arm R) and the
 # origin (arm O), because a build can get any one of the three right while
 # reading the wrong input for the other two.
-expect_count 89
+# 89 -> 95, and the six are ONE subject: an arm must be able to show that its
+# own verdict was caused by its own mutation.
+#
+#   * ONE in arm P and ONE in arm Q — "did this arm discriminate anything?".
+#     Both arms delete the wasm worker script and then assert an ABSOLUTE state
+#     ("the click started no run"), which is evidence only if the base run was
+#     in a different one. On `viewmodel-tests` run 34072935418 it was not, and
+#     the result was visible in the log and read past for weeks: arm G FAILED
+#     with "the press started no run (clicked=true, refusal='')" and arm Q
+#     PASSED, three lines later, for observing the same thing. A negative
+#     control agreeing with its positive arm has measured nothing. The two new
+#     checks compare against arm R's and arm G's own reports and go red when
+#     the base was already degraded, so the arms can no longer bank a kill the
+#     environment handed them.
+#
+#     THE ARMS ARE NOT WRONG ABOUT THE PRODUCT and were not weakened. On the
+#     deploy job, where the modules are declared, run 33983246277 shows them
+#     working exactly as written — arm G starts a run, reaches a verdict and
+#     clears a slot that really span; arm Q shows none of it. What was missing
+#     was the arm's ability to notice which of those two worlds it was in.
+#
+#   * THREE in arm Z, which is new, and one in arm G that arm Z exists to
+#     redden. Arm G could not see a refusal the user was SHOWN: it greps the
+#     console, and `runTestFromGutter`'s absence path answers with
+#     `api.errorMessage` and never reaches the console at all. So the one state
+#     where the product refuses best — before dispatching, with a sentence —
+#     was indistinguishable from the reported defect, a control that takes the
+#     click and says nothing. Arm G now asserts that a press either runs or
+#     explains itself; arm Z empties the descriptor's `modules[]` to produce a
+#     console-silent refusal and proves that assertion can fail.
+#
+# WHAT THIS DOES TO THE TWO JOBS THAT RUN THIS GATE, said out loud because the
+# numbers move in opposite directions and only one of them is a regression:
+#
+#   * the deploy job (`deploy-web-codetracer.yml`, wasm modules present):
+#     89/0 -> 95/0 expected. Every new check has power there.
+#   * `viewmodel-tests` (zero wasm modules declared): 89/8 -> 95/13 expected,
+#     and the delta is FIVE, itemised rather than rounded:
+#
+#         1  arm P's power audit      — arm R's base run started nothing
+#         1  arm Q's power audit      — arm G's base press started nothing
+#         3  arm Z "could not be measured" — the descriptor already declares
+#            no modules, so the mutation has nothing to remove, and its three
+#            checks fail explicitly rather than passing over an unmutated
+#            bundle
+#         0  arm G's second channel   — expected GREEN, see below
+#
+#     An earlier draft of this paragraph said 95/11 and called the delta
+#     "three". That was wrong by two and wrong in kind: it counted arm Z's
+#     unmeasurable branch as ONE failure when it is three `ck fail` calls, one
+#     per check the arm owns. The tally is reconciled to the code instead —
+#     22 new `ck` call sites across four mutually exclusive branch groups plus
+#     arm Z's three, which is 6 new CHECKS (89 -> 95) and 5 new FAILURES in
+#     the no-modules job. Correcting the sentence to match the code, not the
+#     expectation to match the sentence.
+#
+#     None of the five is a new defect. Arms P and Q go red there because they
+#     genuinely have no power in a bundle that cannot run a test — that is the
+#     limit being NAMED rather than papered over — and arm Z goes red because
+#     its mutation is a no-op on a deployment already in the mutated state.
+#     They join the 8 as the same correct refusal. Arm G's new second-channel
+#     check is expected GREEN there — that
+#     job's product does refuse with a sentence — so the gate now records the
+#     one thing about that environment that was working and unmeasured.
+expect_count 95
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${failures}" -eq 0 ]; then
 	echo "RESULT: OK — the bundle mounts a product, and each check was shown to be able to fail"

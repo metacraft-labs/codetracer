@@ -11,15 +11,22 @@
 ## verifier collapses them while passing all its own tests
 ## (Verification.md §7).
 ##
-## Nothing here signs. ``verifyDetachedSignature`` runs ``ssh-keygen -Y
-## verify``; there is no ``-Y sign`` anywhere in this module, and the only
-## routine in the repository that produces a signature is private to
+## Nothing here signs, and nothing here runs a subprocess either. The
+## signature *check* — ``ssh-keygen -Y verify`` — lives in
+## ``certificate_signature.nim`` and is **injected** as a
+## ``CertificateSignatureVerifier``. That split is what lets the status-bar indicator
+## (SB-1) consume this exact module instead of growing a second verifier
+## beside it: a ViewModel compiles on both Nim backends, ``std/os`` and a
+## process bridge do not, and one algorithm with an injected primitive is the
+## only shape that serves both. Read ``certificate_signature.nim``'s header
+## for the full argument.
+##
+## The only routine in the repository that produces a signature is private to
 ## ``certificate_issuance.nim`` (Standard.md §6.2).
 
-import std/[options, os, sets, strutils, tables]
+import std/[options, sets, strutils, tables]
 
 import certificate
-import process_exec
 
 type
   Outcome* = enum
@@ -36,6 +43,31 @@ type
     scValid
     scInvalid
     scUndecidable
+
+  CertificateSignatureVerifier* = proc(payload, publicKey, signatureValue: string):
+      tuple[check: SignatureCheck; detail: string] {.closure, gcsafe.}
+    ## How this verifier reaches the signature primitive.
+    ##
+    ## Spelled with the ``Certificate`` prefix rather than the obvious
+    ## ``SignatureVerifier``, and not for style: ``viewmodel/identity/token.nim``
+    ## already exports an unrelated ``SignatureVerifier`` — an identity-token
+    ## seam over a different primitive — and the status-bar indicator re-exports
+    ## this one into the same front end. Two unrelated types of that name in one
+    ## import graph is a real reading hazard, and it also masked token.nim's
+    ## export from ``ci/test/frontend-reachability.sh``, whose scan is by name:
+    ## naming this the same thing silently marked a genuinely unreached export
+    ## as reached and lowered the ratchet by one for no reason.
+    ##
+    ## **``nil`` is a supported value and means "this consumer cannot check a
+    ## signature at all"** — a front end with no ``ssh-keygen``, a browser tab,
+    ## a ViewModel test. It yields ``scUndecidable`` and therefore
+    ## **unverifiable**, never ``scInvalid``: reporting "the signature does not
+    ## verify" when the check was never made is exactly the collapse
+    ## Verification.md §7 forbids, and it would send an operator to re-issue a
+    ## perfectly good certificate.
+    ##
+    ## Injected rather than imported so this module stays free of ``std/os``
+    ## and of any process bridge. See the module header.
 
   EvaluatedState* = object
     ## The world under evaluation.
@@ -99,86 +131,6 @@ type
       ## Evaluation itself broke down.
 
 # ---------------------------------------------------------------------------
-# Signature verification
-# ---------------------------------------------------------------------------
-
-proc shellQuote(value: string): string =
-  ## POSIX single-quote quoting. Written out rather than pulled from
-  ## ``std/strutils`` so the escaping is visible at the one place it matters:
-  ## these strings are temporary-directory paths this process created, but a
-  ## ``TMPDIR`` containing a quote would otherwise be a command injection.
-  result = "'"
-  for ch in value:
-    if ch == '\'':
-      result.add "'\\''"
-    else:
-      result.add ch
-  result.add "'"
-
-proc verifyDetachedSignature*(payload, publicKey, signatureValue: string):
-    tuple[check: SignatureCheck; detail: string] =
-  ## Verify a detached OpenSSH signature over ``payload`` under the
-  ## ``test-certificate-v1`` namespace (Standard.md §6.1).
-  ##
-  ## ``publicKey`` is an ``ssh-ed25519 AAAA…`` line; ``signatureValue`` is the
-  ## base64 blob a certificate carries in ``signature.value``. ``ssh-keygen``
-  ## reads the armored form instead, and the conversion is pure framing.
-  ##
-  ## The identity is arbitrary: an SSH signature blob binds the **namespace and
-  ## the public key**, not a principal — the principal only selects a line in
-  ## ``allowed_signers``.
-  ##
-  ## Returns ``scUndecidable`` — never ``scInvalid`` — when the check could not
-  ## be *made* (no ``ssh-keygen``, unwritable temp dir). A consumer that
-  ## reported "invalid signature" for a missing tool would send an operator to
-  ## re-run tests over a configuration fault.
-  if publicKey.len == 0:
-    return (scInvalid, "no public key to verify against")
-  if signatureValue.len == 0:
-    return (scInvalid, "no signature value")
-
-  let workDir = getTempDir() / "ct-test-cert-verify-" & $getCurrentProcessId() &
-                "-" & $signatureValue.len & "-" & $payload.len
-  try:
-    createDir(workDir)
-  except OSError as err:
-    return (scUndecidable,
-            "could not create a verification work directory: " & err.msg)
-  defer:
-    try: removeDir(workDir)
-    except OSError: discard
-
-  const identity = "certificate-signer@ct-test.invalid"
-  let
-    payloadPath = workDir / "payload"
-    signaturePath = workDir / "signature"
-    allowedPath = workDir / "allowed_signers"
-  try:
-    writeFile(payloadPath, payload)
-    writeFile(signaturePath,
-      "-----BEGIN SSH SIGNATURE-----\n" & signatureValue &
-      "\n-----END SSH SIGNATURE-----\n")
-    writeFile(allowedPath, identity & " " & publicKey.strip() & "\n")
-  except IOError as err:
-    return (scUndecidable, "could not stage the verification inputs: " & err.msg)
-
-  # `ssh-keygen -Y verify` reads the signed data from stdin, so this goes
-  # through the shell purely for the redirection.
-  let command =
-    "ssh-keygen -Y verify -f " & shellQuote(allowedPath) &
-    " -I " & shellQuote(identity) &
-    " -n " & shellQuote(SignatureNamespace) &
-    " -s " & shellQuote(signaturePath) &
-    " < " & shellQuote(payloadPath)
-  let run = execCapturedShell(command, cwd = workDir)
-  if run.exitCode == 0:
-    return (scValid, "")
-  let output = run.output.strip()
-  if "not found" in output and "ssh-keygen" in output:
-    return (scUndecidable, "ssh-keygen is not available: " & output)
-  (scInvalid, if output.len > 0: output else: "signature did not verify")
-
-# ---------------------------------------------------------------------------
 # Scope matching
 # ---------------------------------------------------------------------------
 
@@ -209,10 +161,17 @@ type
 
 proc verifyCertificates*(state: EvaluatedState; requirement: Requirement;
                          certificates: openArray[CandidateCertificate];
-                         keyStore: KeyStore): VerificationReport =
+                         keyStore: KeyStore;
+                         signatureVerifier: CertificateSignatureVerifier = nil):
+    VerificationReport =
   ## Evaluate a set of candidate certificates against a state and a
   ## requirement, and report the three-valued outcome with the gaps and the
   ## fate of every record.
+  ##
+  ## ``signatureVerifier`` is consulted only when
+  ## ``requirement.requireSignature`` is set. ``nil`` means this consumer has
+  ## no way to check a signature at all, which is **undecidable** rather than
+  ## invalid — see ``CertificateSignatureVerifier``.
   var
     coverage = initTable[string, HashSet[string]]()
     uninterpretable = false
@@ -298,8 +257,17 @@ proc verifyCertificates*(state: EvaluatedState; requirement: Requirement;
         result.rejected.add CertificateNote(certificate: candidate.name,
           why: "no canonical form: " & err.msg)
         continue
-      let checked = verifyDetachedSignature(
-        payload, registered.get.publicKey, cert.signature.value)
+      # A consumer with no verifier at all has not decided anything about this
+      # signature, so it MUST NOT report one. `scUndecidable` is the same
+      # answer a missing `ssh-keygen` produces, and lands as unverifiable.
+      let checked =
+        if signatureVerifier.isNil:
+          (check: scUndecidable,
+           detail: "this consumer has no signature verifier, so authenticity " &
+                   "could not be checked")
+        else:
+          signatureVerifier(payload, registered.get.publicKey,
+                            cert.signature.value)
       case checked.check
       of scInvalid:
         result.rejected.add CertificateNote(certificate: candidate.name,

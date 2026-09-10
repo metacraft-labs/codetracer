@@ -174,6 +174,42 @@ const
     # it belongs in the sibling-gated `just test-no-sidecar-manifests` lane
     # rather than in this toolchain-free one.
     "src/tests/gui/tests/request-panel/request_span_conformance_test.nim",
+    # SB-1 (GUI/Layout-And-Navigation/Status-Bar.milestones.org) — the status
+    # bar's test-certificate indicator.  Both halves are registered here
+    # because this array IS the CI gate: a ViewModel test that exists but is
+    # not listed runs nowhere, and these two are exactly the files a later
+    # change is tempted to `skip()` when the standard's three-valued outcome
+    # gets in its way.
+    #
+    #   * `certificate_indicator_vm_test.nim` runs on BOTH backends (the
+    #     `vm-native` and `vm-js` lanes discover it by glob).  It carries the
+    #     distinction the milestone turns on — *unverifiable* must never
+    #     collapse into *not certified* — and the missing-store case, which
+    #     must render "no certificates" and never an error.
+    #   * `certificate_indicator_native_test.nim` is native-only: it drives the
+    #     shipped `host/desktop_native` platform against a REAL git repository,
+    #     which is the only way to prove the refresh triggers fire when real
+    #     facts move (a commit, a checkout, an edit, a revert).
+    #     `host/desktop_native.nim` is a hard `{.error.}` under `nim js`, hence
+    #     the `vm-js` rejection recorded in `ci/lib/test-lane-files.sh`.
+    #   * `certificate_indicator_view_test.nim` renders the real status shell
+    #     through IsoNim's `MockRenderer` on both backends: what the user
+    #     actually sees for each state, that an unwired indicator emits no
+    #     element at all, and that a state change patches in place instead of
+    #     rebuilding the shell — which is the mechanism
+    #     `status-bar-render-stability.spec.ts` guards from the browser side.
+    #   * `certificate_framework_composition_test.nim` (CTC-2) is the
+    #     several-records, several-frameworks case: that each record is judged
+    #     against its own claim and never a neighbour's, that a record from an
+    #     unrecognised framework is IGNORED rather than rejected — which is the
+    #     rule whose failure turns a harmless neighbour into a broken
+    #     workspace — and that a `ct test` record and a reprobuild record
+    #     carrying the same claim render byte-identically through the real
+    #     status shell.  Both backends.
+    "src/tests/gui/tests/status-bar/certificate_indicator_vm_test.nim",
+    "src/tests/gui/tests/status-bar/certificate_indicator_view_test.nim",
+    "src/tests/gui/tests/status-bar/certificate_indicator_native_test.nim",
+    "src/tests/gui/tests/status-bar/certificate_framework_composition_test.nim",
     # pxor bug campaign (2026-08).  Each of these pins a defect that had
     # previously been reported fixed and was not, so the gate is the point:
     # an ungated ViewModel test is how three of these regressed unnoticed in

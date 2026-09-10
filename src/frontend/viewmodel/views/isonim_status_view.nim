@@ -14,6 +14,44 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 type
+  StatusCertificateDetailRow* = object
+    ## One disclosed fact about the certificate in force. Kept as a
+    ## label/value pair rather than pre-formatted prose so the view owns the
+    ## presentation and the ViewModel owns the facts.
+    label*: string
+    value*: string
+
+  StatusCertificateModel* = object
+    ## The test-certificate indicator (SB-1, Status-Bar.md).
+    ##
+    ## ``label = ""`` RENDERS NO ELEMENT, exactly as ``buildLabel`` does, and
+    ## for the same reason: on a build or a mode that has not wired an
+    ## indicator, ``#status-base``'s DOM is byte-for-byte what it was, so the
+    ## footer contract, the render-stability spec and the bottom-strip selector
+    ## guard all see what they saw.
+    label*: string
+    stateClass*: string
+      ## A CSS modifier naming the STATE, never a colour. The four states
+      ## differ in meaning; the stylesheet decides how that reads, and a view
+      ## that hard-coded green would have decided it here.
+    title*: string
+      ## The whole of what is known, for the hover. The disclosure below is the
+      ## same content laid out; the tooltip is what survives a screenshot.
+    disclosed*: bool
+      ## Whether the detail is open. It renders INSIDE the indicator's own
+      ## span, absolutely positioned, so selecting it neither opens a panel nor
+      ## disturbs the layout (Status-Bar.md, "Interaction").
+    summary*: string
+    remedy*: string
+      ## Empty when there is nothing to do. This is where "run the tests" and
+      ## "fix the configuration" are kept apart, which is the practical payload
+      ## of not collapsing *unverifiable* into *not certified*.
+    authenticityNote*: string
+      ## The sentence that stops "Certified" being read as "verified as
+      ## unforgeable". Rendered in the disclosure unconditionally, never
+      ## abbreviated away.
+    detail*: seq[StatusCertificateDetailRow]
+
   StatusNotificationActionRecord* = object
     label*: string
 
@@ -57,6 +95,9 @@ type
       ## The full 40-hex identity for the label's `title=`. The label is
       ## abbreviated so it fits; the tooltip is what a user copies into a bug
       ## report.
+    certificate*: StatusCertificateModel
+      ## SB-1's test-certificate indicator. `certificate.label == ""` renders
+      ## nothing at all — see `StatusCertificateModel`.
 
   StatusShellModel* = object
     activeNotifications*: seq[StatusNotificationRecord]
@@ -74,6 +115,10 @@ type
     onNotificationAction*: proc(notificationIndex: int; actionIndex: int)
     onCopyLocation*: proc()
     onSendBugReport*: proc(title: string; description: string)
+    onSelectCertificate*: proc()
+      ## Selecting the indicator. Toggles the disclosure — and, on the way
+      ## open, re-reads, because the detail is a claim about the current state
+      ## and the moment the user asks is the worst moment to be stale.
 
 const
   StatusRootClass* = "status-shell"
@@ -105,6 +150,10 @@ proc invokeAction(
 proc invokeCopyLocation(callbacks: StatusShellCallbacks) =
   if not callbacks.onCopyLocation.isNil:
     callbacks.onCopyLocation()
+
+proc invokeSelectCertificate(callbacks: StatusShellCallbacks) =
+  if not callbacks.onSelectCertificate.isNil:
+    callbacks.onSelectCertificate()
 
 proc invokeSendBugReport(
     callbacks: StatusShellCallbacks;
@@ -170,6 +219,20 @@ proc statusStructureSignature*(model: StatusShellModel): string =
   # path for a value that cannot vary. `buildTitle` is derived from the same
   # identity and rides along with it.
   result.add("|bu:" & model.base.buildLabel)
+  # THE CERTIFICATE INDICATOR'S SHAPE, not its values. Presence decides whether
+  # the span exists at all; `disclosed` decides whether the disclosure subtree
+  # does; and the detail rows decide how many nodes are in it. `label`,
+  # `stateClass`, `title`, `summary`, `remedy` and `authenticityNote` are
+  # deliberately absent here and patched in place by `patchStatusValues` — they
+  # change when the tree does, and rebuilding the shell for a state change
+  # would reintroduce exactly the re-render churn M46 removed.
+  result.add("|ce:" & (if model.base.certificate.label.len > 0: "1" else: "0"))
+  result.add("|cd:" & (if model.base.certificate.disclosed: "1" else: "0"))
+  if model.base.certificate.disclosed:
+    result.add("|cr:" & (if model.base.certificate.remedy.len > 0: "1" else: "0"))
+    result.add("|cn:" & $model.base.certificate.detail.len)
+    for row in model.base.certificate.detail:
+      result.add("\x1e" & row.label)
   result.add("|nh:" & (if model.showNotifications: "1" else: "0"))
   result.add("|br:" & (if model.showBugReport: "1" else: "0"))
   result.add("|op:" & (if model.hasOperationNotification: "1" else: "0"))
@@ -267,6 +330,53 @@ template renderStatusShellImpl(
           span(class = "test-movement"):
             text model.base.testMovementText
         span(class = "status-right"):
+          # THE TEST-CERTIFICATE INDICATOR (SB-1). Ambient chrome: a fact that
+          # is currently true about the tree, not an event and not a panel.
+          # Rendered only when a model was supplied, so every build and mode
+          # that has not wired one emits exactly the DOM it emitted before.
+          if model.base.certificate.label.len > 0:
+            span(
+                class = "test-certificate-status status-inline " &
+                        "test-certificate-" & model.base.certificate.stateClass,
+                role = "status",
+                `aria-live` = "polite",
+                `data-certificate-state` = model.base.certificate.stateClass,
+                title = model.base.certificate.title,
+                onclick = proc() = callbacks.invokeSelectCertificate()):
+              span(class = "test-certificate-label"):
+                text model.base.certificate.label
+              # THE DISCLOSURE LIVES INSIDE THE INDICATOR. Status-Bar.md:
+              # selecting it reveals detail "without opening a panel or
+              # disturbing the layout" — so it is a child of the indicator's
+              # own span, positioned out of flow by the stylesheet, and no
+              # layout slot, tab or GoldenLayout arrangement is involved.
+              if model.base.certificate.disclosed:
+                tdiv(id = "test-certificate-disclosure",
+                     class = "test-certificate-disclosure"):
+                  tdiv(class = "test-certificate-summary"):
+                    text model.base.certificate.summary
+                  # NEVER ABBREVIATED AWAY. This is the sentence that keeps
+                  # "Certified" from being read as "verified as unforgeable"
+                  # (Status-Bar.md Notes), so it renders in every state.
+                  tdiv(class = "test-certificate-authenticity"):
+                    text model.base.certificate.authenticityNote
+                  if model.base.certificate.remedy.len > 0:
+                    tdiv(class = "test-certificate-remedy"):
+                      text model.base.certificate.remedy
+                  for rowIndex in 0 ..< model.base.certificate.detail.len:
+                    let row = model.base.certificate.detail[rowIndex]
+                    # Indexed by attribute rather than by position. The
+                    # disclosure's other children (summary, authenticity, an
+                    # optional remedy) are also `div`s, so `nth-of-type` would
+                    # count them and `nth-child` would shift by one whenever
+                    # the remedy is absent — which is exactly the certified
+                    # state.
+                    tdiv(class = "test-certificate-row",
+                         `data-certificate-row` = $rowIndex):
+                      span(class = "test-certificate-row-label"):
+                        text row.label
+                      span(class = "test-certificate-row-value"):
+                        text row.value
           # THE BUILD IDENTITY, first in the right-hand group and rendered only
           # when this build knows one. See `StatusBaseModel.buildLabel`: on the
           # desktop it is "" and nothing at all is emitted here.
@@ -446,6 +556,36 @@ when defined(js):
       container.patchAttribute(
         cstring".disconnected-status", cstring"title",
         model.base.disconnectedTitle)
+    if model.base.certificate.label.len > 0:
+      container.patchText(
+        cstring".test-certificate-label", model.base.certificate.label)
+      container.patchAttribute(
+        cstring".test-certificate-status", cstring"class",
+        "test-certificate-status status-inline test-certificate-" &
+          model.base.certificate.stateClass)
+      container.patchAttribute(
+        cstring".test-certificate-status", cstring"data-certificate-state",
+        model.base.certificate.stateClass)
+      container.patchAttribute(
+        cstring".test-certificate-status", cstring"title",
+        model.base.certificate.title)
+      if model.base.certificate.disclosed:
+        container.patchText(
+          cstring".test-certificate-summary", model.base.certificate.summary)
+        container.patchText(
+          cstring".test-certificate-authenticity",
+          model.base.certificate.authenticityNote)
+        if model.base.certificate.remedy.len > 0:
+          container.patchText(
+            cstring".test-certificate-remedy", model.base.certificate.remedy)
+        # The row LABELS are in the structure signature, so a disclosure whose
+        # rows are patched here always has the same rows in the same order —
+        # which is what makes indexing by position correct rather than lucky.
+        for index in 0 ..< model.base.certificate.detail.len:
+          container.patchText(
+            cstring("[data-certificate-row=\"" & $index &
+                    "\"] .test-certificate-row-value"),
+            model.base.certificate.detail[index].value)
     if not model.base.showFinished and model.base.locationText.len > 0:
       container.patchText(cstring".location-path", model.base.locationText)
       container.patchAttribute(

@@ -55,6 +55,7 @@ import results
 import contracts
 import certificate
 import certificate_issuance
+import certificate_signature
 import certificate_verification
 import discovery
 import process_exec

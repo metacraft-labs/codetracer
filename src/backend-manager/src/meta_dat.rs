@@ -2,8 +2,8 @@
 //! backend-manager so it can extract per-trace metadata without depending
 //! on the heavier `codetracer_trace_types`/`replay-server` crates.
 //!
-//! The wire format is the v3 layout introduced in M-REC-1 and pinned by
-//! M-REC-1.5: pre-1.0, no backcompat for v1/v2 fixtures.  The canonical
+//! The wire format is the layout introduced in M-REC-1 and pinned by
+//! M-REC-1.5: pre-1.0, no backcompat for superseded versions.  The canonical
 //! reference parser is in
 //! `codetracer/src/db-backend/src/ctfs_trace_reader/meta_dat.rs`; the two
 //! implementations stay byte-compatible by construction (they both
@@ -34,7 +34,8 @@ use std::path::Path;
 /// Magic bytes identifying a `meta.dat` payload: ASCII "CTMD".
 pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 
-/// Canonical meta.dat format version: v3 (M-REC-1, 2026-05-18).
+/// Canonical meta.dat format version: v4 (the global line index
+/// correction).
 ///
 /// Pre-1.0, CodeTracer enforces a strict no-backcompat policy on the
 /// trace format: every recorder is required to track the current
@@ -44,18 +45,35 @@ pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 /// § 3 and the M-REC-1 / M-REC-1.5 milestones for the rationale.
 ///
 /// Concretely this means [`SUPPORTED_META_DAT_VERSIONS`] is a
-/// singleton `&[3]`; any v1/v2 payload encountered in the wild is a
+/// singleton; any older payload encountered in the wild is a
 /// stale build artefact (e.g. an out-of-date
 /// `libcodetracer_trace_writer.a` static library) and must be
 /// rebuilt rather than worked around at the reader.
-pub const META_DAT_VERSION: u16 = 3;
+///
+/// This number must equal the db-backend's
+/// `ctfs_trace_reader::meta_dat::META_DAT_VERSION` and the Nim writer's
+/// `MetaDatVersion`.  The three read the same containers, so a number
+/// that moves in one place and not the others turns "this recording is
+/// too old" into "this tool is too old" for exactly the recordings the
+/// others open — a v4 recording would open in the debugger and be
+/// refused by `ct trace info` on the same file.
+pub const META_DAT_VERSION: u16 = 4;
 
 /// The set of `meta.dat` versions this parser accepts on read.  Kept
 /// as a slice (rather than a single constant) so callers that surface
 /// "unsupported version" errors can enumerate the accepted set in
 /// diagnostics; the slice is intentionally a singleton, mirroring
 /// [`META_DAT_VERSION`].
-pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[3];
+///
+/// v3 and below are refused even though this parser reads no step
+/// addresses and so could decode their header perfectly well.  The
+/// version is what says which line-only `global_position_index` packing
+/// the container's steps use, and at v3 that packing is one the
+/// debugger cannot resolve correctly (db-backend
+/// `ctfs_trace_reader::meta_dat::SUPPORTED_VERSIONS` has the arithmetic).
+/// Reporting on a recording that no reader in this repository can open
+/// is a worse answer than saying it must be re-recorded.
+pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[4];
 
 // The canonical flag list lives in
 // `src/db-backend/src/ctfs_trace_reader/meta_dat.rs` (and mirrors the Nim
@@ -95,14 +113,25 @@ const FLAG_HAS_IO_EVENT_STREAM: u16 = 1 << 11;
 const FLAG_HAS_INTERNING_TABLES: u16 = 1 << 12;
 /// Bit 13 — `spans.dat` / `spans.idx` / `spantype.ns` span stream (RS-M1).
 const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
-/// Bit 14 — `corrmark.ns` correlation index + `markers.dat`/`.off` (WTCI).
+/// Bit 14 — every `paths.dat` record carries its file's line count, and the
+/// line-only global position space is laid out from those counts rather than
+/// from the 100000-addresses-per-file convention.
+///
+/// This crate reads `meta.dat` only for the metadata fields it surfaces
+/// (`recording_id`, `program`, `workdir`, `paths`), none of which the bit
+/// changes. It is in the mask because the mask REJECTS what it does not know:
+/// without the constant, every count-bearing container would be refused here
+/// and the trace would look unopenable rather than merely unfamiliar.
+const FLAG_HAS_LINE_COUNT_TABLE: u16 = 1 << 14;
+
+/// Bit 15 — `corrmark.ns` correlation index + `markers.dat`/`.off` (WTCI).
 ///
 /// backend-manager has no use for the index, but a bit outside
 /// `KNOWN_FLAGS_MASK` makes `parse_meta_dat` reject the whole container — so
 /// without this constant every recording that declares a correlation marker
 /// would fail to open here, rather than opening with an index this component
 /// ignores.
-const FLAG_HAS_CORRELATION_INDEX: u16 = 1 << 14;
+const FLAG_HAS_CORRELATION_INDEX: u16 = 1 << 15;
 const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_REPLAY_LAUNCH_FIELDS
     | FLAG_HAS_LAYOUT_SNAPSHOT
@@ -117,6 +146,7 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_IO_EVENT_STREAM
     | FLAG_HAS_INTERNING_TABLES
     | FLAG_HAS_SPAN_STREAM
+    | FLAG_HAS_LINE_COUNT_TABLE
     | FLAG_HAS_CORRELATION_INDEX;
 
 // ── Public types ─────────────────────────────────────────────────────────
@@ -949,7 +979,11 @@ mod tests {
     fn rejects_invalid_recording_id() {
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        // Stamped from the constant, not written out: pinned to a superseded
+        // number this payload would be refused for its VERSION and the
+        // recording-id rule it exists to check would go untested behind a
+        // passing assertion.
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         let bad = "not-a-uuid";
         encode_varint(bad.len() as u64, &mut buf);

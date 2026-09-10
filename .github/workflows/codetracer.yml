@@ -2730,6 +2730,75 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
+      # THE THREE SIBLING CLONES ABOVE AND BELOW ARE DELIBERATELY ADJACENT.
+      #
+      # A GitHub App installation token expires 60 MINUTES after it is minted.
+      # `Generate CI token` above is this job's ONLY mint -- `ci/test/
+      # sibling-provisioning-test.sh` asserts that "no job mints more than one
+      # installation token", so refreshing it mid-job is not available here --
+      # and this job's `timeout-minutes` is 75. Every authenticated git
+      # operation must therefore happen near the TOP of the job.
+      #
+      # `codetracer-js-recorder` and `runquota` used to be cloned next to the
+      # steps that consume them, ~64 minutes in. In run 34219352454 /
+      # job 102038547352 the token was minted at 12:28:05, the
+      # `codetracer-trace-format-nim` clone at 12:29:32 succeeded, and those
+      # two clones -- reached at 13:32:28 and 13:32:34 -- both died with
+      #
+      #   fatal: could not read Username for 'https://github.com':
+      #   terminal prompts disabled
+      #
+      # taking the four steps that depend on those siblings down with them.
+      # Nothing about the clones changed; the job simply grew past an hour and
+      # started reaching an expiry that had always been there.
+      #
+      # Neither clone has an ordering dependency on anything between here and
+      # where it used to sit: `clone-repo` runs plain git, the recorder gate in
+      # src/frontend/viewmodel/tests/unit/recorder_gate.nim keys on the BUILT
+      # recorder binary rather than on the checkout existing, and
+      # `provision-repro-lock-siblings` only reconciles the five repos named in
+      # repro.lock's `depends`, which include neither of these.
+      #
+      # Keep new clone steps in this block. A clone added further down is a
+      # clone that works only until the job gets slower.
+      - name: Clone codetracer-js-recorder sibling
+        # The recorder-gated ViewModel tests
+        # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,
+        # statement_step}_*_vm.nim) drive the real JS recorder to produce a
+        # column-aware trace and replay it through headless_session.  Without
+        # the sibling on disk they all hit recorder_gate's
+        # ``MISSING-RECORDER SKIP:`` path, so the column-aware / formatted-view
+        # / statement-step coverage silently vanished from CI.  Clone it into
+        # the workspace-sibling layout the tests resolve
+        # (../codetracer-js-recorder/packages/cli/dist/index.js) per
+        # codetracer-specs/Testing/Cross-Repo-CI-Integration.md.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          # `dev` is that repo's default branch; `main` trails it (15 commits
+          # behind when this was corrected), so the recorder-gated ViewModel
+          # suites and the `ct record` dispatch tests below were exercising a
+          # stale recorder while reporting green.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone runquota sibling
+        # The `just build-once` step below compiles `ct`, whose import chain
+        # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
+        # src/ct_test/process_exec.nim) starts with `import runquota_process`.
+        # Under tup the checkout is the only way those modules resolve --
+        # NIM_REPO_PATH_FLAGS points at `$(ROOT)/../runquota/...` and tup's
+        # environment allowlist omits RUNQUOTA_SRC (issue #641).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
@@ -3317,50 +3386,12 @@ jobs:
         # belongs in the same job as the trace-layer units above.
         run: nix develop .#devShells.x86_64-linux.default --command just test-mcr-enrichment-units
 
-      - name: Clone codetracer-js-recorder sibling
-        # The recorder-gated ViewModel tests
-        # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,
-        # statement_step}_*_vm.nim) drive the real JS recorder to produce a
-        # column-aware trace and replay it through headless_session.  Without
-        # the sibling on disk they all hit recorder_gate's
-        # ``MISSING-RECORDER SKIP:`` path, so the column-aware / formatted-view
-        # / statement-step coverage silently vanished from CI.  Clone it into
-        # the workspace-sibling layout the tests resolve
-        # (../codetracer-js-recorder/packages/cli/dist/index.js) per
-        # codetracer-specs/Testing/Cross-Repo-CI-Integration.md.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-js-recorder
-          # `dev` is that repo's default branch; `main` trails it (15 commits
-          # behind when this was corrected), so the recorder-gated ViewModel
-          # suites and the `ct record` dispatch tests below were exercising a
-          # stale recorder while reporting green.
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
-
       - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
         # Builds the JS recorder sibling via scripts/build-siblings.sh, builds
         # replay-server, then runs the recorder-gated unit VM suites with a
         # zero-test guard that fails if they all skip (so a missing recorder
         # cannot masquerade as a pass).
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
-
-      - name: Clone runquota sibling
-        # The `just build-once` step below compiles `ct`, whose import chain
-        # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
-        # src/ct_test/process_exec.nim) starts with `import runquota_process`.
-        # Under tup the checkout is the only way those modules resolve --
-        # NIM_REPO_PATH_FLAGS points at `$(ROOT)/../runquota/...` and tup's
-        # environment allowlist omits RUNQUOTA_SRC (issue #641).
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/runquota
-          ref: dev
-          path: ${{ github.workspace }}/../runquota
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
 
       - name: Build ct (needed by the CLI dispatch tests)
         # record_missing_recorder_test.nim and record_dispatch_e2e_test.nim
@@ -3415,6 +3446,7 @@ jobs:
           # read gitconfig; its credentials come from netrc/access-tokens.)
           persist-credentials: false
           token: ${{ steps.ci_token.outputs.token }}
+
       - name: Install Nix
         # WITHOUT THIS, THIS JOB USES WHATEVER NIX THE RUNNER IMAGE SHIPS.
         # `eph-linux-x64`'s ambient nix.conf does not enable the experimental
@@ -3480,6 +3512,7 @@ jobs:
           # read gitconfig; its credentials come from netrc/access-tokens.)
           persist-credentials: false
           token: ${{ steps.ci_token.outputs.token }}
+
       - name: Install Nix
         # WITHOUT THIS, THIS JOB USES WHATEVER NIX THE RUNNER IMAGE SHIPS.
         # `eph-linux-x64`'s ambient nix.conf does not enable the experimental

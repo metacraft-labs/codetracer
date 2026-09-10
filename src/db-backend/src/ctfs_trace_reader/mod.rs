@@ -39,6 +39,7 @@ pub mod http_range_source;
 pub mod interning_tables;
 pub mod interval_tagged_map;
 pub mod lazy_population_store;
+pub mod line_position_space;
 pub mod linehits_namespace;
 pub mod materialization_cache;
 pub mod memwrites_namespace;
@@ -949,6 +950,12 @@ impl CTFSTraceReader {
             std::sync::Arc<codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder>,
         >,
     ) -> Result<Self, Box<dyn Error>> {
+        // The LINE-ONLY half of the same question the decoder above answers: a
+        // line address names a file only against the trace's own path table, so
+        // it is read from this container rather than assumed. `None` for a
+        // container that registers no paths, where no address can be placed.
+        let line_space = line_position_space::container_line_space(ctfs).map(std::sync::Arc::new);
+
         // M17b / M8 — attach the SEEKABLE `calls.dat` call-tree source when the
         // container advertises one. This is the path that lets a network-loaded
         // `.ct` serve its call tree on-demand without materializing the whole
@@ -986,7 +993,9 @@ impl CTFSTraceReader {
         // materialized `db.steps` fallback) rather than failing the open.
         reader.step_stream = match step_value_stream_source::SeekableStepStream::open_from_ctfs(ctfs) {
             Ok(Some(stream)) => {
-                let stream = stream.with_position_decoder(position_decoder.clone());
+                let stream = stream
+                    .with_position_decoder(position_decoder.clone())
+                    .with_line_space(line_space.clone());
                 info!(
                     "CTFS: seekable steps.dat attached ({} steps, chunk_size {}, column-aware {}) — \
                      step lines served on-demand",
@@ -1431,9 +1440,13 @@ impl CTFSTraceReader {
                     .into(),
             );
         };
-        // Tell the stream which encoding its records are in, BEFORE anything
-        // reads a step through it.
-        let step_source = step_source.with_position_decoder(position_decoder.clone());
+        // Tell the stream which encoding its records are in, and — for a
+        // line-only container — which address space they were written in,
+        // BEFORE anything reads a step through it.
+        let line_space = line_position_space::container_line_space(ctfs).map(std::sync::Arc::new);
+        let step_source = step_source
+            .with_position_decoder(position_decoder.clone())
+            .with_line_space(line_space);
         let step_count = step_source.step_count();
         let (step_to_call_key, step_to_global_call_key) = build_step_call_maps(&call_ranges, step_count);
         info!(
@@ -2150,26 +2163,42 @@ impl CTFSTraceReader {
         };
 
         // Build a pure-Rust `GlobalPositionDecoder` for the column-aware
-        // path.  We bypass the Nim FFI's `decodeGlobalPositionIndex`
-        // here for two reasons:
+        // path, decoding each step's raw `global_position_index` against
+        // the per-file line-length tables rather than asking the Nim FFI
+        // for an already-interpreted `(path_id, line)`.  Decoding here
+        // keeps the interpretation in one place: `decode_many` and this
+        // loop share the table, so a `stackTrace` frame and a breakpoint
+        // resolution cannot disagree about where a position is.
         //
-        // 1. The FFI's column-aware fallback (when its per-file
-        //    line-length table is empty) returns `gli.resolve(GLI)` —
-        //    which interprets the byte-offset GLI as a line index, so
-        //    DAP `stackTrace` responses surface absurd "line" numbers
-        //    (e.g. line 270 for a 12-line source file).  Recovering
-        //    here keeps the FFI's bug from leaking into the DAP wire.
+        // `meta.dat` bit 4 decides whether a trace has those tables at
+        // all, and it is the only thing that does.  `line_count_raw` /
+        // `line_length_raw` report the tables the Nim reader actually
+        // parsed, so on a trace that declares line-only steps they are
+        // empty and this gate and that one agree.  They are NOT a way
+        // around the flag: the `paths.dat` line-only and Layout A record
+        // spaces overlap — an ordinary 97-byte ASCII path satisfies the
+        // Layout A grammar and consumes its record exactly — so a
+        // successful parse is not evidence of a layout, and a reader that
+        // promoted on one answered with a truncated path, a fabricated
+        // per-file line table and the wrong step line, silently.
         //
-        // 2. The Nim reader's `decodeGlobalPositionIndex` is gated on
-        //    `meta.hasColumnAwareSteps`, which a known recorder-side
-        //    bug leaves clear even though the trace actually carries
-        //    column-aware Layout A data.  The `lineLengthRaw` /
-        //    `lineCountRaw` ungated FFI exposes the per-file tables
-        //    regardless of the meta bit so we can decode reliably.
+        // The condition that motivated reaching around the flag is real:
+        // a recorder predating the writer fix emitted Layout A records
+        // under a clear bit 4.  Such a trace is now something to REPORT,
+        // not something to reinterpret here.  The Nim reader names it —
+        // `ct_reader_column_aware_paths_suspected` on an ordinarily
+        // opened handle, with `ct_reader_open_assume_column_aware_paths`
+        // as the caller's explicit opt-in, which parses authoritatively
+        // and fails with a named `paths.dat[N]: …` error rather than
+        // falling back.  Neither is reachable from Rust yet: they have no
+        // declaration in `codetracer_trace_writer_nim`'s `extern "C"`
+        // block, and `NimTraceReaderHandle::handle` is private, so the
+        // wrapper is the only place they can be added.  Until then an
+        // affected trace reads as the line-only trace it declares itself
+        // to be, which is correct-by-declaration and never silently wrong.
         //
-        // The decoder is `None` only when no Layout A data is available
-        // (a legitimate line-only trace) — in that case we use the
-        // legacy `step_locations` path so the line numbers stay
+        // The decoder is `None` for a line-only trace — in that case we
+        // use the `step_locations` path, whose line numbers stay
         // bit-for-bit identical to pre-extension behaviour.
         let position_decoder: Option<codetracer_trace_reader::global_position_decoder::GlobalPositionDecoder> =
             if column_aware {
@@ -2220,10 +2249,18 @@ impl CTFSTraceReader {
         // `LazyStepCache` over the seekable stream (plus the cheap, already-computed
         // call-key arrays) and leave `db.steps` / `db.step_map` EMPTY. A step is
         // then reconstructed on first borrow, decompressing only that step's
-        // chunk-aligned RANGE. The reconstructed `DbStep` is byte-identical to what
-        // this loop pushes, because both decode the same packed `(path_id, line)`
-        // (`steps.dat` GLI ↔ the bulk FFI's line-only path) and derive the same
-        // call keys.
+        // chunk-aligned RANGE.
+        //
+        // The reconstructed `DbStep` agrees with what this loop pushes because
+        // the two are told the same thing about the container, not because they
+        // are the same code: the eager loop asks the Nim reader to resolve each
+        // step through the bulk FFI, and the lazy path resolves the `steps.dat`
+        // address in Rust. Both resolutions are the spec's prefix sum over the
+        // registered files, so the lazy stream is HANDED the space to invert
+        // through (`with_line_space`), built from this container's own path
+        // table, rather than left to assume one. Because the Nim writer always
+        // stamps `has_step_stream`, the lazy path is the one a production open
+        // takes.
         //
         // Column-aware traces are EXCLUDED: their eager path overrides
         // `(path_id, line)` via the pure-Rust `GlobalPositionDecoder` and sets
@@ -2240,6 +2277,14 @@ impl CTFSTraceReader {
                         (step_to_call_key, step_to_global_call_key) =
                             build_step_call_maps(&call_ranges, stream.step_count());
                     }
+                    // A line-only container, so the space is a space of lines:
+                    // each file's own recorded `line_count` when the container
+                    // carries the table (`meta.dat` bit 14), and the writer's
+                    // default slot when it states no sizes. The space comes
+                    // from the container itself, so the eager and the lazy
+                    // paths are told the same thing.
+                    let stream = stream
+                        .with_line_space(line_position_space::container_line_space(ctfs).map(std::sync::Arc::new));
                     let stream = std::sync::Arc::new(stream);
                     info!(
                         "Nim reader: steps served LAZILY (range-aware) from seekable steps.dat \
@@ -2333,12 +2378,9 @@ impl CTFSTraceReader {
             }
 
             // When we have a pure-Rust decoder, fetch raw GLIs for the
-            // same step range and override the FFI's (potentially
-            // bogus) (path_id, line, column) interpretation per step.
-            // The FFI buffers stay valid as the legacy fallback (e.g.
-            // when a single step's GLI exceeds the decoder's known
-            // address space — which would only happen on a
-            // partial-trace inconsistency).
+            // same step range and decode them here, so every position in
+            // this DB comes from one table rather than from two decoders
+            // that could drift.
             if let Some(decoder) = position_decoder.as_ref() {
                 let glis_written = reader
                     .step_global_line_indices(step_idx, want, &mut gli_buf[..want as usize])
@@ -2352,10 +2394,27 @@ impl CTFSTraceReader {
                             column_buf[offset] = u64::from(pos.column);
                         }
                         Err(_) => {
-                            // Fall through: keep the FFI's interpretation,
-                            // which on legitimate edge cases (e.g. step
-                            // GLI past the decoder's known address space)
-                            // is the best signal we have.
+                            // Keep whatever the FFI put in the buffers.
+                            //
+                            // This is the weakest point in the path and it
+                            // is worth being precise about why. The decoder
+                            // refuses a position when the file it lands in
+                            // has no per-line table — the mixed case, where
+                            // a recorder supplied line lengths for some
+                            // files and not others. The writer gives such a
+                            // file a fixed-size slot in the position space;
+                            // the reader's table gives it size zero, so the
+                            // two disagree from that file onward. What the
+                            // FFI leaves in the buffers for those steps is
+                            // its line-only reading of a column-aware
+                            // address — a different address space, not a
+                            // degraded reading of this one — so the
+                            // `(path_id, line)` kept here is a guess. It is
+                            // retained rather than made fatal because a
+                            // single unresolvable step must not take down a
+                            // whole trace, but a mixed-table trace is a
+                            // reader bug to fix in the Nim position tables,
+                            // not an edge case to live with.
                         }
                     }
                 }
@@ -3540,6 +3599,30 @@ mod tests {
         d
     }
 
+    /// The `paths.dat` / `paths.off` a container registering `n` synthetic
+    /// source files carries. A `linehits.tc` is keyed by addresses in the space
+    /// that table defines, so a fixture that omits the table has no space to key
+    /// into — exactly as a real container would not.
+    fn synthetic_path_table(n: usize) -> (Vec<u8>, Vec<u8>) {
+        let mut dat = Vec::new();
+        let mut off = Vec::new();
+        off.extend_from_slice(&0u64.to_le_bytes());
+        for id in 0..n {
+            dat.extend_from_slice(format!("/tmp/src{id}.rs").as_bytes());
+            off.extend_from_slice(&(dat.len() as u64).to_le_bytes());
+        }
+        (dat, off)
+    }
+
+    /// The `linehits.tc` key for a location in a container registering
+    /// `path_count` files — the line's address, built through the shared space
+    /// rather than restated.
+    fn linehits_key(path_count: usize, file_id: usize, line: i64) -> u64 {
+        codetracer_trace_writer::line_position::LinePositionSpace::uniform(path_count)
+            .global_index_of(file_id, line)
+            .expect("the file is registered by construction")
+    }
+
     fn cow_linehits_image(entries: &[(u64, Vec<u64>)]) -> Vec<u8> {
         let mut sizing = CowNamespaceWriter::new(CowLeafType::TypeB, true);
         for (key, _) in entries {
@@ -3603,12 +3686,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("linehits.ct");
         let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
-        let key = codetracer_trace_writer::step_stream::pack_global_line_index(3, 42);
+        let (paths_dat, paths_off) = synthetic_path_table(4);
+        let key = linehits_key(4, 3, 42);
         let linehits = cow_linehits_image(&[(key, vec![2, 5, 9])]);
         ctfs_container::write_minimal_ctfs(
             &ct_path,
             &[
                 ("meta.dat", dat.as_slice()),
+                ("paths.dat", paths_dat.as_slice()),
+                ("paths.off", paths_off.as_slice()),
                 (linehits_namespace::CTFS_LINEHITS_COW_FILE, linehits.as_slice()),
             ],
         )
@@ -3626,12 +3712,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ct_path = dir.path().join("session-linehits.ct");
         let dat = meta_dat_bytes("/tmp/test", &[], "/tmp");
-        let key = codetracer_trace_writer::step_stream::pack_global_line_index(1, 7);
+        let (paths_dat, paths_off) = synthetic_path_table(2);
+        let key = linehits_key(2, 1, 7);
         let linehits = cow_linehits_image(&[(key, vec![4, 8])]);
         ctfs_container::write_minimal_ctfs(
             &ct_path,
             &[
                 ("meta.dat", dat.as_slice()),
+                ("paths.dat", paths_dat.as_slice()),
+                ("paths.off", paths_off.as_slice()),
                 (linehits_namespace::CTFS_LINEHITS_COW_FILE, linehits.as_slice()),
             ],
         )

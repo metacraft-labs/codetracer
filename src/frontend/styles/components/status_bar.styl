@@ -822,6 +822,86 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       margin-right: 8px
       cursor: default
 
+    // THE TEST-CERTIFICATE INDICATOR (SB-1, GUI/Layout-And-Navigation/Status-Bar.md).
+    //
+    // Rendered only when a model was supplied — `StatusCertificateModel.label`
+    // is "" everywhere it is not wired and the view emits no element — so this
+    // rule matches nothing in a build that has no certificate story, exactly
+    // as `.build-identity` matches nothing in Electron. The footer's box
+    // layout is untouched in that case, which is what keeps
+    // `status-bar-render-stability.spec.ts` and the two visibility guards
+    // seeing what they saw.
+    //
+    // NO COLOUR IS SET PER STATE HERE, and that is deliberate rather than
+    // unfinished. The bar declares `colors-ui-text-primary-label-subtle`
+    // (5.47:1 on this surface) and every readout inherits it; a per-state
+    // colour would be a new painted value the contrast guard would have to
+    // measure, and the four states differ in MEANING rather than in urgency.
+    // The state is carried by `data-certificate-state` and by the
+    // `test-certificate-<state>` class, which is what a theme, a test or an
+    // assistive technology reads. If a future theme paints these, it must add
+    // them to `footer-contrast-guard.spec.ts` in the same change.
+    .test-certificate-status
+      display: inline-flex
+      align-items: center
+      flex: 0 0 auto
+      white-space: nowrap
+      margin-right: 8px
+      cursor: pointer
+      position: relative
+
+    // THE DISCLOSURE IS OUT OF FLOW, ON PURPOSE.
+    //
+    // Status-Bar.md: selecting the indicator reveals detail "without opening a
+    // panel or disturbing the layout". `position: absolute` inside the
+    // indicator's own `position: relative` span is what delivers that
+    // literally: the bar's box does not change when it opens, no flex item
+    // resizes, and nothing in any GoldenLayout arrangement is touched.
+    //
+    // It grows UPWARD (`bottom: 100%`) because the status bar is at the foot
+    // of the window and a downward panel would be off-screen, and it is
+    // right-aligned because the indicator sits in `.status-right`.
+    .test-certificate-disclosure
+      position: absolute
+      bottom: 100%
+      right: 0
+      z-index: 20
+      min-width: 260px
+      max-width: 420px
+      padding: 8px 10px
+      margin-bottom: 6px
+      text-align: left
+      white-space: normal
+      border-radius: 5px
+      background-color: colors-ui-surface-base-panel
+      color: colors-ui-text-primary-label
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45)
+
+      .test-certificate-summary
+        margin-bottom: 6px
+
+      // NEVER DIMMED AWAY. This is the sentence that keeps "Certified" from
+      // being read as "verified as unforgeable" (Status-Bar.md Notes), so it
+      // is styled as quieter-but-legible rather than as fine print.
+      .test-certificate-authenticity
+        margin-bottom: 6px
+        color: colors-ui-text-primary-label-subtle
+
+      .test-certificate-remedy
+        margin-bottom: 6px
+
+      .test-certificate-row
+        display: flex
+        gap: 8px
+
+        .test-certificate-row-label
+          flex: 0 0 96px
+          color: colors-ui-text-primary-label-subtle
+
+        .test-certificate-row-value
+          flex: 1 1 auto
+          word-break: break-word
+
     #location-status
       float: left
       display: flex

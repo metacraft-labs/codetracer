@@ -1,3 +1,6 @@
+# NOT-A-TEST-CRATE: a program CodeTracer RECORDS during tests, not a test of
+# this repository. Same rule as src/db-backend/test-programs/.not-a-test-lane.
+
 [package]
 name = "rs_checklist"
 version = "0.1.0"

@@ -2193,11 +2193,26 @@ Measured, not theorised:
 The fix, and where to look:
 
 * `ci/lib/lint-steps.sh` — `lint_step "<literal name>" cmd...` runs each check in
-  a subshell, records the verdict, and ALWAYS returns 0, so a red step cannot
-  abort a caller running under `set -e`. `lint_summary` prints one verdict line
-  per step and decides the exit status from all of them. A step exiting **78**
+  a subshell, records the verdict, and returns 0 for EVERY verdict, so a red step
+  cannot abort a caller running under `set -e`. `lint_summary` prints one verdict
+  line per step and decides the exit status from all of them. A step exiting **78**
   is QUARANTINED: reported and counted, but not fatal. The library uses shell
   builtins only, on purpose — see the guard.
+
+  **Every call belongs to the shell that sourced the file.** The report lives in
+  shell arrays, so both entry points compare `BASHPID` against the pid captured at
+  source time and refuse a foreign caller. `lint_step` in a pipeline stage, a
+  `while read` loop or a `$(...)` would append to a copy that dies with the
+  subshell — it used to print `--> FAILED` and be counted `0 FAILED` — so it
+  refuses to run the body at all and returns **2**, the single exception to the
+  return-0 rule (a caller-side misuse with no result, not a red step). Under the
+  lint scripts' `set -uo pipefail` that return does not abort anything and does
+  not redden the job on its own; what reddens is `ci/test/lint-step-isolation-test.sh`
+  B3, which asserts no `ci/lint` script emits the refusal banner. `lint_summary`
+  carries the mirrored check because in a subshell it is its RETURN VALUE that is
+  lost, and suppresses the report rather than print one whose status cannot reach
+  the job. Sourcing the file twice is also a no-op now — it used to reinitialise
+  the arrays and discard every verdict recorded so far.
 
   **Do not "simplify" that to `("$@") || rc=$?`.** Bash suppresses errexit
   inside any command that is an operand of `||`, and A SUBSHELL INHERITS THE
@@ -2223,7 +2238,14 @@ The fix, and where to look:
   names every step it declared. Pass old scripts as arguments to see it go red:
   the pre-fix `bash.sh` dies at its first command and never mentions the other
   eight checks. It also runs the lint scripts against a throwaway copy of `ci/`
-  with cwd inside it, because `ci/lint/rust.sh` writes files.
+  with cwd inside it, because `ci/lint/rust.sh` writes files. Part C checks the
+  guard's OWN scanner: it drives this script, as a subprocess, over synthetic
+  lint scripts. Part B's declaration scan is deliberately NOT `^`-anchored — a
+  `lint_step` behind `if …; then` used to be invisible to it, which made the
+  enforcement mechanism the delivery route past every check it makes — so
+  whole-line comments are stripped first and `(^|[^[:alnum:]_])` keeps
+  `maybe_lint_step` from matching. Part C runs only when no targets are given,
+  which is what terminates the recursion.
 * Order still matters, for a different reason: put pure-bash/git guards ahead of
   anything needing a compiler so their answer reaches the log sooner. They just
   no longer HIDE what follows.
@@ -2375,10 +2397,9 @@ runners exit 0 for an all-skipped suite:
 The remaining providers still derive a whole file's status from one subprocess
 exit code (`cpp_common`, `native_m11_common`, `m12_fallback_common`,
 `smart_contract_common`, and `ruby_common`'s minitest branch), so a skip is
-indistinguishable from a pass there. All of them except
-`smart_contract_common` now at least report a FAILURE honestly — see "the
-counters read `tekTestFinished` ONLY" below — but the coarse granularity is
-unchanged either way: one event per file, not per test.
+indistinguishable from a pass there. All of them now at least report a FAILURE
+honestly — see "the counters read `tekTestFinished` ONLY" below — but the
+coarse granularity is unchanged either way: one event per file, not per test.
 
 The rest of the registry -- jest, vitest,
 pytest, python-unittest, nim-unittest, rust-libtest -- has no `run` wired at
@@ -2428,14 +2449,47 @@ which cpp_common reaches as `nativeM11.unitOutcomeEvents` and
 m12_fallback_common by plain import — so the failure branch cannot drift from
 the passing one again in any of the fourteen providers.
 
-STILL OPEN, same class, same argument, deliberately out of that change's
-scope: `native_m11_common.recordCommand` (the M11 file-RECORDING path) and
-`smart_contract_common.runRecorderCommand` (the M13 harnesses). Both emit a
-`tekTestFinished(tsPassed)` when the recorder succeeds and none at all when it
-fails or produces no artifact, so a workspace whose M13 fixtures all failed
-still reports `executed 0, failed 0` and exits 2. Do not "grep for the fix" —
-follow the `tekRecordFinished` / `tekRunFinished` emissions and check whether a
-`tekTestFinished` sits beside each of them.
+AND THE SAME HOLE, CLOSED IN TWO MORE PLACES, THROUGH THE SAME EMITTER:
+`smart_contract_common.runRecorderCommand` (the fourteen M13 smart-contract
+and VM harnesses -- and it serves BOTH `run` and `record`, so it was a
+run-path defect for twelve of them; `smart-wasm` and `smart-wasmi` are
+`shrmUnsupported` and never reach it) and `native_m11_common.recordCommand`
+(the M11 file-RECORDING path). Both emitted a `tekTestFinished(tsPassed)` when
+the recorder succeeded and NONE at all when it failed or produced no artifact.
+Measured on a scratch workspace holding one `.cairo` fixture and a stub
+recorder that exits 3, driven through the shipped
+`ct test run --workspace <ws> --summary <path>`: before, `executed 0, failed
+0`, verdict "nothing-executed", exit 2, certificate withheld
+`wrNoTestsExecuted`; after, `executed 1, failed 1`, verdict "failed", exit 1,
+withheld `wrTestsFailed`.
+
+`unitOutcomeEvents` grew a `status` overload for it (the recording paths have
+a THIRD outcome the exit-code overload cannot express -- `tsErrored`, meaning
+the command succeeded and produced no artifact) plus `finishedKind` and
+`trace`, so `tekRecordFinished`-closing callers use the same emitter as
+`tekRunFinished`-closing ones. The exit-code predicate moved out to
+`statusForExitCode`, which is the only place in the family that decides which
+exit codes are a pass.
+
+The M13 provider capabilities the REGISTRY stores are still computed with no
+project root (see the KNOWN GAP note on `newSmartHarnessProvider`), so a
+recorder discoverable only at `<repo>/target/{debug,release}/<binary>` still
+yields units `run_orchestration` marks unrunnable without dispatching. That is
+unchanged, and it is why `m13_harness_outcomes_test.nim`'s CLI case sets
+`<SPEC>_CMD`.
+
+STILL OPEN, same class, same argument, and NOT covered by the change above:
+
+* `js_common.recordCommand` (~:930/:948) and `ruby_common.recordCommand`
+  (~:984/:998) -- the JS and Ruby file-RECORDING paths, both failure branches.
+* `js_playwright.nim:391` -- when the Playwright results JSON cannot be
+  parsed, the provider emits `tekRunFinished(tsErrored)` and no
+  `tekTestFinished`, so an unparseable reporter stream reads as "nothing ran".
+* `noir_nargo.nim:365` and `:386` -- the truncated-output and
+  no-per-test-results branches do the same.
+
+Do not "grep for the fix" — follow the `tekRecordFinished` / `tekRunFinished`
+emissions and check whether a `tekTestFinished` sits beside each of them.
 
 ## The `executed` field means TESTS, and the exit code has three outcomes
 
@@ -2990,3 +3044,60 @@ commands.
   through the list in name order, and the dedup (`a.expression ==
   b.expression`) would DELETE a watch whose expression equals a local's
   name — which is the most ordinary watch anyone types.
+- 2026-09-09 (SB-1): **`except CatchableError` / `except Exception` DO NOT
+  CATCH A FOREIGN JS EXCEPTION on the `nim js` backend.** jsgen emits a
+  `catch (e)` that tests `e.m_type` and RE-THROWS when the test fails, and
+  anything thrown by `require('fs')`, `require('child_process')` or any other
+  node API has no `m_type`. Only a BARE `except:` catches it, and
+  `getCurrentExceptionMsg()` then returns the real message
+  (`ENOENT: no such file or directory, scandir '…'`). Measured with a
+  four-line program, not inferred.
+  This is not academic: `viewmodel/host/desktop_electron.nim`'s `jsGuard`
+  template had exactly the two typed arms and no bare one, so **every**
+  `pkNotFound` / `pkAccessDenied` / `errorText()` in that file was dead code
+  for its whole life, and the facade's "failures are values" contract was
+  false on the instantiation the product actually ships. It surfaced only
+  when the status bar's certificate indicator listed a directory most
+  workspaces do not have. If you add a `try` around a host call in a
+  `nim js` module, add a bare arm.
+  AND NOTHING GUARDS THE FIX — checked, not assumed. With the bare arm
+  removed and the frontend rebuilt, `status-bar-render-stability.spec.ts`'s
+  `verify_clean_console_on_trace_open` still passes, because the certificate
+  indicator's own store adapter (`certificate_indicator_source.nim`) wraps
+  every facade call in a bare `except:` and swallows the re-thrown node
+  exception before it can reach `window.onerror`. Measured in the running
+  app: the indicator then reads *unverifiable* for an ordinary
+  store-less workspace with an EMPTY console error bucket — a silently wrong
+  verdict rather than a loud one. `desktop_electron.nim` is `{.error.}` off
+  the JS backend and is imported by no test, so any real guard for it has to
+  run inside Electron and assert the facade's OUTCOME (`fs.listDir` on a
+  missing directory returns `pkNotFound` rather than throwing).
+- 2026-09-09 (SB-1): a CAPTURE-FREE closure literal assigned inside a
+  `std/unittest` `test` body is `jsgen.nim(1239) env is missing
+  [AssertionDefect]` under `nim js` — the file compiles on the C backend and
+  dies in the JS lane. Declare the proc at module level and assign the name
+  instead. Two of the status-bar suites hit this; both now say so at the
+  site.
+- 2026-09-09 (SB-1): `ci/test/frontend-reachability.sh` matches BY NAME
+  across all of `src/frontend`, so adding a symbol anywhere marks every
+  unreached export of the same name as reached — and the ratchet is an
+  EQUALITY, so the count silently drops and the lane demands you lower the
+  ceiling. A drop is therefore not automatically progress: check whether a
+  name went away or merely arrived somewhere else. SB-1 masked
+  `viewmodel/identity/token.nim`'s `SignatureVerifier` (renamed the new type
+  to `CertificateSignatureVerifier` to un-mask it) and still masks that
+  file's `issuedAt`, which cannot be avoided — `issued_at` is the test
+  certificate standard's own field name.
+- 2026-09-09 (SB-1): a refresh driven by "after a render pass" is not a
+  trigger in an idle Electron renderer, because an idle status bar does not
+  render. `ui/certificate_indicator.nim` uses a `setInterval` now. If you need
+  periodic revalidation of anything, do not hang it off a render.
+  MEASURED, with `window.__ctStatusRenderStats()` (status.nim exposes it):
+  across 60 s of untouched idle in edit mode the status bar performed TWO
+  render passes, both inside one 10 s window and none in the other 50. Driving
+  the same change (an edit to a tracked file deep in the tree, which no wired
+  watch can see) the shipped timer moved the label after 15.1 s — one
+  `RevalidateIntervalMs` exactly — and the render-hook design after 29.2 s,
+  and only because a notification happened to draw. So it is not literally
+  "never fires"; its latency is governed by unrelated render activity, which
+  in a quiet window is unbounded.

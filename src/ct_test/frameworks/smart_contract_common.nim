@@ -390,14 +390,30 @@ proc runRecorderCommand(spec: SmartHarnessSpec; scope: TestScope;
     if outcome.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = outcome.output, durationMs = duration)
-    if outcome.exitCode != 0:
-      events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
+    # ONE FIXTURE, ONE `tekTestFinished`, ON ALL THREE OUTCOMES.
+    #
+    # `run_orchestration.summarize` and `certificate_issuance.recordUnitResult`
+    # count `tekTestFinished` and nothing else, so the two failure branches
+    # below — which used to emit only a `tekFailure` and a closing event —
+    # contributed nothing at all to `executed` or `failed`. A workspace whose
+    # M13 fixtures all failed reported `executed 0, failed 0`, took the
+    # `rvNothingExecuted` verdict and exited `ExitNothingExecuted` (2): the
+    # exact report a run that never happened produces. All three outcomes now
+    # go through the one shared emitter, which is also the M11 native run and
+    # record paths', so a branch cannot drift away from its siblings again.
+    # See `native_m11_common.unitOutcomeEvents`.
+    #
+    # The granularity is one event per FIXTURE, not per test: the recorder is
+    # launched once per file here and only its exit code and its artifact are
+    # read.
+    let
+      finishedKind =
+        if mode == trmRecord: tekRecordFinished else: tekRunFinished
+      commandStatus = statusForExitCode(outcome.exitCode)
+    if commandStatus != tsPassed:
+      events.add unitOutcomeEvents(providerId, runId, testId, commandStatus,
           "recorder command exited with " & $outcome.exitCode, outcome.output,
-          durationMs = duration)
-      events.add event(if mode == trmRecord: tekRecordFinished else:
-          tekRunFinished,
-          providerId, runId, testId, some(tsFailed), "failed",
-          durationMs = duration)
+          duration, finishedKind)
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "recorder command failed with exit code " & $outcome.exitCode,
@@ -406,13 +422,14 @@ proc runRecorderCommand(spec: SmartHarnessSpec; scope: TestScope;
 
     let artifacts = nonEmptyTraceArtifacts(outputRoot)
     if artifacts.len == 0:
-      events.add event(tekFailure, providerId, runId, testId, some(tsErrored),
-          "recorder did not produce a non-empty .ct artifact",
-          outcome.output, durationMs = duration)
-      events.add event(if mode == trmRecord: tekRecordFinished else:
-          tekRunFinished,
-          providerId, runId, testId, some(tsErrored), "errored",
-          durationMs = duration)
+      # `tsErrored`, not `tsFailed`: the recorder reported success and left
+      # nothing to replay, which is a broken harness rather than a failing
+      # fixture. `summarize` folds both into `failed` and neither may be
+      # attested, so the distinction is for the reader — but the unit must
+      # still be COUNTED as having run.
+      events.add unitOutcomeEvents(providerId, runId, testId, tsErrored,
+          "recorder did not produce a non-empty .ct artifact", outcome.output,
+          duration, finishedKind)
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "recorder did not produce a non-empty .ct artifact",
@@ -437,14 +454,9 @@ proc runRecorderCommand(spec: SmartHarnessSpec; scope: TestScope;
         testId: testId, status: none(TestResultStatus), message: "recorded",
         output: "", durationMs: duration, trace: some(trace),
         diagnostic: none(TestDiagnostic))
-    events.add event(tekTestFinished, providerId, runId, testId,
-        some(tsPassed), "passed", durationMs = duration)
-    events.add TestEvent(schemaVersion: TestEventSchemaVersion,
-        kind: if mode == trmRecord: tekRecordFinished else: tekRunFinished,
-        providerId: providerId, runId: runId, testId: testId,
-        status: some(tsPassed), message: "passed", output: "",
-        durationMs: duration, trace: some(trace),
-        diagnostic: none(TestDiagnostic))
+    events.add unitOutcomeEvents(providerId, runId, testId, tsPassed, "",
+        durationMs = duration, finishedKind = finishedKind,
+        trace = some(trace))
     ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
 
 proc newSmartHarnessProvider*(spec: SmartHarnessSpec): M1Provider =

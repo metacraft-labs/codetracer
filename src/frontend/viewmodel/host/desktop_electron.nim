@@ -136,12 +136,43 @@ template jsGuard(body: untyped; onError: untyped): untyped =
   ## would have made every `detail` field an empty string — a diagnostic that
   ## silently carries nothing is worse than none, because it looks like the
   ## error had no detail.
+  ##
+  ## ## THE BARE `except:` IS THE WHOLE GUARD, and it replaces two arms that
+  ## ## caught nothing at all
+  ##
+  ## This template used to have exactly the two typed arms below and no bare
+  ## one, and **it never caught a single node exception in its life.** Nim's JS
+  ## backend compiles `except CatchableError` to a `catch (e)` that tests
+  ## `e.m_type` and RE-THROWS when the test fails. A `TypeError` or an `Error`
+  ## thrown by `require('fs')` is not a Nim exception object and has no
+  ## `m_type`, so both arms re-threw it and every `do:` arm in this file — every
+  ## `pkNotFound`, every `pkAccessDenied`, every `errorText()` — was dead code.
+  ##
+  ## Measured rather than reasoned about: `try: discard readdirSync("/nope")`
+  ## with those two arms leaks the exception, and with a bare `except:` catches
+  ## it and reports `getCurrentExceptionMsg()` as
+  ## `ENOENT: no such file or directory, scandir '/nope'`.
+  ##
+  ## It went unnoticed because no caller had asked this facade for something
+  ## that might not be there. SB-1's certificate indicator lists a store
+  ## directory most workspaces do not have, and the ENOENT went straight past
+  ## the facade to `window.onerror` — caught by
+  ## `status-bar/status-bar-render-stability.spec.ts`'s
+  ## `verify_clean_console_on_trace_open`, which is now this fix's regression
+  ## test as well as SB-1's.
+  ##
+  ## The typed arms stay ahead of it so a Nim exception raised inside `body`
+  ## still reports its own message; the bare arm is the one that makes the
+  ## template's contract — "failures are values" — true.
   try:
     body
   except CatchableError:
     lastErrorText = getCurrentExceptionMsg()
     onError
   except Exception:
+    lastErrorText = getCurrentExceptionMsg()
+    onError
+  except:
     lastErrorText = getCurrentExceptionMsg()
     onError
 

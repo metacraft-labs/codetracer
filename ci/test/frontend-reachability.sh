@@ -33,8 +33,8 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh`, so 1227
-# findings fail `lint-nim` and 1226 do not.
+# `env CT_REACHABILITY_MAX=1225 bash ci/test/frontend-reachability.sh`, so 1226
+# findings fail `lint-nim` and 1225 do not.
 #
 # AND SO DOES 1222, SINCE 2026-09-04: the threshold is an EQUALITY, not a
 # ceiling with room under it. Fewer findings than the number fails as "the

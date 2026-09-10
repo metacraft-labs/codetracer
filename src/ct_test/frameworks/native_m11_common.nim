@@ -59,24 +59,44 @@ proc event*(
     trace: none(TraceMetadata),
     diagnostic: none(TestDiagnostic))
 
-proc unitOutcomeEvents*(providerId, runId, testId: string; exitCode: int;
-    failureMessage: string; output = ""; durationMs = 0): seq[TestEvent] =
-  ## The terminal events for a provider that runs one whole unit as a single
-  ## subprocess and has nothing but its exit code to go on.
+proc statusForExitCode*(exitCode: int): TestResultStatus =
+  ## The pass/fail rule for a unit whose only evidence is a process exit code:
+  ## **exactly zero is a pass, and every other value is a failure.**
   ##
-  ## **``tekTestFinished`` is emitted on BOTH branches, and that is the point.**
+  ## One copy, shared by every caller, and written as ``== 0`` rather than as
+  ## ``> 0``, because the NEGATIVE half of the range is reachable:
+  ## ``process_exec.execCaptured`` reports a child killed by a SIGNAL as
+  ## ``-1``, since runquota's ``waitForCompletion`` takes the ``WIFSIGNALED``
+  ## branch — which records the signal — and leaves the ``exitCode: -1`` the
+  ## completion was initialised with. A predicate spelled "greater than zero"
+  ## therefore reports a segfaulting test binary, or a recorder killed
+  ## mid-trace, as ``tsPassed``: a positive claim for a process that crashed,
+  ## which test-certificates-spec ``Standard.md`` §3.1 (``passed`` is the only
+  ## value supporting a positive claim) forbids outright.
+  if exitCode == 0: tsPassed else: tsFailed
+
+proc unitOutcomeEvents*(providerId, runId, testId: string;
+    status: TestResultStatus; failureMessage: string; output = "";
+    durationMs = 0; finishedKind = tekRunFinished;
+    trace = none(TraceMetadata)): seq[TestEvent] =
+  ## The terminal events for a provider that runs one whole unit as a single
+  ## subprocess and reports one outcome for it.
+  ##
+  ## **``tekTestFinished`` is emitted on EVERY branch, and that is the point.**
   ## ``run_orchestration.summarize`` and
   ## ``certificate_issuance.recordUnitResult`` count ``tekTestFinished`` and
-  ## nothing else — ``tekFailure`` and ``tekRunFinished`` are invisible to both.
-  ## A failure branch that emitted only those two therefore contributed *zero*
-  ## to ``executed`` and zero to ``failed``, so a suite in which every unit
-  ## failed reported ``executed 0, failed 0``, took the ``rvNothingExecuted``
-  ## verdict and exited ``ExitNothingExecuted`` (2) instead of
-  ## ``ExitTestsFailed`` (1). That makes a genuinely failing suite
-  ## indistinguishable from one that never ran, which is precisely the
-  ## distinction exit code 2 was introduced to draw. ``ruby_common``'s
-  ## exit-code fallback and ``js_common`` already emit it; the callers of this
-  ## proc did not.
+  ## nothing else — ``tekFailure``, ``tekRunFinished`` and
+  ## ``tekRecordFinished`` are invisible to both. A failure branch that emitted
+  ## only those therefore contributed *zero* to ``executed`` and zero to
+  ## ``failed``, so a suite in which every unit failed reported ``executed 0,
+  ## failed 0``, took the ``rvNothingExecuted`` verdict and exited
+  ## ``ExitNothingExecuted`` (2) instead of ``ExitTestsFailed`` (1). That makes
+  ## a genuinely failing suite indistinguishable from one that never ran, which
+  ## is precisely the distinction exit code 2 was introduced to draw — and
+  ## which ``Standard.md`` §8 ("producers MUST NOT claim targets that did not
+  ## run") relies on being drawn honestly in both directions. ``ruby_common``'s
+  ## exit-code fallback and ``js_common``'s run path already emit it; the
+  ## callers of this proc did not.
   ##
   ## **Granularity: one event per UNIT, not per test.** These providers run a
   ## whole file (or project) as one subprocess and never see individual test
@@ -87,24 +107,39 @@ proc unitOutcomeEvents*(providerId, runId, testId: string; exitCode: int;
   ## per-test parsing in each runner, which is tracked separately.
   ##
   ## The ``tekFailure`` carries the reason and the captured output where a
-  ## human looks for it; the ``tekTestFinished`` beside it is what the counters
-  ## read. Both are needed — neither substitutes for the other.
+  ## human looks for them; the ``tekTestFinished`` beside it is what the
+  ## counters read. Both are needed — neither substitutes for the other. It is
+  ## emitted for ``tsFailed`` and ``tsErrored`` and for nothing else: a
+  ## ``tsSkipped`` unit did not fail, and a passing one has no reason to give.
   ##
-  ## The predicate is "exit code is exactly zero", NOT "exit code is positive":
-  ## ``execCaptured`` — the launch the three C/C++ providers use — reports a
-  ## child killed by a signal as ``-1``, because runquota's
-  ## ``waitForCompletion`` takes the ``WIFSIGNALED`` branch and leaves the
-  ## ``exitCode: -1`` the completion was initialised with. A segfaulting test
-  ## binary must land in ``tsFailed``, not ``tsPassed``.
-  let status = if exitCode == 0: tsPassed else: tsFailed
+  ## ``finishedKind`` is ``tekRunFinished`` for a run and ``tekRecordFinished``
+  ## for a recording, and ``trace`` rides on that closing event **only** — the
+  ## recording paths attach the trace they produced there and leave the
+  ## ``tekTestFinished`` without one, which is exactly where each of the
+  ## hand-written copies of this tail put it.
   result = @[]
-  if exitCode != 0:
+  if status in {tsFailed, tsErrored}:
     result.add event(tekFailure, providerId, runId, testId, some(status),
         failureMessage, output, durationMs = durationMs)
   result.add event(tekTestFinished, providerId, runId, testId, some(status),
       $status, durationMs = durationMs)
-  result.add event(tekRunFinished, providerId, runId, testId, some(status),
-      $status, durationMs = durationMs)
+  result.add TestEvent(schemaVersion: TestEventSchemaVersion,
+      kind: finishedKind, providerId: providerId, runId: runId,
+      testId: testId, status: some(status), message: $status, output: "",
+      durationMs: durationMs, trace: trace, diagnostic: none(TestDiagnostic))
+
+proc unitOutcomeEvents*(providerId, runId, testId: string; exitCode: int;
+    failureMessage: string; output = ""; durationMs = 0): seq[TestEvent] =
+  ## The exit-code spelling of the emitter above, for the run paths that have
+  ## nothing but an exit code to go on.
+  ##
+  ## The predicate itself lives in ``statusForExitCode`` so that "which exit
+  ## codes are a pass" is decided in one place for every provider in this
+  ## family, including the recording paths that cannot use this overload
+  ## because they have a third outcome (``tsErrored``: the command succeeded
+  ## and produced no artifact).
+  unitOutcomeEvents(providerId, runId, testId, statusForExitCode(exitCode),
+      failureMessage, output, durationMs)
 
 proc runCommand*(providerId: string; scope: TestScope; args,
     nixPackages: seq[string]): ProviderResult[seq[TestEvent]] {.gcsafe.} =
@@ -234,11 +269,15 @@ proc recordCommand*(providerId: string; scope: TestScope; args,
     if outcome.output.len > 0:
       events.add event(tekOutput, providerId, runId, testId,
           output = outcome.output)
+    # All three outcomes below close through the one shared emitter, so this
+    # RECORDING path cannot lose the `tekTestFinished` the counters read the
+    # way its run-path twin above did. One event per unit: `ct-mcr` is launched
+    # once per file here and only its exit code and its artifact are read.
     if outcome.exitCode != 0:
-      events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
-          "ct-mcr exited with " & $outcome.exitCode, outcome.output)
-      events.add event(tekRecordFinished, providerId, runId, testId,
-          some(tsFailed), "failed")
+      events.add unitOutcomeEvents(providerId, runId, testId,
+          statusForExitCode(outcome.exitCode),
+          "ct-mcr exited with " & $outcome.exitCode, outcome.output,
+          finishedKind = tekRecordFinished)
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "native recording failed with exit code " & $outcome.exitCode,
@@ -248,10 +287,15 @@ proc recordCommand*(providerId: string; scope: TestScope; args,
     let traces =
       if fileExists(tracePath): @[tracePath] else: ctFilesUnder(outputRoot)
     if traces.len == 0 or getFileSize(traces[0]) <= 0:
-      events.add event(tekFailure, providerId, runId, testId, some(tsErrored),
-          "ct-mcr did not produce a non-empty .ct artifact", outcome.output)
-      events.add event(tekRecordFinished, providerId, runId, testId,
-          some(tsErrored), "errored")
+      # `tsErrored`, not `tsFailed`: the recorder reported success and left
+      # nothing to replay, which is a broken harness rather than a failing
+      # test. `summarize` folds both into `failed` and neither may be attested,
+      # so the distinction is for the reader — but the unit must still be
+      # COUNTED as having run, which is what the `tekTestFinished` inside the
+      # emitter does.
+      events.add unitOutcomeEvents(providerId, runId, testId, tsErrored,
+          "ct-mcr did not produce a non-empty .ct artifact", outcome.output,
+          finishedKind = tekRecordFinished)
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
             "native recording did not produce a non-empty .ct artifact",
@@ -275,12 +319,8 @@ proc recordCommand*(providerId: string; scope: TestScope; args,
         testId: testId, status: none(TestResultStatus), message: "recorded",
         output: "", durationMs: 0, trace: some(trace),
         diagnostic: none(TestDiagnostic))
-    events.add event(tekTestFinished, providerId, runId, testId,
-        some(tsPassed), "passed")
-    events.add TestEvent(schemaVersion: TestEventSchemaVersion,
-        kind: tekRecordFinished, providerId: providerId, runId: runId,
-        testId: testId, status: some(tsPassed), message: "passed", output: "",
-        durationMs: 0, trace: some(trace), diagnostic: none(TestDiagnostic))
+    events.add unitOutcomeEvents(providerId, runId, testId, tsPassed, "",
+        finishedKind = tekRecordFinished, trace = some(trace))
     ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
 
 proc parseProviderEventLine*(providerId: string; raw: string): ProviderResult[

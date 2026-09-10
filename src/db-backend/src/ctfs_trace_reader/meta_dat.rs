@@ -32,8 +32,9 @@
 //!           bit 11      — FLAG_HAS_IO_EVENT_STREAM (M23c — dedicated events.dat)
 //!           bit 12      — FLAG_HAS_INTERNING_TABLES (M23d — binary varint interning tables)
 //!           bit 13      — FLAG_HAS_SPAN_STREAM (RS-M1 — spans.dat/spans.idx/spantype.ns)
-//!           bit 14      — FLAG_HAS_CORRELATION_INDEX (WTCI — corrmark.ns + markers.dat/.off)
-//!           bits 14..=15 — reserved (must be 0; readers reject if set)
+//!           bit 14      — FLAG_HAS_LINE_COUNT_TABLE (paths.dat records carry line_count)
+//!           bit 15      — FLAG_HAS_CORRELATION_INDEX (WTCI — corrmark.ns + markers.dat/.off)
+//!           (no bit is reserved; the flag word is fully allocated)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
 //! varint                       : args_count
@@ -89,6 +90,15 @@
 //!   shim — v1/v2 fixtures must be regenerated.  Spec:
 //!   `codetracer-specs/Refactoring-Plans/Recording-Identifier-Migration.md`
 //!   M-REC-1 / M-REC-1.5.
+//! - **v4** — the line-only `global_position_index` encode became
+//!   `prefix_sum[file_id] + (line - 1)`, where it had been
+//!   `prefix_sum[file_id] + line`.  No field of the header changed; the
+//!   version moved because it is the only thing in a container that
+//!   distinguishes the two encodes, and reading a v3 container under the
+//!   current decode reports every step one line high without failing.
+//!   See [`SUPPORTED_VERSIONS`] for why the accepted set is a singleton.
+//!   Spec: `codetracer-trace-format-spec/internal-files.md` §"Global Line
+//!   Index".
 
 use std::error::Error;
 use std::fmt;
@@ -103,14 +113,47 @@ pub const META_DAT_MAGIC: [u8; 4] = [0x43, 0x54, 0x4D, 0x44];
 ///
 /// M-REC-1.5 retired v1 and v2 (pre-1.0, no backcompat).  The reader
 /// rejects any version not listed in [`SUPPORTED_VERSIONS`].
-pub const META_DAT_VERSION: u16 = 3;
+pub const META_DAT_VERSION: u16 = 4;
+
+/// The highest schema version whose writer packed a line-only
+/// `global_position_index` as `prefix_sum[file_id] + line`.
+///
+/// The bound is named rather than written as a literal `3` where it is
+/// used, so that it and the refusal it drives move together: a later
+/// version that changed the packing again would raise it, and a reader
+/// comparing against a stale literal would answer such a container
+/// instead of refusing it.
+pub const LAST_SHIFTED_GLOBAL_INDEX_VERSION: u16 = 3;
 
 /// All `meta.dat` versions this reader can decode.
 ///
-/// v1 and v2 were retired by M-REC-1.5 (pre-1.0; no backwards
-/// compatibility).  v3 (M-REC-1) added the required `recording_id`
-/// UUIDv7 string and trace-filter provenance flag bit.
-pub const SUPPORTED_VERSIONS: &[u16] = &[3];
+/// **A singleton, and it has to be.**  The obvious alternative — accept
+/// `&[3, 4]`, since v4 changed no field of the header — reintroduces the
+/// exact defect the bump exists to close.  v3 and v4 differ not in the
+/// bytes of `meta.dat` but in what the rest of the container's step
+/// addresses MEAN: a v3 writer packed a line-only `global_position_index`
+/// as `prefix_sum[file_id] + line`, and v4 packs
+/// `prefix_sum[file_id] + (line - 1)`, the exact inverse of the decode
+/// [`super::line_position_space`] performs.  Both land INSIDE the trace's
+/// own address space, so accepting a v3 container does not fail anywhere:
+/// every step resolves to a real file and a real line, each one exactly
+/// one line above where it was recorded, and the debugger shows that line
+/// while a breakpoint set on it never matches.  Nothing else in the
+/// container distinguishes the two — `recorder_id` names the producer,
+/// not its address packing, and the same recorders span the change — so
+/// the schema version is the only field that can carry the distinction,
+/// and answering a v3 container at all is answering it wrongly.
+///
+/// A back-compat shim is not merely unimplemented here, it is not
+/// constructible: subtracting one from every address would correct a
+/// trace whose writer used the old packing, and the version is precisely
+/// what would have said that it did.  Pre-1.0, v3 containers are
+/// re-recorded rather than read.
+///
+/// v1 and v2 were retired earlier, by M-REC-1.5, on the same pre-1.0
+/// no-backcompat policy; [`LAST_SHIFTED_GLOBAL_INDEX_VERSION`] covers
+/// them too, since every version at or below it predates the correction.
+pub const SUPPORTED_VERSIONS: &[u16] = &[4];
 
 /// Flag bit 0 — when set, the MCR (Multi-process Concurrent Recording)
 /// fields are appended after the paths block.
@@ -269,7 +312,40 @@ pub const FLAG_HAS_INTERNING_TABLES: u16 = 1 << 12;
 /// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 13.
 pub const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
 
-/// Flag bit 14 — `FLAG_HAS_CORRELATION_INDEX` (WTCI).  When set the container
+/// Flag bit 14 — `FLAG_HAS_LINE_COUNT_TABLE`.  When set, every `paths.dat`
+/// record carries the file's line count after the path bytes
+/// (`path_len + path_bytes + line_count`) and the line-only global position
+/// space is laid out from those counts rather than from the
+/// `DEFAULT_LINES_PER_FILE` convention.
+///
+/// This is the container finally *stating* what a line-only reader previously
+/// had to assume.  Spec `trace-events.md` §"Per-File Contiguous Integer Ranges"
+/// sizes a line-only file at `file_size = line_count`, but no line-only
+/// container carried the counts, so a reader could only apply the writer's
+/// convention of 100000 addresses per file — unrecorded, and wrong above its
+/// own ceiling: a file with more lines addresses positions inside the *next*
+/// file's range, which is a well-formed address of a location that was never
+/// recorded and which no reader can detect.
+///
+/// **Mutually exclusive with [`FLAG_HAS_COLUMN_AWARE_STEPS`]**: a Layout A
+/// record already carries `line_count` as the length of its per-line table, and
+/// that mode sizes a file in addressable columns rather than lines.  A header
+/// setting both states the same field under two record layouts, and
+/// [`parse_meta_dat`] rejects it.
+///
+/// **Like bit 13, deliberately NOT backwards compatible.**  A reader whose
+/// [`KNOWN_FLAGS_MASK`] predates it refuses a count-bearing container outright,
+/// which is what makes the record-layout change safe: the alternative is
+/// reading the framed record as bare path bytes and answering with a path that
+/// has its own length prefix glued to the front.  Rollout is therefore
+/// "readers before writers", and no writer sets the bit by default.
+///
+/// Must match `codetracer_trace_writer::meta_dat::FLAG_HAS_LINE_COUNT_TABLE`
+/// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 14
+/// (`FlagHasLineCountTable`).
+pub const FLAG_HAS_LINE_COUNT_TABLE: u16 = 1 << 14;
+
+/// Flag bit 15 — `FLAG_HAS_CORRELATION_INDEX` (WTCI).  When set the container
 /// ships `corrmark.ns`, the record-time B-tree index of the distributed-trace
 /// spans and boundary crossings the recording covers, together with the
 /// `markers.dat` / `markers.off` interning table its boundary labels resolve
@@ -287,8 +363,12 @@ pub const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
 /// ignore an index it has no use for.
 ///
 /// Must match `codetracer_trace_writer::meta_dat::FLAG_HAS_CORRELATION_INDEX`
-/// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 14.
-pub const FLAG_HAS_CORRELATION_INDEX: u16 = 1 << 14;
+/// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 15.
+///
+/// Drafted against bit 14, which [`FLAG_HAS_LINE_COUNT_TABLE`] took first.
+/// Both describe the container, so they could not share a bit; neither had
+/// shipped, so moving this one cost no compatibility.
+pub const FLAG_HAS_CORRELATION_INDEX: u16 = 1 << 15;
 
 /// Bitmask of all flag bits this implementation understands.
 ///
@@ -308,9 +388,19 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_IO_EVENT_STREAM
     | FLAG_HAS_INTERNING_TABLES
     | FLAG_HAS_SPAN_STREAM
+    | FLAG_HAS_LINE_COUNT_TABLE
     | FLAG_HAS_CORRELATION_INDEX;
 
 // ── Public types ────────────────────────────────────────────────────────
+
+/// The flag bits this build understands, as a mask.
+///
+/// Exposed so a test in another module can derive a genuinely-unknown bit from
+/// it instead of naming one by hand — a hand-written literal silently stops
+/// probing anything the moment that bit is allocated.
+pub fn known_flags_mask() -> u16 {
+    KNOWN_FLAGS_MASK
+}
 
 /// Decoded contents of a `meta.dat` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -482,6 +572,15 @@ pub enum MetaDatError {
         /// The offending string value (lossy-truncated if oversized).
         value: String,
     },
+    /// The header set both [`FLAG_HAS_COLUMN_AWARE_STEPS`] and
+    /// [`FLAG_HAS_LINE_COUNT_TABLE`], which declare the same `paths.dat` field
+    /// under two incompatible record layouts. Rejected rather than resolved by
+    /// preference: picking one would decode the other layout's records as a
+    /// truncated path with a fabricated count, and answer with no error.
+    ConflictingPathLayouts {
+        /// The full flags field as parsed from the header.
+        flags: u16,
+    },
 }
 
 impl fmt::Display for MetaDatError {
@@ -491,6 +590,37 @@ impl fmt::Display for MetaDatError {
                 write!(f, "meta.dat too short: need at least 8 bytes, got {got}")
             }
             MetaDatError::BadMagic => write!(f, "meta.dat: bad magic bytes (expected 'CTMD')"),
+            MetaDatError::ConflictingPathLayouts { flags } => write!(
+                f,
+                "meta.dat: flags 0x{flags:04x} set both FLAG_HAS_COLUMN_AWARE_STEPS (bit 4) and \
+                 FLAG_HAS_LINE_COUNT_TABLE (bit 14). Each selects a paths.dat record layout and a \
+                 record is in one or the other; a column-aware record already carries the file's \
+                 line_count as the length of its per-line table. Re-record the trace with a \
+                 current recorder"
+            ),
+            // A version at or below the correction bound is refused with its
+            // reason spelled out, not with the generic mismatch, because the
+            // consequence of reading one anyway is not a parse failure — it is
+            // a plausible wrong answer at every step, and only naming it tells
+            // a caller that the remedy is to re-record rather than to wait for
+            // a newer reader.
+            //
+            // Phrased about the WRITER rather than about this container's
+            // contents: the gate is on the schema version, so it also refuses
+            // a container at that version holding no steps at all, and "its
+            // steps were packed as" would be a claim about such a trace that
+            // is not true.
+            MetaDatError::UnsupportedVersion(v) if *v <= LAST_SHIFTED_GLOBAL_INDEX_VERSION => write!(
+                f,
+                "meta.dat: schema version {v} predates the global line index correction, and this \
+                 trace cannot be read. Writers at that version packed a line-only step position as \
+                 prefix_sum[file_id] + line; version {META_DAT_VERSION} packs \
+                 prefix_sum[file_id] + (line - 1). Both land inside the trace's address space, so \
+                 a step read under the current decode would come back one line high rather than \
+                 fail, and the container records nothing else that tells the two apart. Re-record \
+                 the trace with a current recorder. Spec: \
+                 codetracer-trace-format-spec/internal-files.md \"Global Line Index\"",
+            ),
             MetaDatError::UnsupportedVersion(v) => {
                 write!(f, "meta.dat: unsupported version {v}, expected {META_DAT_VERSION}")
             }
@@ -686,6 +816,14 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
     let unknown_bits = flags & !KNOWN_FLAGS_MASK;
     if unknown_bits != 0 {
         return Err(MetaDatError::UnknownFlags { flags, unknown_bits });
+    }
+    // Two known bits that cannot both be honoured: each selects a `paths.dat`
+    // record layout, and a record is in one layout or the other. Refused here,
+    // in front of every consumer, because the wrong choice is not a parse
+    // failure downstream — it is a path string with its own framing inside it
+    // and a per-file size that was never written.
+    if flags & FLAG_HAS_COLUMN_AWARE_STEPS != 0 && flags & FLAG_HAS_LINE_COUNT_TABLE != 0 {
+        return Err(MetaDatError::ConflictingPathLayouts { flags });
     }
 
     let mut pos = 8usize;
@@ -1102,7 +1240,7 @@ mod tests {
     ///
     /// ```text
     /// MetaDat {
-    ///     version: 3,
+    ///     version: META_DAT_VERSION,
     ///     flags: 0,
     ///     recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb",
     ///     program: "hi",
@@ -1123,7 +1261,7 @@ mod tests {
     fn writer_compat_fixture_bytes() -> Vec<u8> {
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC); // "CTMD"
-        buf.extend_from_slice(&3u16.to_le_bytes()); // version
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes()); // version
         buf.extend_from_slice(&0u16.to_le_bytes()); // flags
         encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
         buf.extend_from_slice(TEST_UUID_V7.as_bytes());
@@ -1147,7 +1285,7 @@ mod tests {
         let bytes = writer_compat_fixture_bytes();
         let parsed = parse_meta_dat(&bytes).expect("parse fixture");
         let expected = MetaDat {
-            version: 3,
+            version: META_DAT_VERSION,
             flags: 0,
             recording_id: TEST_UUID_V7.to_owned(),
             program: "hi".to_owned(),
@@ -1190,14 +1328,69 @@ mod tests {
         assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::UnsupportedVersion(2)));
     }
 
-    /// M-REC-1.5 end-to-end: the parser rejects a v3 trace whose
+    /// A header at the last pre-correction schema version is refused, and the
+    /// refusal says what reading it anyway would do.
+    ///
+    /// The fixture is the header this serializer emits with only the version
+    /// field set back, because the serializer can no longer produce one — that
+    /// is what the bump means. Every other byte is what a writer at that
+    /// version wrote, so the container is refused for its VERSION and not for
+    /// some incidental malformation.
+    #[test]
+    fn a_container_from_before_the_line_index_correction_is_refused_by_name() {
+        let mut buf = serialize_meta_dat(&MetaDat {
+            version: META_DAT_VERSION,
+            flags: 0,
+            recording_id: TEST_UUID_V7.to_owned(),
+            program: "prog".to_owned(),
+            args: vec![],
+            workdir: "/w".to_owned(),
+            recorder_id: "r".to_owned(),
+            paths: vec!["/a.py".to_owned(), "/b.py".to_owned()],
+            mcr: None,
+            replay_launch: None,
+            layout_snapshot: None,
+            filter_provenance: vec![],
+            has_filter_provenance: false,
+        });
+        parse_meta_dat(&buf).expect("the header this serializer emits must parse before it is aged");
+
+        buf[4..6].copy_from_slice(&LAST_SHIFTED_GLOBAL_INDEX_VERSION.to_le_bytes());
+        let err = parse_meta_dat(&buf).expect_err("a pre-correction container must be refused");
+        assert_eq!(err, MetaDatError::UnsupportedVersion(LAST_SHIFTED_GLOBAL_INDEX_VERSION));
+
+        let msg = err.to_string();
+        assert!(msg.contains("one line high"), "must name the consequence: {msg}");
+        assert!(
+            msg.contains("prefix_sum[file_id] + line"),
+            "must name the superseded encode: {msg}"
+        );
+        assert!(msg.contains("Re-record"), "must name the remedy: {msg}");
+    }
+
+    /// The accepted set is exactly the current version. Written as a
+    /// membership check rather than an equality on the slice so it states the
+    /// property that matters: no version at or below the correction bound is
+    /// readable, whatever else the set grows to hold later.
+    #[test]
+    fn no_version_at_or_below_the_correction_bound_is_accepted() {
+        for v in 0..=LAST_SHIFTED_GLOBAL_INDEX_VERSION {
+            assert!(
+                !SUPPORTED_VERSIONS.contains(&v),
+                "version {v} predates the global line index correction and must not be readable"
+            );
+        }
+        assert!(SUPPORTED_VERSIONS.contains(&META_DAT_VERSION));
+    }
+
+    /// M-REC-1.5 end-to-end: the parser rejects a trace whose
     /// recording_id is not a canonical UUIDv7.
     #[test]
     fn rejects_invalid_recording_id() {
         let bad = "not-a-valid-uuid";
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         encode_varint(bad.len() as u64, &mut buf);
         buf.extend_from_slice(bad.as_bytes());
@@ -1237,24 +1430,37 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Bit 15 is now the LOWEST — and last — still-reserved flag: bits
-        // 0..=14 are all allocated, most recently bit 14
-        // (FLAG_HAS_CORRELATION_INDEX, WTCI).  The probe follows the reserved
-        // range as it shrinks, because a rejection test aimed at a bit that
-        // has since been allocated is a test of nothing.
+        // THE PROBE IS RETIRED, AND ITS ABSENCE IS THE ASSERTION.
+        //
+        // This test used to set the lowest still-reserved bit and require
+        // `parse_meta_dat` to refuse it, following the reserved range down as
+        // bits 8..=13 were allocated. Bit 14 went to FLAG_HAS_LINE_COUNT_TABLE
+        // and bit 15 to FLAG_HAS_CORRELATION_INDEX, so KNOWN_FLAGS_MASK is now
+        // the whole word and there is no flag value this reader can honestly
+        // call unknown. Crafting one would mean asserting against a bit the
+        // reader is supposed to know — a test of nothing.
+        //
+        // What stands in its place is the invariant that made the probe
+        // impossible. It fails the moment a bit is freed or the flag word
+        // grows, which is exactly the change that has to reinstate a probe
+        // against whatever that growth defines as unknown.
+        assert_eq!(
+            !KNOWN_FLAGS_MASK,
+            0,
+            "the flag word is exhausted; if this fails, a bit was freed or the \
+             field grew, and the unknown-flag probe this replaced must be \
+             reinstated against whatever is unknown now"
+        );
+
+        // The rejection PATH stays covered by the other half of the same
+        // contract: a version this reader does not know is still refused.
         let mut buf = writer_compat_fixture_bytes();
-        buf[6] = 0;
-        buf[7] = 0b1000_0000; // = bit 15, the last reserved bit
-        match parse_meta_dat(&buf) {
-            Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, 0b1000_0000_0000_0000);
-                assert_eq!(unknown_bits, 0b1000_0000_0000_0000);
-            }
-            other => panic!("expected UnknownFlags, got {other:?}"),
-        }
+        buf[4] = 99;
+        buf[5] = 0;
+        assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::UnsupportedVersion(99)));
     }
 
-    /// WTCI — the `FLAG_HAS_CORRELATION_INDEX` bit (14) parses cleanly.
+    /// WTCI — the `FLAG_HAS_CORRELATION_INDEX` bit (15) parses cleanly.
     ///
     /// Same "readers before writers" guarantee bit 13 records: an unknown bit
     /// is rejecting, so before this constant existed the db-backend refused
@@ -1266,8 +1472,45 @@ mod tests {
         let mut buf = writer_compat_fixture_bytes();
         buf[6] = (FLAG_HAS_CORRELATION_INDEX & 0xFF) as u8;
         buf[7] = (FLAG_HAS_CORRELATION_INDEX >> 8) as u8;
-        let parsed = parse_meta_dat(&buf).expect("bit 14 must parse cleanly");
+        let parsed = parse_meta_dat(&buf).expect("bit 15 must parse cleanly");
         assert_eq!(parsed.flags & FLAG_HAS_CORRELATION_INDEX, FLAG_HAS_CORRELATION_INDEX);
+    }
+
+    /// Bit 14 is a REJECTING bit, so before this constant existed the
+    /// db-backend refused every count-bearing container outright. Adding it to
+    /// [`KNOWN_FLAGS_MASK`] is what makes such a container openable at all —
+    /// the "readers before writers" rollout, same as bit 13's.
+    #[test]
+    fn accepts_has_line_count_table_flag() {
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6..8].copy_from_slice(&FLAG_HAS_LINE_COUNT_TABLE.to_le_bytes());
+        let meta = parse_meta_dat(&buf).expect("bit 14 must parse cleanly");
+        assert_eq!(meta.flags & FLAG_HAS_LINE_COUNT_TABLE, FLAG_HAS_LINE_COUNT_TABLE);
+        assert_eq!(meta.flags & FLAG_HAS_COLUMN_AWARE_STEPS, 0);
+    }
+
+    /// Bits 4 and 14 each select a `paths.dat` record layout, and a record is
+    /// in one layout or the other. A header setting both is refused in front of
+    /// every consumer rather than resolved by preference: the wrong choice does
+    /// not fail downstream, it answers with a path that has its own length
+    /// prefix inside it and a per-file size that was never written.
+    #[test]
+    fn rejects_both_path_layout_flags() {
+        let both = FLAG_HAS_COLUMN_AWARE_STEPS | FLAG_HAS_LINE_COUNT_TABLE;
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6..8].copy_from_slice(&both.to_le_bytes());
+        match parse_meta_dat(&buf) {
+            Err(MetaDatError::ConflictingPathLayouts { flags }) => assert_eq!(flags, both),
+            other => panic!("expected ConflictingPathLayouts, got {other:?}"),
+        }
+
+        // The control: each bit ALONE parses, so the rejection is about the
+        // combination and not about either bit being unknown.
+        for one in [FLAG_HAS_COLUMN_AWARE_STEPS, FLAG_HAS_LINE_COUNT_TABLE] {
+            let mut solo = writer_compat_fixture_bytes();
+            solo[6..8].copy_from_slice(&one.to_le_bytes());
+            parse_meta_dat(&solo).unwrap_or_else(|e| panic!("flag {one:#06x} alone must parse: {e}"));
+        }
     }
 
     /// RS-M2 — the `has_span_stream` flag (bit 13) parses cleanly.
@@ -1497,7 +1740,7 @@ mod tests {
         // string extends past EOF.
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
         buf.extend_from_slice(TEST_UUID_V7.as_bytes());
@@ -1520,7 +1763,7 @@ mod tests {
         // Construct a payload where `program` is two bytes of invalid UTF-8.
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(&META_DAT_MAGIC);
-        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(&META_DAT_VERSION.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         encode_varint(TEST_UUID_V7.len() as u64, &mut buf);
         buf.extend_from_slice(TEST_UUID_V7.as_bytes());

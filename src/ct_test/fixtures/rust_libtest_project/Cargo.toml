@@ -1,3 +1,8 @@
+# NOT-A-TEST-CRATE: a fixture for ct-test's rust-libtest provider. Its tests
+# are the DATA that provider is driven over (src/ct_test/rust_libtest_provider_test.nim,
+# run by the required ct-test-release-gate job); running them with cargo here
+# would change the very thing the fixture fixes.
+
 [package]
 name = "ct-test-rust-fixture"
 version = "0.1.0"

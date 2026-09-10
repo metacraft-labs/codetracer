@@ -4,7 +4,9 @@ import contracts
 import discovery
 import run_orchestration
 import certificate
+import certificate_default_store
 import certificate_issuance
+import certificate_store
 import frameworks/ada_fallback
 import frameworks/assembly_fallback
 import frameworks/crystal_spec
@@ -85,8 +87,15 @@ proc ctTestUsageMessage*(): string =
   "[--certificate <path>] [--no-certificate] " &
   "[--sign-key <path> --key-id <id>]); " &
   "a passing run issues a test certificate (schema " & CertificateSchema &
-  ", framework " & CtTestFramework & ") in the run summary, and writes it to " &
-  "`--certificate <path>` when one is given; signing is OPTIONAL and OFF " &
+  ", framework " & CtTestFramework & ") in the run summary and PUBLISHES it, " &
+  "by default, to the workspace certificate store at `" & CtTestStoreDir &
+  "/<platform>.toml` — which is where CodeTracer's status bar looks, so a " &
+  "project needs no flag and no other tool to be reported as certified; " &
+  "`ct test` also writes `" & WorkspaceStateDir & "/.gitignore` so its own " &
+  "record cannot make the next run report your tree as dirty; " &
+  "`--certificate <path>` writes the record THERE INSTEAD (useful for a " &
+  "destination outside the repository), and `--no-certificate` suppresses " &
+  "issuance entirely; signing is OPTIONAL and OFF " &
   "unless `--sign-key` is passed; " &
   "discovery is scoped to the workspace's own files by default — " &
   "`--scope` (or the CT_TEST_SCOPE environment variable) selects the rule, " &
@@ -241,12 +250,19 @@ proc issuerIdentity(): string =
   except CatchableError:
     "ct-test"
 
-proc certificateReport(issuance: Issuance; writtenTo, writeError: string): JsonNode =
+proc certificateReport(issuance: Issuance;
+                       writtenTo, writeError, storeNotice: string): JsonNode =
   ## The ``certificate`` object attached to every run summary.
   ##
   ## Present whether or not a certificate was issued: "no certificate, and
   ## here is why, and here is what would change that" is the report a producer
   ## owes its user, and silence is what makes a withholding producer unusable.
+  ##
+  ## ``storeNotice`` is the same argument applied to the *destination*: a run
+  ## that published into a store git does not ignore has left a file that will
+  ## make the NEXT run report this tree as dirty, and a producer that noticed
+  ## and said nothing would be handing its user a foot-gun it had already seen
+  ## (``certificate_default_store``).
   # `vcs` is TRI-state, not a boolean. A run that failed its own gate (no tests
   # executed, tests failed) never reaches git at all, and reporting that as
   # "could not determine the repository state" would send an operator after a
@@ -274,6 +290,8 @@ proc certificateReport(issuance: Issuance; writtenTo, writeError: string): JsonN
       result["written_to"] = %writtenTo
     if writeError.len > 0:
       result["write_error"] = %writeError
+    if storeNotice.len > 0:
+      result["store_notice"] = %storeNotice
   else:
     result["withheld_reason"] = %($issuance.reason)
     result["message"] = %issuance.message
@@ -352,17 +370,41 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
 
   if not opts.noCertificate:
     let issuance = outcome.issuance
-    var writtenTo, writeError: string
-    if issuance.issued and opts.certificatePath.len > 0:
-      try:
-        let parent = parentDir(opts.certificatePath)
-        if parent.len > 0:
-          createDir(parent)
-        writeFile(opts.certificatePath, issuance.document)
-        writtenTo = opts.certificatePath
-      except CatchableError as err:
-        writeError = err.msg
-    summaryJson["certificate"] = certificateReport(issuance, writtenTo, writeError)
+    var writtenTo, writeError, storeNotice, destination: string
+    if issuance.issued:
+      if opts.certificatePath.len > 0:
+        # AN EXPLICIT DESTINATION REPLACES THE DEFAULT rather than adding to
+        # it. That is what keeps `--certificate` usable for its one job the
+        # default cannot do — writing the record somewhere outside the
+        # repository — and it means a caller who named a path gets that path
+        # and no surprise second copy inside their tree.
+        destination = opts.certificatePath
+        try:
+          let parent = parentDir(opts.certificatePath)
+          if parent.len > 0:
+            createDir(parent)
+          writeFile(opts.certificatePath, issuance.document)
+          writtenTo = opts.certificatePath
+        except CatchableError as err:
+          writeError = err.msg
+      else:
+        # THE DEFAULT DESTINATION, and the reason CTC-2 exists: a certificate
+        # nothing can find certifies nothing. The workspace store is where
+        # `certificate_store` discovers records and therefore where the status
+        # bar reads them, so a project that runs `ct test` and nothing else is
+        # reported as certified without a flag. `publishCertificate` puts the
+        # ignore guard in front of the record; see its module header for why
+        # writing into the workspace is otherwise a foot-gun.
+        let published = publishCertificate(
+          response.workspaceRoot, issuance.certificate.platform,
+          issuance.document)
+        destination = published.path
+        if published.written:
+          writtenTo = published.path
+        writeError = published.error
+        storeNotice = published.notIgnoredNotice
+    summaryJson["certificate"] =
+      certificateReport(issuance, writtenTo, writeError, storeNotice)
 
     if not issuance.issued:
       # stderr, so a machine consumer parsing the summary on stdout is
@@ -370,9 +412,14 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
       # to do about it.
       stderr.writeLine "ct test: no certificate issued — " & issuance.message
       stderr.writeLine "ct test: " & issuance.remedy
-    elif writeError.len > 0:
-      stderr.writeLine "ct test: certificate issued but not written to " &
-                       opts.certificatePath & ": " & writeError
+    else:
+      if writeError.len > 0:
+        stderr.writeLine "ct test: certificate issued but not written to " &
+                         destination & ": " & writeError
+      if storeNotice.len > 0:
+        # Not a failure: the record IS issued and the run's verdict is
+        # unaffected. It is a warning about what the next run will see.
+        stderr.writeLine "ct test: warning — " & storeNotice
 
   echo summaryJson.pretty
   if opts.summaryPath.len > 0:

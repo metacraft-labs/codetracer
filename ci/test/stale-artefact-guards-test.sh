@@ -379,6 +379,59 @@ printf 'x\n' >"${SB}/src/build-debug/public/index.css"
 printf 'x\n' >"${SB}/storybook/dist/components.js"
 printf 'x\n' >"${SB}/storybook/storybook-static/index.html"
 
+# EVERY MTIME BELOW IS STATED, NOT RACED FOR — same reason, and the same
+# remedy, as the `newest_executable` fixture further down (search for
+# "202001010000"): "two files written in the same second would make this pass
+# for the wrong reason".
+#
+# Here it made one FAIL for the wrong reason. `requireFreshStorybookStatic`
+# compares STRICTLY (`stat.mtimeMs > referenceMs`), so equal mtimes read as
+# fresh. This section used bare `touch`es to order the corpus against its
+# sources, and two of the pairs were ADJACENT STATEMENTS with no work between
+# them — a rebuild of the corpus immediately followed by a touch of a file that
+# has to come out strictly newer. Those land in the same coarse clock tick
+# (~1-10ms depending on CONFIG_HZ, and whole seconds on a filesystem with
+# one-second mtime granularity) often enough to be seen: `lint-bash` failed with
+#
+#     FAIL a rebuilt renderer makes the copied corpus stale
+#            the command unexpectedly succeeded
+#            output: FRESH
+#
+# which is what this assertion prints when ui.js did NOT come out newer.
+#
+# A rerun is not evidence either way — the window is one tick, so a rerun very
+# likely passes by winning the race. The deterministic repro is to give the two
+# files the SAME stamp on purpose, which fails 100% against the strict compare.
+#
+# The stamps run Jan 1 -> Jan 8 2020, one day apart, in the order the assertions
+# need. NOTHING IS WEAKENED: each "stale" step still puts its source strictly
+# NEWER than the corpus, so the guard must still refuse it; the ordering is now
+# established by construction instead of by timing luck.
+SB_T_SOURCES=202001010000  # every source file, the baseline
+SB_T_BUILT=202001020000    # the corpus: newer than all of them => FRESH
+SB_T_STORY=202001030000    # a story file outruns the build
+SB_T_REBUILD1=202001040000 # corpus rebuilt, fresh again
+SB_T_RENDERER=202001050000 # the copied renderer outruns the build
+SB_T_REBUILD2=202001060000 # corpus rebuilt, fresh again
+SB_T_NIM=202001070000      # a Nim source outruns the components bundle
+SB_T_REBUILD3=202001080000 # both artefacts rebuilt, fresh again
+
+# `firstNewerThan` walks directories but only ever COMPARES files (it recurses
+# on `isDirectory()` and stats the leaves), so stamping the files is enough and
+# directory mtimes do not matter here.
+touch -t "${SB_T_SOURCES}" \
+	"${SB}/storybook/.storybook/main.ts" \
+	"${SB}/storybook/stories/One.stories.js" \
+	"${SB}/storybook/scripts/check.mjs" \
+	"${SB}/storybook/package.json" \
+	"${SB}/storybook/package-lock.json" \
+	"${SB}/storybook/dist/components.js" \
+	"${SB}/src/frontend/index.html" \
+	"${SB}/src/frontend/ui.nim" \
+	"${SB}/src/build-debug/frontend/ui.js" \
+	"${SB}/src/build-debug/public/index.css"
+touch -t "${SB_T_BUILT}" "${SB}/storybook/storybook-static/index.html"
+
 cat >"${TEST_ROOT}/check-storybook.mjs" <<EOF
 import { requireFreshStorybookStatic } from "${STORYBOOK_FRESHNESS}";
 try {
@@ -395,25 +448,35 @@ check_storybook() { node "${TEST_ROOT}/check-storybook.mjs" "${SB}" 2>&1; }
 assert_contains "$(check_storybook)" "FRESH" \
 	"a storybook-static newer than everything it is built from passes"
 
-touch "${SB}/storybook/stories/One.stories.js"
+touch -t "${SB_T_STORY}" "${SB}/storybook/stories/One.stories.js"
 run_expect_failure "a story file newer than the built corpus is refused" \
 	"Stale storybook corpus" -- check_storybook
 assert_contains "$(check_storybook)" "One.stories.js" \
 	"the refusal names the story file that outran the build"
-touch "${SB}/storybook/storybook-static/index.html"
+touch -t "${SB_T_REBUILD1}" "${SB}/storybook/storybook-static/index.html"
 
 # The staticDirs copy is the half a reader is least likely to think of: the
 # renderer build tree is INSIDE storybook-static, so a `just build-once` between
 # two review rounds makes the corpus a picture of the previous renderer.
-touch "${SB}/src/build-debug/frontend/ui.js"
+#
+# THIS IS THE PAIR THAT FAILED IN CI. The corpus rebuild above and the renderer
+# touch below were adjacent bare `touch`es; ui.js has to come out STRICTLY newer
+# and, at one clock tick apart, sometimes did not.
+touch -t "${SB_T_RENDERER}" "${SB}/src/build-debug/frontend/ui.js"
 run_expect_failure "a rebuilt renderer makes the copied corpus stale" \
 	"ui.js" -- check_storybook
-touch "${SB}/storybook/storybook-static/index.html"
+touch -t "${SB_T_REBUILD2}" "${SB}/storybook/storybook-static/index.html"
 
-touch "${SB}/src/frontend/ui.nim"
+# The same adjacent-touch shape as the pair above. It has not been seen to fail,
+# and only because `src/frontend` is not in the FIRST check's source list — its
+# `ui.nim` is compared against `dist/components.js` by the SECOND check instead,
+# which happens to leave a wider gap. That is an accident of which list a path
+# is on, not a property anybody chose; stamped like the rest so it stays true.
+touch -t "${SB_T_NIM}" "${SB}/src/frontend/ui.nim"
 run_expect_failure "Nim sources newer than the components bundle are refused" \
 	"Stale storybook components" -- check_storybook
-touch "${SB}/storybook/dist/components.js" "${SB}/storybook/storybook-static/index.html"
+touch -t "${SB_T_REBUILD3}" "${SB}/storybook/dist/components.js" \
+	"${SB}/storybook/storybook-static/index.html"
 assert_contains "$(check_storybook)" "FRESH" \
 	"rebuilding both artefacts makes it green again"
 

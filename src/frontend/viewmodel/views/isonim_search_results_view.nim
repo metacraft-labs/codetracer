@@ -29,9 +29,19 @@
 ##
 ## There is deliberately no panel header row and no panel-wide result
 ## count badge: the panel owns the query input, so it must stay visible
-## before a search has run (which is also why the root no longer carries
-## the ``search-results-non-active`` display:none modifier), and the
-## per-file-group badge is the only count the Figma design shows.
+## before a search has run, and the per-file-group badge is the only
+## count the Figma design shows.  The root's old
+## ``search-results-active`` / ``search-results-non-active`` modifier
+## (``display: flex`` / ``display: none``) went with the header for the
+## same reason — hiding the panel before a search would hide the only
+## way to start one — and the CSS rules behind it have since been
+## deleted, so nothing emits or styles either class any more.
+##
+## There is also no ``Filter results...`` input.  The pre-redesign panel
+## rendered one, but it was never wired to anything in any renderer; the
+## VM-side ``filter`` / ``visibleResults`` machinery it was meant to
+## drive has been retired with it, and this view renders ``vm.results``
+## directly.  See the header of ``viewmodels/search_results_vm.nim``.
 ##
 ## Implementation notes:
 ## - Match rows and file groups are appended **imperatively** (outside the
@@ -159,7 +169,7 @@ proc renderSearchResultsPanel*(r: MockRenderer;
 
   createRenderEffect proc() =
     let loading = vm.loading.val
-    let visible = vm.visibleResults.val
+    let visible = vm.results.val
     let query = vm.query.val
     let recents = vm.recentSearches.val
     r.clearChildren(bodyContainer)
@@ -388,7 +398,7 @@ when defined(js):
     # Reactive body: rebuilt from scratch whenever signals change.
     createRenderEffect proc() =
       let loading = vm.loading.val
-      let visible = vm.visibleResults.val
+      let visible = vm.results.val
       let query = vm.query.val
       let recents = vm.recentSearches.val
       r.clearChildren(bodyContainer)

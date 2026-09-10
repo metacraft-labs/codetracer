@@ -217,7 +217,19 @@ done
 # its multi-line spelling. The scanner's blind spot to `- run: "..."` is real
 # and unfixed; converting it is separate work, and this count is the record
 # that it exists.
-readonly EXPECTED_NIX_JOBS=32
+#
+# 32 -> 33: `deploy-get.yml:deploy`, which arrived on this branch with the
+# get.codetracer.com installer site when `stable` was merged back into `dev`.
+# It is a genuinely new job, not a scanner change: the control run of this
+# suite against pristine `origin/dev` classifies 32 and passes both
+# assertions, and the merged tree's `found:` list differs from it by exactly
+# this one entry. The job invokes `nix develop .#ci --command wrangler pages
+# deploy` and provisions Nix first via `./.github/actions/setup-nix`
+# immediately after its checkout, so the "provisions first" rule -- the
+# assertion that carries the actual invariant -- passed on the merged tree
+# before this number was touched. The count is being reconciled to the code,
+# not the other way round.
+readonly EXPECTED_NIX_JOBS=33
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

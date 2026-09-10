@@ -161,6 +161,30 @@ lint_step "shellcheck: build prerequisites checked before tup runs" \
 lint_step "shellcheck: build-alignment harness ('just test' runs it)" \
 	shellcheck scripts/test-build-alignment.sh
 
+# `just test` -- the recipe the line above says runs the build-alignment harness
+# -- is itself an aggregate over seven lanes, and until ci/lib/run-just-lanes.sh
+# existed it was a `set -e` sequence that stopped at the first failing one. Six
+# lanes, including that harness, went unrun and unreported whenever an earlier
+# one broke. `test-bpf` was the same defect spelled as a dependency list.
+#
+# Executed here, and not only linted, for the reason the stale-artefact suite
+# below is: an aggregate that has never been SEEN to report a second failure is
+# indistinguishable from one that still hides it.
+#
+# It is HERMETIC — it stubs `just` on PATH rather than needing the real one —
+# and that is a correctness requirement of running it here, not a convenience.
+# nix/shells/lint.nix carries no `just` on purpose, so the first version of this
+# registration refused to run and turned this job red. The stub costs nothing:
+# ci/lib/run-just-lanes.sh's whole interface to the outside is `just <lane>`,
+# one argument and one exit status. So: no nix, no build, no network, seconds.
+#
+# One section of the suite does need a real `just` (it asserts what `just`
+# itself does with a failing DEPENDENCY, which is why `test-bpf` could not stay
+# a dependency list). That section self-skips here and the suite's expected
+# assertion count drops to match, so a short tally is still a finding.
+lint_step "contract suite: an aggregate runs every lane and names every failure" \
+	bash ci/test/run-just-lanes-test.sh
+
 # UD-0's visual-design-iteration harness. Neither `tools/` nor `scripts/docs/`
 # is under ci/, so the glob at the top does not reach either; the harness and
 # its contract suite are named here.
@@ -462,5 +486,25 @@ lint_step "shellcheck: Rust test-assertion lint (vendored from codetracer-specs)
 # that rotted into a no-op finds zero and reddens this step.
 lint_step "contract suite: no Rust test lacks an assertion (enumerated baseline)" \
 	bash ci/test/test-assertion-baseline.sh
+
+# THE RUST TEST-CRATE COVERAGE GATE. The step above asks whether a Rust test
+# ASSERTS anything; this one asks the question underneath it -- whether the test
+# RUNS at all. `ci/test/test-lane-coverage.sh` answers that for Nim and
+# `ci/test/shell-gate-coverage.sh` for shell gates, and neither can answer it for
+# Rust: lanes enumerate FILES, and Rust tests are selected wholesale by
+# `cargo test` with the CRATE as the unit, so a crate nothing runs cargo test in
+# is dark in a way no per-file rule can express. Five were, holding 61 tests.
+#
+# Same lane and the same reason as the assertion baseline: pure bash + awk +
+# git over the committed tree, no nix, no network, no cargo, seconds. It holds
+# the dark set to an ENUMERATED baseline and fails in both directions -- a newly
+# dark crate is a line the baseline lacks, and a crate that gets wired up is a
+# line the actual set lacks, so an entry cannot outlive the defect it records.
+# Its recognition rules are checked against ci/test/rust-test-crate-coverage.
+# fixture.txt before it is allowed to scan, so it cannot rot into a no-op.
+lint_step "shellcheck: Rust test-crate coverage gate" \
+	shellcheck ci/test/rust-test-crate-coverage.sh
+lint_step "contract suite: every Rust crate with tests is run (enumerated baseline)" \
+	bash ci/test/rust-test-crate-coverage.sh
 
 lint_summary

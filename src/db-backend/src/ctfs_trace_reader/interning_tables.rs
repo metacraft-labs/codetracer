@@ -67,8 +67,8 @@
 use codetracer_trace_types::{FunctionRecord, Line, PathId, TypeKind, TypeRecord, TypeSpecificInfo};
 use num_traits::FromPrimitive;
 
+use codetracer_trace_writer::line_position::LinePositionSpace;
 use codetracer_trace_writer::meta_dat::meta_dat_has_interning_tables;
-use codetracer_trace_writer::step_stream::unpack_global_line_index;
 
 use super::ctfs_container::CtfsReader;
 
@@ -191,6 +191,17 @@ pub struct InterningTables {
     /// on a line-only (non-column-aware) container, which is the signal the
     /// caller uses to leave the legacy decode path exactly as it was.
     pub line_lengths: Vec<Vec<u32>>,
+    /// Per-file line counts, indexed by `PathId` — the count a `paths.dat`
+    /// record carries when the container declares `meta.dat` bit 14
+    /// (`FLAG_HAS_LINE_COUNT_TABLE`).
+    ///
+    /// EMPTY on every container that does not declare the bit, which is what
+    /// distinguishes "this trace states no per-file size" from a size it
+    /// states. The distinction is the point: without it a caller is back to
+    /// assuming 100000 addresses per file, which is wrong for any file with
+    /// more lines than that and undetectable when it is, because the resulting
+    /// address is inside the next file's range.
+    pub line_counts: Vec<u64>,
     /// Which on-disk record layout these tables were decoded from.
     pub layout: RecordLayout,
 }
@@ -276,9 +287,15 @@ impl InterningTables {
         // "Layout A" record; every other table is unaffected. There is no
         // upstream `meta_dat_has_column_aware_steps` helper, so read the bit
         // through this crate's own `meta.dat` parser.
-        let column_aware_paths = super::meta_dat::parse_meta_dat(&meta)
-            .map(|parsed| parsed.flags & super::meta_dat::FLAG_HAS_COLUMN_AWARE_STEPS != 0)
-            .unwrap_or(false);
+        let path_flags = super::meta_dat::parse_meta_dat(&meta)
+            .map(|parsed| parsed.flags)
+            .unwrap_or(0);
+        let column_aware_paths = path_flags & super::meta_dat::FLAG_HAS_COLUMN_AWARE_STEPS != 0;
+        // Bit 14 switches `paths.dat` to the line-count record instead —
+        // Layout A's framing without its trailing per-line table. The two bits
+        // are mutually exclusive and `parse_meta_dat` refuses a header setting
+        // both, so this is an else-branch and not a precedence.
+        let line_count_paths = path_flags & super::meta_dat::FLAG_HAS_LINE_COUNT_TABLE != 0;
 
         let paths_table = Self::load_table(ctfs, "paths")?;
         let funcs_table = Self::load_table(ctfs, "funcs")?;
@@ -287,12 +304,21 @@ impl InterningTables {
 
         let mut paths = Vec::with_capacity(paths_table.count());
         let mut line_lengths = Vec::with_capacity(paths_table.count());
+        let mut line_counts = Vec::new();
+        if line_count_paths {
+            line_counts.reserve(paths_table.count());
+        }
         for id in 0..paths_table.count() {
             let raw = paths_table.record(id)?;
             if column_aware_paths {
                 let (path, lengths) = decode_column_aware_path(id, raw)?;
                 paths.push(path);
                 line_lengths.push(lengths);
+            } else if line_count_paths {
+                let (path, count) = decode_line_count_path(id, raw)?;
+                paths.push(path);
+                line_lengths.push(Vec::new());
+                line_counts.push(count);
             } else {
                 paths.push(String::from_utf8_lossy(raw).into_owned());
                 line_lengths.push(Vec::new());
@@ -304,11 +330,23 @@ impl InterningTables {
             variable_names.push(String::from_utf8_lossy(varnames_table.record(id)?).into_owned());
         }
 
+        // The structured `funcs.dat` record addresses its declaration site in
+        // this container's own space, so the space is built from the path table
+        // that was just decoded.
+        // The funcs.dat declaration site is an address in THIS container's
+        // space, so it is resolved against the sizes the container states —
+        // the recorded counts when it carries them, the uniform convention
+        // when it does not.
+        let line_space = if line_counts.is_empty() {
+            LinePositionSpace::uniform(paths.len())
+        } else {
+            LinePositionSpace::from_line_counts(&line_counts)
+        };
         let mut functions = Vec::with_capacity(funcs_table.count());
         for id in 0..funcs_table.count() {
             let raw = funcs_table.record(id)?;
             functions.push(match layout {
-                RecordLayout::Structured => decode_func_record(id, raw)?,
+                RecordLayout::Structured => decode_func_record(id, raw, &line_space)?,
                 RecordLayout::Plain => FunctionRecord {
                     name: String::from_utf8_lossy(raw).into_owned(),
                     // Not on disk in this layout. The Nim FFI reader stubs the
@@ -341,6 +379,7 @@ impl InterningTables {
             types,
             variable_names,
             line_lengths,
+            line_counts,
             layout,
         }))
     }
@@ -420,10 +459,14 @@ fn decode_column_aware_path(id: usize, raw: &[u8]) -> Result<(String, Vec<u32>),
 
 /// Decode one M23d-layout `funcs.dat` record into a [`FunctionRecord`].
 ///
-/// The record's `global_line_index` is the same packing the step stream uses,
-/// so [`unpack_global_line_index`] recovers the `(path_id, line)` the function
-/// was defined at.
-fn decode_func_record(id: usize, raw: &[u8]) -> Result<FunctionRecord, String> {
+/// The record's `global_line_index` addresses the declaration site in the
+/// container's own position space, the same space the step stream addresses in,
+/// so `space` recovers the `(path_id, line)` the function was defined at.
+///
+/// An address the space cannot place leaves the site at `(0, 0)` — the same
+/// stub the `Plain` layout carries, which every consumer already handles —
+/// rather than a `(path_id, line)` produced by arithmetic alone.
+fn decode_func_record(id: usize, raw: &[u8], space: &LinePositionSpace) -> Result<FunctionRecord, String> {
     let mut pos = 0usize;
     let global_line_index = decode_varint(raw, &mut pos)?;
     let name_len = decode_varint(raw, &mut pos)? as usize;
@@ -431,12 +474,46 @@ fn decode_func_record(id: usize, raw: &[u8]) -> Result<FunctionRecord, String> {
         return Err(format!("funcs.dat: record {id} name extends past record"));
     }
     let name = String::from_utf8_lossy(&raw[pos..pos + name_len]).into_owned();
-    let (path_id, line) = unpack_global_line_index(global_line_index);
+    let (path_id, line) = space.resolve(global_line_index).unwrap_or((0, 0));
     Ok(FunctionRecord {
         name,
         path_id: PathId(path_id),
         line: Line(line),
     })
+}
+
+/// Split a line-count-table `paths.dat` record into its path and its line
+/// count: `path_len + path_bytes + line_count`.
+///
+/// Layout A's framing without the trailing per-line table. Only called on a
+/// container that DECLARED this layout through `meta.dat` bit 14, so a record
+/// that does not decode is corruption and is reported as such — the three
+/// record spaces overlap, and a bare record whose first byte happens to equal
+/// its own remaining length decodes cleanly here into a truncated path and a
+/// fabricated count.
+fn decode_line_count_path(id: usize, raw: &[u8]) -> Result<(String, u64), String> {
+    let mut pos = 0usize;
+    let path_len = decode_varint(raw, &mut pos)? as usize;
+    if pos + path_len > raw.len() {
+        return Err(format!("paths.dat: record {id} path extends past record"));
+    }
+    let path = String::from_utf8_lossy(&raw[pos..pos + path_len]).into_owned();
+    pos += path_len;
+    let count = decode_varint(raw, &mut pos)?;
+    if count == 0 {
+        return Err(format!(
+            "paths.dat: record {id} states line_count 0. A container setting \
+             FLAG_HAS_LINE_COUNT_TABLE states every file's size, and a file sized 0 shares its \
+             base with the next one — the two would be indistinguishable at decode"
+        ));
+    }
+    if pos != raw.len() {
+        return Err(format!(
+            "paths.dat: record {id} has {} trailing byte(s) after line_count",
+            raw.len() - pos
+        ));
+    }
+    Ok((path, count))
 }
 
 /// Decode one `types.dat` record into a [`TypeRecord`].
@@ -528,22 +605,40 @@ mod tests {
         assert!(err.contains("out of range"), "{err}");
     }
 
-    /// A `funcs.dat` record's packed `global_line_index` recovers the real
-    /// definition site — the field the Nim FFI path stubs to `(0, 0)`.
+    /// A `funcs.dat` record's `global_line_index` recovers the real definition
+    /// site — the field the Nim FFI path stubs to `(0, 0)`. The container
+    /// registers eight paths, so path 7 is one it can hold.
     #[test]
     fn func_record_recovers_its_definition_site() {
-        use codetracer_trace_writer::step_stream::pack_global_line_index;
-
-        let gli = pack_global_line_index(7, 42);
+        let mut space = LinePositionSpace::uniform(8);
+        let gli = space.global_index(7, 42);
         let mut raw = Vec::new();
         encode_varint(&mut raw, gli);
         encode_varint(&mut raw, 3);
         raw.extend_from_slice(b"run");
 
-        let record = decode_func_record(0, &raw).unwrap();
+        let record = decode_func_record(0, &raw, &space).unwrap();
         assert_eq!(record.name, "run");
         assert_eq!(record.path_id, PathId(7));
         assert_eq!(record.line, Line(42));
+    }
+
+    /// An address this container's space cannot hold leaves the site stubbed
+    /// rather than answered. A two-path container has no path 7.
+    #[test]
+    fn a_func_address_outside_the_space_is_not_answered() {
+        let mut wide = LinePositionSpace::uniform(8);
+        let gli = wide.global_index(7, 42);
+        let mut raw = Vec::new();
+        encode_varint(&mut raw, gli);
+        encode_varint(&mut raw, 3);
+        raw.extend_from_slice(b"run");
+
+        let narrow = LinePositionSpace::uniform(2);
+        let record = decode_func_record(0, &raw, &narrow).unwrap();
+        assert_eq!(record.name, "run", "the name is still readable");
+        assert_eq!(record.path_id, PathId(0));
+        assert_eq!(record.line, Line(0));
     }
 
     /// A truncated function name is an error naming the record, not a panic.
@@ -553,7 +648,7 @@ mod tests {
         encode_varint(&mut raw, 0);
         encode_varint(&mut raw, 10);
         raw.extend_from_slice(b"ab");
-        let err = decode_func_record(3, &raw).unwrap_err();
+        let err = decode_func_record(3, &raw, &LinePositionSpace::uniform(1)).unwrap_err();
         assert!(err.contains("record 3"), "{err}");
     }
 
