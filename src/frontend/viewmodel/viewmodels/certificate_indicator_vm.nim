@@ -65,9 +65,11 @@
 ## **Coverage against a requirement the user chose.** The status bar has no
 ## idea which targets or platforms a project considers necessary; that is
 ## policy (Standard.md §5) and belongs to a gate, not to ambient chrome. What
-## is evaluated is the last produced certificate against *its own* targets on
-## *this* platform — "does the last green run still describe what I have" —
-## which is the question the status bar is for.
+## is evaluated is each stored certificate against *its own* targets on *this*
+## platform — "does a green run still describe what I have" — which is the
+## question the status bar is for. Which of several records answers it, and how
+## records from different frameworks compose, is written out at
+## ``evaluateCertificateIndicator``.
 
 import std/strutils
 
@@ -292,61 +294,27 @@ const
     "that is worth depends on who can reach that key — a deployment property, " &
     "not a fact in the certificate."
 
-proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
+proc evaluateStoredCertificate(facts: CertificateIndicatorFacts;
+                               stored: StoredCertificate):
     CertificateIndicatorModel =
-  ## Decide what the status bar shows.
+  ## What **one** record in the store says about the state in front of the user.
   ##
-  ## The order below is the standard's own, and the early returns are the cases
-  ## where this consumer genuinely **cannot tell** — each of which reports
-  ## unverifiable rather than picking the reassuring reading.
+  ## Split out of ``evaluateCertificateIndicator`` for CTC-2, which is about a
+  ## store holding several records — possibly from several frameworks — rather
+  ## than the single-record workspaces SB-1 was built against. The composition
+  ## over those records is next door; this decides one of them.
+  ##
+  ## **Every requirement below is built from THIS record's own framework,
+  ## targets and scope**, and that is Verification.md §2's rule as it applies
+  ## to a consumer implementing no framework-specific rule at all: *"A consumer
+  ## MUST NOT apply its own validity rules to another framework's certificate,
+  ## even when the record parses cleanly. The fields are shared; their
+  ## framework-specific meaning is not."* A neighbouring record from another
+  ## framework is neither borrowed to widen this one's claim nor allowed to
+  ## narrow it — it is simply a different question, answered by a different
+  ## call to this proc.
   result.searched = facts.store.searched
-
-  # ---- The store could not be looked at ---------------------------------
-  # Kept ahead of the emptiness check on purpose. "There is nothing here" and
-  # "I could not look" are different answers and only the second is a fault
-  # (Transport.md §4); collapsing them would render "no certificates" for a
-  # store the user can see on disk.
-  if facts.store.unreadable:
-    return unverifiable(facts, facts.store.unreadableReason)
-
-  # ---- No store, or an empty one ----------------------------------------
-  # Explicitly NOT an error, and explicitly not "unverifiable" either:
-  # Verification.md §7 says "no certificates from a framework I implement" is
-  # simply not covered, and unverifiable is reserved for evaluation breaking
-  # down.
-  if not facts.store.present or facts.store.certificates.len == 0:
-    return CertificateIndicatorModel(
-      state: cisNoCertificates,
-      label: NoCertificatesLabel,
-      summary:
-        if facts.store.present:
-          "The workspace has a certificate store and nothing in it."
-        else:
-          "This workspace has no certificate store.",
-      remedy: RunTheTestsRemedy,
-      authenticity: caNotChecked,
-      authenticityNote:
-        "There is no record to say anything about.",
-      searched: facts.store.searched)
-
-  let stored = facts.store.lastProduced
   result.certificateName = stored.name
-
-  # ---- Facts about the world this build could not establish -------------
-  # A certificate names a commit and a platform. A consumer that does not know
-  # its own commit, or its own platform, cannot decide either field — and the
-  # honest report is that it could not, not that the answer was no.
-  if not facts.vcs.known:
-    return unverifiable(facts,
-      "CodeTracer could not establish which commit this workspace is on, so " &
-      "it cannot tell whether the certificate covers it.",
-      name = stored.name)
-  if facts.platform.len == 0:
-    return unverifiable(facts,
-      "CodeTracer could not establish which platform it is running on, so it " &
-      "cannot tell whether the certificate covers this machine. A green run " &
-      "on one platform says nothing about another.",
-      name = stored.name)
 
   # ---- Read the record ---------------------------------------------------
   # `readCertificate` is CTC-1's reader. Its three-valued status is used as
@@ -615,6 +583,131 @@ proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
       detail: detail,
       certificateName: stored.name,
       searched: facts.store.searched)
+
+proc evaluateCertificateIndicator*(facts: CertificateIndicatorFacts):
+    CertificateIndicatorModel =
+  ## Decide what the status bar shows.
+  ##
+  ## The order below is the standard's own, and the early returns are the cases
+  ## where this consumer genuinely **cannot tell** — each of which reports
+  ## unverifiable rather than picking the reassuring reading.
+  ##
+  ## ## Several records, and possibly several frameworks
+  ##
+  ## A workspace may hold certificates from more than one framework at once — a
+  ## `ct test` record beside a reprobuild one is the case CTC-2 exists for —
+  ## and the standard deliberately defines **no** composition rule for that:
+  ## *"A project using several frameworks composes several verifiers, one per
+  ## framework, according to its own policy"* (Verification.md §6). So this is
+  ## the status bar's policy, written where it is implemented:
+  ##
+  ## 1. **A record that binds wins**, whichever framework produced it and
+  ##    wherever it sits in the arrival order. This is Verification.md §7.1's
+  ##    rule 1 — *covered* wins — and it is safe for the reason §7.1 gives:
+  ##    **in v1 coverage only ever grows.** No record subtracts, none
+  ##    contradicts another, so a second record can only ever have *added* the
+  ##    coverage a first one lacked.
+  ##
+  ##    Consulting only the newest record — which is what this did before CTC-2
+  ##    — fails in exactly the direction that costs most: a stale neighbour
+  ##    landing last would report "was certified, run the tests" to a user whose
+  ##    state is covered by a certificate sitting in the same store. When that
+  ##    neighbour is from a framework this consumer does not implement, it is
+  ##    also §2's rule failing in the *rejecting* direction, which is the one
+  ##    the standard singles out: such a record "is not evidence for this
+  ##    consumer, and it is not evidence against anything either".
+  ##
+  ## 2. Otherwise, if any record could not be **evaluated**, the outcome is
+  ##    *unverifiable* — §7.1's rule 2. "Run the tests" is the wrong instruction
+  ##    while an unread record might already cover the state, and a decided-but-
+  ##    negative newest record must not mask it: that would be reporting the
+  ##    reassuring reading of a question this consumer never got to ask.
+  ##
+  ## 3. Otherwise the **newest** record speaks, unchanged from SB-1 — "your last
+  ##    green run no longer covers what you have" is the sentence the user
+  ##    needs, and it is the last run that produced it.
+  ##
+  ## For a store holding ONE record — every workspace SB-1 was built against —
+  ## all three rules return that record's verdict, so nothing there changed.
+  ##
+  ## What is deliberately absent, still: this applies **no framework-specific
+  ## validity rule** to any record, its own included (Verification.md §4.2 —
+  ## a consumer MUST NOT invent a generic substitute for that step). See the
+  ## module header.
+  result.searched = facts.store.searched
+
+  # ---- The store could not be looked at ---------------------------------
+  # Kept ahead of the emptiness check on purpose. "There is nothing here" and
+  # "I could not look" are different answers and only the second is a fault
+  # (Transport.md §4); collapsing them would render "no certificates" for a
+  # store the user can see on disk.
+  if facts.store.unreadable:
+    return unverifiable(facts, facts.store.unreadableReason)
+
+  # ---- No store, or an empty one ----------------------------------------
+  # Explicitly NOT an error, and explicitly not "unverifiable" either:
+  # Verification.md §7 says "no certificates from a framework I implement" is
+  # simply not covered, and unverifiable is reserved for evaluation breaking
+  # down.
+  if not facts.store.present or facts.store.certificates.len == 0:
+    return CertificateIndicatorModel(
+      state: cisNoCertificates,
+      label: NoCertificatesLabel,
+      summary:
+        if facts.store.present:
+          "The workspace has a certificate store and nothing in it."
+        else:
+          "This workspace has no certificate store.",
+      remedy: RunTheTestsRemedy,
+      authenticity: caNotChecked,
+      authenticityNote:
+        "There is no record to say anything about.",
+      searched: facts.store.searched)
+
+  let newest = facts.store.lastProduced
+  result.certificateName = newest.name
+
+  # ---- Facts about the world this build could not establish -------------
+  # A certificate names a commit and a platform. A consumer that does not know
+  # its own commit, or its own platform, cannot decide either field — and the
+  # honest report is that it could not, not that the answer was no.
+  #
+  # Decided ONCE, ahead of any record, because neither fact is a property of a
+  # record: no certificate in the store could be evaluated without them. They
+  # name the newest record because that is the one a user would go looking for.
+  if not facts.vcs.known:
+    return unverifiable(facts,
+      "CodeTracer could not establish which commit this workspace is on, so " &
+      "it cannot tell whether the certificate covers it.",
+      name = newest.name)
+  if facts.platform.len == 0:
+    return unverifiable(facts,
+      "CodeTracer could not establish which platform it is running on, so it " &
+      "cannot tell whether the certificate covers this machine. A green run " &
+      "on one platform says nothing about another.",
+      name = newest.name)
+
+  # ---- The records, newest first (see the policy above) ------------------
+  var
+    newestModel: CertificateIndicatorModel
+    haveNewest = false
+    unevaluated: CertificateIndicatorModel
+    haveUnevaluated = false
+  for stored in facts.store.certificates:
+    let model = evaluateStoredCertificate(facts, stored)
+    if model.state == cisCertified:
+      return model
+    if not haveNewest:
+      # `store.certificates` is ordered by ARRIVAL (`orderByArrival`), so the
+      # first record this loop sees is the newest one.
+      newestModel = model
+      haveNewest = true
+    if not haveUnevaluated and model.state == cisUnverifiable:
+      unevaluated = model
+      haveUnevaluated = true
+  if haveUnevaluated:
+    return unevaluated
+  newestModel
 
 # ---------------------------------------------------------------------------
 # The ViewModel

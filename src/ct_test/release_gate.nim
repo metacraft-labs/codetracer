@@ -198,9 +198,18 @@ const
     #     element at all, and that a state change patches in place instead of
     #     rebuilding the shell — which is the mechanism
     #     `status-bar-render-stability.spec.ts` guards from the browser side.
+    #   * `certificate_framework_composition_test.nim` (CTC-2) is the
+    #     several-records, several-frameworks case: that each record is judged
+    #     against its own claim and never a neighbour's, that a record from an
+    #     unrecognised framework is IGNORED rather than rejected — which is the
+    #     rule whose failure turns a harmless neighbour into a broken
+    #     workspace — and that a `ct test` record and a reprobuild record
+    #     carrying the same claim render byte-identically through the real
+    #     status shell.  Both backends.
     "src/tests/gui/tests/status-bar/certificate_indicator_vm_test.nim",
     "src/tests/gui/tests/status-bar/certificate_indicator_view_test.nim",
     "src/tests/gui/tests/status-bar/certificate_indicator_native_test.nim",
+    "src/tests/gui/tests/status-bar/certificate_framework_composition_test.nim",
     # pxor bug campaign (2026-08).  Each of these pins a defect that had
     # previously been reported fixed and was not, so the gate is the point:
     # an ungated ViewModel test is how three of these regressed unnoticed in
