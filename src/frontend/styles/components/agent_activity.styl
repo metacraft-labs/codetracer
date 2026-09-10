@@ -726,6 +726,104 @@
 .terminal-copy-button
   margin-right: 0.375em
 
+.agent-diff-section
+  margin: 0.5em 0 0.25em 0
+  border-radius: 0.375em
+  overflow: hidden
+
+.agent-diff-header
+  display: flex
+  align-items: center
+  gap: 0.5em
+  padding: 0.5em 0.75em
+  background: colors-ui-surface-primary-tertiary
+
+.agent-diff-status-dot
+  width: 0.5em
+  height: 0.5em
+  border-radius: 50%
+  background: colors-ui-icon-success-primary
+  flex-shrink: 0
+
+.agent-diff-status-label
+  flex: 1
+  font-size: 0.8125rem
+  color: colors-ui-text-primary-body-subtle
+
+.agent-diff-unified-btn
+  display: inline-flex !important
+  align-items: center
+  gap: 0.375em
+  padding: 0.375em 0.75em !important
+  border-radius: 0.375em !important
+  font-size: 0.8125rem
+  font-family: inherit !important
+  cursor: pointer
+  flex: 0 0 auto !important
+  user-select: none
+  white-space: nowrap
+
+.agent-diff-unified-icon
+  width: 11px
+  height: 13px
+  background-image: url("data:image/svg+xml,%3Csvg width='11' height='13' viewBox='0 0 11 13' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.5 2.57324C0.776004 2.57324 0.999775 2.79729 1 3.07324V9.65234C1.0002 10.4803 1.67147 11.1503 2.5 11.1504H7.09766C7.37351 11.1504 7.59718 11.3747 7.59766 11.6504C7.59766 11.9265 7.3738 12.1504 7.09766 12.1504H2.5C1.11978 12.1503 0.000204816 11.0331 0 9.65234V3.07324C0.000224474 2.79734 0.224065 2.57332 0.5 2.57324ZM7.69629 0.00878906C7.78876 0.0266271 7.87584 0.071257 7.94531 0.136719L10.7393 2.77539C10.8392 2.86976 10.8954 3.00222 10.8955 3.13965V8.85742C10.8955 9.23267 10.7379 9.58654 10.4668 9.84277C10.1965 10.098 9.8354 10.2372 9.46484 10.2373H3.41016C3.0396 10.2372 2.67844 10.098 2.4082 9.84277C2.13723 9.58655 1.97852 9.2326 1.97852 8.85742V1.37988C1.97862 1.00464 2.13706 0.650698 2.4082 0.394531C2.67844 0.139294 3.0396 0.000119562 3.41016 0H7.60156L7.69629 0.00878906ZM3.41016 1C3.28703 1.00012 3.17363 1.04661 3.09473 1.12109C3.01684 1.19469 2.97862 1.28882 2.97852 1.37988V8.85742C2.97852 8.94846 3.01698 9.04256 3.09473 9.11621C3.17363 9.19073 3.287 9.23718 3.41016 9.2373H9.46484C9.58789 9.23721 9.70038 9.19059 9.7793 9.11621C9.85734 9.0425 9.89551 8.94863 9.89551 8.85742V3.35352L7.40234 1H3.41016ZM6.93945 4.55273H8.41895V5.55273H6.93945V7.03223H5.93945V5.55273H4.45996V4.55273H5.93945V3.07324H6.93945V4.55273Z' fill='%23DDDDDD'/%3E%3C/svg%3E")
+  background-repeat: no-repeat
+  background-size: contain
+  flex-shrink: 0
+
+.agent-diff-file-row
+  display: flex
+  align-items: center
+  gap: 0.75em
+  padding: 0.5em 0.75em
+  border-top: 1px solid colors-ui-border-secondary
+  cursor: pointer
+  user-select: none
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+
+    .agent-diff-file-path
+      color: colors-ui-text-primary-body
+
+.agent-diff-file-path
+  flex: 1
+  font-size: 0.8125rem
+  color: colors-ui-text-primary-body-subtle
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+.agent-diff-stat-added
+  font-size: 0.8125rem
+  font-weight: 600
+  color: colors-ui-icon-success-primary
+  flex-shrink: 0
+
+.agent-diff-stat-removed
+  font-size: 0.8125rem
+  font-weight: 600
+  color: colors-ui-icon-error-primary
+  flex-shrink: 0
+
+.agent-diff-open-icon
+  width: 11px
+  height: 13px
+  background-image: url("data:image/svg+xml,%3Csvg width='11' height='13' viewBox='0 0 11 13' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.5 2.57324C0.776004 2.57324 0.999775 2.79729 1 3.07324V9.65234C1.0002 10.4803 1.67147 11.1503 2.5 11.1504H7.09766C7.37351 11.1504 7.59718 11.3747 7.59766 11.6504C7.59766 11.9265 7.3738 12.1504 7.09766 12.1504H2.5C1.11978 12.1503 0.000204816 11.0331 0 9.65234V3.07324C0.000224474 2.79734 0.224065 2.57332 0.5 2.57324ZM7.69629 0.00878906C7.78876 0.0266271 7.87584 0.071257 7.94531 0.136719L10.7393 2.77539C10.8392 2.86976 10.8954 3.00222 10.8955 3.13965V8.85742C10.8955 9.23267 10.7379 9.58654 10.4668 9.84277C10.1965 10.098 9.8354 10.2372 9.46484 10.2373H3.41016C3.0396 10.2372 2.67844 10.098 2.4082 9.84277C2.13723 9.58655 1.97852 9.2326 1.97852 8.85742V1.37988C1.97862 1.00464 2.13706 0.650698 2.4082 0.394531C2.67844 0.139294 3.0396 0.000119562 3.41016 0H7.60156L7.69629 0.00878906ZM3.41016 1C3.28703 1.00012 3.17363 1.04661 3.09473 1.12109C3.01684 1.19469 2.97862 1.28882 2.97852 1.37988V8.85742C2.97852 8.94846 3.01698 9.04256 3.09473 9.11621C3.17363 9.19073 3.287 9.23718 3.41016 9.2373H9.46484C9.58789 9.23721 9.70038 9.19059 9.7793 9.11621C9.85734 9.0425 9.89551 8.94863 9.89551 8.85742V3.35352L7.40234 1H3.41016ZM6.93945 4.55273H8.41895V5.55273H6.93945V7.03223H5.93945V5.55273H4.45996V4.55273H5.93945V3.07324H6.93945V4.55273Z' fill='%23DDDDDD'/%3E%3C/svg%3E")
+  background-repeat: no-repeat
+  background-size: contain
+  flex-shrink: 0
+  opacity: 0.7
+
+.agent-diff-file-row:hover .agent-diff-open-icon
+  opacity: 1
+
+.agent-diff-editor-wrapper
+  display: none
+
+.agent-diff-editor-wrapper.agent-diff-editor-visible
+  display: block
+
 .component-wrapper
   background: colors-ui-surface-base-panel
   border-radius: 0.25em

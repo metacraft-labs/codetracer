@@ -20,6 +20,7 @@ import isonim/testing/mock_dom
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import jsffi
 
 import ../store/types
 import ../viewmodels/agent_activity_vm
@@ -105,6 +106,10 @@ type
       ## Called when the user picks Allow once / Allow always / Deny.
       ## `kind` is one of: "allow_once", "allow_always", "deny".
     afterDynamicRender*: proc()
+    onOpenFileDiff*: proc(target: string)
+      ## Called when the user clicks the open-diff icon or "Unified diff"
+      ## button.  ``target`` is ``"file:<msgId>:<diffId>"`` for a single
+      ## file or ``"unified:<msgId>"`` for all files in the message.
     onOpenTestRecording*: proc(anchorId, testId: string;
                                policy: TraceOpenPolicy)
       ## AA-2 — the host's hook for "the reviewer clicked into a recording".
@@ -420,6 +425,8 @@ when defined(js):
   proc classListAdd(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.add(#)".}
   proc classListRemove(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.remove(#)".}
   proc classListToggle(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.toggle(#)".}
+  proc computeLineStatsJs(original: cstring; modified: cstring): js
+    {.importjs: """(function(o,m){var ol=(o||'').split('\n'),ml=(m||'').split('\n');var oc={},mc={};ol.forEach(function(l){oc[l]=(oc[l]||0)+1;});ml.forEach(function(l){mc[l]=(mc[l]||0)+1;});var a=0,d=0;var seen={};ol.concat(ml).forEach(function(l){if(!seen[l]){seen[l]=1;var ov=oc[l]||0,mv=mc[l]||0;a+=Math.max(0,mv-ov);d+=Math.max(0,ov-mv);}});return {added:a,removed:d};})(#,#)""".}
   proc jsQuerySelector(sel: cstring): isonim_dom.Element {.importjs: "document.querySelector(#)".}
   proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element)
     {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">'+e(v.slice(i+1,j))+'</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)""".}
@@ -442,6 +449,13 @@ when defined(js):
   proc setInputElementValue(node: isonim_dom.Element; value: string) =
     node.setInputValue(cstring(value))
     node.dispatchInputEvent()
+
+proc computeDiffStats(original: string; modified: string): (int, int) =
+  when defined(js):
+    let stats = computeLineStatsJs(cstring(original), cstring(modified))
+    (stats.added.to(int), stats.removed.to(int))
+  else:
+    (0, 0)
 
 proc syncInputValue(r: MockRenderer; input: MockNode; value: string) =
   r.setAttribute(input, "value", value)
@@ -482,7 +496,8 @@ when defined(js):
             vm.setInputValue(""))
 
 proc renderMessage[R](r: R; componentId: int;
-                      message: AgentActivityMessageEntry): auto =
+                      message: AgentActivityMessageEntry;
+                      callbacks: AgentActivityCallbacks): auto =
   let contentId = AgentActivityMessageContentClass & "-" & message.id
   if message.role == aamrUser:
     ui(r):
@@ -625,15 +640,31 @@ proc renderMessage[R](r: R; componentId: int;
                 if seg.lang.len > 0:
                   span(class = "agent-code-block-lang"): text seg.lang
                 tdiv(class = "agent-code-block-content"): text seg.content
-        for diffValue in message.diffs:
-          let diff = diffValue
-          tdiv(class = "component-wrapper"):
-            tdiv(class = "header-wrapper"):
-              tdiv(class = "task-name"):
-                text diff.path
-            tdiv(class = "agent-editor-wrapper"):
-              tdiv(class = "agent-editor",
-                   id = diffEditorId(componentId, diff.id))
+        if message.diffs.len > 0:
+          let msgId = message.id
+          tdiv(class = "agent-diff-section"):
+            tdiv(class = "agent-diff-header"):
+              span(class = "agent-diff-status-dot")
+              span(class = "agent-diff-status-label"):
+                text $message.diffs.len & (if message.diffs.len == 1: " file changed" else: " files changed")
+              tdiv(class = "ct-button-md-primary agent-diff-unified-btn",
+                   onclick = proc() =
+                     if callbacks.onOpenFileDiff != nil:
+                       callbacks.onOpenFileDiff("unified:" & msgId)):
+                span(class = "agent-diff-unified-icon")
+                text "Unified diff"
+            for diffValue in message.diffs:
+              let diff = diffValue
+              let (added, removed) = computeDiffStats(diff.original, diff.modified)
+              let singleTarget = "file:" & msgId & ":" & $diff.id
+              tdiv(class = "agent-diff-file-row",
+                   onclick = proc() =
+                     if callbacks.onOpenFileDiff != nil:
+                       callbacks.onOpenFileDiff(singleTarget)):
+                span(class = "agent-diff-file-path"): text diff.path
+                span(class = "agent-diff-stat-added"): text "+" & $added
+                span(class = "agent-diff-stat-removed"): text "-" & $removed
+                span(class = "agent-diff-open-icon")
 
 proc testRunId*(anchorId: string): string =
   AgentActivityTestRunPrefix & anchorId
@@ -1122,7 +1153,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
             conversation, renderEvidenceCall(r, vm, evidence.get, callbacks))
         else:
           r.appendRenderedChild(
-            conversation, renderMessage(r, componentId, message))
+            conversation, renderMessage(r, componentId, message, callbacks))
       for terminal in vm.terminals.val:
         r.appendRenderedChild(
           conversation,
