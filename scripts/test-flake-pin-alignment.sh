@@ -121,18 +121,40 @@ skip() {
 command -v python3 >/dev/null 2>&1 || fail \
 	"python3 is required to read flake.lock (it is JSON) and is not on PATH. This check does NOT fall back to grepping the lock, because a confidently wrong revision is worse than no answer. Run it inside the dev shell (\`nix develop '.?submodules=1#ci' --command just test-flake-pin-alignment\`), or put python3 on PATH. NOTHING about the pins has been established by this run."
 
-# Read <lock-file> <node-name> -> locked.rev, or empty when the node is absent.
+# Read <lock-file> <input-name> -> locked.rev, or empty when the input is absent.
 #
 # "Absent node" and "unreadable file" are DIFFERENT answers and must not share
 # the empty string: the first is a real verdict the caller turns into a precise
 # message about a renamed input, the second means this script learned nothing.
+#
+# The lookup goes through `nodes.root.inputs`, NOT through the node key. Node
+# keys are arbitrary labels nix disambiguates with `_2`, `_3`, … whenever two
+# flakes in the closure name an input the same thing, and the plain name is
+# handed to whichever node was written first — which is not necessarily the
+# root's. reprobuild started committing its whole lock (so its closure now
+# carries a nested `nixos-modules -> reprobuild -> runquota-src`), and from
+# that moment a bare `nodes["runquota-src"]` lookup answered with the NESTED
+# reprobuild's runquota (b71e8e9) while the root's own input sat under
+# `runquota-src_2` (7a79877). The check then demanded this repo pin a revision
+# its reprobuild is not compiled against — the precise inversion of what it
+# exists to prevent, delivered with a paste-ready remedy. Resolve the input
+# edge, and the answer cannot be shadowed by a homonym.
 lock_rev() {
 	local out rc
+	# The single quotes are the point: this is a python program, not a shell
+	# string, and nothing in it is meant to expand. Its two arguments are
+	# passed positionally and read as sys.argv.
+	# shellcheck disable=SC2016
 	out="$(python3 -c '
 import json, sys
 with open(sys.argv[1]) as handle:
     nodes = json.load(handle)["nodes"]
-node = nodes.get(sys.argv[2])
+name = sys.argv[2]
+edge = nodes.get("root", {}).get("inputs", {}).get(name)
+# A root input maps to a node key (str). A list would be a `follows` path,
+# which no root input in either lock uses; fall back rather than guess.
+key = edge if isinstance(edge, str) else name
+node = nodes.get(key)
 print(node.get("locked", {}).get("rev", "") if node else "")
 ' "$1" "$2" 2>&1)"
 	rc=$?

@@ -157,7 +157,7 @@
       # reprobuild revision's own flake.lock and mirror its `runquota-src`.
       # `scripts/test-flake-pin-alignment.sh` (in `just test`) enforces the
       # equality so the two pins cannot silently diverge again.
-      url = "github:metacraft-labs/runquota/f1ca742d19c7b981eeea0fba8b4e029207f43778";
+      url = "github:metacraft-labs/runquota/7a79877992908f64d3c8318bb7b20078ff5d1bf4";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
@@ -177,7 +177,7 @@
       # against a different nixpkgs and against its own runquota /
       # native-recorder pins, producing a different `repro` binary than the one
       # this repo's shells are meant to ship.
-      url = "github:metacraft-labs/reprobuild/581fcf0dd2d3726284bc59f9862c0f5c5875ab24";
+      url = "github:metacraft-labs/reprobuild/3a7ef0d7c16ba4d5f2e0e188dcba582847e938a3";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
