@@ -302,6 +302,15 @@
   padding: 0.05em 0.25em
   font-size: 0.875em
 
+// Inside the highlight overlay the inline-code span must NOT change padding or
+// font-size — those shift the overlay text relative to the textarea, causing
+// the cursor (which the textarea owns) to appear at the wrong position.
+// Color-only styling is safe; layout properties are not.
+.agent-input-highlight .agent-inline-code
+  padding: 0 !important
+  font-size: inherit !important
+  font-family: inherit !important
+
 .agent-table-wrapper
   overflow-x: auto
   margin: 0.75em 0
@@ -824,6 +833,126 @@
 .agent-diff-editor-wrapper.agent-diff-editor-visible
   display: block
 
+// Tool calls section — rendered inside the agent thought block
+.agent-tc-section
+  margin-top: 0.625em
+  display: flex
+  flex-direction: column
+  gap: 0.25em
+
+// History rows: hidden by default, shown when .agent-tc-history-expanded is toggled
+.agent-tc-history
+  display: none
+  flex-direction: column
+  gap: 0.25em
+
+  &.agent-tc-history-expanded
+    display: flex
+
+// Toggle button showing how many tools were used; click expands history
+.agent-tc-toggle
+  display: flex
+  align-items: center
+  gap: 0.375em
+  padding: 0.25em 0.5em
+  cursor: pointer
+  user-select: none
+  color: colors-ui-text-primary-body-subtle
+  font-size: 0.75rem
+
+  &:hover
+    color: colors-ui-text-primary-body
+
+.agent-tc-toggle-icon
+  width: 10px
+  height: 10px
+  flex-shrink: 0
+  opacity: 0.6
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 2L9 6H1L5 2Z' fill='%23888'/%3E%3C/svg%3E")
+  background-repeat: no-repeat
+  background-position: center
+  background-size: contain
+
+.agent-tc-history-expanded ~ .agent-tc-toggle .agent-tc-toggle-icon
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 8L1 4H9L5 8Z' fill='%23888'/%3E%3C/svg%3E")
+
+// Individual tool call row
+.agent-tc-row
+  display: flex
+  align-items: center
+  gap: 0.625em
+  padding: 0.5em 0.75em
+  border-radius: 0.375em
+  background: colors-ui-surface-primary-tertiary
+
+.agent-tc-row-current
+  // No extra style needed; kept for selector specificity if needed
+
+// Expanded state: full tool name wraps instead of truncating with ellipsis
+.agent-tc-row-expanded
+  align-items: flex-start
+
+  .agent-tc-name
+    white-space: normal
+    overflow: visible
+    text-overflow: unset
+
+  .agent-tc-icon
+    transform: rotate(0deg)
+    margin-top: 0.2em
+
+// Chevron icon (left side of each row) — same icon as model/branch arrow buttons.
+// Default: rotate -90deg so it points right (collapsed). When expanded: 0deg (down).
+.agent-tc-icon
+  width: 1.25em
+  height: 1.25em
+  flex-shrink: 0
+  cursor: pointer
+  opacity: 0.65
+  transition: transform 0.15s ease
+  transform: rotate(-90deg)
+  background-image: COMMAND_PALETTE_ARROW_IMG
+  background-repeat: no-repeat
+  background-size: 0.5625em 0.375em
+  background-position: center
+
+  &:hover
+    opacity: 0.9
+
+// Tool name — monospace, truncated
+.agent-tc-name
+  flex: 1
+  font-family: monospace
+  font-size: 0.8125rem
+  color: colors-ui-text-primary-body-subtle
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+// Status dot (right side)
+.agent-tc-dot
+  width: 10px
+  height: 10px
+  border-radius: 50%
+  flex-shrink: 0
+  align-self: center
+
+.agent-tc-dot-running
+  background: colors-ui-icon-warning-primary
+  animation: agent-tc-pulse 1.2s ease-in-out infinite
+
+.agent-tc-dot-done
+  background: colors-ui-icon-success-primary
+
+.agent-tc-dot-failed
+  background: colors-ui-icon-error-primary
+
+@keyframes agent-tc-pulse
+  0%, 100%
+    opacity: 1
+  50%
+    opacity: 0.35
+
 .component-wrapper
   background: colors-ui-surface-base-panel
   border-radius: 0.25em
@@ -951,6 +1080,35 @@
   width: 1.75em
   height: 1.75em
   background-repeat: no-repeat
+
+// Final text summary shown outside the collapsed thought block when done.
+// Hidden when the user expands the block (via agent-final-message-hidden toggle).
+.agent-final-message
+  padding: 0.25em 0.5em 0.375em
+  white-space: pre-wrap
+  word-break: break-word
+  color: colors-ui-text-primary-body
+  font-size: 0.875rem
+  line-height: 1.5
+
+.agent-final-message-hidden
+  display: none !important
+
+// "... Agent is working" indicator shown below message content while the agent
+// is still producing output after the thinking phase ended.
+.agent-working-indicator
+  display: flex
+  flex-direction: row
+  align-items: center
+  gap: 0.25em
+  padding: 0.375em 0.5em 0.25em
+  color: colors-ui-text-primary-body-subtle
+  font-size: 0.8125rem
+
+  .ai-status
+    width: 1.25em
+    height: 1.25em
+    background-size: 0.625em 0.625em
 
 // ---------------------------------------------------------------------------
 // Empty prompt — idle state (shown when the conversation has no messages yet)

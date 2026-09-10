@@ -11,7 +11,7 @@
 ## carries and filled the panel with a summary when what the reviewer came for
 ## is the session itself ("There is no 'DeepReview section' in this panel").
 
-import std/[options, tables, math, strutils]
+import std/[options, tables, math, strutils, sets]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -24,6 +24,8 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/agent_activity_vm
+
+var expandedToolRowIds = initHashSet[string]()
 
 const AgentActivityContainerClass* = "component-container agent-ha-container"
 const AgentActivityConversationClass* = "agent-com"
@@ -149,6 +151,32 @@ proc thoughtDuration*(durationSec: float): string =
     else:
       "Thought for " & $m & "m " & $s & "s"
 
+proc thinkingLabel*(createdAt, thinkingEndedAt: float): string =
+  ## Label for the "Thinking" header once the agent starts producing output.
+  ## Shows how many seconds the pure thinking phase lasted.
+  let sec = int((thinkingEndedAt - createdAt) / 1000.0)
+  "Thinking " & $sec & "s"
+
+type
+  ## A rendered group of consecutive segments: either a block of text or a
+  ## batch of consecutive tool calls that will be shown with expand/collapse.
+  ViewSegGroup* = object
+    isTools*: bool
+    content*: string
+    tools*: seq[AgentActivitySegment]
+
+proc computeSegGroups*(segments: seq[AgentActivitySegment]): seq[ViewSegGroup] =
+  ## Merge consecutive tool-call segments into groups so they can be rendered
+  ## with an expandable history.  Text segments are kept separate.
+  for seg in segments:
+    if not seg.isToolCall:
+      result.add(ViewSegGroup(isTools: false, content: seg.content))
+    else:
+      if result.len > 0 and result[^1].isTools:
+        result[^1].tools.add(seg)
+      else:
+        result.add(ViewSegGroup(isTools: true, tools: @[seg]))
+
 type
   MsgSegKind = enum
     mskText, mskCode, mskCodeBlock,
@@ -169,6 +197,13 @@ proc isSeparatorLine(line: string): bool =
     if ch == '-': hasDash = true
   hasDash
 
+when defined(js):
+  proc codePointToCStr(cp: int): cstring {.importjs: "String.fromCodePoint(#)".}
+  proc codePointToStr(cp: int): string = $codePointToCStr(cp)
+else:
+  import std/unicode
+  proc codePointToStr(cp: int): string = $Rune(cp)
+
 proc parsePipeRow(line: string): seq[string] =
   let parts = line.split('|')
   for p in parts:
@@ -186,12 +221,36 @@ proc parseInlineCode*(s: string): seq[MsgSegment] =
       cur = ""
 
   while i < s.len:
-    # Escape sequences: \* \_ \` \\ \~
-    if s[i] == '\\' and i + 1 < s.len and
-       s[i+1] in {'*', '_', '`', '\\', '~'}:
-      cur.add(s[i+1])
-      inc i, 2
-      continue
+    # Escape sequences: \* \_ \` \\ \~ and literal \n / \t from ACP streams
+    if s[i] == '\\' and i + 1 < s.len:
+      case s[i+1]
+      of '*', '_', '`', '\\', '~':
+        cur.add(s[i+1])
+        inc i, 2
+        continue
+      of 'n':
+        # Literal \n from ACP stream → real newline (renders via pre-wrap)
+        cur.add('\n')
+        inc i, 2
+        continue
+      of 't':
+        cur.add('\t')
+        inc i, 2
+        continue
+      of 'u':
+        # \uXXXX Unicode escape from un-decoded ACP JSON content
+        if i + 5 < s.len:
+          let h = s[i+2 ..< i+6]
+          var allHex = true
+          for c in h:
+            if c notin {'0'..'9', 'a'..'f', 'A'..'F'}:
+              allHex = false
+              break
+          if allHex:
+            cur.add(codePointToStr(parseHexInt(h)))
+            inc i, 6
+            continue
+      else: discard
 
     # Triple backtick code block
     if i + 2 < s.len and s[i] == '`' and s[i+1] == '`' and s[i+2] == '`':
@@ -429,7 +488,7 @@ when defined(js):
     {.importjs: """(function(o,m){var ol=(o||'').split('\n'),ml=(m||'').split('\n');var oc={},mc={};ol.forEach(function(l){oc[l]=(oc[l]||0)+1;});ml.forEach(function(l){mc[l]=(mc[l]||0)+1;});var a=0,d=0;var seen={};ol.concat(ml).forEach(function(l){if(!seen[l]){seen[l]=1;var ov=oc[l]||0,mv=mc[l]||0;a+=Math.max(0,mv-ov);d+=Math.max(0,ov-mv);}});return {added:a,removed:d};})(#,#)""".}
   proc jsQuerySelector(sel: cstring): isonim_dom.Element {.importjs: "document.querySelector(#)".}
   proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element)
-    {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">'+e(v.slice(i+1,j))+'</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)""".}
+    {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)""".}
   proc setupInputHighlight(r: WebRenderer; ta: isonim_dom.Element;
                            hl: isonim_dom.Element) =
     setupInputHighlightJs(ta, hl)
@@ -494,6 +553,20 @@ when defined(js):
           if not vm.isLoading.val:
             callbacks.invokeSubmit()
             vm.setInputValue(""))
+
+proc makeToolRowClickHandler(rowId: string): proc() =
+  ## Captures rowId in a fresh proc scope to avoid Nim JS for-loop closure bug
+  ## where all closures share the last loop iteration's variable reference.
+  let sid = rowId
+  result = proc() =
+    when defined(js):
+      let rowEl = jsQuerySelector(cstring("#" & sid))
+      if not rowEl.isNil:
+        classListToggle(rowEl, "agent-tc-row-expanded")
+        if sid in expandedToolRowIds:
+          expandedToolRowIds.excl(sid)
+        else:
+          expandedToolRowIds.incl(sid)
 
 proc renderMessage[R](r: R; componentId: int;
                       message: AgentActivityMessageEntry;
@@ -570,9 +643,55 @@ proc renderMessage[R](r: R; componentId: int;
   else:
     # Agent message: collapsible thought block
     let chevronId = "chevron-" & message.id
+    let finalMsgId = "final-msg-" & message.id
+    # Pre-compute ordered display groups from the segments list
+    let segGroups = computeSegGroups(message.segments)
+    # Last text segment shown outside the collapsed block when done.
+    # When the ACP completion summary contains `Last agent message: Some("...")`,
+    # we extract the inner content (unescaping \n) to show the actual recap.
+    # Otherwise we fall back to the last paragraph of the final text segment.
+    # finalSegGrpIdx tracks which segGroup index holds this last text so we can
+    # skip rendering it inside the thought block (it appears outside instead).
+    var finalTextContent = ""
+    var finalSegGrpIdx = -1
+    if not message.isLoading:
+      for grpIdx in 0 ..< segGroups.len:
+        let grp = segGroups[grpIdx]
+        if not grp.isTools and grp.content.len > 0:
+          finalTextContent = $grp.content
+          finalSegGrpIdx = grpIdx
+      if finalTextContent.len > 0:
+        const lastMsgMarker = "Last agent message: Some(\""
+        let markerIdx = finalTextContent.find(lastMsgMarker)
+        if markerIdx >= 0:
+          let start = markerIdx + lastMsgMarker.len
+          let closingIdx = finalTextContent.rfind("\")")
+          if closingIdx > start:
+            finalTextContent = finalTextContent[start ..< closingIdx].replace("\\n", "\n")
+        else:
+          let paragraphs = finalTextContent.split("\n\n")
+          var lastParagraph = ""
+          for i in countdown(paragraphs.len - 1, 0):
+            let p = paragraphs[i].strip()
+            if p.len > 0:
+              lastParagraph = p
+              break
+          if lastParagraph.len > 0:
+            finalTextContent = lastParagraph
+    # Header label: "Thinking" while waiting, "Thinking Xs" once output starts
+    let stillThinking = message.thinkingEndedAt == 0.0 and message.isLoading
     let durationLabel =
-      if message.isLoading and message.duration <= 0.0: "Thinking"
-      else: thoughtDuration(message.duration)
+      if message.duration > 0.0:
+        thoughtDuration(message.duration)
+      elif message.thinkingEndedAt > 0.0:
+        thinkingLabel(message.createdAt, message.thinkingEndedAt)
+      else:
+        "Thinking"
+    # Completed messages start collapsed so the conversation stays readable.
+    # The user can expand by clicking the header; ongoing messages are always open.
+    let isCollapsed = not message.isLoading
+    let chevronClass = if isCollapsed: "agent-chevron agent-chevron-collapsed" else: "agent-chevron"
+    let contentClass = if isCollapsed: AgentActivityMessageContentClass & " agent-thought-collapsed" else: AgentActivityMessageContentClass
     ui(r):
       tdiv(class = "agent-msg-wrapper agent-thought-wrapper"):
         tdiv(class = "agent-thought-header",
@@ -580,67 +699,201 @@ proc renderMessage[R](r: R; componentId: int;
                when defined(js):
                  let contentEl = jsQuerySelector(cstring("#" & contentId))
                  let chevronEl = jsQuerySelector(cstring("#" & chevronId))
+                 let finalMsgEl = jsQuerySelector(cstring("#" & finalMsgId))
                  if not contentEl.isNil:
                    classListToggle(contentEl, "agent-thought-collapsed")
                  if not chevronEl.isNil:
-                   classListToggle(chevronEl, "agent-chevron-collapsed")):
+                   classListToggle(chevronEl, "agent-chevron-collapsed")
+                 if not finalMsgEl.isNil:
+                   classListToggle(finalMsgEl, "agent-final-message-hidden")):
           tdiv(class = "agent-thought-header-left"):
-            span(class = "agent-chevron", id = chevronId)
+            span(class = chevronClass, id = chevronId)
             span(class = "agent-thought-label"):
               text durationLabel
               if message.canceled:
                 span: text " (canceled)"
-            if message.isLoading and not message.canceled:
+            # Spinner shown in header only during the pure thinking phase
+            if stillThinking and not message.canceled:
               span(class = "ai-status")
           span(class = "agent-thought-timestamp"):
             text wallClockTime(message.createdAt)
-        tdiv(class = AgentActivityMessageContentClass, id = contentId):
-          for seg in parseInlineCode(message.content):
-            if seg.kind == mskText:
-              text seg.content
-            elif seg.kind == mskCode:
-              span(class = "agent-inline-code"): text seg.content
-            elif seg.kind == mskBold:
-              span(class = "agent-bold"): text seg.content
-            elif seg.kind == mskItalic:
-              span(class = "agent-italic"): text seg.content
-            elif seg.kind == mskBoldItalic:
-              span(class = "agent-bold-italic"): text seg.content
-            elif seg.kind == mskStrike:
-              span(class = "agent-strike"): text seg.content
-            elif seg.kind == mskTable:
-              tdiv(class = "agent-table-wrapper"):
-                tdiv(class = "agent-table"):
-                  if seg.rows.len > 0:
-                    tdiv(class = "agent-table-header-row"):
-                      for cell in seg.rows[0]:
-                        tdiv(class = "agent-table-header-cell"): text cell
-                    for rowIdx in 1 ..< seg.rows.len:
-                      let row = seg.rows[rowIdx]
-                      tdiv(class = "agent-table-row"):
-                        for cell in row:
-                          tdiv(class = "agent-table-cell"):
-                            for cellSeg in parseInlineCode(cell):
-                              if cellSeg.kind == mskText:
-                                text cellSeg.content
-                              elif cellSeg.kind == mskCode:
-                                span(class = "agent-inline-code"): text cellSeg.content
-                              elif cellSeg.kind == mskBold:
-                                span(class = "agent-bold"): text cellSeg.content
-                              elif cellSeg.kind == mskItalic:
-                                span(class = "agent-italic"): text cellSeg.content
-                              elif cellSeg.kind == mskBoldItalic:
-                                span(class = "agent-bold-italic"): text cellSeg.content
-                              elif cellSeg.kind == mskStrike:
-                                span(class = "agent-strike"): text cellSeg.content
-                              else:
-                                text cellSeg.content
-            else:
-              tdiv(class = "agent-code-block"):
-                if seg.lang.len > 0:
-                  span(class = "agent-code-block-lang"): text seg.lang
-                tdiv(class = "agent-code-block-content"): text seg.content
-        if message.diffs.len > 0:
+        tdiv(class = contentClass, id = contentId):
+          if segGroups.len > 0:
+            # Render segments in chronological order.
+            # Skip the final text segment (finalSegGrpIdx) when done — it is
+            # shown outside the collapsed block as agent-final-message instead.
+            for grpIdx in 0 ..< segGroups.len:
+              if finalSegGrpIdx >= 0 and grpIdx == finalSegGrpIdx:
+                continue
+              let grp = segGroups[grpIdx]
+              if not grp.isTools:
+                # Text segment: parse markdown-like inline markup
+                for seg in parseInlineCode(grp.content):
+                  if seg.kind == mskText:
+                    text seg.content
+                  elif seg.kind == mskCode:
+                    span(class = "agent-inline-code"): text seg.content
+                  elif seg.kind == mskBold:
+                    span(class = "agent-bold"): text seg.content
+                  elif seg.kind == mskItalic:
+                    span(class = "agent-italic"): text seg.content
+                  elif seg.kind == mskBoldItalic:
+                    span(class = "agent-bold-italic"): text seg.content
+                  elif seg.kind == mskStrike:
+                    span(class = "agent-strike"): text seg.content
+                  elif seg.kind == mskTable:
+                    tdiv(class = "agent-table-wrapper"):
+                      tdiv(class = "agent-table"):
+                        if seg.rows.len > 0:
+                          tdiv(class = "agent-table-header-row"):
+                            for cell in seg.rows[0]:
+                              tdiv(class = "agent-table-header-cell"): text cell
+                          for rowIdx in 1 ..< seg.rows.len:
+                            let row = seg.rows[rowIdx]
+                            tdiv(class = "agent-table-row"):
+                              for cell in row:
+                                tdiv(class = "agent-table-cell"):
+                                  for cellSeg in parseInlineCode(cell):
+                                    if cellSeg.kind == mskText:
+                                      text cellSeg.content
+                                    elif cellSeg.kind == mskCode:
+                                      span(class = "agent-inline-code"): text cellSeg.content
+                                    elif cellSeg.kind == mskBold:
+                                      span(class = "agent-bold"): text cellSeg.content
+                                    elif cellSeg.kind == mskItalic:
+                                      span(class = "agent-italic"): text cellSeg.content
+                                    elif cellSeg.kind == mskBoldItalic:
+                                      span(class = "agent-bold-italic"): text cellSeg.content
+                                    elif cellSeg.kind == mskStrike:
+                                      span(class = "agent-strike"): text cellSeg.content
+                                    else:
+                                      text cellSeg.content
+                  else:
+                    tdiv(class = "agent-code-block"):
+                      if seg.lang.len > 0:
+                        span(class = "agent-code-block-lang"): text seg.lang
+                      tdiv(class = "agent-code-block-content"): text seg.content
+              else:
+                # Tool-call group: expandable history + always-visible current
+                let grpHistId = "tool-history-" & message.id & "-" & $grpIdx
+                let grpTools = grp.tools
+                tdiv(class = "agent-tc-section"):
+                  if grpTools.len > 1:
+                    tdiv(class = "agent-tc-history", id = grpHistId):
+                      for i in 0 ..< grpTools.len - 1:
+                        let tc = grpTools[i]
+                        let dotClass =
+                          if tc.toolStatus == "completed": "agent-tc-dot agent-tc-dot-done"
+                          elif tc.toolStatus == "failed": "agent-tc-dot agent-tc-dot-failed"
+                          else: "agent-tc-dot agent-tc-dot-running"
+                        let stableId = "tc-" & tc.toolCallId
+                        let initExpanded = stableId in expandedToolRowIds
+                        let rowClass = if initExpanded: "agent-tc-row agent-tc-row-expanded" else: "agent-tc-row"
+                        let histClickHandler = makeToolRowClickHandler(stableId)
+                        tdiv(class = rowClass, id = stableId):
+                          span(class = "agent-tc-icon", onclick = histClickHandler)
+                          span(class = "agent-tc-name"): text tc.toolName
+                          span(class = dotClass)
+                    tdiv(class = "agent-tc-toggle",
+                         onclick = proc() =
+                           when defined(js):
+                             let histEl = jsQuerySelector(cstring("#" & grpHistId))
+                             if not histEl.isNil:
+                               classListToggle(histEl, "agent-tc-history-expanded")):
+                      span(class = "agent-tc-toggle-icon")
+                      text $grpTools.len & " tools used"
+                  let currentTc = grpTools[^1]
+                  let currentDotClass =
+                    if currentTc.toolStatus == "completed": "agent-tc-dot agent-tc-dot-done"
+                    elif currentTc.toolStatus == "failed": "agent-tc-dot agent-tc-dot-failed"
+                    else: "agent-tc-dot agent-tc-dot-running"
+                  let currentStableId = "tc-" & currentTc.toolCallId
+                  let currentInitExpanded = currentStableId in expandedToolRowIds
+                  let currentRowClass = if currentInitExpanded:
+                      "agent-tc-row agent-tc-row-current agent-tc-row-expanded"
+                    else:
+                      "agent-tc-row agent-tc-row-current"
+                  let currentClickHandler = makeToolRowClickHandler(currentStableId)
+                  tdiv(class = currentRowClass, id = currentStableId):
+                    span(class = "agent-tc-icon", onclick = currentClickHandler)
+                    span(class = "agent-tc-name"): text currentTc.toolName
+                    span(class = currentDotClass)
+          else:
+            # Fallback: no segments yet — render flat content (placeholder / old msgs)
+            for seg in parseInlineCode(message.content):
+              if seg.kind == mskText:
+                text seg.content
+              elif seg.kind == mskCode:
+                span(class = "agent-inline-code"): text seg.content
+              elif seg.kind == mskBold:
+                span(class = "agent-bold"): text seg.content
+              elif seg.kind == mskItalic:
+                span(class = "agent-italic"): text seg.content
+              elif seg.kind == mskBoldItalic:
+                span(class = "agent-bold-italic"): text seg.content
+              elif seg.kind == mskStrike:
+                span(class = "agent-strike"): text seg.content
+              elif seg.kind == mskTable:
+                tdiv(class = "agent-table-wrapper"):
+                  tdiv(class = "agent-table"):
+                    if seg.rows.len > 0:
+                      tdiv(class = "agent-table-header-row"):
+                        for cell in seg.rows[0]:
+                          tdiv(class = "agent-table-header-cell"): text cell
+                      for rowIdx in 1 ..< seg.rows.len:
+                        let row = seg.rows[rowIdx]
+                        tdiv(class = "agent-table-row"):
+                          for cell in row:
+                            tdiv(class = "agent-table-cell"):
+                              for cellSeg in parseInlineCode(cell):
+                                if cellSeg.kind == mskText:
+                                  text cellSeg.content
+                                elif cellSeg.kind == mskCode:
+                                  span(class = "agent-inline-code"): text cellSeg.content
+                                elif cellSeg.kind == mskBold:
+                                  span(class = "agent-bold"): text cellSeg.content
+                                elif cellSeg.kind == mskItalic:
+                                  span(class = "agent-italic"): text cellSeg.content
+                                elif cellSeg.kind == mskBoldItalic:
+                                  span(class = "agent-bold-italic"): text cellSeg.content
+                                elif cellSeg.kind == mskStrike:
+                                  span(class = "agent-strike"): text cellSeg.content
+                                else:
+                                  text cellSeg.content
+              else:
+                tdiv(class = "agent-code-block"):
+                  if seg.lang.len > 0:
+                    span(class = "agent-code-block-lang"): text seg.lang
+                  tdiv(class = "agent-code-block-content"): text seg.content
+        # Final text summary: always visible outside the collapsed block when done.
+        # Hidden via agent-final-message-hidden when the user expands the block.
+        if finalTextContent.len > 0:
+          tdiv(class = "agent-final-message msg-content", id = finalMsgId):
+            for mseg in parseInlineCode(finalTextContent):
+              if mseg.kind == mskText:
+                text mseg.content
+              elif mseg.kind == mskCode:
+                span(class = "agent-inline-code"): text mseg.content
+              elif mseg.kind == mskBold:
+                span(class = "agent-bold"): text mseg.content
+              elif mseg.kind == mskItalic:
+                span(class = "agent-italic"): text mseg.content
+              elif mseg.kind == mskBoldItalic:
+                span(class = "agent-bold-italic"): text mseg.content
+              elif mseg.kind == mskStrike:
+                span(class = "agent-strike"): text mseg.content
+              else:
+                tdiv(class = "agent-code-block"):
+                  if mseg.lang.len > 0:
+                    span(class = "agent-code-block-lang"): text mseg.lang
+                  tdiv(class = "agent-code-block-content"): text mseg.content
+        # "Agent is working" indicator: visible outside the collapsible block while
+        # the agent is still producing output after the thinking phase ended.
+        if message.isLoading and not stillThinking and not message.canceled:
+          tdiv(class = "agent-working-indicator"):
+            span(class = "ai-status")
+            text " Agent is working"
+        if message.diffs.len > 0 and not message.isLoading:
           let msgId = message.id
           tdiv(class = "agent-diff-section"):
             tdiv(class = "agent-diff-header"):
@@ -958,7 +1211,7 @@ proc renderAddFilesButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
 proc renderModelButton[R](r: R; vm: AgentActivityVM;
                           callbacks: AgentActivityCallbacks): auto =
   let modelName = if vm.selectedModel.val.len > 0: vm.selectedModel.val
-                  else: "claude-opus-5"
+                  else: "Codex GPT5"
   ui(r):
     button(class = "ct-button-md-tertiary agent-button agent-model-select",
            `type` = "button",

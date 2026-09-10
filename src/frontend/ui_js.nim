@@ -4551,6 +4551,9 @@ proc configureIPC(data: Data) =
     "acp-create-terminal"
     "acp-request-permission"
     "acp-render-diff"
+    "acp-clear-diffs"
+    "acp-tool-call"
+    "acp-tool-call-update"
 
     "reload-file"
 
