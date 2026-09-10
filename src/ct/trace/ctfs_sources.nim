@@ -395,24 +395,15 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
     return false
 
   var paths: seq[string] = @[]
-  var pathsJsonNonEmpty = false
-  try:
-    let pathsJson = reader.readCtfsFile("paths.json")
-    if pathsJson.len > 0:
-      writeFile(outputFolder / "paths.json", pathsJson)
-      for pathNode in parseJson(pathsJson):
-        if pathNode.kind == JString:
-          paths.add pathNode.getStr()
-      result = true
-      pathsJsonNonEmpty = paths.len > 0
-  except CatchableError:
-    discard
-
-  # CTFS v4 containers replace the legacy JSON ``paths.json`` internal
-  # file with the binary ``paths.dat`` + ``paths.off`` interning table.
-  # When the JSON form is absent, decode the binary table so the
-  # frontend still gets a ``paths.json`` sidecar and the bundled
-  # ``files/`` payload is materialised below.
+  # NOTE: two different files are called ``paths.json`` in this proc. The one
+  # written to ``outputFolder`` is the SIDECAR the frontend reads to build the
+  # filesystem jstree, and it stays. The container-INTERNAL ``paths.json`` that
+  # used to be read here first is the retired legacy metadata sidecar, and is
+  # gone — recorded paths come from ``paths.dat`` or ``meta.dat`` below.
+  # A recorded container carries its source paths in the binary
+  # ``paths.dat`` + ``paths.off`` interning table. Decode it so the frontend
+  # gets a ``paths.json`` sidecar and the bundled ``files/`` payload is
+  # materialised below.
   if not result:
     try:
       let interningPaths = extractInterningTablePaths(reader)
@@ -423,15 +414,11 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
     except CatchableError as e:
       echo "ct host: warning: failed to decode CTFS paths.dat: ", e.msg
 
-  # M-REC-1.5/M4a: the ct_recorder (live MCR) trace-writer currently
-  # finalizes the internal ``paths.json`` as a placeholder ``"[]"`` even
-  # when the operator passed ``--source`` paths (those paths *do* land
-  # in ``meta.dat``'s ``paths`` field — see
-  # ``ct_recorder/trace_writer.nim`` TODO("meta-json-retirement")).
-  # Until ``paths.json`` is retired, mirror ``meta.dat``'s paths into
-  # the sidecar when the internal ``paths.json`` was empty so the
-  # importer derives a usable jstree root from the recorded source
-  # paths instead of leaving an empty list.
+  # M-REC-1.5/M4a: mirror ``meta.dat``'s ``paths`` field into the sidecar so
+  # the importer derives a usable jstree root from the recorded source paths
+  # instead of leaving an empty list. This used to be conditional on the
+  # container-internal ``paths.json`` having been empty; that file is retired,
+  # so ``meta.dat`` is now simply where recorded ``--source`` paths come from.
   #
   # Any sibling sidecar already present in ``outputFolder`` (e.g.
   # ``trace_paths.json`` written by the local manifest importer to
@@ -439,7 +426,7 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
   # is merged in — without the merge ``normalizeImportedTracePaths``
   # would silently drop the sidecar because it prefers ``paths.json``
   # whenever it exists.
-  if not pathsJsonNonEmpty:
+  block:
     try:
       let metaPaths = parseCtfsMetaDat(reader.readCtfsFile("meta.dat")).paths
       var merged: seq[string] = @[]

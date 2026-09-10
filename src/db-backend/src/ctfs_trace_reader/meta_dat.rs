@@ -33,7 +33,8 @@
 //!           bit 12      — FLAG_HAS_INTERNING_TABLES (M23d — binary varint interning tables)
 //!           bit 13      — FLAG_HAS_SPAN_STREAM (RS-M1 — spans.dat/spans.idx/spantype.ns)
 //!           bit 14      — FLAG_HAS_LINE_COUNT_TABLE (paths.dat records carry line_count)
-//!           bit 15      — reserved (must be 0; readers reject if set)
+//!           bit 15      — FLAG_HAS_CORRELATION_INDEX (WTCI — corrmark.ns + markers.dat/.off)
+//!           (no bit is reserved; the flag word is fully allocated)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
 //! varint                       : args_count
@@ -344,6 +345,31 @@ pub const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
 /// (`FlagHasLineCountTable`).
 pub const FLAG_HAS_LINE_COUNT_TABLE: u16 = 1 << 14;
 
+/// Flag bit 15 — `FLAG_HAS_CORRELATION_INDEX` (WTCI).  When set the container
+/// ships `corrmark.ns`, the record-time B-tree index of the distributed-trace
+/// spans and boundary crossings the recording covers, together with the
+/// `markers.dat` / `markers.off` interning table its boundary labels resolve
+/// through.
+///
+/// **A hint, not a gate.**  Like bits 8..13 it says only what the container
+/// carries; the root file-entry array remains the authority, and it is the
+/// entry's presence — not this bit — that distinguishes "never indexed" from
+/// "indexed and covering nothing" (see
+/// `codetracer-specs/Testing/CTFS-Correlation-Marker-Contract.md` §9).
+///
+/// Recognising it here is nonetheless load-bearing: [`KNOWN_FLAGS_MASK`]
+/// refuses any container carrying an unknown bit outright, so without this
+/// constant a reader would reject every marker-bearing recording rather than
+/// ignore an index it has no use for.
+///
+/// Must match `codetracer_trace_writer::meta_dat::FLAG_HAS_CORRELATION_INDEX`
+/// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 15.
+///
+/// Drafted against bit 14, which [`FLAG_HAS_LINE_COUNT_TABLE`] took first.
+/// Both describe the container, so they could not share a bit; neither had
+/// shipped, so moving this one cost no compatibility.
+pub const FLAG_HAS_CORRELATION_INDEX: u16 = 1 << 15;
+
 /// Bitmask of all flag bits this implementation understands.
 ///
 /// Any bit outside this mask is rejected by [`parse_meta_dat`] so future
@@ -362,7 +388,8 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_IO_EVENT_STREAM
     | FLAG_HAS_INTERNING_TABLES
     | FLAG_HAS_SPAN_STREAM
-    | FLAG_HAS_LINE_COUNT_TABLE;
+    | FLAG_HAS_LINE_COUNT_TABLE
+    | FLAG_HAS_CORRELATION_INDEX;
 
 // ── Public types ────────────────────────────────────────────────────────
 
@@ -1403,28 +1430,50 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Bit 15 is the lowest — and now the only — still-reserved flag: bits
-        // 0..=14 are all allocated in KNOWN_FLAGS_MASK, most recently bit 14
-        // (FLAG_HAS_LINE_COUNT_TABLE). The probe is pinned to
-        // `!KNOWN_FLAGS_MASK` rather than to a literal so that allocating a
-        // bit cannot leave this test probing a bit the reader now knows, where
-        // it would assert nothing.
+        // THE PROBE IS RETIRED, AND ITS ABSENCE IS THE ASSERTION.
+        //
+        // This test used to set the lowest still-reserved bit and require
+        // `parse_meta_dat` to refuse it, following the reserved range down as
+        // bits 8..=13 were allocated. Bit 14 went to FLAG_HAS_LINE_COUNT_TABLE
+        // and bit 15 to FLAG_HAS_CORRELATION_INDEX, so KNOWN_FLAGS_MASK is now
+        // the whole word and there is no flag value this reader can honestly
+        // call unknown. Crafting one would mean asserting against a bit the
+        // reader is supposed to know — a test of nothing.
+        //
+        // What stands in its place is the invariant that made the probe
+        // impossible. It fails the moment a bit is freed or the flag word
+        // grows, which is exactly the change that has to reinstate a probe
+        // against whatever that growth defines as unknown.
         assert_eq!(
-            !KNOWN_FLAGS_MASK, 0b1000_0000_0000_0000,
-            "bit 15 is the last unallocated flag bit; allocating it means the flag \
-             word has to grow, and this probe has to be rewritten against whatever \
-             that growth defines as unknown"
+            !KNOWN_FLAGS_MASK,
+            0,
+            "the flag word is exhausted; if this fails, a bit was freed or the \
+             field grew, and the unknown-flag probe this replaced must be \
+             reinstated against whatever is unknown now"
         );
-        let probe = !KNOWN_FLAGS_MASK;
+
+        // The rejection PATH stays covered by the other half of the same
+        // contract: a version this reader does not know is still refused.
         let mut buf = writer_compat_fixture_bytes();
-        buf[6..8].copy_from_slice(&probe.to_le_bytes());
-        match parse_meta_dat(&buf) {
-            Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, probe);
-                assert_eq!(unknown_bits, probe);
-            }
-            other => panic!("expected UnknownFlags, got {other:?}"),
-        }
+        buf[4] = 99;
+        buf[5] = 0;
+        assert_eq!(parse_meta_dat(&buf), Err(MetaDatError::UnsupportedVersion(99)));
+    }
+
+    /// WTCI — the `FLAG_HAS_CORRELATION_INDEX` bit (15) parses cleanly.
+    ///
+    /// Same "readers before writers" guarantee bit 13 records: an unknown bit
+    /// is rejecting, so before this constant existed the db-backend refused
+    /// every recording that declared a correlation marker — not because it
+    /// needed the index, but because it did not recognise the announcement of
+    /// one.
+    #[test]
+    fn accepts_has_correlation_index_flag() {
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6] = (FLAG_HAS_CORRELATION_INDEX & 0xFF) as u8;
+        buf[7] = (FLAG_HAS_CORRELATION_INDEX >> 8) as u8;
+        let parsed = parse_meta_dat(&buf).expect("bit 15 must parse cleanly");
+        assert_eq!(parsed.flags & FLAG_HAS_CORRELATION_INDEX, FLAG_HAS_CORRELATION_INDEX);
     }
 
     /// Bit 14 is a REJECTING bit, so before this constant existed the

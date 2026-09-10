@@ -123,6 +123,15 @@ const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
 /// without the constant, every count-bearing container would be refused here
 /// and the trace would look unopenable rather than merely unfamiliar.
 const FLAG_HAS_LINE_COUNT_TABLE: u16 = 1 << 14;
+
+/// Bit 15 — `corrmark.ns` correlation index + `markers.dat`/`.off` (WTCI).
+///
+/// backend-manager has no use for the index, but a bit outside
+/// `KNOWN_FLAGS_MASK` makes `parse_meta_dat` reject the whole container — so
+/// without this constant every recording that declares a correlation marker
+/// would fail to open here, rather than opening with an index this component
+/// ignores.
+const FLAG_HAS_CORRELATION_INDEX: u16 = 1 << 15;
 const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_REPLAY_LAUNCH_FIELDS
     | FLAG_HAS_LAYOUT_SNAPSHOT
@@ -137,7 +146,8 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_IO_EVENT_STREAM
     | FLAG_HAS_INTERNING_TABLES
     | FLAG_HAS_SPAN_STREAM
-    | FLAG_HAS_LINE_COUNT_TABLE;
+    | FLAG_HAS_LINE_COUNT_TABLE
+    | FLAG_HAS_CORRELATION_INDEX;
 
 // ── Public types ─────────────────────────────────────────────────────────
 
