@@ -1,4 +1,5 @@
 import ../utils, ../communication, ../../common/ct_event, value, ui_imports, shell, editor, times, std/[strformat, jsconsole]
+from unified_diff import registerAgentDiffEntry
 
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -554,56 +555,6 @@ proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
     return
   let inputId = INPUT_ID & fmt"-{self.id}{self.commandInputId}"
   self.inputField = cast[typeof(self.inputField)](jq(fmt"#{inputId}"))
-  let sessionKey = self.currentSessionKey()
-  if self.sessionMessageIds.hasKey(sessionKey):
-    for agentMsg in self.sessionMessageIds[sessionKey]:
-      for diffPreview in agentMsg.sessionDiffs:
-        let diffEditorId = fmt"{DIFF_EDITOR_DIV}-{self.id}-{diffPreview.id}"
-        if self.diffEditors.hasKey(diffEditorId):
-          continue
-
-        var lang = fromPath(diffPreview.path)
-        let theme = monacoThemeName(self.data.config.theme)
-
-        self.diffEditors[diffEditorId] = monaco.editor.createDiffEditor(
-          jq(fmt"#{diffEditorId}"),
-          MonacoEditorOptions(
-            language: lang.toCLang(),
-            readOnly: true,
-            theme: theme,
-            automaticLayout: true,
-            folding: true,
-            fontSize: self.data.ui.fontSize,
-            fontFamily: codeFontFamily(self.data.ui),
-            minimap: js{ enabled: false },
-            renderIndentGuides: true,
-            find: js{ addExtraSpaceOnTop: false },
-            renderLineHighlight: "".cstring,
-            lineNumbers: proc(line: int): cstring = self.editorLineNumber(line),
-            lineNumbersMinChars: monacoLineNumbersMinChars(
-              lineCountForGutter(diffPreview.modified)),
-            lineDecorationsWidth: monacoLineDecorationsWidth(self.data.ui.fontSize),
-            showFoldingControls: cstring"always",
-            mouseWheelScrollSensitivity: 0,
-            fastScrollSensitivity: 0,
-            scrollBeyondLastLine: false,
-            smoothScrolling: false,
-            contextmenu: false,
-            renderOverviewRuler: false,
-            renderSideBySide: false,
-            scrollbar: js{
-              horizontalScrollbarSize: 14,
-              horizontalSliderSize: 8,
-              verticalScrollbarSize: 14,
-              verticalSliderSize: 8
-            },
-          )
-        )
-
-        let original = createModel(diffPreview.original, "rust".cstring)
-        let modified = createModel(diffPreview.modified, "rust".cstring)
-        setDiffModel(self.diffEditors[diffEditorId], original, modified)
-
   for termId in self.terminalOrder:
     let terminal = self.terminals[termId]
     if not terminal.shell.initialized:
@@ -686,6 +637,50 @@ when defined(js):
       self.syncLegacyAgentActivityIntoVM()
     result.afterDynamicRender = proc() =
       self.afterAgentActivityDynamicRender()
+    result.onOpenFileDiff = proc(target: string) =
+      ## Open agent diff content in a ``Content.UnifiedDiff`` editor tab.
+      ## ``target`` is ``"file:<msgId>:<diffId>"`` or ``"unified:<msgId>"``.
+      let sessionKey = self.currentSessionKey()
+      if not self.sessionMessageIds.hasKey(sessionKey):
+        return
+      var paths: seq[string] = @[]
+      var originals: seq[string] = @[]
+      var modifieds: seq[string] = @[]
+      if target.startsWith("file:"):
+        # target = "file:<msgId>:<diffId>"
+        let rest = target[5 .. ^1]
+        let lastColon = rest.rfind(':')
+        if lastColon < 0:
+          return
+        let msgId = rest[0 ..< lastColon]
+        let diffIdStr = rest[lastColon + 1 .. ^1]
+        var diffId = 0
+        try: diffId = parseInt(diffIdStr) except: return
+        for msg in self.sessionMessageIds[sessionKey]:
+          if msg.id == cstring(msgId):
+            for d in msg.sessionDiffs:
+              if d.id == diffId:
+                paths.add($d.path)
+                originals.add($d.original)
+                modifieds.add($d.modified)
+                break
+            break
+      elif target.startsWith("unified:"):
+        # target = "unified:<msgId>"
+        let msgId = target[8 .. ^1]
+        for msg in self.sessionMessageIds[sessionKey]:
+          if msg.id == cstring(msgId):
+            for d in msg.sessionDiffs:
+              paths.add($d.path)
+              originals.add($d.original)
+              modifieds.add($d.modified)
+            break
+      if paths.len == 0:
+        return
+      registerAgentDiffEntry(target, paths, originals, modifieds)
+      let newId = self.data.generateId(Content.UnifiedDiff)
+      self.data.openLayoutTab(Content.UnifiedDiff, newId, isEditor = true,
+                              path = cstring("diff:agent-diff:" & target))
 
   proc tryMountIsoNimAgentActivityPanel*(componentId: int) =
     if not agentActivityVMInstances.hasKey(componentId):
