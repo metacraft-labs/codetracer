@@ -35,6 +35,21 @@ proc stringify(obj: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 proc readFileUtf8(path: cstring): Future[cstring] {.importjs: "require('fs').promises.readFile(#, 'utf8')".}
 proc writeFileUtf8(path: cstring, content: cstring): Future[void] {.importjs: "require('fs').promises.writeFile(#, #, 'utf8')".}
 
+# Returns the content of a file at git HEAD (empty string if the file is new/untracked).
+proc gitFileAtHead(absPath: cstring): cstring {.importjs: """
+(() => {
+  try {
+    const cp = require('child_process');
+    const path = require('path');
+    const rel = path.relative(process.cwd(), #);
+    const r = cp.spawnSync('git', ['show', 'HEAD:' + rel],
+      { encoding: 'utf8', timeout: 10000, cwd: process.cwd() });
+    return (!r.error && r.status === 0) ? (r.stdout || '') : '';
+  } catch(e) { return ''; }
+})()
+""".}
+
+
 proc makeClient(onRequestPermission: js, onSessionUpdate: js, onWriteTextFile: js, onReadTextFile: js, onCreateTerminal: js): JsObject {.importjs: "(() => ({ requestPermission: async (params) => await #(params), sessionUpdate: async (params) => await #(params), writeTextFile: async (params) => await #(params), readTextFile: async (params) => await #(params), createTerminal: async (params) => await #(params), extMethod: async () => ({}), extNotification: async () => {} }))()".}
 proc asFactory(obj: JsObject): js {.importjs: "(function(v){ return function(){ return v; }; })(#)".}
 
@@ -66,8 +81,24 @@ var sessionsById: Table[cstring, SessionState] = initTable[cstring, SessionState
 var acpSessionIdsByClient: Table[cstring, cstring] = initTable[cstring, cstring]()
 var clientSessionIdsByAcp: Table[cstring, cstring] = initTable[cstring, cstring]()
 # Cache originals before writes so we can render diffs when ACP only sends the
-# new content.
+# new content (consumed per tool_call_update event).
 var originalFileCache: Table[cstring, cstring] = initTable[cstring, cstring]()
+# Per-session set of file paths touched by the agent (any tool), used at session
+# completion to compute authoritative diffs for ALL touched files.
+var sessionTouchedPaths: Table[cstring, seq[cstring]] = initTable[cstring, seq[cstring]]()
+# Paths written via the writeTextFile ACP callback (session-agnostic, single session assumed).
+var writeTrackedPaths: seq[cstring] = @[]
+# Snapshot of file content BEFORE the agent first touched it during the current
+# prompt (not consumed by tool_call_update, lives until end-of-session diff computation).
+# Key: absolute file path. Only the FIRST write per file per prompt is stored.
+var promptOriginalCache: Table[cstring, cstring] = initTable[cstring, cstring]()
+# Last known file content after each prompt's diff computation. Used as the original
+# baseline for the NEXT prompt when the agent uses bash (or any tool that modifies
+# files without going through ACP writeTextFile or producing a structured filediff).
+var lastKnownContent: Table[cstring, cstring] = initTable[cstring, cstring]()
+# Git-level snapshot of changed+new files captured just before each prompt starts.
+# Used at end of prompt to find only what the agent changed during this prompt.
+var promptGitBaseline: seq[cstring] = @[]
 
 proc getSessionState(sessionId: cstring; state: var SessionState): bool =
   if sessionsById.hasKey(sessionId):
@@ -149,13 +180,30 @@ let handleWriteTextFile = functionAsJS(proc(params: JsObject): Future[JsObject] 
   try:
     # Capture the previous contents (best-effort) so diffs can render even when
     # ACP only provides the new text.
+    var prevContent = cstring""
     if not originalFileCache.hasKey(path):
       try:
-        originalFileCache[path] = await readFileUtf8(path)
+        prevContent = await readFileUtf8(path)
+        originalFileCache[path] = prevContent
       except:
         discard
+    else:
+      prevContent = originalFileCache[path]
+    # promptOriginalCache stores the FIRST pre-write content for each file per
+    # prompt so the end-of-session diff shows only what the agent changed, not
+    # the full file (critical for untracked files not in git HEAD).
+    if not promptOriginalCache.hasKey(path):
+      promptOriginalCache[path] = prevContent
 
     await writeFileUtf8(path, content)
+    # Track every path written so end-of-session diffs can cover them all.
+    var alreadyTracked = false
+    for tp in writeTrackedPaths:
+      if tp == path:
+        alreadyTracked = true
+        break
+    if not alreadyTracked:
+      writeTrackedPaths.add(path)
     # Notify renderer so open Monaco tabs can reload updated content.
     mainWindow.webContents.send("CODETRACER::reload-file", js{ "path": path })
     return js{ "ok": true }
@@ -239,36 +287,49 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
 
       if jsHasKey(updateObj, cstring"sessionUpdate"):
         let updateKind = updateObj[cstring"sessionUpdate"].to(cstring)
-        if updateKind == cstring"tool_call" and jsHasKey(updateObj, cstring"options"):
-          # Permission-like tool call: auto-allow the allow_always option when present.
-          try:
-            let opts = updateObj[cstring"options"].to(seq[JsObject])
-            var optionId = cstring""
-            for opt in opts:
-              if jsHasKey(opt, cstring"kind") and opt[cstring"kind"].to(cstring) == cstring"allow_always" and jsHasKey(opt, cstring"optionId"):
-                optionId = opt[cstring"optionId"].to(cstring)
-                break
-            if optionId.len == 0 and opts.len > 0 and jsHasKey(opts[0], cstring"optionId"):
-              optionId = opts[0][cstring"optionId"].to(cstring)
+        if updateKind == cstring"tool_call":
+          let toolCallId =
+            if jsHasKey(updateObj, cstring"toolCallId"):
+              updateObj[cstring"toolCallId"].to(cstring)
+            else:
+              cstring""
+          let toolTitle =
+            if jsHasKey(updateObj, cstring"title"):
+              updateObj[cstring"title"].to(cstring)
+            else:
+              cstring""
+          # Forward tool call info to the renderer so it can display it in real-time.
+          mainWindow.webContents.send("CODETRACER::acp-tool-call", js{
+            "sessionId": acpSessionId,
+            "clientSessionId": clientSessionId,
+            "messageId": state.currentMessageId,
+            "id": cstring("tool-" & $toolCallId),
+            "toolCallId": toolCallId,
+            "toolName": toolTitle
+          })
+          if jsHasKey(updateObj, cstring"options"):
+            # Permission-like tool call: auto-allow the allow_always option when present.
+            try:
+              let opts = updateObj[cstring"options"].to(seq[JsObject])
+              var optionId = cstring""
+              for opt in opts:
+                if jsHasKey(opt, cstring"kind") and opt[cstring"kind"].to(cstring) == cstring"allow_always" and jsHasKey(opt, cstring"optionId"):
+                  optionId = opt[cstring"optionId"].to(cstring)
+                  break
+              if optionId.len == 0 and opts.len > 0 and jsHasKey(opts[0], cstring"optionId"):
+                optionId = opts[0][cstring"optionId"].to(cstring)
 
-            if optionId.len > 0:
-              let toolCallId =
-                if jsHasKey(updateObj, cstring"toolCallId"):
-                  updateObj[cstring"toolCallId"].to(cstring)
-                else:
-                  cstring""
-              discard
-              # Respond by issuing a tool_call_update with status=approved to mirror agent expectations.
-              discard acpClient.extNotification(cstring"tool_permission", js{
-                "sessionId": acpSessionId,
-                "toolCallId": toolCallId,
-                "outcome": js{
-                  "outcome": cstring"selected",
-                  "optionId": optionId
-                }
-              })
-          except:
-            errorPrint cstring(fmt"[acp_ipc] auto-allow tool permission failed: {getCurrentExceptionMsg()}")
+              if optionId.len > 0:
+                discard acpClient.extNotification(cstring"tool_permission", js{
+                  "sessionId": acpSessionId,
+                  "toolCallId": toolCallId,
+                  "outcome": js{
+                    "outcome": cstring"selected",
+                    "optionId": optionId
+                  }
+                })
+            except:
+              errorPrint cstring(fmt"[acp_ipc] auto-allow tool permission failed: {getCurrentExceptionMsg()}")
         if updateKind == cstring"agent_message_chunk" and state.currentMessageId.len > 0 and
            jsHasKey(updateObj, cstring"content") and
            jsHasKey(updateObj[cstring"content"], cstring"text"):
@@ -310,6 +371,8 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
               path = rawInput[cstring"filePath"].to(cstring)
             elif jsHasKey(rawInput, cstring"filepath"):
               path = rawInput[cstring"filepath"].to(cstring)
+            elif jsHasKey(rawInput, cstring"path"):
+              path = rawInput[cstring"path"].to(cstring)
           # Fallbacks: newer payloads may carry the path/new text only in "content".
           if path.len == 0 and jsHasKey(updateObj, cstring"content"):
             try:
@@ -358,6 +421,13 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
             except:
               discard
 
+          # Snapshot the pre-modification original for the authoritative end-of-session diff.
+          # str_replace_editor and similar tools supply the real pre-modification content in
+          # rawOutput.filediff.original; saving it here ensures the end-of-prompt loop uses
+          # the correct baseline instead of falling back to an empty original.
+          if path.len > 0 and original.len > 0 and not promptOriginalCache.hasKey(path):
+            promptOriginalCache[path] = original
+
           # Log what we are about to forward (trim content to avoid huge console noise).
           let origPreview =
             block:
@@ -378,6 +448,36 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
               "original": original,
               "modified": modified
             })
+            # Track every path the agent touches for authoritative end-of-session diffs.
+            if not sessionTouchedPaths.hasKey(acpSessionId):
+              sessionTouchedPaths[acpSessionId] = @[]
+            var touched = sessionTouchedPaths[acpSessionId]
+            var alreadyTracked = false
+            for tp in touched:
+              if tp == path:
+                alreadyTracked = true
+                break
+            if not alreadyTracked:
+              touched.add(path)
+            sessionTouchedPaths[acpSessionId] = touched
+        if updateKind == cstring"tool_call_update":
+          let toolCallIdForUpdate =
+            if jsHasKey(updateObj, cstring"toolCallId"):
+              updateObj[cstring"toolCallId"].to(cstring)
+            else:
+              cstring""
+          let statusForUpdate =
+            if jsHasKey(updateObj, cstring"status"):
+              updateObj[cstring"status"].to(cstring)
+            else:
+              cstring"completed"
+          if toolCallIdForUpdate.len > 0:
+            mainWindow.webContents.send("CODETRACER::acp-tool-call-update", js{
+              "sessionId": acpSessionId,
+              "clientSessionId": clientSessionId,
+              "toolCallId": toolCallIdForUpdate,
+              "status": statusForUpdate
+            })
         if updateKind == cstring"tool_call_update":
           try:
             var path = cstring""
@@ -387,6 +487,8 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
                 path = rawIn[cstring"filepath"].to(cstring)
               elif jsHasKey(rawIn, cstring"filePath"):
                 path = rawIn[cstring"filePath"].to(cstring)
+              elif jsHasKey(rawIn, cstring"path"):
+                path = rawIn[cstring"path"].to(cstring)
 
             if path.len == 0 and jsHasKey(updateObj, cstring"content"):
               try:
@@ -411,6 +513,17 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
             if path.len > 0:
               mainWindow.webContents.send("CODETRACER::reload-file", js{ "path": path })
               mainWindow.webContents.send("CODETRACER::change-file", js{ "path": path })
+              # Track path for end-of-session diffs even when the streaming diff block
+              # couldn't find original/modified content (e.g. bash tool calls where the
+              # agent puts the path in rawInput but produces no structured filediff output).
+              if not sessionTouchedPaths.hasKey(acpSessionId):
+                sessionTouchedPaths[acpSessionId] = @[]
+              var touchedPaths = sessionTouchedPaths[acpSessionId]
+              var pathAlreadyTracked = false
+              for tp in touchedPaths:
+                if tp == path: pathAlreadyTracked = true; break
+              if not pathAlreadyTracked: touchedPaths.add(path)
+              sessionTouchedPaths[acpSessionId] = touchedPaths
           except:
             errorPrint cstring(fmt"[acp_ipc] tool_call_update reload/change-file notify failed: {getCurrentExceptionMsg()}")
   except:
@@ -513,8 +626,156 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
     "id": messageId
   })
 
+  # Snapshot all git-visible files (modified tracked + untracked) before the prompt starts.
+  # For files not yet in lastKnownContent: read and store their current content so the
+  # end-of-prompt comparison can detect bash modifications to ANY of them, not just
+  # previously-tracked files.  The baseline set is also used by git detection to
+  # identify truly brand-new files (created from scratch during the prompt).
+  promptGitBaseline = @[]
+  {.emit: """
+  (() => {
+    try {
+      const cp = require('child_process');
+      const path = require('path');
+      const cwd = process.cwd();
+      function gitLines(args) {
+        const r = cp.spawnSync('git', args, { encoding: 'utf8', timeout: 10000, cwd });
+        return (!r.error && r.status === 0 && r.stdout)
+          ? r.stdout.trim().split('\n').filter(Boolean) : [];
+      }
+      const paths = [...gitLines(['diff', '--name-only', 'HEAD']),
+                     ...gitLines(['ls-files', '--others', '--exclude-standard'])];
+      for (const p of paths) { `promptGitBaseline`.push(path.resolve(cwd, p)); }
+    } catch(e) {}
+  })();
+  """.}
+  # Read content of git-visible files not yet in lastKnownContent so we have a
+  # pre-prompt baseline for every file the agent might touch via bash.
+  for gitPath in promptGitBaseline:
+    if not lastKnownContent.hasKey(gitPath):
+      try:
+        let content = await readFileUtf8(gitPath)
+        lastKnownContent[gitPath] = content
+      except:
+        discard
+
   let promptResp = await acpClient.prompt(promptRequest(sessionId, text))
   let stopReason = stopReasonFrom(promptResp)
+
+  # Compute authoritative diffs for every file the agent touched during this
+  # session.  Merge paths from tool_call_update events and writeTextFile calls,
+  # then for each path compute original (pre-session git content) and modified
+  # (current file content) so the renderer gets accurate diffs even when the
+  # agent used bash/apply_patch/str_replace_editor instead of writeTextFile.
+  var allTouchedPaths: seq[cstring] = @[]
+  if sessionTouchedPaths.hasKey(sessionId):
+    allTouchedPaths = sessionTouchedPaths[sessionId]
+  for p in writeTrackedPaths:
+    var found = false
+    for tp in allTouchedPaths:
+      if tp == p:
+        found = true
+        break
+    if not found:
+      allTouchedPaths.add(p)
+  writeTrackedPaths = @[]
+  sessionTouchedPaths.del(sessionId)
+
+  # Always check previously-known files for bash-induced changes that primary
+  # tracking missed.  Run unconditionally so we catch files whether or not
+  # primary tracking already found some others in this prompt.
+  for prevPath, prevContent in lastKnownContent.pairs:
+    try:
+      let currentContent = await readFileUtf8(prevPath)
+      if currentContent != prevContent:
+        var alreadyTracked = false
+        for tp in allTouchedPaths:
+          if tp == prevPath: alreadyTracked = true; break
+        if not alreadyTracked:
+          allTouchedPaths.add(prevPath)
+          if not promptOriginalCache.hasKey(prevPath):
+            promptOriginalCache[prevPath] = prevContent
+    except:
+      discard
+
+  # Git-based detection: files modified or created during this prompt that
+  # weren't caught by primary tracking or lastKnownContent (e.g. brand-new
+  # files written for the first time via bash this prompt).
+  var gitCurrentPaths: seq[cstring] = @[]
+  {.emit: """
+  (() => {
+    try {
+      const cp = require('child_process');
+      const path = require('path');
+      const cwd = process.cwd();
+      function gitLines2(args) {
+        const r = cp.spawnSync('git', args, { encoding: 'utf8', timeout: 10000, cwd });
+        return (!r.error && r.status === 0 && r.stdout)
+          ? r.stdout.trim().split('\n').filter(Boolean) : [];
+      }
+      const paths = [...gitLines2(['diff', '--name-only', 'HEAD']),
+                     ...gitLines2(['ls-files', '--others', '--exclude-standard'])];
+      for (const p of paths) { `gitCurrentPaths`.push(path.resolve(cwd, p)); }
+    } catch(e) {}
+  })();
+  """.}
+  for gitPath in gitCurrentPaths:
+    # Skip files that were already changed before this prompt started.
+    var wasInBaseline = false
+    for bp in promptGitBaseline:
+      if bp == gitPath: wasInBaseline = true; break
+    if wasInBaseline: continue
+    # Skip files already in the tracked set.
+    var alreadyTracked = false
+    for tp in allTouchedPaths:
+      if tp == gitPath: alreadyTracked = true; break
+    if alreadyTracked: continue
+    allTouchedPaths.add(gitPath)
+    # Supply the pre-prompt original from git HEAD (empty for brand-new files).
+    if not promptOriginalCache.hasKey(gitPath):
+      let headContent = gitFileAtHead(gitPath)
+      if headContent.len > 0:
+        promptOriginalCache[gitPath] = headContent
+
+  if allTouchedPaths.len > 0:
+    # Tell the renderer to reset stale incremental diffs for this message before
+    # we send the fresh authoritative set.
+    mainWindow.webContents.send("CODETRACER::acp-clear-diffs", js{
+      "sessionId": sessionId,
+      "clientSessionId": clientSessionId,
+      "id": messageId
+    })
+    for filePath in allTouchedPaths:
+      try:
+        # Use the content snapshotted before the first write this prompt as the
+        # original, so the diff shows only what the agent changed — not the full
+        # file vs git HEAD (which breaks for untracked files).
+        var original = cstring""
+        if promptOriginalCache.hasKey(filePath):
+          original = promptOriginalCache[filePath]
+        var modified = cstring""
+        var fileExists = false
+        try:
+          modified = await readFileUtf8(filePath)
+          fileExists = true
+        except:
+          discard
+        # Send diff when file exists now (even empty new file) or had content before (deletion).
+        if fileExists or original.len > 0:
+          mainWindow.webContents.send("CODETRACER::acp-render-diff", js{
+            "sessionId": sessionId,
+            "clientSessionId": clientSessionId,
+            "id": messageId,
+            "path": filePath,
+            "original": original,
+            "modified": modified
+          })
+        # Always track file content (even empty) so subsequent prompts can detect further changes.
+        if fileExists:
+          lastKnownContent[filePath] = modified
+      except:
+        errorPrint cstring(fmt"[acp_ipc] end-of-session diff failed for {filePath}: {getCurrentExceptionMsg()}")
+  promptOriginalCache = initTable[cstring, cstring]()
 
   mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
     "sessionId": sessionId,

@@ -7,6 +7,7 @@ import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
   AgentActivityMessageEntry, AgentActivityMessageRole,
   AgentActivityDiffEntry, AgentActivityTerminalEntry,
+  AgentActivityToolCallEntry, AgentActivitySegment,
   aamrAgent, aamrUser
 from ../viewmodel/viewmodels/agent_activity_vm import
   AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
@@ -31,6 +32,7 @@ const PLACEHOLDER_MSG = "placeholder-msg"
 const TERMINAL_PREFIX = "acp-term-"
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
+proc cstringSlice(s: cstring; fromIdx: int): cstring {.importjs: "#.slice(#)".}
 
 proc createModel*(value, language: cstring): js
   {.importjs: "monaco.editor.createModel(#, #)".}
@@ -52,6 +54,10 @@ var agentActivityVMInstances*: JsAssoc[int, AgentActivityVM] =
   JsAssoc[int, AgentActivityVM]{}
 var agentActivityComponentRefs: JsAssoc[int, AgentActivityComponent] =
   JsAssoc[int, AgentActivityComponent]{}
+var msgSegmentStartOffset = JsAssoc[cstring, int]{}
+  ## Buffer byte offset where the current text segment began.
+  ## Updated each time a tool call arrives so subsequent text chunks show only
+  ## post-tool content rather than the full accumulated message buffer.
 var isoNimAgentActivityMountedIds {.used.}: JsAssoc[int, bool] =
   JsAssoc[int, bool]{}
 
@@ -155,7 +161,7 @@ proc ensureAgentMessage(self: AgentActivityComponent): seq[AgentMessage] =
 proc addAgentMessage(self: AgentActivityComponent, messageId: cstring, initialContent: cstring = cstring"", role: AgentMessageRole = AgentMessageAgent, canceled: bool = false) =
   if messageId notin self.messageOrder:
     try:
-      let message = AgentMessage(id: messageId, content: initialContent, role: role, canceled: canceled, isLoading: false, sessionDiffs: @[], createdAt: epochTime() * 1000.0)
+      let message = AgentMessage(id: messageId, content: initialContent, role: role, canceled: canceled, isLoading: false, sessionDiffs: @[], toolCalls: @[], segments: @[], thinkingEndedAt: 0.0, createdAt: epochTime() * 1000.0)
       var list = self.ensureAgentMessage()
       list.add(message)
       self.sessionMessageIds[self.sessionId] = list
@@ -173,11 +179,29 @@ proc updateAgentMessageContent(self: AgentActivityComponent, messageId: cstring,
   if canceled:
     message.canceled = true
 
+  # Track when the agent first produced output (end of "thinking" phase)
+  if content.len > 0 and message.thinkingEndedAt == 0.0:
+    message.thinkingEndedAt = epochTime() * 1000.0
+
+  # Keep segments in sync: update or create the last text segment.
+  # content is the full accumulated buffer; slice from segOffset so text that
+  # arrived before the most recent tool call is not repeated in later segments.
+  if content.len > 0 and role == AgentMessageAgent:
+    let segOffset = if msgSegmentStartOffset.hasKey(messageId): msgSegmentStartOffset[messageId] else: 0
+    let segContent = if segOffset > 0: cstringSlice(content, segOffset) else: content
+    if message.segments.len > 0 and not message.segments[^1].isToolCall:
+      message.segments[^1].content = segContent
+    else:
+      message.segments.add(AgentSegment(isToolCall: false, content: segContent))
+
   console.log cstring(fmt"[agent-activity] storing message sessionKey={self.currentSessionKey()} messageId={messageId} role={role} canceled={canceled} content={message.content} append={append}")
   self.requestAgentActivityPanelRefresh()
 
 proc bufferMessageChunk(self: AgentActivityComponent, messageId: cstring, content: cstring) =
   ## Accumulate streamed content for a message id until the stop event.
+  ## Chunks are concatenated directly; the LLM's token stream already carries
+  ## correct whitespace at word/token boundaries, so inserting a separator would
+  ## add spurious spaces inside words or between Unicode escape sequences.
   var existing = cstring""
   if self.messageBuffers.hasKey(messageId):
     existing = self.messageBuffers[messageId]
@@ -189,6 +213,7 @@ proc flushMessageBuffer(self: AgentActivityComponent, messageId: cstring, role: 
   if self.messageBuffers.hasKey(messageId):
     content = self.messageBuffers[messageId]
   self.messageBuffers.del(messageId)
+  msgSegmentStartOffset.del(messageId)
   console.log cstring(fmt"[agent-activity] flush sessionKey={self.currentSessionKey()} componentId={self.id} messageId={messageId} len={content.len} canceled={canceled}")
   self.updateAgentMessageContent(messageId, content, false, role, canceled)
 
@@ -331,10 +356,32 @@ proc legacyDiffToVm(diff: DiffPreview): AgentActivityDiffEntry =
     modified: safeStr(diff.modified),
   )
 
+proc legacyToolCallToVm(tc: ToolCallEntry): AgentActivityToolCallEntry =
+  AgentActivityToolCallEntry(
+    toolCallId: safeStr(tc.toolCallId),
+    name: safeStr(tc.name),
+    status: safeStr(tc.status),
+  )
+
+proc legacySegmentToVm(seg: AgentSegment): AgentActivitySegment =
+  AgentActivitySegment(
+    isToolCall: seg.isToolCall,
+    content: safeStr(seg.content),
+    toolCallId: safeStr(seg.toolCallId),
+    toolName: safeStr(seg.toolName),
+    toolStatus: safeStr(seg.toolStatus),
+  )
+
 proc legacyMessageToVm(message: AgentMessage): AgentActivityMessageEntry =
   var diffs: seq[AgentActivityDiffEntry] = @[]
   for diff in message.sessionDiffs:
     diffs.add(legacyDiffToVm(diff))
+  var toolCalls: seq[AgentActivityToolCallEntry] = @[]
+  for tc in message.toolCalls:
+    toolCalls.add(legacyToolCallToVm(tc))
+  var segments: seq[AgentActivitySegment] = @[]
+  for seg in message.segments:
+    segments.add(legacySegmentToVm(seg))
   AgentActivityMessageEntry(
     id: safeStr(message.id),
     content: safeStr(message.content),
@@ -342,6 +389,9 @@ proc legacyMessageToVm(message: AgentMessage): AgentActivityMessageEntry =
     canceled: message.canceled,
     isLoading: message.isLoading,
     diffs: diffs,
+    toolCalls: toolCalls,
+    segments: segments,
+    thinkingEndedAt: message.thinkingEndedAt,
     createdAt: message.createdAt,
     duration: message.duration,
   )
@@ -423,10 +473,11 @@ proc ensureSessionMessageList(self: AgentActivityComponent, sessionKey: cstring)
     self.sessionMessageIds[sessionKey] = @[]
 
 proc addDiffPreview(self: AgentMessage, path, original, modified: cstring) =
-  var lst = self.sessionDiffs
-  if self.sessionDiffs.len() == 0:
-    lst.add(DiffPreview(path: path, original: original, modified: modified))
-    self.sessionDiffs.add(lst)
+  for i in 0 ..< self.sessionDiffs.len:
+    if self.sessionDiffs[i].path == path:
+      self.sessionDiffs[i].modified = modified
+      return
+  self.sessionDiffs.add(DiffPreview(id: self.sessionDiffs.len, path: path, original: original, modified: modified))
 
 proc addMessageToSession(self: AgentActivityComponent, sessionKey, messageId: cstring) =
   self.ensureSessionMessageList(sessionKey)
@@ -791,11 +842,23 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     return
 
   if hasContent and not isFinal:
-    let previewStr = $content
-    let preview = previewStr
-    console.log cstring(fmt"[agent-activity] chunk sessionId={sessionId} componentId={self.id} messageId={messageId} len={content.len} content={preview}")
+    console.log cstring(fmt"[agent-activity] chunk sessionId={sessionId} componentId={self.id} messageId={messageId} len={content.len}")
+    # Drop the placeholder immediately so only one "Thinking" block is shown
+    if self.sessionMessageIds.hasKey(self.sessionId):
+      self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
+      self.sessionMessageIds[self.sessionId] = self.sessionMessageIds[self.sessionId].filterIt(it.id != PLACEHOLDER_MSG)
     self.bufferMessageChunk(messageId, content)
     self.activeAgentMessageId = messageId
+    # Show accumulated buffer in real-time so the user sees text as it streams in
+    let buffered = self.messageBuffers[messageId]
+    self.updateAgentMessageContent(messageId, buffered, false, AgentMessageAgent, false)
+    # Ensure isLoading=true is propagated to the actual message (addAgentMessage
+    # initialises it false; the placeholder carried it but is now gone)
+    if self.sessionMessageIds.hasKey(self.sessionId):
+      for msg in self.sessionMessageIds[self.sessionId]:
+        if msg.id == messageId:
+          msg.isLoading = true
+          break
     return
 
   let appendFlag = messageId in self.messageOrder and not isFinal and hasContent
@@ -892,10 +955,124 @@ proc onAcpPromptStart*(sender: js, response: JsObject) {.async.} =
   if jsHasKey(response, cstring"id"):
     self.activeAgentMessageId = cast[cstring](response[cstring"id"])
 
+proc onAcpToolCall*(sender: js, response: JsObject) {.async.} =
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let self = componentBySessionId(sessionId)
+  if self.isNil:
+    return
+  let toolName =
+    if jsHasKey(response, cstring"toolName"):
+      response[cstring"toolName"].to(cstring)
+    else:
+      cstring""
+  if toolName.len == 0:
+    return
+  let toolCallId =
+    if jsHasKey(response, cstring"toolCallId"):
+      response[cstring"toolCallId"].to(cstring)
+    else:
+      cstring""
+  # Add the tool call to the current active agent message (not as a new message)
+  if self.sessionMessageIds.hasKey(self.sessionId) and
+     self.sessionMessageIds[self.sessionId].len > 0:
+    let msgs = self.sessionMessageIds[self.sessionId]
+    # Find the last non-user message to attach this tool call to
+    for i in countdown(msgs.len - 1, 0):
+      if msgs[i].role == AgentMessageAgent:
+        msgs[i].toolCalls.add(ToolCallEntry(toolCallId: toolCallId, name: toolName, status: cstring"in_progress"))
+        # Also record a tool segment in chronological position
+        msgs[i].segments.add(AgentSegment(
+          isToolCall: true,
+          toolCallId: toolCallId,
+          toolName: toolName,
+          toolStatus: cstring"in_progress"))
+        # A tool call also marks the end of the "thinking" phase
+        if msgs[i].thinkingEndedAt == 0.0:
+          msgs[i].thinkingEndedAt = epochTime() * 1000.0
+        break
+  # Record where in the accumulated buffer the NEXT text segment will start,
+  # so subsequent text chunks show only the post-tool content.
+  let activeId = self.activeAgentMessageId
+  if activeId.len > 0 and self.messageBuffers.hasKey(activeId):
+    msgSegmentStartOffset[activeId] = self.messageBuffers[activeId].len
+  self.requestAgentActivityPanelRefresh()
+
+proc onAcpToolCallUpdate*(sender: js, response: JsObject) {.async.} =
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let self = componentBySessionId(sessionId)
+  if self.isNil:
+    return
+  let toolCallId =
+    if jsHasKey(response, cstring"toolCallId"):
+      response[cstring"toolCallId"].to(cstring)
+    else:
+      cstring""
+  let status =
+    if jsHasKey(response, cstring"status"):
+      response[cstring"status"].to(cstring)
+    else:
+      cstring"completed"
+  if toolCallId.len > 0 and self.sessionMessageIds.hasKey(self.sessionId):
+    block found:
+      for msg in self.sessionMessageIds[self.sessionId]:
+        for tc in msg.toolCalls:
+          if tc.toolCallId == toolCallId:
+            tc.status = status
+            break found
+    # Also update the matching tool segment
+    block foundSeg:
+      for msg in self.sessionMessageIds[self.sessionId]:
+        for seg in msg.segments:
+          if seg.isToolCall and seg.toolCallId == toolCallId:
+            seg.toolStatus = status
+            break foundSeg
+  self.requestAgentActivityPanelRefresh()
+
+proc onAcpClearDiffs*(sender: js, response: JsObject) {.async.} =
+  let sessionId =
+    if jsHasKey(response, cstring"sessionId"):
+      response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let targetId =
+    if jsHasKey(response, cstring"id"):
+      response[cstring"id"].to(cstring)
+    else:
+      cstring""
+  let self = componentBySessionId(sessionId)
+  if self.isNil:
+    return
+  self.ensureSessionMessageList(sessionId)
+  let msgs = self.sessionMessageIds[sessionId]
+  if msgs.len > 0:
+    var cleared = false
+    if targetId.len > 0:
+      for msg in msgs:
+        if msg.id == targetId:
+          msg.sessionDiffs = @[]
+          cleared = true
+          break
+    if not cleared:
+      msgs[^1].sessionDiffs = @[]
+  self.requestAgentActivityPanelRefresh()
+
 proc onAcpRenderDiff*(sender: js, response: JsObject) {.async.} =
   let sessionId =
     if jsHasKey(response, cstring"sessionId"):
       response[cstring"sessionId"].to(cstring)
+    else:
+      cstring""
+  let targetId =
+    if jsHasKey(response, cstring"id"):
+      response[cstring"id"].to(cstring)
     else:
       cstring""
   let self = componentBySessionId(sessionId)
@@ -918,10 +1095,22 @@ proc onAcpRenderDiff*(sender: js, response: JsObject) {.async.} =
       cstring""
   if original.len == 0 and modified.len == 0:
     return
-  echo "TRYING TO ADD A DIFF"
   self.ensureSessionMessageList(sessionId)
-  self.sessionMessageIds[sessionId][^1].addDiffPreview(path, original, modified)
-  echo "NEW: ", self.sessionMessageIds[sessionId][^1].sessionDiffs.len()
+  if self.sessionMessageIds[sessionId].len == 0:
+    var list = self.sessionMessageIds[sessionId]
+    list.add(AgentMessage(id: cstring"diff-placeholder", sessionDiffs: @[], toolCalls: @[], segments: @[]))
+    self.sessionMessageIds[sessionId] = list
+  # Route to the specific message by id; fall back to the last message so the
+  # placeholder-based path (no streaming chunks yet) still works correctly.
+  var target: AgentMessage = nil
+  if targetId.len > 0:
+    for msg in self.sessionMessageIds[sessionId]:
+      if msg.id == targetId:
+        target = msg
+        break
+  if target.isNil:
+    target = self.sessionMessageIds[sessionId][^1]
+  target.addDiffPreview(path, original, modified)
   self.requestAgentActivityPanelRefresh()
 
 proc onAcpSessionReady*(sender: js, response: JsObject) {.async.} =

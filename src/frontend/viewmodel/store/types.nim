@@ -1098,6 +1098,19 @@ type
     original*: string
     modified*: string
 
+  AgentActivityToolCallEntry* = object
+    toolCallId*: string
+    name*: string
+    status*: string  # "in_progress", "completed", "failed"
+
+  AgentActivitySegment* = object
+    ## VM mirror of AgentSegment: one ordered unit (text block or tool call).
+    isToolCall*: bool
+    content*: string
+    toolCallId*: string
+    toolName*: string
+    toolStatus*: string
+
   AgentActivityMessageEntry* = object
     id*: string
     content*: string
@@ -1105,6 +1118,9 @@ type
     canceled*: bool
     isLoading*: bool
     diffs*: seq[AgentActivityDiffEntry]
+    toolCalls*: seq[AgentActivityToolCallEntry]
+    segments*: seq[AgentActivitySegment]
+    thinkingEndedAt*: float
     toolName*: string
     createdAt*: float
     duration*: float
@@ -1325,6 +1341,18 @@ proc `==`*(a, b: AgentActivityDiffEntry): bool {.noSideEffect.} =
     a.original == b.original and
     a.modified == b.modified
 
+proc `==`*(a, b: AgentActivityToolCallEntry): bool {.noSideEffect.} =
+  a.toolCallId == b.toolCallId and
+    a.name == b.name and
+    a.status == b.status
+
+proc `==`*(a, b: AgentActivitySegment): bool {.noSideEffect.} =
+  a.isToolCall == b.isToolCall and
+    a.content == b.content and
+    a.toolCallId == b.toolCallId and
+    a.toolName == b.toolName and
+    a.toolStatus == b.toolStatus
+
 proc `==`*(a, b: AgentActivityMessageEntry): bool {.noSideEffect.} =
   a.id == b.id and
     a.content == b.content and
@@ -1332,6 +1360,9 @@ proc `==`*(a, b: AgentActivityMessageEntry): bool {.noSideEffect.} =
     a.canceled == b.canceled and
     a.isLoading == b.isLoading and
     a.diffs == b.diffs and
+    a.toolCalls == b.toolCalls and
+    a.segments == b.segments and
+    a.thinkingEndedAt == b.thinkingEndedAt and
     a.toolName == b.toolName and
     a.toolCallId == b.toolCallId and
     a.status == b.status
