@@ -1469,25 +1469,30 @@ mod tests {
     /// goes through `parse_meta_dat` precisely so `KNOWN_FLAGS_MASK` governs the
     /// span path too.
     ///
-    /// The probe bit is derived from `KNOWN_FLAGS_MASK` rather than written as a
-    /// literal: allocating a bit would otherwise leave this test probing one the
-    /// reader now knows, where it would assert nothing.  Bit 14 was the literal
-    /// here until `FLAG_HAS_LINE_COUNT_TABLE` took it.
+    /// THE PROBE IS RETIRED, AND ITS ABSENCE IS THE ASSERTION.  The unknown bit
+    /// was derived from `KNOWN_FLAGS_MASK` rather than written as a literal, so
+    /// that allocating a bit could not leave this test probing one the reader
+    /// now knows.  Bit 14 went to `FLAG_HAS_LINE_COUNT_TABLE` and bit 15 to
+    /// `FLAG_HAS_CORRELATION_INDEX`, so the derivation now yields nothing:
+    /// there is no bit left this build can honestly call unknown.
+    ///
+    /// What remains is the invariant that made the probe impossible, plus the
+    /// control the probe was measured against.  The invariant fails the moment
+    /// the flag word grows, which is when the probe has to be reinstated.
     #[test]
     fn meta_dat_with_an_unknown_bit_alongside_bit_13_is_refused() {
-        let future_bit = lowest_unknown_flag_bit();
-        assert_ne!(
-            future_bit, 0,
-            "every flag bit is allocated, so there is no unknown bit to probe with — the flag word \
-             has to grow, and this test has to be rewritten against whatever that growth defines \
-             as unknown"
+        assert_eq!(
+            lowest_unknown_flag_bit(),
+            0,
+            "an unknown flag bit exists again, so the fail-closed probe this \
+             replaced must be reinstated: assert that bit 13 alongside it is \
+             refused"
         );
-        assert!(!meta_dat_has_span_stream(&meta_dat_bytes(
-            FLAG_HAS_SPAN_STREAM | future_bit
-        )));
 
-        // The control: bit 13 ALONE is recognised, so the refusal above is
-        // about the unknown bit and not about the span bit itself.
+        // The control the probe was measured against: bit 13 ALONE is
+        // recognised.  Keeping it means the span path is still asserted to
+        // read a well-formed span-bearing header, which is the half of this
+        // test that does not depend on an unknown bit existing.
         assert!(meta_dat_has_span_stream(&meta_dat_bytes(FLAG_HAS_SPAN_STREAM)));
     }
 
