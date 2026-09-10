@@ -73,7 +73,34 @@ pub const META_DAT_VERSION: u16 = 4;
 /// `ctfs_trace_reader::meta_dat::SUPPORTED_VERSIONS` has the arithmetic).
 /// Reporting on a recording that no reader in this repository can open
 /// is a worse answer than saying it must be re-recorded.
-pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[4];
+///
+/// **GDH-M2 (2026-09-10) widened it to `&[4, 5]`.**  v5 is not a different
+/// meaning for the same bytes; it is a header with one EXTRA word in it —
+/// `[4] flags_ext u32 LE`, inserted after the u16 flags — and the version
+/// field is what says the word is there.  A writer emits v5 only when an
+/// extended flag is actually set, so a recording with no reload in it stays
+/// at [`META_DAT_VERSION`] and is byte-identical to one produced before the
+/// word existed.  A reader that did not know v5 would refuse such a
+/// container outright, which is why reader support ships before any writer
+/// sets an extended flag.
+pub const SUPPORTED_META_DAT_VERSIONS: &[u16] = &[4, META_DAT_VERSION_EXTENDED_FLAGS];
+
+/// GDH-M2 — the schema version a container carries when at least one
+/// EXTENDED flag is set.  Must match the Nim writer's `meta_dat.nim`
+/// `MetaDatVersionExtendedFlags`.
+pub const META_DAT_VERSION_EXTENDED_FLAGS: u16 = 5;
+
+/// Extended flag bit 0 (global bit 16) — the execution stream may contain
+/// step-event tag `0x08` (`TagSourceReload`), the source-version transition
+/// marker of a GDScript hot reload.  Present only at schema version
+/// [`META_DAT_VERSION_EXTENDED_FLAGS`].
+pub const FLAG_EXT_HAS_SOURCE_RELOAD: u32 = 1 << 0;
+
+/// Bitmask of all EXTENDED flag bits this implementation understands.  Any
+/// bit outside it is rejected, exactly as `KNOWN_FLAGS_MASK` does for the
+/// u16: validating one word and not the other would let a container declare
+/// a stream shape this reader cannot decode.
+const KNOWN_EXT_FLAGS_MASK: u32 = FLAG_EXT_HAS_SOURCE_RELOAD;
 
 // The canonical flag list lives in
 // `src/db-backend/src/ctfs_trace_reader/meta_dat.rs` (and mirrors the Nim
@@ -217,6 +244,13 @@ pub enum MetaDatError {
         flags: u16,
         unknown_bits: u16,
     },
+    /// GDH-M2 — one or more EXTENDED flag bits (`flags_ext`, schema version
+    /// 5) were set that this reader does not know.  Same contract as
+    /// `UnknownFlags`: the writer is newer than this reader.
+    UnknownExtendedFlags {
+        ext_flags: u32,
+        unknown_bits: u32,
+    },
     VarintEof,
     VarintTooLong,
     StringEof {
@@ -253,6 +287,10 @@ impl fmt::Display for MetaDatError {
             } => write!(
                 f,
                 "meta.dat: unknown flag bits set (flags=0x{flags:04x}, unknown=0x{unknown_bits:04x})",
+            ),
+            MetaDatError::UnknownExtendedFlags { ext_flags, unknown_bits } => write!(
+                f,
+                "meta.dat: unknown extended flag bits set (flags_ext=0x{ext_flags:08x}, unknown=0x{unknown_bits:08x})",
             ),
             MetaDatError::VarintEof => {
                 write!(f, "meta.dat: unexpected end of input while reading varint")
@@ -376,8 +414,33 @@ pub fn parse_meta_dat(input: &[u8]) -> Result<MetaDat, MetaDatError> {
             unknown_bits,
         });
     }
+    // GDH-M2: the extended flag word, present at schema version 5 only.  It
+    // is validated and its width consumed; it is deliberately not surfaced
+    // as a field, because nothing in this crate reads the marker yet and a
+    // public field would only propagate a constant 0 through every
+    // `MetaDat` literal.  `body_start` moves with it — reading the body
+    // from a fixed 8 would decode the ext word as the recording id's length
+    // prefix, and this parser is strict about trailing bytes, so the
+    // failure would surface as a confusing `TrailingBytes` rather than as
+    // anything about the version.
+    let body_start = if version == META_DAT_VERSION_EXTENDED_FLAGS {
+        if input.len() < 12 {
+            return Err(MetaDatError::TooShort { got: input.len() });
+        }
+        let ext = u32::from_le_bytes([input[8], input[9], input[10], input[11]]);
+        let unknown_ext = ext & !KNOWN_EXT_FLAGS_MASK;
+        if unknown_ext != 0 {
+            return Err(MetaDatError::UnknownExtendedFlags {
+                ext_flags: ext,
+                unknown_bits: unknown_ext,
+            });
+        }
+        12usize
+    } else {
+        8usize
+    };
 
-    let mut pos = 8usize;
+    let mut pos = body_start;
     // v3 (M-REC-1) prepends a canonical UUIDv7 `recording_id` directly
     // after the flags word.  Pre-1.0, the parser only accepts v3, so
     // this read is unconditional — there is no v2-shaped layout to
@@ -889,6 +952,74 @@ pub fn write_minimal_ctfs(path: &Path, files: &[(&str, &[u8])]) -> std::io::Resu
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    /// A REAL schema-version-5 `meta.dat`, produced by the canonical Nim
+    /// writer (`codetracer-trace-format-nim`) recording one file that is
+    /// reloaded once, and copied out of the container byte for byte.
+    ///
+    /// Captured rather than hand-built on purpose: the v5 branches here exist
+    /// so a container from THAT writer parses in THIS crate, and a fixture
+    /// this crate builds itself could only show its own serializer and its
+    /// own parser agreeing — which they would even if both put the
+    /// `flags_ext` word in the wrong place. These are the other
+    /// implementation's bytes, so a layout disagreement fails loudly.
+    ///
+    ///   [0..4)  "CTMD"       [4..6)  version = 5
+    ///   [6..8)  flags = 0x4f00    [8..12) flags_ext = 1 (source reload)
+    ///   [12..]  body — paths has TWO entries for ONE string, the reload.
+    const NIM_WRITTEN_V5_META_DAT: &[u8] = &[
+        0x43, 0x54, 0x4D, 0x44, 0x05, 0x00, 0x00, 0x4F, 0x01, 0x00, 0x00, 0x00, 0x24, 0x30, 0x31,
+        0x38, 0x39, 0x30, 0x30, 0x30, 0x30, 0x2D, 0x30, 0x30, 0x30, 0x30, 0x2D, 0x37, 0x30, 0x30,
+        0x30, 0x2D, 0x38, 0x30, 0x30, 0x30, 0x2D, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30,
+        0x39, 0x31, 0x64, 0x39, 0x0B, 0x72, 0x65, 0x76, 0x5F, 0x70, 0x72, 0x6F, 0x64, 0x75, 0x63,
+        0x65, 0x00, 0x00, 0x00, 0x02, 0x12, 0x72, 0x65, 0x73, 0x3A, 0x2F, 0x2F, 0x72, 0x65, 0x76,
+        0x2F, 0x70, 0x72, 0x6F, 0x62, 0x65, 0x2E, 0x67, 0x64, 0x12, 0x72, 0x65, 0x73, 0x3A, 0x2F,
+        0x2F, 0x72, 0x65, 0x76, 0x2F, 0x70, 0x72, 0x6F, 0x62, 0x65, 0x2E, 0x67, 0x64,
+    ];
+
+    #[test]
+    fn a_v5_header_from_the_nim_writer_parses_here() {
+        // Anti-vacuity: prove the fixture is v5 first. A v4 fixture would
+        // take the old path and satisfy everything below while saying
+        // nothing about the word this test exists for.
+        assert_eq!(
+            u16::from_le_bytes([NIM_WRITTEN_V5_META_DAT[4], NIM_WRITTEN_V5_META_DAT[5]]),
+            META_DAT_VERSION_EXTENDED_FLAGS,
+            "fixture is not a v5 header"
+        );
+
+        let m = parse_meta_dat(NIM_WRITTEN_V5_META_DAT).expect("a v5 header must parse");
+        assert_eq!(m.version, META_DAT_VERSION_EXTENDED_FLAGS);
+        assert_eq!(m.program, "rev_produce");
+        assert_eq!(m.recording_id, "01890000-0000-7000-8000-0000000091d9");
+        // TWO path entries for ONE path string is the reload. Reaching it
+        // coherently proves the body started at offset 12; a four-byte error
+        // would desynchronise every string after the header.
+        assert_eq!(m.paths, vec!["res://rev/probe.gd", "res://rev/probe.gd"]);
+        // The u16 flags are still at offset 6 — the new word went in AFTER
+        // them, which is what leaves every offset-6 reader unaffected.
+        assert_eq!(m.flags, u16::from_le_bytes([0x00, 0x4f]));
+    }
+
+    #[test]
+    fn a_v5_header_with_an_unknown_ext_bit_is_refused() {
+        let mut buf = NIM_WRITTEN_V5_META_DAT.to_vec();
+        buf[9] = 0x01; // ext bit 8 — no constant in this crate claims it
+        match parse_meta_dat(&buf) {
+            Err(MetaDatError::UnknownExtendedFlags { .. }) => {}
+            other => panic!("expected UnknownExtendedFlags, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_v5_header_truncated_before_its_ext_word_is_refused() {
+        // Eleven bytes: past the u16 flags, one short of the ext word.
+        let buf = NIM_WRITTEN_V5_META_DAT[..11].to_vec();
+        assert!(
+            parse_meta_dat(&buf).is_err(),
+            "a v5 header too short to hold its flags_ext word must be refused"
+        );
+    }
 
     const TEST_RECORDING_ID: &str = "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb";
 

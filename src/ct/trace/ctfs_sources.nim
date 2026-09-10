@@ -14,6 +14,29 @@ const
     ## against a stale literal would answer such a container instead of
     ## refusing it.
 
+  MetaDatVersionExtendedFlags* = 5'u16
+    ## GDH-M2 (2026-09-10) — the schema version a container carries when at
+    ## least one EXTENDED flag is set: a v4 header with a
+    ## ``[4] flags_ext u32 LE`` word inserted after the u16 flags.
+    ##
+    ## Accepted ALONGSIDE ``SupportedMetaDatVersion`` rather than replacing
+    ## it, and that is not a relaxation of the paragraph below.  v5 is not a
+    ## different meaning for the same bytes; it is a header with one extra
+    ## word in it, and the version field is what says the word is there —
+    ## the same discipline, applied to a header shape instead of to an
+    ## address packing.  A writer emits v5 only when an extended flag is
+    ## actually set, so a recording with no reload stays at v4 and is
+    ## byte-identical to one produced before the word existed.
+
+  FlagExtHasSourceReload* = 1'u32
+    ## Extended flag bit 0 (global bit 16) — the execution stream may
+    ## contain step-event tag ``0x08`` (``TagSourceReload``).
+
+  KnownExtFlags* = FlagExtHasSourceReload
+    ## Every ``flags_ext`` bit this reader understands.  A v5 header
+    ## carrying a bit outside it is refused, the same strict-rejection
+    ## contract the u16's known-bits mask enforces elsewhere.
+
   SupportedMetaDatVersion* = 4'u16
     ## The one ``meta.dat`` schema version this reader accepts.
     ##
@@ -512,7 +535,8 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
     if byte(data[i].ord) != Magic[i]:
       raise newException(ValueError, "meta.dat: bad magic")
   let version = uint16(data[4].ord) or (uint16(data[5].ord) shl 8)
-  if version != SupportedMetaDatVersion:
+  if version != SupportedMetaDatVersion and
+     version != MetaDatVersionExtendedFlags:
     let detail =
       if version <= LastShiftedGlobalIndexVersion:
         " — its step addresses use the superseded global_position_index " &
@@ -522,10 +546,49 @@ proc parseCtfsMetaDat(data: string): CtfsMetaDat =
         " — this reader predates that version"
     raise newException(ValueError,
       "meta.dat: unsupported version " & $version &
-      " (expected " & $SupportedMetaDatVersion & ")" & detail)
+      " (expected " & $SupportedMetaDatVersion & " or " &
+      $MetaDatVersionExtendedFlags & ")" & detail)
   let flags = uint16(data[6].ord) or (uint16(data[7].ord) shl 8)
 
-  var pos = 8
+  # GDH-M2: schema version 5 inserts a ``[4] flags_ext u32 LE`` word after
+  # the u16 flags.  The word is validated and its width consumed; nothing in
+  # this module reads its bits, but the BODY OFFSET moves with it, and a
+  # parser that read the body from a fixed 8 would decode the ext word as
+  # the recording id's length prefix — which surfaces as "invalid
+  # recording_id" rather than as anything about the version.
+  var bodyStart = 8
+  if version == MetaDatVersionExtendedFlags:
+    if data.len < 12:
+      raise newException(ValueError,
+        "meta.dat: schema version " & $MetaDatVersionExtendedFlags &
+        " declares a flags_ext word but the header is only " & $data.len &
+        " bytes")
+    let flagsExt = uint32(data[8].ord) or (uint32(data[9].ord) shl 8) or
+      (uint32(data[10].ord) shl 16) or (uint32(data[11].ord) shl 24)
+    let unknownExt = flagsExt and (not KnownExtFlags)
+    if unknownExt != 0:
+      raise newException(ValueError,
+        "meta.dat: unknown extended flag bits set: 0x" &
+        toHex(BiggestInt(unknownExt), 8))
+    if flagsExt == 0:
+      # The canonical reader (``meta_dat.nim``) refuses this shape BY NAME
+      # and this one must agree, or the two disagree about what a valid v5
+      # container is — and "which reader opened it" becomes part of the
+      # format. A v5 header with an all-zero extended word is a container
+      # that spent a schema version on nothing, which is precisely what a
+      # writer that bumped the version unconditionally produces; accepting
+      # it would make "no reload" and "reload machinery present but
+      # silent" indistinguishable at the byte level.
+      raise newException(ValueError,
+        "meta.dat: schema version " & $MetaDatVersionExtendedFlags &
+        " with an all-zero flags_ext word. Version " &
+        $MetaDatVersionExtendedFlags & " exists to carry extended flags; " &
+        "a container with none must be written at version " &
+        $SupportedMetaDatVersion & " so that it stays byte-identical to " &
+        "one produced before the word existed")
+    bodyStart = 12
+
+  var pos = bodyStart
   let recordingId = readVarStringFromMetaDat(data, pos)
   if recordingId.len != 36:
     raise newException(ValueError,
