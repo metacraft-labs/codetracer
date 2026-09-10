@@ -32,6 +32,7 @@
 //!           bit 11      — FLAG_HAS_IO_EVENT_STREAM (M23c — dedicated events.dat)
 //!           bit 12      — FLAG_HAS_INTERNING_TABLES (M23d — binary varint interning tables)
 //!           bit 13      — FLAG_HAS_SPAN_STREAM (RS-M1 — spans.dat/spans.idx/spantype.ns)
+//!           bit 14      — FLAG_HAS_CORRELATION_INDEX (WTCI — corrmark.ns + markers.dat/.off)
 //!           bits 14..=15 — reserved (must be 0; readers reject if set)
 //! varint-prefixed UTF-8 string : recording_id        (M-REC-1; v3+)
 //! varint-prefixed UTF-8 string : program
@@ -268,6 +269,27 @@ pub const FLAG_HAS_INTERNING_TABLES: u16 = 1 << 12;
 /// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 13.
 pub const FLAG_HAS_SPAN_STREAM: u16 = 1 << 13;
 
+/// Flag bit 14 — `FLAG_HAS_CORRELATION_INDEX` (WTCI).  When set the container
+/// ships `corrmark.ns`, the record-time B-tree index of the distributed-trace
+/// spans and boundary crossings the recording covers, together with the
+/// `markers.dat` / `markers.off` interning table its boundary labels resolve
+/// through.
+///
+/// **A hint, not a gate.**  Like bits 8..13 it says only what the container
+/// carries; the root file-entry array remains the authority, and it is the
+/// entry's presence — not this bit — that distinguishes "never indexed" from
+/// "indexed and covering nothing" (see
+/// `codetracer-specs/Testing/CTFS-Correlation-Marker-Contract.md` §9).
+///
+/// Recognising it here is nonetheless load-bearing: [`KNOWN_FLAGS_MASK`]
+/// refuses any container carrying an unknown bit outright, so without this
+/// constant a reader would reject every marker-bearing recording rather than
+/// ignore an index it has no use for.
+///
+/// Must match `codetracer_trace_writer::meta_dat::FLAG_HAS_CORRELATION_INDEX`
+/// (Rust writer) and the canonical Nim writer's `meta_dat.nim` bit 14.
+pub const FLAG_HAS_CORRELATION_INDEX: u16 = 1 << 14;
+
 /// Bitmask of all flag bits this implementation understands.
 ///
 /// Any bit outside this mask is rejected by [`parse_meta_dat`] so future
@@ -285,7 +307,8 @@ const KNOWN_FLAGS_MASK: u16 = FLAG_HAS_MCR_FIELDS
     | FLAG_HAS_VALUE_STREAM
     | FLAG_HAS_IO_EVENT_STREAM
     | FLAG_HAS_INTERNING_TABLES
-    | FLAG_HAS_SPAN_STREAM;
+    | FLAG_HAS_SPAN_STREAM
+    | FLAG_HAS_CORRELATION_INDEX;
 
 // ── Public types ────────────────────────────────────────────────────────
 
@@ -1214,29 +1237,37 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag_bits() {
-        // Bit 14 is the lowest still-reserved flag after M17a/M17b allocated
-        // bit 8 (FLAG_HAS_CALL_STREAM), M23a allocated bit 9
-        // (FLAG_HAS_STEP_STREAM), M23b allocated bit 10
-        // (FLAG_HAS_VALUE_STREAM), M23c allocated bit 11
-        // (FLAG_HAS_IO_EVENT_STREAM), M23d allocated bit 12
-        // (FLAG_HAS_INTERNING_TABLES) and RS-M1 allocated bit 13
-        // (FLAG_HAS_SPAN_STREAM).  Bits 0..=13 are FLAG_HAS_MCR_FIELDS /
-        // FLAG_HAS_REPLAY_LAUNCH_FIELDS / FLAG_HAS_LAYOUT_SNAPSHOT /
-        // FLAG_HAS_TRACE_FILTER_PROVENANCE / FLAG_HAS_COLUMN_AWARE_STEPS /
-        // FLAG_HAS_ALTERNATE_SOURCE_VIEWS / FLAG_SUPPORTS_COLUMN_BREAKPOINTS /
-        // FLAG_SUPPORTS_COLUMN_MOTIONS / FLAG_HAS_CALL_STREAM /
-        // FLAG_HAS_STEP_STREAM / FLAG_HAS_VALUE_STREAM / FLAG_HAS_IO_EVENT_STREAM /
-        // FLAG_HAS_INTERNING_TABLES / FLAG_HAS_SPAN_STREAM.
+        // Bit 15 is now the LOWEST — and last — still-reserved flag: bits
+        // 0..=14 are all allocated, most recently bit 14
+        // (FLAG_HAS_CORRELATION_INDEX, WTCI).  The probe follows the reserved
+        // range as it shrinks, because a rejection test aimed at a bit that
+        // has since been allocated is a test of nothing.
         let mut buf = writer_compat_fixture_bytes();
         buf[6] = 0;
-        buf[7] = 0b0100_0000; // = bit 14, lowest reserved
+        buf[7] = 0b1000_0000; // = bit 15, the last reserved bit
         match parse_meta_dat(&buf) {
             Err(MetaDatError::UnknownFlags { flags, unknown_bits }) => {
-                assert_eq!(flags, 0b0100_0000_0000_0000);
-                assert_eq!(unknown_bits, 0b0100_0000_0000_0000);
+                assert_eq!(flags, 0b1000_0000_0000_0000);
+                assert_eq!(unknown_bits, 0b1000_0000_0000_0000);
             }
             other => panic!("expected UnknownFlags, got {other:?}"),
         }
+    }
+
+    /// WTCI — the `FLAG_HAS_CORRELATION_INDEX` bit (14) parses cleanly.
+    ///
+    /// Same "readers before writers" guarantee bit 13 records: an unknown bit
+    /// is rejecting, so before this constant existed the db-backend refused
+    /// every recording that declared a correlation marker — not because it
+    /// needed the index, but because it did not recognise the announcement of
+    /// one.
+    #[test]
+    fn accepts_has_correlation_index_flag() {
+        let mut buf = writer_compat_fixture_bytes();
+        buf[6] = (FLAG_HAS_CORRELATION_INDEX & 0xFF) as u8;
+        buf[7] = (FLAG_HAS_CORRELATION_INDEX >> 8) as u8;
+        let parsed = parse_meta_dat(&buf).expect("bit 14 must parse cleanly");
+        assert_eq!(parsed.flags & FLAG_HAS_CORRELATION_INDEX, FLAG_HAS_CORRELATION_INDEX);
     }
 
     /// RS-M2 — the `has_span_stream` flag (bit 13) parses cleanly.
