@@ -462,6 +462,57 @@ export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL
 export CT_EMULATOR_EXTRA_NIM_PATHS
 export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS
 
+# The io-mon family reaches `ct` through src/ct_test/incremental: the
+# `-d:ctTest` build compiles `io_mon_capture.nim`, which opens with
+#
+#   src/ct_test/incremental/io_mon_capture.nim:83  import io_mon/depfile
+#   src/ct_test/incremental/io_mon_capture.nim:91  import stackable_hooks/propagation
+#
+# NEITHER REPO IS ON `NIM_REPO_PATH_FLAGS` ABOVE, and neither is in
+# `repro.lock`, so `.github/actions/provision-repro-lock-siblings` does not
+# clone them either. The only thing that resolves them on a CI runner is the
+# env fallback in the repo-root `config.nims`:
+#
+#   config.nims:69  addPathIfDir(getEnv("IO_MON_SRC"))
+#   config.nims:79  addPathIfDir(getEnv("NIM_STACKABLE_HOOKS_SRC"))
+#
+# whose values `nix/shells/main.nix:259-264` exports from this repo's own
+# flake inputs. config.nims IS read under tup (it is an ancestor of every
+# project file), but tup sanitizes the environment down to THIS list, so
+# `getEnv` came back empty and the dev shell's export could not reach the
+# compiler. That is the exact shape of the RUNQUOTA_SRC problem documented at
+# the top of this file, and it is why `cross-process-linux` died ~2000 lines
+# into `just build-once` with
+#
+#   src/ct_test/incremental/io_mon_capture.nim(83, 14)
+#     Error: cannot open file: io_mon/depfile
+#
+# in every run it has ever had. Exporting the two variables lets the value the
+# shell already computed survive into the tup rules. An adjacent `../io-mon`
+# checkout still wins where one exists: config.nims lists the workspace
+# sibling AFTER the env var, and Nim resolves later `--path` entries first, so
+# `visual-replay-regression-gate` -- which DOES clone the io-mon family -- is
+# unaffected by this.
+#
+# WHY THE ENV VAR HERE AND A CHECKOUT FOR RUNQUOTA. The runquota entry above
+# argues, correctly, that accepting RUNQUOTA_SRC would let a lane green a
+# workspace check the tup driver cannot satisfy. That argument turns on there
+# being NO WELL-DEFINED PIN to fall back to -- runquota is not a flake input of
+# this repo, so the variable's value is whatever the caller's shell happened to
+# contain. io-mon and nim-stackable-hooks are the opposite case: both are
+# `flake.nix` inputs (flake.nix:257, flake.nix:261), so the value the dev shell
+# exports is a revision flake.lock pins, checked in next to this file.
+#
+# The checkout route is additionally NOT AVAILABLE for nim-stackable-hooks
+# today: flake.lock locks it at two different revisions under two nodes
+# (`nim-stackable-hooks` and `nim-stackable-hooks-src`), so a sibling entry
+# could only be `=dev` -- a branch tip -- and
+# ci/test/sibling-provisioning-test.sh's branch-tip ceiling is already at its
+# limit and may only shrink. Threading the flake input is the pin, not a
+# workaround for the absence of one.
+export IO_MON_SRC
+export NIM_STACKABLE_HOOKS_SRC
+
 # Keep linker selection in Cargo config/env instead of inline --config args.
 # This avoids shell-quoting differences between Windows environments.
 RUST_WINDOWS_LINKER_CONFIG =

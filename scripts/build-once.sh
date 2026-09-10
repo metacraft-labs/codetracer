@@ -213,9 +213,11 @@ if [ -n "$ct_reprobuild_host" ]; then
 	if [ "$ct_reprobuild_host" != "windows" ]; then
 		export CODETRACER_DB_BACKEND_SKIP_DIRENV="${CODETRACER_DB_BACKEND_SKIP_DIRENV:-1}"
 		export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL="${CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL:-1}"
-		if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && [ -d "$PWD/libs/nim-stew/stew" ]; then
+		# ONE GUARD PER VARIABLE. See the long note on the copy of this block
+		# further down (the tup branch) for the failure a shared guard caused.
+		if [ -d "$PWD/libs/nim-stew/stew" ]; then
 			ct_nim_paths_lib="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew"
-			export CT_EMULATOR_EXTRA_NIM_PATHS="$ct_nim_paths_lib"
+			export CT_EMULATOR_EXTRA_NIM_PATHS="${CT_EMULATOR_EXTRA_NIM_PATHS:-$ct_nim_paths_lib}"
 			export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS:-$ct_nim_paths_lib}"
 		fi
 	fi
@@ -479,9 +481,29 @@ ct_publish_build_env "" "$ct_tup_config" "$ct_tup_variant" "src/$ct_tup_variant"
 # costs a full nested `nix develop` of the recorder's flake when it does work.
 export CODETRACER_DB_BACKEND_SKIP_DIRENV="${CODETRACER_DB_BACKEND_SKIP_DIRENV:-1}"
 export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL="${CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL:-1}"
-if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && [ -d "$PWD/libs/nim-stew/stew" ]; then
+# ONE GUARD PER VARIABLE, and the previous shape is why.
+#
+# This block used to open `if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && ...`,
+# so a caller that set ONLY the emulator variable skipped the whole body --
+# including the export of CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS, which is a
+# DIFFERENT variable consumed by a DIFFERENT build script. The line above still
+# ran, so `codetracer_trace_writer_nim`'s build.rs was told not to
+# `nimble install` AND given no substitute path:
+#
+#   .../codetracer-trace-format-nim/src/codetracer_trace_writer.nim(17, 8)
+#     Error: cannot open file: results
+#   nim static-library build failed
+#   error: Recipe `build-once` failed on line 5 with exit code 1
+#
+# That is exactly the job env `cross-process-linux` carries
+# (.github/workflows/codetracer.yml: CT_EMULATOR_EXTRA_NIM_PATHS, and no
+# CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS), and the shell supplies no fallback:
+# nix/shells/ci-base.nix sets the pair only as derivation attributes of the
+# Python-recorder package, not as dev-shell exports. Each variable now defaults
+# independently, so setting one never silences the other.
+if [ -d "$PWD/libs/nim-stew/stew" ]; then
 	ct_nim_paths_lib="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew:$PWD/libs/nim-result"
-	export CT_EMULATOR_EXTRA_NIM_PATHS="$ct_nim_paths_lib"
+	export CT_EMULATOR_EXTRA_NIM_PATHS="${CT_EMULATOR_EXTRA_NIM_PATHS:-$ct_nim_paths_lib}"
 	export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS:-$ct_nim_paths_lib}"
 fi
 

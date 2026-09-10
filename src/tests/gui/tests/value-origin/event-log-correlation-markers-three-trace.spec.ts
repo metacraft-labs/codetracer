@@ -31,6 +31,7 @@ import {
   threeTraceFixtureSkipReason,
   threeTraceRecordingRoot,
 } from "../../lib/value-origin-fixtures";
+import { loadTimePrerequisite } from "../../lib/load-time-prerequisite";
 
 // Shared with the sibling TCT-M5 spec rather than recomputed here. The
 // local `path.resolve(__dirname, "..", "..", "..", "..")` this replaces
@@ -43,7 +44,16 @@ import {
 // through the real recorders and returns the cache directory they landed
 // in, so the marker rows asserted below are the ones today's browser
 // recorder emits rather than the ones some earlier build emitted.
-const fixtureDir = threeTraceRecordingRoot();
+//
+// Wrapped because that call RECORDS at import time, and a throw during
+// import aborts Playwright's collection of the whole suite rather than
+// this file (see `lib/load-time-prerequisite.ts`).
+const fixtureDir = loadTimePrerequisite(
+  test,
+  "the cross-process three-trace recording",
+  threeTraceRecordingRoot,
+  "",
+);
 
 // The HTTP boundary token the fixture's `frontend/app.js` passes to
 // `__ct.markCorrelation` (`const BOUNDARY_HTTP = "account-balance";`),

@@ -122,7 +122,11 @@ VERSION_NIM="${SUITE_ROOT}/src/ct/version.nim"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=107
+# 107 + the 5 in "the freshness check survives a build system that discards
+# mtimes", added with that section, + 1 pinning that section's fixture to the
+# exact mtime nix writes (the assertions around it are only meaningful at that
+# value, so the value itself is asserted rather than assumed).
+EXPECTED_ASSERTIONS=113
 
 ASSERTIONS=0
 FAILURES=0
@@ -1409,6 +1413,106 @@ else
 	bad "all five contrast specs resolve their stylesheet through the shared helper" \
 		"${CSS_NOT_DELEGATING[@]}"
 fi
+
+section "the freshness check survives a build system that discards mtimes"
+
+# THE GUARD ABOVE WAS UNCONDITIONALLY RED ON THE ONE LEG THAT RUNS IT MOST.
+# Nix sets every store file's mtime to 1970-01-01T00:00:01Z by design, so for a
+# `nix build` artefact the mtime is not old, it is ABSENT -- and "is the built
+# CSS newer than the .styl" then always answers no, for every tree, forever.
+#
+# `test-ui-tests (nixos)` resolves its stylesheet through
+# `CODETRACER_E2E_CT_PATH=$GITHUB_WORKSPACE/result/bin/ct` -> `result/frontend/
+# styles/`, so it hit exactly that. Run 34026517513, job 101563733984: 23
+# failures, all "(built 1970-01-01T00:00:01.000Z)". The "Run TypeScript
+# Playwright UI tests (DB-based only)" step carries no `if:`, so a red
+# Stylesheet-guards step SKIPS it -- one impossible comparison cost that leg the
+# whole 711-test suite.
+#
+# The answer is not to stop asking. `nix build` rewrites the `result` symlink
+# on every build, that symlink is on an ordinary filesystem, and its mtime is
+# precisely "when this artefact was produced". So the same question is asked
+# where this build system records it. All four directions are pinned below,
+# because a check that accepted the nix case by ceasing to check would pass the
+# first assertion and none of the others.
+
+NIXTREE="${TEST_ROOT}/nixcss"
+mkdir -p "${NIXTREE}/repo/src/frontend/styles/components" \
+	"${NIXTREE}/store/out/frontend/styles"
+printf '.x { color: red }\n' >"${NIXTREE}/repo/src/frontend/styles/components/status_bar.styl"
+printf '.x{color:red}\n' >"${NIXTREE}/store/out/frontend/styles/theme.css"
+# What nix actually writes: epoch + 1s.
+#
+# TZ=UTC IS LOAD-BEARING. `touch -t` reads its stamp in LOCAL time, so the bare
+# form encodes epoch+1s only for a host already on UTC. Measured, same file,
+# same command, four zones:
+#
+#     UTC                  mtimeMs=1000        <- the value nix writes
+#     Europe/Sofia         mtimeMs=-7199000
+#     America/New_York     mtimeMs=18001000
+#     America/Los_Angeles  mtimeMs=28801000
+#
+# `artefactBuiltAt` treats "> 1000" as a real timestamp, so on any host WEST of
+# UTC the fixture is not a normalized artefact at all, the symlink branch never
+# runs, and the four assertions below fail on a developer's machine while
+# passing on the UTC runners -- the check would be measuring the tester's
+# timezone rather than the code. The zone-independent `touch -d @1` is GNU-only;
+# `TZ=UTC` with `-t` is POSIX and holds for BSD touch too.
+TZ=UTC touch -t 197001010000.01 "${NIXTREE}/store/out/frontend/styles/theme.css"
+ln -sfn "${NIXTREE}/store/out" "${NIXTREE}/repo/result"
+
+# Verify the INSTRUMENT before trusting anything it reports. Every assertion in
+# this section is about behaviour that only occurs at nix's normalized mtime, so
+# a fixture that drifted off that value would be testing the ordinary path under
+# a nix-shaped name. Pin the number itself, not just the behaviour it produces.
+# Bracketed so this is an EQUALITY, not a substring: bare "1000" would also be
+# satisfied by 18001000, which is precisely the wrong value this guards against.
+assert_contains "[$(node -e 'process.stdout.write(String(require("fs").statSync(process.argv[1]).mtimeMs))' \
+	"${NIXTREE}/store/out/frontend/styles/theme.css")]" "[1000]" \
+	"the nix fixture carries the exact mtime nix normalizes store files to (epoch + 1s)"
+
+resolve_nix_css() {
+	CODETRACER_BUILD_DIR='' CODETRACER_E2E_CT_PATH="${NIXTREE}/repo/result/bin/ct" node -e '
+		const { resolveBuiltThemeCss } = require(process.argv[1]);
+		try {
+			process.stdout.write(resolveBuiltThemeCss(process.argv[2], process.argv[3]));
+		} catch (e) {
+			process.stdout.write("REFUSED: " + e.message);
+		}
+	' "${CSS_LIB}" "${NIXTREE}/repo" theme.css 2>&1
+}
+
+# `-h` matters: without it `touch` follows the symlink and dates the store.
+touch -t 202601010000 "${NIXTREE}/repo/src/frontend/styles/components/status_bar.styl"
+touch -h -t 202602010000 "${NIXTREE}/repo/result"
+assert_contains "$(resolve_nix_css)" "result/frontend/styles/theme.css" \
+	"a nix-built stylesheet whose build postdates the .styl is ACCEPTED, despite its 1970 mtime"
+
+touch -t 202603010000 "${NIXTREE}/repo/src/frontend/styles/components/status_bar.styl"
+NIX_STALE="$(resolve_nix_css)"
+assert_contains "${NIX_STALE}" "is STALE" \
+	"...and one whose .styl was edited after that build is still REFUSED"
+assert_contains "${NIX_STALE}" "components/status_bar.styl" \
+	"...naming the source that outdates it, as in the non-nix case"
+
+touch -h -t 202604010000 "${NIXTREE}/repo/result"
+assert_contains "$(resolve_nix_css)" "result/frontend/styles/theme.css" \
+	"...and a re-run of nix build clears it again"
+
+# The remaining direction: a store path reached WITHOUT the symlink cannot be
+# dated at all. Answering "fresh" there would be the silent hole this whole
+# section exists to close, so it refuses and says why.
+rm "${NIXTREE}/repo/result"
+UNDATABLE="$(CODETRACER_BUILD_DIR='' CODETRACER_E2E_CT_PATH="${NIXTREE}/store/out/bin/ct" node -e '
+	const { resolveBuiltThemeCss } = require(process.argv[1]);
+	try {
+		process.stdout.write(resolveBuiltThemeCss(process.argv[2], process.argv[3]));
+	} catch (e) {
+		process.stdout.write("REFUSED: " + e.message);
+	}
+' "${CSS_LIB}" "${NIXTREE}/repo" theme.css 2>&1)"
+assert_contains "${UNDATABLE}" "cannot be dated" \
+	"a timestamp-normalized stylesheet with no build-output symlink is refused, not assumed fresh"
 
 # ---------------------------------------------------------------------------
 # THE DB-BACKEND WASM REPLAY ENGINE.

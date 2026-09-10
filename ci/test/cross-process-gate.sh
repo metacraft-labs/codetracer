@@ -54,9 +54,34 @@ fi
 # missing, and the skip guard fired on every run for as long as it
 # existed. The checks above could not see it: they assert the spec's
 # *shape*, and its shape was correct throughout.
-require_source_line "$EVENT_LOG_SPEC" \
-	'threeTraceRecordingRoot()' \
-	"event-log spec must obtain its recordings from the shared materialiser helper"
+#
+# The contract is about WHERE `fixtureDir` COMES FROM, so this reads the
+# binding rather than the file. The two obvious spellings both fail:
+#
+#   * `threeTraceRecordingRoot()` -- what this used to assert -- only
+#     matches a DIRECT call. It went red the moment the call became a
+#     callback handed to `loadTimePrerequisite`, which defers the same
+#     call so that a throw while recording cannot abort Playwright's
+#     collection of the entire suite. Nothing about the fixture's origin
+#     changed; only the call's syntax did.
+#   * the bare identifier `threeTraceRecordingRoot` matches the import
+#     line, so a spec that imports the helper and then computes its own
+#     path would pass.
+#
+# Joining the `const fixtureDir = ...;` statement and requiring the helper
+# inside it is immune to both: an import cannot satisfy it, and any call
+# shape can.
+fixture_dir_binding="$(awk '
+	/^const fixtureDir[[:space:]]*=/ { capturing = 1 }
+	capturing { printf "%s ", $0 }
+	capturing && /;[[:space:]]*$/ { exit }
+' "$EVENT_LOG_SPEC")"
+[ -n "$fixture_dir_binding" ] ||
+	fail "event-log spec must bind fixtureDir in a top-level 'const fixtureDir = ...;' statement"
+case "$fixture_dir_binding" in
+*threeTraceRecordingRoot*) ;;
+*) fail "event-log spec must obtain its recordings from the shared materialiser helper" ;;
+esac
 # `^[^/*]*` keeps the match off comment lines, so the spec can keep
 # documenting the climb it used to have without tripping its own gate.
 if grep -Eq '^[^/*]*(path\.)?(resolve|join)\([[:space:]]*__dirname' "$EVENT_LOG_SPEC"; then

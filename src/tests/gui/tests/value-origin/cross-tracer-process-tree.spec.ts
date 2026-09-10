@@ -38,10 +38,21 @@ import {
   threeTraceFixtureSkipReason,
   threeTraceRecordingRoot,
 } from "../../lib/value-origin-fixtures";
+import { loadTimePrerequisite } from "../../lib/load-time-prerequisite";
 
 // Produced from this tree rather than read from a committed copy — see
 // `scripts/materialize-recording.sh`.
-const recordingRoot = threeTraceRecordingRoot();
+//
+// Wrapped because this RECORDS, at import time, and a throw during import
+// aborts Playwright's collection of the whole suite rather than this file
+// (see `lib/load-time-prerequisite.ts`). A failure still fails every test
+// below, with the recorder's own diagnostic.
+const recordingRoot = loadTimePrerequisite(
+  test,
+  "the cross-process three-trace recording",
+  threeTraceRecordingRoot,
+  "",
+);
 
 test.use({ sourcePath: recordingRoot, launchMode: "trace-folder" });
 test.setTimeout(240_000);
