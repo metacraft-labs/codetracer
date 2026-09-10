@@ -257,13 +257,16 @@ fn a_superseded_container_is_refused_at_every_entry_point() {
     container(&superseded_addresses(), LAST_SHIFTED_GLOBAL_INDEX_VERSION).write(&ct);
     let bytes = std::fs::read(&ct).expect("read container");
 
+    // `map(drop)` discards the Ok reader so `expect_err` only needs `Debug` on
+    // `()` — `CTFSTraceReader` does not implement it, and the panic message here
+    // names the refusal that did not happen rather than dumping a reader.
     let from_path = CTFSTraceReader::open(&ct)
-        .err()
-        .expect("open() must refuse a pre-correction container")
+        .map(drop)
+        .expect_err("open() must refuse a pre-correction container")
         .to_string();
     let from_bytes = CTFSTraceReader::from_bytes(bytes)
-        .err()
-        .expect("from_bytes() must refuse a pre-correction container")
+        .map(drop)
+        .expect_err("from_bytes() must refuse a pre-correction container")
         .to_string();
 
     for (surface, err) in [("open", &from_path), ("from_bytes", &from_bytes)] {

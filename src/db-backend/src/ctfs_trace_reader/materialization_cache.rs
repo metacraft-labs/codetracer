@@ -68,6 +68,14 @@ use super::linehits_namespace::encode_linehits_cow_namespace;
 use super::memwrites_namespace::encode_memwrites_cow_namespace;
 use crate::omniscient_db::{OmniscientDb, Tick, WriteRecord};
 
+/// One source-line hit as a [`Recreator`] reports it: `((file_id, line), hit)`.
+///
+/// The key is the source LOCATION, not an address. The cache maps it into its own
+/// [`LinePositionSpace`] on ingest, so naming the pair here keeps the recreator's
+/// wire shape in one place and the nested tuple out of every signature that
+/// carries a collection of them.
+pub type LineHitRecord = ((u32, u32), LineHitEntry);
+
 /// The records a [`Recreator`] produces for one re-executed tick interval.
 ///
 /// The recreator re-executes `[tick_lo, tick_hi)` and reports the memory writes
@@ -86,7 +94,7 @@ pub struct MaterializedInterval {
     /// own [`LinePositionSpace`] when it ingests it, so every key in the cache —
     /// and every key in the `linehits.tc` image it collapses to — is built by
     /// one piece of code, and a query builds the same key it stored.
-    pub line_hits: Vec<((u32, u32), LineHitEntry)>,
+    pub line_hits: Vec<LineHitRecord>,
 }
 
 impl MaterializedInterval {
@@ -621,7 +629,7 @@ mod tests {
         /// keyed by `tick_lo`. Writes outside the range are clipped by the cache.
         canned: BTreeMap<u64, Vec<MemWriteEntry>>,
         /// `(global_line_index, hit_tick)` records to return for each interval.
-        canned_linehits: BTreeMap<u64, Vec<((u32, u32), LineHitEntry)>>,
+        canned_linehits: BTreeMap<u64, Vec<LineHitRecord>>,
         /// Number of times `re_execute_and_materialize` was actually called.
         calls: usize,
     }
@@ -640,7 +648,7 @@ mod tests {
             self
         }
 
-        fn with_line_hits(mut self, tick_lo: u64, line_hits: Vec<((u32, u32), LineHitEntry)>) -> Self {
+        fn with_line_hits(mut self, tick_lo: u64, line_hits: Vec<LineHitRecord>) -> Self {
             self.canned_linehits.insert(tick_lo, line_hits);
             self
         }

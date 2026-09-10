@@ -44,7 +44,7 @@ use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{Line, StepId};
 use codetracer_trace_writer::line_position::DEFAULT_LINES_PER_FILE;
-use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat, trace_writer::TraceWriter};
+use codetracer_trace_writer_nim::{NimTraceWriter, TraceEventsFileFormat};
 
 use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::ctfs_trace_reader::ctfs_container::CtfsReader;

@@ -445,9 +445,12 @@ fn e2e_streaming_reader_real_product_all_streams() {
     assert_eq!(reader.values().value_count(), total, "all values after finalization");
     assert_eq!(reader.calls().call_count(), total, "all calls after finalization");
 
-    for i in 0..total {
+    // The fixture must cover every finalized step, or the loop below would check
+    // fewer records than the assertions above just counted and still pass.
+    assert_eq!(steps.len(), total, "the expected-step fixture covers every step");
+    for (i, expected_step) in steps.iter().enumerate() {
         let step = reader.steps().step(i).unwrap();
-        assert_eq!(step.resolve(&fixture_space()), Ok(steps[i]));
+        assert_eq!(step.resolve(&fixture_space()), Ok(*expected_step));
         let vars = reader.values().variables_at(i).unwrap();
         assert_eq!(vars[0].variable_id.0, i);
         assert!(matches!(vars[0].value, ValueRecord::Int { i: n, .. } if n == (i as i64) * 10));
