@@ -194,6 +194,8 @@ jobs:
             lang: ruby
           - recorder: codetracer-js-recorder
             lang: js
+          - recorder: codetracer-beam-recorder
+            lang: beam
     name: ${{ matrix.lang }}
     uses: ./.github/workflows/launcher-recorder-e2e.yml
     with:
