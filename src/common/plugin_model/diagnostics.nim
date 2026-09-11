@@ -126,6 +126,38 @@ type
       ## The refusal names BOTH contributions, because either may be the typo
       ## and an author told only "duplicate id" has to find the other one.
 
+    # -- PLAT-10. §8.3's distribution: a plugin is a COMPONENT, installed by
+    # -- `ct install` into `<root>/<name>@<version>`. These four are what can
+    # -- go wrong between "a directory exists" and "a manifest was read", and
+    # -- every one of them is reported for §4.1's reason — a plugin that
+    # -- silently is not there is the blank tab in its largest form.
+    pecPluginAlsoDispatchable
+      ## §8.3's first distinction: "**A plugin is not a front-end.** Components
+      ## today are things the launcher `exec`s into by command word. A plugin
+      ## is loaded by a running CodeTracer. Sharing the *distribution* format
+      ## must not imply sharing the dispatch model."
+      ##
+      ## A component directory carrying BOTH `plugin.json` and `capabilities`
+      ## claims both, so it is refused as a plugin and the refusal names both
+      ## files. Without this the rule would be a convention held by whoever
+      ## built the tarball.
+    pecPluginIdComponentMismatch
+      ## The `id` in `plugin.json` is not the component name it was installed
+      ## as. §4.1 makes the id the identity and §8.3 makes the component name
+      ## what `ct install`, `ct uninstall` and a `.ctrc` pin all spell, so two
+      ## different strings would mean a user could not pin, upgrade or remove
+      ## the plugin they were reading about.
+    pecBadComponentDirectory
+      ## A directory under a components root that carries a plugin manifest and
+      ## whose name is not `<name>@<version>`. Reported rather than skipped,
+      ## because a plugin that was installed by hand into a misnamed directory
+      ## is invisible to `ct uninstall` as well as to this.
+    pecPinnedVersionMissing
+      ## `.ctrc` pins a version of an installed plugin that is not present.
+      ## The launcher `continue`s past every other version in that case, so the
+      ## plugin does not load — and a user who checked a pin into their
+      ## repository is owed the sentence rather than an absence.
+
   PluginError* = object
     plugin*: PluginId
       ## ALWAYS set. See the header.
@@ -184,6 +216,14 @@ func codeText*(c: PluginErrorCode): string =
   of pecUnknownReprobeTrigger: "unknown re-probe trigger"
   of pecDuplicateContribution:
     "two rendering surfaces share one local id"
+  of pecPluginAlsoDispatchable:
+    "a plugin component that also claims the launcher's command dispatch"
+  of pecPluginIdComponentMismatch:
+    "the plugin id is not the component name it was installed as"
+  of pecBadComponentDirectory:
+    "a plugin outside the '<name>@<version>' component layout"
+  of pecPinnedVersionMissing:
+    "a .ctrc pin names a version that is not installed"
 
 func pluginError*(plugin: PluginId; code: PluginErrorCode;
                   detail: string): PluginError =

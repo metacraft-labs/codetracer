@@ -747,7 +747,23 @@ test_lane_files() {
 				'/test_source_provider_revisions\.nim$' \
 				'/test_plugin_io_sdk\.nim$' \
 				'/test_plugin_source_admission\.nim$' \
-				'/test_plugin_surfaces\.nim$'
+				'/test_plugin_surfaces\.nim$' \
+				'/test_plugin_grant_lifecycle\.nim$'
+		# `test_plugin_grant_lifecycle` (PLAT-10) measures a REVOKED capability
+		# as an effect: it spawns `touch` through PLAT-8's process primitive and
+		# asserts the sentinel file is or is not there, and it writes and reads
+		# the grant ledger with `std/os` under a real temporary user root. Both
+		# halves are native — `plugin_io.nim`'s process arm is
+		# `when not defined(js)` because a browser has no child processes.
+		#
+		# THE REJECTION IS THE FIX RATHER THAN A `when defined(js)` GUARD, and
+		# here the vacuous-pass shape is unusually sharp: the suite's central
+		# claim is *the child never ran*, which is GREEN, for free, on a backend
+		# that could not have run a child under any grant at all. The
+		# backend-independent half is deliberately in a different file —
+		# `src/common/plugin_distribution_test.nim`, in `common-units`, which
+		# asserts the narrowing over all sixty-four capability subsets with no
+		# machine.
 		# `test_plugin_surfaces` (PLAT-9) writes a REAL executable into a real
 		# temporary directory, puts that directory on the real `PATH`, and
 		# asserts that a contributed surface stops being degraded — because

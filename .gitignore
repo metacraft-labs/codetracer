@@ -443,3 +443,12 @@ src/frontend/viewmodel/tests/unit/.plat8-io-mutation.lock
 # rather than enforced — PLAT-9's harness mutates `manifest.nim` and `host.nim`,
 # which PLAT-8's also quotes, so the three must not run at the same time.
 src/frontend/viewmodel/tests/unit/.plat9-surface-mutation.lock
+
+# PLAT-10's mutation run lock — the exclusive `flock` taken by
+# `run-plat10-distribution-mutations.py` before it touches anything, and held
+# for the whole run. A FOURTH lock for the reason the second and third exist: a
+# different subject set and different recorded control digests. Like the other
+# three it does not serialise against its siblings, and like them the reason is
+# stated rather than enforced — PLAT-10's harness mutates `host.nim`, which
+# PLAT-8's and PLAT-9's also quote, so the four must not run at the same time.
+src/frontend/viewmodel/tests/unit/.plat10-distribution-mutation.lock

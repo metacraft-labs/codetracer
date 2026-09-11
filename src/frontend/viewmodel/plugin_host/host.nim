@@ -60,6 +60,7 @@ import isonim/core/graph as isonim_graph
 import isonim/core/owner as isonim_owner
 
 import ./plugin_api
+import ./plugin_io
 import ./surface_host
 
 export plugin_api
@@ -115,6 +116,31 @@ type
       ## activated again this session — see `activateOne`. A set rather than a
       ## flag on the record because the question is asked before a record is
       ## guaranteed to exist.
+    declaredGrants*: Table[PluginId, GrantSet]
+      ## PLAT-10. What each manifest DECLARED, captured at `register` and never
+      ## narrowed. The ledger is applied to this rather than to whatever the
+      ## last application left behind, so re-granting a revoked capability
+      ## restores exactly the declared set and nothing wider — a narrowing
+      ## applied to an already-narrowed value could only ever shrink, which
+      ## would make `grantCapability` a no-op the day somebody used it.
+    ledger*: GrantLedger
+      ## PLAT-10 deliverable 3. Per-plugin capability grants, with their
+      ## history. Meaningful only when `ledgerAttached`.
+    ledgerAttached*: bool
+      ## WHETHER A LEDGER GOVERNS THIS HOST, and the default is `false`.
+      ##
+      ## The two states are genuinely different policies and the flag is how a
+      ## reader tells which one is in force. With no ledger the manifest's
+      ## declaration IS the grant, which is PLAT-8's model and what every suite
+      ## written before this milestone drives. With a ledger attached, a
+      ## capability is permitted only if the ledger says `grant` — so an
+      ## UNDECIDED capability is refused, which is what makes an upgrade that
+      ## widens a manifest safe (`grant_ledger.nim`'s header).
+      ##
+      ## A front-end that discovers plugins from disk always attaches one;
+      ## `PluginHost` does not default to it because a host built by a suite
+      ## with three literal manifests and no user root has nobody to have
+      ## granted anything.
     reclaimFailures*: seq[string]
       ## PLAT-8. A closer that raised during a handle sweep. It is RECORDED
       ## rather than raised out of `deactivate`, because a deactivation that
@@ -141,6 +167,7 @@ proc newPluginHost*(coreVersion: SemVer;
              surfaces: newSurfaceHost(frontEnd, extensionsEnabled),
              impls: initTable[PluginId, PluginImplementation](),
              records: initTable[PluginId, PluginRecord](),
+             declaredGrants: initTable[PluginId, GrantSet](),
              defectedPlugins: initHashSet[PluginId]())
 
 # ---------------------------------------------------------------------------
@@ -167,11 +194,28 @@ proc register*(host: PluginHost; manifestText, source: string;
      not host.impls.hasKey(result.manifest.id):
     host.impls[result.manifest.id] =
       PluginImplementation(manifest: result.manifest, activate: activate)
+    # PLAT-10. Captured HERE, from the parse, before anything can narrow it.
+    host.declaredGrants[result.manifest.id] = result.manifest.grants
     host.registrationOrder.add result.manifest.id
 
 # ---------------------------------------------------------------------------
 # resolve
 # ---------------------------------------------------------------------------
+
+# Forward-declared. `resolveAll` is ABOVE the grant section because the
+# lifecycle order puts it there — §4.2 is `discover → resolve → activate` — but
+# it is the one thing in this file that can UNDO a narrowing, so it has to be
+# able to reach the repair. The alternative, moving the whole PLAT-10 block
+# above `resolve`, would put the ledger before the phase it narrows and read as
+# if a grant were an input to resolution. It is not: it is applied to the
+# output.
+#
+# `isActive` is forward-declared for the same reason, from the other direction:
+# `effectiveCapabilitiesOf` has to know whether a live context exists before it
+# can answer out of the right one, and duplicating the one-line test here would
+# be a second copy of a predicate (Verification-Harness-Traps §14).
+proc applyLedger*(host: PluginHost)
+proc isActive*(host: PluginHost; id: PluginId): bool
 
 proc resolveAll*(host: PluginHost) =
   ## The whole registry, once, before anything is activated.
@@ -182,9 +226,42 @@ proc resolveAll*(host: PluginHost) =
   ## and blocks that plugin's dependents in phase 6 like any other failure.
   ## Passing `none` here would leave `surfaceRefusals` a pure function with no
   ## effect on anything — which is exactly what it was before this line.
+  ##
+  ## AND IT RE-APPLIES THE LEDGER, WHICH IS NOT AN OPTIMISATION. See below.
   host.resolution = resolve(host.parsed, host.coreVersion,
                             some(host.frontEnd))
   host.resolved = true
+
+  # PLAT-10. THE LINE THAT KEEPS A REVOCATION REVOKED ACROSS A SECOND
+  # DISCOVERY PASS, and the reason it is here rather than left to the caller.
+  #
+  # `resolve` is a pure function of `host.parsed` — the manifests AS PARSED,
+  # which is the one copy of a `GrantSet` in this object that is never narrowed
+  # (`declaredGrants` is captured from the same parse for exactly that reason).
+  # So this assignment REPLACES `resolution.manifests` with the DECLARED sets,
+  # discarding every narrowing `applyLedgerTo` had made; `activateOne` then
+  # copies the widened manifest into the next `ctx`. The ledger still says
+  # `revoke`, `report()` still prints REVOKED with the date — and the child
+  # runs. That is the state PLAT-10's brief names as theatre, reached without
+  # touching the ledger at all.
+  #
+  # Measured before the line existed, with a real `execve` and a sentinel file
+  # (`test_plugin_grant_lifecycle.nim`, "re-running discovery does not hand the
+  # capability back"): revoke → resolveAll() → deactivate → activate spawned the
+  # child and wrote the sentinel, while the identical sequence WITHOUT the
+  # `resolveAll()` refused it. `resolveAll` and `deactivate` are both public and
+  # neither is privileged, so nothing but this line stood between the two.
+  #
+  # IT IS ALSO WHAT MAKES `attachGrantLedger` ORDER-INDEPENDENT. That proc's
+  # docstring asks to be called after `resolveAll`, because before it there is
+  # no `resolution.manifests` to narrow. With this line the other order is
+  # merely redundant rather than unsafe, which is the right shape for a
+  # precondition nobody can check.
+  #
+  # `applyLedger` recomputes from `declaredGrants` rather than from the current
+  # value, so it is idempotent and running it on every resolve costs one pass
+  # over the registration order.
+  if host.ledgerAttached: host.applyLedger()
 
 proc loadErrors*(host: PluginHost): seq[PluginError] =
   host.resolution.errors
@@ -198,6 +275,189 @@ proc failureCodeFor*(host: PluginHost; id: PluginId): PluginErrorCode =
   ## when the refusal was for the wrong reason, so a refusal is asserted by
   ## code and never by the presence of some error.
   host.resolution.failureFor(id).code
+
+# ---------------------------------------------------------------------------
+# PLAT-10: the grant lifecycle
+#
+# THE ONLY THING ANY OF THIS DOES IS CHANGE A `GrantSet`, and that is the whole
+# design. `plugin_api.grantsOf(ctx)` is `ctx.manifest.grants`; every I/O the SDK
+# offers passes that value to `capabilities.decide`. So a revoked capability is
+# not a flag somebody has to remember to consult — it is a capability that is
+# NOT IN THE SET, refused by the same arm that refuses a plugin which never
+# declared it, with no second predicate anywhere.
+#
+# The two places a `GrantSet` can be read from are narrowed together:
+#
+#   * `resolution.manifests[id]` — what `activateOne` copies into a new `ctx`,
+#     so a plugin activated AFTER the revocation never sees the capability;
+#   * `records[id].ctx.manifest` — the copy a LIVE plugin is already holding.
+#     `PluginManifest` is a value type, so narrowing the first does nothing to
+#     a plugin that is already running. Without this second line, revocation
+#     would take effect at the next activation and a user who revoked
+#     `process` from a plugin that is spawning things right now would be told
+#     it was done while it went on spawning them.
+#
+# AND THE AUDIT OF EVERY OTHER WRITER OF THOSE TWO FIELDS, because "the ledger
+# is applied in two places" is only true while nothing ELSE assigns them. It was
+# taken over the whole tree rather than over this file, and it is written down
+# so the next reader counts rather than re-derives (§14b):
+#
+#   * `resolution.manifests[id]` is assigned in exactly one production place —
+#     `resolveAll`, through `resolve()`. That was the hole, and it is closed
+#     there. `resolution.nim` builds the table, but from `host.parsed`, which is
+#     the input to `resolveAll` and not a second entry point.
+#   * `records[id].ctx` is assigned in exactly one place, `activateOne`, and the
+#     manifest it copies is `resolution.manifests[id]` — already narrowed, by
+#     the line above. It has no second source.
+#   * `impls[id].manifest` is the raw parse and is read by nothing on the I/O
+#     path (its only reader in the tree is a suite asserting the registration).
+#   * `plugin_io.canonicalGrantsOf` DERIVES a `GrantSet` from `grantsOf(ctx)`
+#     per call and caches nothing, so it cannot hold a stale narrowing.
+#   * `surfaces.register(ctx.manifest)` takes the narrowed copy and reads no
+#     capability out of it.
+#
+# So the shape — "rebuild a narrowed value from an un-narrowed source" — has one
+# instance in this tree, and the line in `resolveAll` is it.
+# ---------------------------------------------------------------------------
+
+proc applyLedgerTo(host: PluginHost; id: PluginId) =
+  if not host.ledgerAttached: return
+  if not host.declaredGrants.hasKey(id): return
+  let narrowed = effectiveGrants(host.declaredGrants[id], host.ledger, id)
+  if host.resolution.manifests.hasKey(id):
+    host.resolution.manifests[id].grants = narrowed
+    host.resolution.manifests[id].capabilities = narrowed.capabilities
+  if host.records.hasKey(id):
+    let rec = host.records[id]
+    if not rec.ctx.isNil:
+      rec.ctx.manifest.grants = narrowed
+      rec.ctx.manifest.capabilities = narrowed.capabilities
+
+proc applyLedger*(host: PluginHost) =
+  ## Re-narrow every plugin. Idempotent: it recomputes from `declaredGrants`
+  ## rather than from the current value, so calling it twice is calling it
+  ## once.
+  for id in host.registrationOrder:
+    host.applyLedgerTo(id)
+
+proc attachGrantLedger*(host: PluginHost; ledger: GrantLedger) =
+  ## Put a ledger in force, at any point in a host's life, including with
+  ## plugins already running.
+  ##
+  ## THE ORDER AGAINST `resolveAll` NO LONGER MATTERS, and it used to. Before
+  ## `resolveAll` there is no `resolution.manifests`, so the narrowing this does
+  ## reaches nothing — which was a precondition a caller could get wrong in
+  ## silence. `resolveAll` now re-applies the ledger itself, so attaching first
+  ## is redundant rather than unsafe. A precondition nobody can check is a
+  ## precondition somebody will break.
+  host.ledger = ledger
+  host.ledgerAttached = true
+  host.applyLedger()
+
+proc grantStateOf*(host: PluginHost; id: PluginId;
+                   cap: Capability): GrantState =
+  ## What the ledger says. With no ledger attached every capability is
+  ## `gsUndecided`, which is the honest answer: nobody has recorded anything.
+  if not host.ledgerAttached: return gsUndecided
+  host.ledger.stateOf(id, cap)
+
+proc effectiveCapabilitiesOf*(host: PluginHost; id: PluginId): set[Capability] =
+  ## What the plugin may actually do — the value `decide` will be handed.
+  ##
+  ## IT IS AN INSPECTION API, SO ITS FAILURE MODE IS A WRONG SENTENCE RATHER
+  ## THAN A WRONG PERMISSION, and that is why it needed fixing separately from
+  ## enforcement. `test_plugin_grant_lifecycle.nim` uses it as assertion (2) of
+  ## three, described there as "the very `set[Capability]` the SDK hands to
+  ## `decide`" — so an implementation that reads a DIFFERENT set than the SDK
+  ## reads makes that assertion true of something nobody executes, and it is
+  ## true or false independently of whether the refusal works.
+  ##
+  ## THERE ARE TWO STORES AND THEY ARE NOT INTERCHANGEABLE:
+  ##
+  ##   * a LIVE plugin's I/O goes through `plugin_io.grantsOf(ctx)`, which is
+  ##     `records[id].ctx.manifest.grants`;
+  ##   * a plugin not currently up will be handed `resolution.manifests[id]`
+  ##     when `activateOne` builds its next context.
+  ##
+  ## So this answers out of the live context when there is one and out of the
+  ## stored manifest when there is not — in both cases the store the next
+  ## `decide` will actually read.
+  ##
+  ## AND IT CALLS `grantsOf` RATHER THAN SPELLING `ctx.manifest.grants` AGAIN.
+  ## Verification-Harness-Traps §14: a second copy of a predicate is a second
+  ## thing that can be wrong while its twin goes on agreeing with itself, and
+  ## the copy nobody mutates is the one that stays wrong. One function, two
+  ## callers — the SDK's I/O arms and this.
+  ##
+  ## WHAT THE OLD UNCONDITIONAL READ COST, measured: with arm H1 applied — the
+  ## arm that stops `applyLedgerTo` narrowing the live context — the old
+  ## implementation read the NARROWED `resolution.manifests` and reported the
+  ## capability as gone, so assertion (2) stayed green over a host that spawned
+  ## the child. Only the sentinel file caught it. It now reddens too, which is
+  ## what an assertion earning its place in a list of three looks like.
+  if host.isActive(id):
+    let rec = host.records[id]
+    if not rec.ctx.isNil:
+      return grantsOf(rec.ctx).capabilities
+  if host.resolution.manifests.hasKey(id):
+    return host.resolution.manifests[id].grants.capabilities
+  {}
+
+proc revokeCapability*(host: PluginHost; id: PluginId; cap: Capability;
+                       at: string; note = ""): bool {.discardable.} =
+  ## Take a capability back. `true` when this changed the state in force.
+  ##
+  ## It does NOT deactivate the plugin, and that is the point: §8.1.1's
+  ## "resources are reclaimable without restarting CodeTracer" has the same
+  ## shape one level up — a user revoking one grant from a working plugin
+  ## wants the rest of it to go on working.
+  if not host.ledgerAttached:
+    raise newException(PluginHostError,
+      "revokeCapability('" & id & "', '" & $cap & "') with no grant ledger " &
+      "attached. A revocation that nothing records is not a revocation; call " &
+      "attachGrantLedger() first")
+  result = host.ledger.revoke(id, cap, at, note)
+  host.applyLedgerTo(id)
+
+proc grantCapability*(host: PluginHost; id: PluginId; cap: Capability;
+                      at: string; note = ""): bool {.discardable.} =
+  ## Give one back, or give one for the first time. A capability the MANIFEST
+  ## does not declare cannot be granted into existence — `effectiveGrants`
+  ## intersects with the declared set — so this widens only as far as the
+  ## plugin asked for.
+  if not host.ledgerAttached:
+    raise newException(PluginHostError,
+      "grantCapability('" & id & "', '" & $cap & "') with no grant ledger " &
+      "attached; call attachGrantLedger() first")
+  result = host.ledger.grant(id, cap, at, note)
+  host.applyLedgerTo(id)
+
+proc acceptDeclaredGrants*(host: PluginHost; id: PluginId; at: string;
+                           note = ""): int {.discardable.} =
+  ## The acceptance step for a plugin the user has just installed: grant every
+  ## capability its manifest declares that has no decision yet. Returns how
+  ## many were recorded.
+  ##
+  ## A REVOKED CAPABILITY IS LEFT REVOKED — see `grant_ledger.grantDeclared`.
+  ## Re-running this after an upgrade grants only what the upgrade ADDED and
+  ## only if the user had not already said no to it.
+  if not host.ledgerAttached:
+    raise newException(PluginHostError,
+      "acceptDeclaredGrants('" & id & "') with no grant ledger attached")
+  if not host.declaredGrants.hasKey(id): return 0
+  result = host.ledger.grantDeclared(
+    id, host.declaredGrants[id].capabilities, at, note)
+  host.applyLedgerTo(id)
+
+proc grantLedgerReport*(host: PluginHost): string =
+  ## The INSPECTABLE half of deliverable 3: every decision, per plugin, with
+  ## the date it was taken and what is in force now.
+  if not host.ledgerAttached:
+    return "no capability grant ledger is attached to this host"
+  var lines: seq[string] = @[]
+  for id in host.registrationOrder:
+    lines.add host.ledger.describe(id)
+  lines.join("\n")
 
 # ---------------------------------------------------------------------------
 # activate
@@ -470,6 +730,25 @@ proc report*(host: PluginHost): string =
       " manifest(s) were read and none was resolved or activated"
   for e in host.resolution.errors:
     lines.add render(e)
+  # PLAT-10. A capability a plugin DECLARED and does not hold is the commonest
+  # reason a working plugin suddenly stops doing one of its jobs, and it is a
+  # reason only this host knows. Printed with the date, because "you revoked
+  # it" and "you never granted it" are different sentences to a user looking
+  # at a feature that has gone.
+  if host.ledgerAttached:
+    for id in host.registrationOrder:
+      if not host.declaredGrants.hasKey(id): continue
+      for c in Capability:
+        if c notin host.declaredGrants[id].capabilities: continue
+        case host.ledger.stateOf(id, c)
+        of gsGranted: discard
+        of gsRevoked:
+          lines.add "plugin '" & id & "': '" & $c & "' was REVOKED on " &
+            host.ledger.decidedAt(id, c) & "; the plugin declares it and is " &
+            "refused it"
+        of gsUndecided:
+          lines.add "plugin '" & id & "': '" & $c & "' is declared and has " &
+            "never been granted, so it is refused"
   for v in host.violations():
     lines.add describe(v)
   for f in host.activationFaults:

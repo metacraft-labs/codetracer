@@ -22,5 +22,13 @@ import ./plugin_model/manifest
 import ./plugin_model/resolution
 import ./plugin_model/activation
 import ./plugin_model/surfaces
+# PLAT-10. `distribution` reads the three grammars `codetracer-launcher`
+# writes; `grant_ledger` is the per-plugin capability record. Both are pure —
+# the filesystem halves are `src/ct/launch/plugin_components.nim` and
+# `src/ct/launch/grant_store.nim`, on the other side of the same line this
+# package's header draws.
+import ./plugin_model/distribution
+import ./plugin_model/grant_ledger
 
-export diagnostics, manifest, resolution, activation, surfaces
+export diagnostics, manifest, resolution, activation, surfaces,
+       distribution, grant_ledger
