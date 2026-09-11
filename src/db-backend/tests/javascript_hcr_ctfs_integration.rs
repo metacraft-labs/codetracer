@@ -69,35 +69,49 @@
 //!
 //! Measured after the fix (Linux x86_64, 2026-09-09): 169 flow steps at both
 //! stops, `value=6`/`counter=3` pre-reload and `value=27`/`counter=9`
-//! post-reload. The on-disk step stream now shows the initial `require` as five
-//! `mymodule.js` steps (lines 1, 3, 8, 13, 18) where it previously showed five
-//! `index.js` steps at lines 1, 6, 12, 23, 24.
+//! post-reload. (The 169 was itself wrong — see §3 below; it is 93 now.) The
+//! on-disk step stream now shows the initial `require` as five `mymodule.js`
+//! steps (lines 1, 3, 8, 13, 18) where it previously showed five `index.js`
+//! steps at lines 1, 6, 12, 23, 24.
 //!
 //! The python and ruby HCR tests never hit this — their recorders emit
 //! `(path, line)` per step rather than an index into a merged manifest, so there
 //! is no cross-file id space to get wrong. Both are green with the same four
 //! assertions (python 112 flow steps, ruby 135).
 //!
-//! # A caveat on the 169, and a defect this test does NOT cover
+//! ## 3. Flow-window frame contamination (fixed 2026-09-11)
 //!
-//! 169 is not the clean analogue of python's 112. Only **95** of those steps are
-//! `index.js`'s own; the other 74 are `mymodule.js` / `mymodule_v2.js` steps
-//! rendered at `index.js` line numbers. The tell is `index.js:13`, which the flow
-//! reports 24 times for a loop that runs 12 — 12 real `if (counter === 7)` steps
-//! plus 12 `mymodule.js:13` (`function aggregate`) steps collapsed onto the same
-//! number. Python's flow for the same program shape contains no `mymodule.py`
-//! lines at all.
+//! The 169 above was never the clean analogue of python's 112. Only **93** of
+//! those steps were `index.js`'s own; the other 76 were `mymodule.js` /
+//! `mymodule_v2.js` steps rendered at `index.js` line numbers. The tell was
+//! `index.js:13`, reported 24 times for a loop that runs 12 — 12 real
+//! `if (counter === 7)` steps plus 12 `mymodule.js:13` (`function aggregate`)
+//! steps collapsed onto the same number. Python's flow for the same program
+//! shape contained no `mymodule.py` lines at all.
 //!
-//! This is NOT the id-space defect returning: the container decodes every step to
-//! the right path now (verified by dumping `steps.dat` against `paths.dat`). It is
-//! that the JS recorder emits a function's declaration-line step *before* opening
-//! the call, so that step carries the caller's `call_key` — in the container,
+//! This was NOT the id-space defect returning: the container decodes every step
+//! to the right path (verified by dumping `steps.dat` against `paths.dat`). The
+//! JS recorder emits a function's declaration-line step *before* opening the
+//! call — deliberately, so that the trace-format `entryStep` convention's LEAF
+//! CLAMP anchors a body-less callee on its own definition line rather than on
+//! the caller's call site (see `flow_preloader.rs`'s
+//! `step_belongs_to_window_file` for the full convention) — so that step
+//! carries the caller's `call_key` while naming the callee's file. In the container
 //! `mymodule.js:3` has `call_key=0` (`index.js`'s module frame) while the body
-//! step `mymodule.js:5` that follows has `call_key=2`. `ct/load-flow` filters by
-//! `call_key` correctly and is handed mis-framed steps. Same family of harm, one
-//! layer up, and still open; it is tracked in
-//! `codetracer-specs/Testing/Known-Test-Failures.md`. Do not "fix" the count by
-//! asserting on it here — this test's contract is the four value/line assertions.
+//! step `mymodule.js:5` that follows has `call_key=2`. `ct/load-flow` filtered
+//! by `call_key` correctly and was handed mis-framed steps.
+//!
+//! The missing invariant was that **nothing enforced that a line lies within the
+//! file it names**. The nim flow window showed the same class of defect from the
+//! other side, with `system.nim` lines 394/398 surfacing inside a 23-line user
+//! file. One guard closes both: `flow_preloader.rs`'s
+//! `step_belongs_to_window_file`, which walks over a step whose path is not the
+//! window's file instead of rendering its line.
+//!
+//! The count is now asserted, by
+//! [`assert_flow_window_is_index_js_only`] — not as a number copied from a
+//! recording, but as the per-line histogram `index.js`'s own control flow
+//! dictates. **93** steps at both stops.
 
 mod test_harness;
 
@@ -321,6 +335,107 @@ fn extract_var_value_at_stop(flow: &FlowData, var_name: &str, stop_rr_ticks: i64
         .or(stop_before)
 }
 
+/// The per-line step histogram `index.js`'s own control flow dictates.
+///
+/// Derived from the fixture source, not from a recording — which is what makes
+/// it an assertion rather than a transcript:
+///
+/// ```text
+///    4  var fs = require("fs");                     once
+///    5  var path = require("path");                 once
+///    6  var mymodule = require("./mymodule");       once
+///    8  var counter = 0;                            once
+///    9  var history = [];                           once
+///   11  for (var i = 0; i < 12; i++) {              once (the loop header's init)
+///   12      counter += 1;                           12 iterations
+///   13      if (counter === 7) {                    12 iterations
+///   15          fs.copyFileSync(                    only when counter === 7
+///   19          delete require.cache[...];          only when counter === 7
+///   20          mymodule = require("./mymodule");   only when counter === 7
+///   22      var value = mymodule.compute(counter);  12 iterations
+///   23      var delta = mymodule.transform(...);    12 iterations
+///   24      history.push(delta);                    12 iterations
+///   25      var total = mymodule.aggregate(...);    12 iterations
+///   26      console.log(...);                       12 iterations
+/// ```
+///
+/// Total: 6 + 3 + (7 x 12) = **93**.
+const EXPECTED_INDEX_JS_LINE_HISTOGRAM: &[(i64, usize)] = &[
+    (4, 1),
+    (5, 1),
+    (6, 1),
+    (8, 1),
+    (9, 1),
+    (11, 1),
+    (12, 12),
+    (13, 12),
+    (15, 1),
+    (19, 1),
+    (20, 1),
+    (22, 12),
+    (23, 12),
+    (24, 12),
+    (25, 12),
+    (26, 12),
+];
+
+fn line_histogram(flow: &FlowData) -> std::collections::BTreeMap<i64, usize> {
+    let mut hist: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+    for step in &flow.steps {
+        *hist.entry(step.line).or_default() += 1;
+    }
+    hist
+}
+
+/// Assert that the flow window for `index.js` contains `index.js`'s steps and
+/// ONLY `index.js`'s steps.
+///
+/// # Why this is asserted by histogram rather than by path
+///
+/// A flow step has no path on the wire: `FlowStep` carries a bare
+/// `position` (line number) and the frontend renders it against the window's
+/// own file (`src/db-backend/src/task.rs`, `FlowStep`). "Which file did this
+/// step come from" is therefore not directly observable from here. The
+/// histogram is — and a step from another file cannot enter this window
+/// without changing it, because it lands on some `index.js` line number it has
+/// no business being on.
+///
+/// # What it caught
+///
+/// Before `flow_preloader.rs` gained `step_belongs_to_window_file`, this window
+/// reported **169** steps: 93 of `index.js`'s own plus 76 `mymodule.js` /
+/// `mymodule_v2.js` steps rendered at `index.js` line numbers. The tell was
+/// `index.js:13`, reported **24** times for a loop that runs 12 — the extra 12
+/// being `mymodule.js:13`, the declaration line of `aggregate`, which is called
+/// once per iteration.
+///
+/// The recorder emits a callee's declaration-line step immediately BEFORE the
+/// `Call` event on purpose — it is what the trace-format `entryStep`
+/// convention's leaf clamp falls back to, so a callee with no body step of its
+/// own still anchors on its definition line (the convention itself is the
+/// "next-step" semantic; see `flow_preloader.rs`'s
+/// `step_belongs_to_window_file`). So that step carries the CALLER's `call_key`
+/// while naming the CALLEE's file. `ct/load-flow` filtered by `call_key`
+/// correctly and was handed mis-framed steps; nothing checked that a line lay
+/// within the file it named.
+fn assert_flow_window_is_index_js_only(label: &str, flow: &FlowData) {
+    let actual = line_histogram(flow);
+    let expected: std::collections::BTreeMap<i64, usize> = EXPECTED_INDEX_JS_LINE_HISTOGRAM.iter().copied().collect();
+    let expected_total: usize = expected.values().sum();
+
+    assert_eq!(
+        actual, expected,
+        "{label}: the index.js flow window must contain index.js's steps and only index.js's steps.\n           expected: {expected:?}\n  actual:   {actual:?}\n           A surplus on a line means steps from another file were rendered at index.js line numbers \
+         (see assert_flow_window_is_index_js_only); a deficit means real index.js steps were dropped."
+    );
+    assert_eq!(
+        flow.steps.len(),
+        expected_total,
+        "{label}: the histogram and the step count must agree ({expected_total} steps)"
+    );
+    println!("{label}: flow window is index.js-only, {expected_total} steps, index.js:13 seen 12 times");
+}
+
 #[test]
 fn test_javascript_hcr_ctfs_integration() {
     // -- Guard: prerequisite check. Loud, and fatal when CI says so. --
@@ -404,6 +519,7 @@ fn test_javascript_hcr_ctfs_integration() {
 
     // Verify pre-reload value: compute(3) = 6 (v1: n*2)
     println!("Pre-reload flow has {} steps", pre_flow.steps.len());
+    assert_flow_window_is_index_js_only("pre-reload", &pre_flow);
     let pre_value = extract_var_value_at_stop(&pre_flow, "value", pre_loc_rr_ticks).unwrap_or_else(|| {
         panic!(
             "pre-reload: could not locate `value` for stop step rr_ticks={} (variables seen: {:?})",
@@ -462,6 +578,7 @@ fn test_javascript_hcr_ctfs_integration() {
 
     // Verify post-reload value: compute(9) = 27 (v2: n*3)
     println!("Post-reload flow has {} steps", post_flow.steps.len());
+    assert_flow_window_is_index_js_only("post-reload", &post_flow);
     let post_value = extract_var_value_at_stop(&post_flow, "value", post_loc_rr_ticks).unwrap_or_else(|| {
         panic!(
             "post-reload: could not locate `value` for stop step rr_ticks={} (variables seen: {:?})",
