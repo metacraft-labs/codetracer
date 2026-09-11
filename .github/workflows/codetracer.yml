@@ -5324,6 +5324,86 @@ jobs:
             codetracer-trace-format=dev
             codetracer-trace-format-nim=dev
 
+      # ---------------------------------------------------------------------
+      # codetracer-js-recorder. This lane runs `./ci/test/non-gui.sh` ->
+      # `just test` -> `just test-rust` -> `cargo nextest run --release
+      # --test '*'`, whose `-E` filter excludes only
+      # `javascript_flow_integration`. FIVE JavaScript tests therefore execute
+      # here, and every one of them needs this sibling:
+      #
+      #   javascript_flow_dap_test::javascript_flow_dap_variables_and_values
+      #   javascript_flow_dap_test::test_js_locals_all_statements
+      #   javascript_hcr_ctfs_integration::test_javascript_hcr_ctfs_integration
+      #   javascript_locals_dap_test::test_js_load_locals_is_point_in_time_not_a_frame_union
+      #   javascript_locals_dap_test::test_js_locals_live_recording_has_values_on_every_step
+      #
+      # `find_js_recorder()` (src/db-backend/tests/test_harness/mod.rs:2469)
+      # resolves `../../../codetracer-js-recorder/packages/cli/dist/index.js`
+      # relative to `src/db-backend`, i.e. the sibling checkout beside this
+      # one -- exactly where `clone-repo` places it below.
+      #
+      # `origin_javascript_dap_test`'s four tests resolve the recorder the same
+      # way and also run on this lane, but their guard is a bare `return` with
+      # an `eprintln!` -- so without the sibling they pass while asserting
+      # nothing. They are not listed above because the five are the tests that
+      # REPORT a missing recorder; the clone makes all nine actually run.
+      #
+      # WHY THIS MATTERS: with the sibling absent, `find_js_recorder()` answers
+      # None, the HCR test takes its loud-skip path and the two DAP suites
+      # panic. NO CI lane built this recorder: `test-non-gui` provisioned
+      # trace-format, trace-format-nim, python-, ruby- and beam-recorder and
+      # not this one, and `windows-rust-components` runs a bare `cargo test`
+      # with the JS suites `--skip`ped outright. A defect affecting EVERY
+      # multi-file JavaScript trace survived roughly two months behind that
+      # gap and was found only because one developer happened to have the
+      # sibling built locally.
+      #
+      # Provisioned with `clone-repo` rather than by extending the
+      # `siblings:` block above: that block's entries are `=dev` branch tips,
+      # and `ci/test/sibling-provisioning-test.sh`'s branch-tip CEILING "is
+      # lowered as blocks are converted and is never raised". This is the same
+      # shape the `test-ui-tests` and `viewmodel-tests` jobs already use for
+      # this same repo. NOT gated to one platform: both legs run the same
+      # `just test`, so both need it.
+      #
+      # The loud-skip path in the tests is deliberately left alone. The goal is
+      # that CI HAS the recorder, not that every developer must.
+      - name: Clone codetracer-js-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Build codetracer-js-recorder sibling
+        # The clone lands unbuilt and `packages/cli/dist/` is PRODUCED, never
+        # committed, so there is no stale copy to fall back on: without this
+        # step `find_js_recorder()` still answers None and the JS tests still
+        # skip. `ci/verdict/recorder-clone-implies-build.py` enforces that a
+        # job cloning this repo also builds it in the same job.
+        #
+        # Built in the RECORDER's own pinned dev shell (`nix develop` from its
+        # checkout), the way `scripts/build-siblings.sh` and `test-ui-tests`
+        # build it -- codetracer's shell does not ship the napi/node toolchain
+        # the addon needs.
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-js-recorder"
+          nix develop --no-write-lock-file --command just build
+
+          # Assert the artefact `find_js_recorder()` actually opens, by the
+          # same name it uses. A built-looking tree with no dist/index.js
+          # would put the JS tests straight back on the skip path, silently.
+          if [ ! -f packages/cli/dist/index.js ]; then
+            echo "::error::just build reported success but packages/cli/dist/index.js is missing; find_js_recorder() returns None and the JavaScript db-backend tests skip instead of asserting."
+            ls -la packages/cli/dist 2>/dev/null || echo "  (packages/cli/dist does not exist)"
+            exit 1
+          fi
+          echo "js recorder CLI: $(pwd)/packages/cli/dist/index.js"
+
       - name: Allow direnv in cloned codetracer-beam-recorder
         # ``elixir_flow_dap_test.rs`` / ``erlang_flow_dap_test.rs``
         # invoke ``elixirc`` / ``erlc`` through
