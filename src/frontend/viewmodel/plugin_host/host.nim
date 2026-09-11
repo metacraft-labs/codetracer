@@ -53,15 +53,17 @@
 ## SDK-consumer tree, so `ci/test/sdk-facade-boundary.sh` holds those plugins
 ## to §2.1's rule the same way it holds the terminal front-end to it.
 
-import std/[strutils, tables, times]
+import std/[options, sets, strutils, tables, times]
 
 import isonim/core/types as isonim_types
 import isonim/core/graph as isonim_graph
 import isonim/core/owner as isonim_owner
 
 import ./plugin_api
+import ./surface_host
 
 export plugin_api
+export surface_host
 
 type
   PluginHostError* = object of CatchableError
@@ -92,6 +94,27 @@ type
     activationLog*: seq[PluginId]
       ## Every activation, in the order it happened. The DEPENDENCY ORDER
       ## claim of §4.2 is a claim about this sequence.
+    frontEnd*: FrontEnd
+      ## PLAT-9 / §6.3. WHICH FRONT-END THIS HOST IS, and therefore which
+      ## surfaces have a view. It is a host field rather than a resolve-time
+      ## argument because a host IS a front-end's plugin host — there is no
+      ## point in the lifetime of one at which the answer changes.
+    surfaces*: SurfaceHost
+      ## PLAT-9's registry: the contributed surfaces, their dependency probes,
+      ## their degradation and their fault boundary.
+    extensionsEnabled*: bool
+      ## `--no-extensions`. See `newPluginHost`.
+    activationFaults*: seq[string]
+      ## PLAT-9 / §7. A plugin whose `activate` RAISED. Recorded rather than
+      ## propagated, because "a failing extension must not take down the
+      ## debugger" applies to the plugin's first line as much as to its
+      ## hundredth, and a host that let `activate` throw would take the
+      ## application down before any view had been mounted inside a boundary.
+    defectedPlugins*: HashSet[PluginId]
+      ## PLAT-9 / §7. Plugins whose `activate` raised a `Defect`. They are not
+      ## activated again this session — see `activateOne`. A set rather than a
+      ## flag on the record because the question is asked before a record is
+      ## guaranteed to exist.
     reclaimFailures*: seq[string]
       ## PLAT-8. A closer that raised during a handle sweep. It is RECORDED
       ## rather than raised out of `deactivate`, because a deactivation that
@@ -101,10 +124,24 @@ type
       ## finding rather than a silence.
 
 proc newPluginHost*(coreVersion: SemVer;
-                    budget = DefaultEffectBudget): PluginHost =
-  PluginHost(coreVersion: coreVersion, budget: budget,
+                    budget = DefaultEffectBudget;
+                    frontEnd = feWeb;
+                    extensionsEnabled = true): PluginHost =
+  ## `extensionsEnabled = false` IS `--no-extensions` (§7's last bullet), AND
+  ## THE HOST'S HALF OF IT IS: nothing is resolved, nothing is activated, and
+  ## no plugin's `activate` is entered. `SurfaceHost`'s half — no registry, no
+  ## probe, no render — is in `newSurfaceHost`.
+  ##
+  ## `register` still RECORDS a manifest with the flag on, deliberately: a
+  ## user who passes the flag and then asks what is installed should get the
+  ## list, and `report()` names the flag as the reason none of them is running.
+  ## What the flag removes is execution, not knowledge.
+  PluginHost(coreVersion: coreVersion, budget: budget, frontEnd: frontEnd,
+             extensionsEnabled: extensionsEnabled,
+             surfaces: newSurfaceHost(frontEnd, extensionsEnabled),
              impls: initTable[PluginId, PluginImplementation](),
-             records: initTable[PluginId, PluginRecord]())
+             records: initTable[PluginId, PluginRecord](),
+             defectedPlugins: initHashSet[PluginId]())
 
 # ---------------------------------------------------------------------------
 # discover
@@ -138,7 +175,15 @@ proc register*(host: PluginHost; manifestText, source: string;
 
 proc resolveAll*(host: PluginHost) =
   ## The whole registry, once, before anything is activated.
-  host.resolution = resolve(host.parsed, host.coreVersion)
+  ##
+  ## THE FRONT-END IS PASSED IN, and that is what makes §6.3's refusal real
+  ## rather than a function nobody calls: `resolve` evaluates a required
+  ## surface against it in phase 3b, fails the plugin that has no view there,
+  ## and blocks that plugin's dependents in phase 6 like any other failure.
+  ## Passing `none` here would leave `surfaceRefusals` a pure function with no
+  ## effect on anything — which is exactly what it was before this line.
+  host.resolution = resolve(host.parsed, host.coreVersion,
+                            some(host.frontEnd))
   host.resolved = true
 
 proc loadErrors*(host: PluginHost): seq[PluginError] =
@@ -146,6 +191,13 @@ proc loadErrors*(host: PluginHost): seq[PluginError] =
 
 proc isLoadable*(host: PluginHost; id: PluginId): bool =
   host.resolved and host.resolution.isLoadable(id)
+
+proc failureCodeFor*(host: PluginHost; id: PluginId): PluginErrorCode =
+  ## WHY a plugin is not loadable, as the code a caller may branch on.
+  ## Verification-Harness-Traps §4b: a test asserting only "it refused" passes
+  ## when the refusal was for the wrong reason, so a refusal is asserted by
+  ## code and never by the presence of some error.
+  host.resolution.failureFor(id).code
 
 # ---------------------------------------------------------------------------
 # activate
@@ -165,7 +217,14 @@ proc activateOne*(host: PluginHost; id: PluginId): bool {.discardable.} =
     raise newException(PluginHostError,
       "activateOne('" & id & "') before resolveAll(): Extensibility-Model " &
       "§4.2 requires resolution to be total before any activation")
+  # PLAT-9 / §7. `--no-extensions` is checked HERE, at the one point every
+  # activation path goes through, rather than at each of the three callers.
+  # `activateFor` and `activateEager` both funnel here, so there is no second
+  # route by which a plugin's `activate` could be entered.
+  if not host.extensionsEnabled: return false
   if host.isActive(id): return true
+  # §7, and the one place a `Defect` differs from a handled error on this path.
+  if id in host.defectedPlugins: return false
   if not host.isLoadable(id): return false
   if not host.impls.hasKey(id): return false
 
@@ -189,14 +248,70 @@ proc activateOne*(host: PluginHost; id: PluginId): bool {.discardable.} =
   host.records[id] = rec
   host.activationLog.add id
 
+  # PLAT-9 / §6.1. The surfaces are registered BEFORE `activate` runs, because
+  # `contributeView` joins a view to a surface the manifest declared and the
+  # host has to know which surfaces this front-end kept. Registering afterwards
+  # would make the ordering a plugin could observe.
+  host.surfaces.register(ctx.manifest)
+
   # `runWithOwner` makes `scope` the AMBIENT owner, so every `createEffect`
   # and `createMemo` the plugin reaches — through `plugin_api`, which is the
   # only way it can — attaches itself to `scope.owned`. The plugin does not
   # opt in and cannot opt out.
+  #
+  # AND IT RUNS INSIDE A `try`, which is §7's containment applied to the
+  # plugin's FIRST line. A plugin whose `activate` raises used to propagate
+  # out of here into whatever was booting the application; now it is recorded,
+  # attributed, and the plugin is left inactive with everything it managed to
+  # create released. `report()` prints the fault.
+  #
+  # AND IT CATCHES `Defect` AS WELL AS `CatchableError`, for the reason
+  # `surface_host.renderSurface` does: `IndexDefect`, `FieldDefect`,
+  # `RangeDefect` and a nil dereference are not `CatchableError`s, they are the
+  # commonest way Nim code fails at runtime, and a containment that misses them
+  # contains the rare case and not the ordinary one. The two are recorded
+  # separately because they mean different things — see `surface_host`'s
+  # header, including what `--panics:on` does to both — and because a plugin
+  # whose FIRST line broke an invariant is not re-entered on the next
+  # activation event, while one that raised a handled error is.
+  var faulted = false
+  var faultedByDefect = false
+  var faultMessage = ""
   let enter = proc() =
     if not impl.activate.isNil:
-      impl.activate(ctx)
+      try:
+        impl.activate(ctx)
+      except Defect as d:
+        faulted = true
+        faultedByDefect = true
+        faultMessage = "the Defect " & $d.name & ": " & d.msg
+      except CatchableError as e:
+        faulted = true
+        faultMessage = $e.name & ": " & e.msg
   isonim_owner.runWithOwner(scope, enter)
+  if faulted:
+    host.activationFaults.add "plugin '" & id & "': activate() raised " &
+      faultMessage & " — the plugin is not active and contributes nothing" &
+      (if faultedByDefect:
+         ". A Defect is a broken invariant rather than a handled error, so " &
+         "this plugin will not be activated again this session"
+       else: "")
+    if faultedByDefect:
+      # NOT RE-ARMED. `activateFor` walks the plan on every declared event, and
+      # a plugin left merely inactive is retried on the next one. A
+      # `CatchableError` earns that retry; a `Defect` does not, for the reason
+      # `surface_host.containDefect` gives — the retry is a second run over
+      # state whose invariants the language has just said do not hold.
+      host.defectedPlugins.incl id
+    # Release whatever it created before it threw. `cleanNode` over a scope
+    # holding nothing is a no-op, so this is correct for a plugin that threw
+    # on its first statement as well as for one that threw on its last.
+    isonim_graph.cleanNode(scope)
+    rec.active = false
+    return false
+
+  # PLAT-9. Join the views the plugin contributed to the surfaces it declared.
+  host.surfaces.attachViews(ctx)
   true
 
 proc activateFor*(host: PluginHost; occurred: ActivationEvent): seq[PluginId]
@@ -346,13 +461,41 @@ proc report*(host: PluginHost): string =
   ## the two places. A surface that showed only one of them would be right
   ## half the time.
   var lines: seq[string] = @[]
+  if not host.extensionsEnabled:
+    # §7's recovery route says so FIRST. A user who started with the flag and
+    # then reads a column of "your plugin did not load" lines is being told
+    # the wrong thing in the right amount of detail.
+    lines.add "extensions are disabled for this session (" &
+      NoExtensionsFlag & "): " & $host.parsed.len &
+      " manifest(s) were read and none was resolved or activated"
   for e in host.resolution.errors:
     lines.add render(e)
   for v in host.violations():
     lines.add describe(v)
+  for f in host.activationFaults:
+    lines.add f
   for f in host.reclaimFailures:
     lines.add f
+  let surfaceLines = host.surfaces.report()
+  if surfaceLines.len > 0 and host.extensionsEnabled:
+    lines.add surfaceLines
   lines.join("\n")
+
+proc renderSurface*(host: PluginHost; qualifiedId: string;
+                    core = initDegradedStateSnapshot()): ViewNode =
+  ## PLAT-9's one render entry point for the application. Delegates to the
+  ## surface host so that a front-end has one call to make and cannot reach
+  ## past the boundary by accident.
+  host.surfaces.renderSurface(qualifiedId, core)
+
+proc reprobeDependencies*(host: PluginHost;
+                          occurred: ActivationEvent): seq[string]
+                          {.discardable.} =
+  ## §8.2's declared trigger, from the side the application drives. THE SAME
+  ## EVENT VALUE that `activateFor` takes, so a front-end announcing "a trace
+  ## opened" makes both things happen from one occurrence rather than from two
+  ## call sites that could disagree about what happened.
+  host.surfaces.reprobe(occurred)
 
 proc grantsReport*(host: PluginHost): string =
   ## What every loadable plugin was granted, with its declared sets —

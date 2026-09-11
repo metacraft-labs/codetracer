@@ -21,5 +21,6 @@ import ./plugin_model/diagnostics
 import ./plugin_model/manifest
 import ./plugin_model/resolution
 import ./plugin_model/activation
+import ./plugin_model/surfaces
 
-export diagnostics, manifest, resolution, activation
+export diagnostics, manifest, resolution, activation, surfaces

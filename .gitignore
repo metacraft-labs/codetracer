@@ -435,3 +435,11 @@ src/frontend/viewmodel/tests/unit/.plat7-boundary-mutation.lock
 # at the same time — that is a fact about the tree, stated in each harness's
 # header, not something either lock enforces for the other.)
 src/frontend/viewmodel/tests/unit/.plat8-io-mutation.lock
+
+# The same again, for PLAT-9's surfaces, degradation and fault-boundary
+# harness. A THIRD lock for the same reason the second exists: a different
+# subject set and different recorded control digests. Like the other two it
+# does not serialise against its siblings, and like them the reason is stated
+# rather than enforced — PLAT-9's harness mutates `manifest.nim` and `host.nim`,
+# which PLAT-8's also quotes, so the three must not run at the same time.
+src/frontend/viewmodel/tests/unit/.plat9-surface-mutation.lock

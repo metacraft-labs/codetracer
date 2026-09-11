@@ -817,6 +817,12 @@ suite "Layout algebra — invariants (§7)":
         of lpPaneNotDocked: some(cmdRestoreDocked(paneEditor))
         of lpTargetNotAStack: some(cmdMoveTab(paneState, paneEditor, 0))
         of lpIndexOutOfRange: some(cmdMoveTab(paneEditor, paneState, 99))
+        of lpMalformedContributedPane:
+          # PLAT-9. A contributed pane id that is not namespaced is refused by
+          # `apply` as well as by `validate` — the command is the second door a
+          # third party's id reaches a layout through, and the id below is
+          # spelled exactly like a built-in pane.
+          some(cmdAddContributedPane("editor"))
         of lpEmptyContainer, lpPaneWithChildren, lpContainerWithPaneField,
            lpActiveIndexOutOfRange, lpSingleChildContainer:
           none(LayoutCommand)
@@ -836,7 +842,7 @@ suite "Layout algebra — invariants (§7)":
         check witness.isNone
     # A positive control: if `problemSources` declared everything structural,
     # every branch would be skipped and this test would still be green.
-    check refusalCovered == 11
+    check refusalCovered == 12
 
 # ---------------------------------------------------------------------------
 # §3A.2 — the floating-panel non-goal, asserted structurally
@@ -888,7 +894,8 @@ suite "Layout algebra — floating panels are not expressible (§3A.2)":
     check offenders.len == 0
     # Positive control (Verification-Harness-Traps §4): a walk that visited
     # nothing would report no offenders too.
-    check checkedFields == 6 + 5 + 3
+    # PLAT-9 added `LayoutNode.contributedPane`, so the node's arity is 7.
+    check checkedFields == 7 + 5 + 3
 
   test "every visible pane occupies a distinct region of the split tree":
     # The model's half of the projection's total-and-disjoint invariant: each

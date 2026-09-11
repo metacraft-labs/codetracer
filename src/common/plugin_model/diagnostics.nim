@@ -75,6 +75,57 @@ type
       ## acknowledge an exfiltration path the plugin cannot take, which trains
       ## them to acknowledge the next one without reading it.
 
+    # -- PLAT-9. §6's surfaces, §6.3's required/optional rule, and §8.2's
+    # -- dependency declarations. Every one of them is a LOAD-TIME refusal for
+    # -- §4.1's reason: a surface that quietly does nothing is the blank tab.
+    pecUnknownFrontEnd
+      ## A `nativeViews` entry naming a front-end PLAT-3's vocabulary does not
+      ## have. The three are `terminal`, `web` and `gpui`, with the `--ui`
+      ## spellings accepted as aliases.
+    pecUnknownRequirement
+      ## §6.3 has exactly two: `required` and `optional`. A third spelling is
+      ## refused rather than rounded to one of them, because rounding it down
+      ## produces a surface that silently does nothing and rounding it up
+      ## refuses a plugin the author meant to ship.
+    pecBadContributedPaneId
+      ## §6.1/§10.2's namespaced string, against `contributed_pane_id`'s
+      ## grammar. The id is persisted into a layout the desktop reads back, so
+      ## it is validated where it enters rather than where it is rendered.
+    pecUndeclaredDependency
+      ## §8.2: a surface names a dependency in `needs` that the manifest's
+      ## `executables` does not declare. The host resolves a tool against the
+      ## declared set (§8.1.1), so a need outside it can never be satisfied —
+      ## which is a permanently degraded surface nobody wrote down.
+    pecMissingInstallHint
+      ## §8.2: "The degradation says **what is missing and how to get it** — a
+      ## name and an install action, not 'unavailable'." A surface declaring a
+      ## dependency without the remedy could only ever render 'unavailable',
+      ## so the remedy is required at load time rather than hoped for.
+    pecSurfaceUnavailableOnFrontEnd
+      ## §6.3's rule, at resolution time: a REQUIRED surface with no view for
+      ## the active front-end. The detail names the front-end AND the surface,
+      ## because "an extension that appears to load and then silently does
+      ## nothing" is what §6.3 exists to prevent.
+    pecUnknownReprobeTrigger
+      ## §8.2's "re-probed on a declared trigger". The trigger vocabulary is
+      ## §4.2's activation events — one vocabulary, not two — so an unknown
+      ## trigger fails the same way an unknown activation event does.
+    pecDuplicateContribution
+      ## §6.1. TWO RENDERING SURFACES OF ONE MANIFEST SHARING A LOCAL ID.
+      ##
+      ## The qualified id is `<plugin>/<surface>` and carries no contribution
+      ## kind, so a `pane` and a `marker` both called `metrics` compose the
+      ## same string — one registry key, one `declaresSurface` answer, one
+      ## `contributeView` target. Measured before the rule existed: the
+      ## manifest parsed with zero errors, the host registered one record, and
+      ## the second contribution was dropped by a `hasKey` test with nothing
+      ## anywhere saying it had gone. That is `lpUnknownPane`'s
+      ## silently-missing-surface failure arriving at load time instead of at
+      ## restore time, which is the one thing §6.1 exists to prevent.
+      ##
+      ## The refusal names BOTH contributions, because either may be the typo
+      ## and an author told only "duplicate id" has to find the other one.
+
   PluginError* = object
     plugin*: PluginId
       ## ALWAYS set. See the header.
@@ -123,6 +174,16 @@ func codeText*(c: PluginErrorCode): string =
     "an exfiltration path without the explicit trace-egress grant"
   of pecTraceEgressWithoutPair:
     "a trace-egress grant on a plugin that has no exfiltration path"
+  of pecUnknownFrontEnd: "unknown front-end"
+  of pecUnknownRequirement: "unknown surface requirement"
+  of pecBadContributedPaneId: "malformed contributed pane id"
+  of pecUndeclaredDependency: "surface needs a tool the manifest never declared"
+  of pecMissingInstallHint: "a declared dependency with no way to get it"
+  of pecSurfaceUnavailableOnFrontEnd:
+    "a required surface has no view for this front-end"
+  of pecUnknownReprobeTrigger: "unknown re-probe trigger"
+  of pecDuplicateContribution:
+    "two rendering surfaces share one local id"
 
 func pluginError*(plugin: PluginId; code: PluginErrorCode;
                   detail: string): PluginError =

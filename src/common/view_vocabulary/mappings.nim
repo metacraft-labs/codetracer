@@ -340,6 +340,29 @@ func frontEndName*(fe: FrontEnd): string =
   of feWeb: "web"
   of feGpui: "gpui"
 
+func absentEntries*(fe: FrontEnd): seq[ViewKind] =
+  ## Every entry this front-end has NO construct for, READ OUT OF the three
+  ## mappings above rather than listed a second time anywhere.
+  ##
+  ## ONE PREDICATE, ONE FUNCTION (Verification-Harness-Traps §14). Three places
+  ## state "which entries are absent on GPUI" in prose — this module's header,
+  ## `Extensibility-Model.md` §3.4 and §6.4, and `plugin_model/surfaces.nim`'s
+  ## header — and a fourth written as a literal is exactly where they would
+  ## drift apart. They already had: §6.4 and `surfaces.nim` named `Image`,
+  ## which is `msComplete` here, and omitted `Modal`, which is `msAbsent`.
+  ## Nothing in the tree could contradict them, because nothing read the table.
+  ## `plugin_surfaces_test` now compares `surfaces.nim`'s own sentence with
+  ## what this function returns.
+  ##
+  ## In `ViewKind` order, which is the order `mappingSummary` prints.
+  for k in ViewKind:
+    if mappingFor(fe, k).status == msAbsent: result.add k
+
+func absentEntryNames*(fe: FrontEnd): seq[string] =
+  ## `absentEntries`, in PLAT-3's spelling — the form a sentence uses, so a
+  ## sentence can be compared with it directly.
+  for k in absentEntries(fe): result.add vocabularyName(k)
+
 func mappingSummary*(): string =
   ## The whole table, one row per entry, as a fixed-width report. Written so a
   ## reader can see the three columns beside each other, which is the form the

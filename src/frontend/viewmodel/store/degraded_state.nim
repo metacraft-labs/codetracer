@@ -38,10 +38,18 @@
 ## | Reorganised away                    | `ChainVM` — §3                                |
 ## | CDN unreachable                     | the service worker — §14, Rendering-And-Delivery |
 ##
-## The six bold rows are the ones that reach a *pane*, and they are the six
-## `PaneDegradation` values below. The other seven are named in this table
-## rather than merely omitted, because "we forgot" and "that belongs one
-## layer up" look identical in a file that only lists what it owns.
+## The six bold rows are the ones that reach a *pane*, and they are six of the
+## seven non-`pdNone` `PaneDegradation` values below. The other seven §14 rows
+## are named in this table rather than merely omitted, because "we forgot" and
+## "that belongs one layer up" look identical in a file that only lists what it
+## owns.
+##
+## **The seventh value is not a §14 row at all.** PLAT-9 added
+## `pdDependencyMissing` for Extensibility-Model.md §8.2, which names this
+## module as the home for a plugin surface whose external component is absent
+## — "inventing a parallel 'plugin unavailable' banner would be a second
+## mechanism saying the same thing worse". So this catalogue now spans two
+## specifications, and the row says which one it came from.
 ##
 ## **"here" means consumed here, not owned exclusively here.** Four of the six
 ## bold rows also have a BlockTracer ViewModel named against them in
@@ -170,30 +178,71 @@ type
       ## a synthetic frame. Distinct from `savUnverified` because there
       ## is nothing for a supply-sources action to attach to.
 
+  PluginDependencyState* = enum
+    ## PLAT-9 / Extensibility-Model.md §8.2. Whether the external component a
+    ## CONTRIBUTED surface declared is there.
+    ##
+    ## §8.2: "A plugin whose external component is absent is **degraded, not
+    ## broken**, and CodeTracer already has a model for exactly that … That is
+    ## the right home, and inventing a parallel 'plugin unavailable' banner
+    ## would be a second mechanism saying the same thing worse."
+    ##
+    ## THE FIFTH AXIS IS NOT A BOOL, for the same reason `ReplayAvailability`
+    ## is not one: the two ways a dependency can be unusable have different
+    ## remedies. `pdsAbsent` is answered by installing it; `pdsUnsupported` is
+    ## answered by using a different front-end, and telling a user to install
+    ## a tool on a host that could not run it either way is the retry that
+    ## cannot succeed §14 forbids.
+    pdsSatisfied
+      ## Every dependency this surface declared resolved. The ZERO VALUE, so a
+      ## snapshot describing the core panes — which declare no dependencies —
+      ## is undegraded on this axis without anybody setting it.
+    pdsAbsent
+      ## A declared tool is not on the host's PATH. Renewable by installing it,
+      ## which is what the surface's `install` hint says how to do.
+    pdsUnsupported
+      ## The host has no process SDK at all on this backend (§8.1's stated
+      ## absence on the JS target), so the dependency cannot be resolved here
+      ## however it is installed.
+
   PaneDegradation* = enum
     ## The single value a pane hands its view, so the view renders a
     ## treatment rather than deciding on one.
     ##
-    ## Six of the seven values are §14 rows; `pdNone` is the ordinary
+    ## Seven of the eight values are catalogue rows; `pdNone` is the ordinary
     ## case. Every §14 row that reaches a pane is here, and nothing that
     ## does not reach a pane is (see the table in this module's header).
     pdNone
     pdPermanentlyUnreplayable  ## §14 / §14.1a — terminal
     pdReplayWindowExpired      ## §14 / §14.1a — renewable
     pdEngineUnavailable        ## §14 / §14.2 — a ladder rung is in force
+    pdDependencyMissing
+      ## Extensibility-Model.md §8.2 — a CONTRIBUTED surface whose declared
+      ## external component is absent. Not a §14 row: §14's catalogue predates
+      ## the plugin model. It is here rather than in a second enum because
+      ## §8.2 names this module as "the right home" and because a contributed
+      ## pane is otherwise sensitive to the same rows every other pane is —
+      ## two enums would mean two precedences to keep in agreement.
     pdDivergenceDetected       ## §14 — non-dismissible banner
     pdTraceTruncated           ## §14 — banner, offer a deeper profile
     pdNoVerifiedSource         ## §14 — instruction-level stepping
 
   DegradedStateSnapshot* = object
-    ## The four independent axes, read together. A snapshot rather than
-    ## four arguments so `resolveDegradation` cannot be called with three
+    ## The five independent axes, read together. A snapshot rather than
+    ## five arguments so `resolveDegradation` cannot be called with four
     ## of them by accident, and so a pane memo makes one read of each
     ## signal per evaluation.
     availability*: ReplayAvailability
     integrity*: TraceIntegrity
     capability*: ReplayCapability
     sourceAvailability*: SourceAvailability
+    dependency*: PluginDependencyState
+      ## PLAT-9. Per SURFACE rather than per session: the four axes above are
+      ## properties of the trace and the host, and this one is a property of
+      ## one contributed pane. `ReplayDataStore.degradedSnapshot` therefore
+      ## leaves it at `pdsSatisfied` and the surface host fills it in for the
+      ## pane being resolved — which is why it is a field on the snapshot
+      ## rather than a signal on the store.
 
 const
   # The order `resolveDegradation` tests conditions in, most severe first.
@@ -203,10 +252,17 @@ const
   # The ordering rule: a state that means "you cannot see this execution at
   # all" outranks one that means "what you can see is incomplete", which
   # outranks one that means "what you can see is coarser than usual".
-  DegradationPrecedence*: array[6, PaneDegradation] = [
+  DegradationPrecedence*: array[7, PaneDegradation] = [
     pdPermanentlyUnreplayable,
     pdReplayWindowExpired,
     pdEngineUnavailable,
+    # A contributed surface whose tool is absent has nothing to draw at all,
+    # so it outranks the two rows that mean "what you can see is incomplete".
+    # It sits BELOW `pdEngineUnavailable` because a plugin pane inside a
+    # debugger whose replay engine is gone has a more fundamental problem than
+    # its own missing helper, and telling the user to install a tool would be
+    # an instruction that does not help.
+    pdDependencyMissing,
     pdDivergenceDetected,
     pdTraceTruncated,
     pdNoVerifiedSource,
@@ -263,15 +319,48 @@ const
     pdTraceTruncated,
   }
 
-  # Every pane's sensitivity set, so a test can assert that the union covers
-  # every §14 row this package owns — the check that catches a seventh row
-  # being added to `PaneDegradation` and then rendered by nobody.
-  AllPaneDegradations*: array[5, set[PaneDegradation]] = [
+  # PLAT-9. A pane contributed by an extension (Extensibility-Model.md §6.1).
+  #
+  # It is sensitive to `pdDependencyMissing` — which is its own row and no
+  # other pane's — and to the three rows that mean the execution cannot be
+  # seen at all, because a plugin pane over a trace that will not replay is in
+  # exactly the same position as a built-in one. It is NOT sensitive to
+  # truncation, divergence or source verification: those are claims about what
+  # a CodeTracer pane is showing, and this module cannot know what a third
+  # party's pane shows. §8.2's rule is that a missing dependency degrades
+  # "that surface, not the whole plugin, and not the application", and the
+  # mirror of that is that this surface does not inherit banners about data it
+  # may not be reading.
+  ContributedPaneDegradations*: set[PaneDegradation] = {
+    pdPermanentlyUnreplayable,
+    pdReplayWindowExpired,
+    pdEngineUnavailable,
+    pdDependencyMissing,
+  }
+
+  # The five BUILT-IN panes' sensitivity sets. Separate from
+  # `AllPaneDegradations` because the suite that drives real pane ViewModels
+  # can only drive these five, and a suite asserting "every row is reachable
+  # on a pane it can build" must be able to say which those are without
+  # hard-coding a skip list.
+  CorePaneDegradations*: array[5, set[PaneDegradation]] = [
     EditorPaneDegradations,
     CalltracePaneDegradations,
     EventLogPaneDegradations,
     StatePaneDegradations,
     DebugControlsPaneDegradations,
+  ]
+
+  # EVERY pane's sensitivity set, so a test can assert that the union covers
+  # every row this package owns — the check that catches a new row being added
+  # to `PaneDegradation` and then rendered by nobody.
+  AllPaneDegradations*: array[6, set[PaneDegradation]] = [
+    EditorPaneDegradations,
+    CalltracePaneDegradations,
+    EventLogPaneDegradations,
+    StatePaneDegradations,
+    DebugControlsPaneDegradations,
+    ContributedPaneDegradations,
   ]
 
 func initDegradedStateSnapshot*(): DegradedStateSnapshot =
@@ -283,6 +372,7 @@ func initDegradedStateSnapshot*(): DegradedStateSnapshot =
     integrity: tiComplete,
     capability: rcCapable,
     sourceAvailability: savVerified,
+    dependency: pdsSatisfied,
   )
 
 func capabilityRung*(capability: ReplayCapability): CapabilityRung =
@@ -316,7 +406,8 @@ func degradationPresent*(snapshot: DegradedStateSnapshot;
     snapshot.availability in {raRetained, raWindowedLive} and
       snapshot.integrity == tiComplete and
       snapshot.capability == rcCapable and
-      snapshot.sourceAvailability == savVerified
+      snapshot.sourceAvailability == savVerified and
+      snapshot.dependency == pdsSatisfied
   of pdPermanentlyUnreplayable:
     snapshot.availability == raUnreplayable
   of pdReplayWindowExpired:
@@ -332,6 +423,13 @@ func degradationPresent*(snapshot: DegradedStateSnapshot;
     snapshot.availability in {raWindowExpired, raNeverGenerated}
   of pdEngineUnavailable:
     snapshot.capability != rcCapable
+  of pdDependencyMissing:
+    # Both non-satisfied states are one PANE row because a pane's treatment is
+    # identical — the surface cannot draw and says what is missing — while the
+    # remedy differs and belongs to the consumer, which reads
+    # `PluginDependencyState` and still has both values. The same split
+    # `pdReplayWindowExpired` makes over §14.1a's two renewable rows.
+    snapshot.dependency != pdsSatisfied
   of pdDivergenceDetected:
     snapshot.integrity == tiDivergent
   of pdTraceTruncated:

@@ -277,7 +277,8 @@ suite "Interaction — separate from Layout, structurally (§4.1)":
     check offenders.len == 0
     # Positive control (Verification-Harness-Traps §4): a walk that visited
     # nothing would report no offenders either.
-    check checkedFields == 6 + 5 + 3
+    # PLAT-9 added `LayoutNode.contributedPane`, so the node's arity is 7.
+    check checkedFields == 7 + 5 + 3
 
   test "layout_model names none of the transient types, and cannot":
     # `layout_interaction` imports `layout_model`; the reverse import is a

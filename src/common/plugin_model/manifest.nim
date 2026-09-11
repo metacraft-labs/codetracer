@@ -51,8 +51,10 @@ import std/[json, strutils, tables]
 
 import ./diagnostics
 import ./capabilities
+import ../contributed_pane_id
 import ../value_presentation/vocabulary as presentation_vocabulary
 import ../view_vocabulary/vocabulary as view_vocabulary
+import ../view_vocabulary/mappings as view_mappings
 
 export diagnostics
 export capabilities
@@ -67,6 +69,28 @@ export capabilities
 # every name it exports becomes public surface.
 export presentation_vocabulary.PresentationKind
 export view_vocabulary.ViewKind, view_vocabulary.vocabularyName
+
+# PLAT-9 WIDENS THAT RE-EXPORT BY EXACTLY ONE TYPE, and the comment above said
+# it would: a pane declaring a view is now a pane RENDERING one, so `FrontEnd`
+# — PLAT-3's three rendering targets — has to be spellable in a manifest and
+# readable by whoever decides whether a surface has a view here. `Mapping`,
+# `MappingStatus` and `mappingFor` come with it, because §6.3's decision is
+# taken against the mapping table rather than against a second copy of it.
+export view_mappings.FrontEnd, view_mappings.MappingStatus,
+       view_mappings.Mapping, view_mappings.mappingFor,
+       view_mappings.frontEndName,
+       # `absentEntries`/`absentEntryNames` come with `mappingFor` because they
+       # ARE `mappingFor`, folded over the enum: "which entries have no view
+       # here" is the question §6.3 is about, and a consumer that had to write
+       # the fold itself would be writing the second copy of a predicate
+       # (Verification-Harness-Traps §14) — which is how the absent set came to
+       # be stated wrongly in prose in two places at once.
+       view_mappings.absentEntries, view_mappings.absentEntryNames
+
+# PLAT-9. A contributed pane id is a value a manifest declares, a value the
+# layout persists and a value a front-end renders, so the grammar travels with
+# the manifest rather than being re-derived at each of the three.
+export contributed_pane_id
 
 type
   SemVer* = object
@@ -97,14 +121,53 @@ type
     ckStatusItem = "statusItem"
     ckViewModel = "viewModel"
 
+  SurfaceRequirement* = enum
+    ## §6.3's rule: "an extension declares, per surface, whether it is
+    ## `required` or `optional`."
+    ##
+    ## `srOptional` IS THE ZERO VALUE, DELIBERATELY. A manifest that says
+    ## nothing gets the arm that cannot refuse activation, so omitting the
+    ## field never turns a plugin off; declaring `required` is a decision the
+    ## author writes down, exactly as `startup` activation is.
+    srOptional = "optional"
+    srRequired = "required"
+
   Contribution* = object
     kind*: ContributionKind
     id*: string
+      ## The surface's LOCAL id. For a pane the host composes the qualified,
+      ## namespaced id as `<pluginId>/<id>` — see `contributed_pane_id`.
     title*: string
     views*: seq[ViewKind]
-      ## PANES ONLY. The PLAT-3 vocabulary entries this surface is written in
-      ## — §6.2's "abstract" arm. A pane declaring none is declaring a native
-      ## view, which is PLAT-9's business and not refused here.
+      ## The PLAT-3 vocabulary entries this surface's ABSTRACT view is written
+      ## in — §6.2's first arm, "written once in the shared vocabulary, runs on
+      ## every front-end". A surface declaring none and no `nativeViews` has no
+      ## view anywhere, which §6.3 decides on rather than ignores.
+    nativeFrontEnds*: set[FrontEnd]
+      ## §6.2's second arm: the front-ends for which this surface supplies a
+      ## NATIVE view. "An extension may supply **both**: an abstract view as
+      ## the baseline and a native view for one or more front-ends, with the
+      ## native one preferred where present."
+    requirement*: SurfaceRequirement
+      ## §6.3. Read only for the surfaces that RENDER
+      ## (`RenderingContributionKinds`): a command is invoked, not drawn, so
+      ## "no view for this front-end" is not a condition it can be in.
+    needs*: seq[string]
+      ## §8.2: "A plugin declares, per surface, which of its dependencies that
+      ## surface needs." Each entry is a bare program name that must also
+      ## appear in the manifest's `executables` — §8.1.1 has the host resolve a
+      ## tool against that declared set, so a need outside it could never be
+      ## satisfied.
+    install*: string
+      ## §8.2: "The degradation says what is missing and **how to get it** — a
+      ## name and an install action, not 'unavailable'." Required whenever
+      ## `needs` is non-empty; see `pecMissingInstallHint`.
+    reprobe*: seq[ActivationEvent]
+      ## §8.2: "The dependency is re-probed on a declared trigger, so
+      ## installing the missing component does not require restarting
+      ## CodeTracer." The trigger vocabulary IS §4.2's activation events —
+      ## one vocabulary rather than two, so `activation.matches` is the one
+      ## comparison and a trigger cannot acquire a second spelling.
     version*: SemVer
       ## `viewModel` only. §10's open decision 3 recommends published
       ## ViewModels be versioned; recording the version now costs nothing and
@@ -305,6 +368,50 @@ func activationKindByName*(name: string;
   for k in ActivationEventKind:
     if $k == name:
       dest = k
+      return true
+  false
+
+const
+  RenderingContributionKinds* = {ckPane, ckMarker, ckStatusItem}
+    ## §6.1's surfaces that DRAW. A command is invoked from the palette and a
+    ## published ViewModel is consumed by other code; neither can be in the
+    ## state §6.3 is about ("no view for the active front-end"), so neither is
+    ## evaluated against it. Stated as a set rather than as an `if` inside the
+    ## evaluator so a suite can assert the partition directly.
+
+  FrontEndAliases*: array[6, tuple[spelling: string; frontEnd: FrontEnd]] = [
+    ## §6.2 is written in PLAT-3's three rendering targets, and a plugin author
+    ## thinks in `--ui` values. Both spellings are accepted and BOTH ARE
+    ## LISTED, so `--ui=electron` and `--ui=webui` are visibly one rendering
+    ## target rather than silently folded into one.
+    ##
+    ## `gui` is on the list because `ui_selection.effectiveFrontEnd` resolves
+    ## it to Electron today; `tui` is the terminal. The canonical spellings
+    ## (`terminal`, `web`, `gpui`) come first so an error message that prints
+    ## this table leads with the vocabulary's own names.
+    ("terminal", feTerminal),
+    ("web", feWeb),
+    ("gpui", feGpui),
+    ("tui", feTerminal),
+    ("electron", feWeb),
+    ("webui", feWeb),
+  ]
+
+func frontEndByName*(name: string; dest: var FrontEnd): bool =
+  for entry in FrontEndAliases:
+    if entry.spelling == name:
+      dest = entry.frontEnd
+      return true
+  false
+
+func knownFrontEndNames*(): seq[string] =
+  for entry in FrontEndAliases:
+    result.add entry.spelling
+
+func requirementByName*(name: string; dest: var SurfaceRequirement): bool =
+  for r in SurfaceRequirement:
+    if $r == name:
+      dest = r
       return true
   false
 
@@ -693,7 +800,185 @@ proc parseManifest*(text, source: string): ParsedManifest =
               result.errors.add pluginError(named, pecBadVersion,
                 "'" & c.id & "' declares version '" & vtext & "'")
               continue
+
+          # ----- PLAT-9: the surface's own declarations --------------------
+          #
+          # A PANE'S QUALIFIED ID IS VALIDATED HERE, WHERE IT ENTERS. It is
+          # composed from the plugin id and this contribution's id, persisted
+          # into a layout document the desktop reads back, and rendered into a
+          # tab. Refusing a malformed one at the boundary is what keeps every
+          # later consumer — the encoder, the decoder, the renderer — free of
+          # a second opinion about what an id may contain.
+          if ck == ckPane:
+            let qualified = qualifiedPaneId(named, c.id)
+            let idProblem = paneIdProblem(qualified)
+            if idProblem != pipOk:
+              result.errors.add pluginError(named, pecBadContributedPaneId,
+                describe(idProblem, qualified))
+              continue
+
+          if entry.hasKey("requirement"):
+            let rtext = jstr(entry, "requirement")
+            if not requirementByName(rtext, c.requirement):
+              var known: seq[string] = @[]
+              for r in SurfaceRequirement: known.add $r
+              result.errors.add pluginError(named, pecUnknownRequirement,
+                "'" & c.id & "' declares requirement '" & rtext &
+                "' — §6.3 has exactly " & known.join(" and "))
+              continue
+
+          var surfaceProblem = false
+
+          if entry.hasKey("nativeViews"):
+            let natives = entry["nativeViews"]
+            if natives.kind != JArray:
+              result.errors.add pluginError(named, pecMalformedManifest,
+                "'nativeViews' of '" & c.id & "' must be an array of " &
+                "front-end names")
+              continue
+            for n in natives:
+              if n.kind != JString:
+                result.errors.add pluginError(named, pecUnknownFrontEnd,
+                  "a front-end name must be a string, got " & $n.kind)
+                surfaceProblem = true
+                continue
+              var fe: FrontEnd
+              if not frontEndByName(n.getStr(), fe):
+                result.errors.add pluginError(named, pecUnknownFrontEnd,
+                  "'" & c.id & "' declares a native view for '" & n.getStr() &
+                  "' — the front-ends are " & knownFrontEndNames().join(", "))
+                surfaceProblem = true
+                continue
+              c.nativeFrontEnds.incl fe
+
+          if entry.hasKey("needs"):
+            let needs = entry["needs"]
+            if needs.kind != JArray:
+              result.errors.add pluginError(named, pecMalformedManifest,
+                "'needs' of '" & c.id & "' must be an array of bare program " &
+                "names")
+              continue
+            for n in needs:
+              if n.kind != JString:
+                result.errors.add pluginError(named, pecBadDeclaration,
+                  "a dependency must be a string, got " & $n.kind)
+                surfaceProblem = true
+                continue
+              let tool = n.getStr()
+              if not isBareExecutableName(tool):
+                result.errors.add pluginError(named, pecBadDeclaration,
+                  "'" & c.id & "' needs '" & tool & "', which is not a bare " &
+                  "program name. §8.1.1 has the host resolve the name; a " &
+                  "plugin does not hand over a path of its choosing")
+                surfaceProblem = true
+                continue
+              c.needs.add tool
+
+          c.install = jstr(entry, "install")
+
+          if entry.hasKey("reprobe"):
+            let triggers = entry["reprobe"]
+            if triggers.kind != JArray:
+              result.errors.add pluginError(named, pecMalformedManifest,
+                "'reprobe' of '" & c.id & "' must be an array of activation " &
+                "event objects")
+              continue
+            for t in triggers:
+              if t.kind != JObject:
+                result.errors.add pluginError(named, pecUnknownReprobeTrigger,
+                  "a re-probe trigger must be an object, got " & $t.kind)
+                surfaceProblem = true
+                continue
+              let tname = jstr(t, "event")
+              var tkind: ActivationEventKind
+              if not activationKindByName(tname, tkind):
+                var known: seq[string] = @[]
+                for k in ActivationEventKind: known.add $k
+                result.errors.add pluginError(named, pecUnknownReprobeTrigger,
+                  "'" & c.id & "' re-probes on '" & tname &
+                  "' — the trigger vocabulary is §4.2's activation events: " &
+                  known.join(", "))
+                surfaceProblem = true
+                continue
+              let tvalue = jstr(t, "value")
+              if tkind in EventsNeedingValue and tvalue.len == 0:
+                result.errors.add pluginError(named, pecUnknownReprobeTrigger,
+                  "re-probe trigger '" & tname & "' on '" & c.id &
+                  "' needs a 'value', for the same reason the activation " &
+                  "event does: without one it matches every value or none")
+                surfaceProblem = true
+                continue
+              c.reprobe.add ActivationEvent(kind: tkind, value: tvalue,
+                                            reason: "")
+
+          if surfaceProblem: continue
+
+          # §8.2's two rules about a declared dependency, both refused at LOAD
+          # time because both describe a surface that could only ever be
+          # permanently and inexplicably degraded.
+          if c.needs.len > 0 and c.install.strip().len == 0:
+            result.errors.add pluginError(named, pecMissingInstallHint,
+              "'" & c.id & "' needs " & c.needs.join(", ") & " but declares " &
+              "no 'install'. §8.2: the degradation says what is missing AND " &
+              "how to get it — a name and an install action, not " &
+              "'unavailable'")
+            continue
+
           m.contributions.add c
+
+  # ----- PLAT-9 / §6.1: two rendering surfaces may not share a local id ------
+  #
+  # AFTER the contributions loop, because the rule relates two entries and both
+  # have to have been read — and because `contributes` is a JSON OBJECT keyed by
+  # kind, so a pane and a marker arrive in different iterations of the outer
+  # loop and neither can see the other.
+  #
+  # WHY THE SET IS `RenderingContributionKinds` AND NOT EVERY CONTRIBUTION.
+  # These are the kinds that share ONE namespace: the surface host keys its
+  # registry on `qualifiedPaneId(plugin, id)`, which carries no kind, and
+  # `plugin_api.declaresSurface` and `contributeView` both look a surface up by
+  # local id across exactly this set. A `command` called `metrics` collides
+  # with nothing — it is reached by `commandIds`, never by either of those —
+  # so refusing it would be a rule without a failure behind it.
+  #
+  # REFUSED AT LOAD RATHER THAN QUALIFIED BY KIND, and the trade is worth
+  # stating: putting the kind into the id would also make the collision
+  # impossible, and it would change the shape of a string that is PERSISTED
+  # into every saved layout document and validated by a grammar whose central
+  # invariant is "exactly one separator" (`contributed_pane_id.nim`). That is a
+  # format migration and a weakened grammar to fix a manifest that is a typo in
+  # every real instance. Refusing costs an author one rename, names both
+  # contributions so they can see which, and — Verification-Harness-Traps §17 —
+  # refusing at load is the better place on its own merits.
+  var surfaceKindById = initTable[string, ContributionKind]()
+  for c in m.contributions:
+    if c.kind notin RenderingContributionKinds: continue
+    if surfaceKindById.hasKey(c.id):
+      result.errors.add pluginError(named, pecDuplicateContribution,
+        "'" & c.id & "' is declared as both a " & $surfaceKindById[c.id] &
+        " and a " & $c.kind & " surface. Both compose the qualified id '" &
+        qualifiedPaneId(named, c.id) & "', which is the surface registry's " &
+        "one key and the id `contributeView` resolves, so only one of them " &
+        "could ever be registered or rendered. Rename one of the two")
+      continue
+    surfaceKindById[c.id] = c.kind
+
+  # ----- PLAT-9 / §8.2: a need outside the declared set can never be met -----
+  #
+  # AFTER the contributions loop, because it relates two sections of the
+  # manifest and both have to have been read. §8.1.1 has the host resolve a
+  # tool name "against a declared set and its own PATH policy", so a surface
+  # needing `ripgrep` in a manifest whose `executables` does not name it
+  # describes a dependency the host would refuse to use even if it were
+  # installed — a surface that is degraded forever, for a reason the
+  # degradation could not state.
+  for c in m.contributions:
+    for tool in c.needs:
+      if tool notin m.grants.executables:
+        result.errors.add pluginError(named, pecUndeclaredDependency,
+          "'" & c.id & "' needs '" & tool & "', which 'executables' does " &
+          "not declare. §8.1.1 resolves a tool against the declared set, so " &
+          "this surface could not use it even where it is installed")
 
   result.manifest = m
 

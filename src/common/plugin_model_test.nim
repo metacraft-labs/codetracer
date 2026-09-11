@@ -481,10 +481,10 @@ suite "PLAT-7: every load-time error names the plugin":
       ck not seen.hasKey(t)
       seen[t] = c
       inc n
-    ck n == 22
+    ck n == 30
 
 suite "PLAT-7: the counted-assertion tally":
 
   test "the tally":
     # Written from a run. See the header, Verification-Harness-Traps §4c.
-    check countedAssertions == 172
+    check countedAssertions == 188

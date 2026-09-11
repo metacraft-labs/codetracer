@@ -746,7 +746,24 @@ test_lane_files() {
 				'/test_source_vm_window\.nim$' \
 				'/test_source_provider_revisions\.nim$' \
 				'/test_plugin_io_sdk\.nim$' \
-				'/test_plugin_source_admission\.nim$'
+				'/test_plugin_source_admission\.nim$' \
+				'/test_plugin_surfaces\.nim$'
+		# `test_plugin_surfaces` (PLAT-9) writes a REAL executable into a real
+		# temporary directory, puts that directory on the real `PATH`, and
+		# asserts that a contributed surface stops being degraded — because
+		# §8.2's "installing the missing component does not require restarting
+		# CodeTracer" is a claim about a program appearing on a machine.
+		# `setFilePermissions`, `putEnv` and PLAT-8's `resolveExecutable` are
+		# all native, and `surface_host.probeTool` answers `dpUnsupported` on
+		# this backend BY DESIGN (§8.1: "a browser has no child processes").
+		#
+		# THE REJECTION IS THE FIX RATHER THAN A `when defined(js)` GUARD, for
+		# the same reason as the suites below: a dependency-probe suite on a
+		# backend that can never resolve a dependency would report green having
+		# probed nothing. The backend-independent half is deliberately in a
+		# different file — `src/common/plugin_surfaces_test.nim`, in
+		# `common-units`, which asserts the pane identity, §6.2's view choice
+		# and §6.3's refusal with no machine at all.
 		# `test_plugin_source_admission` (PLAT-8) COMPILES AND RUNS a real
 		# exploit — `nim c` on a probe that reads `/etc/hostname` with posix
 		# `open`/`read` and reaches `/bin/sh` with `fork`/`execv` — and then

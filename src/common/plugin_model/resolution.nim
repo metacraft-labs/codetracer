@@ -39,12 +39,13 @@
 ## Every input is a value. There is no clock, no filesystem, no process and no
 ## collaborator here to stand in for.
 
-import std/[algorithm, sets, strutils, tables]
+import std/[algorithm, options, sets, strutils, tables]
 
 import ./diagnostics
 import ./manifest
+import ./surfaces
 
-export diagnostics, manifest
+export diagnostics, manifest, surfaces
 
 type
   Resolution* = object
@@ -151,7 +152,8 @@ func rotateTo(cyc: seq[PluginId]; id: PluginId): seq[PluginId] =
     result.add members[(start + i) mod members.len]
   result.add id
 
-proc resolve*(parsed: seq[ParsedManifest]; coreVersion: SemVer): Resolution =
+proc resolve*(parsed: seq[ParsedManifest]; coreVersion: SemVer;
+              frontEnd: Option[FrontEnd] = none(FrontEnd)): Resolution =
   ## The whole registry, in one pass, before anything is activated.
   ##
   ## Phases, in order, because each depends on the previous having run over
@@ -160,10 +162,26 @@ proc resolve*(parsed: seq[ParsedManifest]; coreVersion: SemVer): Resolution =
   ##   1. parse errors carried through, and duplicate ids;
   ##   2. the core version requirement;
   ##   3. activation events naming a command nobody contributes;
+  ##   3b. PLAT-9 / §6.3 — a REQUIRED surface with no view on `frontEnd`;
   ##   4. dependency existence and version;
   ##   5. cycles;
   ##   6. transitive blocking;
   ##   7. the topological order over what is left.
+  ##
+  ## ## WHY THE FRONT-END IS AN `Option` AND NOT A DEFAULT VALUE
+  ##
+  ## §6.3's refusal is a statement about the front-end the user is running,
+  ## and there is no honest default for it: picking one would silently apply
+  ## `web`'s answer to a terminal session, which is the wrong answer stated
+  ## confidently. `none` means "this registry was resolved without a front-end,
+  ## so §6.3 was not evaluated" — an ABSENCE OF A CLAIM rather than a claim of
+  ## availability. `PluginHost` always passes one, because a host knows which
+  ## front-end it is; `plugin_model_test` resolves without one, because it is
+  ## asserting the DAG rather than the surfaces.
+  ##
+  ## Phase 3b sits before dependency resolution deliberately, so that a plugin
+  ## refused for a front-end blocks its dependents through phase 6 exactly as
+  ## any other load failure does — §4.2's "does not activate half-alive".
   result.manifests = initTable[PluginId, PluginManifest]()
   result.failed = initTable[PluginId, PluginError]()
 
@@ -213,6 +231,18 @@ proc resolve*(parsed: seq[ParsedManifest]; coreVersion: SemVer): Resolution =
         result.note pluginError(id, pecUnknownCommand,
           "activates on command '" & a.value &
           "', which no plugin in this registry contributes")
+
+  # --- phase 3b: PLAT-9 / §6.3 — a required surface with no view here ------
+  # "A **required** surface with no view for the active front-end makes the
+  # extension fail to activate, naming the front-end and the surface." The
+  # decision is `surfaces.surfaceRefusals`, which is pure and is asserted on
+  # its own; what happens here is that the refusal FAILS the plugin, so it is
+  # absent from `order` and `activateFor` can never reach it.
+  if frontEnd.isSome:
+    for id in ids:
+      if result.failed.hasKey(id): continue
+      for e in surfaceRefusals(result.manifests[id], frontEnd.get):
+        result.note e
 
   # --- phase 4: dependency existence and version ---------------------------
   var deps = initTable[PluginId, seq[PluginId]]()

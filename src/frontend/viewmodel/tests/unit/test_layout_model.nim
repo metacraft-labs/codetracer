@@ -354,6 +354,12 @@ suite "Layout model — validation":
             DockedPane(pane: paneState, edge: leLeft, order: 0)]))
         of lpPaneNeitherPlacedNorDocked:
           some(initLayout(row([pane(paneEditor), pane(paneState)])))
+        of lpMalformedContributedPane:
+          # PLAT-9. A hand-built tree carrying an id that is not namespaced —
+          # which is exactly the spelling a BUILT-IN pane has, and therefore
+          # the shape a hostile manifest would try in order to collide.
+          some(initLayout(row([pane(paneEditor),
+                               contributedPaneNode("editor")])))
         of lpPaneNotPlaced, lpPaneNotDocked, lpTargetNotAStack,
            lpIndexOutOfRange:
           none(Layout)
@@ -379,7 +385,7 @@ suite "Layout model — validation":
     # A positive control for the loop above: if `problemSources` ever declared
     # every kind refusal-only, every branch would be skipped and the test
     # would still be green (Verification-Harness-Traps §4).
-    check structuralCovered == 12
+    check structuralCovered == 13
 
 # ---------------------------------------------------------------------------
 # Serialisation — the replacement for saving a GoldenLayoutResolvedConfig

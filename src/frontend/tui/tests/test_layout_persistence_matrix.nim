@@ -62,7 +62,7 @@
 ## | --- | --- | --- | --- |
 ## | `SessionMatrix` — session x document x gesture | 96 | 96 | 0 |
 ## | `PlanTable` — `layoutPersistPlan`'s own two inputs | 6 | 4 | 2 |
-## | `KindTable` — every `LayoutRestoreReport.kind` this build can produce | 13 | 11 | 2 |
+## | `KindTable` — every `LayoutRestoreReport.kind` this build can produce | 15 | 13 | 2 |
 ## | `FailureTable` — the two arms that answer `lpoFailed` | 2 | 2 | 0 |
 ##
 ## **`FailureTable` IS A TABLE AND NOT A DIMENSION**, and the reason is worth
@@ -141,7 +141,7 @@ import ../host/layout_store
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 1083
+const ExpectedAssertions = 1091
 
 const EaccesLaneAssertions = 41
   ## What the `EACCES` lane contributes to the count above.
@@ -504,7 +504,13 @@ const PlanTable: array[ExpectedPlanCells, PlanRow] = [
 # THE KIND TABLE. Every value `LayoutRestoreReport.kind` can take in this build.
 #
 # Three are `app/layout/persistence.nim`'s own, one is its fallback literal, and
-# eight are `layout_model.LayoutDecodeErrorKind`'s — plus `""` for a success.
+# ten are `layout_model.LayoutDecodeErrorKind`'s — plus `""` for a success.
+#
+# PLAT-9 ADDED THE LAST TWO, and they are the reason this table is written as
+# an enumeration over the whole enum rather than as a list somebody extends:
+# a contributed pane id arrives from a third-party manifest and is persisted
+# into this very document, so the two ways it can be malformed have to be
+# decodable, reportable conditions and not blank regions.
 # Two are UNREACHABLE and say why; the rest name a document that produces them.
 # ---------------------------------------------------------------------------
 
@@ -518,8 +524,8 @@ type
       ## Why it cannot be produced, for an unreachable one.
 
 const
-  ExpectedKindCells = 13
-  ExpectedKindReachable = 11
+  ExpectedKindCells = 15
+  ExpectedKindReachable = 13
 
 const KindTable: array[ExpectedKindCells, KindRow] = [
   ("", true, """{"version": 2, "layout": {"kind": "pane", "pane": "calltrace"}, "docked": []}""", ""),
@@ -537,6 +543,17 @@ const KindTable: array[ExpectedKindCells, KindRow] = [
   ("MissingField", true, """{"version": 2, "docked": []}""", ""),
   ("WrongFieldType", true, """{"version": "2", "layout": {"kind": "pane", "pane": "calltrace"}, "docked": []}""", ""),
   ("UnknownEdge", true, """{"version": 2, "layout": {"kind": "pane", "pane": "calltrace"}, "docked": [{"pane": "editor", "edge": "leGalactic", "order": 0}]}""", ""),
+  ("BadContributedPane", true, """{"version": 2, "layout": {"kind": "pane", "contributedPane": "not namespaced"}, "docked": []}""", ""),
+    # PLAT-9 / Extensibility-Model.md §6.1. A contributed pane id that is not
+    # namespaced — which is exactly how a BUILT-IN pane's name is spelled, and
+    # therefore the shape a hostile manifest would try in order to collide with
+    # one. Refused rather than kept: unlike a well-formed id naming an
+    # extension that is not installed, a malformed one cannot be attributed to
+    # any extension, so there is nothing to tell the user to install.
+  ("PaneAndContributedPane", true, """{"version": 2, "layout": {"kind": "pane", "pane": "editor", "contributedPane": "acme.ext/metrics"}, "docked": []}""", ""),
+    # PLAT-9. A leaf claiming BOTH namespaces. Read either way it would place a
+    # pane the author did not ask for, so it is a document written by something
+    # that does not understand the format.
   ("Refused", false, "",
    "`persistence.adoptLayoutDocument` composes this literal when " &
    "`restoreDocument` refuses WITHOUT reporting a kind. " &
@@ -1386,13 +1403,13 @@ suite "PLAT-6: the persistence decision, enumerated":
     ck not unnamed.layoutPersistenceEnabled()
     ck unnamed.layoutPersistPlanOf().intent == lpiQuarantine
 
-  test "the failure-kind table: thirteen kinds, eleven produced and two unreachable":
+  test "the failure-kind table: fifteen kinds, thirteen produced and two unreachable":
     # EVERY VALUE `LayoutRestoreReport.kind` CAN TAKE, enumerated. The session
     # matrix collapses all of these to "unreadable"; this table is what says the
     # collapse is over a KNOWN set rather than over the four somebody happened
     # to write a case for.
     ck KindTable.len == ExpectedKindCells
-    # THE SUBJECT IS THE WHOLE ENUM. A ninth `LayoutDecodeErrorKind` added
+    # THE SUBJECT IS THE WHOLE ENUM. An eleventh `LayoutDecodeErrorKind` added
     # upstream must appear here or this fails — the table cannot silently
     # answer a smaller question than it appears to (§6).
     var decodeKinds = 0
@@ -1406,8 +1423,8 @@ suite "PLAT-6: the persistence decision, enumerated":
         checkpoint("decode kind " & $k & " appears " & $listed & " times")
       ck listed == 1
     checkpoint("LayoutDecodeErrorKind values: " & $decodeKinds)
-    # 8 decode kinds + NotJson + EmptyDocument + UnreadableFile + Refused + "".
-    ck decodeKinds == 8
+    # 10 decode kinds + NotJson + EmptyDocument + UnreadableFile + Refused + "".
+    ck decodeKinds == 10
     ck ExpectedKindCells == decodeKinds + 5
 
     let rt = newBoundRuntime(80, 24)
@@ -1465,7 +1482,7 @@ suite "PLAT-6: the persistence decision, enumerated":
     checkpoint("refusals carrying a typed kind: " & $refusalsSeen)
     # THE NON-VACUITY FLOOR (§4): a corpus that refused nothing would satisfy
     # "every refusal carries a kind" completely.
-    ck refusalsSeen == 7
+    ck refusalsSeen == 9
     ck refusalsWithoutAKind == 0
 
     # **`DockedPanesUnsupported` IS UNREACHABLE THROUGH THIS PATH**, and the

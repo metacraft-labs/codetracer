@@ -121,6 +121,13 @@ proc snapshotFor(degradation: PaneDegradation): DegradedStateSnapshot =
     result.integrity = tiTruncated
   of pdNoVerifiedSource:
     result.sourceAvailability = savUnverified
+  of pdDependencyMissing:
+    # PLAT-9 / Extensibility-Model.md §8.2. Reached by a CONTRIBUTED pane and
+    # by no built-in one, so the loop below skips it — see the comment there
+    # for why the skip is derived from `CorePaneDegradations` rather than
+    # written out, and `test_plugin_surfaces.nim` for the suite that drives a
+    # real contributed surface into this state.
+    result.dependency = pdsAbsent
 
 proc apply(store: ReplayDataStore; snapshot: DegradedStateSnapshot) =
   store.setReplayAvailability(snapshot.availability)
@@ -365,10 +372,23 @@ suite "M2b — the five panes drive headlessly (MockBackendService, no renderer)
 suite "M2b — every degraded state is an enum value (§14)":
 
   test "every PaneDegradation value is reachable on at least one pane":
-    # The exhaustive half. `for d in PaneDegradation` means a seventh row
-    # added to the catalogue and wired to nobody fails here.
+    # The exhaustive half. `for d in PaneDegradation` means a new row added to
+    # the catalogue and wired to nobody fails here.
+    #
+    # THE SUBJECT IS THE FIVE BUILT-IN PANES, AND THE SKIP IS DERIVED. This
+    # suite can only construct the five ViewModels it opens, so a row no
+    # built-in pane renders — PLAT-9's `pdDependencyMissing`, which belongs to
+    # a contributed surface — cannot be driven here. The skip is computed from
+    # `CorePaneDegradations`, the same data these five panes' memos read, so a
+    # row rendered by NOBODY is still a failure: it is in neither this union
+    # nor `AllPaneDegradations`, and the case below catches it.
+    var coreUnion: set[PaneDegradation] = {}
+    for s in CorePaneDegradations:
+      coreUnion = coreUnion + s
     createRoot proc(dispose: proc()) =
       for degradation in PaneDegradation:
+        if degradation != pdNone and degradation notin coreUnion:
+          continue
         let p = openPanes()
         p.store.apply(snapshotFor(degradation))
         check degradation in p.paneDegradations()

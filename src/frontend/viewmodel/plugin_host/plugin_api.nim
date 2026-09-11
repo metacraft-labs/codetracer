@@ -181,7 +181,7 @@
 ## effects are `isonim`'s real effects on `isonim`'s real graph, and the
 ## budget is measured against a real monotonic clock.
 
-import std/[monotimes, strutils, times]
+import std/[monotimes, strutils, tables, times]
 
 import isonim/core/graph as isonim_graph
 import isonim/core/signals as isonim_signals
@@ -189,10 +189,24 @@ import isonim/core/computation as isonim_computation
 import isonim/core/owner as isonim_owner
 
 import ../../../common/plugin_model
+import ../../../common/view_vocabulary/vocabulary as view_vocabulary
 import ./handles
 
 export plugin_model
 export handles
+
+# PLAT-9 WIDENS THE PLUGIN'S SURFACE BY THE VIEW BUILDERS, and `manifest.nim`'s
+# own note said this would be the milestone that did it: it re-exported
+# `ViewKind` and `vocabularyName` only, "because a plugin declaring a pane is
+# not yet rendering one". §6.2 now has it render one, so it needs `ViewNode`
+# and the builders that make one.
+#
+# This is a widening of the same shape as the module header's: it grants access
+# to NO CodeTracer state. A `ViewNode` is a description of a view, it holds no
+# signal, it reaches no ViewModel, and the builders are `func`s over plain data
+# — which is exactly why an abstract view can be rendered by a front-end the
+# plugin has never heard of.
+export view_vocabulary
 
 type
   PluginBudgetExceeded* = object of CatchableError
@@ -277,6 +291,30 @@ type
       ## set. Here a handle cannot exist without a plugin, because the table it
       ## lives in is reached only through that plugin's context.
 
+  PluginSurfaceError* = object of CatchableError
+    ## PLAT-9. Raised when a plugin contributes a view for a surface its own
+    ## manifest does not declare, or contributes two views for one surface.
+    ##
+    ## §4.1's rule, in the mirror direction: the manifest is refused when it
+    ## names a view that does not exist, and the CODE is refused when it names
+    ## a surface the manifest does not declare. Both failures produce the same
+    ## thing if tolerated — a contribution that reaches no layout — and §6.3
+    ## calls that "an extension that appears to load and then silently does
+    ## nothing".
+    ##
+    ## It is raised rather than recorded because it happens inside `activate`,
+    ## where the plugin can see it; `host.activateOne` catches it, attributes
+    ## it, and leaves the plugin inactive rather than half-registered.
+
+  PluginViewProc* = proc(): ViewNode {.closure.}
+    ## What a plugin hands the host for one surface: a thunk producing an
+    ## abstract view (§6.2's baseline) or a `nativeEscape` naming a native one.
+    ##
+    ## A THUNK RATHER THAN A `ViewNode`, because §7's containment is per
+    ## render and not per registration: a view that throws on every frame has
+    ## to be able to throw more than once for the boundary to have anything to
+    ## contain.
+
   PluginContext* = ref object
     ## What a plugin's `activate` is handed. It carries the plugin's own
     ## manifest, its accounting, and its scope — and no CodeTracer state at
@@ -285,6 +323,14 @@ type
     manifest*: PluginManifest
     state*: PluginRunState
     scope*: OwnerBase
+    views*: OrderedTable[string, PluginViewProc]
+      ## PLAT-9 / §6.1. The views this plugin contributed, keyed by the
+      ## surface's LOCAL id — the same id its manifest declared, so the two
+      ## halves of a contribution are joined on a value the author wrote once.
+      ##
+      ## ORDERED, so a report over a plugin's surfaces is in declaration order
+      ## rather than in hash order: a list that reorders between runs is one
+      ## nobody can diff.
 
   PluginImplementation* = object
     ## An in-process Nim plugin. §10's open decision 1 lists three execution
@@ -609,6 +655,55 @@ proc pluginRoot*(ctx: PluginContext; name: string;
   isonim_owner.createRoot(proc(dispose: proc()) =
     scope.cleanups.add dispose
     runBudgeted(c, name, proc() = body(dispose)))
+
+# ---------------------------------------------------------------------------
+# Contributing a view (§6) — PLAT-9
+# ---------------------------------------------------------------------------
+
+proc declaresSurface*(m: PluginManifest; surfaceId: string): bool =
+  ## Does this manifest declare a RENDERING surface with this local id?
+  ## One predicate, read by `contributeView` and by the host's registry, so
+  ## "the manifest declares it" cannot mean two things.
+  for c in m.contributions:
+    if c.kind in RenderingContributionKinds and c.id == surfaceId:
+      return true
+  false
+
+proc contributeView*(ctx: PluginContext; surfaceId: string;
+                     render: PluginViewProc) =
+  ## Supply the view for one of this plugin's declared surfaces.
+  ##
+  ## REFUSED when the manifest does not declare the surface, and refused when
+  ## a view was already contributed for it. Both are the same defect wearing
+  ## different clothes — a view that will never be rendered — and §6.3 is
+  ## explicit that a plugin which "appears to load and then silently does
+  ## nothing" is the failure mode the whole section exists to prevent.
+  ##
+  ## The refusal names the plugin and the surface AND lists the surfaces the
+  ## manifest does declare, because the overwhelmingly likely cause is a typo
+  ## and an author should be able to fix it from the message.
+  if ctx.isNil or ctx.state.isNil:
+    raise newException(PluginSurfaceError,
+      "a view was contributed with no plugin context at all")
+  if render.isNil:
+    raise newException(PluginSurfaceError,
+      "plugin '" & ctx.state.id & "' contributed a nil view for surface '" &
+      surfaceId & "'; a surface with no renderer is the blank region §6.1 " &
+      "refuses")
+  if not ctx.manifest.declaresSurface(surfaceId):
+    var declared: seq[string] = @[]
+    for c in ctx.manifest.contributions:
+      if c.kind in RenderingContributionKinds: declared.add c.id
+    raise newException(PluginSurfaceError,
+      "plugin '" & ctx.state.id & "' contributed a view for surface '" &
+      surfaceId & "', which its manifest does not declare. It declares " &
+      (if declared.len == 0: "no rendering surface at all"
+       else: declared.join(", ")))
+  if ctx.views.hasKey(surfaceId):
+    raise newException(PluginSurfaceError,
+      "plugin '" & ctx.state.id & "' contributed two views for surface '" &
+      surfaceId & "'; only one of them could ever be rendered")
+  ctx.views[surfaceId] = render
 
 proc onPluginCleanup*(ctx: PluginContext; fn: proc()) =
   ## Register a cleanup on the plugin's scope. This is `isonim.onCleanup`, and

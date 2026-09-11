@@ -41,7 +41,10 @@
 ## container with a `pane` set, or a pane with children, is a reported
 ## structural error, not something a reader has to remember.
 
-import std/[json, options, strutils, tables]
+import std/[json, options, sets, strutils, tables]
+
+import ../../common/contributed_pane_id
+export contributed_pane_id
 
 type
   PaneKind* = enum
@@ -70,6 +73,45 @@ type
     paneScratchpad = "scratchpad"
     paneShell = "shell"
 
+  PaneRefKind* = enum
+    ## PLAT-9 / Extensibility-Model.md §6.1. WHAT KIND OF PANE A SLOT HOLDS.
+    ##
+    ## §6.1 asks for "an identity that is *not* a compile-time enum value while
+    ## keeping the property that an unknown pane in a saved layout is a typed,
+    ## reportable error rather than a blank region". These three values are
+    ## that property: there is no fourth arm, and in particular no arm meaning
+    ## "something we did not recognise, dropped".
+    prBuiltin
+      ## One of `PaneKind`'s values. The ZERO VALUE, so a `PaneRef` nobody
+      ## filled in is a built-in pane rather than a contributed one — which is
+      ## the safe direction: a builtin id is closed and checkable.
+    prContributed
+      ## A namespaced id from an extension that IS loaded in this session.
+    prUnloadedExtension
+      ## A WELL-FORMED contributed id naming a surface no loaded extension
+      ## provides. THE TYPED "pane from an unloaded extension" PLAT-9 asks
+      ## for: the layout keeps the slot, the front-end renders a report naming
+      ## the extension, and reinstalling it restores the pane where it was.
+      ##
+      ## This is the whole point of the enum. GoldenLayout's failure mode is an
+      ## unrecognised `componentName` producing a blank tab; here the same
+      ## input produces a value a `case` must handle.
+
+  PaneRef* = object
+    ## A pane's identity, whichever namespace it is in.
+    ##
+    ## NOT A VARIANT OBJECT, for the same reason `LayoutNode` is not: a slot's
+    ## classification CHANGES when an extension loads or unloads, and Nim
+    ## forbids assigning a new discriminator to an existing object. The cost is
+    ## that `builtin` is meaningless when `kind != prBuiltin` and `id` is
+    ## meaningless when it is; `paneRefOf` and `classify` are the only two
+    ## constructors, so the cost is paid in two places rather than everywhere.
+    kind*: PaneRefKind
+    builtin*: PaneKind
+    id*: string
+      ## The qualified, namespaced id — `contributed_pane_id.qualifiedPaneId`.
+      ## Empty for `prBuiltin`.
+
   LayoutNodeKind* = enum
     ## The four shapes a layout node can take.
     ##
@@ -87,7 +129,25 @@ type
     ## record rather than a variant object.
     kind*: LayoutNodeKind
     pane*: PaneKind
-      ## Meaningful only when `kind == lnPane`.
+      ## Meaningful only when `kind == lnPane` AND `contributedPane` is empty.
+    contributedPane*: string
+      ## PLAT-9. A namespaced contributed pane id, or `""` for a built-in pane.
+      ##
+      ## A SECOND FIELD RATHER THAN A WIDENED `pane`, and the reason is the
+      ## persisted format. `LayoutSchemaVersion`'s own note says "`PaneKind` is
+      ## a persisted vocabulary. Adding a value is a version bump", and a
+      ## contributed pane must not be a value of it — an extension would
+      ## otherwise be adding members to a format the desktop reads. So the two
+      ## namespaces are separate fields here and SEPARATE JSON KEYS on the
+      ## wire (`pane` vs `contributedPane`), which is why a hostile id spelled
+      ## exactly `"editor"` still cannot be read back as `paneEditor`. The
+      ## grammar in `contributed_pane_id` makes them disjoint as STRINGS too;
+      ## the separate keys mean the round trip does not depend on that.
+      ##
+      ## `isContributed` is the discriminator, and every query below consults
+      ## it before reading `pane` — because `pane` on a contributed leaf is the
+      ## enum's zero value, and a walker that forgot would report `paneEditor`
+      ## for somebody else's pane.
     title*: string
       ## What a renderer would put on the tab. Free text; empty means "use
       ## the pane's own default", which this module does not decide either.
@@ -127,6 +187,14 @@ type
       ## restore bug than an intention.
     lpNegativeWeight = "NegativeWeight"
       ## A share smaller than nothing.
+    lpMalformedContributedPane = "MalformedContributedPane"
+      ## PLAT-9. A leaf carrying a `contributedPane` that is not a well-formed
+      ## namespaced id (`contributed_pane_id.paneIdProblem`). Reported rather
+      ## than tolerated for the reason the whole identity exists: a slot whose
+      ## id nothing can resolve is the blank region, and an id that arrived
+      ## from a third-party manifest is exactly where a malformed one comes
+      ## from. The decoder refuses one outright (`ldeBadContributedPane`); this
+      ## is the same rule for a tree built in memory.
 
     # -- PLAT-4 / Layout-ViewModel §7. Everything above this line is about a
     # bare `LayoutNode` and is reported by `validate(LayoutNode)`. Everything
@@ -190,7 +258,13 @@ type
       ## Slash-separated child indices from the root, e.g. `"0/2"`. The root
       ## itself is `""`.
     pane*: Option[PaneKind]
-      ## Set when the problem is about a specific pane.
+      ## Set when the problem is about a specific BUILT-IN pane.
+    contributed*: string
+      ## PLAT-9. Set instead of `pane` when the problem is about a contributed
+      ## one. A second field rather than a widened `pane` for the same reason
+      ## `LayoutNode` has two: `Option[PaneKind]` cannot hold a string, and a
+      ## problem that named the wrong namespace would send a reader looking in
+      ## the wrong place.
 
   LayoutEdge* = enum
     ## The four strips a pane can be auto-hidden to.
@@ -262,6 +336,20 @@ type
     lcMergeIntoStack = "mergeIntoStack"
     lcSetAutoHide = "setAutoHide"
     lcRename = "rename"
+    lcAddContributedPane = "addContributedPane"
+      ## PLAT-9 / Extensibility-Model.md §6.1: "`Layout-ViewModel.md` §2.2
+      ## lists `lcAddPane` and programmatic stack creation, and an extension
+      ## contributing a pane is precisely the caller those exist for."
+      ##
+      ## TWO COMMAND KINDS RATHER THAN A WIDENED `lcAddPane`, and the reason is
+      ## the same one that keeps the two identities in separate fields: every
+      ## other command in this algebra is typed on `PaneKind`, and widening all
+      ## of them to a `PaneRef` would make every existing caller — the terminal
+      ## front-end's motions, its bindings, its profiles and its persistence —
+      ## pass a value where a closed enum is what they mean. The contributed
+      ## namespace gets its own two verbs; the eight PaneKind-typed ones are
+      ## untouched and still refuse a name they do not know.
+    lcRemoveContributedPane = "removeContributedPane"
 
   SplitAxis* = enum
     ## Which container a split creates.
@@ -353,6 +441,19 @@ type
     of lcRename:
       renameTarget*: PaneKind
       renameTitle*: string
+    of lcAddContributedPane:
+      addedContributedPane*: string
+      addedContributedTitle*: string
+      addedContributedWeight*: float
+      addContributedAfter*: Option[PaneKind]
+        ## Anchored on a BUILT-IN pane, deliberately: "put the extension's
+        ## pane beside the editor" is the gesture a front-end actually has, and
+        ## anchoring on another contributed pane would need the anchor to be a
+        ## `PaneRef` — which is the widening this pair of commands exists to
+        ## avoid. `none` means the root container, exactly as `lcAddPane`'s
+        ## does.
+    of lcRemoveContributedPane:
+      removedContributedPane*: string
 
   LayoutOutcomeKind* = enum
     ## Layout-ViewModel §2.3.
@@ -410,6 +511,19 @@ type
       ## rule `ldeUnknownPane` embodies, applied to the second persisted
       ## vocabulary: a decodable, reportable condition, never a silently
       ## dropped strip.
+    ldeBadContributedPane = "BadContributedPane"
+      ## PLAT-9. A `contributedPane` key whose value is not a well-formed
+      ## namespaced id. REFUSED rather than kept, and that asymmetry with
+      ## `prUnloadedExtension` is the whole design: an id that is well formed
+      ## but names nothing loaded is a pane we can report and restore later; an
+      ## id that is MALFORMED cannot be attributed to any extension, so there
+      ## is nothing to tell the user to install and nothing a later session
+      ## could resolve. The first is a slot, the second is corruption.
+    ldePaneAndContributedPane = "PaneAndContributedPane"
+      ## A leaf carrying BOTH keys. The two namespaces are disjoint, so a node
+      ## claiming one of each is a document written by something that does not
+      ## understand the format — read either way it would silently place a
+      ## pane the author did not ask for.
     ldeDockedPanesUnsupported = "DockedPanesUnsupported"
       ## A caller asked for the TREE of a document that carries docked panes.
       ## A bare `LayoutNode` cannot represent them, so handing one back would
@@ -486,10 +600,84 @@ const
 # Construction
 # ---------------------------------------------------------------------------
 
+static:
+  # THE DISJOINTNESS IS A COMPILE ERROR TO BREAK, not a sentence in a comment.
+  #
+  # PLAT-9's collision requirement — "a contributed pane id cannot collide with
+  # a built-in `PaneKind`" — rests on one fact: every contributed id contains
+  # the separator and no `PaneKind` spelling does. That fact is checked here,
+  # over the WHOLE enum, at compile time. Adding a `PaneKind` whose spelling
+  # contained a `/` would stop the build rather than open the collision, and
+  # adding one is already a persisted-format change this file makes a reader
+  # think about.
+  #
+  # It is stated in both directions, because "no builtin is a contributed id"
+  # and "no builtin contains the separator" are different claims and only the
+  # second is the mechanism.
+  for k in PaneKind:
+    doAssert PaneIdSeparator notin $k,
+      "PaneKind." & $k & " contains '" & $PaneIdSeparator & "', which is the " &
+      "character that keeps the built-in and contributed pane namespaces " &
+      "disjoint"
+    doAssert not isContributedPaneId($k),
+      "PaneKind." & $k & " parses as a contributed pane id; the two " &
+      "namespaces would overlap"
+
 proc pane*(kind: PaneKind; title: string = ""; weight: float = 0.0):
     LayoutNode =
   ## A leaf.
   LayoutNode(kind: lnPane, pane: kind, title: title, weight: weight)
+
+proc contributedPaneNode*(id: string; title: string = "";
+                          weight: float = 0.0): LayoutNode =
+  ## A leaf holding an extension's pane. PLAT-9 / §6.1.
+  ##
+  ## It does NOT refuse a malformed id: `validate` reports one as
+  ## `lpMalformedContributedPane` and the decoder refuses one as
+  ## `ldeBadContributedPane`, and a third opinion here would be a third place
+  ## the grammar could drift. What a constructor CAN do is make the mistake
+  ## visible, and `validate` is where this module makes structural mistakes
+  ## visible for every other field too.
+  LayoutNode(kind: lnPane, contributedPane: id, title: title, weight: weight)
+
+func isContributed*(n: LayoutNode): bool =
+  ## THE DISCRIMINATOR. Every walker below consults it before reading `pane`.
+  not n.isNil and n.kind == lnPane and n.contributedPane.len > 0
+
+func paneRefOf*(n: LayoutNode): PaneRef =
+  ## A leaf's identity, in whichever namespace it is in. Nodes that are not
+  ## leaves answer `prBuiltin` with the enum's zero value, which no caller
+  ## should read — `kind == lnPane` is the precondition and `validate` is what
+  ## reports a tree that breaks it.
+  if n.isContributed:
+    PaneRef(kind: prContributed, id: n.contributedPane)
+  else:
+    PaneRef(kind: prBuiltin, builtin: (if n.isNil: PaneKind.low else: n.pane))
+
+func classify*(r: PaneRef; loaded: HashSet[string]): PaneRef =
+  ## Resolve a contributed reference against the surfaces a session actually
+  ## has. THE ONE PLACE `prUnloadedExtension` IS PRODUCED.
+  ##
+  ## The decoder cannot do this, and that split is deliberate: decoding is a
+  ## pure function of the document, and which extensions are loaded is a fact
+  ## about the session. A decoder that also resolved would give two different
+  ## answers for one file depending on what was installed, which is exactly
+  ## the kind of hidden input that makes a persisted format untestable.
+  if r.kind == prBuiltin: return r
+  if r.id in loaded: PaneRef(kind: prContributed, id: r.id)
+  else: PaneRef(kind: prUnloadedExtension, id: r.id)
+
+func describe*(r: PaneRef): string =
+  ## What a front-end puts in the slot. §6.1's "typed, reportable error rather
+  ## than a blank region" is only true if somebody can render the report, and a
+  ## report that said "unknown pane" would name nothing actionable — so the
+  ## unloaded arm names the EXTENSION, which is the thing a user installs.
+  case r.kind
+  of prBuiltin: $r.builtin
+  of prContributed: r.id
+  of prUnloadedExtension:
+    "pane '" & surfaceOf(r.id) & "' from the extension '" & pluginOf(r.id) &
+      "', which is not loaded in this session"
 
 proc row*(children: openArray[LayoutNode]; weight: float = 0.0): LayoutNode =
   ## A left-to-right container.
@@ -537,7 +725,8 @@ proc clone*(node: LayoutNode): LayoutNode =
   if node.isNil:
     return nil
   result = LayoutNode(
-    kind: node.kind, pane: node.pane, title: node.title, weight: node.weight,
+    kind: node.kind, pane: node.pane, contributedPane: node.contributedPane,
+    title: node.title, weight: node.weight,
     activeIndex: node.activeIndex, children: @[])
   for c in node.children:
     result.children.add(clone(c))
@@ -547,15 +736,45 @@ proc clone*(node: LayoutNode): LayoutNode =
 # ---------------------------------------------------------------------------
 
 proc allPanes*(node: LayoutNode): seq[PaneKind] =
-  ## Every pane in the tree, depth-first, whether or not it is visible.
+  ## Every BUILT-IN pane in the tree, depth-first, whether or not it is
+  ## visible.
+  ##
+  ## CONTRIBUTED LEAVES ARE SKIPPED, and the skip is the whole reason
+  ## `isContributed` exists. `pane` on a contributed leaf holds the enum's zero
+  ## value, so a walker that read it unconditionally would report `paneEditor`
+  ## for an extension's pane — placing the editor twice in `validate`, hiding
+  ## it from `lpPaneNeitherPlacedNorDocked`, and letting `lcRemovePane(editor)`
+  ## delete somebody else's surface. `allContributedPanes` is the other half.
   result = @[]
   if node.isNil:
     return
   if node.kind == lnPane:
-    result.add(node.pane)
+    if not node.isContributed:
+      result.add(node.pane)
     return
   for c in node.children:
     result.add(allPanes(c))
+
+proc allContributedPanes*(node: LayoutNode): seq[string] =
+  ## Every contributed pane id in the tree, depth-first.
+  result = @[]
+  if node.isNil:
+    return
+  if node.kind == lnPane:
+    if node.isContributed:
+      result.add(node.contributedPane)
+    return
+  for c in node.children:
+    result.add(allContributedPanes(c))
+
+proc paneCount*(node: LayoutNode): int =
+  ## Every leaf, in BOTH namespaces. This is the count §2.4 rule 3 is about —
+  ## "there is no valid layout with no panes" does not mean "no built-in
+  ## panes", and a layout holding one contributed pane is a layout.
+  if node.isNil: return 0
+  if node.kind == lnPane: return 1
+  for c in node.children:
+    result += paneCount(c)
 
 proc visiblePanes*(node: LayoutNode): seq[PaneKind] =
   ## Every pane a user can currently see: the whole tree, minus the
@@ -569,7 +788,8 @@ proc visiblePanes*(node: LayoutNode): seq[PaneKind] =
     return
   case node.kind
   of lnPane:
-    result.add(node.pane)
+    if not node.isContributed:
+      result.add(node.pane)
   of lnStack:
     if node.activeIndex >= 0 and node.activeIndex < node.children.len:
       result.add(visiblePanes(node.children[node.activeIndex]))
@@ -577,10 +797,33 @@ proc visiblePanes*(node: LayoutNode): seq[PaneKind] =
     for c in node.children:
       result.add(visiblePanes(c))
 
+proc visibleContributedPanes*(node: LayoutNode): seq[string] =
+  ## The contributed half of `visiblePanes`: a shell can avoid rendering — and
+  ## a surface host can avoid probing for — a contributed pane nobody can see.
+  result = @[]
+  if node.isNil:
+    return
+  case node.kind
+  of lnPane:
+    if node.isContributed:
+      result.add(node.contributedPane)
+  of lnStack:
+    if node.activeIndex >= 0 and node.activeIndex < node.children.len:
+      result.add(visibleContributedPanes(node.children[node.activeIndex]))
+  of lnRow, lnColumn:
+    for c in node.children:
+      result.add(visibleContributedPanes(c))
+
 proc contains*(node: LayoutNode; kind: PaneKind): bool =
   ## Whether `kind` is placed anywhere in the tree.
   for p in allPanes(node):
     if p == kind:
+      return true
+  false
+
+proc containsContributed*(node: LayoutNode; id: string): bool =
+  for p in allContributedPanes(node):
+    if p == id:
       return true
   false
 
@@ -592,13 +835,26 @@ proc isVisible*(node: LayoutNode; kind: PaneKind): bool =
   false
 
 proc find*(node: LayoutNode; kind: PaneKind): LayoutNode =
-  ## The leaf holding `kind`, or nil.
+  ## The leaf holding `kind`, or nil. Contributed leaves are not candidates —
+  ## see `allPanes`.
   if node.isNil:
     return nil
   if node.kind == lnPane:
-    return if node.pane == kind: node else: nil
+    return if not node.isContributed and node.pane == kind: node else: nil
   for c in node.children:
     let hit = find(c, kind)
+    if not hit.isNil:
+      return hit
+  nil
+
+proc findContributed*(node: LayoutNode; id: string): LayoutNode =
+  ## The leaf holding contributed pane `id`, or nil.
+  if node.isNil:
+    return nil
+  if node.kind == lnPane:
+    return if node.isContributed and node.contributedPane == id: node else: nil
+  for c in node.children:
+    let hit = findContributed(c, id)
     if not hit.isNil:
       return hit
   nil
@@ -617,7 +873,12 @@ proc equalTrees*(a, b: LayoutNode): bool =
   if a.kind != b.kind or a.title != b.title or a.weight != b.weight:
     return false
   if a.kind == lnPane:
-    return a.pane == b.pane
+    # BOTH identities, because `toJson` writes both and this function's
+    # contract is "structural equality over exactly the fields `toJson`
+    # writes". Comparing only `pane` would make two DIFFERENT contributed
+    # panes equal — they share the zero value — and `apply` would report
+    # `loNoOp` for a drag that genuinely moved one.
+    return a.pane == b.pane and a.contributedPane == b.contributedPane
   if a.kind == lnStack and a.activeIndex != b.activeIndex:
     return false
   if a.children.len != b.children.len:
@@ -695,12 +956,19 @@ proc becomes(node: LayoutNode; other: LayoutNode) =
   let
     k = other.kind
     p = other.pane
+    cp = other.contributedPane
     t = other.title
     w = other.weight
     a = other.activeIndex
     c = other.children
   node.kind = k
   node.pane = p
+  # PLAT-9. WITHOUT THIS LINE the collapse silently converts a contributed
+  # leaf into a built-in one: `pane` carries the enum's zero value, so a row
+  # collapsing onto its only child — an extension's pane — would become
+  # `paneEditor`. That is the blank-region failure in its most expensive form,
+  # because the pane would not be blank, it would be somebody else's.
+  node.contributedPane = cp
   node.title = t
   node.weight = w
   node.activeIndex = a
@@ -774,10 +1042,34 @@ proc detachPane(node: LayoutNode; kind: PaneKind): bool =
   var totalBefore = 0.0
   for c in node.children:
     totalBefore += effectiveWeight(c)
-    if c.kind == lnPane and c.pane == kind:
+    if c.kind == lnPane and not c.isContributed and c.pane == kind:
       removed = true
       continue
     if detachPane(c, kind):
+      removed = true
+    kept.add(c)
+  if removed:
+    if kept.len != node.children.len and node.kind != lnStack:
+      renormalise(kept, totalBefore)
+    node.children = kept
+  removed
+
+proc detachContributedPane(node: LayoutNode; id: string): bool =
+  ## `detachPane`'s contributed twin, and it is a twin deliberately: §2.4's
+  ## rule 4 (renormalise the survivors) and the stack exemption apply to a
+  ## region whichever namespace names it, so the two functions differ in one
+  ## comparison and in nothing else.
+  if node.isNil or node.kind == lnPane:
+    return false
+  var kept: seq[LayoutNode] = @[]
+  var removed = false
+  var totalBefore = 0.0
+  for c in node.children:
+    totalBefore += effectiveWeight(c)
+    if c.isContributed and c.contributedPane == id:
+      removed = true
+      continue
+    if detachContributedPane(c, id):
       removed = true
     kept.add(c)
   if removed:
@@ -812,7 +1104,8 @@ proc copyOf(n: LayoutNode): LayoutNode =
   ## A shallow structural copy: the same fields, the same child refs. Used
   ## when a node is about to be rewritten by `becomes` but its old contents
   ## have to survive as a child of the replacement.
-  LayoutNode(kind: n.kind, pane: n.pane, title: n.title, weight: n.weight,
+  LayoutNode(kind: n.kind, pane: n.pane, contributedPane: n.contributedPane,
+             title: n.title, weight: n.weight,
              activeIndex: n.activeIndex, children: n.children)
 
 proc wrapRootAround(root: LayoutNode; leaf: LayoutNode; leafFirst: bool) =
@@ -987,6 +1280,17 @@ proc cmdRestoreDocked*(pane: PaneKind;
 proc cmdRename*(pane: PaneKind; title: string): LayoutCommand =
   LayoutCommand(kind: lcRename, renameTarget: pane, renameTitle: title)
 
+proc cmdAddContributedPane*(id: string; title = ""; weight = 0.0;
+                            after = none(PaneKind)): LayoutCommand =
+  ## PLAT-9 / §6.1: the caller `lcAddPane` exists for, in the contributed
+  ## namespace.
+  LayoutCommand(kind: lcAddContributedPane, addedContributedPane: id,
+                addedContributedTitle: title, addedContributedWeight: weight,
+                addContributedAfter: after)
+
+proc cmdRemoveContributedPane*(id: string): LayoutCommand =
+  LayoutCommand(kind: lcRemoveContributedPane, removedContributedPane: id)
+
 proc `$`*(cmd: LayoutCommand): string =
   ## One line for a failure message. Not a serialisation format.
   case cmd.kind
@@ -1015,6 +1319,12 @@ proc `$`*(cmd: LayoutCommand): string =
     of ahRestore:
       "restoreDocked(" & $cmd.autoHidePane & ")"
   of lcRename: "rename(" & $cmd.renameTarget & ", '" & cmd.renameTitle & "')"
+  of lcAddContributedPane:
+    "addContributedPane(" & cmd.addedContributedPane & ", after=" &
+      (if cmd.addContributedAfter.isSome: $cmd.addContributedAfter.get
+       else: "root") & ")"
+  of lcRemoveContributedPane:
+    "removeContributedPane(" & cmd.removedContributedPane & ")"
 
 # ---------------------------------------------------------------------------
 # §2.1 / §2.3 — `apply`
@@ -1027,6 +1337,15 @@ proc refused(kind: LayoutProblemKind; pane: Option[PaneKind];
 
 proc refusedFor(kind: LayoutProblemKind; pane: PaneKind): LayoutOutcome =
   refused(kind, some(pane))
+
+proc refusedForContributed(kind: LayoutProblemKind;
+                           id: string): LayoutOutcome =
+  ## The contributed twin of `refusedFor`. It sets `contributed` and leaves
+  ## `pane` as `none`, so a reader of the refusal is never pointed at a
+  ## built-in pane that had nothing to do with it.
+  LayoutOutcome(kind: loRefused,
+                problem: LayoutProblem(kind: kind, path: "",
+                                       pane: none(PaneKind), contributed: id))
 
 proc noOp(): LayoutOutcome = LayoutOutcome(kind: loNoOp)
 
@@ -1099,10 +1418,41 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       return refusedFor(lpPaneNotPlaced, cmd.addedPane)
     return appliedTo(next)
 
+  of lcAddContributedPane:
+    # PLAT-9. THE ID IS VALIDATED BEFORE ANYTHING IS PLACED, because a command
+    # is the other way a hostile id reaches a layout — the decoder is not the
+    # only door. A malformed one is refused with the same problem kind
+    # `validate` reports, so a caller has one thing to branch on.
+    if paneIdProblem(cmd.addedContributedPane) != pipOk:
+      return refusedForContributed(lpMalformedContributedPane,
+                                   cmd.addedContributedPane)
+    if tree.containsContributed(cmd.addedContributedPane):
+      return refusedForContributed(lpDuplicatePane, cmd.addedContributedPane)
+    if cmd.addContributedAfter.isSome and
+       not tree.contains(cmd.addContributedAfter.get):
+      return refusedFor(lpPaneNotPlaced, cmd.addContributedAfter.get)
+    let leaf = contributedPaneNode(cmd.addedContributedPane,
+                                   cmd.addedContributedTitle,
+                                   cmd.addedContributedWeight)
+    if not insertBeside(tree, cmd.addContributedAfter, leaf):
+      return refusedForContributed(lpPaneNotPlaced, cmd.addedContributedPane)
+    return appliedTo(next)
+
+  of lcRemoveContributedPane:
+    if not tree.containsContributed(cmd.removedContributedPane):
+      return refusedForContributed(lpPaneNotPlaced,
+                                   cmd.removedContributedPane)
+    if paneCount(tree) <= 1:
+      return refusedForContributed(lpEmptyRoot, cmd.removedContributedPane)
+    discard detachContributedPane(tree, cmd.removedContributedPane)
+    if not normaliseInPlace(tree):
+      return refusedForContributed(lpEmptyRoot, cmd.removedContributedPane)
+    return appliedTo(next)
+
   of lcRemovePane:
     if not tree.contains(cmd.removedPane):
       return refusedFor(lpPaneNotPlaced, cmd.removedPane)
-    if allPanes(tree).len <= 1:
+    if paneCount(tree) <= 1:
       # §2.4 rule 3. Refused, not emptied: there is no valid layout with no
       # panes, and a shell that reaches one has no way back through the UI.
       return refusedFor(lpEmptyRoot, cmd.removedPane)
@@ -1431,6 +1781,7 @@ proc addPane*(node: LayoutNode; leaf: LayoutNode): bool =
 # ---------------------------------------------------------------------------
 
 proc validateNode(node: LayoutNode; path: string; seen: var Table[PaneKind, bool];
+                  seenContributed: var Table[string, bool];
                   problems: var seq[LayoutProblem]) =
   if node.isNil:
     return
@@ -1438,6 +1789,23 @@ proc validateNode(node: LayoutNode; path: string; seen: var Table[PaneKind, bool
     problems.add(LayoutProblem(kind: lpNegativeWeight, path: path,
                                pane: none(PaneKind)))
   if node.kind == lnPane:
+    if node.isContributed:
+      # PLAT-9. The contributed namespace gets the SAME two structural rules —
+      # a leaf holds no children, and a pane is placed once — and one more that
+      # only an open identity can break: the id has to be well formed.
+      if node.children.len > 0:
+        problems.add(LayoutProblem(kind: lpPaneWithChildren, path: path,
+                                   pane: none(PaneKind),
+                                   contributed: node.contributedPane))
+      if paneIdProblem(node.contributedPane) != pipOk:
+        problems.add(LayoutProblem(kind: lpMalformedContributedPane,
+                                   path: path, pane: none(PaneKind),
+                                   contributed: node.contributedPane))
+      if seenContributed.hasKeyOrPut(node.contributedPane, true):
+        problems.add(LayoutProblem(kind: lpDuplicatePane, path: path,
+                                   pane: none(PaneKind),
+                                   contributed: node.contributedPane))
+      return
     if node.children.len > 0:
       problems.add(LayoutProblem(kind: lpPaneWithChildren, path: path,
                                  pane: some(node.pane)))
@@ -1454,6 +1822,13 @@ proc validateNode(node: LayoutNode; path: string; seen: var Table[PaneKind, bool
   if node.pane != PaneKind.low:
     problems.add(LayoutProblem(kind: lpContainerWithPaneField, path: path,
                                pane: some(node.pane)))
+  if node.contributedPane.len > 0:
+    # The contributed twin of the rule above, and it is STRICTLY better
+    # evidence: `contributedPane` has no zero value that a constructor might
+    # leave behind, so a non-empty one on a container is unambiguous.
+    problems.add(LayoutProblem(kind: lpContainerWithPaneField, path: path,
+                               pane: none(PaneKind),
+                               contributed: node.contributedPane))
   if node.children.len == 0:
     problems.add(LayoutProblem(kind: lpEmptyContainer, path: path,
                                pane: none(PaneKind)))
@@ -1470,14 +1845,15 @@ proc validateNode(node: LayoutNode; path: string; seen: var Table[PaneKind, bool
           pane: none(PaneKind)))
   for i, c in node.children:
     validateNode(c, (if path.len == 0: $i else: path & "/" & $i), seen,
-                 problems)
+                 seenContributed, problems)
 
 proc validate*(node: LayoutNode): seq[LayoutProblem] =
   ## Every structural defect in the tree, in depth-first order. Empty means
   ## the tree is well formed.
   result = @[]
   var seen = initTable[PaneKind, bool]()
-  validateNode(node, "", seen, result)
+  var seenContributed = initTable[string, bool]()
+  validateNode(node, "", seen, seenContributed, result)
 
 proc isValid*(node: LayoutNode): bool =
   ## Convenience over `validate`.
@@ -1501,6 +1877,13 @@ proc problemSources*(kind: LayoutProblemKind): set[LayoutProblemSource] =
     {lpsStructural, lpsRefusal}
   of lpPaneNotPlaced, lpPaneNotDocked, lpTargetNotAStack, lpIndexOutOfRange:
     {lpsRefusal}
+  of lpMalformedContributedPane:
+    ## Both, and PLAT-9 needs both: a hand-built or hand-edited tree can hold
+    ## one (`validate` reports it), and `lcAddContributedPane` can be asked to
+    ## create one (`apply` refuses it). An id arriving from a third-party
+    ## manifest reaches the layout through the command, so a kind that were
+    ## structural-only would leave that door unguarded.
+    {lpsStructural, lpsRefusal}
 
 proc singleChildContainers(node: LayoutNode; path: string;
                            problems: var seq[LayoutProblem]) =
@@ -1528,7 +1911,7 @@ proc validate*(layout: Layout; owned: set[PaneKind] = {}): seq[LayoutProblem] =
   ## suite passes a non-empty set.
   result = validate(layout.tree)
   singleChildContainers(layout.tree, "", result)
-  if layout.tree.isNil or allPanes(layout.tree).len == 0:
+  if layout.tree.isNil or paneCount(layout.tree) == 0:
     result.add(LayoutProblem(kind: lpEmptyRoot, path: "", pane: none(PaneKind)))
   var seenDocked = initTable[PaneKind, bool]()
   var seenSlot = initTable[string, bool]()
@@ -1564,7 +1947,19 @@ proc toJson*(node: LayoutNode): JsonNode =
   result["kind"] = %($node.kind)
   case node.kind
   of lnPane:
-    result["pane"] = %($node.pane)
+    # TWO KEYS, NEVER BOTH. This is the structural half of PLAT-9's collision
+    # defence: a contributed id is written under `contributedPane`, so even an
+    # id spelled exactly like a built-in pane ("editor") cannot be read back as
+    # one — a decoder would have to look in the wrong key to confuse them, and
+    # a document carrying both is refused (`ldePaneAndContributedPane`).
+    #
+    # It also keeps the v2 format unchanged for every document that has no
+    # contributed pane: the key is simply absent, `restoreLayoutDocument`
+    # reads such a file exactly as it did before, and no version bump is owed.
+    if node.isContributed:
+      result["contributedPane"] = %node.contributedPane
+    else:
+      result["pane"] = %($node.pane)
   of lnStack:
     result["activeIndex"] = %node.activeIndex
   of lnRow, lnColumn:
@@ -1639,11 +2034,38 @@ proc fromJson*(j: JsonNode): LayoutNode =
   let nodeKind = parseNodeKind(j["kind"].getStr)
   result = LayoutNode(kind: nodeKind, children: @[])
   if nodeKind == lnPane:
-    if not j.hasKey("pane"):
-      raiseDecode(ldeMissingField, "pane")
-    if j["pane"].kind != JString:
-      raiseDecode(ldeWrongFieldType, "pane is " & $j["pane"].kind)
-    result.pane = parsePaneKind(j["pane"].getStr)
+    let hasBuiltin = j.hasKey("pane")
+    let hasContributed = j.hasKey("contributedPane")
+    if hasBuiltin and hasContributed:
+      raiseDecode(ldePaneAndContributedPane,
+        "'" & j["pane"].getStr & "' and '" & j["contributedPane"].getStr & "'")
+    if hasContributed:
+      if j["contributedPane"].kind != JString:
+        raiseDecode(ldeWrongFieldType,
+          "contributedPane is " & $j["contributedPane"].kind)
+      let id = j["contributedPane"].getStr
+      # THE GRAMMAR IS APPLIED AT THE DOOR. The id came from a third-party
+      # manifest and has been sitting in a file on disk since; this is the
+      # point where CodeTracer decides whether it is an identity at all.
+      # A WELL-FORMED id naming nothing loaded is NOT refused here — that is
+      # `prUnloadedExtension`, and `classify` is where it is decided, against a
+      # session rather than against a document.
+      let problem = paneIdProblem(id)
+      if problem != pipOk:
+        raiseDecode(ldeBadContributedPane, describe(problem, id))
+      result.contributedPane = id
+    else:
+      if not hasBuiltin:
+        raiseDecode(ldeMissingField, "pane")
+      if j["pane"].kind != JString:
+        raiseDecode(ldeWrongFieldType, "pane is " & $j["pane"].kind)
+      result.pane = parsePaneKind(j["pane"].getStr)
+  elif j.hasKey("contributedPane"):
+    # A CONTAINER carrying the key. Refused rather than ignored: a decoder that
+    # dropped it would silently discard the only record that a pane was meant
+    # to be there.
+    raiseDecode(ldePaneAndContributedPane,
+      "a " & $nodeKind & " node carries 'contributedPane'")
   if j.hasKey("title"):
     if j["title"].kind != JString:
       raiseDecode(ldeWrongFieldType, "title is " & $j["title"].kind)
@@ -1771,7 +2193,8 @@ proc `$`*(node: LayoutNode): string =
     return "<nil>"
   case node.kind
   of lnPane:
-    "pane:" & $node.pane
+    if node.isContributed: "contributed:" & node.contributedPane
+    else: "pane:" & $node.pane
   of lnStack:
     var parts: seq[string] = @[]
     for i, c in node.children:
@@ -1803,6 +2226,8 @@ proc `$`*(outcome: LayoutOutcome): string =
   of loRefused:
     "refused: " & $outcome.problem.kind &
       (if outcome.problem.pane.isSome: " (" & $outcome.problem.pane.get & ")"
+       elif outcome.problem.contributed.len > 0:
+         " (" & outcome.problem.contributed & ")"
        else: "")
 
 # ---------------------------------------------------------------------------
