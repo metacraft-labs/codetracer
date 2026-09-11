@@ -242,6 +242,27 @@ lint_step "reachability ratchet: contract suite (equality, both directions)" \
 lint_step "frontend reachability: the ratchet's prose agrees with its threshold" \
 	assert_reachability_prose_agrees
 
+# THIS STEP IS RED, AND HAS BEEN SINCE 2026-09-05. SAID HERE SO THAT NOBODY
+# QUOTES ITS COUNT AGAIN AS THOUGH IT HAD PASSED.
+#
+# Measured 2026-09-11 at 422647a0: the tree carries 1800 findings against the
+# ceiling of 1226 below, so this step fails by 574 and every other step of this
+# stage is green. Last green commit a9e7f12d (2026-09-05 10:13, exactly 1226);
+# first red a6386614 (2026-09-05 12:40, 1253); every first-parent commit since
+# has been red — 32 of them counting a6386614 itself, sampled across the window
+# and monotonically worse (1253, 1283, 1608, 1684, 1800). The allow-list has
+# never had an entry and has never been the failing arm.
+#
+# THE CEILING IS DELIBERATELY NOT BEING RAISED TO 1800 to make this green. The
+# whole argument above is that a report is not a gate; a ceiling re-fitted to
+# whatever the tree happens to carry is a report wearing a gate's label, and it
+# is the ONE change that would remove the pressure to fix this without fixing
+# anything. Three repairs that would make the number mean something again are
+# costed — per-directory ratchets, a checked-in baseline, and "no new findings
+# in files this change touched" — in PLAT-11's milestone section of
+# codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org. They are
+# proposals: which one this repository adopts is a policy decision for this
+# lane's owner.
 lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1226 + allow-list hygiene)" \
 	env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh
 

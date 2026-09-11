@@ -26,6 +26,17 @@
 ## `run-plat11-definitions-mutations.py` aims at; "no sentinel appeared" is
 ## the outcome, and the three properties are the reasons.
 ##
+## ## THE SECOND CASE THIS FILE EXISTS FOR, ADDED 2026-09-11
+##
+## *"A definition referencing a path outside the checkout is refused"* — which
+## the lexical grammar satisfied for every spelling a definition could write,
+## and which an ordinary checked-in symlink walked straight past. The two
+## cases at the bottom of this file are the escape and its positive twin: a
+## `vendor -> /elsewhere` link whose bytes must not come back, and a checkout
+## that is ITSELF behind a symlink whose own files must still be readable.
+## The second exists because the half-repair that breaks it fails in the safe
+## direction (Verification-Harness-Traps §15) and would redden nothing.
+##
 ## ## NO MOCKS
 ##
 ## Nothing is stubbed. `loadCheckoutDefinitions` is the product function, the
@@ -45,7 +56,7 @@ import std/[os, sets, strutils, unittest]
 
 import ./project_definitions_dir
 
-const ExpectedAssertions = 76
+const ExpectedAssertions = 99
 
 var countedAssertions = 0
 
@@ -69,6 +80,20 @@ template ckRefused(problems: untyped; wanted: ProjectDefinitionCode) =
 # ---------------------------------------------------------------------------
 # A real tree
 # ---------------------------------------------------------------------------
+
+proc firstLine(sf: SourceFile): string =
+  ## The first line, or the empty string when there is none.
+  ##
+  ## WRITTEN BECAUSE A MUTATION ARM CRASHED THE SUITE THROUGH `lines[0]`.
+  ## Arm D7 makes `readSourceFile` return `present: false` for a checkout
+  ## behind a symlink; the case noticed, reported `[FAILED]`, and then indexed
+  ## an empty `seq` on the very next line — an `IndexDefect` that took every
+  ## case AFTER it with it, including the tally. That is
+  ## Verification-Harness-Traps §1a's shape and this harness's own fifth
+  ## verdict (`SUITE-DIED`) arriving from the SUITE's side: a case that dies
+  ## while reporting is a case whose neighbours never ran. An assertion about
+  ## the first line must survive there being none.
+  if sf.lines.len == 0: "" else: sf.lines[0]
 
 proc freshRoot(name: string): string =
   result = getTempDir() / "ct-plat11-" & name & "-" & $getCurrentProcessId()
@@ -140,6 +165,33 @@ const RouterSource = """import std/strutils
 proc handleRequest(r: Req) =
   discard
 """
+
+# ---------------------------------------------------------------------------
+# THE SYMLINK ESCAPE, and the bytes it used to bring back
+# ---------------------------------------------------------------------------
+
+const OutsideNeedle = "PRIVATE-KEY-MATERIAL-ct-plat11"
+  ## A byte string that appears NOWHERE else in this repository, so "did any
+  ## of the outside file's content come back" is a question with one answer
+  ## rather than a substring coincidence.
+
+const OutsideSecret = OutsideNeedle & "\nsecond line of the outside file\n"
+
+const EscapingPoints = """
+schema = "codetracer.points.v1"
+
+[[collection]]
+name = "escape"
+
+[[collection.point]]
+kind = "breakpoint"
+path = "vendor/id_rsa"
+anchor = "PRIVATE-KEY-MATERIAL-ct-plat11"
+"""
+  ## A declaration that is LEXICALLY INSIDE the checkout in every way the path
+  ## grammar can check — no `..`, no leading `/`, no drive letter, no
+  ## backslash — and whose anchor is a line of a file outside it. `vendor` is
+  ## an ordinary checked-in symlink, which is the whole of the trick.
 
 # ---------------------------------------------------------------------------
 
@@ -502,6 +554,142 @@ suite "PLAT-11: a collection re-resolved against a really edited file":
     # refusal above is about containment rather than about absence being the
     # only outcome this function has.
     ck not readSourceFile(root, "src/missing.nim").present
+
+    # THE TWO SHAPES THAT ONLY THE LEXICAL CHECK CATCHES, added 2026-09-11
+    # with the realpath containment below it.
+    #
+    # The realpath check that closes the symlink escape also refuses every
+    # path in the four lines above, which made each of them evidence about two
+    # mechanisms at once and about neither in particular — and left the arm
+    # aimed at the lexical check with nothing that could notice its removal
+    # (Verification-Harness-Traps §16: a repair can make an arm unkillable
+    # without moving its needle, simply by making a second mechanism cover the
+    # same case). These two are refused by the GRAMMAR and by nothing else:
+    #
+    #   `src/../src/a.nim` resolves, through `realpath`, to a file that really
+    #   is inside this checkout. Only `pathProblem` refuses it, and it should:
+    #   two spellings of one path is one too many, and a definition that
+    #   writes `..` is a definition nobody can check by reading.
+    ck not readSourceFile(root, "src/../src/a.nim").present
+    #   And a NUL, which is the reason `ppControlChar` exists. Every byte
+    #   after it is invisible to the C API underneath `realpath`, so without
+    #   the grammar's refusal the path that is CHECKED and the path that is
+    #   OPENED are different strings — and the one that is opened resolves to
+    #   a contained file, so the containment below says yes.
+    ck not readSourceFile(root, "src/a.nim\0ignored").present
+
+  test "a checked-in symlink does not carry a point's path out of the checkout":
+    # THE ESCAPE PLAT-11'S VERIFICATION PASS REPRODUCED ON 2026-09-11, and the
+    # repair that closed it. Before the repair this exact fixture gave
+    # `prResolved` at line 1 of a file outside the checkout, with that file's
+    # bytes in `SourceFile.lines` — `pathProblem` said `ppOk` (correctly: the
+    # path IS lexically inside) and containment stopped there.
+    #
+    # WHAT IS ASSERTED IS THE EFFECT. "A problem code came back" is a claim
+    # about the report; the claim worth making is that no byte of the outside
+    # file reaches the caller, and that is what `OutsideNeedle` is for.
+    let base = getTempDir() / "ct-plat11-symlink-" & $getCurrentProcessId()
+    removeDir(base)
+    defer: removeDir(base)
+    let root = base / "checkout"
+    let elsewhere = base / "elsewhere"
+    createDir(root / "src")
+    createDir(elsewhere)
+    writeFile(elsewhere / "id_rsa", OutsideSecret)
+    writeFile(root / "src/router.nim", RouterSource)
+    createSymlink(elsewhere, root / "vendor")
+
+    # THE FIXTURE IS PROVED BEFORE IT IS USED (Verification-Harness-Traps §4).
+    # A scan that finds nothing passes every "must not contain" check ever
+    # written, and so does a leak test over a file that was never there. The
+    # outside file exists, carries the needle, and is reachable THROUGH the
+    # symlink by an ordinary reader in this same process.
+    ck readFile(elsewhere / "id_rsa").contains(OutsideNeedle)
+    ck fileExists(root / "vendor" / "id_rsa")
+    ck readFile(root / "vendor" / "id_rsa").contains(OutsideNeedle)
+    # And the grammar is not what stops it, which is why the grammar was not
+    # enough: this path satisfies every rule `pathProblem` has.
+    ckEq pathProblem("vendor/id_rsa"), ppOk
+
+    let escaped = readSourceFile(root, "vendor/id_rsa")
+    ck not escaped.present
+    ckEq escaped.lines.len, 0
+    var leaked = false
+    for l in escaped.lines:
+      if l.contains(OutsideNeedle): leaked = true
+    ck not leaked
+
+    # THE POSITIVE TWIN, through the same function, in the same run (§4a): a
+    # file that really is in the checkout comes back WITH ITS BYTES. Without
+    # this, "nothing came back" is also what a reader that has stopped working
+    # produces.
+    let ordinary = readSourceFile(root, "src/router.nim")
+    ck ordinary.present
+    ck firstLine(ordinary).contains("import std/strutils")
+
+    # AND END TO END, through the product loader and §4's re-resolution —
+    # `loadCheckoutDefinitions` over a real `points.toml`, exactly the path the
+    # verification pass walked to reach `prResolved` at line 1.
+    writeDefinition(root, "", "points.toml", EscapingPoints)
+    let loaded = loadCheckoutDefinitions(root)
+    ckEq loaded.project.collections.len, 1
+    resolveRoot = root
+    let res = resolveCollection(loaded.project.collections[0],
+                                readerForResolveRoot)
+    # The point is still a ROW rather than an absence — §4's rule does not
+    # bend for a refusal.
+    ckEq res.points.len, 1
+    ckEq res.points[0].outcome, prFileAbsent
+    ckEq res.points[0].line, 0
+    # And the refusal's own text does not quote the file it refused to read,
+    # which is how a "safe" message becomes the disclosure.
+    ck not res.points[0].detail.contains(OutsideNeedle)
+
+  test "a checkout reached through a symlink still reads its own files":
+    # VERIFICATION-HARNESS-TRAPS §15's POSITIVE TWIN, and the reason it is
+    # written rather than assumed: PLAT-8 found this exact half-repair in
+    # `canonicalGrantsOf` by writing the twin there. Resolving the CANDIDATE
+    # and comparing it against an UNRESOLVED root refuses every file in a
+    # checkout that is itself behind a symlink — `/tmp` on macOS, a bind
+    # mount, a home under `/home/x` that is really `/data/home/x`. Every
+    # assertion in the case above would be MORE satisfied and nothing anywhere
+    # would go red.
+    let base = getTempDir() / "ct-plat11-linkroot-" & $getCurrentProcessId()
+    removeDir(base)
+    defer: removeDir(base)
+    let real = base / "real-checkout"
+    createDir(real / "src")
+    writeFile(real / "src/a.nim", "line one\n")
+    let linked = base / "linked-checkout"
+    createSymlink(real, linked)
+    ck symlinkExists(linked)
+
+    let viaLink = readSourceFile(linked, "src/a.nim")
+    ck viaLink.present
+    ckEq firstLine(viaLink), "line one"
+
+    # A symlink INSIDE the checkout, pointing inside it, is an ordinary thing
+    # for a repository to contain and still works: the repair resolves it and
+    # finds the TARGET contained. "Refuse every symlink" would have been the
+    # other half-repair, and it would have broken vendored trees for the same
+    # invisible reason.
+    createSymlink("src/a.nim", real / "alias.nim")
+    let viaInside = readSourceFile(real, "alias.nim")
+    ck viaInside.present
+    ckEq firstLine(viaInside), "line one"
+
+    # WHAT SHARING PLAT-8's PREDICATE COSTS, measured rather than assumed —
+    # the same treatment the non-ASCII limitation gets in
+    # `project_definitions_test`. `capabilities.pathIsUnder` refuses outright
+    # if the two characters `..` appear ANYWHERE in either argument, which is
+    # a SUBSTRING test rather than a segment test, so a file whose NAME
+    # contains `..` is now unreadable here although the grammar accepts it.
+    # The alternative was a second copy of the containment predicate, which is
+    # §14's defect in a security check; the repair belongs in PLAT-8's file
+    # and is recorded in PLAT-11's residues.
+    writeFile(real / "src/a..b.nim", "dotted\n")
+    ckEq pathProblem("src/a..b.nim"), ppOk
+    ck not readSourceFile(real, "src/a..b.nim").present
 
 # ---------------------------------------------------------------------------
 

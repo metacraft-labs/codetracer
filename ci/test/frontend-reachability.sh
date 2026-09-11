@@ -36,6 +36,39 @@
 # `env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh`, so 1227
 # findings fail `lint-nim` and 1226 do not.
 #
+# AND IT IS NON-ENFORCING TODAY, WHICH IS THE FIRST THING A READER NEEDS.
+# ----------------------------------------------------------------------
+# Measured 2026-09-11 at `422647a0`: this tree carries **1800** findings
+# against a ceiling of **1226**, so the step is RED and has been since
+# `a638661447e706d95b9f8bd7e0f07886cc89f3dd` (2026-09-05 12:40, 1253
+# findings). The last commit at which it was green is
+# `a9e7f12d5f74a75281ef6a2f0b1426a5a3703abb` (2026-09-05 10:13), and every
+# first-parent commit since has failed it — 32 of them counting the first red,
+# re-counted 2026-09-12 after this header said 44. Every other step of
+# `ci/lint/nim.sh` is green.
+#
+# So: **this number is a REPORT and not a gate right now.** Five campaigns
+# have quoted "reachability N, allow-list 0/0" in their evidence tables as
+# though the lane enforcing a ceiling on N had passed. It had not, and it
+# cannot have: an equality against a ceiling 574 below the tree fails for
+# every tree.
+#
+# The drift is not one bad merge. It is two campaigns landing large, tested,
+# not-yet-wired subsystems: `src/frontend/tui/` went 3 -> 423 between 09-05
+# and 09-08, and `src/frontend/viewmodel/plugin_host/` went 0 -> 90 between
+# 09-08 and 09-11. 514 of the 574 are bucket A ("tested, and no product module
+# reaches it"), which is the bucket that needs owners rather than deletions.
+#
+# **The remedy is deliberately NOT "raise the ceiling to 1800".** That turns a
+# broken gate into a silent one: the count would agree with the tree and the
+# guard would go on not asking anyone anything, which is the exact state the
+# paragraph above says this file exists to leave. Three candidate repairs are
+# costed with real numbers in PLAT-11's milestone section
+# (`codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org`), under
+# "The reachability ratchet is RED, and has been since 2026-09-05". Choosing
+# between them is a repo-wide policy decision and belongs to whoever owns this
+# lane, not to the milestone that measured it.
+#
 # AND SO DOES 1222, SINCE 2026-09-04: the threshold is an EQUALITY, not a
 # ceiling with room under it. Fewer findings than the number fails as "the
 # ceiling has slack, lower it to what you measured", because slack is a budget —

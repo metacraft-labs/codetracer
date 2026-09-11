@@ -31,15 +31,34 @@
 ## the project" are different fixes, and §4b's lesson is that a refusal
 ## asserted only as "it refused" passes for the wrong reason.
 ##
-## ## IT IS LEXICAL, AND THAT IS THE POINT RATHER THAN A LIMITATION
+## ## IT IS LEXICAL, WHICH IS RIGHT HERE AND IS NOT SUFFICIENT ANYWHERE
 ##
 ## Nothing here touches the filesystem: no `getCurrentDir`, no `expandFilename`,
 ## no `symlinkExists`. A containment check that resolves symlinks would need
-## I/O, and §2.2's first bullet forbids the loader any. A LEXICAL grammar this
-## narrow is decidable without the disk, and the residue — a repository whose
-## own checked-in symlink points outside itself — is a property of the
-## checkout rather than of the definition, and belongs to whoever opens the
-## file, not to whoever reads the declaration.
+## I/O, and §2.2's first bullet forbids the LOADER any. A LEXICAL grammar this
+## narrow is decidable without the disk, and that is the right shape for the
+## question this function answers: *may a repository write this string.*
+##
+## **CORRECTED 2026-09-11.** This paragraph used to end by handing the
+## remaining case away — "the residue … belongs to whoever opens the file, not
+## to whoever reads the declaration" — and it was wrong twice. It was wrong
+## about the residue's size: a checkout carrying an ordinary checked-in
+## symlink `vendor -> /elsewhere`, plus `path = "vendor/id_rsa"`, satisfied
+## every rule below, and `resolveCollection` returned `prResolved` at line 1
+## of a file outside the checkout, with that file's bytes. And it was wrong
+## about the owner: *whoever opens the file* is
+## `ct/launch/project_definitions_dir.readSourceFile`, which is PLAT-11's own
+## filesystem half. §2.2 forbids the LOADER I/O; it says nothing about the
+## half whose job is I/O, so a `realpath` there broke no rule — there simply
+## was not one.
+##
+## There is now. `readSourceFile` resolves both the checkout and the candidate
+## and asks `capabilities.pathIsUnder` — PLAT-8's containment predicate,
+## shared rather than re-derived — then opens the resolved path with
+## `O_NOFOLLOW` and reads from the verified descriptor. **This module is
+## unchanged and still lexical, deliberately**: the two checks answer
+## different questions, they are applied at different places, and the one that
+## needs a disk lives where the disk is. See `readSourceFile`'s header.
 ##
 ## ## ONE PREDICATE, TWO CALLERS
 ##

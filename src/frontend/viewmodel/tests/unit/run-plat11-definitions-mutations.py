@@ -24,7 +24,8 @@ inexpressible, each of which is real code with a real failure mode:
   * the accepted-key set is closed and an unknown key ABANDONS the entry
     (P1, P2, P15);
   * the path grammar is closed (C1-C7) and is applied wherever a path enters
-    (P8, L2, D3, D4);
+    (P8, L2, D3, D4) and is RESOLVED before it is applied at the syscall,
+    so a checked-in symlink cannot carry it out of the checkout (D6, D7);
   * the file set the reader opens is a constant, and an executable-tier
     file's BYTES never enter the process (D1, D5, L3);
   * matching, templating and re-resolution are bounded and total (P12, P16,
@@ -231,6 +232,9 @@ C_FILESET = "the set of files opened is the constant set, and nothing else"
 C_DISKSIZE = "an oversized definition is refused by its SIZE, before it is read"
 C_SCOPE = "a definition in a package scope outside the checkout is refused"
 C_READGUARD = "readSourceFile refuses a path outside the checkout, at the syscall"
+C_SYMLINK = ("a checked-in symlink does not carry a point's path out of the "
+             "checkout")
+C_LINKROOT = "a checkout reached through a symlink still reads its own files"
 
 # `test_point_collections_fill_the_point_list.nim`
 V_GATE = "applyCollections WRITES the signal — the verification gate"
@@ -922,12 +926,17 @@ MUTATIONS: list[Mutation] = [
         "  if pathProblem(repoRelativePath) != ppOk:",
         "  if false:",
         C_READGUARD, NIM_CLI,
-        'readSourceFile(root, "../ct-plat11-outside-" & '
-        '$getCurrentProcessId() & ".txt").present was true',
-        "THE CHECK AT THE SYSCALL GOES. The grammar upstream still refuses "
-        "an escaping path, so nothing breaks today — and the one check that "
-        "would survive a refactor of everything upstream of it is the one "
-        "removed",
+        'readSourceFile(root, "src/../src/a.nim").present was true',
+        "THE LEXICAL CHECK AT THE SYSCALL GOES. Its `because` was RE-DERIVED "
+        "on 2026-09-11 and so were the assertions that kill it: the realpath "
+        "containment added beside it refuses every path the old ones named "
+        "(`../outside`, `/etc/passwd`, `src/../../etc/passwd`), so this arm "
+        "had become unkillable WITHOUT ITS NEEDLE MOVING — Verification-"
+        "Harness-Traps §16 by way of a second mechanism rather than a rename. "
+        "It now grades the two shapes only the GRAMMAR refuses: a `..` segment "
+        "that resolves back INSIDE the checkout, and a NUL, after which the "
+        "path that was checked and the path that is opened are different "
+        "strings",
         control_name="the verdict is read into a named binding",
         control_find="  if pathProblem(repoRelativePath) != ppOk:",
         control_replace="  let contained = pathProblem(repoRelativePath) == ppOk\n"
@@ -945,6 +954,54 @@ MUTATIONS: list[Mutation] = [
         control_find="      if name in known: continue",
         control_replace="      let isADefinition = name in known\n"
                         "      if isADefinition: continue",
+    ),
+
+    # -- §2.2's containment at the SYSCALL, where a symlink used to walk out --
+    #
+    # These two arrived on 2026-09-11 with the repair for the escape PLAT-11's
+    # verification pass reproduced: a checked-in `vendor -> /elsewhere` plus
+    # `path = "vendor/id_rsa"` gave `prResolved` at line 1 of a file outside
+    # the checkout. D6 grades the repair; D7 grades the HALF of it that would
+    # otherwise fail in the safe direction (Verification-Harness-Traps §15).
+    #
+    # There is deliberately no arm aimed at `O_NOFOLLOW` or at the
+    # `(dev, ino)` comparison. Both fire only on a swap that races the check,
+    # and an arm whose kill condition needs a winning race is §10's assertion
+    # that cannot fail wearing a stopwatch. What IS asserted instead, in the
+    # same cases, is that neither breaks an ordinary symlink: a link pointing
+    # INSIDE the checkout still resolves and still reads.
+    Mutation(
+        "D6", DIR,
+        "  if not pathIsUnder(resolvedFile, resolvedRoot):",
+        "  if false:",
+        C_SYMLINK, NIM_CLI, "escaped.present was true",
+        "THE REALPATH CONTAINMENT GOES AND THE LEXICAL ONE IS LEFT, which is "
+        "the state this milestone shipped in and the verification pass "
+        "falsified. `pathProblem` says `ppOk` for `vendor/id_rsa` and is right "
+        "to — the path IS lexically inside — so an ordinary checked-in symlink "
+        "carries a point's path to any file the user can read, and the bytes "
+        "come back in `SourceFile.lines`",
+        control_name="the containment verdict is read into a named binding",
+        control_find="  if not pathIsUnder(resolvedFile, resolvedRoot):",
+        control_replace="  let contained = pathIsUnder(resolvedFile, resolvedRoot)\n"
+                        "  if not contained:",
+    ),
+    Mutation(
+        "D7", DIR,
+        "  let resolvedRoot = resolvedRealPath(root)",
+        "  let resolvedRoot = root",
+        C_LINKROOT, NIM_CLI, "Check failed: viaLink.present",
+        "ONLY THE SUBJECT IS RESOLVED AND THE ROOT IS NOT — PLAT-8's "
+        "`canonicalGrantsOf` defect, in a second place. Every escape "
+        "assertion still passes and every checkout that is itself behind a "
+        "symlink (`/tmp` on macOS, a bind mount, a home under `/home/x` that "
+        "is really `/data/home/x`) stops containing its own files, so every "
+        "point in it reports 'the file is not there'. §15: it fails in the "
+        "SAFE direction, so without this case nothing anywhere goes red",
+        control_name="the checkout directory is bound before it is resolved",
+        control_find="  let resolvedRoot = resolvedRealPath(root)",
+        control_replace="  let checkoutDir = root\n"
+                        "  let resolvedRoot = resolvedRealPath(checkoutDir)",
     ),
 
     # -- the verification gate -----------------------------------------------

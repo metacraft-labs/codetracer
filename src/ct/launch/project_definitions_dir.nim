@@ -18,15 +18,30 @@
 ##
 ## and, for the user's own set, the same three names under a directory the
 ## CALLER names. Every one of those names comes from
-## `layout.definitionFileName`, which is a `case` over a closed enum. **No
-## string from inside any definition file ever reaches a filesystem call**,
-## because no definition file is parsed here at all: this reads bytes and
-## hands them over.
+## `layout.definitionFileName`, which is a `case` over a closed enum, and **no
+## definition file is parsed here at all**: this reads bytes and hands them
+## over.
 ##
 ## That is the concrete form of §2's rule. A repository cannot cause CodeTracer
-## to open a file of its choosing, so it cannot cause CodeTracer to load one,
-## so it cannot cause CodeTracer to run one. The attack needs a name to travel
-## from the data into a syscall and there is no channel for it.
+## to open a DEFINITION file of its choosing, so it cannot cause CodeTracer to
+## load one, so it cannot cause CodeTracer to run one. The attack needs a name
+## to travel from the data into a *loader* and there is no channel for it.
+##
+## ## ONE STRING FROM INSIDE A DEFINITION *DOES* REACH A SYSCALL
+##
+## Said here rather than left for a reader to discover, because the paragraph
+## above used to end "**No string from inside any definition file ever reaches
+## a filesystem call**" and that sentence is FALSE — PLAT-11's verification
+## pass measured it on 2026-09-11.
+##
+## `readSourceFile` at the bottom of this file takes a POINT'S `path`, which a
+## definition supplied, and opens `root / thatPath`. That is deliberate: it is
+## what §4's re-resolution IS, and the bytes go into a line number rather than
+## into anything that loads or runs. What was wrong was the SCOPE of the
+## claim, and the cost of the over-wide version was concrete: it described a
+## containment that was purely lexical as though nothing needed containing,
+## and a checked-in symlink walked out of the checkout through it. See
+## `readSourceFile`'s own header for the repair.
 ##
 ## ## THE PACKAGE LIST IS THE CALLER'S, AND IS CHECKED
 ##
@@ -55,9 +70,44 @@
 
 import std/[os, strutils]
 
+when defined(posix):
+  import std/posix
+
 import ../../common/project_definitions
 
 export project_definitions
+
+# PLAT-8's containment predicate, SHARED rather than re-derived.
+#
+# Verification-Harness-Traps §14 is "one predicate, one function", and §14a is
+# the same rule with the worst instance attached: a whole module re-derived
+# from the same examples, which then disagreed with its twin in a way that was
+# invisible to every green run. "Is this resolved path inside this resolved
+# root" is asked in exactly two places in this product — by `fs:read` /
+# `fs:write` in `plugin_host/plugin_io.nim`, and here — so it is asked through
+# one function.
+#
+# A `from … import` rather than a plain `import`, because ONE symbol is wanted
+# and the rest of that module is PLAT-8's grant vocabulary. This is the
+# filesystem half of PLAT-11 and is outside `common/project_definitions/` —
+# whose import closure is asserted verbatim by `project_definitions_test` and
+# still reaches four `std` modules and nothing else — so sharing a *path
+# predicate* here does not make a project definition a plugin. There is still
+# no `Capability`, no `GrantSet` and no grant ledger anywhere near a project
+# definition.
+#
+# ITS ONE COST, MEASURED AND NOT HIDDEN. `pathIsUnder` refuses outright if the
+# two-character sequence `..` appears ANYWHERE in either argument — a substring
+# test, not a segment test — so a checkout or a source file with `..` inside a
+# NAME (`src/a..b.nim`, which `pathProblem` accepts, since `.` is in the
+# character set) is now refused here. That is a real narrowing of what a
+# definition may name, it fails in the safe direction, and
+# `project_definitions_dir_test` asserts it so the limitation is a measured
+# fact rather than an assumption. Repairing it means editing
+# `capabilities.nim`, which is PLAT-8's mutation subject and carries PLAT-8's
+# recorded control digest — a different campaign's diff, recorded in PLAT-11's
+# residues rather than slipped in here.
+from ../../common/plugin_model/capabilities import pathIsUnder
 
 type
   DiscoveryOutcome* = object
@@ -242,6 +292,54 @@ proc loadCheckoutDefinitions*(root: string;
   for p in result.problems: combined.add p
   result.problems = combined
 
+when defined(posix):
+  let O_NOFOLLOW_CT {.importc: "O_NOFOLLOW", header: "<fcntl.h>".}: cint
+    ## `std/posix` declares `O_CLOEXEC` and not this, on every platform —
+    ## PLAT-8 checked `posix_linux_amd64_consts`, `posix_other_consts` and
+    ## `posix_freertos_consts` and this file inherits that finding. Imported
+    ## from the header rather than written as a number, because the value
+    ## differs between Linux (0o400000), the BSDs (0x100) and macOS.
+
+proc resolvedRealPath(path: string): string =
+  ## `realpath(3)` on POSIX — every symlink in the path followed — or the
+  ## empty string when the path resolves to nothing at all.
+  ##
+  ## ## WHY THIS IS NOT `plugin_io.canonicalPath`, MEASURED RATHER THAN
+  ## ## PREFERRED
+  ##
+  ## PLAT-8's canonicaliser is three fallbacks deep — `absolutePath`, then
+  ## `expandFilename`, then `expandFilename(parent) / leaf`, then
+  ## `normalizedPath` — because `writePath` CREATES files and a leaf that does
+  ## not exist yet cannot be `realpath`'d. Nothing here creates anything: a
+  ## source file that cannot be resolved is a source file that cannot be read,
+  ## and "it does not resolve" and "it is not there" are the same answer
+  ## (`SourceFile(present: false)`). So the parent-fallback arm would be dead
+  ## code carrying a security argument, which is worse than absent.
+  ##
+  ## It is also not IMPORTABLE. `canonicalPath` lives inside `plugin_io.nim`'s
+  ## native `when` arm, behind `chronos`/`asyncdispatch` and the whole plugin
+  ## host; and PLAT-8's mutation harness aims arms at needles that are literal
+  ## lines of it (`      return expandFilename(absolute)`), so relocating it
+  ## into a shared module would move those needles and leave the arms silently
+  ## unkillable — Verification-Harness-Traps §16, arriving through a tidy-up.
+  ##
+  ## **The containment PREDICATE is shared** (`pathIsUnder`, above) and is the
+  ## thing §14 is about: the canonicaliser produces an input, the predicate
+  ## takes the decision, and there is one of the latter.
+  ##
+  ## ## AND IT IS A REAL RESOLUTION ONLY ON POSIX
+  ##
+  ## `os.expandFilename` is `realpath(3)` on POSIX and `GetFullPathNameW` on
+  ## Windows, which normalises `.` and `..` and **resolves no symlink or
+  ## junction at all** (its doc comment's "Follows symlinks" is true of one of
+  ## its two `when` arms). The containment below is therefore a real
+  ## containment on POSIX and a normalisation on Windows — the same bound
+  ## PLAT-8 records for the same reason, not a new one.
+  try:
+    expandFilename(path)
+  except CatchableError, Defect:
+    ""
+
 proc readSourceFile*(root, repoRelativePath: string): SourceFile =
   ## One source file of the checkout, for `resolve.resolveCollection`.
   ##
@@ -253,14 +351,112 @@ proc readSourceFile*(root, repoRelativePath: string): SourceFile =
   ## second call is here because this is the function that turns a string into
   ## a syscall, and a check at the boundary that performs the dangerous
   ## operation survives a refactor of everything upstream of it.
+  ##
+  ## ## AND THE LEXICAL CHECK IS NOT ENOUGH, WHICH WAS MEASURED
+  ##
+  ## PLAT-11's verification pass, 2026-09-11, against the product loader: a
+  ## checkout carrying an ordinary checked-in symlink `vendor -> /elsewhere`,
+  ## plus `path = "vendor/id_rsa"` in `points.toml`. `pathProblem` returns
+  ## `ppOk` — the path IS lexically inside — `loadCheckoutDefinitions` accepts
+  ## the collection, and `resolveCollection` over this function returned
+  ## `prResolved` at line 1 of a file outside the checkout, with the outside
+  ## file's bytes in `SourceFile.lines`. Remove the symlink and the same
+  ## declaration finds nothing, so the symlink was doing the work.
+  ##
+  ## This is PLAT-8's `fs:read` repair arriving in a second place
+  ## (Extensibility-Model §8: "`fs:read` reached recordings through an ordinary
+  ## symlink until the containment moved to the realpath") and it takes the
+  ## same two-part shape, for the same reasons:
+  ##
+  ##   1. **Resolve, then contain.** Both the root and the candidate go through
+  ##      `resolvedRealPath` and the verdict is `pathIsUnder` — PLAT-8's own
+  ##      predicate, not a second one.
+  ##   2. **Open in a way that cannot disagree with the resolution.** See below.
+  ##
+  ## ## BOTH SIDES ARE RESOLVED, AND THAT IS THE HALF THAT IS EASY TO SKIP
+  ##
+  ## Verification-Harness-Traps §15: a half-repair that fails in the SAFE
+  ## direction looks like nothing from outside. Resolving the candidate and
+  ## comparing it against an unresolved `root` would make every checkout that
+  ## is itself reached through a symlink — `/tmp` on macOS, a bind mount, a
+  ## home under `/home/x` that is really `/data/home/x`, a worktree behind a
+  ## convenience link — stop containing its own files. Every point in it would
+  ## report "the file is not there", every security assertion here would be
+  ## MORE satisfied, and nothing anywhere would go red. PLAT-8 found exactly
+  ## this in `canonicalGrantsOf` by writing the positive twin, so the positive
+  ## twin is written here too, as its own case in
+  ## `project_definitions_dir_test`.
+  ##
+  ## ## THE TOCTOU SEAM, NAMED RATHER THAN HOPED AWAY
+  ##
+  ## The resolution happens, then the containment decision, then the open.
+  ## Anyone who can write inside the checkout can change what a name means in
+  ## that window, so "we resolved it" is a statement about the past. Three
+  ## things, and what each does and does not cover:
+  ##
+  ##   * the path opened is the RESOLVED one, which by construction contains no
+  ##     symlink as of the resolve — so there is no second traversal of the
+  ##     unresolved string, and resolve and open cannot name two different
+  ##     paths;
+  ##   * `O_NOFOLLOW` — the kernel refuses if the FINAL component is a symlink
+  ##     at the moment of the open. A leaf that has become one since the
+  ##     resolve is precisely the swap, and `ELOOP` is the refusal;
+  ##   * an `fstat` of the descriptor against an `lstat` of the same name,
+  ##     compared on `(st_dev, st_ino)`. The bytes are then read from THAT
+  ##     DESCRIPTOR and never by re-opening the name, so the file the check
+  ##     passed is the file the caller gets.
+  ##
+  ## The check FAILS CLOSED — a disagreement is `present: false`, not a retry.
+  ##
+  ## **Two residuals, stated rather than implied away.** A swap of an
+  ## INTERMEDIATE directory that completes BEFORE the open is followed
+  ## consistently by both the open and the `lstat`, so they agree; only a swap
+  ## racing the check itself is caught. Closing that needs per-component
+  ## `openat(O_NOFOLLOW)` or Linux's `openat2(RESOLVE_BENEATH)`, which is one
+  ## platform's answer to a problem the other two would still have. And a HARD
+  ## LINK from inside the checkout to a file outside it defeats every
+  ## path-based containment, this one included, because there is nothing left
+  ## to resolve. Both need write access inside the checkout, which is the
+  ## user's own; neither is reachable from `git clone`, which is the threat §2
+  ## is about — a symlink IS.
   if pathProblem(repoRelativePath) != ppOk:
     return SourceFile(present: false)
-  let disk = root / repoRelativePath
-  if not fileExists(disk):
+
+  let resolvedRoot = resolvedRealPath(root)
+  let resolvedFile = resolvedRealPath(root / repoRelativePath)
+  if resolvedRoot.len == 0 or resolvedFile.len == 0:
+    # Either the checkout or the file resolves to nothing. A file that is not
+    # there and a file that cannot be resolved are one answer here.
     return SourceFile(present: false)
+  if not pathIsUnder(resolvedFile, resolvedRoot):
+    return SourceFile(present: false)
+
   var text = ""
-  try:
-    text = readFile(disk)
-  except CatchableError:
-    return SourceFile(present: false)
+  when not defined(posix):
+    # No `O_NOFOLLOW` and no `(dev, ino)` re-verification off POSIX — see
+    # `resolvedRealPath`'s header. The containment above still runs.
+    try:
+      text = readFile(resolvedFile)
+    except CatchableError:
+      return SourceFile(present: false)
+  else:
+    var fd = posix.open(resolvedFile.cstring,
+                        O_RDONLY or O_NOFOLLOW_CT or O_CLOEXEC)
+    if fd < 0:
+      return SourceFile(present: false)
+    var opened, named: Stat
+    if fstat(fd, opened) != 0 or lstat(resolvedFile.cstring, named) != 0 or
+       opened.st_dev != named.st_dev or opened.st_ino != named.st_ino:
+      discard posix.close(fd)
+      return SourceFile(present: false)
+    var f: File
+    if not open(f, FileHandle(fd), fmRead):
+      discard posix.close(fd)
+      return SourceFile(present: false)
+    try:
+      text = f.readAll()
+    except CatchableError:
+      f.close()
+      return SourceFile(present: false)
+    f.close()
   SourceFile(present: true, lines: text.splitLines())
