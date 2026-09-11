@@ -927,39 +927,56 @@ proc recordNodeTestCommand*(providerId: string;
       events.add event(tekOutput, providerId, runId, testId,
           output = result.output)
 
-    if result.exitCode != 0:
-      events.add event(
-        tekFailure,
-        providerId,
-        runId,
-        testId,
-        some(tsFailed),
-        "codetracer-js-recorder exited with " & $result.exitCode,
-        result.output)
-      events.add event(tekRecordFinished, providerId, runId, testId, some(
-          tsFailed), "failed")
-      return ProviderResult[seq[TestEvent]](
-        diagnostics: @[diagnostic(dsError,
-            "node:test recording failed with exit code " & $result.exitCode,
-            scope.file)],
-        value: events)
-
+    # ---- "did the RECORDER work" vs "did the RECORDED SUITE pass" ------------
+    # These are two different questions and the exit code cannot answer both.
+    #
+    # Per `codetracer-specs/Recorder-CLI-Conventions.md` §6 a recorder's exit
+    # code is 1 for its OWN errors and otherwise the target program's code,
+    # passed through. `node:test` exits 1 when a test fails, so 1 is ambiguous
+    # by construction — and it is the single most likely non-zero code here.
+    #
+    # This used to map ANY non-zero exit onto `tekFailure` + "node:test
+    # recording failed with exit code N". While the JS recorder swallowed the
+    # recorded program's exit code that was merely unreachable; once the
+    # recorder started propagating it (the fix for a two-month silent pass in
+    # `javascript_hcr_ctfs_integration.rs`), a suite containing one failing
+    # test began reporting as a RECORDING failure — throwing away the trace
+    # and every per-test event with it, and pointing the reader at the
+    # recorder instead of at their test.
+    #
+    # §6 also lists a `--no-propagate-script-exit` escape hatch, which this
+    # recorder does not implement. It is deliberately NOT the mechanism used
+    # here: suppressing the pass-through would remove the only signal for "the
+    # recorded program died outside its tests" (a module that throws at load
+    # produces no TAP stream at all) and would leave nothing to fall back to.
+    # The pass-through is kept; what changes is who is asked what.
+    #
+    # The ARTIFACT answers the first question. A recorder that could not do
+    # its job leaves no non-empty `.ct`; one that finished leaves one, whatever
+    # the recorded program then did.
     let traces = ctFilesUnder(outputRoot)
-    if traces.len == 0 or getFileSize(traces[0]) <= 0:
+    let recordingProduced = traces.len > 0 and getFileSize(traces[0]) > 0
+
+    if not recordingProduced:
+      let detail =
+        if result.exitCode != 0:
+          "codetracer-js-recorder exited with " & $result.exitCode &
+            " and produced no non-empty .ct artifact"
+        else:
+          "codetracer-js-recorder did not produce a non-empty .ct artifact"
       events.add event(
         tekFailure,
         providerId,
         runId,
         testId,
         some(tsErrored),
-        "codetracer-js-recorder did not produce a non-empty .ct artifact",
+        detail,
         result.output)
       events.add event(tekRecordFinished, providerId, runId, testId, some(
           tsErrored), "errored")
       return ProviderResult[seq[TestEvent]](
         diagnostics: @[diagnostic(dsError,
-            "node:test recording did not produce a non-empty .ct artifact",
-            scope.file)],
+            "node:test recording failed: " & detail, scope.file)],
         value: events)
 
     var metadata = initTable[string, string]()
@@ -975,6 +992,9 @@ proc recordNodeTestCommand*(providerId: string;
       entryPoint: normalizedRelative(scope.projectRoot, scope.file),
       metadata: metadata)
 
+    # The recording exists and is reported REGARDLESS of how the recorded
+    # suite fared. A trace of a failing test is exactly the artifact its author
+    # wants; discarding it because a test failed is the opposite of the point.
     events.add TestEvent(
       schemaVersion: TestEventSchemaVersion,
       kind: tekRecordingCreated,
@@ -987,21 +1007,108 @@ proc recordNodeTestCommand*(providerId: string;
       durationMs: 0,
       trace: some(trace),
       diagnostic: none(TestDiagnostic))
-    events.add event(
-      tekTestFinished, providerId, runId, testId, some(tsPassed), "passed")
+
+    # ---- The RECORDED SUITE's verdict ---------------------------------------
+    # `node:test` autoruns on import and prints the same TAP stream a bare
+    # `node --test` does (measured on Node 22.22: `TAP version 13`, a plan
+    # line, and the `# tests` / `# pass` / `# fail` / `# skipped` / `# todo`
+    # summary counters), so the recorded program's stdout carries per-test
+    # results even though the recorder, not `--test`, drove it. That stream is
+    # the same object `runNodeTestCommand` trusts, parsed by the same function
+    # and subject to the same self-consistency cross-check, with the recorder's
+    # (propagated) exit code as the documented fallback when it is unusable.
+    var
+      diagnostics: seq[TestDiagnostic] = @[]
+      suiteStatus = tsPassed
+    let reported = parseNodeTapResults(providerId, runId, testId, result.output)
+    if reported.usable:
+      var
+        anyFailed = false
+        anyPassed = false
+        anySkipped = false
+      for finished in reported.events:
+        let status = finished.status.get(tsErrored)
+        case status
+        of tsFailed, tsErrored:
+          anyFailed = true
+          events.add event(tekFailure, providerId, runId, finished.testId,
+              some(status), finished.message, result.output)
+        of tsPassed: anyPassed = true
+        of tsSkipped: anySkipped = true
+        events.add finished
+
+      suiteStatus =
+        if anyFailed: tsFailed
+        elif anyPassed: tsPassed
+        elif anySkipped: tsSkipped
+        else: tsErrored
+
+      if anyFailed:
+        diagnostics.add diagnostic(dsError,
+            "the recorded node:test suite failed: at least one test did not " &
+            "pass (recorder exit code " & $result.exitCode &
+            "). The trace was still written and is reported.",
+            scope.file)
+      elif result.exitCode != 0:
+        # A non-zero exit the TAP stream does not explain — an uncaught async
+        # error after the plan, a non-zero `process.exit()` in teardown. Never
+        # swallowed, and never blamed on the recorder: the artifact proves the
+        # recorder finished.
+        suiteStatus = tsFailed
+        events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
+            "the recorded program exited with " & $result.exitCode &
+            " but reported no failing test", result.output)
+        diagnostics.add diagnostic(dsError,
+            "the recorded node:test program exited with " & $result.exitCode &
+            " but reported no failing test; treat the unit as failed and " &
+            "check the output for an error outside the tests",
+            scope.file)
+      elif reported.events.len == 0:
+        suiteStatus = tsErrored
+        diagnostics.add diagnostic(dsWarning,
+            "the recorded node:test program executed no test for " &
+            (if scope.selector.len > 0: scope.selector else: scope.file) &
+            "; the trace attests nothing about this unit",
+            scope.file)
+    else:
+      # No trustworthy TAP stream. Fall back to the exit code — which is the
+      # RECORDED PROGRAM's, since the artifact already established that the
+      # recorder itself finished — and say so, so a unit that regressed onto
+      # this path is not indistinguishable from a per-test one.
+      diagnostics.add diagnostic(dsWarning,
+          "falling back to the recorded program's exit code for this unit's " &
+          "status: " & reported.reason &
+          ". An exit code cannot distinguish a skipped test from a passing " &
+          "one, so a skip in this unit is reported as a pass",
+          scope.file)
+      if result.exitCode == 0:
+        suiteStatus = tsPassed
+        events.add event(tekTestFinished, providerId, runId, testId,
+            some(tsPassed), "passed")
+      else:
+        suiteStatus = tsFailed
+        events.add event(tekFailure, providerId, runId, testId, some(tsFailed),
+            "the recorded program exited with " & $result.exitCode,
+            result.output)
+        events.add event(tekTestFinished, providerId, runId, testId,
+            some(tsFailed), "failed")
+        diagnostics.add diagnostic(dsError,
+            "the recorded node:test program exited with " & $result.exitCode,
+            scope.file)
+
     events.add TestEvent(
       schemaVersion: TestEventSchemaVersion,
       kind: tekRecordFinished,
       providerId: providerId,
       runId: runId,
       testId: testId,
-      status: some(tsPassed),
-      message: "passed",
+      status: some(suiteStatus),
+      message: $suiteStatus,
       output: "",
       durationMs: 0,
       trace: some(trace),
       diagnostic: none(TestDiagnostic))
-    ProviderResult[seq[TestEvent]](diagnostics: @[], value: events)
+    ProviderResult[seq[TestEvent]](diagnostics: diagnostics, value: events)
 
 proc unsupportedRecord*(providerId, milestone: string;
     scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =

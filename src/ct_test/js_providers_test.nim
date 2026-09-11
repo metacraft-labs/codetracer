@@ -669,6 +669,143 @@ test('top level todo', { todo: 'later' }, () => { assert.fail('ignored'); });
     for event in recordResult.value:
       check event.validateEvent.valid
 
+  test "a recorded node:test unit whose test FAILS keeps its trace and its events":
+    ## REGRESSION. ``recordNodeTestCommand`` mapped ANY non-zero recorder exit
+    ## onto ``tekFailure`` + "node:test recording failed with exit code N" and
+    ## returned before ``tekRecordingCreated`` was ever emitted.
+    ##
+    ## That was unreachable only while the JS recorder swallowed the recorded
+    ## program's exit code. Once it began propagating it — the fix for a
+    ## two-month silent pass in ``javascript_hcr_ctfs_integration.rs`` — a unit
+    ## containing a failing test started coming back as a RECORDING failure:
+    ## the trace was thrown away, every per-test event with it, and the
+    ## diagnostic pointed at the recorder instead of at the failing assertion.
+    ##
+    ## The artifact answers "did the recorder work"; the recorded program's
+    ## own TAP stream answers "did the test pass". This asserts BOTH, on a
+    ## recorder that really runs, with a test that really fails.
+    let sibling = jsRecorderSibling()
+    if sibling.len == 0 and findExe("codetracer-js-recorder").len == 0 and
+        getEnv("CODETRACER_JS_RECORDER_PATH", "").len == 0:
+      checkpoint("codetracer-js-recorder is required: build the sibling " &
+        "checkout (`direnv exec ../codetracer-js-recorder just build`) or " &
+        "set CODETRACER_JS_RECORDER_PATH")
+    check (sibling.len > 0 or findExe("codetracer-js-recorder").len > 0 or
+      getEnv("CODETRACER_JS_RECORDER_PATH", "").len > 0)
+
+    # One case only: `recordNodeTestCommand` records single-case files, and
+    # that single case is the one that fails.
+    let workspace = nodeScratchProject(
+      "ct-js-record-failing",
+      "record_failing.test.cjs",
+      "const { test } = require('node:test');\n" &
+      "const assert = require('node:assert/strict');\n" &
+      "test('records a failing cjs node test', () => {\n" &
+      "  assert.equal(1, 2);\n" &
+      "});\n")
+    if sibling.len > 0:
+      createSymlink(sibling, workspace / "codetracer-js-recorder")
+    defer: removeDir(workspace)
+
+    let
+      failingFile = workspace / "test/record_failing.test.cjs"
+      failingCatalog = nodeTestFileCatalog(workspace, failingFile).value
+      failingItem = failingCatalog.itemBySelector(
+        "test/record_failing.test.cjs::records a failing cjs node test")
+      failingProvider = newJsNodeTestM1Provider()
+      failingResult = failingProvider.provider.record(TestScope(
+        kind: tskSingle,
+        projectRoot: workspace,
+        file: failingFile,
+        testId: failingItem.id,
+        selector: failingItem.selector))
+
+    checkpoint($failingResult.diagnostics)
+
+    # 1. The RECORDING happened and is reported. This is the event the old
+    #    code returned before ever emitting.
+    check failingResult.value.eventsOfKind(tekRecordingCreated).len == 1
+    let failingTrace = failingResult.value.firstTrace
+    check failingTrace.backend == "javascript"
+    check failingTrace.entryPoint == "test/record_failing.test.cjs"
+    let failingArtifacts = toSeq(walkFiles(failingTrace.path / "*.ct"))
+    check failingArtifacts.len == 1
+    check getFileSize(failingArtifacts[0]) > 0
+
+    # 2. The per-test EVENT STREAM survives, and says the test failed — not
+    #    that the recorder did.
+    check failingResult.value.eventsOfKind(tekTestFinished).len == 1
+    check failingResult.value.eventsOfKind(tekTestFinished)[0].status.get ==
+      tsFailed
+    check failingResult.value.eventsOfKind(tekTestFinished)[0].testId ==
+      "records a failing cjs node test"
+    check failingResult.value.eventsOfKind(tekFailure).len == 1
+    check failingResult.value.eventsOfKind(tekRecordFinished).len == 1
+    check failingResult.value.eventsOfKind(tekRecordFinished)[0].status.get ==
+      tsFailed
+
+    # 3. The diagnostic blames the SUITE, not the recorder. The old message is
+    #    asserted absent so this cannot pass against the old behaviour.
+    check failingResult.diagnostics.len == 1
+    check failingResult.diagnostics[0].severity == dsError
+    check failingResult.diagnostics[0].message.contains(
+      "the recorded node:test suite failed")
+    check not failingResult.diagnostics[0].message.contains(
+      "node:test recording failed with exit code")
+
+    # 4. The recorded program's TAP output is carried through verbatim, which
+    #    is what the verdict above was derived from.
+    check failingResult.value.outputContains(
+      "not ok 1 - records a failing cjs node test")
+    check failingResult.value.outputContains("# fail 1")
+    for event in failingResult.value:
+      check event.validateEvent.valid
+
+  test "a node:test recording with NO artifact is still a recorder failure":
+    ## The negative control for the test above: the artifact is what
+    ## distinguishes "the recorder failed" from "the recorded program failed",
+    ## so a recorder that exits non-zero and writes nothing must still be
+    ## reported as a recorder failure — otherwise the previous test's rule
+    ## would have turned every recorder fault into a test fault.
+    ##
+    ## The recorder here is a stub that exits non-zero and writes no `.ct`.
+    let
+      workspace = nodeScratchProject(
+        "ct-js-record-no-artifact",
+        "only.test.cjs",
+        "const { test } = require('node:test');\n" &
+        "test('records only', () => {});\n")
+      stubCli = workspace / "codetracer-js-recorder" / "packages" / "cli" /
+        "dist" / "index.js"
+    createDir(stubCli.parentDir)
+    writeFile(stubCli, "process.exit(7)\n")
+    defer: removeDir(workspace)
+
+    let
+      onlyFile = workspace / "test/only.test.cjs"
+      onlyCatalog = nodeTestFileCatalog(workspace, onlyFile).value
+      onlyItem = onlyCatalog.itemBySelector("test/only.test.cjs::records only")
+
+    withEnvValue("PATH", pathWithout("codetracer-js-recorder")):
+      withoutEnvValue("CODETRACER_JS_RECORDER_PATH"):
+        let res = recordNodeTestCommand("js-node-test", TestScope(
+          kind: tskSingle,
+          projectRoot: workspace,
+          file: onlyFile,
+          testId: onlyItem.id,
+          selector: onlyItem.selector))
+        checkpoint($res.diagnostics)
+        check res.value.eventsOfKind(tekRecordingCreated).len == 0
+        check res.value.eventsOfKind(tekFailure).len == 1
+        check res.value.eventsOfKind(tekRecordFinished).len == 1
+        check res.value.eventsOfKind(tekRecordFinished)[0].status.get ==
+          tsErrored
+        check res.diagnostics.len == 1
+        check res.diagnostics[0].severity == dsError
+        check res.diagnostics[0].message.contains(
+          "node:test recording failed")
+        check res.diagnostics[0].message.contains("exited with 7")
+
   test "node:test recorder resolution is anchored to the workspace, not the cwd":
     ## REGRESSION. ``jsRecorderCommandPrefix`` used to look for the recorder
     ## checkout under ``getCurrentDir().parentDir``, so *whether a trace could
