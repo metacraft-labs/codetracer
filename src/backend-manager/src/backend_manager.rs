@@ -1498,37 +1498,57 @@ impl BackendManager {
             {
                 let pending = ds.py_bridge.pending_requests.remove(idx);
 
-                // Fire-and-forget requests: silently consume the backend
-                // response without forwarding anything to the client.
-                // This is used for setDataBreakpoints commands whose
-                // results the client does not need.
-                if pending.kind == PendingPyRequestKind::FireAndForget {
+                // Responses this daemon deliberately does not inspect,
+                // each carrying the reason that made not inspecting it
+                // safe (see `UnobservedReason`).  Silently consume.
+                if matches!(pending.kind, PendingPyRequestKind::Unobserved(_)) {
                     return;
                 }
 
-                // `ct/py-add-breakpoint`: the backend's per-line
-                // `verified` flag decides whether this succeeded, and it
-                // is handled here rather than in the formatter table
-                // below because a refusal also has to be rolled back out
-                // of the daemon's own breakpoint table.
-                if let PendingPyRequestKind::AddBreakpoint {
-                    trace_path,
-                    bp_id,
-                    index,
-                } = &pending.kind
-                {
-                    let (success, body_or_error) =
-                        python_bridge::format_add_breakpoint_response(msg, *index, *bp_id);
+                // `ct/py-add-breakpoint` and `ct/py-add-watchpoint`: the
+                // backend's per-entry `verified` flag decides whether
+                // these succeeded, and they are handled here rather than
+                // in the formatter table below because a refusal also
+                // has to be rolled back out of the daemon's own table.
+                let point_verdict = match &pending.kind {
+                    PendingPyRequestKind::AddBreakpoint {
+                        trace_path,
+                        bp_id,
+                        index,
+                    } => Some((
+                        python_bridge::format_add_breakpoint_response(msg, *index, *bp_id),
+                        trace_path.clone(),
+                        *bp_id,
+                        false,
+                    )),
+                    PendingPyRequestKind::AddWatchpoint {
+                        trace_path,
+                        wp_id,
+                        index,
+                    } => Some((
+                        python_bridge::format_add_watchpoint_response(msg, *index, *wp_id),
+                        trace_path.clone(),
+                        *wp_id,
+                        true,
+                    )),
+                    _ => None,
+                };
 
+                if let Some(((success, body_or_error), trace_path, point_id, is_watchpoint)) =
+                    point_verdict
+                {
                     if !success {
-                        // Drop the breakpoint the backend refused, so it
-                        // is not re-sent with every subsequent add for
-                        // this file — and so a later `remove_breakpoint`
-                        // cannot be answered for an id that never bound.
+                        // Drop the point the backend refused, so it is
+                        // not re-sent with every subsequent add for this
+                        // file — and so a later `remove_*` cannot be
+                        // answered for an id that never bound.
                         if let Some(ds) = self.daemon_state.as_mut() {
-                            ds.py_bridge
-                                .breakpoint_state_mut(trace_path)
-                                .forget_breakpoint(*bp_id);
+                            let state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                            if is_watchpoint {
+                                state.forget_watchpoint(point_id);
+                            } else {
+                                state.forget_breakpoint(point_id);
+                            }
                         }
                     }
 
@@ -1599,8 +1619,9 @@ impl BackendManager {
                         python_bridge::format_resolve_variable_step_response(msg, &pending.expression)
                     }
                     PendingPyRequestKind::AddBreakpoint { .. }
-                    | PendingPyRequestKind::FireAndForget => {
-                        // Both are answered above; unreachable.
+                    | PendingPyRequestKind::AddWatchpoint { .. }
+                    | PendingPyRequestKind::Unobserved(_) => {
+                        // All are answered above; unreachable.
                         return;
                     }
                 };
@@ -3686,7 +3707,9 @@ impl BackendManager {
                 let _ = self.message(backend_id, dap_request).await;
                 if let Some(ds) = self.daemon_state.as_mut() {
                     ds.py_bridge.pending_requests.push(PendingPyRequest {
-                        kind: PendingPyRequestKind::FireAndForget,
+                        kind: PendingPyRequestKind::Unobserved(
+                            python_bridge::UnobservedReason::SetPointsResyncAfterRemoval,
+                        ),
                         client_id: 0,
                         original_seq: 0,
                         backend_seq: dap_seq,
@@ -3797,8 +3820,10 @@ impl BackendManager {
 
         self.reset_ttl_for_backend_id(backend_id);
 
-        // Update the watchpoint state.
-        let (wp_id, all_expressions) = match self.daemon_state.as_mut() {
+        // Update the watchpoint state.  `index` is where this
+        // watchpoint's verdict will sit in the backend's per-entry
+        // `setDataBreakpoints` response.
+        let (wp_id, all_expressions, index) = match self.daemon_state.as_mut() {
             Some(ds) => {
                 let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
                 bp_state.add_watchpoint(&expression)
@@ -3826,26 +3851,48 @@ impl BackendManager {
             }
         });
 
-        let _ = self.message(backend_id, dap_request).await;
+        // WAIT for the backend, exactly as `ct/py-add-breakpoint` does,
+        // and for the same reason: the backend's answer is the only
+        // place that says whether the watchpoint was accepted.  This one
+        // is the more severe of the two — the replay backend has no
+        // `setDataBreakpoints` arm at all and answers
+        // `success: false, "command setDataBreakpoints not supported
+        // here"`.  While this was fire-and-forget that refusal was
+        // discarded and `Trace.add_watchpoint()` returned a positive id
+        // for a watchpoint nothing anywhere had accepted, after which
+        // `continue_forward()` ran to the end of the trace.
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            // Roll back: nothing was sent, so the daemon must not keep a
+            // watchpoint the backend has never heard of.
+            if let Some(ds) = self.daemon_state.as_mut() {
+                ds.py_bridge
+                    .breakpoint_state_mut(&trace_path)
+                    .forget_watchpoint(wp_id);
+            }
+            self.send_py_command_error(
+                seq,
+                "ct/py-add-watchpoint",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
         if let Some(ds) = self.daemon_state.as_mut() {
             ds.py_bridge.pending_requests.push(PendingPyRequest {
-                kind: PendingPyRequestKind::FireAndForget,
-                client_id: 0,
-                original_seq: 0,
+                kind: PendingPyRequestKind::AddWatchpoint {
+                    trace_path,
+                    wp_id,
+                    index,
+                },
+                client_id,
+                original_seq: seq,
                 backend_seq: dap_seq,
-                response_command: String::new(),
-                expression: String::new(),
+                response_command: "ct/py-add-watchpoint".to_string(),
+                expression,
             });
         }
 
-        let response = json!({
-            "type": "response",
-            "request_seq": seq,
-            "success": true,
-            "command": "ct/py-add-watchpoint",
-            "body": {"watchpointId": wp_id}
-        });
-        self.send_response_for_seq(seq, response);
         Ok(())
     }
 
@@ -3961,7 +4008,9 @@ impl BackendManager {
                 let _ = self.message(backend_id, dap_request).await;
                 if let Some(ds) = self.daemon_state.as_mut() {
                     ds.py_bridge.pending_requests.push(PendingPyRequest {
-                        kind: PendingPyRequestKind::FireAndForget,
+                        kind: PendingPyRequestKind::Unobserved(
+                            python_bridge::UnobservedReason::SetPointsResyncAfterRemoval,
+                        ),
                         client_id: 0,
                         original_seq: 0,
                         backend_seq: dap_seq,
@@ -6045,7 +6094,9 @@ impl BackendManager {
                 });
                 // Fire-and-forget: consume the responses silently.
                 ds.py_bridge.pending_requests.push(PendingPyRequest {
-                    kind: PendingPyRequestKind::FireAndForget,
+                    kind: PendingPyRequestKind::Unobserved(
+                            python_bridge::UnobservedReason::OpenTraceCachedSessionReset,
+                        ),
                     client_id: 0,
                     original_seq: 0,
                     backend_seq: clear_bp_seq,
@@ -6053,7 +6104,9 @@ impl BackendManager {
                     expression: String::new(),
                 });
                 ds.py_bridge.pending_requests.push(PendingPyRequest {
-                    kind: PendingPyRequestKind::FireAndForget,
+                    kind: PendingPyRequestKind::Unobserved(
+                            python_bridge::UnobservedReason::OpenTraceCachedSessionReset,
+                        ),
                     client_id: 0,
                     original_seq: 0,
                     backend_seq: reset_seq,
