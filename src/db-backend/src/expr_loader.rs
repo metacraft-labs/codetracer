@@ -1000,6 +1000,48 @@ impl ExprLoader {
                     }
                 }
 
+                // The DECLARED NAME of a routine, reached through however many
+                // wrapper nodes the grammar puts in the way.
+                //
+                // Neither of the two tests above sees it.  For
+                // `proc calculateSum(a: int, b: int): int =` tree-sitter-nim
+                // produces
+                //
+                //     routine_definition
+                //       name: exported_symbol
+                //         symbol
+                //           identifier  "calculateSum"   <- this node
+                //
+                // so the identifier's parent is `symbol`: not
+                // `routine_definition` (first test) and not `exported_symbol`
+                // (second test, which only looks one level up from the
+                // identifier and therefore only matches an
+                // `exported_symbol -> identifier` shape the grammar does not
+                // emit here).  The result was that the proc's own name was
+                // reported as a variable of the definition line, which is what
+                // `nim_mcr_streaming_flow_test`'s `excluded_identifiers` entry
+                // for `calculateSum` catches.
+                //
+                // Climb the wrapper chain instead of enumerating shapes: skip
+                // `symbol` / `exported_symbol` / `qualified_identifier` — the
+                // nodes tree-sitter-nim interposes between a declaration and
+                // its identifier — and ask whether what we surfaced into is the
+                // `name` of a declaration.  A `let`/`var` binding surfaces into
+                // `decl_def`, which is NOT in the set, so ordinary locals keep
+                // being extracted.
+                {
+                    let mut wrapper = parent;
+                    while matches!(wrapper.kind(), "symbol" | "exported_symbol" | "qualified_identifier") {
+                        match wrapper.parent() {
+                            Some(next) => wrapper = next,
+                            None => break,
+                        }
+                    }
+                    if matches!(wrapper.kind(), "routine_definition" | "type_def" | "enum_field_def") {
+                        return false;
+                    }
+                }
+
                 // Filter out function calls - identifier followed by call_suffix
                 if (parent_kind == "postfix_expr" || parent_kind == "command_expr")
                     && let Some(field_name) = field_name_in_parent(node)

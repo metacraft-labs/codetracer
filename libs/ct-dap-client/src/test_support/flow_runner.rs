@@ -656,6 +656,15 @@ fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), B
         flow.steps.len(),
         flow.all_variables
     );
+    // The per-step LINE NUMBERS, not just the step count.  Without them a
+    // failing flow test cannot be told apart from a flow that covered the wrong
+    // lines entirely: the Nim MCR arm returns five steps at lines 13, 5, 13,
+    // 394 and 398 over a 23-line source file, and the summary line above
+    // reports that as "Total steps: 5" — identical to a healthy result.
+    println!(
+        "  Step lines: {:?}",
+        flow.steps.iter().map(|step| step.line).collect::<Vec<_>>()
+    );
 
     // Check excluded identifiers are NOT in the list
     for excluded in &config.excluded_identifiers {

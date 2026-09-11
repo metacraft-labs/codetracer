@@ -3101,3 +3101,53 @@ commands.
   and only because a notification happened to draw. So it is not literally
   "never fires"; its latency is governed by unrelated render activity, which
   in a quiet window is unbounded.
+- 2026-09-11 (M-LX-7): THERE ARE TWO extension→language maps in db-backend and
+  they do not agree. `src/lang.rs::lang_from_context` is the one that decides
+  which value loader the native replay worker uses, and it knows `.adb`/`.ads`,
+  `.f90`/`.F90`, `.cr`, `.jl`, `.lean`, … `src/expr_loader.rs::
+  ExprLoader::get_current_language` is a SEPARATE, older map that decides which
+  tree-sitter grammar parses the file, and it knows far fewer. A language in the
+  first but not the second computes `Lang::Unknown` there, misses `NODE_NAMES`,
+  and `process_file`'s `if NODE_NAMES.contains_key(&lang)` guard then extracts
+  ZERO expressions — the flow comes back with steps and no variables, which
+  reads exactly like a broken extractor. Ada and Fortran are in that gap today.
+  If you add a language, add it to BOTH.
+- 2026-09-11 (M-LX-7): `log_expressions`'s documented "no tree-sitter grammar →
+  load variable names from the trace data" fallback is reached for those
+  languages and, for MCR traces, returns nothing: an Ada session stopped inside
+  `Calculate_Sum` logs `no tree-sitter var list for line Position(30)` then
+  `loaded 0 variables from trace data`. So the fallback is not the safety net it
+  looks like on MCR traces.
+- 2026-09-11 (M-LX-7): `add_mcr_source_breakpoint` (codetracer-native-backend)
+  answers the DAP `setBreakpoints` request with `verified: true` even when LLDB
+  resolved ZERO locations — it downgrades to a *pending* breakpoint and logs
+  `created pending source breakpoint N`. `ct-dap-client`'s
+  `validate_set_breakpoints_body` checks `verified` and nothing else — not the
+  location count — so a breakpoint with zero locations passes that gate and the
+  failure surfaces much later as an empty flow at `<unknown>:0`. Late resolution
+  IS a designed outcome (`mcr_refresh_pending_breakpoints` re-checks and logs
+  `pending source breakpoint N resolved with M location(s)`); the defect is that
+  `verified: true` is asserted BEFORE that happens, so the client cannot tell
+  "resolved" from "hoping". When a flow test reports `Stopped at <unknown>:0`,
+  grep the worker log for `pending source breakpoint` before suspecting the
+  extractor. Note also that this path forces BASENAME matching
+  (`utils::lldb_breakpoint_file` reduces any path with a `/` to its file name).
+- 2026-09-11 (M-LX-7): a hard-coded `breakpoint_line` in a flow test is a
+  liability — `rust_mcr_streaming_flow_test` pointed at line 12 for two days
+  after a ~390-line preamble was prepended to the fixture, and the symptom was
+  indistinguishable from a variable-extraction defect. That test now derives the
+  line from the source text and panics if the anchor is missing or ambiguous;
+  prefer that shape for new ones. The other EIGHT language arms
+  (c/cpp/ada/d/fortran/go/nim/pascal) still hard-code theirs and carry the same
+  hazard.
+- 2026-09-11 (M-LX-7): `flow_preloader.rs`'s flow walk pushes
+  `new_location.line` into a `FlowViewUpdate` whose `location` is the WINDOW's
+  file, and NEVER compares `new_location.path` against `self.location.path`. So
+  a step that legitimately reports a line in another file — a Nim `=destroy`
+  hook inlined from `system.nim`, an inlined header function in C++ — is filed
+  as that line number of the file you asked about. This is how the nim MCR arm
+  reports "steps at lines 394 and 398" of a 23-line fixture: those are real
+  `system.nim` lines. Symptom to recognise: step lines beyond the end of the
+  file, together with locals that belong to a different translation unit
+  (`colontmpD_`, `nimErr_`, `FR_`, `gEnv`). `ExprLoader::get_source_line`
+  already warns on the out-of-range row and nothing acts on it.
