@@ -119,7 +119,7 @@ fn build_trace_inner(trace_dir: &PathBuf, extra_caller_step: bool) -> (Arc<dyn T
 
     db.paths.push(String::new());
     db.paths.push(recorded.clone());
-    db.path_map.insert(recorded.clone(), PathId(1));
+    db.register_path_version(recorded.clone(), PathId(1));
 
     db.types.push(TypeRecord {
         kind: TypeKind::Int,

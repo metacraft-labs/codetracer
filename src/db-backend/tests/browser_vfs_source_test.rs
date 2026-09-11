@@ -90,7 +90,7 @@ fn the_origin_chain_classifier_gets_its_line_from_the_vfs() {
     let path = virtual_path("classifier");
     let mut loader = loader();
 
-    let (before, origin_before) = loader.get_source_line_v2(&PathBuf::from(&path), 3, None);
+    let (before, origin_before) = loader.get_source_line_v2(&PathBuf::from(&path), 3, None, 0);
     assert_eq!(
         origin_before,
         SourceOrigin::Unavailable,
@@ -103,7 +103,7 @@ fn the_origin_chain_classifier_gets_its_line_from_the_vfs() {
     // A fresh loader: `processed_files` caches per path, and a cache hit from
     // the call above would make this pass without reading anything.
     let mut loader = self::loader();
-    let (line, origin) = loader.get_source_line_v2(&PathBuf::from(&path), 3, None);
+    let (line, origin) = loader.get_source_line_v2(&PathBuf::from(&path), 3, None, 0);
     assert_ne!(
         origin,
         SourceOrigin::Unavailable,

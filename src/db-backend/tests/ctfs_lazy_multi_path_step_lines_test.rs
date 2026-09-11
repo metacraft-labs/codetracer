@@ -147,8 +147,10 @@ fn lazy_step_locations_equal_recorded_across_two_paths() {
     let ct = write_two_path_bundle(dir.path());
     let reader = CTFSTraceReader::open(&ct).expect("open two-path bundle");
 
-    let main_id = reader.path_id_for(MAIN_SRC).expect("main source interned");
-    let lib_id = reader.path_id_for(LIB_SRC).expect("lib source interned");
+    let main_id = reader
+        .path_id_for_first_version(MAIN_SRC)
+        .expect("main source interned");
+    let lib_id = reader.path_id_for_first_version(LIB_SRC).expect("lib source interned");
     assert_ne!(main_id, lib_id, "the two sources must intern to different ids");
 
     for i in 0..STEPS_PER_FILE {
@@ -195,7 +197,7 @@ fn breakpoint_resolution_finds_steps_in_the_second_path() {
     let ct = write_two_path_bundle(dir.path());
     let reader = CTFSTraceReader::open(&ct).expect("open two-path bundle");
 
-    let lib_id = reader.path_id_for(LIB_SRC).expect("lib source interned");
+    let lib_id = reader.path_id_for_first_version(LIB_SRC).expect("lib source interned");
     let line = lib_line(0) as usize;
 
     let steps = reader

@@ -66,7 +66,33 @@ pub struct Db {
     pub local_variable_cells: Vec<HashMap<VariableId, Place>>,
 
     pub step_map: DistinctVec<PathId, HashMap<usize, Vec<DbStep>>>,
-    pub path_map: HashMap<String, PathId>,
+    /// Path string → **every** `PathId` interned under it, in path-id
+    /// (registration) order: index 0 is the earliest version, the last entry
+    /// the newest.
+    ///
+    /// GDH-M7 / design §7.1(1). This was `HashMap<String, PathId>` built with
+    /// a bare `insert`, which is LAST-WINS: a GDScript hot reload registers
+    /// the same `res://` string a second time (GDH-M1), and the earlier
+    /// version became unreachable by name — so every step recorded before the
+    /// reload was served against the newest version's text. A single id
+    /// cannot answer "which version" and there is no defensible choice of
+    /// which one to keep, which is why the map holds the list and every
+    /// consumer states which version it wants.
+    ///
+    /// For a legacy (single-version) trace every vector has exactly one
+    /// element and nothing downstream changes.
+    pub path_map: HashMap<String, Vec<PathId>>,
+
+    /// `PathId` → `"sha256:<hex>"` of that version's raw (`view_kind == 0`)
+    /// source view, when the container carried one.
+    ///
+    /// GDH-M7 / design §7.0's `Location::source_digest`. Keyed by PATH ID and
+    /// not by path string: after a hot reload one string has several
+    /// contents, and §7.2 names keying content by string as the expected
+    /// implementation error. A missing entry yields the empty string, which
+    /// the field's doc comment already defines as "the backend did not provide
+    /// a stable content identity".
+    pub source_digests: HashMap<u64, String>,
 
     pub end_of_program: EndOfProgram,
     // TODO? probably names wouldn't be unique
@@ -97,8 +123,122 @@ impl Db {
 
             step_map: DistinctVec::new(),
             path_map: HashMap::new(),
+            source_digests: HashMap::new(),
 
             end_of_program: EndOfProgram::Normal, // by default, but has to be reassigned in postprocessing
+        }
+    }
+
+    /// Record `path_id` as a version of `path`, appended after every id
+    /// already interned under the same string.
+    ///
+    /// GDH-M7. Every bulk loader used to call `path_map.insert(..)` directly,
+    /// which silently dropped the earlier id when a container interned one
+    /// path string twice. Routing them all through here is what makes that
+    /// unrepresentable rather than merely fixed in four places.
+    pub fn register_path_version(&mut self, path: String, path_id: PathId) {
+        #[cfg(not(feature = "gdh7-falsify-newest-wins-path-map"))]
+        self.path_map.entry(path).or_default().push(path_id);
+        // FALSIFIER ARM (gdh7-falsify-newest-wins-path-map) — design §2.2's
+        // ROOT defect, restored at the one place every loader now funnels
+        // through. This is the `insert` that used to be in five places: the
+        // second version of a path string evicts the first, so `path_ids_for`
+        // answers one id, `path_version_ordinal` cannot find the evicted ids
+        // among their own string's versions and falls to its degraded `0`, and
+        // every step in the recording reports generation 0 — a reloaded trace
+        // made indistinguishable from a legacy one. Added during review: the
+        // shipped arms cover the three CONSUMER layers §2.2 named, and none of
+        // them covered the map the consumers read.
+        #[cfg(feature = "gdh7-falsify-newest-wins-path-map")]
+        {
+            self.path_map.insert(path, vec![path_id]);
+        }
+    }
+
+    /// Every `PathId` interned under `path`, oldest version first.
+    ///
+    /// An empty slice means the trace never recorded that path — which is a
+    /// different answer from "it recorded it once", and callers must keep the
+    /// two apart.
+    pub fn path_ids_for(&self, path: &str) -> &[PathId] {
+        self.path_map.get(path).map(|ids| ids.as_slice()).unwrap_or(&[])
+    }
+
+    /// The digest recorded for `path_id`'s own source view, or the empty
+    /// string when the container carried none.
+    pub fn source_digest_for_path(&self, path_id: PathId) -> String {
+        self.source_digests
+            .get(&(path_id.0 as u64))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// The version ordinal of `path_id`: `0` for the first entry carrying its
+    /// path string, `1` for the second, and so on.
+    ///
+    /// This is design §7.0's `Location::source_generation`. It is deliberately
+    /// 0-based even though the wire protocol's
+    /// `HcrSourceGenerationEntry.generation` starts at 1 for a process's
+    /// original content — the two are off by one BY CONSTRUCTION (§7.0), and
+    /// the reload marker carries the wire generation so the mapping is
+    /// recorded rather than inferred.
+    ///
+    /// A legacy container yields `0` for every path, which is exactly what the
+    /// field's own doc comment already promises, so no existing trace changes
+    /// behaviour.
+    ///
+    /// # The zero this returns is overloaded, and the overload is LOGGED
+    ///
+    /// Three different states answer `0` here, and only the first is a real
+    /// answer:
+    ///
+    /// 1. `path_id` IS the first version of its string — the true ordinal 0;
+    /// 2. `path_id` is not in `paths` at all — out of range;
+    /// 3. `path_id` is in `paths`, but is not among the ids registered under
+    ///    its own string — the registry and the path table disagree.
+    ///
+    /// 2 and 3 mean "I could not look", and returning the same `0` a legacy
+    /// single-version trace gets would let a lookup failure read as "this is
+    /// the original version" — the silent-self-pass shape this campaign keeps
+    /// finding. They cannot occur once every `paths.push` is paired with
+    /// [`Self::register_path_version`], which is why they are `warn!` rather
+    /// than a widened return type; the caller has an `i64`-shaped hole and the
+    /// degraded answer has to fill it. `gdh7_consumers_tell_the_truth` asserts
+    /// the absence of both states directly, over every step in the recording,
+    /// so the gate does not depend on anyone reading a log line.
+    pub fn path_version_ordinal(&self, path_id: PathId) -> i64 {
+        let Some(path) = self.paths.get(path_id) else {
+            warn!(
+                "path_version_ordinal: path id {} is outside the path table ({} entries); \
+                 answering the DEGRADED 0, which is indistinguishable on the wire from a \
+                 genuine first version",
+                path_id.0,
+                self.paths.len()
+            );
+            return 0;
+        };
+        match self.path_map.get(path) {
+            Some(ids) => match ids.iter().position(|id| *id == path_id) {
+                Some(ordinal) => ordinal as i64,
+                None => {
+                    warn!(
+                        "path_version_ordinal: path id {} carries `{path}` but is not among the \
+                         {} version(s) registered under it ({ids:?}) — the path table and the \
+                         version registry disagree; answering the DEGRADED 0",
+                        path_id.0,
+                        ids.len()
+                    );
+                    0
+                }
+            },
+            None => {
+                warn!(
+                    "path_version_ordinal: `{path}` (path id {}) was never registered as a \
+                     version; answering the DEGRADED 0",
+                    path_id.0
+                );
+                0
+            }
         }
     }
 
@@ -835,10 +975,11 @@ impl Db {
     pub fn new_for_test() -> Db {
         let steps: DistinctVec<StepId, DbStep> = DistinctVec::new();
         let mut step_map_0: HashMap<usize, Vec<DbStep>> = HashMap::new();
-        let mut path_map: HashMap<String, PathId> = HashMap::new();
+        // GDH-M7: the map holds EVERY version interned under a path string.
+        let mut path_map: HashMap<String, Vec<PathId>> = HashMap::new();
         // let call = DbCall::new_for_test(0, 1, 0);
-        path_map.insert("".to_string(), PathId(0));
-        path_map.insert("/test/wordkir".to_string(), PathId(1));
+        path_map.insert("".to_string(), vec![PathId(0)]);
+        path_map.insert("/test/wordkir".to_string(), vec![PathId(1)]);
         // for i in 0..10 {
         //     steps.push(DbStep::new_for_test(i, 1, i, 0))
         // }
@@ -872,6 +1013,7 @@ impl Db {
 
             step_map,
             path_map: path_map.clone(),
+            source_digests: HashMap::new(),
 
             end_of_program: EndOfProgram::Normal, // by default, but has to be reassigned in postprocessing
         }
@@ -2230,13 +2372,28 @@ impl MaterializedReplaySession {
         Err(format!("variable `{name}` not found at step {step_id:?}").into())
     }
 
-    /// Resolves a source path to its `PathId` in the trace database.
+    /// Resolves a source path to **every** `PathId` in the trace database that
+    /// can carry it, oldest version first.
     ///
-    /// Delegates to `TraceReader::fuzzy_path_id_for` which tries multiple
+    /// Delegates to `TraceReader::fuzzy_path_ids_for` which tries multiple
     /// matching strategies: exact match, workdir-stripped, suffix match,
     /// canonicalized, reverse canonicalize, and filename-only.
+    ///
+    /// GDH-M7: this used to answer `Option<PathId>`, which after a hot reload
+    /// meant "one of the versions, chosen by the map's insertion order". The
+    /// callers below each state which they want.
+    fn load_path_ids(&self, path: &str) -> Vec<PathId> {
+        self.reader.fuzzy_path_ids_for(path)
+    }
+
+    /// The NEWEST version `path` resolves to — the file's current content.
+    ///
+    /// Used where the question is "where in the file the user is looking at",
+    /// not "which version ran": a jump destination. A step's own rendering
+    /// never comes through here; it resolves through the step's recorded
+    /// `path_id`.
     fn load_path_id(&self, path: &str) -> Option<PathId> {
-        self.reader.fuzzy_path_id_for(path)
+        self.load_path_ids(path).last().copied()
     }
 
     fn id_to_name(&self, variable_id: VariableId) -> &str {
@@ -2699,11 +2856,31 @@ impl ReplaySession for MaterializedReplaySession {
         column: Option<i64>,
         condition: Option<String>,
     ) -> Result<Breakpoint, Box<dyn Error>> {
-        let path_id_res: Result<PathId, Box<dyn Error>> = self
-            .load_path_id(path)
-            .ok_or(format!("can't add a breakpoint: can't find path `{}`` in trace", path).into());
-        let path_id = path_id_res?;
-        let inner_map = &mut self.breakpoint_list[path_id.0];
+        // GDH-M7 / design §7.1 — A BREAKPOINT FANS OUT OVER EVERY VERSION.
+        //
+        // "A breakpoint is a user intent about a FILE, not about a version;
+        // binding it to one version would silently stop working after a
+        // reload" — which is `Debugger-Integration.md:670`'s rule that
+        // line-based breakpoints survive reloads, applied here. The stop check
+        // (`step_matches_any_breakpoint`) indexes `breakpoint_list` by the
+        // step's own `path_id`, so a breakpoint present in only one version's
+        // table cannot fire in the others.
+        //
+        // One `Breakpoint` VALUE, one id, several table entries: `delete_
+        // breakpoint` already sweeps every path's table by id, so the fan-out
+        // unbinds as one act too.
+        #[cfg(not(feature = "gdh7-falsify-single-version-breakpoint"))]
+        let path_ids = self.load_path_ids(path);
+        #[cfg(feature = "gdh7-falsify-single-version-breakpoint")]
+        // FALSIFIER ARM (gdh7_a_breakpoint_binds_to_every_version): bind to the
+        // single id the resolution answers with, as the pre-GDH-M7 code did.
+        // The breakpoint then hits in one version only and the gate goes red on
+        // the hit count.
+        let path_ids: Vec<PathId> = self.load_path_id(path).into_iter().collect();
+
+        if path_ids.is_empty() {
+            return Err(format!("can't add a breakpoint: can't find path `{path}` in trace").into());
+        }
         let breakpoint = Breakpoint {
             enabled: true,
             id: self.breakpoint_next_id as i64,
@@ -2711,15 +2888,31 @@ impl ReplaySession for MaterializedReplaySession {
             condition,
         };
         self.breakpoint_next_id += 1;
-        // Keyed by `(line, column)` per M1: the same line can carry
-        // multiple column-anchored breakpoints (one per statement on a
-        // multi-statement minified line) without overwriting each
-        // other, AND a column-less legacy breakpoint coexists with
-        // column-aware siblings on the same line (it lives under the
-        // `(line, None)` slot).  M9 stores the optional condition
-        // expression alongside the `(line, column)` key — the stop
-        // check evaluates it before honouring the breakpoint hit.
-        inner_map.insert((line as usize, column), breakpoint.clone());
+        for path_id in path_ids {
+            let Some(inner_map) = self.breakpoint_list.get_mut(path_id.0) else {
+                // A resolved id with no table slot means the registry and the
+                // path table disagree about how many paths the trace has.
+                // Report it rather than silently binding to fewer versions
+                // than were asked for — a breakpoint that quietly covers two
+                // of three versions is the defect this fan-out exists to fix.
+                warn!(
+                    "add_breakpoint: path id {} resolved for `{path}` has no breakpoint table \
+                     (registry holds {} paths); the breakpoint is NOT bound to that version",
+                    path_id.0,
+                    self.breakpoint_list.len()
+                );
+                continue;
+            };
+            // Keyed by `(line, column)` per M1: the same line can carry
+            // multiple column-anchored breakpoints (one per statement on a
+            // multi-statement minified line) without overwriting each
+            // other, AND a column-less legacy breakpoint coexists with
+            // column-aware siblings on the same line (it lives under the
+            // `(line, None)` slot).  M9 stores the optional condition
+            // expression alongside the `(line, column)` key — the stop
+            // check evaluates it before honouring the breakpoint hit.
+            inner_map.insert((line as usize, column), breakpoint.clone());
+        }
         Ok(breakpoint)
     }
 
@@ -3342,8 +3535,14 @@ impl MaterializedReplaySession {
             // therefore pass the trace's 1-based line number directly.
             let classifier_lang = classifier_lang_for_path(&path_str);
             let row = step_record.line.0.max(0) as usize;
-            let (mut line_text, mut source_origin) =
-                expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+            let (mut line_text, mut source_origin) = expr_loader.get_source_line_v2(
+                &probe_path,
+                row,
+                meta_dat_sources_root,
+                // GDH-M7: the step's OWN version, so a line rendered for a
+                // pre-reload step reads pre-reload text.
+                self.reader.path_version_ordinal(step_record.path_id),
+            );
             // Pre-execution snapshot fallback: when the line at
             // `last_change_step` does not parse as an assignment that
             // names `current_var_name`, walk to the immediately
@@ -3988,7 +4187,12 @@ impl MaterializedReplaySession {
         let path_str = self.reader.path(step.path_id)?.to_string();
         let probe_path = source_probe_path(self.reader.workdir(), &path_str);
         let row = step.line.0.max(0) as usize;
-        let (line_text, origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+        let (line_text, origin) = expr_loader.get_source_line_v2(
+            &probe_path,
+            row,
+            meta_dat_sources_root,
+            self.reader.path_version_ordinal(step.path_id),
+        );
         if origin == SourceOrigin::Unavailable || line_text.trim().is_empty() {
             return None;
         }
@@ -4016,7 +4220,12 @@ impl MaterializedReplaySession {
                 let path_str = self.reader.path(step.path_id)?.to_string();
                 let probe_path = source_probe_path(self.reader.workdir(), &path_str);
                 let row = step.line.0.max(0) as usize;
-                let (line_text, origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+                let (line_text, origin) = expr_loader.get_source_line_v2(
+                    &probe_path,
+                    row,
+                    meta_dat_sources_root,
+                    self.reader.path_version_ordinal(step.path_id),
+                );
                 let trimmed = line_text.trim();
                 if origin != SourceOrigin::Unavailable
                     && !trimmed.starts_with("def ")
@@ -4124,8 +4333,12 @@ impl MaterializedReplaySession {
             let step = self.reader.step(sid).copied()?;
             if step.call_key == frame {
                 let row = step.line.0.max(0) as usize;
-                let (line_text, origin) =
-                    expr_loader.get_source_line_v2(&probe_path.to_path_buf(), row, meta_dat_sources_root);
+                let (line_text, origin) = expr_loader.get_source_line_v2(
+                    &probe_path.to_path_buf(),
+                    row,
+                    meta_dat_sources_root,
+                    self.reader.path_version_ordinal(step.path_id),
+                );
                 if origin != SourceOrigin::Unavailable && !line_text.trim().is_empty() {
                     return Some((sid, line_text, origin));
                 }
@@ -4171,7 +4384,12 @@ impl MaterializedReplaySession {
             }
             let probe_path = source_probe_path(self.reader.workdir(), path_str);
             let row = step.line.0.max(0) as usize;
-            let (line_text, origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+            let (line_text, origin) = expr_loader.get_source_line_v2(
+                &probe_path,
+                row,
+                meta_dat_sources_root,
+                self.reader.path_version_ordinal(step.path_id),
+            );
             if origin == SourceOrigin::Unavailable {
                 step_idx -= 1;
                 continue;
@@ -4581,7 +4799,7 @@ mod breakpoint_condition_tests {
         // PathId(0) is the sentinel reserved by the CTFS loader.
         db.paths.push(String::new());
         db.paths.push("synthetic.src".to_string());
-        db.path_map.insert("synthetic.src".to_string(), PathId(1));
+        db.register_path_version("synthetic.src".to_string(), PathId(1));
 
         // Type table — we use a single `Int` record for all numeric
         // recorded values; the evaluator never consults type ids,
@@ -4894,7 +5112,7 @@ mod breakpoint_condition_tests {
         // PathId(0) is the sentinel reserved by the CTFS loader.
         db.paths.push(String::new());
         db.paths.push("synthetic.src".to_string());
-        db.path_map.insert("synthetic.src".to_string(), PathId(1));
+        db.register_path_version("synthetic.src".to_string(), PathId(1));
 
         db.variable_names.push("<sentinel>".to_string());
         db.functions.push(FunctionRecord {
@@ -5105,7 +5323,7 @@ mod jump_destination_tests {
         // PathId(0) is the sentinel the CTFS loader reserves.
         db.paths.push(String::new());
         db.paths.push(TEST_PATH.to_string());
-        db.path_map.insert(TEST_PATH.to_string(), PathId(1));
+        db.register_path_version(TEST_PATH.to_string(), PathId(1));
         db.variable_names.push("<sentinel>".to_string());
 
         db.functions.push(FunctionRecord {

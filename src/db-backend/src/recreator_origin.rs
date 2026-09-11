@@ -412,7 +412,12 @@ pub fn run_rr_origin_chain(
             let path_str = location.path.clone();
             let row = location.line.max(0) as usize;
             let probe_path = std::path::PathBuf::from(&path_str);
-            let (line_text, source_origin) = expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root);
+            // GDH-M7: the location's own version. On the RR/native path this
+            // is always 0 today (no recorder there registers a path twice),
+            // which is exactly the historical destination.
+            let source_generation = location.source_generation;
+            let (line_text, source_origin) =
+                expr_loader.get_source_line_v2(&probe_path, row, meta_dat_sources_root, source_generation);
             if source_origin == SourceOrigin::Unavailable || line_text.is_empty() {
                 // Unknown-source: keep reverse-stepping; same posture as
                 // spec §6.3 "Optimizer-elided or runtime-injected code".
@@ -455,7 +460,7 @@ pub fn run_rr_origin_chain(
                 // stack-slot reuse guard's rejection behavior.
                 let previous_row = row - 1;
                 let (previous_line_text, previous_source_origin) =
-                    expr_loader.get_source_line_v2(&probe_path, previous_row, meta_dat_sources_root);
+                    expr_loader.get_source_line_v2(&probe_path, previous_row, meta_dat_sources_root, source_generation);
                 if previous_source_origin != SourceOrigin::Unavailable
                     && !previous_line_text.is_empty()
                     && let Some(previous_ast) = parse_assignment(&previous_line_text, lang)

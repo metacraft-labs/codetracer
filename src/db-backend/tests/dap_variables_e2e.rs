@@ -143,7 +143,7 @@ fn build_trace_with_variable(column_1based: i64, recorded_name: &str) -> (Arc<dy
     // CTFS loader; PathId(1) is the absolute recorded path.
     db.paths.push(String::new());
     db.paths.push(recorded.clone());
-    db.path_map.insert(recorded.clone(), PathId(1));
+    db.register_path_version(recorded.clone(), PathId(1));
 
     db.types.push(TypeRecord {
         kind: TypeKind::Int,

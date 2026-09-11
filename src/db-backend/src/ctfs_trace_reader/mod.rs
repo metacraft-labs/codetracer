@@ -62,7 +62,7 @@ use std::error::Error;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
-use log::info;
+use log::{info, warn};
 use serde_json::Value;
 
 use codetracer_trace_types::{
@@ -956,6 +956,36 @@ impl CTFSTraceReader {
         // container that registers no paths, where no address can be placed.
         let line_space = line_position_space::container_line_space(ctfs).map(std::sync::Arc::new);
 
+        // GDH-M7 / design §7.0 — the per-VERSION source digest.
+        //
+        // Read here, on the one path BOTH container formats go through, so
+        // `Location::source_digest` is answered from the container's own
+        // recorded bytes rather than from whatever the replaying filesystem
+        // happens to hold at the same path. That distinction is the whole of
+        // §7.2: after a reload one path string has several contents, and the
+        // file on disk is only ever the last of them.
+        //
+        // A container with no source-view streams (`Absent`) is the expected
+        // legacy case and leaves the map empty, which yields the empty digest
+        // the field documents. A CORRUPT one is logged and also left empty:
+        // refusing to open a trace because its optional source views do not
+        // parse would be a worse answer than opening it without them.
+        match crate::source_views::SourceViews::load_from_reader(ctfs) {
+            Ok(views) => {
+                reader.db.source_digests = views.raw_digests_by_path_id();
+                info!(
+                    "CTFS: {} raw source view digest(s) attached - Location::source_generation \
+                     and ::source_digest are answered per PATH ID, so two versions of one path \
+                     string keep separate identities",
+                    reader.db.source_digests.len()
+                );
+            }
+            Err(crate::source_views::SourceViewsError::Absent) => {}
+            Err(e) => {
+                warn!("CTFS: source views present but unreadable ({e:?}); source_digest stays empty");
+            }
+        }
+
         // M17b / M8 — attach the SEEKABLE `calls.dat` call-tree source when the
         // container advertises one. This is the path that lets a network-loaded
         // `.ct` serve its call tree on-demand without materializing the whole
@@ -1379,7 +1409,12 @@ impl CTFSTraceReader {
                 }
                 for path in tables.paths {
                     db.paths.push(path.clone());
-                    db.path_map.insert(path, PathId(db.paths.len() - 1));
+                    // GDH-M7: a container may intern one path string more than
+                    // once (a hot reload mints a second entry, GDH-M1). This
+                    // was `path_map.insert`, which is LAST-WINS and made the
+                    // earlier version unreachable by name.
+                    let path_id = PathId(db.paths.len() - 1);
+                    db.register_path_version(path, path_id);
                     db.step_map.push(HashMap::new());
                 }
                 for function in tables.functions {
@@ -1399,7 +1434,8 @@ impl CTFSTraceReader {
                 );
                 for path in &meta.paths {
                     db.paths.push(path.clone());
-                    db.path_map.insert(path.clone(), PathId(db.paths.len() - 1));
+                    let path_id = PathId(db.paths.len() - 1);
+                    db.register_path_version(path.clone(), path_id);
                     db.step_map.push(HashMap::new());
                 }
             }
@@ -1888,12 +1924,17 @@ impl CTFSTraceReader {
 
     fn ensure_db_path(db: &mut Db, path: &Path) -> PathId {
         let path_string = path.display().to_string();
-        if let Some(path_id) = db.path_map.get(&path_string) {
+        // FIRST-wins here, deliberately and unlike the bulk loaders: this is
+        // the Elixir sidecar's incremental intern, where one path string names
+        // one file and re-seeing it is a repeat mention rather than a new
+        // version. A reload mints its version through the container's own
+        // `paths.dat`, which the bulk loaders above read.
+        if let Some(path_id) = db.path_ids_for(&path_string).first() {
             return *path_id;
         }
         let path_id = PathId(db.paths.len());
         db.paths.push(path_string.clone());
-        db.path_map.insert(path_string, path_id);
+        db.register_path_version(path_string, path_id);
         db.step_map.push(HashMap::new());
         path_id
     }
@@ -2010,7 +2051,8 @@ impl CTFSTraceReader {
         for i in 0..reader.path_count() {
             let p = reader.path(i).map_err(|e| format!("path {i}: {e}"))?;
             db.paths.push(p.clone());
-            db.path_map.insert(p, PathId(db.paths.len() - 1));
+            let path_id = PathId(db.paths.len() - 1);
+            db.register_path_version(p, path_id);
             db.step_map.push(HashMap::new());
         }
 
@@ -3342,8 +3384,16 @@ impl TraceReader for CTFSTraceReader {
 
     // ── Secondary indices ───────────────────────────────────────────
 
-    fn path_id_for(&self, path: &str) -> Option<PathId> {
-        self.db.path_map.get(path).copied()
+    fn path_ids_for(&self, path: &str) -> Vec<PathId> {
+        self.db.path_ids_for(path).to_vec()
+    }
+
+    fn path_version_ordinal(&self, path_id: PathId) -> i64 {
+        self.db.path_version_ordinal(path_id)
+    }
+
+    fn source_digest_for_path(&self, path_id: PathId) -> String {
+        self.db.source_digest_for_path(path_id)
     }
 
     fn steps_on_line(&self, path_id: PathId, line: usize) -> Option<&Vec<DbStep>> {
@@ -3511,7 +3561,16 @@ impl TraceReader for CTFSTraceReader {
     }
 
     fn path_entries_iter(&self) -> Box<dyn Iterator<Item = (&str, PathId)> + '_> {
-        Box::new(self.db.path_map.iter().map(|(s, &id)| (s.as_str(), id)))
+        // GDH-M7: one item per (string, id) PAIR, not per map key. The map
+        // holds every version's id now, and the fuzzy ladder's stages walk
+        // this iterator — a version missing from it would be invisible to
+        // suffix, canonicalize and filename matching alike.
+        Box::new(
+            self.db
+                .path_map
+                .iter()
+                .flat_map(|(s, ids)| ids.iter().map(move |&id| (s.as_str(), id))),
+        )
     }
 
     // ── Instructions ────────────────────────────────────────────────
@@ -4087,7 +4146,7 @@ mod tests {
         // --- Verify interning tables ---
         assert_eq!(reader.path_count(), 1);
         assert_eq!(reader.path(PathId(0)).unwrap(), "/tmp/hello.py");
-        assert_eq!(reader.path_id_for("/tmp/hello.py"), Some(PathId(0)));
+        assert_eq!(reader.path_ids_for("/tmp/hello.py"), vec![PathId(0)]);
 
         assert_eq!(reader.function_count(), 2);
         assert_eq!(reader.function(FunctionId(0)).unwrap().name, "main");

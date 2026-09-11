@@ -304,7 +304,7 @@ fn point_lookups_stay_lazy_under_m25b() {
     // Now demand the whole table (a line-map accessor). This DOES run the parallel
     // build. Afterwards the whole table is materialized and `steps_on_line` order
     // matches a fresh sequential reference.
-    let path_id = reader.path_id_for(SRC).expect("interned SRC");
+    let path_id = reader.path_id_for_first_version(SRC).expect("interned SRC");
     let _ = reader.steps_on_line(path_id, 10);
     assert_eq!(
         reader.lazy_full_steps_materialized(),

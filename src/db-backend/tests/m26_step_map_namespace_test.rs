@@ -217,7 +217,7 @@ fn index_resolution_matches_whole_table() {
     let ct = write_production_bundle(dir.path());
 
     let reader = CTFSTraceReader::open(&ct).expect("open with step-map.ns");
-    let path_id = reader.path_id_for(SRC).expect("source path interned");
+    let path_id = reader.path_id_for_first_version(SRC).expect("source path interned");
 
     for line_off in 0..DISTINCT_LINES {
         let line = 10 + line_off;
@@ -244,7 +244,7 @@ fn index_resolution_does_not_build_whole_table() {
     let ct = write_production_bundle(dir.path());
 
     let reader = CTFSTraceReader::open(&ct).expect("open with step-map.ns");
-    let path_id = reader.path_id_for(SRC).expect("source path interned");
+    let path_id = reader.path_id_for_first_version(SRC).expect("source path interned");
 
     // At open the whole-table view is not built.
     assert_eq!(reader.lazy_full_steps_materialized(), Some(false));
@@ -288,7 +288,7 @@ fn bundle_without_step_map_falls_back_to_whole_table() {
         "a bundle without step-map.ns must not attach an index"
     );
 
-    let path_id = reader.path_id_for(SRC).expect("source path interned");
+    let path_id = reader.path_id_for_first_version(SRC).expect("source path interned");
     assert_eq!(reader.lazy_full_steps_materialized(), Some(false));
 
     // Resolution still correct — served from the whole-table build.
@@ -322,7 +322,7 @@ fn index_and_fallback_agree() {
     // Indexed reader — the native bundle carries the Nim-emitted step-map.ns.
     let indexed_ct = write_production_bundle(dir.path());
     let indexed = CTFSTraceReader::open(&indexed_ct).expect("open indexed");
-    let ipath = indexed.path_id_for(SRC).expect("path");
+    let ipath = indexed.path_id_for_first_version(SRC).expect("path");
     assert!(indexed.has_prepopulated_step_map());
 
     // Fallback reader — a separate bundle with the internal index stripped, so it
@@ -331,7 +331,7 @@ fn index_and_fallback_agree() {
     let fallback_ct = write_production_bundle(fallback_dir.path());
     strip_internal_step_map(&fallback_ct);
     let fallback = CTFSTraceReader::open(&fallback_ct).expect("open fallback");
-    let fpath = fallback.path_id_for(SRC).expect("path");
+    let fpath = fallback.path_id_for_first_version(SRC).expect("path");
     assert!(!fallback.has_prepopulated_step_map());
 
     for line_off in 0..DISTINCT_LINES {
@@ -378,7 +378,7 @@ fn malformed_step_map_is_ignored() {
     );
 
     // Breakpoint resolution still correct via the fallback build.
-    let path_id = reader.path_id_for(SRC).expect("path");
+    let path_id = reader.path_id_for_first_version(SRC).expect("path");
     let line = 10;
     assert_eq!(reader.step_ids_on_line(path_id, line), Some(expected_line_steps(line)));
 }

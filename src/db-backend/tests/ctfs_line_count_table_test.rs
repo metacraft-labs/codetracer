@@ -116,8 +116,10 @@ fn every_step_reads_back_where_it_was_recorded() {
     let ct = write_bundle(dir.path(), "counted", true);
 
     let reader = CTFSTraceReader::open(&ct).expect("open the counted bundle");
-    let main_id = reader.path_id_for(MAIN_SRC).expect("main source interned");
-    let lib_id = reader.path_id_for(LIB_SRC).expect("lib source interned");
+    let main_id = reader
+        .path_id_for_first_version(MAIN_SRC)
+        .expect("main source interned");
+    let lib_id = reader.path_id_for_first_version(LIB_SRC).expect("lib source interned");
     assert_ne!(main_id, lib_id, "the two sources must intern to different ids");
 
     for (i, (path, line)) in recorded().into_iter().enumerate() {
@@ -208,8 +210,10 @@ fn without_the_table_the_same_program_uses_the_convention() {
     // And the steps still read back correctly under the convention — the table
     // is an improvement, not a prerequisite.
     let reader = CTFSTraceReader::open(&ct).expect("open the uncounted bundle");
-    let main_id = reader.path_id_for(MAIN_SRC).expect("main source interned");
-    let lib_id = reader.path_id_for(LIB_SRC).expect("lib source interned");
+    let main_id = reader
+        .path_id_for_first_version(MAIN_SRC)
+        .expect("main source interned");
+    let lib_id = reader.path_id_for_first_version(LIB_SRC).expect("lib source interned");
     for (i, (path, line)) in recorded().into_iter().enumerate() {
         let want_id = if path == MAIN_SRC { main_id } else { lib_id };
         let s = reader.step(StepId(i as i64)).expect("step present");

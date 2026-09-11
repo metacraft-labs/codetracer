@@ -174,7 +174,9 @@ impl<'a> TraceProcessor<'a> {
             TraceLowLevelEvent::Path(path) => {
                 let path_string = path.display().to_string();
                 self.db.paths.push(path_string.clone());
-                self.db.path_map.insert(path_string, PathId(self.db.paths.len() - 1));
+                // GDH-M7: append rather than overwrite — see `Db::path_map`.
+                let path_id = PathId(self.db.paths.len() - 1);
+                self.db.register_path_version(path_string, path_id);
             }
             TraceLowLevelEvent::VariableName(name) => {
                 self.db.variable_names.push(name.to_string());

@@ -202,8 +202,8 @@ fn unified_engine_step_map_matches_eager_postprocess() {
 
     let eager = eager_postprocess_reference(dir.path());
 
-    let lazy_path = lazy.path_id_for(SRC).expect("lazy interned SRC");
-    let eager_path = eager.path_id_for(SRC).expect("eager interned SRC");
+    let lazy_path = lazy.path_id_for_first_version(SRC).expect("lazy interned SRC");
+    let eager_path = eager.path_id_for_first_version(SRC).expect("eager interned SRC");
 
     let lazy_counts = user_line_counts(&lazy, lazy_path);
     let eager_counts = user_line_counts(&eager, eager_path);
@@ -244,7 +244,7 @@ fn per_slot_and_whole_table_engine_paths_agree() {
     let ct = write_production_bundle(dir.path());
     let reader = CTFSTraceReader::open(&ct).expect("open production");
 
-    let path_id = reader.path_id_for(SRC).expect("interned SRC");
+    let path_id = reader.path_id_for_first_version(SRC).expect("interned SRC");
 
     // Independent line→step map derived purely from the per-slot `step()` path.
     let mut from_points: HashMap<usize, Vec<i64>> = HashMap::new();
@@ -278,7 +278,7 @@ fn omniscient_line_hit_sink_matches_in_memory_line_map() {
     let ct = write_production_bundle(dir.path());
     let reader = CTFSTraceReader::open(&ct).expect("open production");
 
-    let path_id = reader.path_id_for(SRC).expect("interned SRC");
+    let path_id = reader.path_id_for_first_version(SRC).expect("interned SRC");
 
     // The reader's in-memory whole-table line→step map (built by the engine's
     // `WholeStepTableSink` on first demand) — the reference the omniscient build

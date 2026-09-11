@@ -128,7 +128,7 @@ fn the_probe_picks_the_spelling_the_vfs_can_serve() {
     // Resolution and classification are separate claims, so they are separate
     // assertions: a probe that returned the right path but yielded no line
     // would still leave the origin chain with nothing to parse.
-    let (line, origin) = loader().get_source_line_v2(&probe, ROW, None);
+    let (line, origin) = loader().get_source_line_v2(&probe, ROW, None, 0);
     assert_ne!(
         origin,
         SourceOrigin::Unavailable,
@@ -162,7 +162,7 @@ fn the_bare_spelling_still_wins_when_that_is_what_the_host_wrote() {
         "the joined spelling is not in the store, so the probe must still fall \
          through to the bare one — the downstream work-around stays correct"
     );
-    let (line, origin) = loader().get_source_line_v2(&probe, ROW, None);
+    let (line, origin) = loader().get_source_line_v2(&probe, ROW, None, 0);
     assert_ne!(origin, SourceOrigin::Unavailable);
     assert_eq!(line, EXPECTED_LINE);
 }
@@ -206,7 +206,7 @@ fn both_spellings_a_host_may_have_written_resolve() {
 
         vfs::vfs_write(&case_key.to_string_lossy(), SOURCE.as_bytes().to_vec());
         let probe = source_probe_path(&case_wd, &recorded);
-        let (line, origin) = loader().get_source_line_v2(&probe, ROW, None);
+        let (line, origin) = loader().get_source_line_v2(&probe, ROW, None, 0);
         assert_ne!(origin, SourceOrigin::Unavailable, "{name}: origin must be resolved");
         assert_eq!(line, EXPECTED_LINE, "{name}: wrong line text");
         resolved += 1;
@@ -303,7 +303,7 @@ fn the_vfs_loader_extracts_every_raw_view_a_container_ships() {
     // The write must land on the key the read side derives. Deriving it here
     // with the same function is deliberate: spelling it by hand would keep
     // passing if the two sides drifted apart.
-    let dest = bundled_source_path(&root, Path::new(RECORDED_GD));
+    let dest = bundled_source_path(&root, Path::new(RECORDED_GD), 0);
     assert_nothing_is_on_disk(&[&dest]);
     let stored = vfs::vfs_read(&dest.to_string_lossy()).expect("the extracted view must be in the VFS at that key");
     let text = String::from_utf8(stored).expect("the bundled GDScript view is UTF-8");
@@ -325,7 +325,7 @@ fn the_vfs_loader_extracts_every_raw_view_a_container_ships() {
 fn a_bundled_source_in_the_vfs_reads_back_with_bundled_origin() {
     let root = PathBuf::from("/virtual/browser-produced/bundled-read/sources");
     let recorded = Path::new(RECORDED_GD);
-    let dest = bundled_source_path(&root, recorded);
+    let dest = bundled_source_path(&root, recorded, 0);
     assert_nothing_is_on_disk(&[&root, &dest]);
 
     let gd_source = std::fs::read_to_string(fixture_ct().with_file_name("gf_values.gd"))
@@ -337,7 +337,7 @@ fn a_bundled_source_in_the_vfs_reads_back_with_bundled_origin() {
 
     // Negative half first, and asserted: without the VFS entry the bundled
     // branch has nothing, so the pair is the absent one.
-    let (before, origin_before) = loader().get_source_line_v2(&recorded.to_path_buf(), GD_ROW, Some(&root));
+    let (before, origin_before) = loader().get_source_line_v2(&recorded.to_path_buf(), GD_ROW, Some(&root), 0);
     assert_eq!(
         origin_before,
         SourceOrigin::Unavailable,
@@ -347,7 +347,7 @@ fn a_bundled_source_in_the_vfs_reads_back_with_bundled_origin() {
 
     vfs::vfs_write(&dest.to_string_lossy(), gd_source.into_bytes());
 
-    let (line, origin) = loader().get_source_line_v2(&recorded.to_path_buf(), GD_ROW, Some(&root));
+    let (line, origin) = loader().get_source_line_v2(&recorded.to_path_buf(), GD_ROW, Some(&root), 0);
     assert_eq!(
         origin,
         SourceOrigin::BundledMetaData,

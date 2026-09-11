@@ -316,8 +316,8 @@ fn sparse_javascript_trace() -> (Db, TempDir) {
     let mut db = Db::new(&workdir);
     db.paths.push(String::new());
     db.paths.push(SOURCE_PATH.to_string());
-    db.path_map.insert(SOURCE_PATH.to_string(), PathId(1));
-    db.path_map.insert(abs_source.to_string_lossy().to_string(), PathId(1));
+    db.register_path_version(SOURCE_PATH.to_string(), PathId(1));
+    db.register_path_version(abs_source.to_string_lossy().to_string(), PathId(1));
 
     db.types.push(TypeRecord {
         kind: TypeKind::Int,

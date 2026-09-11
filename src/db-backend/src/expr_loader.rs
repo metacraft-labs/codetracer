@@ -543,6 +543,12 @@ pub struct ExprLoader {
     processed_files: HashMap<PathBuf, FileInfo>,
     loop_index: i64,
     pub trace: CoreTrace,
+    /// FALSIFIER ARM ONLY — see the arm's note in `get_source_line_v2`. Keyed
+    /// by path STRING, which is the whole point: it is design §7.2's named
+    /// implementation error made real so the reverse-navigation gate can be
+    /// shown to catch it. Absent from every build that does not ask for it.
+    #[cfg(feature = "gdh7-falsify-string-keyed-cache")]
+    gdh7_string_keyed_cache: HashMap<PathBuf, String>,
 }
 
 // TODO: separate into
@@ -634,6 +640,8 @@ impl ExprLoader {
             processed_files: HashMap::new(),
             loop_index: 1,
             trace,
+            #[cfg(feature = "gdh7-falsify-string-keyed-cache")]
+            gdh7_string_keyed_cache: HashMap::new(),
         }
     }
 
@@ -778,17 +786,54 @@ impl ExprLoader {
     /// not exist; failing both yields `SourceOrigin::Unavailable`.
     /// Existing callers continue to use [`Self::get_source_line`] which
     /// preserves the original behaviour.
+    /// `generation` is design §7.0's `Location::source_generation` for the
+    /// step whose line is being rendered — the version ordinal of that step's
+    /// OWN path id, never the newest sharing its string. Callers with no
+    /// version information pass `0`, which resolves to the historical
+    /// destination and is correct for every single-version trace.
     pub fn get_source_line_v2(
         &mut self,
         path: &PathBuf,
         row: usize,
         meta_dat_sources_root: Option<&Path>,
+        generation: i64,
     ) -> (String, SourceOrigin) {
         // Bundled copy first per spec §6.1: when the trace ships its own
         // sources under `meta_dat/sources/`, that is the authoritative
         // line text used for the classifier.
         if let Some(root) = meta_dat_sources_root {
-            let candidate = bundled_source_path(root, path);
+            let candidate = bundled_source_path(root, path, generation);
+
+            // FALSIFIER ARM (gdh7_reverse_across_the_boundary_shows_v1, arm 1)
+            // — design §7.2's named implementation error, in the shipped code
+            // path.
+            //
+            // "The pane's cache key must be the PATH ID, not the path string.
+            // A pane keyed by string will show stale text on exactly one
+            // transition in each direction, which is the kind of defect that
+            // looks like a rendering glitch and is actually a correctness
+            // failure."
+            //
+            // The arm caches the bundled text under the path STRING, so the
+            // first version read for a file wins for the whole session: step
+            // forward past the reload and v2's line numbers render against
+            // v1's text; step BACK and — if v2 was read first — v1's line
+            // numbers render against v2's. The gate must go red either way,
+            // which is why it asserts the BYTES on both sides of the boundary
+            // and not only the backward one.
+            #[cfg(feature = "gdh7-falsify-string-keyed-cache")]
+            {
+                if let Some(cached) = self.gdh7_string_keyed_cache.get(path) {
+                    let line = nth_line(cached, row.saturating_sub(1));
+                    return (line, SourceOrigin::BundledMetaData);
+                }
+                if let Some(text) = source_text(&candidate) {
+                    self.gdh7_string_keyed_cache.insert(path.clone(), text.clone());
+                    let line = nth_line(&text, row.saturating_sub(1));
+                    return (line, SourceOrigin::BundledMetaData);
+                }
+            }
+
             // `candidate.exists() && fs::read_to_string(..)` — the shape this
             // used to have — is two filesystem calls, and on
             // `wasm32-unknown-unknown` the first is hardwired `false` and the
@@ -2503,7 +2548,7 @@ pub enum SourceOrigin {
 /// land on the same key. The native extraction and the VFS extraction both
 /// derive their destination from this function; a test that spelled the
 /// destination itself would keep passing if the two sides drifted.
-pub fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
+pub fn bundled_source_path(root: &Path, source_path: &Path, generation: i64) -> PathBuf {
     // Godot records GDScript source under its virtual-filesystem scheme
     // (`res://script.gd`, `user://...`). That is neither a real
     // filesystem path nor portable (a `res:` path component is invalid
@@ -2518,7 +2563,29 @@ pub fn bundled_source_path(root: &Path, source_path: &Path) -> PathBuf {
     };
     // Strip the leading "/" so absolute paths can sit under root/.
     let rel = source_path.strip_prefix("/").unwrap_or(source_path);
-    root.join(rel)
+
+    // GDH-M7 / design §7.1(3) — THE VERSION IS PART OF THE KEY.
+    //
+    // This function used to be `root.join(rel)` with no version term, and
+    // `Handler::load_bundled_sources` writes EVERY raw source view through it.
+    // A GDScript hot reload records two raw views for one `res://` string, so
+    // the second `fs::write` landed on the first's destination and silently
+    // replaced it: a container that carried both versions correctly still
+    // rendered ONE of them for every step in the session.
+    //
+    // Generation 0 keeps the historical destination EXACTLY, byte for byte in
+    // the path. That is deliberate and it is what makes this change invisible
+    // to every trace that has one version per path — which is every trace this
+    // repo has ever recorded outside this campaign. Only a second and later
+    // version moves, and it moves into a sibling directory rather than gaining
+    // a suffix, so the file keeps its extension and every extension-driven
+    // consumer (syntax highlighting, the classifier's `classifier_lang_for_
+    // path`) still sees `.gd`.
+    if generation <= 0 {
+        root.join(rel)
+    } else {
+        root.join(format!("__ctgen{generation}")).join(rel)
+    }
 }
 
 /// Strip a leading Godot virtual-filesystem scheme (`res://`, `user://`)

@@ -105,8 +105,8 @@ fn build_trace(recipe: Recipe<'_>) -> (Db, TempDir) {
     let mut db = Db::new(&workdir);
     db.paths.push(String::new());
     db.paths.push(recipe.source_path.to_string());
-    db.path_map.insert(recipe.source_path.to_string(), PathId(1));
-    db.path_map.insert(abs_source.to_string_lossy().to_string(), PathId(1));
+    db.register_path_version(recipe.source_path.to_string(), PathId(1));
+    db.register_path_version(abs_source.to_string_lossy().to_string(), PathId(1));
 
     // One concrete type for every value we manufacture.
     db.types.push(make_int_type());
@@ -610,8 +610,8 @@ fn test_origin_chain_continuation_token_source_digest_mismatch() {
     db.variable_names.push("a".to_string());
     db.variable_names.push("b".to_string());
     db.variable_names.push("c".to_string());
-    db.path_map.insert("fixture.py".to_string(), PathId(1));
-    db.path_map.insert(source_path.to_string_lossy().to_string(), PathId(1));
+    db.register_path_version("fixture.py".to_string(), PathId(1));
+    db.register_path_version(source_path.to_string_lossy().to_string(), PathId(1));
     for step_idx in 0..3 {
         let step = DbStep {
             step_id: StepId(step_idx),
