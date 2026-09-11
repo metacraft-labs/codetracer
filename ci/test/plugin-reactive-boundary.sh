@@ -139,7 +139,11 @@
 #   * **It says what it does at a module it cannot resolve.** A spec that
 #     resolves to no repository file is a module this gate cannot read, and it
 #     therefore cannot bind: `std/…` and `system` are the standard library,
-#     which carries no reactive primitive and is admitted by name; ANY OTHER
+#     which carries no reactive primitive and is admitted BY SPELLING here (see
+#     `is_stdlib_spec`, and note that admitting the spelling is a statement
+#     about check 11 only — check 19's ALLOW-LIST is what decides whether a
+#     given `std/` module may be imported at all, and it refuses `std/posix`
+#     while check 11 goes on being satisfied that it knew what it was); ANY OTHER
 #     unresolvable spec is a finding (check 11), because "I could not read it"
 #     and "it is clean" are different facts and only one of them is a result.
 #     That is why a bare `import strutils` is refused with the remedy `std/`:
@@ -171,6 +175,26 @@
 #                            controls in checks 7, 8 and 10, which were four
 #                            further inline copies of it)
 #   `plugin_closure`         the walk              (rule + controls 12 and 13)
+#   `stdlib_admitted`        whether a std module is admitted (the allow-list
+#                            rule, check 19, and both halves of control 20)
+#   `unadmitted_stdlib_in`   the allow-list rule   (check 19 + control 20)
+#
+# WHAT AN ALLOW-LIST IS DOING IN A FILE OF DENYLISTS
+# -------------------------------------------------
+# Checks 1, 2 and 15 are three denylists — two over module specs, one over
+# identifiers — and each answers "did the plugin name one of the things we
+# thought of". Check 19 answers the complement. It is here because the denied
+# lists were measured losing, on 2026-09-09, over a plugin that simply declined
+# to use the SDK: `## CT-PLUGIN:` plus `import codetracer_plugin` plus
+# `import std/posix` read `/etc/hostname` with no `fs:read` grant and
+# fork+exec'd `/bin/sh` with no `process` grant, while this script printed
+# `19 check(s), 0 failing`. Seven more names on `PluginDeniedSyncIo` would not
+# have reached it: `read` and `write` are the SDK's own spellings, so denying
+# them denies the sanctioned path.
+#
+# The membership rule, the reason each refused module is refused, and the one
+# thing the allow-list cannot reach (`system`, which is auto-imported and so has
+# no import to refuse) are in `src/common/plugin_model/source_admission.nim`.
 #
 # Usage:
 #   ci/test/plugin-reactive-boundary.sh
@@ -197,6 +221,22 @@ set -uo pipefail
 # shellcheck source=ci/lib/nim-imports.sh disable=SC1091
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/nim-imports.sh"
 
+# The DERIVED half of PLAT-8's second denied set. `system` is auto-imported
+# into every nim module and ends with `export syncio`, so its surface is in
+# every plugin's scope with no import to refuse and no scope to filter — and it
+# is therefore the one surface this file cannot decide by reading the
+# repository. `system_surface_names` reads the PINNED COMPILER instead. Check
+# 23 below requires every name it derives to be accounted for.
+#
+# Sourced by `BASH_SOURCE` and not by `${root}`, deliberately: with `--root` on
+# a synthetic tree the library must still be the REAL one, or the contract
+# suite would grade a copy.
+# Same `source=` / SC1091 pair as the `nim-imports.sh` line above, and for
+# the same reason: the pre-commit hook runs shellcheck without -x and cannot
+# follow a sourced file at all.
+# shellcheck source=ci/lib/system-io-surface.sh disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/system-io-surface.sh"
+
 # `nim_imports` REFUSES to analyse three shapes rather than guessing at them,
 # and it writes each refusal to this file because a process substitution puts it
 # in a subshell where it cannot touch `failures`. Check 11 turns a non-empty log
@@ -220,6 +260,51 @@ nim_imports_open_unanalysable_log
 # it from here; nothing hardcodes the ten names.
 PRIMITIVES_REL="src/frontend/viewmodel/plugin_host/plugin_api.nim"
 PRIMITIVES_CONST="PluginDeniedPrimitives"
+
+# Where PLAT-8's SECOND denied set is defined: the synchronous I/O primitives.
+# Read from the table the same way `PluginDeniedPrimitives` is, by the same
+# function, so this gate has one parser rather than two.
+SYNC_IO_REL="src/frontend/viewmodel/plugin_host/plugin_io.nim"
+SYNC_IO_CONST="PluginDeniedSyncIo"
+
+# The companion table in the same file: the names `system` puts in every
+# plugin's scope that are deliberately NOT denied, each with the reason.
+#
+# IT IS A TABLE RATHER THAN AN ABSENCE, and that is the whole repair. Before
+# 2026-09-09 an exemption WAS an absence from `PluginDeniedSyncIo`, which is
+# indistinguishable from an oversight — and that is exactly what `open`,
+# `readBuffer` and `writeBuffer` were, while the residual paragraph claimed
+# nine of ten names covered. Check 23 makes the two tables partition the
+# derived surface, so an oversight is now a red check instead of a hole.
+SYSTEM_EXEMPT_CONST="PluginSystemSurfaceExempt"
+
+# Where PLAT-8's THIRD list is defined, and it is the only one of the three
+# that is an ALLOW-list. Read by the same `table_names` parser, for the same
+# reason: one parser over three tables.
+#
+# WHY AN ALLOW-LIST AND NOT A FOURTH DENIED SET. Measured 2026-09-09, with a
+# DECLARED plugin, against this gate: a module carrying `## CT-PLUGIN:` and
+# importing `codetracer_plugin` and `std/posix` read `/etc/hostname` with no
+# `fs:read` grant and fork+exec'd `/bin/sh` with no `process` grant, while this
+# script printed `19 check(s), 0 failing` — including `plugin-names-no-sync-io:
+# 6 module(s) in the plugin closure, no synchronous I/O primitive named in
+# code`. `PluginDeniedSyncIo` is a list of NAMES and `std/posix` spells the
+# same operations `open`, `read`, `write`, `socket`, `connect`, `fork` and
+# `execv` — and `read` and `write` are the SDK's own spellings, so they cannot
+# be denied by name without denying the sanctioned path.
+#
+# The membership rule, the refusals and the `system` residual are all written
+# up in ALLOWLIST_REL's own header. This file is the enforcement.
+ALLOWLIST_REL="src/common/plugin_model/source_admission.nim"
+ALLOWLIST_CONST="PluginAllowedStdlibModules"
+
+# PLAT-8's FOURTH list, in the same file, and it closes the route the ALLOW-list
+# does not reach: an FFI pragma needs no import, so refusing every module in the
+# world would leave it open. Measured on 2026-09-09 by attacking the allow-list
+# on the day it was written — a module whose entire content is
+# `import codetracer_plugin` plus one `{.importc: "system", header:
+# "<stdlib.h>".}` declaration ran a shell and created its sentinel.
+FFI_CONST="PluginDeniedFfiPragmas"
 
 # The surface a plugin consumes, and the constant it must declare — the same
 # drift guard `sdk-facade-boundary.sh` puts on `CodeTracerEmbedFacadeModule`,
@@ -326,18 +411,106 @@ code_lines() {
 # denied_primitives — the primitive names, read out of PRIMITIVES_REL's
 # `PluginDeniedPrimitives` table. Never hardcoded here: the whole point of that
 # table is that the code, the plugin surface and this gate cannot drift.
-denied_primitives() {
-	[ -f "${PRIMITIVES_REL}" ] || return 0
-	awk -v const_name="${PRIMITIVES_CONST}" '
+# table_names FILE CONST [ONLY-HOST-ONLY] — the primitive names in a
+# `("name", "replacement"[, hostOnly])` table declared as CONST in FILE.
+#
+# ONE PARSER FOR BOTH DENIED SETS. PLAT-7 has `PluginDeniedPrimitives` and
+# PLAT-8 has `PluginDeniedSyncIo`; a second copy of this awk would be a second
+# place for the "the table moved and the gate did not notice" defect, and the
+# whole reason the tables exist in the code rather than here is that there is
+# one source of truth.
+#
+# With a third argument of `host-only`, only the entries whose third tuple
+# field is `true` are printed — the entries the HOST is allowed to call on a
+# plugin's behalf. See `PluginDeniedSyncIo`'s own comment for why that flag is
+# in the data.
+table_names() {
+	local file="$1" const_name="$2" mode="${3:-all}"
+	[ -f "${file}" ] || return 0
+	awk -v const_name="${const_name}" -v mode="${mode}" '
 	$0 ~ ("^[[:space:]]*" const_name "\\*?[[:space:]]*[:*]") { inside = 1; next }
 	inside && /^[[:space:]]*\]/ { inside = 0 }
 	inside {
-		if (match($0, /\("[A-Za-z_][A-Za-z0-9_]*"/)) {
+		# The `/` IS IN THE CHARACTER CLASS FOR THE THIRD TABLE, whose left
+		# column is a module spec (`std/strutils`) rather than an identifier.
+		# It is meaning-preserving for the two identifier tables — no nim
+		# identifier carries a `/` — so widening it moved no count in either of
+		# their controls, which is the reason it was widened rather than
+		# copied.
+		#
+		# The `&` and `=` ARE IN IT FOR THE FIFTH TABLE, on the same argument
+		# and measured the same way. `PluginSystemSurfaceExempt` has to name
+		# `&=`, because that is a name `system` exports and check 23 requires
+		# every derived name to be on one of the two tables; an operator that
+		# the parser could not read would have had to become a hardcoded
+		# exemption in this file, which is the drift the tables exist to
+		# prevent. No nim identifier carries `&` or `=` either, so the four
+		# older tables keep their counts — asserted by check 24.
+		#
+		# NO APOSTROPHE ANYWHERE IN THIS awk PROGRAM. The whole thing is one
+		# single-quoted shell word, so an apostrophe in a COMMENT ends it and
+		# bash parses the rest of the awk source as shell. The error it then
+		# prints names a token forty lines away that nobody wrote, which is why
+		# this is worth a comment rather than a second lesson.
+		if (match($0, /\("[A-Za-z_&][A-Za-z0-9_\/&=]*"/)) {
 			s = substr($0, RSTART + 2, RLENGTH - 3)
-			print s
+			if (mode == "host-only") {
+				if ($0 ~ /,[[:space:]]*true\)[[:space:]]*,?[[:space:]]*$/) print s
+			} else {
+				print s
+			}
 		}
 	}
-	' "${PRIMITIVES_REL}" | sort -u
+	' "${file}" | sort -u
+}
+
+# table_declared_len FILE CONST — the `N` in `CONST*: array[N, …]`.
+#
+# THE SECOND READER OF THE SAME DECLARATION, and it exists so check 24 can ask
+# a question that is true in ANY tree: does the parser return every row the
+# table SAYS it has? Pinning the real repository's 10/21/13 there instead was
+# tried and was wrong — the contract suite's synthetic trees carry three-entry
+# tables on purpose, so twenty-two cases failed on a check that had nothing to
+# do with them. `parsed == declared` is the property that actually characterises
+# a working parser, and it holds for a three-row fixture and a forty-one-row
+# table alike.
+table_declared_len() {
+	local file="$1" const_name="$2"
+	[ -f "${file}" ] || return 0
+	awk -v const_name="${const_name}" '
+	$0 ~ ("^[[:space:]]*" const_name "\\*?[[:space:]]*[:*]") {
+		if (match($0, /array\[[0-9]+,/)) {
+			print substr($0, RSTART + 6, RLENGTH - 7)
+			exit
+		}
+	}
+	' "${file}"
+}
+
+denied_primitives() {
+	table_names "${PRIMITIVES_REL}" "${PRIMITIVES_CONST}"
+}
+
+# denied_sync_io — PLAT-8's set: the routines that block the calling thread.
+denied_sync_io() {
+	table_names "${SYNC_IO_REL}" "${SYNC_IO_CONST}"
+}
+
+# sync_io_host_only — the subset the SDK itself may call.
+sync_io_host_only() {
+	table_names "${SYNC_IO_REL}" "${SYNC_IO_CONST}" host-only
+}
+
+# allowed_stdlib_modules — PLAT-8's THIRD list, and the only allow-list of the
+# three: the `std/` module specs a plugin's closure may import.
+allowed_stdlib_modules() {
+	table_names "${ALLOWLIST_REL}" "${ALLOWLIST_CONST}"
+}
+
+# denied_ffi_pragmas — PLAT-8's FOURTH list: the pragmas by which a plugin would
+# bind a foreign function without importing anything.
+denied_ffi_pragmas() {
+	table_names "${ALLOWLIST_REL}" "${FFI_CONST}"
 }
 
 # surface_except_names — the identifiers SURFACE_REL filters out of its
@@ -555,16 +728,158 @@ file_names() {
 # do checks 8 and 10 — so a mutation of that one function reddens the rule and
 # every control over it at once, which is what makes each of them evidence
 # about the other.
-denied_names_in() {
-	local file="$1" body name hit
+# blank_strings — replace the CONTENTS of every double-quoted literal with
+# nothing, leaving the quotes.
+#
+# WITHOUT THIS, THE DENIED TABLES REPORT THEMSELVES. `PluginDeniedSyncIo` names
+# `waitFor` and `execProcess` in string literals on CODE lines, so a scan of
+# `plugin_io.nim` for those names would find them and the `sdk-does-not-block`
+# check below could never pass. The general form of the same problem is a
+# plugin with a diagnostic message quoting the name of the thing it must not
+# call — refusing that would be Verification-Harness-Traps §4d's "reword the
+# prose until the regex is happy".
+#
+# It is not a hole in check 2. A nim string literal cannot call anything; the
+# only way a name inside quotes runs is through a macro that evaluates it, and
+# there is none in a plugin's closure. Check 17 asserts the blanking
+# discriminates, in both directions, on a real file.
+blank_strings() {
+	sed -e 's/"[^"]*"/""/g'
+}
+
+# strip_export_except — blank the identifier list of an `export … except …`
+# clause.
+#
+# THE SAME SHAPE AS `strip_compiles`, AND FOR THE SAME REASON. `export X except
+# waitFor` names a routine in order to REMOVE it from the scope every importer
+# gets; it is the opposite of calling it, and a scanner that read it as a call
+# would report the narrowing mechanism as a violation of the rule the narrowing
+# enforces. Check 17 asserts this discriminates on a real file: the names it
+# blanks here are present in the raw bytes.
+#
+# The continuation form is handled because nim permits it: a clause whose line
+# ends in a comma continues onto the next line.
+strip_export_except() {
+	awk '
+	{
+		line = $0
+		if (continuing) {
+			had_comma = (line ~ /,[[:space:]]*$/)
+			sub(/[^[:space:]].*$/, "", line)
+			continuing = had_comma
+			print line
+			next
+		}
+		if (line ~ /^[[:space:]]*export[[:space:]].*[[:space:]]except([[:space:]]|$)/) {
+			had_comma = (line ~ /,[[:space:]]*$/) || (line ~ /except[[:space:]]*$/)
+			sub(/[[:space:]]except([[:space:]].*)?$/, " except", line)
+			continuing = had_comma
+			print line
+			next
+		}
+		print line
+	}
+	'
+}
+
+# names_in FILE NAMES — every NAME (one per line) that appears as a whole
+# identifier in FILE's CODE, as `<line>:<name>`.
+#
+# ONE FUNCTION FOR BOTH DENIED SETS AND FOR EVERY CONTROL OVER THEM. PLAT-7's
+# check 2 and check 7 already shared one scanner for exactly this reason; PLAT-8
+# adds a second SET rather than a second scanner, so a mutation of this function
+# reddens four checks at once.
+names_in() {
+	local file="$1" names="$2" mode="${3:-code-only}" body name hit
 	body="$(code_lines "${file}" | strip_compiles)"
+	# PLAT-8's set is scanned with two further filters, and PLAT-7's is not.
+	# That is a difference in the SUBJECT rather than in the predicate: PLAT-8's
+	# denied names are DECLARED, as string literals, in the very file check 16
+	# scans, and they are NARROWED, in an `export … except` clause, in the very
+	# module that provides the async vocabulary. Scanning either as a call would
+	# report the mechanism as the violation.
+	if [ "${mode}" = "declaration-aware" ]; then
+		body="$(blank_strings <<<"${body}" | strip_export_except)"
+	fi
+	# PLAT-8's FOURTH set is scanned inside PRAGMA SPANS ONLY, and that
+	# narrowing is the check rather than an optimisation. `header`, `link`,
+	# `compile` and `emit` are ordinary English words and perfectly ordinary nim
+	# identifiers; a scan for them as bare names would refuse a plugin with a
+	# variable called `header`, which is the "reword the code until the regex is
+	# happy" smell Verification-Harness-Traps §4d names, pointed at code instead
+	# of at prose. Bounding the scan to `{. … .}` makes the finding a PRAGMA
+	# rather than a word, and check 22 asserts the bound in both directions.
+	if [ "${mode}" = "pragma-only" ]; then
+		body="$(blank_strings <<<"${body}" | pragma_spans)"
+	fi
 	while IFS= read -r name; do
 		[ -n "${name}" ] || continue
 		while IFS= read -r hit; do
 			[ -n "${hit}" ] || continue
 			printf '%s:%s\n' "${hit%%:*}" "${name}"
 		done < <(grep -nE "$(identifier_pattern "${name}")" <<<"${body}" || true)
-	done < <(denied_primitives)
+	done <<<"${names}"
+}
+
+denied_names_in() {
+	names_in "$1" "$(denied_primitives)"
+}
+
+# sync_io_names_in FILE — PLAT-8's set, through the same scanner.
+sync_io_names_in() {
+	names_in "$1" "$(denied_sync_io)" declaration-aware
+}
+
+# pragma_spans — stdin is nim source with comments removed and string contents
+# blanked; stdout is one `{. … .}` pragma span per line, brace markers removed.
+#
+# WHY THE SPAN AND NOT THE LINE. A pragma may span lines
+# (`{.importc: "x",`↵`  header: "<y.h>".}`), a line may carry a pragma and
+# ordinary code, and `{.push dynlib: "libc.so".}` is a pragma with no routine
+# on it at all. Accumulating from `{.` to `.}` across lines reads all three; a
+# per-line regex reads the first and loses the other two, and losing them is
+# SILENT — the exact failure mode this gate's own extractor was repaired for
+# seven times.
+#
+# The input is already string-blanked, so a `.}` inside a literal cannot close a
+# span and a `{.` inside one cannot open one.
+pragma_spans() {
+	awk '
+	{
+		line = $0
+		while (length(line) > 0) {
+			if (inside == 0) {
+				p = index(line, "{.")
+				if (p == 0) break
+				line = substr(line, p + 2)
+				inside = 1
+				span = ""
+			}
+			q = index(line, ".}")
+			if (q == 0) {
+				span = span " " line
+				line = ""
+				break
+			}
+			span = span " " substr(line, 1, q - 1)
+			print span
+			inside = 0
+			span = ""
+			line = substr(line, q + 2)
+		}
+	}
+	END { if (inside == 1 && span != "") print span }
+	'
+}
+
+# ffi_names_in FILE — every denied FFI pragma named inside a pragma span in the
+# file's code, through the SAME scanner as the other two sets.
+#
+# ONE FUNCTION, CALLED BY THE RULE (check 21) AND BY BOTH HALVES OF ITS CONTROL
+# (check 22). Third set, still one scanner: a mutation of `names_in` or of
+# `identifier_pattern` now reddens six checks at once.
+ffi_names_in() {
+	names_in "$1" "$(denied_ffi_pragmas)" pragma-only
 }
 
 # ---------------------------------------------------------------------------
@@ -634,6 +949,54 @@ is_stdlib_spec() {
 	return 1
 }
 
+# stdlib_admitted SPEC — true when SPEC is a standard-library spec a PLUGIN's
+# closure may import.
+#
+# THIS IS A DIFFERENT QUESTION FROM `is_stdlib_spec` AND THE TWO ARE KEPT
+# APART DELIBERATELY. `is_stdlib_spec` is a SPELLING test: "is this the
+# standard library, so that failing to resolve it to a repository file is not a
+# finding". It answers for check 11, whose remedy line is *spell it `std/`* —
+# which is the wrong remedy for `std/posix`, a spec the gate resolves and
+# understands perfectly and refuses on purpose. Folding the two would print
+# that remedy under check 11 and lose the reason.
+#
+# `system` is admitted here and cannot be anything else: it is auto-imported
+# into every nim module, so there is no import statement to refuse and no scope
+# to filter it out of. What still stands in front of it is check 15's
+# NAME-based scan over `PluginDeniedSyncIo`'s nine `system` entries — a
+# denylist, which is the mechanism this allow-list exists because it lost, and
+# the only one `system` leaves available. It is a residual, not a closed hole,
+# and ALLOWLIST_REL's header says so in those words.
+stdlib_admitted() {
+	case "$1" in
+	system) return 0 ;;
+	std/*) ;;
+	*) return 1 ;;
+	esac
+	local allowed
+	while IFS= read -r allowed; do
+		[ "${allowed}" = "$1" ] && return 0
+	done < <(allowed_stdlib_modules)
+	return 1
+}
+
+# unadmitted_stdlib_in FILE — every standard-library spec FILE imports that is
+# NOT on the allow-list, one per line.
+#
+# ONE FUNCTION, CALLED BY THE RULE (check 18) AND BY ITS CONTROL (check 19) —
+# Verification-Harness-Traps §14. Written as two copies, breaking the rule's
+# copy would leave the control's copy intact and agreeing with itself, which is
+# the defect this file's header records three times over.
+unadmitted_stdlib_in() {
+	local file="$1" spec
+	while IFS= read -r spec; do
+		[ -n "${spec}" ] || continue
+		is_stdlib_spec "${spec}" || continue
+		stdlib_admitted "${spec}" && continue
+		printf '%s\n' "${spec}"
+	done < <(nim_imports "${file}")
+}
+
 # plugin_closure TERMINAL SEED... — every repository module reachable from the
 # SEEDs by imports, one per line, INCLUDING the seeds and EXCLUDING TERMINAL.
 #
@@ -652,11 +1015,22 @@ is_stdlib_spec() {
 # `[ -f "${candidate}" ]`. A cycle costs one visit. (The bound is the ON-DISK
 # set, not `git ls-files` — see the header.)
 plugin_closure() {
-	local terminal="$1"
+	# TERMINALS is a space-separated LIST, and it became one under PLAT-8 rather
+	# than staying a single path. The plugin surface now re-exports two things —
+	# `codetracer_embed` and `plugin_host/plugin_io` — so a control that stopped
+	# the walk at the facade alone would follow the second edge and range over
+	# the whole plugin model, and its exact counts (§4b) would have become large
+	# numbers nobody could justify. Stopping at both is the same claim about the
+	# same one hop.
+	local terminals="$1"
 	shift
 	local -a queue=("$@")
 	local -A seen=()
-	local cur spec resolved
+	local -A stop=()
+	local cur spec resolved t
+	for t in ${terminals}; do
+		[ -n "${t}" ] && stop["${t}"]=1
+	done
 	for cur in "$@"; do seen["${cur}"]=1; done
 	while [ "${#queue[@]}" -gt 0 ]; do
 		cur="${queue[0]}"
@@ -667,7 +1041,7 @@ plugin_closure() {
 			[ -n "${spec}" ] || continue
 			resolved="$(resolve_repo_module "${spec}" "${cur}")"
 			[ -n "${resolved}" ] || continue
-			[ "${resolved}" = "${terminal}" ] && continue
+			[ -n "${stop[${resolved}]+x}" ] && continue
 			if [ -z "${seen[${resolved}]+x}" ]; then
 				seen["${resolved}"]=1
 				queue+=("${resolved}")
@@ -1161,10 +1535,17 @@ fi
 # through `plugin_closure` itself and through `denied_imports_in` itself.
 #
 # The rule calls `plugin_closure "${SURFACE_REL}" <plugins>`; this calls the
-# SAME function with the FACADE as the terminal instead, so the walk must step
-# through the surface it normally stops at. The result is exactly two modules —
-# the plugin and the surface — and feeding them to check 1's own predicate must
-# yield exactly ONE finding: the surface's `import codetracer_embed`.
+# SAME function with the surface's own two re-exports as the terminals instead,
+# so the walk must step through the surface it normally stops at. The result is
+# exactly two modules — the plugin and the surface — and feeding them to
+# check 1's own predicate must yield exactly ONE finding: the surface's
+# `import codetracer_embed`.
+#
+# The second terminal is PLAT-8's: `codetracer_plugin.nim` re-exports
+# `plugin_host/plugin_io` beside the facade, and a control that stopped only at
+# the facade would follow that edge into the whole plugin model and turn its
+# two exact counts into thirteen and three. Same one hop, same claim, both
+# doors closed.
 #
 # That finding is one the rule itself can never produce, which is the point: it
 # is produced by the walk having gone somewhere. A walk that returned only its
@@ -1179,7 +1560,7 @@ CLOSURE_CONTROL_MODULES=2
 CLOSURE_CONTROL_FINDINGS=1
 
 if [ -f "${PROSE_PROBE_REL}" ] && [ -f "${SURFACE_REL}" ] && [ -f "${FACADE_REL}" ]; then
-	control_closure="$(plugin_closure "${FACADE_REL}" "${PROSE_PROBE_REL}" | sort -u)"
+	control_closure="$(plugin_closure "${FACADE_REL} ${SYNC_IO_REL}" "${PROSE_PROBE_REL}" | sort -u)"
 	control_closure_n="$(grep -c . <<<"${control_closure}" || true)"
 	control_closure_findings=""
 	while IFS= read -r f; do
@@ -1241,7 +1622,13 @@ through_surface=0
 not_through=""
 while IFS= read -r f; do
 	[ -n "${f}" ] || continue
-	if nim_imports "${f}" | sed 's|.*/||' | grep -qxF "${SURFACE_MODULE}"; then
+	# HERE-STRING, NOT A PIPE — see the note on check 20's control. This site is
+	# one of the four `ci/test/grep-q-pipefail-gate.sh` was written for and was
+	# still outstanding; it is in this file, so it is repaired here. Under
+	# `pipefail` a producer still writing when `grep -q` exits makes a SUCCESSFUL
+	# MATCH read as a failure, so this check could report "does not import
+	# codetracer_plugin" about a plugin that does.
+	if grep -qxF "${SURFACE_MODULE}" <<<"$(nim_imports "${f}" | sed 's|.*/||')"; then
 		through_surface=$((through_surface + 1))
 	else
 		not_through="${not_through}${f} "
@@ -1255,6 +1642,616 @@ elif [ "${plugin_count}" -gt 0 ]; then
 	detail "A plugin that imports nothing satisfies every rule above vacuously."
 	detail "The surface is where PluginContext, pluginEffect and pluginMemo come from."
 fi
+
+# ---------------------------------------------------------------------------
+# Check 14: PLAT-8's second denied set is not empty
+#
+# Verification-Harness-Traps §4/§6a again, and for the same reason check 0
+# exists: with nothing parsed out of `PluginDeniedSyncIo`, checks 15 and 16
+# scan for nothing and print OK forever.
+# ---------------------------------------------------------------------------
+
+sync_io="$(denied_sync_io)"
+sync_io_count="$(grep -c . <<<"${sync_io}" || true)"
+sync_host_only="$(sync_io_host_only)"
+
+if [ ! -f "${SYNC_IO_REL}" ]; then
+	check_failed "sync-io-set-nonempty: ${SYNC_IO_REL} does not exist"
+	detail "PLAT-8's I/O primitives are what make §8.1.3's 'no synchronous form'"
+	detail "enforceable. Without the module there is no denied set to enforce."
+elif [ "${sync_io_count}" -eq 0 ]; then
+	check_failed "sync-io-set-nonempty: no primitive parsed out of ${SYNC_IO_REL}"
+	detail "Expected a '${SYNC_IO_CONST}' table of (\"primitive\", \"replacement\", hostOnly) entries."
+	detail "With an empty set, checks 15 and 16 scan for nothing and report OK."
+else
+	check_ok "sync-io-set-nonempty: ${sync_io_count} denied synchronous-I/O primitive(s) ($(tr '\n' ' ' <<<"${sync_io}"))"
+fi
+
+# ---------------------------------------------------------------------------
+# Check 15: NOTHING IN A DECLARED PLUGIN'S CLOSURE names a synchronous I/O
+# primitive in code
+#
+# §8.1.3: "the I/O API has no synchronous form at all". The plugin surface
+# filters `waitFor`, `runForever`, `poll` and `drain` out of the async
+# vocabulary it re-exports, and that is the half a plugin author trips over.
+# This is the half that catches the rest — including `readFile`, which lives in
+# `system` and therefore cannot be filtered out of ANY scope. Measured on the
+# tree that carries PLAT-7's surface: `compiles(readFile("x"))` inside a plugin
+# is **true**.
+#
+# Same subject as check 2 — the reachable closure, not the declared file — for
+# the same reason: a helper module doing the blocking call on the plugin's
+# behalf is the same defect one module further out.
+# ---------------------------------------------------------------------------
+
+sync_findings=""
+scanned_sync=0
+if [ "${sync_io_count}" -gt 0 ]; then
+	while IFS= read -r f; do
+		[ -n "${f}" ] || continue
+		scanned_sync=$((scanned_sync + 1))
+		while IFS= read -r hit; do
+			[ -n "${hit}" ] || continue
+			sync_findings="${sync_findings}${f}:${hit}"$'\n'
+		done < <(sync_io_names_in "${f}")
+	done <<<"${plugin_scope}"
+
+	if [ -n "${sync_findings}" ]; then
+		check_failed "plugin-names-no-sync-io: a declared plugin names a synchronous I/O primitive in code"
+		while IFS= read -r finding; do
+			[ -n "${finding}" ] || continue
+			detail "${finding}"
+			prim="${finding##*:}"
+			while IFS= read -r pair; do
+				case "${pair}" in
+				"${prim} "*) detail "  use ${pair#* } instead — it returns a future and is a deadline checkpoint" ;;
+				esac
+			done < <(awk '{ if (match($0, /\("[A-Za-z_][A-Za-z0-9_]*",[[:space:]]*"[^"]*"/)) {
+					s = substr($0, RSTART, RLENGTH); gsub(/[()"]/, "", s); n = index(s, ",")
+					printf "%s %s\n", substr(s, 1, n - 1), substr(s, n + 1)
+				} }' "${SYNC_IO_REL}" 2>/dev/null | sed 's/ \+/ /')
+		done <<<"${sync_findings}"
+		detail "A blocking call inside a plugin freezes the front-end for as long as the"
+		detail "peer feels like taking, and PLAT-7's budget cannot stop it: that budget's"
+		detail "own stated claim is 'one overrun, attributed, then never again'."
+		detail "Comments and string literals are removed before this scan, so a finding is code."
+	else
+		check_ok "plugin-names-no-sync-io: ${scanned_sync} module(s) in the plugin closure, no synchronous I/O primitive named in code"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Check 16: THE SDK DOES NOT BLOCK EITHER
+#
+# An SDK whose own implementation blocked would satisfy check 15 for every
+# plugin and break §8.1.3 on all of their behalf — the plugin would be clean
+# and the front-end would still freeze. So the same scanner is turned on
+# `plugin_io.nim` itself.
+#
+# The one exception is DATA rather than a second list here: `startProcess` is
+# marked `hostOnly` in the table, because it does not block and because
+# wrapping the child's pipes as `AsyncFile`s is precisely the host's job. An
+# exemption the gate hardcoded could drift from the SDK; one the SDK declares
+# cannot.
+# ---------------------------------------------------------------------------
+
+if [ -f "${SYNC_IO_REL}" ] && [ "${sync_io_count}" -gt 0 ]; then
+	sdk_findings=""
+	while IFS= read -r hit; do
+		[ -n "${hit}" ] || continue
+		name="${hit##*:}"
+		if grep -qxF "${name}" <<<"${sync_host_only}"; then continue; fi
+		sdk_findings="${sdk_findings}${hit}"$'\n'
+	done < <(sync_io_names_in "${SYNC_IO_REL}")
+	if [ -n "${sdk_findings}" ]; then
+		check_failed "sdk-does-not-block: ${SYNC_IO_REL} names a blocking primitive in code"
+		while IFS= read -r finding; do
+			[ -n "${finding}" ] || continue
+			detail "${SYNC_IO_REL}:${finding}"
+		done <<<"${sdk_findings}"
+		detail "Every entry point in that module must reach the OS through an async"
+		detail "primitive. A blocking call here breaks §8.1.3 for every plugin at once,"
+		detail "and check 15 would still be green for all of them."
+		detail "If the host genuinely must call it, mark the entry hostOnly in the table."
+	else
+		check_ok "sdk-does-not-block: ${SYNC_IO_REL} names none of the ${sync_io_count} blocking primitive(s) except $(tr '\n' ' ' <<<"${sync_host_only}")"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Check 17: POSITIVE CONTROL for the scanner's two filters, on a real file
+#
+# Check 16 passing means the scanner found nothing. Verification-Harness-Traps
+# §4: a scanner that finds nothing passes every "must not contain". So the same
+# file is asked the same question with the filters removed, and it must answer
+# differently — `${SYNC_IO_REL}` names every denied primitive in its own table
+# and in its own header prose, so a scanner that could still see either would
+# have to report them.
+#
+# TWO FILTERS, TWO DIRECTIONS, and the check names which one is dead.
+# ---------------------------------------------------------------------------
+
+if [ -f "${SYNC_IO_REL}" ] && [ "${sync_io_count}" -gt 0 ]; then
+	raw_hits=0
+	stripped_only=0
+	# Captured rather than piped into `grep -q`: with `pipefail` set, `grep -q`
+	# closing the pipe early kills the upstream `awk` with SIGPIPE and the whole
+	# pipeline reports failure, which would make this control read "found
+	# nothing" no matter what the file held. That is exactly the shape it
+	# exists to detect, so it must not be its own implementation.
+	sync_io_stripped="$(code_lines "${SYNC_IO_REL}" | strip_compiles)"
+	while IFS= read -r name; do
+		[ -n "${name}" ] || continue
+		if grep -qE "$(identifier_pattern "${name}")" "${SYNC_IO_REL}"; then
+			raw_hits=$((raw_hits + 1))
+		fi
+		if grep -qE "$(identifier_pattern "${name}")" <<<"${sync_io_stripped}"; then
+			stripped_only=$((stripped_only + 1))
+		fi
+	done <<<"${sync_io}"
+	if [ "${raw_hits}" -lt "${sync_io_count}" ]; then
+		check_failed "sync-io-scan-discriminates: only ${raw_hits} of ${sync_io_count} name(s) are present in ${SYNC_IO_REL} at all"
+		detail "That file declares the table and describes every entry in its header,"
+		detail "so every name must be findable in the raw bytes. If they are not, this"
+		detail "control cannot tell a working scanner from a dead one."
+	elif [ "${stripped_only}" -le 1 ]; then
+		check_failed "sync-io-scan-discriminates: with strings left in place the scan still found ${stripped_only} name(s)"
+		detail "The comment stripper alone should leave the TABLE's own string literals,"
+		detail "which name every entry. Finding at most one means the comment stripper is"
+		detail "eating code, and check 15 is scanning something close to nothing."
+	else
+		check_ok "sync-io-scan-discriminates: ${raw_hits} name(s) in the raw file, ${stripped_only} surviving the comment strip, 0 surviving the string blank (except hostOnly)"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Check 18: PLAT-8's THIRD list is not empty, and every entry is a `std/` spec
+#
+# The non-vacuity floor, and it points the OTHER WAY from checks 0 and 14 —
+# which is worth saying, because reading it as "the same floor again" is how it
+# would get deleted as boilerplate. An empty DENIED set makes its scan find
+# nothing and print OK forever; an empty ALLOW-list refuses every plugin, loudly
+# and by name. So this check is not protecting against a vacuous pass in check
+# 19 — the failure falls the safe way on its own. It is protecting against the
+# OTHER thing an unparseable table produces: a gate that has stopped reading
+# ALLOWLIST_REL and is refusing every plugin for a reason nobody can act on. A
+# renamed constant, a moved file and a reformatted table all land here, and the
+# remedy names the file rather than leaving somebody to infer it from twenty
+# refusals.
+#
+# The `std/` spelling assertion is the second half and it is not decoration:
+# `stdlib_admitted` compares whole specs, so an entry written `strutils` would
+# admit nothing, and the symptom would be a plugin refused for importing the
+# module the table says is fine.
+# ---------------------------------------------------------------------------
+
+allowed_stdlib="$(allowed_stdlib_modules)"
+allowed_stdlib_count="$(grep -c . <<<"${allowed_stdlib}" || true)"
+allowed_stdlib_malformed="$(grep -v '^std/' <<<"${allowed_stdlib}" | grep -c . || true)"
+
+if [ ! -f "${ALLOWLIST_REL}" ]; then
+	check_failed "stdlib-allow-list-nonempty: ${ALLOWLIST_REL} does not exist"
+	detail "That file is the SOURCE-LEVEL admission policy: which std modules a"
+	detail "plugin's closure may import. Without it check 19 refuses every plugin"
+	detail "that imports any std module at all."
+elif [ "${allowed_stdlib_count}" -eq 0 ]; then
+	check_failed "stdlib-allow-list-nonempty: no module parsed out of ${ALLOWLIST_REL}"
+	detail "Expected a '${ALLOWLIST_CONST}' table of (\"std/<module>\", \"reason\") entries."
+	detail "With an empty list every declared plugin is refused, which is the safe"
+	detail "direction and an unusable gate: fix the table rather than the plugins."
+elif [ "${allowed_stdlib_malformed}" -gt 0 ]; then
+	check_failed "stdlib-allow-list-nonempty: ${allowed_stdlib_malformed} entr(y|ies) in ${ALLOWLIST_CONST} are not spelled 'std/<module>'"
+	while IFS= read -r bad_spec; do
+		[ -n "${bad_spec}" ] || continue
+		detail "${bad_spec} — write it as the plugin writes the import, 'std/${bad_spec}'"
+	done < <(grep -v '^std/' <<<"${allowed_stdlib}")
+else
+	check_ok "stdlib-allow-list-nonempty: ${allowed_stdlib_count} admitted std module(s) ($(tr '\n' ' ' <<<"${allowed_stdlib}"))"
+fi
+
+# ---------------------------------------------------------------------------
+# Check 19: NOTHING IN A DECLARED PLUGIN'S CLOSURE IMPORTS A std MODULE THAT IS
+# NOT ON THE ALLOW-LIST
+#
+# THE RULE. Checks 1, 2 and 15 are three denylists — two over module specs and
+# one over identifiers — and each of them answers "did the plugin NAME one of
+# the things we thought of". This one answers the complement, which is the only
+# form of the question that survives a language surface:
+#
+#     a plugin's closure may import what the allow-list holds, and nothing else.
+#
+# It was measured, not supposed. With checks 1-17 green, a declared plugin
+# importing `codetracer_plugin` and `std/posix` read `/etc/hostname` with no
+# `fs:read` grant and fork+exec'd `/bin/sh` with no `process` grant, and this
+# script printed `19 check(s), 0 failing`. The whole of §8.1 is bypassed by a
+# plugin that declines to use the SDK, and no number of further denied NAMES
+# reaches that — `read` and `write` are the SDK's own spellings.
+#
+# Same subject as checks 1, 2 and 15 — the reachable CLOSURE, not the declared
+# file — and for the same reason those have it: a helper module importing
+# `std/posix` on the plugin's behalf is the identical defect one module out.
+#
+# WHAT THIS CHECK IS NOT. It is not a claim that an admitted module is safe in
+# some absolute sense, and it is not a claim about `system`, which is
+# auto-imported and therefore has no import to refuse. Both bounds are on
+# `stdlib_admitted` and in ALLOWLIST_REL's header, in those words.
+# ---------------------------------------------------------------------------
+
+allowlist_findings=""
+scanned_allowlist=0
+if [ "${allowed_stdlib_count}" -gt 0 ]; then
+	while IFS= read -r f; do
+		[ -n "${f}" ] || continue
+		scanned_allowlist=$((scanned_allowlist + 1))
+		while IFS= read -r hit; do
+			[ -n "${hit}" ] || continue
+			allowlist_findings="${allowlist_findings}${f}:${hit}"$'\n'
+		done < <(unadmitted_stdlib_in "${f}")
+	done <<<"${plugin_scope}"
+
+	if [ -n "${allowlist_findings}" ]; then
+		check_failed "plugin-imports-allow-listed: a module in a declared plugin's closure imports a std module that is not admitted"
+		while IFS= read -r finding; do
+			[ -n "${finding}" ] || continue
+			detail "${finding%:*} imports ${finding##*:}, which is not in ${ALLOWLIST_CONST}"
+		done <<<"${allowlist_findings}"
+		detail "A plugin composes the SDK's primitives; it does not open the operating"
+		detail "system itself. ${ALLOWLIST_REL}"
+		detail "carries the membership rule and the reason each refused module is refused."
+		detail "If the module is genuinely inert, add it there WITH ITS REASON and a probe"
+		detail "arm in src/common/plugin_source_admission_test.nim — that is the review the"
+		detail "rule asks for, and it is one line plus one line."
+	else
+		check_ok "plugin-imports-allow-listed: ${scanned_allowlist} module(s) in the plugin closure, every std import admitted"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Check 20: POSITIVE CONTROL for check 19 — the same predicate, in BOTH
+# directions, on a real file
+#
+# Verification-Harness-Traps §4a: check 19 passing means the scan found
+# nothing, and a scan that cannot find anything reports exactly that. The
+# subject is `${SYNC_IO_REL}` — the SDK module that reaches the operating
+# system SO THAT A PLUGIN NEED NOT — which makes it the one file in the tree
+# guaranteed to carry unadmitted imports for as long as the SDK does its job.
+#
+# BOTH DIRECTIONS, because one is not enough. §4a's own postscript is that a
+# scan reporting EVERYTHING passes a "must contain" control just as easily as a
+# blind one passes a "must not contain": so the check asserts that the
+# unadmitted modules are reported AND that the admitted one this same file
+# imports is NOT. A predicate that had stopped consulting the allow-list would
+# pass the first half and fail the second.
+#
+# The count is pinned rather than "at least one" (§4b). The pin is a coupling
+# and it is the intended kind: adding an operating-system module to the SDK
+# reddens this line and asks for the number to be moved deliberately.
+# ---------------------------------------------------------------------------
+
+ALLOWLIST_CONTROL_UNADMITTED=9
+ALLOWLIST_CONTROL_ADMITTED="std/strutils"
+
+if [ -f "${SYNC_IO_REL}" ]; then
+	control_unadmitted="$(unadmitted_stdlib_in "${SYNC_IO_REL}")"
+	control_unadmitted_n="$(printf '%s\n' "${control_unadmitted}" | sort -u | grep -c . || true)"
+	control_imports_admitted=0
+	# HERE-STRING, NOT A PIPE. `ci/test/grep-q-pipefail-gate.sh` caught this the
+	# first time it was run over this pass: under `pipefail`, a producer still
+	# writing when `grep -q` exits makes a SUCCESSFUL MATCH read as a failure —
+	# so the negative half of this control would have reported "the file does
+	# not import std/strutils" intermittently, which is a red gate for a reason
+	# that is not in the code.
+	if grep -qxF "${ALLOWLIST_CONTROL_ADMITTED}" <<<"$(nim_imports "${SYNC_IO_REL}")"; then
+		control_imports_admitted=1
+	fi
+	control_admitted_leaked=0
+	if grep -qxF "${ALLOWLIST_CONTROL_ADMITTED}" <<<"${control_unadmitted}"; then
+		control_admitted_leaked=1
+	fi
+
+	if [ "${control_imports_admitted}" -ne 1 ]; then
+		check_failed "allow-list-scan-discriminates: ${SYNC_IO_REL} does not import ${ALLOWLIST_CONTROL_ADMITTED}"
+		detail "The negative half of this control needs an ADMITTED std import in the same"
+		detail "file, or 'the scan did not report it' is satisfied by an import that is not"
+		detail "there — Verification-Harness-Traps §4, in the control itself."
+	elif [ "${control_admitted_leaked}" -eq 1 ]; then
+		check_failed "allow-list-scan-discriminates: the scan reported ${ALLOWLIST_CONTROL_ADMITTED}, which IS on the allow-list"
+		detail "The predicate is reporting std imports without consulting the allow-list,"
+		detail "so check 19 would refuse every plugin that imports anything at all."
+	elif [ "${control_unadmitted_n}" -ne "${ALLOWLIST_CONTROL_UNADMITTED}" ]; then
+		check_failed "allow-list-scan-discriminates: the predicate reports ${control_unadmitted_n} unadmitted std module(s) in ${SYNC_IO_REL}, expected ${ALLOWLIST_CONTROL_UNADMITTED}"
+		detail "$(printf '%s' "${control_unadmitted}" | sort -u | tr '\n' ' ')"
+		detail "If the SDK genuinely gained or lost an operating-system module, move"
+		detail "ALLOWLIST_CONTROL_UNADMITTED and say so. If it did not, check 19 is blind."
+	else
+		check_ok "allow-list-scan-discriminates: ${control_unadmitted_n} unadmitted std module(s) in ${SYNC_IO_REL} ($(printf '%s' "${control_unadmitted}" | sort -u | tr '\n' ' ')), and ${ALLOWLIST_CONTROL_ADMITTED} not among them"
+	fi
+else
+	check_failed "allow-list-scan-discriminates: ${SYNC_IO_REL} is missing, so check 19 has no control"
+fi
+
+# ---------------------------------------------------------------------------
+# Check 21: NOTHING IN A DECLARED PLUGIN'S CLOSURE BINDS A FOREIGN FUNCTION
+#
+# THE ATTACK ON CHECK 19, AND ITS REPAIR. Check 19 refuses `std/posix`; this
+# refuses the plugin declaring posix's routines for itself, which needs no
+# import and would therefore have walked past an allow-list over every module
+# in the world. Measured, compiled and run against the real surface on
+# 2026-09-09 — the whole module:
+#
+#     import codetracer_plugin
+#     proc c_system(cmd: cstring): cint
+#       {.importc: "system", header: "<stdlib.h>".}
+#     discard c_system("printf FFI-REACHED > /tmp/ct-plat8-ffi.txt")
+#
+# and the sentinel was there. One pragma is `system(3)`, which is every grant
+# at once and none of them declared.
+#
+# THIS ONE IS A DENYLIST AND THAT IS DELIBERATE. The argument against a
+# denylist is that the set is open; nim's foreign-function pragmas are closed,
+# enumerable and fixed by the compiler's grammar, so this is a different object
+# from a denylist over library identifiers. The residual is exact: a pragma nim
+# ADDS in a future release is not on the list. See ALLOWLIST_REL's header.
+# ---------------------------------------------------------------------------
+
+ffi_pragmas="$(denied_ffi_pragmas)"
+ffi_pragma_count="$(grep -c . <<<"${ffi_pragmas}" || true)"
+
+if [ "${ffi_pragma_count}" -eq 0 ]; then
+	check_failed "ffi-pragma-set-nonempty: no pragma parsed out of ${ALLOWLIST_REL}"
+	detail "Expected a '${FFI_CONST}' table of (\"pragma\", \"replacement\") entries."
+	detail "With an empty set this scan finds nothing and prints OK forever, which is"
+	detail "the vacuous pass checks 0 and 14 exist to refuse for the other two sets."
+else
+	ffi_findings=""
+	scanned_ffi=0
+	while IFS= read -r f; do
+		[ -n "${f}" ] || continue
+		scanned_ffi=$((scanned_ffi + 1))
+		while IFS= read -r hit; do
+			[ -n "${hit}" ] || continue
+			ffi_findings="${ffi_findings}${f}:${hit}"$'\n'
+		done < <(ffi_names_in "${f}")
+	done <<<"${plugin_scope}"
+
+	if [ -n "${ffi_findings}" ]; then
+		check_failed "plugin-binds-no-foreign-function: a declared plugin's closure carries a foreign-function pragma"
+		# `names_in` yields `<file>:<n>:<name>`, and in this mode `<n>` counts
+		# PRAGMA SPANS rather than source lines — the scan reads a span, not a
+		# line, which is the whole reason it sees the multi-line spelling. It
+		# is dropped rather than printed, because a number that looks like a
+		# line number and is not is worse than no number: a reader would go to
+		# that line and find something else.
+		while IFS= read -r finding; do
+			[ -n "${finding}" ] || continue
+			detail "${finding%%:*} binds a foreign function with '${finding##*:}'"
+		done < <(sed -E 's/:[0-9]+:/:/' <<<"${ffi_findings}" | sort -u | grep -v '^$')
+		detail "A plugin composes the SDK's primitives. One '{.importc: \"system\".}' is"
+		detail "arbitrary code execution with no grant, no declared executable and no"
+		detail "disclosure, and it needs no import at all — which is why refusing modules"
+		detail "does not reach it. ${ALLOWLIST_REL} carries the list and the reason."
+	else
+		check_ok "plugin-binds-no-foreign-function: ${scanned_ffi} module(s) in the plugin closure, no foreign-function pragma in code (${ffi_pragma_count} refused)"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Check 22: POSITIVE CONTROL for check 21 — the same predicate, on two real
+# files, one of which must yield and one of which must not
+#
+# Verification-Harness-Traps §4a's pairing, and it needs BOTH files because the
+# two ways this scan can be wrong point in opposite directions. A scan that
+# reads nothing passes check 21 vacuously; a scan that has lost its
+# pragma-span bound matches the word `header` in ordinary code and refuses
+# every plugin that has one. The first is caught by `${SYNC_IO_REL}`, which
+# declares `O_NOFOLLOW` with `{.importc: … header: ….}` for the symlink repair
+# F2 landed; the second is caught by `${PRIMITIVES_REL}`, which carries no
+# pragma at all and must yield zero.
+#
+# The count is pinned rather than "at least one" (§4b).
+# ---------------------------------------------------------------------------
+
+FFI_CONTROL_EXPECTED=2
+
+if [ "${ffi_pragma_count}" -gt 0 ] && [ -f "${SYNC_IO_REL}" ] && [ -f "${PRIMITIVES_REL}" ]; then
+	ffi_control_hits="$(ffi_names_in "${SYNC_IO_REL}" | cut -d: -f2- | sort -u)"
+	ffi_control_n="$(grep -c . <<<"${ffi_control_hits}" || true)"
+	ffi_quiet_n="$(ffi_names_in "${PRIMITIVES_REL}" | grep -c . || true)"
+	if [ "${ffi_control_n}" -ne "${FFI_CONTROL_EXPECTED}" ]; then
+		check_failed "ffi-scan-reads-pragmas: the predicate found ${ffi_control_n} pragma(s) in ${SYNC_IO_REL}, expected ${FFI_CONTROL_EXPECTED}"
+		detail "$(tr '\n' ' ' <<<"${ffi_control_hits}")"
+		detail "That file declares O_NOFOLLOW with importc and header. Finding fewer means"
+		detail "check 21 is scanning something close to nothing."
+	elif [ "${ffi_quiet_n}" -ne 0 ]; then
+		check_failed "ffi-scan-reads-pragmas: the predicate found ${ffi_quiet_n} pragma(s) in ${PRIMITIVES_REL}, which has none"
+		detail "The scan has lost its pragma-span bound and is matching bare identifiers,"
+		detail "so a plugin with a variable called 'header' would now be refused."
+	else
+		check_ok "ffi-scan-reads-pragmas: ${ffi_control_n} pragma(s) in ${SYNC_IO_REL} ($(tr '\n' ' ' <<<"${ffi_control_hits}")), 0 in ${PRIMITIVES_REL}"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Check 23: THE `system` SURFACE IS ENUMERATED, AND THE ENUMERATION IS DERIVED
+#
+# THE FIFTH LIST, AND IT IS THE ONLY ONE NOT WRITTEN DOWN IN THIS REPOSITORY.
+# The other four are tables in nim files. This one is swept off the pinned
+# compiler's own source by `ci/lib/system-io-surface.sh`, because the subject is
+# not ours: `system.nim` ends with `export syncio`, so what a plugin can name
+# with no import and no pragma is whatever `std/syncio` exports in the compiler
+# that happens to be on PATH.
+#
+# WHY IT IS DERIVED RATHER THAN LISTED. Three passes wrote the residual down by
+# hand and all three were short. The third is the one that cost something: the
+# list said ten names, `open` was on it and denied nowhere, and the buffer
+# family around `open` was not on it at all — so a plugin whose entire import
+# list was `import codetracer_plugin` read and wrote any file the user could,
+# with nineteen checks green above it. Sweeping for the repair then turned up
+# `reopen` and `lines`, which no list had either, and `reopen` needs no `open`
+# at all — so even denying the name that WAS written down would not have closed
+# it.
+#
+# WHAT THIS CHECK ASSERTS is therefore not "the names we thought of are
+# denied". It is that the DERIVED SET is partitioned by the two tables: every
+# name is refused (`PluginDeniedSyncIo`) or exempted with a reason
+# (`PluginSystemSurfaceExempt`). A nim release that adds a routine to `syncio`
+# reddens this check on the next run, which is the property no enumeration
+# maintained here can have.
+#
+# IT FAILS CLOSED. A sweep that derived nothing — no nim on PATH, a moved
+# stdlib, a parser that stopped parsing — is reported as a FAILURE and not as a
+# clean surface, for the reason `sync-io-set-nonempty` above gives: a scan that
+# finds nothing passes every "must not contain".
+# ---------------------------------------------------------------------------
+
+# THE DIAGNOSIS IS KEPT, NOT DISCARDED. This line read `2>/dev/null` until
+# 2026-09-10, so nim's exit code and its stderr went in the bin and every way
+# the sweep can fail arrived below as one sentence and three guesses. "nim is
+# not on PATH", "nim exited 137 because something killed it" and "the stdlib
+# moved" are three different facts, exactly one of which is a finding about this
+# repository, and a check that cannot tell them apart hands the next reader an
+# investigation instead of a result — which is what it did, twice.
+system_surface_diag="$(mktemp)"
+system_surface="$(system_surface_names 2>"${system_surface_diag}" || true)"
+system_surface_n="$(grep -c . <<<"${system_surface}" || true)"
+system_exempt="$(table_names "${SYNC_IO_REL}" "${SYSTEM_EXEMPT_CONST}")"
+system_exempt_n="$(grep -c . <<<"${system_exempt}" || true)"
+
+if [ "${system_surface_n}" -eq 0 ]; then
+	check_failed "system-surface-enumerated: the sweep derived NO name from the compiler's system/syncio surface"
+	# THE SWEEP'S OWN REASON, verbatim, before any prose of ours. It names the
+	# command, its exit code and what it printed, so the three ways this fires
+	# are told apart from the transcript rather than by a second run.
+	while IFS= read -r system_surface_line; do
+		[ -n "${system_surface_line}" ] || continue
+		detail "${system_surface_line}"
+	done <"${system_surface_diag}"
+	detail "ci/lib/system-io-surface.sh found nothing. This is reported as a"
+	detail "FAILURE rather than as an empty surface: with nothing derived, this check"
+	detail "would otherwise pass by scanning for nothing, which is exactly how the"
+	detail "residual it replaces went three passes without being noticed."
+else
+	system_accounted="$(printf '%s\n%s\n' "${sync_io}" "${system_exempt}" | grep -v '^$' | LC_ALL=C sort -u)"
+	system_unaccounted="$(LC_ALL=C comm -23 <(printf '%s\n' "${system_surface}") <(printf '%s\n' "${system_accounted}"))"
+	system_unaccounted_n="$(grep -c . <<<"${system_unaccounted}" || true)"
+	if [ "${system_unaccounted_n}" -gt 0 ]; then
+		check_failed "system-surface-enumerated: ${system_unaccounted_n} name(s) that ARE in every plugin's scope are on neither table"
+		while IFS= read -r nm; do
+			[ -n "${nm}" ] || continue
+			detail "${nm} — exported by system, on neither table"
+		done <<<"${system_unaccounted}"
+		detail "Each is exported by std/syncio or system/compilation.nim on the nim in use,"
+		detail "so a plugin can name it with no import and no pragma. Put it on"
+		detail "${SYNC_IO_CONST} if it reaches the operating system, or on"
+		detail "${SYSTEM_EXEMPT_CONST} WITH THE REASON if it does not. Do not"
+		detail "narrow the sweep: the sweep is the only part of this that a nim upgrade"
+		detail "cannot make quietly wrong."
+	else
+		check_ok "system-surface-enumerated: ${system_surface_n} derived name(s), all accounted for (${system_exempt_n} exempt with a reason)"
+	fi
+	# THE LOOKUP'S OWN NOTE, WHEN IT HAD ONE — under the OK as well as under the
+	# VIOLATION. A NON-EMPTY sweep can still have something to say:
+	# `system_surface_lib` derives the library directory from where the nim on
+	# PATH sits when `nim dump` could not be read, and that happens when the
+	# compiler is present but cannot be RUN — a starved or OOM-killed `nim` on a
+	# loaded host, measured 2026-09-11. The sweep that follows is complete, so
+	# this is not a finding and must not redden the check; but a fallback that
+	# only ever spoke on the path where it failed would be a fallback nobody
+	# could audit from a transcript, which is the shape of the 2026-09-10 repair
+	# above that put nim's exit code in front of the reader in the first place.
+	# Silent on a normal run: every command in the sweep captures its own
+	# output, so this file is empty unless the lookup wrote to it.
+	while IFS= read -r system_surface_line; do
+		[ -n "${system_surface_line}" ] || continue
+		detail "${system_surface_line}"
+	done <"${system_surface_diag}"
+fi
+
+# ---------------------------------------------------------------------------
+# Check 24: POSITIVE CONTROL for check 23 — the sweep discriminates, and
+# widening `table_names` moved no other table's count
+#
+# Two independent ways check 23 can be green for the wrong reason, so two
+# controls (Verification-Harness-Traps §4a, §4b — the counts are pinned rather
+# than "at least one"):
+#
+#   * THE SWEEP READS THE RIGHT MODULE. `readFile` must be derived — it is the
+#     name the whole residual was written about — and `fork` must NOT be, because
+#     `fork` is `std/posix`, which is refused by the ALLOW-list and is a
+#     different mechanism. A sweep that had drifted onto the wrong file, or that
+#     had started reading every module in the stdlib, fails one of the two.
+#   * WIDENING THE PARSER CHANGED NOTHING ELSE. `table_names` grew `&` and `=`
+#     for this table's `&=` row. The other four tables are parsed by the same
+#     awk, so their counts are asserted here rather than argued.
+# ---------------------------------------------------------------------------
+
+SYSTEM_SURFACE_PRESENT="readFile"
+SYSTEM_SURFACE_ABSENT="fork"
+
+if [ "${system_surface_n}" -gt 0 ]; then
+	surface_ctl=""
+	grep -qxF "${SYSTEM_SURFACE_PRESENT}" <<<"${system_surface}" ||
+		surface_ctl="${surface_ctl}the sweep did not derive '${SYSTEM_SURFACE_PRESENT}', which system exports; "
+	if grep -qxF "${SYSTEM_SURFACE_ABSENT}" <<<"${system_surface}"; then
+		surface_ctl="${surface_ctl}the sweep derived '${SYSTEM_SURFACE_ABSENT}', which is std/posix and not system; "
+	fi
+	# EVERY DECLARED ROW COMES BACK, from all five tables, through the one awk
+	# that now carries `&` and `=` for `PluginSystemSurfaceExempt`'s `&=` row.
+	# A widening that had started swallowing or inventing rows moves one of
+	# these five, in whatever tree the gate is pointed at.
+	for tbl in "${PRIMITIVES_REL}:${PRIMITIVES_CONST}" \
+		"${SYNC_IO_REL}:${SYNC_IO_CONST}" \
+		"${SYNC_IO_REL}:${SYSTEM_EXEMPT_CONST}" \
+		"${ALLOWLIST_REL}:${ALLOWLIST_CONST}" \
+		"${ALLOWLIST_REL}:${FFI_CONST}"; do
+		tbl_file="${tbl%:*}"
+		tbl_const="${tbl##*:}"
+		[ -f "${tbl_file}" ] || continue
+		tbl_declared="$(table_declared_len "${tbl_file}" "${tbl_const}")"
+		[ -n "${tbl_declared}" ] || continue
+		tbl_parsed="$(table_names "${tbl_file}" "${tbl_const}" | grep -c . || true)"
+		if [ "${tbl_parsed}" -ne "${tbl_declared}" ]; then
+			surface_ctl="${surface_ctl}${tbl_const} declares ${tbl_declared} row(s) and the parser returned ${tbl_parsed}; "
+		fi
+	done
+	# THE `open` EXEMPTION IS ONE LINE, AND THAT IS THE ASSERTION.
+	#
+	# `open` is `hostOnly`, so check 16 does not hold the SDK to it — and an
+	# exemption nobody measures is an exemption that grows. It covers ONE
+	# occurrence, `posix.open` inside `openVerified`, the mediated open taken
+	# after `decide`. It covered SIX until 2026-09-09, when `handles.open` —
+	# which opened nothing and was the entire reason `open` was said to be
+	# undeniable — was renamed to `registerHandle`. Pinning the count here is
+	# what stops the rename being undone by a call site at a time.
+	# ONLY IF THE SDK CLAIMS THE EXEMPTION. In a synthetic tree `open` is not
+	# on the table at all, and asserting a repo-specific line count there would
+	# be this check failing for a reason the case under test never touched.
+	if grep -qxF open <<<"${sync_host_only}"; then
+		sdk_open_hits="$(sync_io_names_in "${SYNC_IO_REL}" | grep ':open$' || true)"
+		sdk_open_n="$(grep -c . <<<"${sdk_open_hits}" || true)"
+		if [ "${sdk_open_n}" -ne 1 ]; then
+			surface_ctl="${surface_ctl}${SYNC_IO_REL} names 'open' ${sdk_open_n} time(s), expected exactly 1 (posix.open in openVerified); "
+		else
+			sdk_open_line="$(sed -n "${sdk_open_hits%%:*}p" "${SYNC_IO_REL}")"
+			case "${sdk_open_line}" in
+			*posix.open*) ;;
+			*) surface_ctl="${surface_ctl}the one 'open' in ${SYNC_IO_REL} is not posix.open: ${sdk_open_line}; " ;;
+			esac
+		fi
+	fi
+	if [ -n "${surface_ctl}" ]; then
+		check_failed "system-surface-control: ${surface_ctl}"
+		detail "Check 23 is only evidence if the sweep reads the right module and the"
+		detail "parser it shares with four other tables still reads them the same way."
+	else
+		check_ok "system-surface-control: the sweep has '${SYSTEM_SURFACE_PRESENT}' and not '${SYSTEM_SURFACE_ABSENT}'; all five tables return every declared row; the SDK names 'open' once (posix.open)"
+	fi
+fi
+
+# Removed here rather than in an EXIT trap: `nim_imports_open_unanalysable_log`
+# already owns this script's only trap, and a second one would silently replace
+# it (see that function's header).
+rm -f "${system_surface_diag}"
 
 # ---------------------------------------------------------------------------
 # Verdict

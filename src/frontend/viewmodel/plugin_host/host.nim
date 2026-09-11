@@ -92,6 +92,13 @@ type
     activationLog*: seq[PluginId]
       ## Every activation, in the order it happened. The DEPENDENCY ORDER
       ## claim of §4.2 is a claim about this sequence.
+    reclaimFailures*: seq[string]
+      ## PLAT-8. A closer that raised during a handle sweep. It is RECORDED
+      ## rather than raised out of `deactivate`, because a deactivation that
+      ## propagated the third handle's failure would abandon the fourth — and
+      ## the resources this exists to reclaim are exactly the ones that would
+      ## then leak. `report()` prints them, so "it did not close cleanly" is a
+      ## finding rather than a silence.
 
 proc newPluginHost*(coreVersion: SemVer;
                     budget = DefaultEffectBudget): PluginHost =
@@ -219,11 +226,76 @@ proc eagerReasons*(host: PluginHost): Table[PluginId, string] =
 # deactivate
 # ---------------------------------------------------------------------------
 
+proc reclaim*(host: PluginHost; id: PluginId): int {.discardable.} =
+  ## PLAT-8, §8.1.1: "Every handle is attributable to a plugin, so a
+  ## misbehaving one is nameable and its **resources are reclaimable without
+  ## restarting CodeTracer**."
+  ##
+  ## THAT SENTENCE HAS TWO HALVES AND THIS IS THE SECOND. Deactivation also
+  ## closes every handle, but deactivation is a different thing to do to a
+  ## plugin: it unlinks its effects, so the plugin stops observing and does not
+  ## come back until the next activation event. `reclaim` closes the OS
+  ## resources and leaves the plugin ALIVE — it is what an operator does to a
+  ## plugin that is holding forty sockets, and what "without restarting
+  ## CodeTracer" concretely means: not the application, and not the plugin
+  ## either.
+  ##
+  ## A plugin whose handles were reclaimed sees `ioClosed` from the streams it
+  ## still holds — a value, per §8.1's "error as values" — rather than a crash.
+  ##
+  ## Returns how many handles were released. Failures during release are
+  ## collected rather than allowed to abandon the sweep; see
+  ## `handles.closeAll`.
+  if not host.records.hasKey(id): return 0
+  let rec = host.records[id]
+  if rec.ctx.isNil or rec.ctx.state.isNil or rec.ctx.state.handles.isNil:
+    return 0
+  var failures: seq[HandleCloseFailure] = @[]
+  result = rec.ctx.state.handles.closeAll(failures)
+  for f in failures:
+    host.reclaimFailures.add "plugin '" & id & "': releasing " & $f.kind &
+      " '" & f.description & "' failed: " & f.message
+
+proc liveHandleCount*(host: PluginHost; id: PluginId): int =
+  ## What the accounting says this plugin still holds. `test_plugin_io_sdk.nim`
+  ## asserts this AND asks the OS the same question, because a table that
+  ## reached zero is also what a table that forgot a handle looks like.
+  if not host.records.hasKey(id): return 0
+  let rec = host.records[id]
+  if rec.ctx.isNil or rec.ctx.state.isNil or rec.ctx.state.handles.isNil:
+    return 0
+  rec.ctx.state.handles.liveCount
+
+proc handleReport*(host: PluginHost): string =
+  ## Every plugin's live handles, in registration order. §8.1.1's "a
+  ## misbehaving one is nameable", from the side the application drives.
+  var lines: seq[string] = @[]
+  for id in host.registrationOrder:
+    if not host.records.hasKey(id): continue
+    let rec = host.records[id]
+    if rec.ctx.isNil or rec.ctx.state.isNil or rec.ctx.state.handles.isNil:
+      continue
+    if rec.ctx.state.handles.liveCount == 0: continue
+    lines.add rec.ctx.state.handles.describe()
+  lines.join("\n")
+
 proc deactivate*(host: PluginHost; id: PluginId): bool {.discardable.} =
   ## Release everything the plugin holds. See this module's header for why
   ## `cleanNode` is the release and the `csClean` sweep is not.
   if not host.isActive(id): return false
   let rec = host.records[id]
+
+  # PLAT-8, §8.1.1: "Processes and sockets are host-owned resources the plugin
+  # holds by handle. **Deactivation closes them** — §4.2's rule, and the reason
+  # a plugin cannot leak a daemon past its own lifetime."
+  #
+  # BEFORE `cleanNode`, deliberately. `cleanNode` runs the scope's cleanups,
+  # and a plugin that registered `onPluginCleanup` to tidy its own process
+  # would then race the sweep. Closing first means the sweep is the release and
+  # the plugin's own cleanup finds the work already done, which is the same
+  # ordering `plugin_api.onPluginCleanup`'s docstring promises: the release
+  # does not depend on the plugin having registered anything.
+  host.reclaim(id)
 
   # The scheduling half FIRST: a computation already sitting in isonim's
   # `Effects` queue is run by `flushUpdates` if it is still `csStale`, and
@@ -278,4 +350,20 @@ proc report*(host: PluginHost): string =
     lines.add render(e)
   for v in host.violations():
     lines.add describe(v)
+  for f in host.reclaimFailures:
+    lines.add f
+  lines.join("\n")
+
+proc grantsReport*(host: PluginHost): string =
+  ## What every loadable plugin was granted, with its declared sets —
+  ## §8.4's "declared in a manifest the user can read before granting",
+  ## rendered for a user who is about to grant it.
+  ##
+  ## A plugin holding `trace` + `socket:remote` gets `traceEgressDisclosure`
+  ## appended by `describeGrants`, so the pair is never shown as two ordinary
+  ## rows.
+  var lines: seq[string] = @[]
+  for id in host.registrationOrder:
+    if not host.resolution.manifests.hasKey(id): continue
+    lines.add describeGrants(id, host.resolution.manifests[id].grants)
   lines.join("\n")

@@ -1,0 +1,127 @@
+## CT-PLUGIN: the probe that measures the residual the allow-list NAMED and
+## did not close — `system`.
+##
+## THE THIRD EXPLOIT, AND IT IS THE ONE BOTH REPAIRS WALK PAST. Its sibling
+## `posix_raw_plugin.nim.probe` needs `import std/posix`, which the allow-list
+## refuses. Its sibling `ffi_raw_plugin.nim.probe` needs an `{.importc.}`
+## pragma, which `PluginDeniedFfiPragmas` refuses. **This one has neither.**
+## Its entire import list is `import codetracer_plugin` and it carries no
+## pragma at all: `open`, `readBuffer`, `writeBuffer`, `close`, `File` and
+## `copyMem` are in every nim module's scope because `system` is auto-imported,
+## and `system` is `export syncio`.
+##
+## Measured, compiled and run against the real surface on 2026-09-09, before
+## any of these names was denied:
+##
+##     SYSIO-READ[gpu-server-001]
+##     SYSIO-WRITE-OK
+##
+## which is the allow-list's OWN motivating measurement — "posix read of
+## /etc/hostname, no fs:read grant" — reproduced by a route that needs no
+## import, so the mechanism built to close it structurally cannot see it.
+##
+## ## WHY THIS ONE IS THE ARGUMENT FOR DERIVING THE ENUMERATION
+##
+## The residual was written down as ten names. It is not ten names: `system`
+## ends with `when not defined(nimPreviewSlimSystem): import std/syncio; export
+## syncio`, so the residual is the WHOLE exported surface of `std/syncio` —
+## thirty-six entries on the pinned compiler — plus `system`'s own compile-time
+## `staticExec`/`gorge`/`gorgeEx`/`slurp`/`staticRead`. Nine of those thirty-six
+## were denied; `open` was named in the paragraph and denied nowhere, and the
+## buffer family around it (`readBuffer`, `readBytes`, `readChars`,
+## `writeBuffer`) was not named at all. That is what turns one undenied name
+## into a complete unmediated file I/O API, and it is why
+## `ci/lib/system-io-surface.sh` now DERIVES the set from the compiler in use
+## rather than taking a list anybody typed.
+##
+## Read by the same two consumers as its siblings, from these same bytes: the
+## contract suite copies it into a synthetic tree and asserts the refusal; the
+## real-stack suite compiles it, runs it, and asserts the EFFECT.
+##
+## ## THE SENTINELS, AND WHY THE ASSERTIONS ARE ON FILES
+##
+##   the READ sentinel  — this module writes the bytes it pulled out of
+##                        `/etc/hostname` here, holding no `fs:read` grant. The
+##                        CONTENT is the evidence: a file the probe merely
+##                        created proves nothing about reading.
+##   the WRITE sentinel — a path that did not exist, created and filled, with no
+##                        `fs:write` grant. Its EXISTENCE is the evidence.
+##
+## Both are files rather than lines of stdout for the reason its siblings give:
+## a missing line of output is also what a crashed probe, a lost pipe and a
+## buffered stream look like, and the assertion that matters after the repair is
+## an ABSENCE.
+##
+## The two paths arrive on stdin, read with `readBuffer(stdin, …)` — which is
+## itself a member of the family under test, so this module needs no import and
+## no pragma to reach its own input either.
+
+import codetracer_plugin
+
+const
+  HostnamePath = "/etc/hostname"
+  WriteMarker = "SYSIO-WRITE-OK"
+
+proc sysRead*(path: string): string =
+  ## No `fs:read` grant, no declared root, no `ctx.readPath`, no `decide`.
+  ## `open` binds the path to a `File`; `readBuffer` fills a stack buffer from
+  ## it. Two identifiers, both auto-imported.
+  var f: File
+  if not open(f, path, fmRead):
+    return ""
+  var buf: array[512, char]
+  let n = readBuffer(f, addr buf[0], 512)
+  close(f)
+  if n <= 0:
+    return ""
+  result = newString(n)
+  copyMem(addr result[0], addr buf[0], n)
+
+proc sysWrite*(path, data: string) =
+  ## No `fs:write` grant either. `fmWrite` CREATES, so the sentinel's existence
+  ## is the whole claim.
+  var f: File
+  if not open(f, path, fmWrite):
+    return
+  if data.len > 0:
+    discard writeBuffer(f, addr data[0], data.len)
+  close(f)
+
+proc activate*() =
+  ## The shape a plugin's entry point has, so this module reads as a plugin
+  ## rather than as a program that happens to carry the marker.
+  discard sysRead(HostnamePath)
+
+proc sentinelsFromStdin(): seq[string] =
+  ## The two sentinel paths, one per line, off `stdin` with `readBuffer`.
+  ##
+  ## Hand-rolled rather than `strutils.split` so this module's import list stays
+  ## exactly `codetracer_plugin` — which IS the subject. `readLine` would have
+  ## done it in one call and is already on the denied list, which would have
+  ## made the source gate fire for a reason that is not the one under test.
+  var buf: array[4096, char]
+  let n = readBuffer(stdin, addr buf[0], 4095)
+  result = @[]
+  if n <= 0:
+    return
+  var cur = ""
+  for i in 0 ..< n:
+    if buf[i] == '\n':
+      result.add(cur)
+      cur = ""
+    else:
+      cur.add(buf[i])
+  if cur.len > 0:
+    result.add(cur)
+
+when isMainModule:
+  let sentinels = sentinelsFromStdin()
+  let readSentinel = if sentinels.len > 0: sentinels[0] else: ""
+  let writeSentinel = if sentinels.len > 1: sentinels[1] else: ""
+
+  let hostname = sysRead(HostnamePath)
+  if readSentinel.len > 0:
+    sysWrite(readSentinel, hostname)
+  if writeSentinel.len > 0:
+    sysWrite(writeSentinel, WriteMarker)
+  echo "SYSIO-PROBE-DONE bytes=", hostname.len

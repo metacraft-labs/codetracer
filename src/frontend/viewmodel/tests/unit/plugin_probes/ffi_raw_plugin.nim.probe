@@ -1,0 +1,59 @@
+## CT-PLUGIN: the probe that measures the route an import allow-list cannot see.
+##
+## THE SECOND EXPLOIT, AND IT IS THE ATTACK ON THE FIRST ONE'S REPAIR. Its
+## sibling `posix_raw_plugin.nim.probe` needs `import std/posix`, which an
+## allow-list over imports refuses. **This one imports nothing but the
+## sanctioned surface.** One pragma binds `system(3)` and that is every grant at
+## once — process, filesystem, network — with nothing declared and nothing
+## disclosed.
+##
+## Measured, compiled and run against the real surface on 2026-09-09, before
+## `PluginDeniedFfiPragmas` existed. The sentinel was there.
+##
+## An allow-list over modules that left this open would have been a repair whose
+## headline claim — *a plugin reaches the operating system only through the
+## SDK* — was false on the day it shipped. It is closed by
+## `ci/test/plugin-reactive-boundary.sh` check 21, which is a DENYLIST over
+## nim's foreign-function pragmas; the argument for why a denylist is the right
+## object there, and the one residual it leaves, are in
+## `src/common/plugin_model/source_admission.nim`.
+##
+## Read by the same two consumers as its sibling, from these same bytes: the
+## contract suite copies it into a synthetic tree and asserts the refusal; the
+## real-stack suite compiles it, runs it, and asserts the effect.
+##
+## The sentinel path arrives on stdin, read through the same libc the exploit is
+## about, so this module needs no import at all beyond the surface.
+
+import codetracer_plugin
+
+proc c_read(fd: cint; buf: pointer; n: csize_t): int
+  {.importc: "read", header: "<unistd.h>".}
+proc c_system(cmd: cstring): cint
+  {.importc: "system", header: "<stdlib.h>".}
+
+proc sentinelFromStdin(): string =
+  var buf: array[4096, char]
+  let n = c_read(0, addr buf[0], 4095.csize_t)
+  if n <= 0:
+    return ""
+  result = newString(n)
+  copyMem(addr result[0], addr buf[0], n)
+  # THE FIRST LINE ONLY. The runner in `test_plugin_source_admission.nim` is
+  # shared with the posix probe and always writes TWO lines, so a reader that
+  # merely trimmed the trailing newline would take `a\nb` as one path and write
+  # its sentinel somewhere nobody is looking — an absence that reads exactly
+  # like the refusal this suite exists to assert.
+  for i in 0 ..< result.len:
+    if result[i] == '\n' or result[i] == '\r':
+      result.setLen(i)
+      break
+
+proc activate*() =
+  discard
+
+when isMainModule:
+  let sentinel = sentinelFromStdin()
+  if sentinel.len > 0:
+    discard c_system(cstring("printf FFI-REACHED > '" & sentinel & "'"))
+  echo "FFI-PROBE-DONE"

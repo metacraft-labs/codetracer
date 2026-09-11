@@ -316,6 +316,23 @@ export trace_source
 import plugin_host/plugin_api
 export plugin_api
 
+# PLAT-8's I/O primitives are DELIBERATELY NOT HERE, and the reason is the
+# whole of §8's argument.
+#
+# `plugin_host/plugin_io.nim` spawns processes and opens sockets. This facade
+# may not reach either: `ci/test/sdk-facade-boundary.sh` forbids `std/osproc`
+# in the facade's graph, because CodeTracer-Embed-SDK.md §8 has an EMBEDDER
+# create a worker rather than a child process, and an embeddable library that
+# can `execve` is a different product. Putting the plugin SDK here was tried
+# and that check reddened immediately, which is the check working.
+#
+# The two audiences are already separated (see above), and this is the same
+# split one step further: an SDK consumer gets this facade and cannot spawn
+# anything; a PLUGIN gets `codetracer_plugin.nim`, which is this facade minus
+# the ten reactive primitives PLUS the capability-gated I/O. §8.1.2's grants
+# are what stand between a plugin and a process, and an embedder has no
+# manifest and therefore no grants at all.
+
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"
     ## The one module name a consumer may import from this SDK. The import

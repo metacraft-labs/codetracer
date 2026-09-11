@@ -49,7 +49,57 @@ cleanup() { rm -rf "${work}"; }
 trap cleanup EXIT
 
 VM="src/frontend/viewmodel"
+COMMON="src/common"
 FIXTURES="${VM}/tests/unit/plugin_fixtures"
+
+# THE DERIVED `system` SURFACE, COMPUTED ONCE.
+#
+# Check 23 ranges over the names the PINNED COMPILER puts in every plugin's
+# scope, and requires each to be on `PluginDeniedSyncIo` or on
+# `PluginSystemSurfaceExempt` IN THE TREE UNDER TEST. Every synthetic tree here
+# carries a three-entry denied table on purpose — the gate reads whatever the
+# table holds and three is readable — so without an exempt table each of the
+# hundred-odd cases below would fail check 23 for a reason that has nothing to
+# do with the case.
+#
+# So `make_tree` generates one, from the SAME sweep the gate uses. That keeps
+# the baseline clean AND keeps check 23 live in every case rather than skipped:
+# the two cases at the end remove a row from it and assert the check notices.
+#
+# COMPUTED ONCE AND NOT PER TREE: the sweep shells out to `nim dump`, and a
+# hundred `make_tree` calls would have put a hundred of those in a suite that
+# takes under a minute.
+# Same `source=` / SC1091 pair as the `nim-imports.sh` line above, and for
+# the same reason: the pre-commit hook runs shellcheck without -x and cannot
+# follow a sourced file at all.
+# shellcheck source=ci/lib/system-io-surface.sh disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/system-io-surface.sh"
+SYSTEM_SURFACE_ALL="$(system_surface_names 2>/dev/null || true)"
+# The fixture's denied table holds `readFile`; a name on both tables would be a
+# fixture that disagrees with itself, so the exempt half is the complement.
+SYSTEM_SURFACE_EXEMPTABLE="$(grep -vxF -e waitFor -e readFile -e startProcess \
+	<<<"${SYSTEM_SURFACE_ALL}" || true)"
+
+# system_exempt_table [OMIT] — the fixture table, as nim source. With OMIT, that
+# one name is left out, which is exactly the finding check 23 exists to make.
+system_exempt_table() {
+	local omit="${1:-}" n rows count
+	rows=""
+	while IFS= read -r n; do
+		[ -n "${n}" ] || continue
+		[ "${n}" != "${omit}" ] || continue
+		rows="${rows}    (\"${n}\", \"fixture: the synthetic tree exempts the derived surface so a case is about its own subject\"),"$'\n'
+	done <<<"${SYSTEM_SURFACE_EXEMPTABLE}"
+	# THE DECLARED LENGTH IS COUNTED, NOT GUESSED. Check 24 asserts that every
+	# table returns as many rows as its `array[N, …]` says it has, in whatever
+	# tree the gate is pointed at — so a fixture whose header disagreed with its
+	# body would fail that control rather than the case under test.
+	count="$(grep -c . <<<"${rows}" || true)"
+	echo "const"
+	echo "  PluginSystemSurfaceExempt*: array[${count}, tuple[primitive, replacement: string]] = ["
+	printf '%s' "${rows}"
+	echo "  ]"
+}
 
 # make_tree NAME — a CLEAN baseline on which every check passes.
 #
@@ -64,7 +114,31 @@ FIXTURES="${VM}/tests/unit/plugin_fixtures"
 make_tree() {
 	local name="$1"
 	local t="${work}/${name}"
-	mkdir -p "${t}/${VM}/plugin_host" "${t}/${FIXTURES}"
+	mkdir -p "${t}/${VM}/plugin_host" "${t}/${FIXTURES}" "${t}/${COMMON}/plugin_model"
+
+	# PLAT-8's THIRD list, and the only ALLOW-list of the three. Three entries
+	# rather than twenty-one for the same reason the denied table above has
+	# three: the gate reads whatever the table holds, and three is readable.
+	#
+	# `std/strutils` is here because check 20's NEGATIVE half needs an admitted
+	# module that the SDK module below actually imports — without it that half
+	# is satisfied by an import that is not there, which is
+	# Verification-Harness-Traps §4 inside the control.
+	cat >"${t}/${COMMON}/plugin_model/source_admission.nim" <<'EOF'
+## The source-level admission policy. Its header names std/posix in prose.
+const
+  PluginAllowedStdlibModules*: array[3, tuple[primitive, replacement: string]] = [
+    ("std/strutils", "string manipulation over values already in memory"),
+    ("std/tables", "hash tables over in-memory values"),
+    ("std/times", "a clock is not a mediated kind"),
+  ]
+
+  PluginDeniedFfiPragmas*: array[3, tuple[primitive, replacement: string]] = [
+    ("importc", "call the SDK"),
+    ("header", "call the SDK"),
+    ("dynlib", "call the SDK"),
+  ]
+EOF
 
 	cat >"${t}/${VM}/plugin_host/plugin_api.nim" <<'EOF'
 ## The wrapped API. Its header names createEffect in prose, deliberately.
@@ -80,6 +154,47 @@ const
 proc pluginEffect*(name: string; body: proc()) =
   isonim_computation.createEffect(body)
 EOF
+
+	# PLAT-8's second denied set, and the module the gate holds to the same
+	# rule it holds a plugin to. It names every entry in a string literal (the
+	# table), one of them in an `export … except` clause, and one of them in
+	# real code — which is the hostOnly entry. Checks 14 to 17 all read this.
+	cat >"${t}/${VM}/plugin_host/plugin_io.nim" <<'EOF'
+## The I/O primitives. Its header names waitFor and readFile in prose.
+import codetracer_embed
+export asyncdispatch except waitFor, runForever
+
+# NINE UNADMITTED MODULES AND ONE ADMITTED ONE. This is check 20's subject: the
+# SDK module that reaches the operating system SO THAT A PLUGIN NEED NOT, which
+# makes it the file guaranteed to carry unadmitted imports. The count matches
+# `ALLOWLIST_CONTROL_UNADMITTED` in the gate, and `std/strutils` is the
+# admitted import the control's negative half needs.
+import std/strutils
+import std/[asyncdispatch, asyncfile, asyncnet, nativesockets, net, os,
+            osproc, posix, strtabs]
+
+const
+  PluginDeniedSyncIo*: array[3,
+      tuple[primitive, replacement: string, hostOnly: bool]] = [
+    ("waitFor",      "await",            false),
+    ("readFile",     "ctx.readPath",     false),
+    ("startProcess", "ctx.spawnProcess", true),
+  ]
+
+proc spawnProcess*(name: string) =
+  discard startProcess(name)
+
+# Check 22's POSITIVE subject: the SDK legitimately binds a C constant, so the
+# scan has something to find. `plugin_api.nim` beside it carries no pragma at
+# all and is the same control's NEGATIVE subject.
+let O_NOFOLLOW_CT {.importc: "O_NOFOLLOW", header: "<fcntl.h>".}: cint
+EOF
+
+	# Check 23's other table, generated from the same sweep the gate reads.
+	# See `system_exempt_table` above for why it is here rather than written
+	# out: without it every case in this file would fail check 23 for a reason
+	# that has nothing to do with the case.
+	system_exempt_table >>"${t}/${VM}/plugin_host/plugin_io.nim"
 
 	cat >"${t}/${VM}/codetracer_embed.nim" <<'EOF'
 import isonim/core/[signals, computation, owner]
@@ -105,6 +220,10 @@ EOF
 	cat >"${t}/${FIXTURES}/position_watch_plugin.nim" <<'EOF'
 ## There is no createEffect, no createRoot and no getOwner in this file's code.
 import codetracer_plugin
+## `std/times` is on the allow-list, so the clean baseline exercises check 19's
+## ADMITTED path rather than only its empty one — a rule graded only on files
+## that import no std module at all is a rule nothing has ever let through.
+import std/times
 
 proc activate*() =
   pluginEffect("watch", proc() = discard)
@@ -506,7 +625,7 @@ assert_fires "${t}" "plugin-imports-narrow" \
 t="$(make_tree later-piece-conditional-is-not-a-refusal)"
 cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
 import codetracer_plugin
-discard 1; when not defined(js): import std/os
+discard 1; when not defined(js): import std/strutils
 proc activate*() = discard
 EOF
 assert_clean "${t}" \
@@ -615,7 +734,7 @@ assert_fires "${t}" "plugin-imports-narrow" \
 t="$(make_tree block-comment-line-with-a-clean-import-is-clean)"
 cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
 import codetracer_plugin
-discard 1; #[c]# when not defined(js): import std/os
+discard 1; #[c]# when not defined(js): import std/strutils
 proc activate*() = discard
 EOF
 assert_clean "${t}" \
@@ -695,7 +814,7 @@ assert_fires "${t}" "plugin-imports-narrow" \
 t="$(make_tree import-continuation-line-with-a-clean-import-is-clean)"
 {
 	printf 'import\n'
-	printf '  codetracer_plugin; when not defined(js): import std/os\n'
+	printf '  codetracer_plugin; when not defined(js): import std/strutils\n'
 	printf 'proc activate*() = discard\n'
 } >"${t}/${FIXTURES}/p.nim"
 assert_clean "${t}" \
@@ -928,11 +1047,11 @@ assert_fires "${t}" "closure-is-readable" \
 t="$(make_tree closure-stdlib-import)"
 cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
 import codetracer_plugin
-import std/[strutils, monotimes]
+import std/[strutils, times]
 proc activate*() = discard "x".strip()
 EOF
 assert_clean "${t}" \
-	"the SAME import spelled 'std/…' is admitted — the standard library carries no reactive primitive"
+	"the SAME import spelled 'std/…' AND on the allow-list is clean — check 11 stops asking and check 19 says yes"
 
 t="$(make_tree closure-unreadable-in-a-helper)"
 cat >"${t}/${VM}/quiet_helper.nim" <<'EOF'
@@ -1200,6 +1319,397 @@ assert_fires "${t}" "plugin-uses-the-surface" \
 	"imports nothing satisfies every rule above vacuously"
 
 # ---------------------------------------------------------------------------
+# PLAT-8: sync-io-set-nonempty, plugin-names-no-sync-io, sdk-does-not-block
+#
+# The same three shapes PLAT-7's set gets: the set can be empty (§4/§6a), the
+# rule can be broken in the declared file OR in a helper one hop away, and the
+# scanner must tell code from prose, from a string literal and from an
+# `export … except` clause.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree sync-io-module-missing)"
+rm -f "${t}/${VM}/plugin_host/plugin_io.nim"
+assert_fires "${t}" "sync-io-set-nonempty" \
+	"a tree with no plugin_io.nim is a finding, not a silently skipped check" \
+	"plugin_io.nim does not exist"
+
+t="$(make_tree sync-io-table-empty)"
+cat >"${t}/${VM}/plugin_host/plugin_io.nim" <<'EOF'
+import codetracer_embed
+
+# The imports and the pragma are carried over from the baseline UNCHANGED, so
+# this case still differs from it in exactly one way. Without them checks 20 and
+# 22 lose their subject and fire alongside check 14, and a case that trips three
+# checks is a case that has stopped saying which one it is about.
+import std/strutils
+import std/[asyncdispatch, asyncfile, asyncnet, nativesockets, net, os,
+            osproc, posix, strtabs]
+
+const
+  PluginDeniedSyncIo*: array[0,
+      tuple[primitive, replacement: string, hostOnly: bool]] = [
+  ]
+
+let O_NOFOLLOW_CT {.importc: "O_NOFOLLOW", header: "<fcntl.h>".}: cint
+EOF
+assert_fires "${t}" "sync-io-set-nonempty" \
+	"an empty denied-sync-io table is a finding rather than a vacuous pass" \
+	"no primitive parsed"
+
+t="$(make_tree sync-io-in-plugin)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+
+proc activate*() =
+  let text = readFile("/etc/hosts")
+  discard text
+EOF
+assert_fires "${t}" "plugin-names-no-sync-io" \
+	"a plugin calling readFile is caught — system's readFile cannot be filtered from any scope" \
+	"readFile" "ctx.readPath"
+
+t="$(make_tree sync-io-qualified)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+
+proc activate*() =
+  discard system.readFile("/etc/hosts")
+EOF
+assert_fires "${t}" "plugin-names-no-sync-io" \
+	"the module-qualified spelling is caught too — it is what a scope filter cannot reach" \
+	"readFile"
+
+t="$(make_tree sync-io-in-helper)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+import ../../../blocking_helper
+EOF
+cat >"${t}/${VM}/blocking_helper.nim" <<'EOF'
+proc slurp*(path: string): string =
+  readFile(path)
+EOF
+assert_fires "${t}" "plugin-names-no-sync-io" \
+	"a helper module blocking on the plugin's behalf is the same finding" \
+	"blocking_helper" "readFile"
+
+t="$(make_tree sync-io-in-prose)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+## This plugin does not call readFile, execProcess or waitFor anywhere.
+import codetracer_plugin
+
+proc activate*() = discard
+EOF
+assert_clean "${t}" \
+	"a plugin naming every sync-I/O primitive in PROSE is clean"
+
+t="$(make_tree sync-io-in-string)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+
+const Advice* = "do not call readFile or waitFor from a plugin"
+
+proc activate*() = discard
+EOF
+assert_clean "${t}" \
+	"a plugin naming a sync-I/O primitive inside a STRING is clean — a literal calls nothing"
+
+t="$(make_tree sdk-blocks)"
+cat >>"${t}/${VM}/plugin_host/plugin_io.nim" <<'EOF'
+
+proc slurp*(path: string): string =
+  readFile(path)
+EOF
+assert_fires "${t}" "sdk-does-not-block" \
+	"the SDK blocking on every plugin's behalf is caught, though every plugin is clean" \
+	"readFile"
+
+t="$(make_tree sdk-exempts-itself)"
+sed -i 's/("startProcess", "ctx.spawnProcess", true)/("startProcess", "ctx.spawnProcess", false)/' \
+	"${t}/${VM}/plugin_host/plugin_io.nim"
+assert_fires "${t}" "sdk-does-not-block" \
+	"the hostOnly exemption is read from the TABLE, so clearing it reddens the gate" \
+	"startProcess"
+
+t="$(make_tree sdk-marks-a-second-entry)"
+sed -i 's/("waitFor",      "await",            false)/("waitFor",      "await",            true)/' \
+	"${t}/${VM}/plugin_host/plugin_io.nim"
+assert_clean "${t}" \
+	"marking an entry hostOnly in the table is what exempts it, and the gate says which"
+
+# ---------------------------------------------------------------------------
+# THE IMPORT ALLOW-LIST — checks 18, 19 and 20
+#
+# The three denied lists above answer "did the plugin name one of the things we
+# thought of". These answer the complement, and they exist because the denied
+# lists were MEASURED LOSING on 2026-09-09: a declared plugin importing
+# `codetracer_plugin` and `std/posix` read `/etc/hostname` with no `fs:read`
+# grant and fork+exec'd `/bin/sh` with no `process` grant, over a gate printing
+# `19 check(s), 0 failing`.
+#
+# THE ACCEPTANCE CASE IS FIRST AND IT IS THE REAL EXPLOIT'S OWN BYTES. The
+# probe is a committed file (`plugin_probes/posix_raw_plugin.nim.probe`) that
+# `test_plugin_source_admission.nim` COMPILES AND RUNS: it reads the file and
+# reaches the shell, and both effects are asserted there against sentinels
+# rather than against anything either instrument printed. Copying the same
+# bytes here rather than paraphrasing them is Verification-Harness-Traps §14 —
+# a second copy of an exploit is a second thing that can drift while each half
+# goes on agreeing with itself, and the half that would drift is the one nobody
+# runs.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree the-posix-probe)"
+cp "${repo_root}/src/frontend/viewmodel/tests/unit/plugin_probes/posix_raw_plugin.nim.probe" \
+	"${t}/${FIXTURES}/posix_raw_plugin.nim"
+assert_fires "${t}" "plugin-imports-allow-listed" \
+	"THE PROBE: a declared plugin importing std/posix is refused, naming the module and the import" \
+	"posix_raw_plugin.nim imports std/posix" \
+	"which is not in PluginAllowedStdlibModules"
+
+# The same exploit one hop out. A boundary an undeclared helper module defeats
+# is a boundary a plugin author defeats by accident — the defect PLAT-7 paid
+# for on checks 1 and 2, asked of check 19 before it can be found the same way.
+t="$(make_tree unadmitted-in-a-helper)"
+cat >"${t}/${VM}/os_helper.nim" <<'EOF'
+import std/posix
+proc pid*(): int = int(getpid())
+EOF
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+import ../../../os_helper
+proc activate*() = discard pid()
+EOF
+assert_fires "${t}" "plugin-imports-allow-listed" \
+	"the same import ONE HOP OUT, in an undeclared helper, is refused and the HELPER is named" \
+	"os_helper.nim imports std/posix"
+
+# THE SDK'S OWN INTERNALS ARE BOUND TOO, and this is the case that says so.
+# The allow-list is over `std/` specs; what keeps an SDK internal from being a
+# way around it is the CLOSURE WALK, which enters every repository module a
+# plugin reaches and applies the same rule there. The two TERMINALS
+# (`codetracer_plugin` and `plugin_host/plugin_io`) are the deliberate
+# exception — they are reached and not entered, because they are what a plugin
+# calls INSTEAD of the operating system, and the case above them asserts that.
+t="$(make_tree plugin-reaching-an-sdk-internal)"
+cat >"${t}/${VM}/plugin_host/handles.nim" <<'EOF'
+import std/os
+proc handleCount*(): int = paramCount()
+EOF
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+import plugin_host/handles
+proc activate*() = discard handleCount()
+EOF
+assert_fires "${t}" "plugin-imports-allow-listed" \
+	"an SDK INTERNAL reached from a plugin is bound by the same rule — the walk enters it" \
+	"handles.nim imports std/os"
+
+# `std/asyncdispatch` is the one a reader will think is already handled. It is
+# not: the SDK re-exports it with `waitFor`, `runForever`, `poll` and `drain`
+# filtered out, and a plugin importing it ITSELF gets all four back. An
+# `export … except` narrows one path and cannot narrow a second one the plugin
+# opens for itself.
+t="$(make_tree unadmitted-asyncdispatch)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+import std/asyncdispatch
+proc activate*() = discard
+EOF
+assert_fires "${t}" "plugin-imports-allow-listed" \
+	"importing std/asyncdispatch DIRECTLY is refused — the export-except filter binds one path only" \
+	"std/asyncdispatch"
+
+# THE POSITIVE TWIN. Verification-Harness-Traps §4a: a rule that refuses
+# everything passes every "is it refused" case ever written, so the case that a
+# permitted import is PERMITTED is what makes the refusals above mean anything.
+t="$(make_tree admitted-imports-are-clean)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+import std/[strutils, tables, times]
+proc activate*() = discard
+EOF
+assert_clean "${t}" \
+	"a plugin importing only allow-listed modules is clean — the rule permits as well as refuses"
+
+# AND THE LIST IS READ FROM THE TABLE. The pair below is the whole argument for
+# the table living in nim rather than in this script: the same plugin, refused
+# under the baseline list and clean once the table names the module. A gate with
+# the list hardcoded passes the first case and fails the second.
+t="$(make_tree unadmitted-monotimes)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+import std/monotimes
+proc activate*() = discard
+EOF
+assert_fires "${t}" "plugin-imports-allow-listed" \
+	"a std module absent from the table is refused, whatever anybody thinks of it" \
+	"std/monotimes"
+
+t="$(make_tree admitted-monotimes)"
+sed -i 's|("std/times", "a clock is not a mediated kind"),|("std/times", "a clock is not a mediated kind"),\n    ("std/monotimes", "a monotonic counter is not a mediated kind either"),|' \
+	"${t}/${COMMON}/plugin_model/source_admission.nim"
+sed -i '0,/array\[3, tuple/s//array[4, tuple/' \
+	"${t}/${COMMON}/plugin_model/source_admission.nim"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+import std/monotimes
+proc activate*() = discard
+EOF
+assert_clean "${t}" \
+	"the SAME module becomes clean once the TABLE names it — the gate reads it, it does not hold it"
+
+# `system` is admitted and cannot be anything else: it is auto-imported, so
+# there is no import to refuse. The case exists so the special-case in
+# `stdlib_admitted` is graded rather than assumed, and so the residual has a
+# line in a suite instead of only a line in a header.
+t="$(make_tree system-import-is-admitted)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+import system
+proc activate*() = discard
+EOF
+assert_clean "${t}" \
+	"'import system' is admitted — it is auto-imported anyway, so refusing the spelling would buy nothing"
+
+t="$(make_tree allow-list-table-empty)"
+cat >"${t}/${COMMON}/plugin_model/source_admission.nim" <<'EOF'
+const
+  PluginAllowedStdlibModules*: array[0, tuple[primitive, replacement: string]] = [
+  ]
+  PluginDeniedFfiPragmas*: array[1, tuple[primitive, replacement: string]] = [
+    ("importc", "call the SDK"),
+  ]
+EOF
+assert_fires "${t}" "stdlib-allow-list-nonempty" \
+	"an empty allow-list table is a NAMED finding, not twenty unexplained refusals" \
+	"no module parsed"
+
+t="$(make_tree allow-list-entry-misspelled)"
+sed -i 's|("std/tables", "hash tables over in-memory values"),|("tables", "hash tables over in-memory values"),|' \
+	"${t}/${COMMON}/plugin_model/source_admission.nim"
+assert_fires "${t}" "stdlib-allow-list-nonempty" \
+	"an entry not spelled 'std/<module>' is refused with the spelling in the remedy" \
+	"not spelled 'std/<module>'"
+
+# THE CONTROL'S OWN TWO HALVES, broken one at a time. Check 20 is what stops
+# check 19 from being satisfied by a scanner that reads nothing, so a suite that
+# never breaks it has taken the control on trust.
+t="$(make_tree control-loses-its-admitted-import)"
+sed -i '/^import std\/strutils$/d' "${t}/${VM}/plugin_host/plugin_io.nim"
+assert_fires "${t}" "allow-list-scan-discriminates" \
+	"the control's NEGATIVE half needs a real admitted import, and says so when it has none" \
+	"does not import std/strutils"
+
+t="$(make_tree control-count-moves)"
+sed -i 's|("std/times", "a clock is not a mediated kind"),|("std/times", "a clock is not a mediated kind"),\n    ("std/os", "PLANTED: this is what admitting an operating-system module looks like"),|' \
+	"${t}/${COMMON}/plugin_model/source_admission.nim"
+sed -i '0,/array\[3, tuple/s//array[4, tuple/' \
+	"${t}/${COMMON}/plugin_model/source_admission.nim"
+assert_fires "${t}" "allow-list-scan-discriminates" \
+	"admitting an operating-system module moves the control's pinned count, and the gate says by how much" \
+	"expected 9"
+
+# ---------------------------------------------------------------------------
+# THE FOREIGN-FUNCTION PRAGMA — checks 21 and 22
+#
+# The attack on the allow-list, run on the day it was written. An FFI pragma
+# needs NO import, so refusing every module in the world would not reach it.
+# Measured, compiled and run against the real surface: a module whose entire
+# content is `import codetracer_plugin` plus one `{.importc: "system",
+# header: "<stdlib.h>".}` declaration created its sentinel.
+# ---------------------------------------------------------------------------
+
+t="$(make_tree ffi-importc-in-a-plugin)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+proc c_system(cmd: cstring): cint {.importc: "system", header: "<stdlib.h>".}
+proc activate*() = discard c_system("true")
+EOF
+assert_fires "${t}" "plugin-binds-no-foreign-function" \
+	"one importc line is arbitrary code execution with no grant, and it is refused by name" \
+	"p.nim binds a foreign function with 'importc'"
+
+# The multi-line spelling. A per-line regex reads the first line and loses the
+# rest in SILENCE, which is the failure mode this gate's own import extractor
+# was repaired for seven times; the span accumulator is why this is caught.
+t="$(make_tree ffi-pragma-across-lines)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+proc c_execv(path: cstring; argv: cstringArray): cint {.
+  importc: "execv",
+  header: "<unistd.h>".}
+proc activate*() = discard
+EOF
+assert_fires "${t}" "plugin-binds-no-foreign-function" \
+	"a pragma split ACROSS LINES is read too — the scan accumulates the span, it does not match a line" \
+	"p.nim binds a foreign function with 'importc'"
+
+# `{.push.}` carries no routine at all, so a scan keyed on a proc declaration
+# would miss it entirely.
+t="$(make_tree ffi-push-pragma)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+{.push dynlib: "libc.so.6".}
+proc c_fork(): cint
+{.pop.}
+proc activate*() = discard
+EOF
+assert_fires "${t}" "plugin-binds-no-foreign-function" \
+	"a '{.push dynlib.}' with no routine on it is read too" \
+	"p.nim binds a foreign function with 'dynlib'"
+
+# THE NEGATIVE TWIN, and it is the one that decides whether this check is usable
+# at all. `header`, `link`, `compile` and `emit` are ordinary English words. A
+# scan for them as bare identifiers would refuse a plugin with a variable called
+# `header`, and the remedy would be to rename the variable — which is
+# Verification-Harness-Traps §4d's smell pointed at code instead of at prose.
+t="$(make_tree ffi-words-outside-a-pragma-are-clean)"
+cat >"${t}/${FIXTURES}/p.nim" <<'EOF'
+import codetracer_plugin
+type Row = object
+  header*: string
+  link*: string
+proc compile(r: Row): string = r.header & r.link
+proc activate*() =
+  var emit = Row(header: "h", link: "l")
+  discard compile(emit)
+EOF
+assert_clean "${t}" \
+	"the same WORDS outside a pragma are clean — the finding is a pragma, not a vocabulary"
+
+t="$(make_tree ffi-table-empty)"
+cat >"${t}/${COMMON}/plugin_model/source_admission.nim" <<'EOF'
+const
+  PluginAllowedStdlibModules*: array[3, tuple[primitive, replacement: string]] = [
+    ("std/strutils", "string manipulation over values already in memory"),
+    ("std/tables", "hash tables over in-memory values"),
+    ("std/times", "a clock is not a mediated kind"),
+  ]
+
+  PluginDeniedFfiPragmas*: array[0, tuple[primitive, replacement: string]] = [
+  ]
+EOF
+assert_fires "${t}" "ffi-pragma-set-nonempty" \
+	"an empty FFI-pragma table is a finding rather than a vacuous pass" \
+	"no pragma parsed"
+
+t="$(make_tree ffi-control-loses-its-subject)"
+sed -i '/O_NOFOLLOW_CT/d' "${t}/${VM}/plugin_host/plugin_io.nim"
+assert_fires "${t}" "ffi-scan-reads-pragmas" \
+	"the FFI control says so when its positive subject is gone, rather than reporting a clean scan" \
+	"expected 2"
+
+t="$(make_tree ffi-control-loses-its-span-bound)"
+cat >>"${t}/${VM}/plugin_host/plugin_api.nim" <<'EOF'
+
+# A pragma word in ORDINARY CODE, in the file check 22 requires to be quiet.
+# If the scan ever loses its `{. … .}` bound this line is what reports it.
+proc headerOf(s: string): string = s
+var header = "not a pragma"
+EOF
+assert_clean "${t}" \
+	"a pragma WORD in the control's quiet subject keeps it quiet — the bound is asserted, not assumed"
+
+# ---------------------------------------------------------------------------
 # Argument handling
 # ---------------------------------------------------------------------------
 
@@ -1244,6 +1754,223 @@ if grep -qF "${VM}/quiet_helper.nim" <<<"${listed}" &&
 	ok "--list-closure names the reached helper, the declared plugin, and NOT the terminal surface"
 else
 	bad "--list-closure names the reached helper, the declared plugin, and NOT the terminal surface" "${listed}"
+fi
+
+# ---------------------------------------------------------------------------
+# THE DERIVED `system` SURFACE — checks 23 and 24
+#
+# The fifth list, and the only one not written down in this repository:
+# `system.nim` ends with `export syncio`, so what a plugin can name with no
+# import and no pragma is whatever the compiler on PATH exports there. The
+# check requires the two tables to PARTITION that set.
+#
+# It exists because the hand-kept version lost three times, and the third time
+# a plugin whose entire import list was `import codetracer_plugin` read and
+# wrote any file the user could, with nineteen checks green above it: the
+# residual named ten routines, `open` was among them and denied nowhere, and
+# `readBuffer` / `writeBuffer` were not among them at all.
+# ---------------------------------------------------------------------------
+
+# A NAME ON NEITHER TABLE IS THE FINDING, and `open` is the right one to drop:
+# it is the name the old residual DID write down and did not deny.
+t="$(make_tree system-surface-name-unaccounted)"
+io_fixture="${t}/${VM}/plugin_host/plugin_io.nim"
+grep -v '("open", "fixture' "${io_fixture}" >"${io_fixture}.trimmed"
+mv "${io_fixture}.trimmed" "${io_fixture}"
+assert_fires "${t}" "system-surface-enumerated" \
+	"a name the compiler puts in every plugin's scope, on neither table, is a NAMED finding" \
+	"open — exported by system, on neither table"
+
+# THE SWEEP ITSELF IS THE THING THAT CAN BE WRONG, so it is controlled in both
+# directions on the real repository rather than argued about: `readFile` is
+# `system`'s and must be derived; `fork` is `std/posix`'s and must not be,
+# because that is the ALLOW-list's mechanism and not this one's. A sweep that
+# had drifted onto the wrong module, or that had started reading the whole
+# stdlib, fails one of the two.
+if [ -n "${SYSTEM_SURFACE_ALL}" ] &&
+	grep -qxF readFile <<<"${SYSTEM_SURFACE_ALL}" &&
+	! grep -qxF fork <<<"${SYSTEM_SURFACE_ALL}"; then
+	ok "the sweep derives system's own names and not std/posix's ($(grep -c . <<<"${SYSTEM_SURFACE_ALL}") name(s))"
+else
+	bad "the sweep derives system's own names and not std/posix's" "${SYSTEM_SURFACE_ALL}"
+fi
+
+# AND IT FAILS CLOSED. A sweep that derived nothing must be a FAILURE and not a
+# clean surface — Verification-Harness-Traps §4, which is the trap this whole
+# check was written to escape. Asserted by pointing the gate at a PATH with no
+# nim on it, which is the real way the sweep goes empty.
+# Only `nim` is taken away — an empty PATH would break `grep`, `awk` and `git`
+# too, and the case would then pass for a reason that is not the one it claims.
+t="$(make_tree system-surface-sweep-empty)"
+no_nim="${work}/no-nim"
+mkdir -p "${no_nim}"
+printf '#!/bin/sh\nexit 127\n' >"${no_nim}/nim"
+chmod +x "${no_nim}/nim"
+empty_output="$(PATH="${no_nim}:${PATH}" bash "${guard}" --root "${t}" 2>&1 || true)"
+if grep -q "VIOLATION system-surface-enumerated" <<<"${empty_output}" &&
+	grep -q "derived NO name" <<<"${empty_output}"; then
+	ok "a sweep that derives nothing is a FAILURE, not a clean surface"
+else
+	bad "a sweep that derives nothing is a FAILURE, not a clean surface" "${empty_output}"
+fi
+
+# AND THE FAILURE SAYS WHY. Until 2026-09-10 the gate discarded nim's exit code
+# and its stderr (`2>/dev/null`) and then printed three guesses, so "nim is not
+# on PATH" was indistinguishable in the transcript from "nim was killed" and
+# from "the stdlib moved". That is not a nicety: this check firing once, for a
+# reason nobody could read off the run, cost this campaign two verification
+# passes. The stub above exits 127, and the transcript has to say so.
+if grep -q 'dump` exited 127' <<<"${empty_output}"; then
+	ok "the empty sweep NAMES its reason — nim's own exit code reaches the transcript"
+else
+	bad "the empty sweep NAMES its reason — nim's own exit code reaches the transcript" "${empty_output}"
+fi
+
+# A COMPILER THAT IS PRESENT BUT CANNOT BE RUN IS NOT AN EMPTY SURFACE.
+#
+# The case above and this one are the two halves of the same question and they
+# must answer it differently, which is why they sit together. Both have a `nim`
+# on PATH that exits non-zero and prints nothing; they differ in ONE fact —
+# whether a Nim standard library is sitting next to that executable.
+#
+# WHY THE DIFFERENCE IS THE RIGHT ONE. Nothing in this sweep needs nim to
+# execute: it reads the stdlib's SOURCE off disk, and `nim dump` is asked only
+# because the library's location is not guessable across the nix and source
+# layouts. So when `dump` cannot be read but the executable is sitting beside a
+# library that carries `std/syncio.nim`, the sweep that follows is the SAME
+# sweep over the SAME files, and refusing it would report "this repository has
+# an unaccounted surface" when the true statement is "this machine could not
+# start a process". That is not hypothetical: on 2026-09-11 a host at load ~1200
+# with two gigabytes free — 1250 orphaned processes from an unrelated runaway —
+# reddened check 23 inside the ViewModel suite (`vm-unit`,
+# `test_plugin_source_admission.nim`, three VIOLATIONs where the case pins two),
+# and the finding was the host.
+#
+# THE STUB EXITS 137 — SIGKILL — because that is the shape the real failure had.
+# `lib` is a symlink to the pinned compiler's real library, which is also the
+# nix layout's own shape (`<prefix>/lib -> nim/lib`), so `pwd -P` resolving it
+# is exercised rather than assumed.
+t="$(make_tree system-surface-lib-from-exe)"
+fallback_nim="${work}/fallback-nim"
+mkdir -p "${fallback_nim}/bin"
+printf '#!/bin/sh\nexit 137\n' >"${fallback_nim}/bin/nim"
+chmod +x "${fallback_nim}/bin/nim"
+ln -s "$(system_surface_lib)" "${fallback_nim}/lib"
+fallback_output="$(PATH="${fallback_nim}/bin:${PATH}" bash "${guard}" --root "${t}" 2>&1 || true)"
+if ! grep -q "VIOLATION system-surface-enumerated" <<<"${fallback_output}" &&
+	grep -qE "OK        system-surface-enumerated: [1-9][0-9]* derived name" <<<"${fallback_output}"; then
+	ok "a nim that cannot be RUN but sits beside its library still yields the full surface"
+else
+	bad "a nim that cannot be RUN but sits beside its library still yields the full surface" \
+		"${fallback_output}"
+fi
+
+# AND THE FALLBACK SAYS SO, ON THE PATH WHERE IT SUCCEEDS. A lookup that
+# silently changed which directory it swept would be indistinguishable in a
+# transcript from one that did not, and "the compiler could not be executed" is
+# exactly the environment fact whose absence from the transcript cost this
+# campaign two verification passes when the FAILING spelling of it arrived.
+# Asserted under the OK, because that is the path on which silence is tempting.
+if grep -q "derived from where the nim on PATH SITS" <<<"${fallback_output}" &&
+	grep -q 'dump` exited 137' <<<"${fallback_output}"; then
+	ok "the executable-relative fallback NAMES itself and nim's exit code, under the OK"
+else
+	bad "the executable-relative fallback NAMES itself and nim's exit code, under the OK" \
+		"${fallback_output}"
+fi
+
+# THE FALLBACK'S OWN CONTROL (Verification-Harness-Traps §15). A repair that
+# adds a second derivation owes the case in which the two must AGREE, written as
+# the case that must keep passing — otherwise the day they diverge, the sweep
+# quietly describes a stdlib the compiler does not use, and the only evidence
+# would be a comment claiming they cannot.
+#
+# The comparison is a plain string equality because both sides resolve symlinks:
+# `nim dump` names the real directory and `system_surface_lib_from_exe` runs
+# `pwd -P`. On the pinned 2.2.8 that is `<prefix>/nim/lib` from both, reached
+# through `<prefix>/lib` on the second.
+exe_lib="$(cd "${repo_root}" && system_surface_lib_from_exe 2>/dev/null || true)"
+dump_lib="$(cd "${repo_root}" && system_surface_lib 2>/dev/null || true)"
+if [ -n "${exe_lib}" ] && [ "${exe_lib}" = "${dump_lib}" ]; then
+	ok "the fallback's derivation agrees with \`nim dump\` (${exe_lib})"
+else
+	# THE LABEL CARRIES AN APOSTROPHE ON PURPOSE, and it is not a style choice:
+	# `shfmt -s` rewrites a double-quoted literal that needs no expansion into a
+	# single-quoted one, and a single-quoted literal containing a BACKTICK PAIR
+	# is SC2016 to shellcheck. Both run as pre-commit hooks, so a label of
+	# `"... \`nim dump\`"` cannot satisfy them both. The sibling case below
+	# ("the sweep's compiler lookup …") is already immune for the same reason.
+	bad "the fallback's derivation agrees with \`nim dump\`" \
+		"dump: ${dump_lib}
+exe:  ${exe_lib}"
+fi
+
+# AND IT IS VALIDATED, NOT GUESSED. The directory is returned only once a root
+# has been looked at — the same list the sweep then reads
+# (`SYSTEM_SURFACE_ROOTS_REL`), so the directory a lookup ACCEPTS and the files
+# the sweep READS cannot come apart. Driven with the real library minus one
+# root, which is the shape a repackaged or half-installed distribution has and
+# the shape an unvalidated guess would accept.
+partial_nim="${work}/partial-nim"
+mkdir -p "${partial_nim}/bin" "${partial_nim}/lib/std"
+printf '#!/bin/sh\nexit 137\n' >"${partial_nim}/bin/nim"
+chmod +x "${partial_nim}/bin/nim"
+ln -s "$(system_surface_lib)/std/syncio.nim" "${partial_nim}/lib/std/syncio.nim"
+partial_lib="$(PATH="${partial_nim}/bin:${PATH}" bash -c '
+	. "'"${repo_root}"'/ci/lib/system-io-surface.sh"
+	system_surface_lib_from_exe 2>/dev/null || true')"
+if [ -z "${partial_lib}" ]; then
+	ok "a library directory missing one of the sweep's roots is NOT accepted"
+else
+	bad "a library directory missing one of the sweep's roots is NOT accepted" "${partial_lib}"
+fi
+
+# A LOOKUP THAT LANDS SOMEWHERE PLAUSIBLE BUT WRONG IS A NAMED REFUSAL, not an
+# empty sweep. This is the other half of failing closed, and it is a different
+# failure from the case above: there `nim` is gone, which is the loud way to
+# derive nothing; here `nim` answers, and answers with a library directory that
+# has no `std/syncio.nim` under it — the shape a moved stdlib, a repackaged
+# distribution or a mis-read dump line actually has. Before the root check the
+# sweep opened no file, emitted no name, and said nothing anywhere about having
+# missed one: Verification-Harness-Traps §4, arriving through the scan's INPUT
+# rather than through its pattern.
+t="$(make_tree system-surface-lib-has-no-roots)"
+wrong_nim="${work}/wrong-nim"
+mkdir -p "${wrong_nim}"
+printf '#!/bin/sh\necho /nonexistent/lib/pure\n' >"${wrong_nim}/nim"
+chmod +x "${wrong_nim}/nim"
+wrong_output="$(PATH="${wrong_nim}:${PATH}" bash "${guard}" --root "${t}" 2>&1 || true)"
+if grep -q "VIOLATION system-surface-enumerated" <<<"${wrong_output}" &&
+	grep -q "/nonexistent/lib/std/syncio.nim" <<<"${wrong_output}"; then
+	ok "a compiler lookup that lands on a library with no roots NAMES the missing root"
+else
+	bad "a compiler lookup that lands on a library with no roots NAMES the missing root" "${wrong_output}"
+fi
+
+# THE REPAIR'S OWN CONTROL (Verification-Harness-Traps §15). `system_surface_lib`
+# asks nim with `--skipUserCfg --skipParentCfg --skipProjCfg`, so its answer is
+# a property of the COMPILER and not of whatever tree `--root` happens to name —
+# the reason being that a plain `nim dump` evaluates the project configuration
+# of the directory the gate is standing in, which for the ViewModel suite is a
+# synthetic tree inside this repository, so `codetracer/config.nims` runs in
+# full for a question about where the stdlib lives.
+#
+# What makes that safe rather than merely six times cheaper is that the two
+# spellings resolve to the SAME directory. A configuration that redirected
+# `--lib` would be swept differently by the two, and this repository has no
+# `--lib` anywhere; the day one arrives, this case goes red instead of the
+# sweep quietly describing a stdlib the compiler does not use. A repair that
+# normalises one side of a comparison owes the case in which the other side
+# needed no treatment, written as the case that must keep passing.
+plain_dump_lib="$(cd "${repo_root}" && nim dump 2>&1 | grep -E '/lib/pure$' || true)"
+plain_dump_lib="${plain_dump_lib%%$'\n'*}"
+swept_lib="$(cd "${repo_root}" && system_surface_lib 2>/dev/null || true)"
+if [ -n "${swept_lib}" ] && [ "${plain_dump_lib%/pure}" = "${swept_lib}" ]; then
+	ok "the sweep's compiler lookup agrees with a plain \`nim dump\` (${swept_lib})"
+else
+	bad "the sweep's compiler lookup agrees with a plain \`nim dump\`" \
+		"plain: ${plain_dump_lib}
+swept: ${swept_lib}"
 fi
 
 # ---------------------------------------------------------------------------

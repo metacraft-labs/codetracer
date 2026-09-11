@@ -558,17 +558,25 @@ MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "G10", GATE,
-        "\t\t[ \"${resolved}\" = \"${terminal}\" ] && continue",
-        "\t\t[ \"${resolved}\" = \"\" ] && continue",
+        "\t\t\t[ -n \"${stop[${resolved}]+x}\" ] && continue",
+        "\t\t\t[ -n \"\" ] && continue",
         G_TERMINAL, BASH_GATE,
         "the sanctioned surface stops being a terminal, so the walk enters it, "
         "finds its `import codetracer_embed` — a DENIED import — and reports "
         "every plugin in the tree for consuming the surface correctly. The "
         "terminal is load-bearing in the other direction too, which is why it "
-        "is a parameter of the walk rather than a filter applied afterwards.",
-        control_name="the terminal comparison is written with the operands swapped",
-        control_find="\t\t[ \"${resolved}\" = \"${terminal}\" ] && continue",
-        control_replace="\t\t[ \"${terminal}\" = \"${resolved}\" ] && continue",
+        "is a parameter of the walk rather than a filter applied afterwards.\n"
+        "\n"
+        "        The needle moved on 2026-09-08: PLAT-8 made the terminal a "
+        "LIST, because `codetracer_plugin.nim` now re-exports `plugin_io` "
+        "beside the facade and check 12's control would otherwise walk the "
+        "whole plugin model. The membership test replaced a string comparison; "
+        "the arm is the same claim about the same line.",
+        control_name="the terminal-membership test is written as an if",
+        control_find="\t\t\t[ -n \"${stop[${resolved}]+x}\" ] && continue",
+        control_replace="\t\t\tif [ -n \"${stop[${resolved}]+x}\" ]; then\n"
+                        "\t\t\t\tcontinue\n"
+                        "\t\t\tfi",
     ),
     Mutation(
         "G11", GATE,
@@ -976,6 +984,54 @@ def read_control_hashes() -> dict[str, str]:
     return out
 
 
+def needle_scan() -> list[str]:
+    """Every arm whose `find` or `control_find` does not occur EXACTLY ONCE.
+
+    Verification-Harness-Traps §16, which this harness's sibling
+    (`run-plat8-io-mutations.py`) paid for on 2026-09-09: two of its arms had
+    lost their needles under repairs to the files they quote, and an arm whose
+    needle no longer occurs can never be applied and therefore never killed —
+    it is a row in the table that LOOKS like coverage.
+
+    THIS HARNESS IS EXPOSED TO EXACTLY THAT, and more than its sibling is: four
+    of its arms quote `ci/test/plugin-reactive-boundary.sh`, a file that has now
+    been repaired seven times by PLAT-7's own passes and once more by PLAT-8's
+    source-admission pass. It runs before the killer pre-flight and it GATES
+    `--record-control-hashes`, because re-recording is the moment the new bytes
+    are blessed and doing it first certifies the arms that have just stopped
+    describing them.
+    """
+    problems: list[str] = []
+    arms = list(MUTATIONS) + list(globals().get("DECLARED_SURVIVORS", []))
+    for mut in arms:
+        body = (ROOT / mut.path).read_text()
+        for label, needle in (("find", mut.find),
+                              ("control_find", mut.control_find)):
+            if not needle:
+                continue
+            n = body.count(needle)
+            if n != 1:
+                problems.append(
+                    f"{mut.id}: {label} occurs {n} time(s) in {mut.path}, "
+                    f"expected exactly 1")
+    return problems
+
+
+def report_needle_scan() -> int:
+    problems = needle_scan()
+    arms = len(MUTATIONS) + len(globals().get("DECLARED_SURVIVORS", []))
+    if not problems:
+        print(f"  all {arms} arm(s) resolve to exactly one needle and one "
+              f"control needle")
+        return 0
+    print("ARM NEEDLES DO NOT RESOLVE — nothing was mutated and nothing recorded.")
+    for line in problems:
+        print(f"  {line}")
+    print("  An arm whose needle no longer occurs can never be applied and can")
+    print("  never be killed; it sits in the table looking like coverage.")
+    return 2
+
+
 def write_control_hashes() -> None:
     body = ["# Control digests for run-plat7-boundary-mutations.py.",
             "#",
@@ -1047,7 +1103,15 @@ def main() -> int:
     # restore, so a re-run after fixing one arm does not have to re-grade the
     # other sixteen and a tally cannot stand in for a named verdict.
     global MUTATIONS
+    if "--needle-scan" in sys.argv[1:]:
+        return report_needle_scan()
+
     if "--record-control-hashes" in sys.argv[1:]:
+        # THE SCAN IS A GATE ON RECORDING, not a report beside it. See
+        # `needle_scan` and Verification-Harness-Traps §16.
+        rc = report_needle_scan()
+        if rc:
+            return rc
         write_control_hashes()
         print(f"recorded {len(TOUCHED)} control digest(s) in "
               f"{CONTROL_HASHES.relative_to(ROOT)}")
@@ -1065,6 +1129,12 @@ def main() -> int:
     # THE TREE IS AT ITS CONTROL BYTES — asserted before anything is mutated,
     # against a RECORDED digest rather than against this run's own reading.
     rc = check_control_hashes()
+    if rc:
+        return rc
+
+    # BEFORE ANY MUTATION, for the same reason the killer pre-flight is: an arm
+    # that cannot be applied is not a thing to discover half way through a run.
+    rc = report_needle_scan()
     if rc:
         return rc
 

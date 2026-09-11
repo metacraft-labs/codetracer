@@ -49,6 +49,31 @@ type
     pecBlockedByDependency  ## §4.2: "does not activate half-alive"
     pecCoreTooOld           ## the host does not satisfy `requires.core`
     pecUnknownCommand       ## activation on a command nobody contributes
+    pecCapabilityWithoutDeclaration
+      ## PLAT-8. §8.1.1: the host resolves an executable "against a declared
+      ## set", and §8.1.2 grants `socket:remote` "to declared hosts". A grant
+      ## whose declared set is empty is a grant that permits nothing, and an
+      ## author who wrote it meant something else.
+    pecDeclarationWithoutCapability
+      ## The mirror. A manifest declaring executables it was not granted
+      ## `process` for reads, to a user, as though it could spawn them.
+    pecBadDeclaration
+      ## A declared executable that is a path rather than a name, a declared
+      ## host with an unusable port, a declared path that is not absolute.
+    pecTraceEgressNotAcknowledged
+      ## A capability composition that can move recorded data off the machine,
+      ## without the explicit, informed grant. PLAT-8's verification gate.
+      ##
+      ## TWO COMPOSITIONS TRIGGER IT, not one. §8.1.2's pair — `trace` +
+      ## `socket:remote` — and `process` on its own, because `process`
+      ## subsumes every other capability (`capabilities.SubsumingCapabilities`).
+      ## The second was added on 2026-09-09 after a plugin holding `trace`,
+      ## `fs:read` and `process` — no socket capability, no declared host —
+      ## exfiltrated a recording with this error never raised.
+    pecTraceEgressWithoutPair
+      ## The grant present without any such composition. A user was asked to
+      ## acknowledge an exfiltration path the plugin cannot take, which trains
+      ## them to acknowledge the next one without reading it.
 
   PluginError* = object
     plugin*: PluginId
@@ -85,6 +110,19 @@ func codeText*(c: PluginErrorCode): string =
   of pecBlockedByDependency: "blocked by a failed dependency"
   of pecCoreTooOld: "core version requirement not met"
   of pecUnknownCommand: "activation names a command nobody contributes"
+  of pecCapabilityWithoutDeclaration: "capability granted with nothing declared"
+  of pecDeclarationWithoutCapability: "declaration without the capability it needs"
+  of pecBadDeclaration: "malformed declaration"
+  of pecTraceEgressNotAcknowledged:
+    # NOT "'trace' + 'socket:remote'" any more. That spelling was the whole
+    # trigger until 2026-09-09 and it is now one of two: `process` subsumes
+    # every other capability, so it needs the same grant on its own, and a
+    # code text naming a composition the plugin does not hold is a wrong
+    # answer printed above a right one. The DETAIL is the disclosure and says
+    # which composition fired.
+    "an exfiltration path without the explicit trace-egress grant"
+  of pecTraceEgressWithoutPair:
+    "a trace-egress grant on a plugin that has no exfiltration path"
 
 func pluginError*(plugin: PluginId; code: PluginErrorCode;
                   detail: string): PluginError =

@@ -1,0 +1,20 @@
+# Control digests for run-plat8-io-mutations.py.
+#
+# ABSOLUTE, and that is the point. A baseline taken at start-up
+# cannot tell a clean tree from one a killed run left a mutation
+# in: it reads the mutation as the baseline, every restore then
+# verifies against the mutated bytes, and the only symptom is
+# `CONTROL IS NOT GREEN` — which describes a red suite without
+# naming the cause.
+#
+# Rewrite with --record-control-hashes, deliberately, when the
+# SDK, the policy or a gate changes on purpose.
+
+c6befd979a54d4a388ef33a47254f87a76757407b40ae25f675f790ce5168184  src/common/plugin_model/capabilities.nim
+49997cdcb395a9d54a9fc5ba3a54c105c732a2c7ac500d39e374ec0479c3bb22  src/common/plugin_model/manifest.nim
+3d4c62ca0a06f1921b0d6baf965c424c4ec42e114f98689a3a6ba9c08c8f0046  src/frontend/viewmodel/plugin_host/plugin_io.nim
+70e75bb33b8899e7108e2ac5c327509b41d87c3338948d813415c0beb3a295d7  src/frontend/viewmodel/plugin_host/handles.nim
+43d911e6aad32e16fa5841ac575914bc8ba712df20b68fe26eeef550d98ec08d  src/frontend/viewmodel/plugin_host/host.nim
+2e087f20de705add8e0e448d773f826aaf976a64ffcc32d18e2cdbd3256f3e10  ci/test/plugin-reactive-boundary.sh
+9e8c3b900ea455135b737129aedb79292fe3240999c9f6170d38a7eeb7e3c9eb  ci/test/sdk-facade-boundary.sh
+eea1e03b2a8b6dd6234f44facc1b6050b170bcbaca9b2903eb13a4a4e51d61bf  src/common/plugin_model/source_admission.nim

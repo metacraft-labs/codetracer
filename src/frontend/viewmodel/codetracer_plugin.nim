@@ -95,6 +95,36 @@
 ## over code that compiles and runs on every developer's machine; without the
 ## second it would be a speed bump.
 ##
+## ## AND THERE IS A THIRD HALF NOW, BECAUSE THE FIRST TWO BOUND THE WRONG SET
+##
+## Both halves above are about the ten reactive primitives, and both were true
+## and green on 2026-09-09 over a declared plugin that imported this module and
+## `std/posix`, read `/etc/hostname` with no `fs:read` grant and `fork`+`execv`d
+## `/bin/sh` with no `process` grant. Neither half could have refused it: they
+## bind NAMES, and `std/posix` spells the same operations `open`, `read`,
+## `write`, `socket`, `connect`, `fork` and `execv` — and `read` and `write` are
+## the SDK's own spellings.
+##
+## The third half is an ALLOW-LIST over the imports of a plugin's reachable
+## closure, with the membership rule and the reason for every entry in
+## `src/common/plugin_model/source_admission.nim`, plus a denial of nim's
+## foreign-function pragmas, which is the route AROUND an import allow-list and
+## needs no import at all. Checks 18-22 of the same gate.
+##
+## **THE ALLOW-LIST RESTS ON A PROPERTY OF THIS FILE**, so it is stated here
+## rather than only there: this module and `plugin_host/plugin_io` are the two
+## TERMINALS of the gate's closure walk — reached, reported and NOT entered — so
+## nothing in the gate holds `plugin_io`'s `std/os`, `std/osproc` and
+## `std/posix` imports against a plugin. That is correct only while `plugin_io`
+## re-exports none of them, which it does not (it re-exports `asyncdispatch`
+## minus the four blocking spellings, and nothing else). If it ever started to,
+## the allow-list would be intact and the boundary would be gone, and no check
+## in the gate could see it. `tests/unit/plugin_probes/surface_reach_probe.nim.probe`
+## measures it: a module importing only this one, compiled and run, reporting
+## `osproc-reachable=false`, `posix-reachable=false`, `os-reachable=false` —
+## and `future-reachable=true`, so a probe on which nothing is reachable cannot
+## pass it.
+##
 ## ## THE FILTERED SET IS NOT WRITTEN TWICE
 ##
 ## The `except` clause below and `plugin_api.PluginDeniedPrimitives` name the
@@ -123,6 +153,37 @@ import codetracer_embed
 export codetracer_embed except
   createEffect, createRenderEffect, createComputed, createMemo, onMount,
   createRoot, onCleanup, runWithOwner, getOwner, updateComputation
+
+# PLAT-8. The one thing this door reaches that `codetracer_embed` does not.
+#
+# `plugin_host/plugin_io.nim` is §8.1's four primitives — process, stream,
+# socket, codec — and its native arm imports `std/osproc`. That is why it is
+# HERE and not on the facade: `ci/test/sdk-facade-boundary.sh` forbids
+# `std/osproc` anywhere in the facade's import graph, because
+# CodeTracer-Embed-SDK.md §8 has an EMBEDDER create a worker rather than a
+# child process. Putting the plugin SDK on the facade was tried and that check
+# reddened, which is the check working: an application embedding CodeTracer
+# must not acquire process spawning by linking it.
+#
+# A plugin must, and §8 is the argument for why: "A plugin that decodes a
+# proprietary format, drives an existing analyser, queries a symbol server or
+# shells out to a toolchain needs a **process**, and pretending otherwise
+# produces either a crippled plugin model or a sandbox with a hole in it."
+#
+# SO THIS IS A WIDENING, AND IT IS THE DELIBERATE KIND §2.1 ASKS FOR. §2.1's
+# "second door" is one that reaches something the first does not *without
+# review*; this one is reviewed here, is admitted by name in
+# `sdk-facade-boundary.sh` for THIS FILE ONLY, and everything it reaches is
+# refused unless the plugin's own manifest declared the capability AND the
+# target. An embedder has no manifest and therefore no grants; a plugin has
+# both, and a user read them before granting (§8.4).
+#
+# The narrowing above and this widening are the same decision seen from two
+# sides: a plugin is trusted with LESS of the reactive core than an embedder,
+# and with MORE of the outside world, because those are the two things the two
+# audiences actually need.
+import plugin_host/plugin_io
+export plugin_io
 
 const
   CodeTracerPluginSurfaceModule* = "codetracer_plugin"

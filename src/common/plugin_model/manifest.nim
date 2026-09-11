@@ -50,10 +50,12 @@
 import std/[json, strutils, tables]
 
 import ./diagnostics
+import ./capabilities
 import ../value_presentation/vocabulary as presentation_vocabulary
 import ../view_vocabulary/vocabulary as view_vocabulary
 
 export diagnostics
+export capabilities
 
 # THE VOCABULARY IS RE-EXPORTED NARROWLY, and the narrowness is deliberate.
 # A consumer reading `Contribution.views` needs the sixteen entries by name
@@ -85,16 +87,6 @@ type
     ## author said rather than something a parser assumed.
     text*: string          ## as written, for the diagnostic
     bounds*: seq[VersionBound]
-
-  Capability* = enum
-    ## Extensibility-Model.md §8.1.2's table, verbatim in its own spellings.
-    ## PLAT-7 records the grant; PLAT-8 is what makes each one do anything.
-    capProcess = "process"
-    capSocketLocal = "socket:local"
-    capSocketRemote = "socket:remote"
-    capFsRead = "fs:read"
-    capFsWrite = "fs:write"
-    capTrace = "trace"
 
   ContributionKind* = enum
     ## §6.1's four surfaces, plus the published ViewModel §2 names as the
@@ -146,6 +138,17 @@ type
     coreVersion*: VersionRange
     dependencies*: seq[Dependency]
     capabilities*: set[Capability]
+      ## PLAT-7's field, kept as the shorthand every existing caller reads.
+      ## It is the SAME set as `grants.capabilities` — `parseManifest` assigns
+      ## both from one parse and `plugin_model_test` asserts they agree, so
+      ## there is no second source of truth, only a second spelling of the one
+      ## a caller most often wants.
+    grants*: GrantSet
+      ## PLAT-8. The capabilities WITH their declared sets: the executables a
+      ## `process` grant may reach, the hosts a `socket:remote` grant may
+      ## reach, the paths the `fs:*` grants may reach, and the explicit
+      ## trace-egress grant. §8.4 makes this "declared in a manifest the user
+      ## can read before granting", and `capabilities.decide` is what reads it.
     activation*: seq[ActivationEvent]
     contributions*: seq[Contribution]
 
@@ -412,6 +415,185 @@ proc parseManifest*(text, source: string): ParsedManifest =
             "'" & c.getStr() & "' — the granted set is " & known.join(", "))
           continue
         m.capabilities.incl cap
+
+  # ----- the declared sets (PLAT-8, §8.1.1 and §8.4) -------------------------
+  #
+  # A capability says WHICH POWER; a declaration says WHICH TARGETS. §8.4's
+  # whole argument that the sandbox survives §8 is that "the executables and
+  # hosts a plugin may reach are declared in a manifest the user can read
+  # before granting", so the two are validated against each other in BOTH
+  # directions: a grant with an empty declared set permits nothing, and a
+  # declaration without its grant reads to a user as a power the plugin has.
+  if root.hasKey("executables"):
+    let execs = root["executables"]
+    if execs.kind != JArray:
+      result.errors.add pluginError(named, pecMalformedManifest,
+        "'executables' must be an array of bare program names")
+    else:
+      for e in execs:
+        if e.kind != JString:
+          result.errors.add pluginError(named, pecBadDeclaration,
+            "an executable declaration must be a string, got " & $e.kind)
+          continue
+        let nm = e.getStr()
+        if not isBareExecutableName(nm):
+          result.errors.add pluginError(named, pecBadDeclaration,
+            "'" & nm & "' is not a bare program name. §8.1.1: the host " &
+            "resolves the name against this set and its own PATH policy, so " &
+            "a plugin does not hand over a path of its choosing")
+          continue
+        m.grants.executables.add nm
+
+  if root.hasKey("hosts"):
+    let hosts = root["hosts"]
+    if hosts.kind != JArray:
+      result.errors.add pluginError(named, pecMalformedManifest,
+        "'hosts' must be an array of 'host' or 'host:port' strings")
+    else:
+      for h in hosts:
+        if h.kind != JString:
+          result.errors.add pluginError(named, pecBadDeclaration,
+            "a host declaration must be a string, got " & $h.kind)
+          continue
+        var text = h.getStr().strip()
+        var port = AnyPort
+        # `host:port`, and the separator is recognised ONLY where it cannot be
+        # part of a bare IPv6 literal: after a `]`, or when the string carries
+        # exactly one colon. `::1` therefore stays `::1` rather than becoming
+        # the host `::` on port 1, which is what a plain `rfind(':')` does to it.
+        let colon = text.rfind(':')
+        let bracket = text.rfind(']')
+        let colonCount = text.count(':')
+        let isSeparator = colon > 0 and colon < text.high and
+          ((bracket >= 0 and bracket < colon) or
+           (bracket < 0 and colonCount == 1))
+        if isSeparator:
+          let portText = text[colon + 1 .. ^1]
+          var n = 0
+          var ok = portText.len > 0 and portText.len <= 5
+          if ok:
+            for c in portText:
+              if c notin {'0' .. '9'}:
+                ok = false
+                break
+              n = n * 10 + (ord(c) - ord('0'))
+          if not (ok and n >= 1 and n <= 65535):
+            result.errors.add pluginError(named, pecBadDeclaration,
+              "host '" & h.getStr() & "' has a port outside 1-65535")
+            continue
+          port = n
+          text = text[0 ..< colon]
+        if text.len == 0:
+          result.errors.add pluginError(named, pecBadDeclaration,
+            "host '" & h.getStr() & "' names no host")
+          continue
+        if classifyHost(text) == acAmbiguous:
+          result.errors.add pluginError(named, pecBadDeclaration,
+            "host '" & text & "' is a name the machine resolves rather than " &
+            "an address. Declare loopback as 127.0.0.1 or ::1, which " &
+            "'socket:local' already grants")
+          continue
+        m.grants.hosts.add DeclaredHost(host: text, port: port)
+
+  if root.hasKey("paths"):
+    let paths = root["paths"]
+    if paths.kind != JObject:
+      result.errors.add pluginError(named, pecMalformedManifest,
+        "'paths' must be an object with 'read' and/or 'write' arrays")
+    else:
+      for key in ["read", "write"]:
+        if not paths.hasKey(key): continue
+        if paths[key].kind != JArray:
+          result.errors.add pluginError(named, pecMalformedManifest,
+            "'paths." & key & "' must be an array")
+          continue
+        for p in paths[key]:
+          if p.kind != JString:
+            result.errors.add pluginError(named, pecBadDeclaration,
+              "a path declaration must be a string, got " & $p.kind)
+            continue
+          let text = p.getStr()
+          if text.len == 0 or not (text.startsWith("/") or
+                                   (text.len > 2 and text[1] == ':')):
+            result.errors.add pluginError(named, pecBadDeclaration,
+              "path '" & text & "' is not absolute. A relative declared root " &
+              "means a different directory depending on where CodeTracer was " &
+              "started, which is not something a user can grant")
+            continue
+          if ".." in text:
+            result.errors.add pluginError(named, pecBadDeclaration,
+              "path '" & text & "' contains '..'; declare the directory it " &
+              "resolves to")
+            continue
+          if key == "read": m.grants.readPaths.add text
+          else: m.grants.writePaths.add text
+
+  # ----- the explicit trace-egress grant (§8.1.2, PLAT-8's gate) -------------
+  if root.hasKey("traceEgress"):
+    let te = root["traceEgress"]
+    if te.kind != JObject:
+      result.errors.add pluginError(named, pecMalformedManifest,
+        "'traceEgress' must be an object with 'acknowledged' and 'statement'")
+    else:
+      let ack = te.hasKey("acknowledged") and te["acknowledged"].kind == JBool and
+                te["acknowledged"].getBool()
+      let statement = jstr(te, "statement")
+      m.grants.traceEgress = TraceEgressGrant(acknowledged: ack,
+                                              statement: statement)
+
+  m.grants.capabilities = m.capabilities
+
+  # Both directions, per capability. Each arm names the plugin, the grant and
+  # the remedy, because a manifest error a user cannot act on is the blank tab
+  # §4.1 refuses in a different costume.
+  if capProcess in m.capabilities and m.grants.executables.len == 0:
+    result.errors.add pluginError(named, pecCapabilityWithoutDeclaration,
+      "'process' is granted but no 'executables' are declared, so the plugin " &
+      "may spawn nothing. §8.1.1 has the host resolve a name against a " &
+      "declared set; declare the programs it needs")
+  if capProcess notin m.capabilities and m.grants.executables.len > 0:
+    result.errors.add pluginError(named, pecDeclarationWithoutCapability,
+      "'executables' are declared without the 'process' capability")
+  if capSocketRemote in m.capabilities and m.grants.hosts.len == 0:
+    result.errors.add pluginError(named, pecCapabilityWithoutDeclaration,
+      "'socket:remote' is granted but no 'hosts' are declared. §8.1.2 grants " &
+      "it 'to declared hosts', and the declaration is what makes the grant " &
+      "inspectable")
+  if capSocketRemote notin m.capabilities and m.grants.hosts.len > 0:
+    result.errors.add pluginError(named, pecDeclarationWithoutCapability,
+      "'hosts' are declared without the 'socket:remote' capability")
+  if capFsRead in m.capabilities and m.grants.readPaths.len == 0:
+    result.errors.add pluginError(named, pecCapabilityWithoutDeclaration,
+      "'fs:read' is granted but 'paths.read' declares nothing")
+  if capFsRead notin m.capabilities and m.grants.readPaths.len > 0:
+    result.errors.add pluginError(named, pecDeclarationWithoutCapability,
+      "'paths.read' is declared without the 'fs:read' capability")
+  if capFsWrite in m.capabilities and m.grants.writePaths.len == 0:
+    result.errors.add pluginError(named, pecCapabilityWithoutDeclaration,
+      "'fs:write' is granted but 'paths.write' declares nothing")
+  if capFsWrite notin m.capabilities and m.grants.writePaths.len > 0:
+    result.errors.add pluginError(named, pecDeclarationWithoutCapability,
+      "'paths.write' is declared without the 'fs:write' capability")
+
+  # THE PAIR. Refused at LOAD time, so a plugin holding it without the grant
+  # never activates at all — the runtime refusal in `capabilities.decide` is
+  # the second of two, not the only one.
+  if needsTraceEgressGrant(m.capabilities):
+    if not traceEgressPermitted(m.grants):
+      result.errors.add pluginError(named, pecTraceEgressNotAcknowledged,
+        traceEgressDisclosure(named, m.grants) &
+        " Declare \"traceEgress\": {\"acknowledged\": true, \"statement\": " &
+        "\"<why this plugin sends recorded data off the machine>\"} — at " &
+        "least " & $MinTraceEgressStatement & " characters of statement.")
+  elif m.grants.traceEgress.acknowledged or
+       m.grants.traceEgress.statement.len > 0:
+    result.errors.add pluginError(named, pecTraceEgressWithoutPair,
+      "a 'traceEgress' grant is declared, but this plugin holds " &
+      (if capTrace in m.capabilities: "'trace' without 'socket:remote'"
+       elif capSocketRemote in m.capabilities: "'socket:remote' without 'trace'"
+       else: "neither 'trace' nor 'socket:remote'") &
+      ". Asking a user to acknowledge a path the plugin cannot take teaches " &
+      "them to acknowledge the next one without reading it")
 
   # ----- activation ---------------------------------------------------------
   if root.hasKey("activation"):

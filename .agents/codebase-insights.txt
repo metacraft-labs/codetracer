@@ -3829,3 +3829,147 @@ PLAT-3 — THE ABSTRACT VIEW VOCABULARY (2026-09-07)
     `binding.resize` re-selects the profile always but rebuilds the tree only
     while `userModified` is false.  `:reset-layout` is the way back.  Recorded
     in Layout-ViewModel §8.2/§8.4 and CodeTracer-TUI.md §3.2.
+
+PLAT-8 verification repairs, 2026-09-09 — four stdlib facts that cost time
+--------------------------------------------------------------------------
+  * `os.expandFilename` IS NOT THE SAME FUNCTION ON TWO PLATFORMS, and its doc
+    comment ("Follows symlinks") describes only one of them.  POSIX: `realpath(3)`,
+    which resolves every symlink.  Windows: `GetFullPathNameW`, which normalises
+    `.`/`..` and does NOT resolve symlinks or junctions.  So a security check
+    written as "canonicalise, then compare textually" is a real containment on
+    Linux and a no-op on Windows.  `plugin_io.canonicalPath` uses it and says so;
+    the write-up of that repair first claimed cross-platform coverage and had to
+    be corrected.  Verification-Harness-Traps §8's shape: two `when` arms, one
+    plausible sentence.
+  * `std/posix` DOES NOT DECLARE `O_NOFOLLOW` on any platform — checked across
+    `posix_linux_amd64_consts`, `posix_other_consts` and `posix_freertos_consts`,
+    which all carry `O_CLOEXEC` and not this.  Import it from the header
+    (`{.importc: "O_NOFOLLOW", header: "<fcntl.h>".}`) rather than writing the
+    number: it is 0o400000 on Linux and 0x100 on the BSDs and macOS.
+  * `osproc`'s `poDaemon` IS `POSIX_SPAWN_SETPGROUP` WITH A PGROUP OF 0, AND
+    NOTHING ELSE, on the `posix_spawn` path — no `setsid`, no stdio change.  That
+    makes the child its own process-group leader atomically at spawn, which is the
+    only race-free way to make `killpg` reach a child's descendants from the
+    parent (a parent-side `setpgid` can lose to `execve`).  BUT
+    `startProcessAuxFork` IGNORES IT ENTIRELY, so a build where
+    `useProcessAuxSpawn` is false silently gets no process group.  Always read the
+    group back with `getpgid` and compare it with the pid before `killpg`: if they
+    differ the child shares YOUR group, and `killpg` would SIGKILL the whole
+    application.
+  * A CHILD'S CHILD CANNOT BE REAPED BY YOU.  `rawKill` reaps its own child with
+    `peekExitCode` (a `waitpid`), so `/proc/<child>` is gone immediately after a
+    teardown.  A grandchild reparents to `init` or the session subreaper when its
+    parent dies, and THAT reaps it, on its own schedule — so `/proc/<grandchild>`
+    lingers in state `Z` for an unbounded moment.  A teardown test may assert the
+    grandchild is dead (`Z` or gone); asserting `/proc` is gone races the reaper.
+
+PLAT-8 source admission, 2026-09-09 — five nim facts the allow-list rests on
+---------------------------------------------------------------------------
+  * `import` IS NOT `export`, AND THAT IS THE WHOLE MEMBERSHIP RULE.  A module a
+    plugin imports hands it that module's EXPORTED symbols plus any module that
+    module `export`s WHOLE — never the modules it merely imports.  `std/times`
+    imports `std/posix` on the POSIX arm and re-exports none of it, so
+    `times.fork` does not resolve; `std/intsets` IS `export packedsets`, so
+    admitting the first commits an allow-list to the second.  Measured with
+    `declared(alias.name)` in `src/common/plugin_source_admission_test.nim`, not
+    read off the source.
+  * `import std/x as y` HIDES THE NAME `x`.  After `import std/os as d_os`,
+    `declared(os.getEnv)` is FALSE.  That is what makes a probe file able to
+    import both the modules it admits and the modules it refuses without the
+    refused ones polluting the "no bare module name is reachable" assertion.
+  * `declared(m.name)` ANSWERS FALSE FOR AN UNDECLARED `m` RATHER THAN FAILING
+    TO COMPILE, so a corpus of qualified names can be asked of any module alias.
+    Use QUALIFIED lookup: unqualified `declared(readFile)` answers about
+    `system`, which exports `readFile`, `open`, `close` and `write` into every
+    scope in the language, and every module then looks dangerous.
+  * A `'` AFTER AN ALPHANUMERIC IS A TYPE SUFFIX, NOT A CHARACTER LITERAL.
+    `4096'u64` and `1'f32` are ordinary integer/float literals.  Any scanner
+    that treats `'` as a char-literal opener swallows from there to the next
+    apostrophe — measured on a trap-13 sweep, where
+    `updateDebuggerPosition(21'u64, …)` merged 102 lines into one and put a whole
+    suite's `check`s inside a helper `proc`'s body, i.e. a FALSE POSITIVE that
+    looked exactly like a real finding.
+  * `nim` READS `config.nims` FROM THE PROJECT FILE'S DIRECTORY AND ITS
+    ANCESTORS.  A generated probe compiled out of `/tmp` therefore fails with
+    `cannot open file: isonim/core/signals` while the identical file under the
+    repository compiles: this repo's `config.nims` is what puts the siblings on
+    the path.  Stage generated sources under `build/` (gitignored) rather than
+    `/tmp` when they import anything of ours.
+  * COREUTILS' `timeout` IS A MULTI-CALL BINARY HERE.  `findExe("timeout")`
+    returns `/nix/store/…/bin/coreutils`, and `osproc.startProcess` sets
+    `argv[0]` to the command string it was given — so the child runs as
+    `coreutils` and answers `unrecognized option '--hints:off'`, naming your
+    ARGUMENT rather than the program.  Pass the bare name with `poUsePath`.
+
+- 2026-09-09 (PLAT-8, the `system` residual): **`system.nim` ends with
+  `when not defined(nimPreviewSlimSystem): import std/syncio; export syncio`.**
+  That one line is why "what a plugin can call with no import" is not a list
+  anybody in this repo can keep. Consequences that cost three passes to learn:
+  * THE SURFACE IS `std/syncio`'s WHOLE EXPORTED API — 36 entries on nim 2.2.8,
+    not the ten the residual used to name. `open`, `reopen`, `lines`,
+    `readBuffer`, `readBytes`, `readChars`, `writeBuffer`, `writeBytes`,
+    `writeChars`, `writeLine`, `getFileHandle`, `getOsFileHandle`,
+    `getFileSize`, `getFilePos`, `setFilePos`, `endOfFile`, `flushFile`,
+    `setInheritable`, `setStdIoUnbuffered` are all reachable in a module whose
+    entire import list is `import codetracer_plugin`.
+  * `reopen(stdin, path, fmRead)` READS ANY FILE WITH NO `open`. `stdin` is
+    already a `File`, so denying `open` alone closes nothing. Likewise
+    `for l in lines(path)` is a whole file read in one identifier.
+  * `compiles(lines("x"))` IS **FALSE** while `for l in lines("x")` compiles and
+    reads the file — an iterator is not callable as an expression. Any
+    `compiles`-shaped reachability probe answers the question you spelled, so
+    ask iterators in the `for` spelling: `compiles((for x in it(): discard))`.
+  * THE ENUMERATION IS DERIVED, NOT TYPED: `ci/lib/system-io-surface.sh` sweeps
+    `std/syncio.nim` and `system/compilation.nim` (plus their `include`
+    closures) off the compiler on PATH, and the gate's check 23 requires every
+    derived name to be on `PluginDeniedSyncIo` or `PluginSystemSurfaceExempt`.
+    Validated against `nim jsondoc`: the sweep reproduces the compiler's view of
+    `syncio` exactly, 36/36. It reads every `when` branch on purpose, so it
+    over-reports (`nimrtl`) rather than under-reporting.
+  * `hostOnly` IS READ OFF THE SAME LINE AS THE NAME. `table_names … host-only`
+    matches `, true)` in the record it just matched `("name"` in, so an entry
+    split across a continuation loses the flag SILENTLY — the symptom is
+    `sdk-does-not-block` firing on a line the table meant to exempt.
+  * A `'` ANYWHERE IN THE `table_names` awk PROGRAM — INCLUDING IN A COMMENT —
+    ends the single-quoted shell word, and bash then reports a syntax error at
+    a token forty lines away that nobody wrote.
+  * THE FFI PRAGMA DENYLIST AND THE IMPORT ALLOW-LIST ARE ONE COMPOSED DEFENCE.
+    A macro-built pragma (`nnkPragma.newTree(ident("importc"))`) puts the word
+    on no line of source and yields ZERO pragma spans; what refuses it is
+    `std/macros` not being on the allow-list. Admitting any reflective module
+    retires the pragma denylist with it.
+
+THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
+------------------------------------------------------------------------------
+  * `ci/lib/system-io-surface.sh` reads the stdlib's SOURCE off disk; the only
+    thing it ever needed a running compiler for is WHERE that source is, because
+    the nix layout (`<prefix>/nim/lib`) and the source layout (`<prefix>/lib`)
+    disagree. So a `nim … dump` that cannot be RUN — starved, OOM-killed, or a
+    release that stops printing the line — used to be indistinguishable from
+    "this compiler has no standard library", and check 23 of
+    `ci/test/plugin-reactive-boundary.sh` then reported it as an unaccounted
+    surface, i.e. as a finding about THIS repository. Measured: a host at load
+    ~1200 with 2 GB free (1250 orphaned processes from a runaway in a SIBLING
+    workspace, `~/m/dev/reprobuild`) took `test_plugin_source_admission.nim`'s
+    `VIOLATION` count from 2 to 3 that way, and the transcript sent two readers
+    hunting for a PATH defect that was not there. The suite's environment is
+    fine: it inherits PATH through `startProcess`, and the suite is green from
+    the lane's exact environment at load 1200.
+  * The repair is `system_surface_lib_from_exe`: the SAME nim (`command -v`), a
+    second DERIVATION of its library directory, returned only once a root has
+    been looked at. It is the shape `src/db-backend/build.rs` already uses for
+    the same compiler. On the pinned 2.2.8 `<prefix>/lib` is a symlink to
+    `<prefix>/nim/lib`, so `pwd -P` makes the two derivations string-identical
+    and the agreement control a plain comparison.
+  * FAILING CLOSED IS UNCHANGED, and it is the property to check first when
+    touching this file: with no nim, or with a nim beside no library carrying
+    `std/syncio.nim`, the sweep still derives nothing and check 23 still
+    refuses. PLAT-8's arm S7 is what holds that down — it is graded by the
+    contract suite's `no-nim` stub, which shadows the real nim on PATH, so the
+    fallback resolves to the STUB's directory and finds nothing there.
+  * `shfmt -s` AND `shellcheck` DISAGREE ABOUT BACKTICKS IN A SHELL LITERAL, and
+    both run as pre-commit hooks. `shfmt -s` rewrites a double-quoted literal
+    that needs no expansion into a single-quoted one; a single-quoted literal
+    containing a BACKTICK PAIR is then SC2016 and shellcheck exits 1. A string
+    carrying an apostrophe is immune, because shfmt cannot single-quote it.
+    Worth knowing before writing ``"… \`nim dump\`"`` into a `ci/` script.

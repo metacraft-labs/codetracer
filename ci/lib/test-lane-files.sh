@@ -744,7 +744,40 @@ test_lane_files() {
 				'/test_platform_desktop_native\.nim$' \
 				'/test_pane_mount_markers_are_released\.nim$' \
 				'/test_source_vm_window\.nim$' \
-				'/test_source_provider_revisions\.nim$'
+				'/test_source_provider_revisions\.nim$' \
+				'/test_plugin_io_sdk\.nim$' \
+				'/test_plugin_source_admission\.nim$'
+		# `test_plugin_source_admission` (PLAT-8) COMPILES AND RUNS a real
+		# exploit — `nim c` on a probe that reads `/etc/hostname` with posix
+		# `open`/`read` and reaches `/bin/sh` with `fork`/`execv` — and then
+		# runs the boundary gate over a tree carrying it and asserts that
+		# neither effect happens under admission. Every one of those needs a
+		# process and a filesystem, so on `nim js` there is nothing for it to
+		# assert. It is rejected for the same reason as the suite below rather
+		# than guarded, and for the sharper version of it: a suite whose whole
+		# subject is *the shell was not reached* is GREEN, vacuously, on a
+		# backend that could not have reached a shell in the first place.
+		# The backend-independent half is deliberately in a different file —
+		# `src/common/plugin_source_admission_test.nim`, in `common-units`,
+		# which probes the allow-list's own closure with `declared()` and needs
+		# no machine at all.
+		#
+		# `test_plugin_io_sdk` (PLAT-8) drives REAL child processes over the
+		# kernel's pipes, a REAL Unix domain socket against a real `python3`
+		# peer, and measures a plugin teardown against `/proc`. Its subject —
+		# `plugin_host/plugin_io.nim`'s native arm — is behind
+		# `when not defined(js)` because a browser has no child processes, so
+		# there is nothing on this backend for the suite to assert about.
+		#
+		# THE REJECTION IS THE FIX RATHER THAN A `when defined(js)` GUARD, for
+		# the same reason as the two below: a suite compiled here with its
+		# spawns elided would report green having exercised no sandbox at all,
+		# and the sandbox is what the milestone is. What DOES run on this
+		# backend is the half that is backend-independent and is deliberately
+		# in a different file — `src/common/plugin_capabilities_test.nim`, the
+		# capability policy and PLAT-8's trace-egress gate, in `common-units`,
+		# which links no dispatcher on either target.
+		#
 		# `test_source_vm_window` and `test_source_provider_revisions` (CTUI-4)
 		# WRITE the source files they then read back through the CTFS half of
 		# `sdk/source_provider.nim`. That half is `when not defined(js)` for the

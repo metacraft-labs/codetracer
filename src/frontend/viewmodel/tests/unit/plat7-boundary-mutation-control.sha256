@@ -10,7 +10,7 @@
 # Rewrite with --record-control-hashes, deliberately, when a gate
 # or the API changes on purpose.
 
-d921f21211cb8dc8e60911484c24d003ef272f426a4207d93c7b28e7a0d6ae42  src/frontend/viewmodel/plugin_host/plugin_api.nim
-bf542ed6dbbbf7edff51af6f7324d5e5feb9979eef7f5fa6b850b7dc74caa60b  src/frontend/viewmodel/codetracer_plugin.nim
-2cfbd37b2cb0c5c0978a09610a8a53573c5e71acff8174aac816cc6cc251d2d6  ci/test/plugin-reactive-boundary.sh
+719214187da9b59aa266e688527de0d90881a4d2f73207142a845aeb902dbd89  src/frontend/viewmodel/plugin_host/plugin_api.nim
+0d8c5f494f33e2900362aa0077e633b9ccaac4c84d92fa9f3f5ef4ec6d1573ba  src/frontend/viewmodel/codetracer_plugin.nim
+2e087f20de705add8e0e448d773f826aaf976a64ffcc32d18e2cdbd3256f3e10  ci/test/plugin-reactive-boundary.sh
 05f39b61011e038710d1d84f6a14e2156c783813a74149458bc417033a603cbc  ci/lib/nim-imports.sh

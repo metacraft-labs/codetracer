@@ -1,0 +1,149 @@
+## CT-PLUGIN: the probe that measures what PLAT-8's model does NOT describe.
+##
+## THIS FILE IS AN EXPLOIT AND IT IS SUPPOSED TO BE REFUSED. It carries the
+## `## CT-PLUGIN:` header marker, imports `codetracer_plugin` — the sanctioned
+## surface — and then declines to use it: `std/posix` reads any file and runs
+## any program, and no capability decision is anywhere in that path.
+##
+## ## WHY IT IS `.nim.probe` AND NOT `.nim`
+##
+## Two consumers read these exact bytes, which is the whole reason it is one
+## file rather than two (Verification-Harness-Traps §14 — one subject, one
+## place; two copies of an exploit are two things that can drift while each
+## goes on agreeing with itself):
+##
+##   * `ci/test/plugin-reactive-boundary-test.sh` copies it into a synthetic
+##     tree's plugin-fixture directory and asserts the gate REFUSES it, naming
+##     the module and the import;
+##   * `src/frontend/viewmodel/tests/unit/test_plugin_source_admission.nim`
+##     compiles and RUNS it, and asserts the EFFECT — the file was read and the
+##     shell was reached — and then asserts that under admission neither
+##     happens.
+##
+## The extension keeps it out of `git ls-files '*.nim'`, which is the set the
+## gate seeds its plugin discovery from. A live exploit sitting in a
+## `.ct-plugin` directory would make the real gate red on every run, and a gate
+## that is red for a reason everybody has agreed to ignore is a gate nobody
+## reads. It is compiled by the suite above, so it cannot rot in silence.
+##
+## ## WHAT IT DEMONSTRATED, BEFORE THE ALLOW-LIST EXISTED
+##
+## Measured 2026-09-09, with this module declared as a plugin in the real tree:
+##
+##     posix read of /etc/hostname, no fs:read grant -> gpu-server-001
+##     posix fork+exec of /bin/sh, no process grant  -> child pid 505249
+##     POSIX-EXEC-REACHED
+##
+## and `ci/test/plugin-reactive-boundary.sh` over that same tree printed
+## `19 check(s), 0 failing`, including `plugin-names-no-sync-io: 6 module(s) in
+## the plugin closure, no synchronous I/O primitive named in code`.
+##
+## ## THE TWO SENTINELS, AND WHY THE ASSERTIONS ARE ON FILES
+##
+## Both effects are recorded in FILES rather than on stdout, because the
+## assertion that matters is `the shell was not reached` and a missing line of
+## output is also what a crashed probe, a lost pipe and a buffered stream look
+## like. A file the child created either exists or does not.
+##
+##   the READ sentinel  — this module writes the bytes it read out of
+##                        `/etc/hostname` here, with posix `open`/`write`,
+##                        holding no `fs:read` and no `fs:write` grant.
+##   the EXEC sentinel  — the SHELL writes `SHELL-REACHED` here, so the file
+##                        existing means `execv` SUCCEEDED and `/bin/sh` ran,
+##                        not merely that `fork` returned.
+##
+## The two paths arrive on **stdin, read with posix's own `read(2)` on fd 0**,
+## and not from the environment or from `paramStr`. That is not fastidiousness:
+## `std/posix` carries no `getenv` (nim declares it privately, in
+## `std/private/win_setenv`), `os.getEnv` would need `std/os`, and `paramStr`
+## would too — so reading the environment at all would have widened the probe's
+## import list past the two lines that are its whole subject. The one remaining
+## route is `system`, and `system.readLine` is on `PluginDeniedSyncIo`, so it
+## would have made check 15 fire alongside check 19 and blurred which check
+## refused the module.
+
+import codetracer_plugin
+import std/posix
+
+const
+  HostnamePath = "/etc/hostname"
+  ExecMarker = "SHELL-REACHED"
+
+proc rawRead*(path: string): string =
+  ## No `fs:read` grant, no declared root, no `ctx.readPath`, no `decide`.
+  let fd = posix.open(path.cstring, O_RDONLY)
+  if fd < 0:
+    return ""
+  var buf: array[512, char]
+  let n = posix.read(fd, addr buf[0], 511)
+  discard posix.close(fd)
+  if n <= 0:
+    return ""
+  result = newString(n)
+  copyMem(addr result[0], addr buf[0], n)
+
+proc rawWrite*(path, data: string) =
+  ## No `fs:write` grant either. The sentinel is written by the same syscall
+  ## pair the SDK exists to mediate.
+  let fd = posix.open(path.cstring, O_WRONLY or O_CREAT or O_TRUNC, 0o600.Mode)
+  if fd < 0:
+    return
+  if data.len > 0:
+    discard posix.write(fd, addr data[0], data.len)
+  discard posix.close(fd)
+
+proc rawExec*(sentinel: string): Pid =
+  ## No `process` grant, no declared executable set, no bare-name rule, no
+  ## `spawnProcess`. `fork` + `execv` is two identifiers.
+  let pid = fork()
+  if pid == 0:
+    # In the child. Keep every string alive in a local: `cstring` borrows.
+    let sh = "/bin/sh"
+    let flag = "-c"
+    let script = "printf " & ExecMarker & " > '" & sentinel & "'"
+    var argv: array[4, cstring] = [sh.cstring, flag.cstring, script.cstring,
+                                   cast[cstring](nil)]
+    discard execv(sh.cstring, cast[cstringArray](addr argv[0]))
+    # Only reached if execv failed; do not run the parent's code.
+    quit(127)
+  pid
+
+proc activate*() =
+  ## The shape a plugin's entry point has. It is here so the module reads as a
+  ## plugin rather than as a program that happens to carry the marker.
+  discard rawRead(HostnamePath)
+
+proc rawLinesFromStdin(): seq[string] =
+  ## The two sentinel paths, one per line, read off fd 0 with posix `read`.
+  ## Hand-rolled rather than `strutils.split` so this module's import list stays
+  ## exactly `codetracer_plugin` and `std/posix` — which IS the subject.
+  var buf: array[4096, char]
+  let n = posix.read(0, addr buf[0], 4095)
+  result = @[]
+  if n <= 0:
+    return
+  var cur = ""
+  for i in 0 ..< n:
+    if buf[i] == '\n':
+      result.add(cur)
+      cur = ""
+    else:
+      cur.add(buf[i])
+  if cur.len > 0:
+    result.add(cur)
+
+when isMainModule:
+  let sentinels = rawLinesFromStdin()
+  let readSentinel = if sentinels.len > 0: sentinels[0] else: ""
+  let execSentinel = if sentinels.len > 1: sentinels[1] else: ""
+
+  let hostname = rawRead(HostnamePath)
+  if readSentinel.len > 0:
+    rawWrite(readSentinel, hostname)
+
+  var status: cint = 0
+  if execSentinel.len > 0:
+    let pid = rawExec(execSentinel)
+    if pid > 0:
+      discard waitpid(pid, status, 0)
+  echo "POSIX-PROBE-DONE bytes=", hostname.len, " status=", status

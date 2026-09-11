@@ -189,8 +189,10 @@ import isonim/core/computation as isonim_computation
 import isonim/core/owner as isonim_owner
 
 import ../../../common/plugin_model
+import ./handles
 
 export plugin_model
+export handles
 
 type
   PluginBudgetExceeded* = object of CatchableError
@@ -262,6 +264,18 @@ type
       ## for accounting and because it is what lets `host.deactivate` close
       ## isonim's already-queued-effect hazard — see `host.nim`. It is NOT the
       ## release mechanism: `cleanNode(scope)` is.
+    handles*: HandleTable
+      ## PLAT-8. Every process, stream and socket the plugin holds, and the
+      ## closer for each. `host.deactivate` sweeps it; `host.reclaim` sweeps it
+      ## WITHOUT deactivating, which is §8.1.1's "reclaimable without
+      ## restarting CodeTracer".
+      ##
+      ## IT IS ON THE RUN STATE RATHER THAN IN A HOST-WIDE REGISTRY, and that
+      ## is the accounting requirement rather than a convenience: a registry
+      ## keyed on a file descriptor would have to be told which plugin owned
+      ## each entry, and the answer would be a field somebody could forget to
+      ## set. Here a handle cannot exist without a plugin, because the table it
+      ## lives in is reached only through that plugin's context.
 
   PluginContext* = ref object
     ## What a plugin's `activate` is handed. It carries the plugin's own
@@ -321,7 +335,7 @@ const
     ## generous is the point — a budget nobody ever hits is documentation.
 
 func newRunState*(id: PluginId; budget: Duration): PluginRunState =
-  PluginRunState(id: id, budget: budget)
+  PluginRunState(id: id, budget: budget, handles: newHandleTable(id))
 
 func describe*(v: BudgetViolation): string =
   ## THE PLUGIN COMES FIRST, for the same reason `PluginError.render` puts it

@@ -203,6 +203,24 @@ FACADE_MODULE="codetracer_embed"
 PLUGIN_SURFACE_REL="${SDK_SUBTREE}/codetracer_plugin.nim"
 PLUGIN_SURFACE_MODULE="codetracer_plugin"
 
+# The ONE SDK internal the plugin surface may import, and the ONLY file that
+# may import it — PLAT-8, Extensibility-Model.md §8.
+#
+# `plugin_host/plugin_io.nim` is §8.1's process, stream, socket and codec
+# primitives, and its native arm imports `std/osproc`. That is exactly what
+# check 3's `FORBIDDEN_PATTERNS` refuses to have anywhere in the FACADE's
+# graph, on §8's grounds that an embedder creates a worker rather than a child
+# process — so it cannot be on `codetracer_embed`, and putting it there was
+# tried and reddened that check.
+#
+# It is admitted here rather than exempted: the pair below is (importer,
+# imported), so this is a single named edge and not a hole. Any other consumer
+# importing `plugin_io` is still a violation, and the plugin surface importing
+# any OTHER internal is still a violation. Check 4a asserts the edge exists —
+# an admission for an import nobody makes is an admission nobody can see is
+# wrong.
+PLUGIN_IO_REL="${SDK_SUBTREE}/plugin_host/plugin_io.nim"
+
 # Where an unqualified module spec is looked up, after the importing file's own
 # directory. Mirrors the `--path` entries the ViewModel lanes compile with
 # (ci/lib/test-lane-files.sh `test_lane_extra_flags`) plus config.nims.
@@ -827,6 +845,7 @@ fi
 mapfile -t consumers < <(consumer_files)
 
 consumer_violations=0
+plugin_io_edge_seen=0
 for c in "${consumers[@]}"; do
 	while read -r spec; do
 		[ -n "${spec}" ] || continue
@@ -840,6 +859,13 @@ for c in "${consumers[@]}"; do
 		# The narrowed surface a plugin consumes. See PLUGIN_SURFACE_REL above
 		# for why admitting it changes nothing else about this guard.
 		[ "${resolved}" = "${PLUGIN_SURFACE_REL}" ] && continue
+		# PLAT-8's single named edge: the plugin surface, and only it, may
+		# reach the capability-gated I/O primitives. See PLUGIN_IO_REL above.
+		if [ "${c}" = "${PLUGIN_SURFACE_REL}" ] &&
+			[ "${resolved}" = "${PLUGIN_IO_REL}" ]; then
+			plugin_io_edge_seen=1
+			continue
+		fi
 		consumer_violations=$((consumer_violations + 1))
 		violation_detail "${c} imports '${spec}' -> ${resolved}"
 		violation_detail "  That is an SDK internal. A consumer may import '${FACADE_MODULE}', or"
@@ -858,6 +884,33 @@ elif [ "${consumer_violations}" -eq 0 ]; then
 	check_ok "consumer-facade-only: ${#consumers[@]} declared consumer file(s), no reach past the facade"
 else
 	check_failed "consumer-facade-only: ${consumer_violations} import(s) past the facade"
+fi
+
+# ---------------------------------------------------------------------------
+# Check 4a: the one admitted edge is REAL
+#
+# The admission above lets `codetracer_plugin.nim` import
+# `plugin_host/plugin_io.nim`. An admission for an import nobody makes is an
+# admission nobody can see is wrong: it would sit there permitting a reach the
+# tree does not have, and the day somebody added a second admission beside it
+# there would be no evidence that either was ever exercised.
+#
+# So the edge is asserted rather than merely permitted. It is skipped when the
+# plugin surface does not exist at all, which is the case for the synthetic
+# trees ci/test/sdk-facade-boundary-test.sh builds.
+# ---------------------------------------------------------------------------
+
+if [ -f "${PLUGIN_SURFACE_REL}" ] && [ -f "${PLUGIN_IO_REL}" ]; then
+	if [ "${plugin_io_edge_seen}" -eq 1 ]; then
+		check_ok "plugin-io-edge-is-real: ${PLUGIN_SURFACE_REL} imports ${PLUGIN_IO_REL}, and it is the only file admitted to"
+	else
+		check_failed "plugin-io-edge-is-real: ${PLUGIN_SURFACE_REL} does not import ${PLUGIN_IO_REL}"
+		violation_detail "Check 4 admits exactly that edge and nothing else reaches it, so the"
+		violation_detail "admission is currently permitting an import that does not exist."
+		violation_detail "Either the plugin surface stopped offering PLAT-8's I/O primitives —"
+		violation_detail "in which case a plugin can no longer spawn or connect at all — or"
+		violation_detail "the admission is dead and should be removed."
+	fi
 fi
 
 # ---------------------------------------------------------------------------

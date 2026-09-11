@@ -426,3 +426,12 @@ repro.paths
 # lifetime of a run so a second instance in the same worktree refuses to start;
 # two instances corrupt each other's in-memory restores.
 src/frontend/viewmodel/tests/unit/.plat7-boundary-mutation.lock
+
+# The same, for PLAT-8's I/O and capability-sandbox harness. It is a SECOND
+# lock rather than a shared one: the two harnesses have different subject sets
+# and different recorded control digests, and one lock would serialise runs
+# that do not need to be serialised while telling a reader they collide.
+# (They DO both touch ci/test/plugin-reactive-boundary.sh, so they must not run
+# at the same time — that is a fact about the tree, stated in each harness's
+# header, not something either lock enforces for the other.)
+src/frontend/viewmodel/tests/unit/.plat8-io-mutation.lock

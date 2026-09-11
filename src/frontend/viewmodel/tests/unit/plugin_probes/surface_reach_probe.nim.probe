@@ -1,0 +1,108 @@
+## CT-PLUGIN: what the sanctioned surface does and does not put in a plugin's scope.
+##
+## THE THIRD PROBE, AND THE ONLY ONE THAT IS NOT AN EXPLOIT. Its two siblings
+## demonstrate that a plugin declining to use the SDK reaches the operating
+## system; this one demonstrates the complement, which the refusals are
+## worthless without (Verification-Harness-Traps §4a): a plugin importing NOTHING
+## BUT `codetracer_plugin` is **clean to the gate** and **does not have the SDK's
+## own internals in scope**.
+##
+## `codetracer_plugin` re-exports `plugin_host/plugin_io`, whose native arm
+## imports `std/os`, `std/osproc`, `std/posix`, `std/net`, `std/nativesockets`,
+## `std/asyncfile` and `std/asyncnet` — and re-exports NONE of them. That is the
+## sentence the allow-list rests on, because `plugin_io` is a TERMINAL of the
+## gate's closure walk: it is reached, reported and not entered, so nothing in
+## the gate holds its imports against a plugin. If the terminal ever started
+## re-exporting one of them, the allow-list would be intact and the boundary
+## would be gone, and no check in the gate could see it.
+##
+## So the claim is measured here rather than argued: `compiles` on a
+## module-QUALIFIED name, which is the spelling `export … except` cannot filter
+## and therefore the only honest way to ask.
+##
+## Two lines assert the other direction on purpose:
+##
+##   * `asyncdispatch.Future` IS reachable — the async vocabulary is what the
+##     SDK deliberately hands a plugin, and a probe that found nothing reachable
+##     would be a probe that had stopped compiling anything;
+##   * `readFile` IS reachable — `system` is the allow-list's residual, and it is
+##     asserted rather than described so the day nim moves it the case reddens.
+##
+## Read by the same two consumers as its siblings, from these same bytes.
+
+import codetracer_plugin
+
+when isMainModule:
+  echo "osproc-reachable=", compiles(osproc.startProcess("x"))
+  echo "posix-reachable=", compiles(posix.fork())
+  echo "os-reachable=", compiles(os.getEnv("x"))
+  echo "net-reachable=", compiles(net.newSocket())
+  echo "nativesockets-reachable=", compiles(nativesockets.getAddrInfo("x", 1.Port))
+  echo "asyncfile-reachable=", compiles(asyncfile.openAsync("x"))
+  echo "future-reachable=", compiles(Future[int])
+  echo "system-readFile-reachable=", compiles(readFile("x"))
+
+  # ---- THE AsyncFD VOCABULARY, ADDED 2026-09-09 --------------------------
+  #
+  # `plugin_io` does `export asyncdispatch except waitFor, runForever, poll,
+  # drain`, and what the four names it DOES filter hid is that the module also
+  # exports a socket vocabulary on `AsyncFD` — which is an integer. So
+  # `connect`, `send`, `recv`, `accept` and `register` are in every plugin's
+  # scope, UNQUALIFIED, addressable by file-descriptor NUMBER, and no
+  # capability decision is in any of those paths.
+  #
+  # IT IS LATENT RATHER THAN LIVE, and the probe measures the reason rather
+  # than asserting it in prose: a plugin cannot MINT an AsyncFD —
+  # `newAsyncNativeSocket` is unreachable and `newSocket` is unreachable — so
+  # it would have to guess a descriptor number the host already owns. What
+  # keeps `dial` out is NOT the language: `dial-reachable` below is `true`, and
+  # `dial` is stopped by the source gate's denied list alone. That distinction
+  # is the point of measuring it.
+  echo "asyncfd-type-reachable=", compiles(AsyncFD)
+  echo "asyncfd-connect-reachable=", compiles(connect(0.AsyncFD, "h", 1.Port))
+  echo "asyncfd-send-reachable=", compiles(send(0.AsyncFD, "x"))
+  echo "asyncfd-recv-reachable=", compiles(recv(0.AsyncFD, 1))
+  echo "asyncfd-accept-reachable=", compiles(accept(0.AsyncFD))
+  echo "asyncfd-register-reachable=", compiles(register(0.AsyncFD))
+  echo "socket-mint-reachable=", compiles(newAsyncNativeSocket())
+  echo "dial-reachable=", compiles(dial("h", 1.Port))
+
+  # ---- THE `system` FILE-I/O FAMILY, ADDED 2026-09-09 ---------------------
+  #
+  # `system` is `export syncio`, so a plugin importing NOTHING but the surface
+  # has a complete file I/O API. These lines are the measurement the residual
+  # paragraph was asserting in prose while claiming nine of ten names covered.
+  #
+  # `lines` IS ASKED IN THE `for` SPELLING ON PURPOSE. `compiles(lines("x"))`
+  # is **false** — an iterator is not callable as an expression — while
+  # `for l in lines("x")` compiles and reads the file. A probe that asked the
+  # convenient question would have reported this one name as unreachable, which
+  # is how a `compiles`-shaped probe lies: it answers the question you spelled.
+  echo "system-open-reachable=", compiles(open(stdin, "x", fmRead))
+  echo "system-reopen-reachable=", compiles(reopen(stdin, "x", fmRead))
+  echo "system-lines-call-reachable=", compiles(lines("x"))
+  echo "system-lines-for-reachable=", compiles((for l in lines("x"): discard))
+  echo "system-readBuffer-reachable=", compiles(readBuffer(stdin, nil, 0))
+  echo "system-writeBuffer-reachable=", compiles(writeBuffer(stdout, nil, 0))
+  echo "system-slurp-reachable=", compiles(slurp("x"))
+  echo "system-getFileHandle-reachable=", compiles(getFileHandle(stdin))
+
+  # ---- `cast`, WHICH IS OUTSIDE THE DERIVED SCOPE ON PURPOSE -------------
+  #
+  # The sweep in `ci/lib/system-io-surface.sh` covers `std/syncio` and
+  # `system/compilation.nim`. It does NOT cover `system.nim`'s other five
+  # hundred-odd names, and `cast` is one of them — so this is the stated scope
+  # of that derivation, measured rather than left as a sentence.
+  #
+  # `cast[File](0)` FABRICATES A FILE HANDLE OUT OF AN INTEGER, and `write` —
+  # which cannot be denied, because it is the SDK's own spelling — accepts it.
+  # That does not let a plugin NAME A PATH: the value is a `FILE*`, so reaching
+  # a real file means guessing the address of one the host already has open,
+  # and `cast[File](0)` is a null pointer that crashes rather than opening
+  # anything. It is the same shape as the `AsyncFD` lines above — addressable
+  # by number, not constructible — and it is measured here so "a plugin cannot
+  # name a path" is read with the caveat it actually carries.
+  echo "cast-to-File-reachable=", compiles(cast[File](0))
+  echo "cast-to-AsyncFD-reachable=", compiles(cast[AsyncFD](3))
+  echo "write-to-cast-File-reachable=", compiles(write(cast[File](0), "x"))
+  echo "SURFACE-PROBE-DONE"
