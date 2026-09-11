@@ -301,10 +301,46 @@ type
       ## offer "more"; a test uses it to assert that a budget bit.
 
 const
+  ValuePresentationKinds* = {pkText, pkList, pkTree, pkTable, pkImage}
+    ## THE PRESENTER'S RANGE, as a value rather than as a sentence.
+    ##
+    ## The five of PLAT-3's sixteen that a recorded VALUE can inhabit. The
+    ## other eleven are interaction forms and container chrome reachable only
+    ## by a VIEW; the reasons are in this module's header, one per entry.
+    ##
+    ## It is a named constant because two callers need the same answer and a
+    ## second copy of a closed set is how the two come to disagree
+    ## (Verification-Harness-Traps §14):
+    ##
+    ##   * `value_presentation_test`'s "the presenter's range is still PLAT-2's
+    ##     five" case, which folds `present` over every `PValueKind` at two
+    ##     budgets — this was the set's first home, as a `const` local to that
+    ##     case;
+    ##   * `common/project_definitions/parse.nim`, which refuses a project
+    ##     definition declaring `present = "Button"`. A visualiser is a
+    ##     function from a value to a presentation
+    ##     (Project-Definitions.md §3.1), so the presentations it may name are
+    ##     exactly the ones a value can become — and if the presenter's range
+    ##     ever widened, the declarative grammar would widen with it on the
+    ##     same day rather than a release later.
+
   Ellipsis* = "…"
     ## One display cell wide, so a clipped field's width is still its cell
     ## count. The same constant the TUI's formatters used before this package
     ## existed.
+
+func presentationSpelling*(k: PresentationKind): string =
+  ## `pkProgressIndicator` -> `ProgressIndicator`. PLAT-3's own spelling of an
+  ## entry, DERIVED from the enum rather than written in a table, so a name
+  ## cannot drift from the member it names.
+  ##
+  ## IT LIVES WITH THE ENUM, and `view_vocabulary.vocabularyName` forwards to
+  ## it. That is where it was written first, and it moved down on 2026-09-11
+  ## when PLAT-11's declarative grammar needed to spell a `present = "Table"`
+  ## back: a project definition names a PRESENTATION, so reaching for the
+  ## name through the VIEW vocabulary would have made the value-presentation
+  ## grammar depend on the view package for a string about its own enum.
+  ($k)[2 .. ^1]
 
 func defaultMeasure*(s: string): int {.gcsafe, raises: [].} =
   ## Runes, not bytes. The fallback when a surface declares no measure of its

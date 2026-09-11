@@ -277,7 +277,16 @@ func vocabularyName*(k: ViewKind): string =
   ## `pkProgressIndicator` -> `ProgressIndicator`. The spelling PLAT-3 uses,
   ## derived from the enum rather than written twice, so a table of names
   ## cannot drift from the enum it describes.
-  ($k)[2 .. ^1]
+  ##
+  ## THE DERIVATION MOVED DOWN to `value_presentation/vocabulary.nim` on
+  ## 2026-09-11, where `PresentationKind` itself lives, and this forwards to
+  ## it. `ViewKind` IS `PresentationKind`, so the two spellings were always
+  ## one function; PLAT-11's declarative grammar needs to read a
+  ## `present = "Table"` back into a presentation kind and would otherwise
+  ## have had to reach through the VIEW package for a string about the VALUE
+  ## package's own enum — or, worse, keep a second copy of `($k)[2 .. ^1]`
+  ## (Verification-Harness-Traps §14).
+  presentationSpelling(k)
 
 # ---------------------------------------------------------------------------
 # Builders

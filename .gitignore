@@ -452,3 +452,14 @@ src/frontend/viewmodel/tests/unit/.plat9-surface-mutation.lock
 # stated rather than enforced — PLAT-10's harness mutates `host.nim`, which
 # PLAT-8's and PLAT-9's also quote, so the four must not run at the same time.
 src/frontend/viewmodel/tests/unit/.plat10-distribution-mutation.lock
+
+# PLAT-11's mutation run lock — the exclusive `flock` taken by
+# `run-plat11-definitions-mutations.py`, held for the whole run. A FIFTH lock,
+# and the first whose subject set is DISJOINT from its siblings': PLAT-11
+# touches `common/project_definitions/`, `ct/launch/project_definitions_dir.nim`
+# and `viewmodel/viewmodels/point_collection_source.nim`, and none of the other
+# four quotes any of them. So this one genuinely may run beside the plugin
+# harnesses — which is worth writing down precisely because the other four's
+# notes say the opposite about each other, and a reader who skims would assume
+# the rule is "never two at once".
+src/frontend/viewmodel/tests/unit/.plat11-definitions-mutation.lock

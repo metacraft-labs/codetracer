@@ -133,7 +133,12 @@ suite "PLAT-2: the vocabulary slice is PLAT-3's, and it is closed":
     # the other nine interaction/chrome entries. Asserted over every
     # `PValueKind` at two budgets, because a presenter reached only at one
     # budget is a presenter this case would not see.
-    const ValueKinds = {pkText, pkList, pkTree, pkTable, pkImage}
+    # THE SET MOVED TO `vocabulary.ValuePresentationKinds` on 2026-09-11 and
+    # is named here rather than re-spelled. PLAT-11's declarative grammar
+    # refuses `present = "Button"` against the same constant, so the rule this
+    # case asserts and the rule that grammar enforces are one piece of code
+    # (Verification-Harness-Traps §14) rather than two lists that agree today.
+    const ValueKinds = ValuePresentationKinds
     var reached = 0
     for k in PValueKind:
       for budget in [TracepointBudget, StatePanelBudget]:

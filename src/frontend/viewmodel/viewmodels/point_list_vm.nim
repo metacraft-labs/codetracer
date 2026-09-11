@@ -26,7 +26,35 @@ type
     label*: string
     path*: string
     line*: int
+      ## Where the point is, 1-based. **0 when it could not be located** —
+      ## see `resolution` below. A row with `line == 0` is a row a pane must
+      ## not offer as a jump target.
     enabled*: bool
+
+    # -- PLAT-11 -----------------------------------------------------------
+    #
+    # Three fields added on 2026-09-11, when project definitions became the
+    # first producer of this signal. Every one of them has a zero value that
+    # is the pre-existing behaviour, so the two existing constructors — the
+    # storybook fixture and this file's own default — are unchanged.
+    collection*: string
+      ## The named collection (Project-Definitions.md §4) this point came
+      ## from, or "" for a point the user created. Collections "may be
+      ## enabled and disabled as a unit", which a pane cannot offer if the
+      ## unit is not on the row.
+    resolution*: string
+      ## What became of the point's anchor: `resolved`, `moved`,
+      ## `unresolvable`, `file absent` — `resolve.describe`'s own words, never
+      ## a second spelling of them.
+      ##
+      ## §4: "**A point whose location no longer resolves is reported, not
+      ## dropped.** A collection that silently loses half its points as a file
+      ## evolves is worse than one that says so." An unresolvable point is
+      ## therefore IN this list, with this field saying so, rather than
+      ## filtered out of it.
+    detail*: string
+      ## Why, for a point that did not resolve cleanly. What the user needs in
+      ## order to fix the definition; empty for `resolved`.
 
   PointListVM* = ref object of ViewModel
     ## Reactive state for the Point List panel.
