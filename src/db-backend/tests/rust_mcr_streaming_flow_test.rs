@@ -11,40 +11,15 @@
 //! 5. Loads flow data and verifies local variable names and values
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use ct_dap_client::test_support::{FlowTestConfig, FlowTestRunner};
 
 mod test_harness;
-use test_harness::{Language, TestRecording};
+use test_harness::{Language, TestRecording, find_line_containing};
 
 fn find_db_backend() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_replay-server"))
-}
-
-/// The 1-based line number of the unique line in `path` containing `needle`.
-///
-/// Panics — loudly, naming both the file and the needle — when the line is
-/// absent or ambiguous.  That is the point: a fixture whose breakpoint line has
-/// drifted must fail as "the anchor moved", not as an empty flow result that
-/// reads exactly like a variable-extraction defect.
-fn find_line_containing(path: &Path, needle: &str) -> usize {
-    let source = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("could not read {} to locate {needle:?}: {e}", path.display()));
-    let hits: Vec<usize> = source
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| line.contains(needle))
-        .map(|(index, _)| index + 1)
-        .collect();
-    assert_eq!(
-        hits.len(),
-        1,
-        "expected exactly one line containing {needle:?} in {}, found {:?}",
-        path.display(),
-        hits
-    );
-    hits[0]
 }
 
 #[test]

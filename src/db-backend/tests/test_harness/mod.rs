@@ -1470,6 +1470,40 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// The 1-based line number of the unique line in `path` containing `needle`.
+///
+/// Panics — loudly, naming both the file and the needle — when the line is
+/// absent or ambiguous.  That is the point: a flow fixture whose breakpoint
+/// line has drifted must fail as "the anchor moved", not as an empty flow
+/// result, which reads exactly like a variable-extraction defect and has
+/// repeatedly been mistaken for one.
+///
+/// Hard-coded `breakpoint_line` constants have gone stale twice in this suite:
+/// the Rust fixture's `12` survived the file growing from 23 to 457 lines, and
+/// the Ada and Fortran fixtures shipped with anchors one line past the
+/// statement their own comments named (`end Calculate_Sum;` instead of
+/// `return Final_Result;`, `end function calculate_sum` instead of the final
+/// `print`). Deriving the line from the source text at test time is what stops
+/// that recurring.
+pub fn find_line_containing(path: &Path, needle: &str) -> usize {
+    let source = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("could not read {} to locate {needle:?}: {e}", path.display()));
+    let hits: Vec<usize> = source
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains(needle))
+        .map(|(index, _)| index + 1)
+        .collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "expected exactly one line containing {needle:?} in {}, found {:?}",
+        path.display(),
+        hits
+    );
+    hits[0]
+}
+
 /// Find the ct-native-replay binary.
 ///
 /// Search order:
