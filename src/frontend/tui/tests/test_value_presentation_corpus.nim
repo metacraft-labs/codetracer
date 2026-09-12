@@ -73,6 +73,40 @@
 ## longer reports determinism as if it were correctness — and neither does
 ## PLAT-2, whose deliverable still reads "renders consistently".
 ##
+## ## PLAT-12'S BLOCK IS HAND-FALSIFIED TOO, AND IT DOES NOT OVERLAP THE HARNESS
+##
+## `run-plat12-visualiser-mutations.py` does not compile this file — its suites
+## are the pure one, the viewmodel one and the terminal affordance one — so NO
+## MUTATION ARM GRADES ANYTHING BELOW. This file's own M1/M3 precedent is
+## therefore the only standard available, and the PLAT-12 block is held to it.
+##
+## The block's POSITIVE half was falsified when it was written. Its two
+## NEGATIVE controls were not, and those are what stop a presenter that emitted
+## the declared summary for EVERY value from passing. Both were falsified by
+## hand on 2026-09-12, one at a time, against all three verified fixtures:
+##
+##   * M4 — `presenter.inlineText` returning the literal `the project said so`
+##     for every value. The block's POSITIVE half stays green (the declared
+##     rendering is exactly what it expects), and
+##     `present(subject, StatePanelBudget).root.text != DeclaredSummary` goes
+##     RED in every fixture. 13 FAILED / 2 OK.
+##   * M5 — `presenter.resolveBuiltin` reporting `ptProjectDefinition` as the
+##     tier of every value, so a value NO declaration matched is attributed to
+##     the project's tier. Both halves of the positive assertion stay green and
+##     `present(subject, StatePanelBudget).attribution.tier == ptBuiltin` goes
+##     RED. **3 FAILED / 12 OK** — the whole rest of this corpus, 25,924
+##     assertions of it, is satisfied by a presenter that has started
+##     attributing every recorded value to a tier with no members. That is the
+##     measurement worth carrying: the negative control is not a formality
+##     beside the positive one, it is the only thing here that can see M5.
+##
+## An unfalsified negative control is a self-comparison wearing a negation,
+## which is the trap the section above this one was written about — and which
+## is now `Testing/Verification-Harness-Traps.md` §7a, with M5's measurement in
+## it. It was recorded there on 2026-09-12 because a finding that lives only in
+## the header of the file it was found in is a finding the next harness author
+## does not read, which is that page's own stated reason for existing.
+##
 ## ## NO MOCKS
 ##
 ## Metacraft policy and PLAT-2's own "Real-stack integration tests (no mocks)":
@@ -100,6 +134,8 @@ import store/types
 import fixtures/fixture_provider
 
 import ../../../common/value_presentation
+import ../../../common/project_definitions
+import ../../../common/value_visualisers
 
 var countedAssertions = 0
 
@@ -152,6 +188,17 @@ const
     ## a derivation from the run's own shape moves BOTH sides together when a
     ## fixture drops out, which is why the summary case now carries a FIXED
     ## fixture floor beside it.
+
+  ChecksPlat12PerVerifiedFixture = 5 + 3 * BudgetCount
+    ## PLAT-12's real-recording arm, per verified fixture. See the block in the
+    ## per-fixture case: three fixed assertions before the budget loop, three
+    ## inside it per surface, and two after it.
+    ##
+    ## FIXED RATHER THAN DERIVED FROM THE RUN, on purpose: the block asserts
+    ## the SAME statement for every fixture — one declaration, rendering on
+    ## every declared surface, beating a built-in — so a fixture whose block
+    ## stopped asserting has to move this number rather than move an
+    ## expectation along with it.
 
   ChecksPerScalarValue = 1
     ## The scalar-identity assertion, counted per SCALAR value rather than per
@@ -377,6 +424,76 @@ suite "PLAT-2: one presentation, on real recordings":
             checkpoint(name & ": attribution '" & described & "'")
           ck described.startsWith("builtin.")
           ck described.contains("budget=state-panel")
+
+        # ---------------------------------------------------------------
+        # PLAT-12 — A DECLARED VISUALISER, ON A VALUE NOBODY HERE CHOSE
+        #
+        # PLAT-12's first integration test asks that "one visualiser, written
+        # once, renders in the state panel, tracepoint output, flow, the
+        # scratchpad and the TUI variables pane, each within its budget".
+        # `src/common/value_visualisers_test.nim` makes that statement over
+        # constructed values; this makes it over a RECORDING, and the
+        # difference is the one this file exists for — the type name the rule
+        # matches is read out of the trace rather than written here, so a rule
+        # that only ever matched a value the test author also wrote would not
+        # get a pass.
+        #
+        # The declaration is TOML text through `loadProjectDefinitions`, the
+        # same function `src/ct/launch/project_definitions_dir.nim` hands a
+        # checkout's bytes to. Nothing is constructed past the grammar.
+        var declaredIndex = -1
+        for k in 0 ..< firstValues.len:
+          let name = firstValues[k][1].typeName
+          # A type name this suite can quote into a TOML string and the
+          # grammar will accept. Rust generics, Python classes and Noir's own
+          # names all pass; the guard is against a name carrying a quote, a
+          # backslash or a newline, which would produce a declaration this
+          # suite mis-wrote rather than a declaration the product refused.
+          if name.len > 0 and name.len <= MaxTypeMatchBytes and
+             not name.contains('"') and not name.contains('\\') and
+             not name.contains('\n'):
+            declaredIndex = k
+            break
+        checkpoint("PLAT-12 subject: " &
+                   (if declaredIndex < 0: "<no quotable recorded type name>"
+                    else: firstValues[declaredIndex][0] & " : " &
+                          firstValues[declaredIndex][1].typeName))
+        # Loud rather than skipped: a fixture whose recorded values carry no
+        # usable type name has not exercised this and must say so.
+        ck declaredIndex >= 0
+        let subject =
+          if declaredIndex >= 0: firstValues[declaredIndex][1]
+          else: PValue(kind: pvkOpaque, typeName: "no-quotable-recorded-type")
+        const DeclaredSummary = "the project said so"
+        let declaredText =
+          "schema = \"codetracer.visualisers.v1\"\n\n" &
+          "[[visualiser]]\n" &
+          "match = \"" & subject.typeName & "\"\n" &
+          "summary = \"" & DeclaredSummary & "\"\n"
+        let loadedDefinitions = loadProjectDefinitions(@[
+          DefinitionFile(kind: dfkVisualisers, origin: doProject,
+                         path: definitionPath("", dfkVisualisers),
+                         text: declaredText)])
+        ck loadedDefinitions.isOk
+        let declaredPresenters = presentersFor(loadedDefinitions)
+        ck declaredPresenters.visualisers.len == 1
+        for budget in SurfaceBudgets:
+          let ruled = present(subject, budget, presenters = declaredPresenters)
+          if ruled.root.text != DeclaredSummary:
+            checkpoint("PLAT-12 @ " & budget.name & ": '" &
+                       brief(ruled.root.text) & "'")
+          ck ruled.root.text == DeclaredSummary
+          ck ruled.attribution.tier == ptProjectDefinition
+          # §5.4's "a user must be able to ask which visualiser rendered this
+          # value and get an answer", on a real recording: the answer names
+          # the rule AND the built-in it beat.
+          ck describeAttribution(ruled).contains("over=builtin.")
+        # …and the SAME value, with no declaration, renders the built-in way.
+        # Without this the case would be satisfied by a presenter that emitted
+        # the summary for everything — the self-comparison trap this file's
+        # own header records two mutations against.
+        ck present(subject, StatePanelBudget).root.text != DeclaredSummary
+        ck present(subject, StatePanelBudget).attribution.tier == ptBuiltin
 
 # ---------------------------------------------------------------------------
 # THE INDEPENDENT ORACLE.
@@ -611,6 +728,7 @@ suite "PLAT-2: the corpus run measured itself":
 
     let expected =
       verifiedFixtures * ChecksPerVerifiedFixture +
+      verifiedFixtures * ChecksPlat12PerVerifiedFixture +
       skippedFixtures * ChecksPerSkippedFixture +
       variablesSeen * ChecksPerVariable +
       scalarValuesSeen * ChecksPerScalarValue +

@@ -12,7 +12,7 @@
 # (Verification-Harness-Traps §16).
 
 1d00ad555eb04478a8d8cec6c9d8507ef7c424db8b94e16f3a54255d65f6721e  src/common/project_definitions/containment.nim
-d00336b331d9f46784d15411439f9fa9bca75ce70c48ac8fb648d29b4a26ef82  src/common/project_definitions/parse.nim
+fd0b44353efb82186023ea74eba6e7b3d4929d93870208961dd615cc6faeb88c  src/common/project_definitions/parse.nim
 a338591175adccf741a4980b5c1a7bac4f94a67636360696463aaea4ec5847d6  src/common/project_definitions/load.nim
 c5912cb4649a0601ac6b6e3a702b1996e92df612bc9c89cb89c88bdc655c752b  src/common/project_definitions/resolve.nim
 ce74596fd40814b49b99b028a981ef87a5b72d7130edf5cb2033202fde4aa9f0  src/ct/launch/project_definitions_dir.nim

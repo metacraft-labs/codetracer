@@ -771,7 +771,7 @@ method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} 
     self.redraw()
 
 
-proc atomValueTextAndClass(value: Value): (string, string) =
+proc atomValueTextAndClass(value: Value): (string, string, string) =
   ## PLAT-2: one presentation, at the state panel's budget, plus the CSS class
   ## the same presentation reports.
   ##
@@ -783,10 +783,19 @@ proc atomValueTextAndClass(value: Value): (string, string) =
   ## `Any`, `Recursion`, `Html` and `C`. The class strings were hand-written
   ## beside each arm and are now `presentationClassName`'s, keyed on the same
   ## `PresentationClass` the terminal colours by.
+  ##
+  ## PLAT-12 ADDED THE THIRD MEMBER: the PROVENANCE — which presenter or
+  ## visualiser produced this rendering, and what it beat — taken off the SAME
+  ## presentation rather than from a second call. A second `statePanelValue`
+  ## here would be a second rendering of the same value on the surface PLAT-2
+  ## removed exactly that from (`ui/flow.nim` called `textRepr` twice per value
+  ## to decide whether to show a "view more" button), and the two could in
+  ## principle disagree.
   let presentation = statePanelValue(value)
-  (presentation.root.text, presentationClassName(presentation.root.class))
+  (presentation.root.text, presentationClassName(presentation.root.class),
+   valueProvenance(presentation))
 
-proc collapsedValueTextAndClass(value: Value): (string, string) =
+proc collapsedValueTextAndClass(value: Value): (string, string, string) =
   ## The collapsed rendering of a compound value. Identical to the atom case
   ## since PLAT-2 — the split existed only because the two halves reached two
   ## different formatters, and they now reach one.
@@ -833,7 +842,8 @@ proc renderDirectAtomValueDom(
   valueText: string,
   expression: cstring,
   klass: string,
-  value: Value
+  value: Value,
+  provenance: string = ""
 ): Node =
   let klassNumber =
     if self.i mod 2 == 0:
@@ -855,6 +865,16 @@ proc renderDirectAtomValueDom(
   )
 
   let textSpan = newElement(cstring"span", cstring"value-expanded-text")
+  # PLAT-12 / Project-Definitions §5.4: "a user must be able to ask which
+  # visualiser rendered this value and get an answer." The terminal answers in
+  # its variables-pane title row; the desktop had no affordance at all, which
+  # PLAT-9 recorded as open. `title` is the one a DOM already has for "what is
+  # this?", it costs no layout, it is readable by a screen reader, and it
+  # carries the degradation sentence too when a §5.2 declaration was not
+  # honoured — so the value a reader is looking at and the explanation of it
+  # are the same element.
+  if provenance.len > 0:
+    textSpan.setAttribute(cstring"title", cstring(provenance))
   textSpan.appendText(cstring(valueText))
   result.appendChild(textSpan)
 
@@ -1035,8 +1055,9 @@ proc renderValueContentDom(
       nextPath.add(SubPath{kind: Dereference, typeKind: value.kind})
       result = self.renderValueRowDom(value.refValue, expression, cstring"_", nextPath, depth, value.address & " ->")
     else:
-      let (valueText, klass) = collapsedValueTextAndClass(value)
-      result = self.renderDirectAtomValueDom(valueText, expression, klass, value)
+      let (valueText, klass, provenance) = collapsedValueTextAndClass(value)
+      result = self.renderDirectAtomValueDom(valueText, expression, klass,
+                                             value, provenance)
 
   of Seq, Set, HashSet, OrderedSet, Array, Varargs,
       Variant, TableKind, Instance, Union, Tuple:
@@ -1048,13 +1069,15 @@ proc renderValueContentDom(
 
       result = self.renderExpandedCompoundDom(value, expression, children, path, left, right, depth)
     else:
-      let (valueText, klass) = collapsedValueTextAndClass(value)
-      result = self.renderDirectAtomValueDom(valueText, expression, klass, value)
+      let (valueText, klass, provenance) = collapsedValueTextAndClass(value)
+      result = self.renderDirectAtomValueDom(valueText, expression, klass,
+                                             value, provenance)
 
   of Int, Float, String, CString, Char, Bool,
       Enum, Enum16, Enum32, FunctionKind, types.None:
-    let (valueText, klass) = atomValueTextAndClass(value)
-    result = self.renderDirectAtomValueDom(valueText, expression, klass, value)
+    let (valueText, klass, provenance) = atomValueTextAndClass(value)
+    result = self.renderDirectAtomValueDom(valueText, expression, klass,
+                                           value, provenance)
 
   of TypeKind.Raw:
     result = newElement(cstring"div", cstring"value-raw value-expanded-text")

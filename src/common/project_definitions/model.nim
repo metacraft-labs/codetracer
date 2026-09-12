@@ -50,6 +50,27 @@ export presentation_vocabulary.ValuePresentationKinds
 export presentation_vocabulary.presentationSpelling
 export presentation_vocabulary.PresenterTier
 
+# §5.2's closed media list, DERIVED from the renderer's `MediaClass` rather
+# than written out a second time here. `parse.DeclarativeMediaTypes` is this
+# call; see the note there for what the two literals used to be and what went
+# wrong between them.
+export presentation_vocabulary.declarableMediaTypes
+
+# PLAT-12 MOVED `MatchKind` AND ITS PREDICATE DOWN, and nothing else about this
+# module changed. The three match kinds and the comparison over them are now
+# `value_presentation/vocabulary`'s, because `presenter.resolve` has to
+# evaluate them and cannot see this package — the pipeline's whole import
+# closure is two `std` modules. `MatchKind` below is an alias, `matches`
+# forwards, and there is exactly one implementation of "does this rule match
+# this type" in the tree (Verification-Harness-Traps §14).
+#
+# Exporting the TYPE is what carries `mkTypeName`, `mkTypePrefix` and
+# `mkTypeSuffix` with it — Nim refuses an enum field exported on its own, and
+# the refusal is the language saying what this alias already claims: the fields
+# belong to the type and the type is one type.
+export presentation_vocabulary.ValueMatchKind
+export presentation_vocabulary.typeMatches
+
 type
   PointKind* = enum
     ## §4's two. Spelled as the user-facing words, because the same strings
@@ -115,12 +136,16 @@ type
     file*: string
     points*: seq[PointDefinition]
 
-  MatchKind* = enum
+  MatchKind* = ValueMatchKind
     ## The three total predicates. See this module's header for why there is
-    ## no fourth.
-    mkTypeName = "typeName"      ## exact equality
-    mkTypePrefix = "typePrefix"  ## `startsWith`
-    mkTypeSuffix = "typeSuffix"  ## `endsWith`
+    ## no fourth, and `value_presentation/vocabulary.ValueMatchKind` for why
+    ## they are declared there rather than here.
+    ##
+    ## AN ALIAS AND NOT A COPY. `mkTypeName` is the same symbol both packages
+    ## name, `$mkTypeName` is still `"typeName"` — which is what
+    ## `parse.matchKindByName` reads and what an error message prints — and
+    ## `ord(high(MatchKind)) + 1` is still 3, which is the assertion that keeps
+    ## a fourth kind from arriving without the argument for it.
 
   VisualiserRule* = object
     ## §5.3: "what it matches", "how it presents", "what it hides".
@@ -141,6 +166,21 @@ type
       ## Constrained to `ValuePresentationKinds` at parse time — the five a
       ## recorded value can inhabit, named by
       ## `value_presentation/vocabulary`. PLAT-12 renders it; PLAT-11 reads it.
+    presentDeclared*: bool
+      ## Whether `present` was WRITTEN or is the zero value.
+      ##
+      ## ADDED BY PLAT-12, AND THE ABSENCE WAS A REAL AMBIGUITY RATHER THAN AN
+      ## OMISSION. `pkText` is both the first member of the enum and a
+      ## legitimate declaration (`present = "Text"` is how a project flattens a
+      ## record to one line), so a renderer reading `present` alone cannot tell
+      ## "the project asked for text" from "the project said nothing" — and the
+      ## second must leave the value's own shape alone. Reading it wrongly
+      ## turns every matched record into a leaf, which is a silent loss of the
+      ## tree beside it.
+      ##
+      ## The field is `false` for every rule that does not write `present`, so
+      ## a definition file that predates this field parses to exactly what it
+      ## parsed to before.
     mediaType*: string
       ## §5.2: "a rule may declare that a region of a value is media of a
       ## stated MIME type". From a closed list; see `parse.nim`.
@@ -226,18 +266,18 @@ func isOk*(l: LoadedProjectDefinitions): bool =
 
 func matches*(rule: VisualiserRule; typeName, language: string): bool =
   ## TOTAL, and bounded by `typeName.len`. The one implementation of §5.3's
-  ## matching: PLAT-12 will call it, the suite calls it, and there is no
-  ## second copy for the two to disagree over (Verification-Harness-Traps
-  ## §14).
-  if rule.language.len > 0 and rule.language != language: return false
-  case rule.matchKind
-  of mkTypeName: typeName == rule.match
-  of mkTypePrefix:
-    rule.match.len <= typeName.len and
-      typeName[0 ..< rule.match.len] == rule.match
-  of mkTypeSuffix:
-    rule.match.len <= typeName.len and
-      typeName[typeName.len - rule.match.len .. ^1] == rule.match
+  ## matching: PLAT-12 calls it, the suite calls it, and there is no second
+  ## copy for the two to disagree over (Verification-Harness-Traps §14).
+  ##
+  ## THE BODY MOVED DOWN IN PLAT-12 AND WAS NOT COPIED. It is
+  ## `value_presentation/vocabulary.typeMatches`, because `presenter.resolve`
+  ## has to ask the same question of a `Visualiser` and cannot see this type.
+  ## This function is now the adapter from a `VisualiserRule`'s four fields to
+  ## that predicate's four parameters and contains no comparison of its own —
+  ## which is what makes "the grammar and the renderer agree about what a rule
+  ## matches" structural rather than a claim about two similar-looking `case`
+  ## statements.
+  typeMatches(rule.matchKind, rule.match, rule.language, typeName, language)
 
 func specificity*(rule: VisualiserRule): int =
   ## §5.4: "within a tier the more specific match wins".

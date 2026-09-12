@@ -61,6 +61,64 @@ func presentationClassName*(class: PresentationClass): string =
   of pcMedia: "media"
   of pcOpaque, pcUnknown: "empty"
 
+# ---------------------------------------------------------------------------
+# PLAT-12 — the checkout's per-type visualisers, read HERE and only here
+# ---------------------------------------------------------------------------
+
+var activeVisualisers: seq[Visualiser] = @[]
+  ## The visualiser tier this session's checkout declared.
+  ##
+  ## ## WHY A MODULE-LEVEL `var` IS ADMISSIBLE HERE AND NOWHERE BELOW IT
+  ##
+  ## It is not admissible in the PIPELINE: `ci/test/value-presentation-boundary.sh`
+  ## holds `common/value_presentation/`'s four core modules to `func`, and a
+  ## module-scope `var` there would make every presentation impure — the one
+  ## property PLAT-2 cannot trade. `PresenterSet` is a PARAMETER for that
+  ## reason and `presenter.nim` has no registry.
+  ##
+  ## This module is the desktop's one DOOR, and it already holds exactly this
+  ## shape for exactly this reason: `sessionLang` reads `data.trace.lang`,
+  ## ambient session state, in one visible place, and everything below passes
+  ## the answer as an argument. The visualiser list is the same kind of fact —
+  ## a property of the open recording's checkout, not of the value — so it is
+  ## read once, here, where a reader can see it, rather than threaded through
+  ## six surfaces that would each have to remember to pass it.
+  ##
+  ## Private, so the only ways in are the two procs below.
+
+proc setActiveVisualisers*(visualisers: seq[Visualiser]) =
+  ## Install the tier for this session. Called when a recording opens and its
+  ## checkout's `.codetracer/` has been read; `@[]` is the correct argument
+  ## when it has not, and is the state every build is in until a caller
+  ## supplies one.
+  activeVisualisers = visualisers
+
+proc activeVisualiserCount*(): int =
+  ## How many rules are in force. For a diagnostics surface and for a caller
+  ## that wants to say "no project definitions are loaded" rather than showing
+  ## an empty list — the distinction `describeVisualisers` makes in words.
+  activeVisualisers.len
+
+proc valueProvenance*(presentation: Presentation): string =
+  ## §5.4's "a user must be able to ask which visualiser rendered this value
+  ## and get an answer", for the desktop.
+  ##
+  ## ## THE DESKTOP HAD NO AFFORDANCE FOR THIS, AND PLAT-9 RECORDED THAT
+  ##
+  ## The terminal's variables pane has named the winning presenter in its title
+  ## row since PLAT-2's second pass; the desktop and the web did not, and a
+  ## field only a test can reach does not satisfy a requirement about a reader.
+  ## `ui/value.nim` puts this on the value span's `title`, which is the
+  ## affordance a DOM already has for "what is this?" — hover, and it says.
+  ##
+  ## IT TAKES THE PRESENTATION RATHER THAN THE VALUE, so the answer describes
+  ## the rendering the reader is looking at rather than a second one made for
+  ## the purpose. The same value at two budgets is two byte strings, which is
+  ## why `describeAttribution` prints the budget's name at all.
+  let degradation = describeDegradation(presentation)
+  if degradation.len == 0: describeAttribution(presentation)
+  else: describeAttribution(presentation) & "\n" & degradation
+
 proc sessionLang*(): Lang =
   ## The loaded recording's language.
   ##
@@ -71,19 +129,19 @@ proc sessionLang*(): Lang =
 
 proc statePanelValue*(value: Value): Presentation =
   ## The state panel: a TREE, seven levels deep, 200 members per node.
-  presentValue(value, StatePanelBudget, sessionLang())
+  presentValue(value, StatePanelBudget, sessionLang(), activeVisualisers)
 
 proc tracepointValue*(value: Value): Presentation =
   ## A tracepoint result row: ONE line.
-  presentValue(value, TracepointBudget, sessionLang())
+  presentValue(value, TracepointBudget, sessionLang(), activeVisualisers)
 
 proc eventLogValue*(value: Value): Presentation =
   ## The trace-log / event-log locals column: ONE line.
-  presentValue(value, EventLogBudget, sessionLang())
+  presentValue(value, EventLogBudget, sessionLang(), activeVisualisers)
 
 proc scratchpadValue*(value: Value): Presentation =
   ## A scratchpad row: ONE line, expandable into children.
-  presentValue(value, ScratchpadBudget, sessionLang())
+  presentValue(value, ScratchpadBudget, sessionLang(), activeVisualisers)
 
 proc flowValue*(value: Value): Presentation =
   ## A flow chip: ONE line, THIRTY CELLS.
@@ -95,7 +153,7 @@ proc flowValue*(value: Value): Presentation =
   ## "view more" affordance appears, which is the same question asked of the
   ## presenter instead of re-derived by measuring a string the surface rendered
   ## twice.
-  presentValue(value, FlowBudget, sessionLang())
+  presentValue(value, FlowBudget, sessionLang(), activeVisualisers)
 
 proc callArgValue*(value: Value): Presentation =
   ## One call-trace argument chip: ONE line.
@@ -112,4 +170,4 @@ proc callArgValue*(value: Value): Presentation =
   ## rendered a `Seq`, an `Instance`, a `Tuple`, a `Table`, a `Variant`, a
   ## `Pointer` or an `Enum` argument as the empty string, so those chips were
   ## blank. They now read the same as they do everywhere else.
-  presentValue(value, CalltraceArgBudget, sessionLang())
+  presentValue(value, CalltraceArgBudget, sessionLang(), activeVisualisers)

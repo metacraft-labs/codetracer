@@ -463,3 +463,22 @@ src/frontend/viewmodel/tests/unit/.plat10-distribution-mutation.lock
 # notes say the opposite about each other, and a reader who skims would assume
 # the rule is "never two at once".
 src/frontend/viewmodel/tests/unit/.plat11-definitions-mutation.lock
+
+# PLAT-12's mutation run lock — the exclusive `flock` taken by
+# `run-plat12-visualiser-mutations.py`, held for the whole run. A SIXTH lock,
+# and the note above it needs a correction rather than a repetition: PLAT-11's
+# entry says its subject set is disjoint from its siblings' and that it "may
+# run beside the plugin harnesses". The MUTATION SUBJECTS are disjoint and that
+# sentence is true of them; what it does not cover — and what
+# Verification-Harness-Traps records as residue 12 — is that a harness's SUITES
+# compile files another harness MUTATES. PLAT-11's suites compile PLAT-8's
+# subject, and a PLAT-8 arm reddens PLAT-11's unmutated suite. The locks do not
+# serialise against each other, so the safe rule is the simple one: never run
+# two harnesses at once, whatever their subject sets say.
+#
+# PLAT-12's own subjects are `common/value_presentation/`,
+# `common/value_visualisers.nim`, `viewmodel/store/value_media_degradation.nim`
+# and the terminal's two variables-pane modules. Its suites compile
+# `common/project_definitions/` — PLAT-11's subject — which is the same hazard
+# in the other direction.
+src/frontend/viewmodel/tests/unit/.plat12-visualiser-mutation.lock

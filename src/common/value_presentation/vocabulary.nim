@@ -169,6 +169,182 @@ type
     ptPlugin           ## an installed extension's contribution
     ptBuiltin          ## this repository's own kind-directed presenters
 
+  ValueMatchKind* = enum
+    ## The three TOTAL predicates a per-type visualiser may match a type name
+    ## with (Project-Definitions.md §5.3), spelled as the words a project
+    ## definition writes.
+    ##
+    ## IT LIVES HERE RATHER THAN IN `project_definitions/model.nim`, AND THE
+    ## MOVE IS §14'S. PLAT-11 declared these three beside the grammar that
+    ## parses them; PLAT-12 has to EVALUATE them inside `presenter.resolve`,
+    ## which cannot see the definition grammar — the pipeline imports
+    ## `std/strutils` and `std/unicode` and nothing else. Two copies of one
+    ## three-armed string comparison is exactly the shape
+    ## Verification-Harness-Traps §14 names, so `model.MatchKind` IS this type
+    ## and `model.matches` forwards to `typeMatches` below. There is one
+    ## predicate; the grammar and the presenter both call it.
+    ##
+    ## THERE IS DELIBERATELY NO REGULAR EXPRESSION, and the reason is PLAT-11's
+    ## unchanged: a regex over a cloned repository's text is unbounded work
+    ## (the catastrophic-backtracking family), and "bounded" would then mean a
+    ## step budget, a timeout and a partial answer — three mechanisms replacing
+    ## one that does not need them.
+    mkTypeName = "typeName"      ## exact equality
+    mkTypePrefix = "typePrefix"  ## `startsWith`
+    mkTypeSuffix = "typeSuffix"  ## `endsWith`
+
+  MediaClass* = enum
+    ## What a declared media type IS, as a CLOSED enum.
+    ##
+    ## ## THE STRING IS CLASSIFIED ONCE AND THEN NEVER CONSULTED AGAIN
+    ##
+    ## This is hardening, not tidiness. A media type on a presentation is a
+    ## string a CLONED REPOSITORY wrote (Project-Definitions.md §1.1: "a user
+    ## who clones a repository to *look* at it has evaluated nothing"), and the
+    ## obvious rendering design — a table keyed on the string, a decoder looked
+    ## up by subtype, a `split('/')` and a dispatch on the second half — is a
+    ## dispatch the repository controls. That is the shape PLAT-11's parse
+    ## excluded by keeping the media list closed, and it would be reintroduced
+    ## the moment rendering went looking for a decoder BY NAME.
+    ##
+    ## So `mediaClassOf` is a total function from bytes to a member of this
+    ## enum by EXACT EQUALITY against a literal list, everything downstream
+    ## branches on the ENUM, and an unrecognised string is `mcUnknown` —
+    ## a value, reported, never a lookup miss. `image/png; charset=utf-8`,
+    ## `IMAGE/PNG` and `image/png\0` are all `mcUnknown`, which is the right
+    ## answer: this build has no renderer for any of them.
+    mcUnknown
+    mcImagePng
+    mcImageJpeg
+    mcImageSvg
+    mcAudioWav
+    mcAudioOgg
+    mcTextMarkdown
+    mcTextHtml
+    mcOctetStream
+
+  MediaGap* = object
+    ## §5.2's media, declared on a surface that cannot draw it — "what is
+    ## missing and how to get it", for a VALUE rather than for a pane.
+    ##
+    ## THE SHAPE IS PLAT-9'S `DependencyGap` AND THAT IS DELIBERATE. §8.2's
+    ## rule for a plugin surface whose external component is absent is that the
+    ## degradation "says what is missing and how to get it — a name and an
+    ## install action, not 'unavailable'", and a terminal that cannot show
+    ## `image/png` is the same sentence with a different subject. Inventing a
+    ## second "cannot render" concept beside it would be the parallel banner
+    ## §8.2 already refused once.
+    ##
+    ## `store/value_media_degradation.nim` is where this becomes a
+    ## `PaneDegradation`; it is not in this package because `PaneDegradation`
+    ## is the front-end's and this one is the pipeline's.
+    mediaType*: string
+      ## As DECLARED, verbatim and already bounded by the declaration's own
+      ## length bound. Carried so a reader is told what the project said rather
+      ## than what this build made of it.
+    class*: MediaClass
+    visualiser*: string
+      ## The presenter id that declared it, so the gap and the attribution name
+      ## the same thing.
+    surface*: string
+      ## The budget's name. The same value degrades on one surface and not on
+      ## another, so a gap that could not say which surface it was on would be
+      ## answering a different question — the reason `Budget.name` exists.
+    bytes*: int
+      ## How many bytes the declared field held, or 0 when the field named by
+      ## `mediaFrom` is not in the value.
+    fieldPresent*: bool
+      ## Whether the value actually carried the field the rule named. A rule
+      ## pointing at a field that is not there is a DIFFERENT problem from a
+      ## surface that cannot draw, and the remedy differs, so the two are not
+      ## collapsed into one message.
+
+  ExpansionBound* = object
+    ## PLAT-12. The WORK a rendering was allowed and what it did with it —
+    ## and, when the allowance ran out, that fact as something a reader is
+    ## told rather than something that silently shortens a value.
+    ##
+    ## ## WHY A PRESENTATION NEEDS A WORK BOUND AT ALL
+    ##
+    ## Because §5.2's templating is RECURSIVE and nothing above this said so.
+    ## A summary is substituted by rendering each named field through the same
+    ## presenter — `substituteSummary` -> `inlineText` -> `winningVisualiser`
+    ## -> `visualisedText` -> `substituteSummary` — so a rule matching a type
+    ## that CONTAINS ITSELF re-enters its own template once per placeholder.
+    ## The branching factor is `MaxTemplatePlaceholders` (16) and the only
+    ## bound on the number of levels is `Budget.depth`, which is 7 on the
+    ## state panel and 16 on the terminal's tree. Measured on 2026-09-12, a
+    ## 200-byte declaration against `Node { next: Node }`, release build:
+    ##
+    ## | budget depth | elapsed | text produced |
+    ## |---|---|---|
+    ## | 4 | 28 ms | 1.0 MB |
+    ## | 5 | 453 ms | 16.8 MB |
+    ## | 6 | 7.3 s | 268 MB |
+    ## | 7 | 125 s | **4.29 GB**, for ONE value |
+    ##
+    ## Exactly ×16 per level, and CLIPPING DOES NOT SAVE A NARROW SURFACE:
+    ## `flow` is 30 cells and depth 10, so it produces the whole string and
+    ## then cuts 30 cells off the front of it.
+    ##
+    ## ## WHY THE BOUND IS ON WORK AND NOT ON DEPTH
+    ##
+    ## Depth was already bounded and bounded nothing: every row above is
+    ## inside `Budget.depth`. What a declaration multiplies is the number of
+    ## renderings per level, so the quantity to bound is the TOTAL — see
+    ## `MaxRenderWork`.
+    ##
+    ## ## AND "WORK" HAD TO BE MEASURED, NOT ASSUMED
+    ##
+    ## *Corrected 2026-09-12, one day after the bound was added.* The first
+    ## version charged one unit per rendering entered and one per byte
+    ## produced, and called that the frame's cost. It is not. Three of the
+    ## things one rendering does are proportional to the RECORDING and appear
+    ## in neither number — the walk over the field a `media` rule names, the
+    ## two walks `byteBufferOf` makes over a value's own members, and the
+    ## `MaxVisualiserRules` × `MaxTypeMatchBytes` comparison the rule scan
+    ## makes per node. Measured against a 200,000-element field at the state
+    ## panel's depth: 19.5 seconds for ONE value, linear in the field, with
+    ## `spent` below reporting the same 1,048,582 it reports for a field two
+    ## hundred times smaller.
+    ##
+    ## THAT IS THE LESSON THIS FIELD EXISTS TO CARRY. A bound whose report is
+    ## constant in the quantity being multiplied is a bound on the wrong
+    ## quantity — and because it reports, it states that it honoured an
+    ## allowance it never measured, which is worse than saying nothing. The
+    ## charges are now one per QUANTITY at the site that spends it; see the
+    ## block above `presenter.memberScanCost`.
+    ##
+    ## ## AND IT IS REPORTED, NOT SILENT
+    ##
+    ## The shape is `MediaGap`'s, for §8.2's reason: a value that stopped
+    ## short because this process refused to spend more is a degradation, and
+    ## a degradation that says nothing is the blank region §8.2 forbids. The
+    ## rendering is not blanked either — expansion stops with the elision
+    ## glyph the surface already uses, the value's own text up to that point
+    ## stays, and `reached` carries the sentence.
+    reached*: bool
+      ## Whether the bound was hit. False on every ordinary presentation,
+      ## including every presentation in this repository's suites and corpus.
+    spent*: int
+      ## Units consumed, in five quantities: one per inline rendering entered,
+      ## one per byte produced, one per member each of a frame's O(n) walks may
+      ## touch, one per byte the visualiser scan may compare, and one per
+      ## member of the field a §5.2 rule named. Carried whether or not the
+      ## bound was reached, because a number that only appears in the failure
+      ## case cannot be watched — and, as the correction above records, a
+      ## number that does not MOVE with the work cannot be watched either.
+    bound*: int
+      ## `MaxRenderWork`, carried so a report is readable without the reader
+      ## having to look the constant up.
+    visualiser*: string
+      ## The id of the rule being expanded when the bound was reached, or ""
+      ## when no visualiser was involved. This is what makes the sentence
+      ## actionable: the remedy is a change to THAT rule.
+    surface*: string
+      ## The budget's name, for `MediaGap`'s reason — the same value at two
+      ## budgets is two different renderings.
+
   Attribution* = object
     ## WHICH presenter rendered a value, and what else could have.
     ##
@@ -228,6 +404,29 @@ type
       ## is why the same value reads `306` in a tracepoint line and
       ## `306 (0x132)` on a focused TUI row — a budget difference, which is the
       ## only difference PLAT-2 permits between surfaces.
+    media*: set[MediaClass]
+      ## Which media this surface can RENDER AS MEDIA, rather than describe.
+      ##
+      ## PLAT-12. A per-type visualiser may declare that a region of a value is
+      ## `image/png` (Project-Definitions.md §5.2); whether that becomes pixels
+      ## is a property of the SURFACE, and §5.2 says so — "an image, at
+      ## whatever fidelity the surface allows". A surface that cannot is not
+      ## permitted to go blank: the class is absent from this set, the
+      ## presenter renders the value's ordinary presentation instead, and a
+      ## `MediaGap` on the result says what was missing and how to get it.
+      ##
+      ## THE ZERO VALUE IS THE EMPTY SET, AND THAT IS THE HONEST DEFAULT: a
+      ## surface that has not said it can draw something cannot.
+      ##
+      ## EVERY BUDGET IN `surfaces.nim` DECLARES EXACTLY `{mcOctetStream}`
+      ## TODAY, and the sameness is a measurement rather than an oversight —
+      ## see that file's `MediaCapabilityNote`. No surface in this repository
+      ## draws pixels, plays audio or renders markdown yet; raw bytes are the
+      ## one medium all seven already honour, because `builtin.byte-buffer`
+      ## has rendered a hex dump with a length since CTUI-7. Widening a set
+      ## here is PLAT-14's work for the terminal and the desktop's own for the
+      ## DOM, and claiming a capability nothing implements would turn the
+      ## degradation path — the part that IS built — into a blank region.
 
   PresentationMeasure* = proc (s: string): int {.noSideEffect, gcsafe, raises: [].}
     ## How WIDE a string is on the consuming surface.
@@ -254,6 +453,25 @@ type
     ## bytes with no argument having changed. That is precisely the impurity
     ## PLAT-2's "byte-identical across runs and across front-ends" forbids.
     lang*: PresentationLang
+    languageName*: string
+      ## The recording's own name for its language — `rust`, `python`, `noir` —
+      ## verbatim, as a project definition spells it in a rule's `language`.
+      ##
+      ## A SECOND LANGUAGE FIELD, AND THE TWO ANSWER DIFFERENT QUESTIONS.
+      ## `lang` above is a three-member enum because PRESENTATION only ever
+      ## needed to know whether to draw `vec![…]` or `@[…]`; collapsing every
+      ## other language onto `plOther` is correct for that and useless for
+      ## §5.3's "what it matches: … a language", where a rule saying
+      ## `language = "python"` must not also claim a Ruby value. Widening the
+      ## enum instead would have made this package carry a list of every
+      ## language CodeTracer records, which is `common/lang.nim`'s job and is
+      ## the module this package deliberately cannot see (see
+      ## `PresentationLang`).
+      ##
+      ## EMPTY MEANS UNKNOWN, and an unknown language matches no
+      ## language-qualified rule — `typeMatches` compares by equality and ""
+      ## equals no declared language. An unqualified rule still matches, which
+      ## is the right default: a rule that named no language did not ask.
     budget*: Budget
     measure*: PresentationMeasure
 
@@ -299,6 +517,34 @@ type
       ## whether ANYTHING was dropped anywhere in the tree — text clipped,
       ## members elided, depth cut. A surface uses it to decide whether to
       ## offer "more"; a test uses it to assert that a budget bit.
+    mediaGaps*: seq[MediaGap]
+      ## PLAT-12. Every §5.2 media declaration this surface could not honour,
+      ## deduplicated and bounded by `MaxMediaGaps`.
+      ##
+      ## A SEQ AND NOT A BOOL, because §8.2's rule is that the degradation says
+      ## WHAT is missing: a value carrying two media fields on a surface that
+      ## can draw neither has two things to say, and a flag would say one of
+      ## them. It is also the reason it is not folded into `truncated` — a
+      ## clipped string and an undrawable image have different remedies, and
+      ## PLAT-2's budget model already owns the first.
+      ##
+      ## EMPTY IS THE ORDINARY CASE, including for every value on a build with
+      ## no project definitions loaded: a gap can only be produced by a rule
+      ## that declared media.
+    expansion*: ExpansionBound
+      ## PLAT-12. What this rendering SPENT, and whether it was cut off for
+      ## spending it. See `ExpansionBound`; `reached` is false on every
+      ## ordinary presentation and the zero value is therefore the ordinary
+      ## case, exactly as `mediaGaps` being empty is.
+      ##
+      ## SEPARATE FROM `truncated`, and the separation is the point. A budget
+      ## elision and a refused expansion have different remedies: the first is
+      ## answered by opening the value on a surface with more room, and the
+      ## second cannot be — no surface has 4 GB of room, and the fix is to the
+      ## RULE. Folding the second into the first would offer a remedy that
+      ## cannot work, which is the same error `describeMediaGap`'s three arms
+      ## exist to avoid. `truncated` is ALSO set when the bound is reached,
+      ## because something was in fact dropped.
 
 const
   ValuePresentationKinds* = {pkText, pkList, pkTree, pkTable, pkImage}
@@ -328,6 +574,212 @@ const
     ## One display cell wide, so a clipped field's width is still its cell
     ## count. The same constant the TUI's formatters used before this package
     ## existed.
+
+  MaxMediaGaps* = 8
+    ## How many DISTINCT media gaps one presentation reports.
+    ##
+    ## A BOUND RATHER THAN A LIST THAT GROWS WITH THE VALUE, because the gap
+    ## list is derived from attacker-controlled declarations applied to an
+    ## attacker-controlled recording: a rule matching by suffix against a
+    ## thousand-member record would otherwise produce a thousand identical
+    ## sentences, each of them a string this process allocated on behalf of a
+    ## repository nobody read. Gaps are deduplicated first, so the bound is
+    ## reached only by a value that genuinely declares more than eight
+    ## different undrawable media — at which point the ninth is dropped and
+    ## the eight that are shown are still true.
+
+  MaxRenderWork* = 1_048_576
+    ## HOW MUCH ONE PRESENTATION MAY SPEND — one mebibyte, counted as one unit
+    ## per inline rendering entered plus one per byte it produced.
+    ##
+    ## THE UNIT IS OUTPUT, WITH A FLOOR OF ONE PER RENDERING, and both halves
+    ## are load-bearing. Output is the quantity a reader can check (it is the
+    ## length of the strings this process allocated on a repository's behalf)
+    ## and it bounds memory directly; the floor of one is what keeps a
+    ## rendering that produces nothing from being free, so the count is a bound
+    ## on WORK and not only on bytes.
+    ##
+    ## WHY A CONSTANT AND NOT A FUNCTION OF THE BUDGET. Because the runaway is
+    ## not a property of the surface: `flow` is the narrowest budget in the
+    ## product (30 cells) and has the DEEPEST exposure of the one-line
+    ## surfaces (depth 10), since clipping happens after the string exists.
+    ## A bound derived from `Budget.cells` would be smallest exactly where the
+    ## exposure is largest.
+    ##
+    ## THE NUMBER IS QUOTED AGAINST THE LARGEST RENDERING EVER MEASURED HERE.
+    ## `headless_session.extractValueText` produced a 12 KB string for a
+    ## 600-entry mapping — the measurement `surfaces.tuiValueBudget` records
+    ## as the cost its member cap removed — so this is ~87× the worst real
+    ## case, and three to four ORDERS OF MAGNITUDE below what a declaration
+    ## reaches without it (268 MB at depth 6, 4.29 GB at depth 7; see
+    ## `ExpansionBound`). Nothing in this repository's suites or in its
+    ## recorded fixture corpus reaches it, and that is a measurement rather
+    ## than an expectation: the whole `tui` lane is green with the bound in
+    ## place, including `test_value_presentation_corpus`'s 25,924 assertions
+    ## over three real recordings driven through a real `replay-server`, and
+    ## `expansion.reached` is false on every one of them.
+    ##
+    ## REACHING IT IS A REPORTABLE CONDITION, NOT A BLANK. See
+    ## `ExpansionBound` and `describeExpansionBound`.
+
+func mediaTypeSpelling*(c: MediaClass): string =
+  ## The MIME type a class is written as, in a declaration and in a report.
+  ##
+  ## THE CLOSED LIST LIVES HERE AND NOWHERE ELSE. PLAT-11's
+  ## `parse.DeclarativeMediaTypes` — the set a project definition may name — is
+  ## DERIVED from this function by `declarableMediaTypes` below, so the
+  ## grammar's list and the renderer's classification cannot disagree about
+  ## whether `audio/ogg` is a thing. They were written as two literals in the
+  ## first draft, which is Verification-Harness-Traps §14 in its most literal
+  ## form: a type the grammar accepts and the renderer does not know is a
+  ## silently blank value, and a type the renderer knows and the grammar
+  ## refuses is a feature nobody can reach.
+  case c
+  of mcUnknown: ""
+  of mcImagePng: "image/png"
+  of mcImageJpeg: "image/jpeg"
+  of mcImageSvg: "image/svg+xml"
+  of mcAudioWav: "audio/wav"
+  of mcAudioOgg: "audio/ogg"
+  of mcTextMarkdown: "text/markdown"
+  of mcTextHtml: "text/html"
+  of mcOctetStream: "application/octet-stream"
+
+func mediaClassOf*(mediaType: string): MediaClass =
+  ## The class a declared media type IS, or `mcUnknown`.
+  ##
+  ## EXACT EQUALITY, over the whole string, against the spelling
+  ## `mediaTypeSpelling` gives — no `split`, no lowercasing, no parameter
+  ## stripping, no prefix test on the type half. Every one of those would make
+  ## the string a repository wrote select what this process does with it, which
+  ## is the dispatch-by-name this enum exists to prevent. See `MediaClass`.
+  ##
+  ## Written as a loop over the enum rather than as a `case` over string
+  ## literals so that the two directions are one table: a member added to
+  ## `MediaClass` with a spelling is classifiable, declarable and renderable on
+  ## the same edit.
+  if mediaType.len == 0:
+    return mcUnknown
+  for c in MediaClass:
+    if c != mcUnknown and mediaTypeSpelling(c) == mediaType:
+      return c
+  mcUnknown
+
+func declarableMediaTypes*(): seq[string] =
+  ## §5.2's table, as the MIME types a project definition may declare.
+  ##
+  ## DERIVED from `MediaClass`, which is the point — see `mediaTypeSpelling`.
+  ## `mcUnknown` is not in it because it is the ABSENCE of a class rather than
+  ## a member of the list.
+  for c in MediaClass:
+    if c != mcUnknown: result.add mediaTypeSpelling(c)
+
+func describeMediaGap*(g: MediaGap): string =
+  ## §8.2's sentence, for a value: the name, the surface, and how to get it.
+  ##
+  ## BOTH HALVES ARE IN THE STRING AND THE SUITE ASSERTS BOTH SUBSTRINGS
+  ## rather than that the string is non-empty — `surface_host.describe` carries
+  ## the same note for the same reason. "unavailable" is what §8.2 forbids, and
+  ## a blank region is what it forbids one step further.
+  ##
+  ## THREE CAUSES, THREE REMEDIES, because collapsing them would tell a user to
+  ## do something that cannot work — §14's retry-that-cannot-succeed at value
+  ## scale:
+  ##
+  ##   * the rule names a field the value does not have. The project's
+  ##     declaration is wrong, or this value is not the one it meant; there is
+  ##     nothing to install and nothing to switch to.
+  ##   * the media type is outside §5.2's list. No surface in any front-end
+  ##     draws it, so "try another front-end" would be that same bad advice.
+  ##   * the type is one §5.2 names and THIS surface cannot draw it. That is
+  ##     the renewable one, and the remedy names the surfaces that can.
+  let where = if g.surface.len > 0: g.surface else: "this surface"
+  if not g.fieldPresent:
+    return "visualiser '" & g.visualiser & "' declares '" & g.mediaType &
+      "' but the value has no such field, so there are no bytes to draw. " &
+      "The value is shown as it would be without the declaration. To fix it: " &
+      "point the rule's 'mediaFrom' at a field this type actually has"
+  if g.class == mcUnknown:
+    return "visualiser '" & g.visualiser & "' declares media type '" &
+      g.mediaType & "' (" & $g.bytes & " bytes), which this build has no " &
+      "renderer for on ANY surface — it is outside the media a declaration " &
+      "may name. The value is shown as it would be without the declaration. " &
+      "To fix it: declare one of " & declarableMediaTypes().join(", ")
+  "visualiser '" & g.visualiser & "' declares '" & g.mediaType & "' (" &
+    $g.bytes & " bytes) and the '" & where & "' surface draws no " &
+    g.mediaType & ". The value is shown as it would be without the " &
+    "declaration, so nothing is hidden. To see it: open the value on a " &
+    "surface that draws it — a surface whose budget declares '" &
+    g.mediaType & "' in its media set"
+
+func describeExpansionBound*(e: ExpansionBound): string =
+  ## §8.2's sentence, for a rendering that ran out of allowance. "" when it did
+  ## not, which is every ordinary presentation.
+  ##
+  ## A NAME AND A REMEDY, like `describeMediaGap`, and for the same reason: a
+  ## value that stops short without saying why is the blank region §8.2
+  ## forbids. The remedy names the RULE rather than a surface, because no
+  ## surface has room for the rendering that was refused — telling a reader to
+  ## open it somewhere else would be the retry that cannot succeed.
+  ##
+  ## TWO REMEDIES, because there are two ways to reach the bound and only one
+  ## of them is a declaration's fault. A rule whose summary re-enters its own
+  ## type is named and blamed; a presentation that simply rendered a very large
+  ## recording is told what it spent and is not told to edit a rule it does not
+  ## have.
+  if not e.reached:
+    return ""
+  let where = if e.surface.len > 0: e.surface else: "this surface"
+  if e.visualiser.len > 0:
+    return "visualiser '" & e.visualiser & "' was still expanding when this " &
+      "rendering reached its work bound of " & $e.bound & " units (" &
+      $e.spent & " spent) on the '" & where & "' surface. Expansion " &
+      "stopped there and " &
+      "the value is shown as far as it got, marked with '" & Ellipsis &
+      "'. A summary template is substituted by RENDERING each field it names, " &
+      "so a rule whose type contains itself re-enters its own template once " &
+      "per placeholder. To fix it: give that rule a summary that does not " &
+      "name a field of its own type, or name fewer of them"
+  "this rendering reached its work bound of " & $e.bound & " units (" &
+    $e.spent & " spent) on the '" & where &
+    "' surface and stopped there, marked with '" &
+    Ellipsis & "'. No visualiser was expanding, so this is the size of the " &
+    "recorded value rather than a declaration. To see more of it: open the " &
+    "value on a surface whose budget descends less far, so that fewer " &
+    "renderings are spent above the part you are reading"
+
+func typeMatches*(matchKind: ValueMatchKind; match, ruleLanguage: string;
+                  typeName, valueLanguage: string): bool =
+  ## Whether a rule matching `match` under `matchKind` (and, when non-empty,
+  ## restricted to `ruleLanguage`) claims a value of type `typeName` recorded
+  ## from `valueLanguage`.
+  ##
+  ## TOTAL, AND BOUNDED BY `typeName.len`. §2.2: "Matching and templating are
+  ## total and terminate by construction." Three O(n) string comparisons, no
+  ## backtracking, no allocation, no re-scan.
+  ##
+  ## THE ONE IMPLEMENTATION. `project_definitions/model.matches` calls this and
+  ## contains no comparison of its own, `presenter.resolve` calls it, and both
+  ## suites call it through their subjects. §14: one predicate, one function,
+  ## rule and control both calling it — which is the property that stops the
+  ## grammar's idea of "does this rule match" drifting from the renderer's.
+  ##
+  ## AN EMPTY `match` MATCHES NOTHING, deliberately, and this is not the
+  ## "empty pattern matches everything" convention. `mkTypeName` with an empty
+  ## match asks whether the type name is "", which for an unnamed value it is —
+  ## so the rule that a whole tier could be claimed by a one-character typo is
+  ## closed where it can be closed rather than here: PLAT-11's parser refuses a
+  ## visualiser whose `match` is empty (`pdcMissingField`), and
+  ## `value_visualisers.admit` refuses one again at the presenter boundary, so
+  ## no `Visualiser` reaching `resolve` has one.
+  if ruleLanguage.len > 0 and ruleLanguage != valueLanguage: return false
+  case matchKind
+  of mkTypeName: typeName == match
+  of mkTypePrefix:
+    match.len <= typeName.len and typeName[0 ..< match.len] == match
+  of mkTypeSuffix:
+    match.len <= typeName.len and
+      typeName[typeName.len - match.len .. ^1] == match
 
 func presentationSpelling*(k: PresentationKind): string =
   ## `pkProgressIndicator` -> `ProgressIndicator`. PLAT-3's own spelling of an
@@ -446,4 +898,50 @@ func describeAttribution*(p: Presentation): string =
     parts.add "unopposed"
   if p.truncated:
     parts.add "truncated"
+  if p.mediaGaps.len > 0:
+    # PLAT-12. A value whose declared media this surface cannot draw is still
+    # rendered — but a reader asking "which visualiser rendered this" has to be
+    # told that the visualiser asked for something it did not get, or the
+    # answer is true and misleading at once. The MARKER is here, one token per
+    # gap; the sentence with the remedy in it is `describeDegradation`, because
+    # this function is one line long by contract (see the doc comment) and
+    # §8.2's remedy is not.
+    var kinds: seq[string] = @[]
+    for g in p.mediaGaps: kinds.add g.mediaType
+    parts.add "media-degraded=" & kinds.join(",")
+  if p.expansion.reached:
+    # PLAT-12. The same division of labour as the marker above: a reader
+    # asking which visualiser rendered a value has to be told that the
+    # rendering was CUT OFF, or the answer is true and misleading at once.
+    # The marker names the rule when there was one, because that is the thing
+    # to edit; the sentence with the remedy in it is `describeDegradation`.
+    parts.add "expansion-bounded=" &
+      (if p.expansion.visualiser.len > 0: p.expansion.visualiser
+       else: $p.expansion.spent & "/" & $p.expansion.bound)
   parts.join(" ")
+
+func describeDegradation*(p: Presentation): string =
+  ## Every way this rendering did not give the reader what was declared, one
+  ## per line, each naming what is missing and how to get it. "" when there is
+  ## nothing to say, which is the ordinary case.
+  ##
+  ## The full answer to `describeAttribution`'s `media-degraded=` and
+  ## `expansion-bounded=` markers. Two functions rather than one for the reason
+  ## `attributionBadge` and `describeAttribution` are two: a title row has a
+  ## handful of cells and a diagnostics pane has a paragraph, and a caller
+  ## short of room must show the shortest TRUE answer rather than a clipped
+  ## one.
+  ##
+  ## PLAT-12'S WORK BOUND IS A LINE HERE RATHER THAN A SECOND FUNCTION, and
+  ## that is the §8.2 decision rather than a convenience: a pane asking "is
+  ## there anything to tell the reader about this value" must not have to know
+  ## how many KINDS of answer exist, or the next kind is silent in every caller
+  ## written before it. `value_media_degradation` and the terminal's title row
+  ## both call this one function.
+  var lines: seq[string] = @[]
+  for g in p.mediaGaps:
+    lines.add describeMediaGap(g)
+  let bounded = describeExpansionBound(p.expansion)
+  if bounded.len > 0:
+    lines.add bounded
+  lines.join("\n")

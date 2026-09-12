@@ -126,16 +126,27 @@ const
     ## a *decision about what may exist*, and a guard that derived itself from
     ## the subject would approve of whatever the subject said.
 
-  DeclarativeMediaTypes* = [
+  DeclarativeMediaTypes* = declarableMediaTypes()
     ## §5.2's table, as the MIME types a rule may declare. A closed list
     ## rather than "any `type/subtype`", because every entry here is something
     ## a surface must know how to render, and a type nothing renders is a
     ## silently blank value — `lpUnknownPane` at value scale.
-    "image/png", "image/jpeg", "image/svg+xml",
-    "audio/wav", "audio/ogg",
-    "text/markdown", "text/html",
-    "application/octet-stream",
-  ]
+    ##
+    ## PLAT-12 MADE IT DERIVED, and it used to be eight literals here.
+    ## `value_presentation/vocabulary.MediaClass` is the enum the RENDERER
+    ## classifies a declared type into, and the two lists had to agree about
+    ## exactly the same eight strings for the feature to work at all — a type
+    ## this grammar accepted and `mediaClassOf` did not know would have been
+    ## accepted, ranked, matched and then shown as a blank, and a type the
+    ## renderer knew and this refused would have been unreachable. That is
+    ## Verification-Harness-Traps §14 in its most literal form: two copies of
+    ## one closed set, in two packages, with nothing making them equal.
+    ##
+    ## Note the direction: the closed set lives in the PRESENTER'S vocabulary
+    ## and the GRAMMAR reads it, not the other way round, for the same reason
+    ## `ValuePresentationKinds` does — a visualiser is a function from a value
+    ## to a presentation (§3.1), so what it may name is decided by what the
+    ## presenter can produce.
 
   MinOccurrence = 1
   MaxOccurrence = 10_000
@@ -213,11 +224,29 @@ func templateProblem*(s: string): TemplateProblem =
   ## construction."
   ##
   ## Validated HERE, at parse time, so substitution later is one linear pass
-  ## that cannot fail: a well-formed template has balanced, non-nested,
-  ## bounded placeholders over a closed identifier charset, and substituting
-  ## a field's text into one never produces another placeholder because the
-  ## result is not re-scanned. There is no recursion to bound because there is
-  ## no recursion.
+  ## over the TEMPLATE that cannot fail: a well-formed template has balanced,
+  ## non-nested, bounded placeholders over a closed identifier charset, and
+  ## substituting a field's text into one never produces another placeholder
+  ## because the result is not re-scanned.
+  ##
+  ## THIS FUNCTION BOUNDS THE TEMPLATE AND NOT THE SUBSTITUTION, AND THE
+  ## COMMENT HERE USED TO CLAIM OTHERWISE. It read *"There is no recursion to
+  ## bound because there is no recursion"*, which is true of the text and false
+  ## of the work: the presenter substitutes a placeholder by RENDERING the
+  ## named field through the whole pipeline, so a rule matching a type that
+  ## contains itself re-enters its own template once per placeholder. What this
+  ## function decides is the BRANCHING FACTOR of that recursion —
+  ## `MaxTemplatePlaceholders` — and 16 per level is exactly the multiplier
+  ## that made it expensive (4.29 GB from a 200-byte declaration, measured;
+  ## see `value_presentation/vocabulary.ExpansionBound`).
+  ##
+  ## The bound on the work itself is `MaxRenderWork`, tested in
+  ## `presenter.inlineText` and charged at the sites that spend, and it is
+  ## there rather than here because a parser cannot see how deep the VALUE goes
+  ## — nor how many members it has, which is the quantity the first version of
+  ## that bound did not charge for. The two are not a duplicated check (§14):
+  ## this one bounds a declaration, that one bounds a rendering, and neither
+  ## can be derived from the other.
   ##
   ## `{{` is an escaped literal brace, so a summary CAN contain a `{`.
   if s.len > MaxSummaryBytes: return tpPlaceholderTooLong
@@ -599,6 +628,7 @@ proc readVisualisers(r: var FileReader; root: TomlNode;
     if not r.stringField(entry, "present", where, MaxNameBytes, false,
                          presentName):
       continue
+    v.presentDeclared = presentName.len > 0
     if presentName.len > 0 and not presentationByName(presentName, v.present):
       r.note(pdcUnknownPresentation,
         where & " presents as '" & presentName & "'. A visualiser is a " &

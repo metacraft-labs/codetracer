@@ -161,7 +161,23 @@ func toPValue*(value: Value; depth: int = 32): PValue =
                   elif value.r.len > 0: $value.r
                   else: ""))
 
-func presentValue*(value: Value; budget: Budget; lang: Lang = LangUnknown): Presentation =
+func presentationLanguageName*(lang: Lang): string =
+  ## The recording's own name for its language, as a project definition spells
+  ## it in a rule's `language` (§5.3).
+  ##
+  ## DERIVED FROM THE ENUM RATHER THAN TABULATED. `$LangRust` is `LangRust`, so
+  ## the name is the member with its four-letter prefix dropped and the rest
+  ## lower-cased: `rust`, `python`, `noir`, `ruby`. A table here would be a
+  ## second list of every language CodeTracer records, and the two would
+  ## diverge on the day one of them gained a member (§14).
+  ##
+  ## `LangUnknown` answers "" — see `PresentationContext.languageName`: an
+  ## unknown language matches no language-qualified rule, and an unqualified
+  ## rule still matches, because a rule that named no language did not ask.
+  if lang == LangUnknown: "" else: toLowerAscii(($lang)[4 .. ^1])
+
+func presentValue*(value: Value; budget: Budget; lang: Lang = LangUnknown;
+                   visualisers: seq[Visualiser] = @[]): Presentation =
   ## THE ENTRY POINT EVERY DESKTOP SURFACE CALLS.
   ##
   ## `lang` is a PARAMETER with an explicit default and no global fallback.
@@ -172,9 +188,18 @@ func presentValue*(value: Value; budget: Budget; lang: Lang = LangUnknown): Pres
   ## is precisely what PLAT-2's "byte-identical across runs and across
   ## front-ends" forbids. A caller that wants the session's language now passes
   ## it, visibly, at the call site.
-  present(toPValue(value), budget, presentationLangOf(lang))
+  ## PLAT-12 ADDED `visualisers`, LAST AND DEFAULTING TO `@[]`, so every call
+  ## written before this milestone means what it meant: no visualisers,
+  ## therefore the built-in table alone, therefore byte-identical output. A
+  ## surface that has loaded a checkout's definitions passes the list and gets
+  ## §5.4's precedence; `presented_value.nim` is the desktop's one door and is
+  ## where that list is read.
+  present(toPValue(value), budget, presentationLangOf(lang),
+          presenters = withVisualisers(visualisers),
+          languageName = presentationLanguageName(lang))
 
 func presentValueText*(value: Value; budget: Budget;
-                       lang: Lang = LangUnknown): string =
+                       lang: Lang = LangUnknown;
+                       visualisers: seq[Visualiser] = @[]): string =
   ## The one-line rendering alone, for the surfaces that are a line.
-  presentValue(value, budget, lang).root.text
+  presentValue(value, budget, lang, visualisers).root.text

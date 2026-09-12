@@ -177,6 +177,14 @@ type
       ## so "released on collapse" is a property of this module rather than of
       ## its callers.
     totals: Table[string, int]
+    visualisers*: seq[Visualiser]
+      ## PLAT-12: the per-type visualisers this session's checkout declared.
+      ##
+      ## ON THE MODEL AND NOT ON A GLOBAL, for the reason `PresenterSet` is a
+      ## parameter rather than a registry: two sessions in one process must not
+      ## see each other's rules, and a presentation has to stay a function of
+      ## its arguments. The zero value is `@[]`, which is the built-in table
+      ## alone — so every existing caller of this model is unaffected.
     populations*: int
       ## How many times `children` has been called. Asserted by the expansion
       ## suite: a re-expansion that did no work — the CTUI-4 shape, where the
@@ -461,6 +469,7 @@ proc rowSpecFor*(model: VariablesModel; row: VariablesRow;
       modified: model.diff.isModified(variablePathOf(row.node.path)),
       focused: model.focused == row.node.path,
       memberCount: row.node.memberCount, presented: row.node.presented,
+      visualisers: model.visualisers,
       width: width)
 
 # ---------------------------------------------------------------------------
@@ -515,10 +524,9 @@ proc provenanceOf*(model: VariablesModel): string =
   if presented.isNil:
     return ""
   let spec = TreeRowSpec(kind: trkVariable, presented: presented,
+                         visualisers: model.visualisers,
                          focused: model.focused == model.selected)
-  describeAttribution(
-    present(presented, spec.valueBudget(ProvenanceBudgetCells),
-            measure = terminalMeasure))
+  describeAttribution(spec.presentation(ProvenanceBudgetCells))
 
 proc provenanceBadgeOf*(model: VariablesModel): string =
   ## The short form — `via builtin.record` — for a title row with too few
@@ -529,10 +537,9 @@ proc provenanceBadgeOf*(model: VariablesModel): string =
   if presented.isNil:
     return ""
   let spec = TreeRowSpec(kind: trkVariable, presented: presented,
+                         visualisers: model.visualisers,
                          focused: model.focused == model.selected)
-  attributionBadge(
-    present(presented, spec.valueBudget(ProvenanceBudgetCells),
-            measure = terminalMeasure))
+  attributionBadge(spec.presentation(ProvenanceBudgetCells))
 
 proc fitProvenance*(model: VariablesModel; width, usedByTitle: int): string =
   ## The longest TRUE provenance that fits, or "".
@@ -552,6 +559,47 @@ proc fitProvenance*(model: VariablesModel; width, usedByTitle: int): string =
   if cellWidthOf("  " & badge) <= room:
     return "  " & badge
   ""
+
+proc degradationOf*(model: VariablesModel): string =
+  ## PLAT-12 / Extensibility-Model.md §8.2's "what is missing and how to get
+  ## it", for the value under the inspection cursor. "" when nothing is
+  ## missing, which is the ordinary case.
+  ##
+  ## ## WHY THE FULL SENTENCE IS HERE AND THE MARKER IS IN THE TITLE ROW
+  ##
+  ## `describeAttribution` — which `provenanceOf` renders into the title row —
+  ## already carries `media-degraded=image/png` when a declaration was not
+  ## honoured, so a reader looking at the pane is TOLD, in the same line that
+  ## answers "which visualiser drew this". What it cannot carry is the remedy:
+  ## that line is one line by contract because a tracepoint has to be able to
+  ## show it, and §8.2's remedy is a sentence.
+  ##
+  ## So this is the long form, and it is a separate function for exactly the
+  ## reason `attributionBadge` and `describeAttribution` are two: a caller with
+  ## room shows the sentence and a caller without shows the marker, and neither
+  ## shows a clipped version of the other.
+  ##
+  ## THE VALUE STILL RENDERS. A degraded media declaration falls through to the
+  ## value's ordinary presentation (`presenter.visualisedText`), so this string
+  ## is an ADDITION to a populated row rather than a replacement for a blank
+  ## one — which is the half of §8.2 that "visibly degraded" is usually read
+  ## without: a surface that said "unavailable" and showed nothing would have
+  ## hidden data the reader could have had.
+  let presented = model.selectedPresented()
+  if presented.isNil:
+    return ""
+  let spec = TreeRowSpec(kind: trkVariable, presented: presented,
+                         visualisers: model.visualisers,
+                         focused: model.focused == model.selected)
+  # `describeDegradation` AND NOT `store/value_media_degradation`, and the
+  # difference is a boundary rather than a preference. This file is a DECLARED
+  # SDK CONSUMER (`ci/test/sdk-facade-boundary.sh`), so it may import
+  # `codetracer_embed`, `codetracer_plugin` and nothing else inside the
+  # ViewModel — reaching for the degradation module's forwarder was tried and
+  # reddened that gate by name. Nothing is duplicated by taking the other
+  # route: `valueDegradationDetail` forwards to this same function, so the
+  # sentence has one implementation and two callers (§14).
+  describeDegradation(spec.presentation(ProvenanceBudgetCells))
 
 proc titleRowSpans*(model: VariablesModel; width: int): StyledRow =
   ## `VARIABLES 22 name(s) 1 changed  builtin.record tier=builtin … ────`.

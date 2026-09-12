@@ -481,6 +481,42 @@ suite "CTUI-9: the modal state machine decides every event":
     checkpoint("worst dispatch " & $worstUs & " us over " & $dispatches &
                " dispatches; slowest " & slowest)
     # 2 ms, spelled in nanoseconds so the comparison is integer.
+    #
+    # ## KNOWN WEAKNESS, RECORDED 2026-09-12 — THIS IS A §12 COIN FLIP AND IT
+    # ## WILL BITE CI
+    #
+    # It measures an ABSOLUTE wall-clock duration of one function call on a
+    # shared machine, and the thing it is supposed to detect — a dispatch table
+    # that got slow — is three orders of magnitude away from the thing it
+    # actually measures, which is whether this process was descheduled during
+    # the slowest of 1,105 `getMonoTime()` intervals.
+    #
+    # Measured on one host, same tree, same binary:
+    #
+    # | how it was run | `worstNs` |
+    # |---|---|
+    # | alone | 19,500 (19.5 us) |
+    # | beside other test lanes | **3,052,821 (3.05 ms) — RED** |
+    #
+    # 156x, from the scheduler. Verification-Harness-Traps §12 is this exact
+    # shape: "what would this have said if the thing it names had not happened?"
+    # — a dispatch table 100x slower than today's still passes at 1.95 ms, and a
+    # correct one fails whenever a neighbour lane is compiling. It fails in the
+    # direction that costs most, because a red gate on a correct product teaches
+    # the next person to re-run it.
+    #
+    # IT IS RECORDED RATHER THAN FIXED because the fix is a different
+    # milestone's decision, not a different constant: §12's remedy is to assert
+    # a two-sided property against a signal, and the signal here has to be
+    # established first — either a RELATIVE bound (this table against a
+    # trivial-resolve baseline measured in the same process, so both sides carry
+    # the same noise) or a per-dispatch budget derived from a distribution
+    # rather than from a maximum. Raising the constant is NOT the fix: it widens
+    # a gate that is already 100x too loose for its stated subject.
+    #
+    # PRE-EXISTING: this gate is CTUI-9's and predates PLAT-12, which touched
+    # neither this file nor `resolve`. Until it is repaired, RUN THE `tui` LANE
+    # ALONE — the number above is what it says otherwise.
     ck worstNs < 2_000_000
     # THE NON-VACUITY FLOOR: 85 bindings x 13 tokens = 1105. A sweep that
     # measured nothing would satisfy the gate above trivially.

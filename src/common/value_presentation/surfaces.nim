@@ -59,6 +59,32 @@
 import vocabulary
 
 const
+  MediaCapabilityNote* = {mcOctetStream}
+    ## PLAT-12. What EVERY surface below declares in its `Budget.media`, and
+    ## the reason the seven sets are identical.
+    ##
+    ## §5.2 lets a project declare that a region of a value is an image, a
+    ## waveform, a framebuffer, rendered markdown or a chart. Nothing in this
+    ## repository draws any of those yet: the terminal's image tiers are
+    ## PLAT-14, the desktop's `ValueComponent` has no media element, and
+    ## `PresentationNode` carries a media TYPE and a SIZE rather than a
+    ## payload. Declaring a capability here that nothing implements would turn
+    ## every such value into a blank region, which is the outcome PLAT-9's
+    ## degradation model exists to prevent — so the sets say what is true.
+    ##
+    ## `application/octet-stream` IS TRUE ON ALL SEVEN, and it is not a
+    ## placeholder. Raw bytes are the one medium every surface already honours:
+    ## `builtin.byte-buffer` has rendered `01 02 ff … (12 bytes)` since CTUI-7,
+    ## on a line, and a media label naming the type and the size is the same
+    ## fidelity. So the "this surface draws it" arm of `surfaceDrawsMedia` is
+    ## reachable and tested rather than dead code beside a degradation path.
+    ##
+    ## NAMED ONCE AND REFERENCED SEVEN TIMES rather than written out seven
+    ## times, so that widening one surface is a visible divergence from the
+    ## note instead of a seventh copy silently drifting (§14). PLAT-14 is
+    ## expected to give `tui-tree` and `tui-row` more than this; the desktop's
+    ## own image work is expected to give `state-panel` more.
+
   StatePanelBudget* = Budget(
     name: "state-panel",
     lines: 0,          ## a tree; as many lines as the pane has rows
@@ -66,7 +92,8 @@ const
     depth: 7,          ## `ui/state.nim`'s own request depth limit
     members: 200,
     expandable: true,
-    annotated: false)
+    annotated: false,
+    media: MediaCapabilityNote)
 
   TracepointBudget* = Budget(
     name: "tracepoint",
@@ -75,7 +102,8 @@ const
     depth: 10,
     members: 32,
     expandable: false,
-    annotated: false)
+    annotated: false,
+    media: MediaCapabilityNote)
 
   FlowBudget* = Budget(
     name: "flow",
@@ -84,7 +112,8 @@ const
     depth: 10,
     members: 16,
     expandable: false,
-    annotated: false)
+    annotated: false,
+    media: MediaCapabilityNote)
 
   ScratchpadBudget* = Budget(
     name: "scratchpad",
@@ -93,7 +122,8 @@ const
     depth: 10,
     members: 32,
     expandable: true,  ## the scratchpad's rows expand into children
-    annotated: false)
+    annotated: false,
+    media: MediaCapabilityNote)
 
   EventLogBudget* = Budget(
     name: "event-log",
@@ -102,7 +132,8 @@ const
     depth: 10,
     members: 32,
     expandable: false,
-    annotated: false)
+    annotated: false,
+    media: MediaCapabilityNote)
 
   TuiTreeBudget* = Budget(
     name: "tui-tree",
@@ -111,7 +142,8 @@ const
     depth: 16,         ## `headless_session.ValueDecodeDepth`
     members: 100,      ## `tui/app/views/variables.DefaultPageSize`
     expandable: true,
-    annotated: false)
+    annotated: false,
+    media: MediaCapabilityNote)
 
   CalltraceArgBudget* = Budget(
     name: "calltrace-arg",
@@ -121,7 +153,8 @@ const
                        ## desktop surface carries
     members: 16,       ## `flow`'s, the other inline one-line chip surface
     expandable: false, ## a chip has no affordance; the value popup does
-    annotated: false)
+    annotated: false,
+    media: MediaCapabilityNote)
 
   SurfaceBudgets*: array[7, Budget] = [
     StatePanelBudget, TracepointBudget, FlowBudget, ScratchpadBudget,
@@ -152,7 +185,8 @@ func tuiRowBudget*(cells: int; focused: bool): Budget =
   ## `annotated`, which is §3.3.4's "decimal and hexadecimal simultaneously
   ## upon focus" expressed as a budget rather than as a second code path.
   Budget(name: "tui-row", lines: 1, cells: cells, depth: 1,
-         members: 8, expandable: false, annotated: focused)
+         members: 8, expandable: false, annotated: focused,
+         media: MediaCapabilityNote)
 
 func tuiValueBudget*(): Budget =
   ## The rendering stored on a `store/types.Variable` when a `ct/load-locals`
@@ -165,4 +199,4 @@ func tuiValueBudget*(): Budget =
   ## `type_formatters.trimmedRange` (11 ms -> 4.3 ms against a 15 ms gate); this
   ## budget removes its cause rather than working around it.
   Budget(name: "tui-value", lines: 1, cells: 0, depth: 16, members: 64,
-         expandable: true, annotated: false)
+         expandable: true, annotated: false, media: MediaCapabilityNote)

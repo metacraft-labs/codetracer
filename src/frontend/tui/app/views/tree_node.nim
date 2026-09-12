@@ -107,6 +107,18 @@ type
       ## Nil for a scope header and for a `… n more` marker, which have no
       ## value. `value` above remains, and is what the row shows when
       ## `presented` is nil.
+    visualisers*: seq[Visualiser]
+      ## PLAT-12: the per-type visualisers this session's checkout declared,
+      ## in §5.4's order.
+      ##
+      ## THE ZERO VALUE IS `@[]` AND THAT IS THE PRE-PLAT-12 BEHAVIOUR, exactly.
+      ## `withVisualisers(@[])` returns `BuiltinPresenters`, so a row built by
+      ## anything that does not know about this field — every existing suite,
+      ## `provenanceOf`'s two synthetic specs, a storybook fixture — renders
+      ## byte-for-byte what it rendered before. That is why the field carries
+      ## the LIST rather than a `PresenterSet`: a zero-valued `PresenterSet`
+      ## has no built-in rules either, and a row that quietly resolved every
+      ## value to `builtin.none` would still render, just wrongly.
     width*: int
 
 const
@@ -196,6 +208,21 @@ proc valueBudget*(spec: TreeRowSpec; cells: int): Budget =
   ## numeric rendering when the row is focused.
   tuiRowBudget(cells, spec.focused)
 
+proc presentation*(spec: TreeRowSpec; cells: int): Presentation =
+  ## The whole presentation this row's value produced, not only its text.
+  ##
+  ## PLAT-12 needs three things off it that a string cannot carry — the
+  ## attribution (WHICH visualiser rendered the row), the media gaps (what a
+  ## declaration asked for that this surface could not draw), and the node's
+  ## kind — and `formattedValue` below now calls this rather than `present`
+  ## directly, so the row's text and the row's provenance are the SAME
+  ## presentation rather than two renderings that could differ. The same value
+  ## at two budgets is two byte strings, which is precisely the confusion
+  ## `Budget.name` exists to prevent, and it applies within one row too.
+  present(spec.presented, spec.valueBudget(cells),
+          measure = terminalMeasure,
+          presenters = withVisualisers(spec.visualisers))
+
 proc formattedValue*(spec: TreeRowSpec; cells: int): string =
   ## The value as this row shows it, ALREADY FITTED.
   ##
@@ -213,7 +240,7 @@ proc formattedValue*(spec: TreeRowSpec; cells: int): string =
   ## every other surface gets them too.
   if spec.presented.isNil:
     return truncateToCells(spec.value, cells)
-  present(spec.presented, spec.valueBudget(cells), measure = terminalMeasure).root.text
+  spec.presentation(cells).root.text
 
 proc valueStyleFor*(spec: TreeRowSpec): CellStyle =
   if spec.kind == trkVariable: valueStyle(spec.valueClassOf())
