@@ -554,7 +554,8 @@ summary = "{rows}x{cols}"
     #   | guarded (as now)       |  1,048,586 | **+10 units** |
     #
     # and the difference is 9,950,200 — which is 199 siblings x 50,001 members
-    # exactly, so the mechanism is not inferred from the shape of the number.
+    # (9,950,199) plus one unit for the root's own walk, so the mechanism is
+    # derived rather than inferred from the shape of the number.
     # The residue that priced this said the overshoot was "one frame's charge,
     # multiplied by nothing"; it was one frame's charge multiplied by the
     # siblings left in every loop on the stack.
@@ -562,9 +563,10 @@ summary = "{rows}x{cols}"
     # THE EQUALITY IS THE ASSERTION AND NOT AN INEQUALITY, for the reason
     # part 1 of the charge case gives: `spent` is a number a reader is invited
     # to watch approaching, so what it says after the bound is reached is as
-    # much a claim as what it says before. `< 2 * MaxRenderWork` would be
-    # satisfied by anything up to a 100% overshoot and would not have caught
-    # the 1049%.
+    # much a claim as what it says before, and `+ 10` catches a one-unit drift
+    # that no inequality would. `< 2 * MaxRenderWork` would have caught this
+    # particular 10.49x overshoot — the argument for the equality is the
+    # reported number, not this defect's magnitude.
     let rules = siblingRules()
     let shared = sharedWide()
     let p = present(exhaustingRow(shared), StatePanelBudget, presenters = rules)
