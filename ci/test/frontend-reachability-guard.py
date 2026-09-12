@@ -79,6 +79,70 @@ CI switches to once the backlog is cleared.  ``--max <n>`` is the ratchet in
 between: fail only if the count EXCEEDS a recorded ceiling, so the number can
 only go down.
 
+THE RATCHET POLICY, DECIDED 2026-09-12 — AND NOT IMPLEMENTED HERE
+------------------------------------------------------------------
+The ceiling has been red since 2026-09-05 and the reason is not a bad merge:
+this repository lands large tested subsystems that nothing wires yet, so the
+backlog grows by construction.  Three repairs were costed over the 45
+first-parent commits since the ceiling was last set, and are written up in
+PLAT-11's section of
+``codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org``.
+
+**The decision is (c): "no new findings in files this change touched."**  It is
+recorded here, beside the instrument, rather than only in a milestone document,
+because the next person to read this file is the next person tempted to move
+the number.
+
+Why (c), in the terms the three were costed in:
+
+* Across all 45 commits, only **10 of 746** new findings (1.3%) appeared in a
+  file the commit did not touch.  So it is not a weakened ratchet — it catches
+  98.7% of the same additions, and it attributes each one to the commit that
+  caused it, which no count can.
+* It is the only one of the three that needs **no checked-in number that 29 of
+  45 commits must edit**.  That is the property that matters most, because a
+  number 64% of commits have to edit is a number that rots, and this ceiling
+  rotting is the whole reason any of this was costed.
+
+Why not the other two:
+
+* **(b), a per-directory ratchet, is the one to drop.**  It buys LOCALITY and
+  pays for it by reproducing the slack-side failure 10 or 26 times over —
+  multiplying the one failure mode that has already fired — while editing
+  exactly as many commits as (a).  "The same, but in more places" is not a
+  repair.
+* **(a), a checked-in baseline, has a silent hole.**  Its stated cost is size
+  (1709 lines / 101 KB); its real cost is RESOLUTION.  It keys on
+  ``path:symbol``, and 91 of the findings already share a key with another, so
+  a newly-added **overload** of an already-baselined symbol passes UNSEEN.
+  That is this repository's own trap §4 — a scan that finds nothing satisfying
+  a "must not contain" check — installed deliberately.  Keying on the line
+  number closes it and churns on every edit, which is the same trade in the
+  other direction.
+
+**IT IS DELIBERATELY NOT IMPLEMENTED IN THIS DIFF.**  (c) is a repo-wide policy
+change: it needs a per-file diff scope, an escape hatch, and its own contract
+suite proving it fires and can be seen to fire.  It also has an honest and
+large cost — 15 of the last 20 commits would have failed it — which is the
+backlog becoming visible rather than a defect in the rule, and is a
+conversation this lane's owner should have before the switch is thrown.
+
+**TWO THINGS CAME FIRST AND ARE DONE, because all three proposals were
+otherwise costed against a miscounted bucket:**
+
+1. ``--max`` is a CEILING again and not an equality (see the ratchet block near
+   the bottom of this file).  The equality had already reddened CI for five
+   hours over a tree that had got better.
+2. The bucket-A reclassification is done (see the bucket order in ``main``).
+   It moved 722 findings out of the counted total: 1800 -> **1078**.
+
+The ceiling was NOT raised, and must not be.  A ceiling re-fitted to whatever
+the tree carries converts a broken gate into a silent one.  Note the
+consequence of the two changes above, stated rather than left to be found: at
+1078 against a ceiling of 1226 the lane now passes with 148 slots of reported
+slack.  That slack is exactly what (c) is for, and lowering the ceiling to the
+measured number is the ratchet-policy pass's call, not this one's.
+
 THE ALLOW-LIST IS THE PART THAT ROTS
 ------------------------------------
 An allow-list that grows without review becomes the thing it was meant to
@@ -553,10 +617,35 @@ def main() -> int:
         if allow.allows(decl.name):
             allowed_hits.add(key)
             continue
-        if key in tested:
-            bucket = "tested-only"
-        elif readers:
+        # THE BUCKET ORDER, CORRECTED 2026-09-12. This read `if key in tested`
+        # FIRST, so any symbol its own module already used was RELABELLED the
+        # moment a test mentioned its name — moved out of bucket C ("only its
+        # own module reaches it", deliberately not counted) and into bucket A
+        # ("tested, and no product module reaches it", counted). Bucket A's
+        # printed sentence was then false for 722 of its 1167 entries: a
+        # product module did reach them, namely the declaring one.
+        #
+        # `ci/lint/nim.sh`'s own header had argued for this correction and
+        # measured it at 355 of the then-1226; it is 722 of 1800 now, and the
+        # growth is the point — this campaign GENERATES the shape by design,
+        # building and testing a ViewModel before any front-end wires it.
+        #
+        # The two buckets are different defects and the difference is what a
+        # reader does about them. Bucket A is "a tested capability that is dead
+        # in the product" — wire it, delete it, or allow-list it. Bucket C is
+        # "an export nobody outside needs" — drop the `*`. Counting the second
+        # as the first inflates the number the ratchet enforces AND makes the
+        # triage advice wrong for most of the rows it is printed beside.
+        #
+        # `readers` is product-module mentions only (`collect` builds
+        # `mentioned_by` from product files and `tested` from test files), and
+        # by this line `external` is empty — so `readers` non-empty means
+        # exactly "the declaring module mentions it", which is bucket C's
+        # definition. Asking that first is the whole fix.
+        if readers:
             bucket = "own-module-only"
+        elif key in tested:
+            bucket = "tested-only"
         else:
             bucket = "nothing"
         findings.append(Finding(decl.name, decl.kind, decl.path, decl.line, bucket))
@@ -683,47 +772,74 @@ def main() -> int:
             encoding="utf-8",
         )
 
-    # THE RATCHET IS AN EQUALITY, NOT A CEILING WITH ROOM UNDER IT.
+    # THE RATCHET IS A CEILING. IT WAS AN EQUALITY FOR SEVEN DAYS AND THE
+    # EQUALITY COST MORE THAN THE SLACK IT CLOSED (changed 2026-09-12).
     #
-    # This was `>` alone, and `ci/lint/nim.sh` recorded the consequence in its own
-    # words: "WHEN YOU DELETE OR WIRE A SYMBOL, LOWER THIS NUMBER. Nothing forces
-    # that yet ... so slack accumulates silently under it." It did. The ceiling was
-    # raised 1224 -> 1226 -> 1228 in twenty-nine minutes on 2026-09-04, the backlog
-    # was then brought DOWN to 1223 by deleting dead entry points, and nobody
-    # lowered the ceiling — leaving five free slots. Five new unreached exports
-    # could have landed without this lane saying a word, which is precisely the
-    # budget the shell-gate inventory next door refuses to grant:
+    # The equality landed for a real reason, and the reason still reads well:
+    # `ci/lint/nim.sh` had recorded, in its own words, "WHEN YOU DELETE OR WIRE A
+    # SYMBOL, LOWER THIS NUMBER. Nothing forces that yet ... so slack accumulates
+    # silently under it." It had: the ceiling went 1224 -> 1226 -> 1228 in
+    # twenty-nine minutes on 2026-09-04, the backlog was then brought DOWN to 1223
+    # by deleting dead entry points, and nobody lowered the ceiling — five free
+    # slots for five new unreached exports. The shell-gate inventory next door
+    # refuses exactly that budget, in a sentence this file copied:
     #
     #     "Not `<=`: slack under a ceiling is a budget for new dark gates, and the
     #      cheapest way to make this guard green has always been to append a line."
     #
-    # Both directions are deliberate, and the DOWNWARD one is the whole point. A
-    # raise already had to be written down; a fall did not, so a fall was where the
-    # slack came from. Now clearing findings forces the number down in the same
-    # diff, and `assert_reachability_prose_agrees` forces the three sentences that
-    # describe it to move too.
-    if args.max is not None and len(counted) > args.max:
+    # WHAT THE EQUALITY ACTUALLY DID, MEASURED. `f274fa68` and `ab7ce4c1`
+    # (2026-09-05) carry 1225 findings against a ceiling of 1226 and BOTH EXIT 1,
+    # with `RATCHET SLACK`. CI was red for five hours because somebody had made
+    # the tree better, and it went green again when an unrelated commit put the
+    # count back up to exactly 1226. That is not a hypothetical cost of the
+    # equality; it is a gate whose failure told a developer to undo an
+    # improvement.
+    #
+    # AND IT IS THE FAILURE MODE THIS WHOLE FILE EXISTS TO AVOID. Its own header
+    # says a guard that reddens CI on day one gets disabled on day one. A guard
+    # that reddens CI for the tree getting BETTER teaches the same lesson faster,
+    # because the developer it fires on has no repair to make — the only way to
+    # clear it is to edit a number in a different file, or to put the finding
+    # back.
+    #
+    # SO THE SLACK IS ANSWERED BY REPORTING IT LOUDLY RATHER THAN BY FAILING ON
+    # IT. The message below is unchanged and still names the value to lower the
+    # ceiling to; what changed is that it no longer sets the exit code. The
+    # budget that leaves is real and is not the permanent answer — see "THE
+    # RATCHET POLICY, DECIDED" in this file's header for what is, and why it
+    # needs a pass of its own rather than a line here.
+    over_ceiling = args.max is not None and len(counted) > args.max
+    under_ceiling = args.max is not None and len(counted) < args.max
+
+    if over_ceiling:
         print(f"RATCHET: {len(counted)} findings exceeds the recorded ceiling of {args.max}.")
         print(f"         {len(counted) - args.max} more than the tree is allowed to carry.")
         print("         Wire or delete the new one; do not raise the ceiling by reflex.")
         exit_code = max(exit_code, 1)
-    elif args.max is not None and len(counted) < args.max:
-        slack = args.max - len(counted)
-        print(f"RATCHET SLACK: {len(counted)} findings, ceiling is still {args.max}.")
-        print(f"         Lower it to {len(counted)}, in this diff. A ceiling with {slack} "
-              "slot(s) under")
-        print("         it is a budget: that many unreached exports can land without this")
-        print("         lane noticing, and the ratchet only ratchets if it tightens.")
-        print("         Three sentences name this threshold — the setter and step label in")
-        print("         ci/lint/nim.sh and the header of ci/test/frontend-reachability.sh.")
-        print("         All three must move together or the prose guard fails.")
-        exit_code = max(exit_code, 1)
-    elif args.enforce and counted:
-        print(f"ENFORCE: {len(counted)} exported symbols have no cross-module product reader.")
-        exit_code = max(exit_code, 1)
-    elif exit_code == 0:
-        print("Reported, not enforced. Pass --enforce once the backlog is cleared,")
-        print("or --max <n> to ratchet it down.")
+    else:
+        if under_ceiling:
+            # REPORTED, NOT FAILED. See the block above. The slack branch is
+            # deliberately NOT an `elif` in front of `--enforce` any more: when
+            # it set the exit code, making it stop doing so would also have made
+            # it swallow `--enforce`, which is the harder setting and must not be
+            # weakened by the softer one being relaxed.
+            slack = args.max - len(counted)
+            print(f"RATCHET SLACK: {len(counted)} findings, ceiling is still {args.max}.")
+            print(f"         Lower it to {len(counted)}, in this diff. A ceiling with {slack} "
+                  "slot(s) under")
+            print("         it is a budget: that many unreached exports can land without this")
+            print("         lane noticing, and the ratchet only ratchets if it tightens.")
+            print("         Three sentences name this threshold — the setter and step label in")
+            print("         ci/lint/nim.sh and the header of ci/test/frontend-reachability.sh.")
+            print("         All three must move together or the prose guard fails.")
+            print("         THIS IS A REPORT AND NOT A FAILURE since 2026-09-12: failing on")
+            print("         slack reddened CI for five hours over a tree that had improved.")
+        if args.enforce and counted:
+            print(f"ENFORCE: {len(counted)} exported symbols have no cross-module product reader.")
+            exit_code = max(exit_code, 1)
+        elif exit_code == 0 and not under_ceiling:
+            print("Reported, not enforced. Pass --enforce once the backlog is cleared,")
+            print("or --max <n> to ratchet it down.")
 
     return exit_code
 

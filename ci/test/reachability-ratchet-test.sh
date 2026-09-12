@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# reachability-ratchet-test.sh — does `--max` bite in BOTH directions?
+# reachability-ratchet-test.sh — does `--max` bite where it is supposed to?
 #
 # WHY THIS EXISTS
 # ---------------
@@ -13,13 +13,15 @@
 # could land without reddening `lint-nim`. `ci/lint/nim.sh` said so in its own
 # header, in the present tense, for as long as it was true.
 #
-# The rule is the shell-gate inventory's, almost word for word: slack under a
-# ceiling is a budget, so the ratchet is an equality and it tightens itself.
+# It shipped as an EQUALITY on that rule — the shell-gate inventory's, almost
+# word for word: slack under a ceiling is a budget. Since 2026-09-12 it is a
+# CEILING again, and the slack side is a loud report rather than a failure; arm
+# 2 below carries the measurement that decided it.
 #
 # WHY A SYNTHETIC TREE, AND WHY ITS COUNT IS ASSERTED FIRST
 # ---------------------------------------------------------
 # Every arm below is a claim about what the guard does at a KNOWN count. Against
-# the real `src/frontend` the count is 1223 and moves whenever anyone exports a
+# the real `src/frontend` the count is 1078 and moves whenever anyone exports a
 # symbol, so an arm written against it would be measuring the tree rather than
 # the ratchet — and would go red for reasons that have nothing to do with this
 # file. The fixture is four unreached exports in two modules.
@@ -104,9 +106,8 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-# ARM 1 — THE EQUALITY. The exact count passes, and it is the ONLY value that
-# does. Without this the two failing arms below would be satisfied by a guard
-# that simply always fails.
+# ARM 1 — THE EXACT COUNT PASSES. Without this, arm 3 would be satisfied by a
+# guard that simply always fails, and arm 2 by one that never does.
 # ---------------------------------------------------------------------------
 out="$(run_guard --max 4)"
 rc=$?
@@ -118,17 +119,34 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# ARM 2 — SLACK IS A BUDGET. This is THE defect: it is the direction that was
-# silent, because a fall in the count never had to be written down while a raise
-# did. Five real slots had accumulated this way before the equality landed.
+# ARM 2 — SLACK IS REPORTED AND IS NOT A FAILURE (changed 2026-09-12).
+#
+# This arm asserted the opposite until 2026-09-12, and the change is a decision
+# rather than a relaxation, so the old assertion is quoted rather than deleted:
+# it required `--max 5` over 4 findings to EXIT NON-ZERO, on the rule that slack
+# under a ceiling is a budget.
+#
+# What the equality did in practice was measured instead of argued.
+# `f274fa68` and `ab7ce4c1` (2026-09-05) carry 1225 findings against a ceiling
+# of 1226 and both exit 1: CI was red for five hours because the tree had got
+# BETTER, and went green again only when an unrelated commit put the count back
+# up to 1226. A gate whose failure asks a developer to undo an improvement — or
+# to edit a number in a different file — is the "guard that gets switched off"
+# this instrument's own header is about.
+#
+# So the budget is answered by reporting it loudly rather than by failing on it.
+# ARM 2b is what keeps that honest: the report must still name the value, so it
+# is actionable rather than decorative. The permanent answer is "no new findings
+# in files this change touched" and is recorded in the guard's header; it is a
+# repo-wide policy change and is deliberately not implemented here.
 # ---------------------------------------------------------------------------
 out="$(run_guard --max 5)"
 rc=$?
-if [ "${rc}" -ne 0 ] && grep -q 'RATCHET SLACK' <<<"${out}"; then
-	ok "2/a ceiling with slack under it FAILS: --max 5 over 4 findings exits ${rc}"
+if [ "${rc}" -eq 0 ] && grep -q 'RATCHET SLACK' <<<"${out}"; then
+	ok "2/a ceiling with slack under it REPORTS and does not fail: --max 5 over 4 findings exits 0"
 else
-	bad "2/SURVIVED — --max 5 over 4 findings did not fail (rc=${rc}); slack is a budget"
-	printf '%s\n' "${out}" | tail -3 | sed 's/^/           /'
+	bad "2/--max 5 over 4 findings did not report-and-pass (rc=${rc}); a ceiling is not an equality"
+	printf '%s\n' "${out}" | tail -4 | sed 's/^/           /'
 fi
 
 # And it must say which way to move, by number. "Lower it" without the value is
@@ -140,9 +158,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# ARM 3 — AND THE ORIGINAL DIRECTION STILL BITES. A new unreached export must
-# still redden the lane; making the ratchet an equality must not have traded one
-# direction for the other.
+# ARM 3 — AND THE DIRECTION THAT MATTERS STILL BITES. A new unreached export
+# must still redden the lane; relaxing the slack side in 2026-09-12 must not
+# have traded one direction for the other, and this is the arm that says so.
 # ---------------------------------------------------------------------------
 out="$(run_guard --max 3)"
 rc=$?
@@ -173,6 +191,6 @@ if [ "${failures}" -gt 0 ]; then
 	echo "RESULT: FAILED"
 	exit 1
 fi
-echo "  The ratchet passes at its number and fails on either side of it, so a"
-echo "  cleared finding forces the ceiling down in the same diff as the clearing."
+echo "  The ratchet passes at its number and BELOW it, fails above it, and names"
+echo "  the value to lower the ceiling to when the tree has got better."
 echo "RESULT: OK"

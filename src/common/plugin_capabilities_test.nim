@@ -476,6 +476,40 @@ suite "PLAT-8: fs:read and fs:write reach declared paths only":
     ck not pathIsUnder("/srv/symbols/../../etc/shadow", "/srv/symbols")
     ck not pathIsUnder("/srv/symbols/a", "/srv/../srv/symbols")
 
+  test "a '..' inside a NAME is not a '..' segment":
+    # THE SEGMENT/SUBSTRING DISTINCTION, repaired 2026-09-12. `pathIsUnder`
+    # asked `".." in path or ".." in root` — a SUBSTRING test, applied to BOTH
+    # arguments, the second of which is the resolved ROOT. So a declared root
+    # or a checkout whose own path merely contains those two characters had
+    # EVERY file in it refused, with a message saying the file was not inside
+    # it. It failed in the safe direction, so nothing went red
+    # (Verification-Harness-Traps §15).
+    #
+    # These are the cases only the segment walk admits. `..` is a segment;
+    # `my..project`, `v1..v2` and `a..b.sym` are names.
+    ck pathIsUnder("/srv/my..project/src/a.nim", "/srv/my..project")
+    ck pathIsUnder("/srv/symbols/a..b.sym", "/srv/symbols")
+    ck pathIsUnder("/srv/v1..v2", "/srv/v1..v2")
+    # A name that ENDS in `..` is still a name; only the whole component `..`
+    # is the parent segment. This is the boundary the walk has to get right and
+    # a `endsWith("..")` test would not.
+    ck pathIsUnder("/srv/symbols/trailing../leaf", "/srv/symbols")
+
+    # AND THE EFFECT, through `decide`, which is the function a plugin meets.
+    # The three lines above are about the predicate; this one is about the
+    # grant, and it is the one that was actually broken for a user.
+    let g = grants({capFsRead}, reads = @["/srv/my..project"])
+    ck decide(g, "acme.p", IoRequest(kind: irReadPath,
+      target: "/srv/my..project/src/a.nim")).permitted
+
+    # THE REFUSAL IS UNCHANGED, asserted in the same case so the widening
+    # cannot be read as a loosening. A real `..` segment still escapes nothing,
+    # in either argument, at any depth.
+    ck not pathIsUnder("/srv/my..project/../../etc/shadow", "/srv/my..project")
+    ck not pathIsUnder("/srv/my..project/a", "/srv/my..project/..")
+    ck not decide(g, "acme.p", IoRequest(kind: irReadPath,
+      target: "/srv/my..project/../../etc/shadow")).permitted
+
   test "read and write are separate grants":
     let readOnly = grants({capFsRead}, reads = @["/srv/x"])
     ck not decide(readOnly, "acme.p",
@@ -719,5 +753,6 @@ suite "PLAT-8: the counted-assertion tally":
   test "the tally":
     # Verification-Harness-Traps §4c. Written from a run; a suite that stops
     # asserting is a suite whose count moves. 193 before the 2026-09-09
-    # verification repairs; 267 with F1's and F4's arms and their controls.
-    check countedAssertions == 267
+    # verification repairs; 267 with F1's and F4's arms and their controls;
+    # 275 with the 2026-09-12 segment-vs-substring case for `pathIsUnder`.
+    check countedAssertions == 275

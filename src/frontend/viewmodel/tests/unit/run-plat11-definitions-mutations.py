@@ -964,12 +964,53 @@ MUTATIONS: list[Mutation] = [
     # the checkout. D6 grades the repair; D7 grades the HALF of it that would
     # otherwise fail in the safe direction (Verification-Harness-Traps §15).
     #
-    # There is deliberately no arm aimed at `O_NOFOLLOW` or at the
-    # `(dev, ino)` comparison. Both fire only on a swap that races the check,
-    # and an arm whose kill condition needs a winning race is §10's assertion
-    # that cannot fail wearing a stopwatch. What IS asserted instead, in the
-    # same cases, is that neither breaks an ordinary symlink: a link pointing
-    # INSIDE the checkout still resolves and still reads.
+    # TWO LINES OF THE REPAIR ARE DELIBERATELY UNARMED, AND HERE IS THE
+    # MEASUREMENT RATHER THAN THE ASSERTION (2026-09-12).
+    #
+    # `O_NOFOLLOW` and the `(st_dev, st_ino)` comparison in `readSourceFile`
+    # have no arm. That was previously written here as a claim — "both fire
+    # only on a swap that races the check" — and a claim of the form "no input
+    # can kill this" is exactly what Verification-Harness-Traps §10 says to
+    # stop believing and start measuring. So it was measured: each line was
+    # removed IN TURN and the CLI suite run against the tree.
+    #
+    #   | line removed                    | result           |
+    #   | ------------------------------- | ---------------- |
+    #   | `O_NOFOLLOW_CT or ` at the open | 13 passed, 0 fail|
+    #   | the `(dev, ino)` comparison     | 13 passed, 0 fail|
+    #
+    # The absence is therefore REAL and not a gap in the arms: nothing in this
+    # suite, and nothing that could be added to it, distinguishes those two
+    # lines from their removal.
+    #
+    # AND THE REASON IS STRUCTURAL, WHICH IS WHY NO DETERMINISTIC CASE WAS
+    # CONSTRUCTED INSTEAD. The path `readSourceFile` opens is `resolvedFile` —
+    # the output of `realpath(3)` — so it contains NO symlink in any position,
+    # leaf included, by construction. `O_NOFOLLOW` cannot fire on it without a
+    # swap landing between the resolve and the open, and `lstat` of a path with
+    # no symlink in it cannot disagree with `fstat` of the descriptor that path
+    # just opened. "A symlinked leaf is refused with ELOOP" is a real
+    # deterministic case for an opener that is handed an UNRESOLVED path; it is
+    # not constructible against this one, and the suite already carries the
+    # positive that proves why — `alias.nim -> src/a.nim` reads its target's
+    # bytes, because the resolve consumed the link before the open ever saw it.
+    #
+    # THE SAME TWO LINES ARE NOT UNARMABLE IN PLAT-8, and the difference is
+    # worth recording because the two files look identical at the syscall.
+    # `plugin_io.canonicalPath` falls back to `expandFilename(parent) / leaf`
+    # when the whole path does not resolve — it has to, because `writePath`
+    # CREATES files — so a DANGLING symlink survives canonicalisation as
+    # itself, and `O_NOFOLLOW` is then load-bearing with no race at all.
+    # Measured 2026-09-12 on this machine: `realpath` of a dangling link fails
+    # (ENOENT); `open(..., O_CREAT|O_WRONLY|O_NOFOLLOW)` is refused with
+    # ELOOP; the same open WITHOUT `O_NOFOLLOW` succeeds and creates the
+    # link's target, outside the root. That is PLAT-8's file, PLAT-8's arm to
+    # write, and it is named in this milestone's residues rather than added
+    # here.
+    #
+    # What IS asserted in these cases, and is not a substitute for the above:
+    # that neither line breaks an ordinary symlink — a link pointing INSIDE
+    # the checkout still resolves and still reads.
     Mutation(
         "D6", DIR,
         "  if not pathIsUnder(resolvedFile, resolvedRoot):",
@@ -1002,6 +1043,39 @@ MUTATIONS: list[Mutation] = [
         control_find="  let resolvedRoot = resolvedRealPath(root)",
         control_replace="  let checkoutDir = root\n"
                         "  let resolvedRoot = resolvedRealPath(checkoutDir)",
+    ),
+    Mutation(
+        "D8", DIR,
+        "  let resolvedFile = resolvedRealPath(root / repoRelativePath)",
+        "  let resolvedFile = root / repoRelativePath",
+        C_SYMLINK, NIM_CLI, "leaked was true",
+        "D7's MIRROR, and the one of the two that reopens the escape OUTRIGHT: "
+        "the ROOT is resolved and the CANDIDATE is not. Every part of the "
+        "repair downstream then agrees with it — `pathIsUnder` says the "
+        "unresolved `<root>/vendor/id_rsa` is textually inside the resolved "
+        "root, `O_NOFOLLOW` passes because the LEAF is a real file and only "
+        "`vendor` is the link, and the two stats agree because `lstat` follows "
+        "intermediate components exactly as `open` does. So the outside bytes "
+        "come back in `SourceFile.lines`, which is the state 2026-09-11's "
+        "verification pass found and closed.\n"
+        "\n"
+        "        ADDED 2026-09-12, and it was already covered before it was "
+        "added — that is the point. The escape case and the linked-root case "
+        "both kill it, so the PROPERTY never had a hole; what was missing was "
+        "the ROW, and a future edit to this line had nothing in the table "
+        "pointing at it. An arm is how a line is attributable, not only how a "
+        "property is covered.\n"
+        "\n"
+        "        Its `because` quotes the LEAK SWEEP rather than "
+        "`escaped.present`, which D6 already quotes. §17a: prefer the `because` "
+        "that quotes the EFFECT — `leaked` is set by walking the returned "
+        "lines for the outside file's needle, so it cannot be satisfied by a "
+        "reader that reports a refusal politely and hands the bytes over "
+        "anyway — and two arms sharing one `because` cannot be told apart.",
+        control_name="the candidate path is joined before it is resolved",
+        control_find="  let resolvedFile = resolvedRealPath(root / repoRelativePath)",
+        control_replace="  let candidate = root / repoRelativePath\n"
+                        "  let resolvedFile = resolvedRealPath(candidate)",
     ),
 
     # -- the verification gate -----------------------------------------------

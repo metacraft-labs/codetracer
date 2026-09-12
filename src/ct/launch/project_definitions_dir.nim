@@ -96,17 +96,25 @@ export project_definitions
 # no `Capability`, no `GrantSet` and no grant ledger anywhere near a project
 # definition.
 #
-# ITS ONE COST, MEASURED AND NOT HIDDEN. `pathIsUnder` refuses outright if the
-# two-character sequence `..` appears ANYWHERE in either argument — a substring
-# test, not a segment test — so a checkout or a source file with `..` inside a
-# NAME (`src/a..b.nim`, which `pathProblem` accepts, since `.` is in the
-# character set) is now refused here. That is a real narrowing of what a
-# definition may name, it fails in the safe direction, and
-# `project_definitions_dir_test` asserts it so the limitation is a measured
-# fact rather than an assumption. Repairing it means editing
-# `capabilities.nim`, which is PLAT-8's mutation subject and carries PLAT-8's
-# recorded control digest — a different campaign's diff, recorded in PLAT-11's
-# residues rather than slipped in here.
+# ITS ONE COST WAS A DEFECT, AND IT IS FIXED (2026-09-12). This paragraph used
+# to record a "real narrowing of what a definition may name": `pathIsUnder`
+# refused outright if the two characters `..` appeared ANYWHERE in either
+# argument — a substring test, not a segment test — so a source file with `..`
+# inside a NAME (`src/a..b.nim`, which `pathProblem` accepts) was refused here.
+#
+# The narrowing was wider than that sentence, which is why it is worth keeping
+# the history. The predicate tests BOTH arguments and the second one is the
+# RESOLVED CHECKOUT, so a checkout whose own path contains `..` — `my..project`,
+# `v1..v2/checkout` — had EVERY file in it refused, and the row §4 shows the
+# user said "'src/a.nim' is not in this checkout", which is false. It failed in
+# the safe direction, so nothing anywhere went red
+# (Verification-Harness-Traps §15).
+#
+# `capabilities.pathIsUnder` now tests for a `..` SEGMENT. The repair is in
+# PLAT-8's file, with PLAT-8's arm (`V7`) and PLAT-8's re-recorded control
+# digest, because that is whose file it is — and the positive is asserted HERE
+# too, in `project_definitions_dir_test`, because this is the caller the outage
+# was measured through.
 from ../../common/plugin_model/capabilities import pathIsUnder
 
 type

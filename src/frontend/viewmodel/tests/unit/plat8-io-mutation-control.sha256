@@ -10,9 +10,9 @@
 # Rewrite with --record-control-hashes, deliberately, when the
 # SDK, the policy or a gate changes on purpose.
 
-c6befd979a54d4a388ef33a47254f87a76757407b40ae25f675f790ce5168184  src/common/plugin_model/capabilities.nim
+0b557f84f1258e63f94e6c0695364693a39ea875c5322d60c0a693d36ead1290  src/common/plugin_model/capabilities.nim
 f9946192d0ab07d61bd3c5f845c311657dbe66023ab8677b11143e4d444d4f96  src/common/plugin_model/manifest.nim
-3d4c62ca0a06f1921b0d6baf965c424c4ec42e114f98689a3a6ba9c08c8f0046  src/frontend/viewmodel/plugin_host/plugin_io.nim
+dd176a320de76d026946eaec4520a771c5f45257c561b711b401b757947f70a5  src/frontend/viewmodel/plugin_host/plugin_io.nim
 70e75bb33b8899e7108e2ac5c327509b41d87c3338948d813415c0beb3a295d7  src/frontend/viewmodel/plugin_host/handles.nim
 bd67d91207bba5c5d8f2a845f6ed0732710c8749cdbd42eda0d78206873926a0  src/frontend/viewmodel/plugin_host/host.nim
 2e087f20de705add8e0e448d773f826aaf976a64ffcc32d18e2cdbd3256f3e10  ci/test/plugin-reactive-boundary.sh

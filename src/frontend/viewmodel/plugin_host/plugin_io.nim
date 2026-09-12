@@ -1419,13 +1419,39 @@ else:
     ##     symlinks in it by construction, so a leaf that has become one is
     ##     precisely the swap, and `ELOOP` is the refusal.
     ##   * an `fstat` of the descriptor against an `lstat` of the path,
-    ##     compared on `(st_dev, st_ino)` — which catches a swap of an
-    ##     INTERMEDIATE directory, where `O_NOFOLLOW` says nothing.
+    ##     compared on `(st_dev, st_ino)` — which catches a swap that RACES
+    ##     the check, on any component, where `O_NOFOLLOW` says nothing.
     ##
-    ## A swap racing the comparison itself makes the two disagree and is
+    ## **CORRECTED 2026-09-12, BY EXPERIMENT RATHER THAN FROM A MAN PAGE.**
+    ## The second bullet used to read "catches a swap of an INTERMEDIATE
+    ## directory", and that is an overclaim. Build `root/a/b`; replace the
+    ## DIRECTORY `a` with a symlink to an outside directory that also holds a
+    ## `b`; then run this exact open/`fstat`/`lstat` sequence. The open
+    ## SUCCEEDS — `O_NOFOLLOW` constrains the final component and nothing else
+    ## — the two stats AGREE, because `lstat` follows intermediate components
+    ## exactly as `open` does and only declines to follow the leaf, and the
+    ## descriptor holds the OUTSIDE file's bytes. The control in the same run
+    ## confirms the instrument rather than the claim: a symlink in the LEAF
+    ## position is refused with `ELOOP`.
+    ##
+    ## So an intermediate swap that COMPLETES BEFORE the open is followed
+    ## consistently by both calls and is not caught. Only a swap that lands
+    ## BETWEEN the `open` and the `lstat` makes the two disagree, and that is
     ## refused: the check FAILS CLOSED, so the attacker's win condition is
     ## "make two stats of the same name agree while naming different objects",
     ## which needs one inode with two names — a HARD LINK.
+    ##
+    ## **WHAT CLOSING THE INTERMEDIATE CASE WOULD TAKE, NAMED AND NOT
+    ## IMPLEMENTED.** Resolve the path a component at a time: `openat` each
+    ## directory with `O_NOFOLLOW` from a descriptor for the one above it, or
+    ## on Linux one `openat2` with `RESOLVE_BENEATH`. Both make containment a
+    ## property of the descriptors the kernel handed back rather than of a
+    ## string, which is the only formulation a swap cannot get between. It is
+    ## recorded rather than written because it is one platform's answer
+    ## (`openat2` is Linux 5.6+) to a problem the other two still have, and
+    ## because the residual it closes needs write access inside the declared
+    ## root, which is the user's own. PLAT-11's `readSourceFile` carries the
+    ## same two sentences; they are the same seam in a second place.
     ##
     ## **The hard-link residual is real and is bounded elsewhere.** A hard link
     ## from inside a declared root to a recording defeats every path-based

@@ -163,6 +163,7 @@ C_NO_REDEMAND = "the second pass does NOT re-demand the declared host"
 C_REMOTE_NOT_LOCAL = "socket:remote does not reach loopback"
 C_LOCAL_NOT_REMOTE = "socket:local does not reach beyond loopback"
 C_WITH_GRANT = "the pair with the grant is permitted, and it is the grant that did it"
+C_DOTDOT_NAME = "a '..' inside a NAME is not a '..' segment"
 I_REMOTE_UNDECLARED = "socket:remote without the host declared is still refused"
 
 # `src/frontend/viewmodel/tests/unit/test_plugin_io_sdk.nim`
@@ -1116,6 +1117,40 @@ MUTATIONS: list[Mutation] = [
         control_name="the array bound is written as a range",
         control_find="  PluginDeniedSyncIo*: array[41,",
         control_replace="  PluginDeniedSyncIo*: array[0 .. 40,",
+    ),
+
+    # -- the segment/substring repair (2026-09-12) -------------------------
+    #
+    # `pathIsUnder` tested for `..` as a SUBSTRING, in BOTH arguments, and the
+    # second argument is the resolved ROOT. A declared root — or, through
+    # PLAT-11's `readSourceFile`, a whole checkout — whose own path contained
+    # those two characters had every file in it refused, with a message saying
+    # the file was not inside it.
+    #
+    # THE ARM MUTATES THE SEGMENT WALK BACK INTO THE SUBSTRING TEST rather than
+    # deleting the check. Deleting it would be graded by the OTHER case ("a
+    # path containing '..' is refused rather than resolved"), which both
+    # spellings satisfy; the thing worth grading is the DISTINCTION, so the
+    # mutation is the old code and the killer is the case only the new code
+    # passes. Verification-Harness-Traps §16a's rule, applied forwards: two
+    # mechanisms — here two readings of one rule — need disjoint evidence.
+    Mutation(
+        "V7", CAPS,
+        "  if hasParentSegment(path) or hasParentSegment(root): return false",
+        '  if ".." in path or ".." in root: return false',
+        C_DOTDOT_NAME, NIM_CAPS,
+        "THE SUBSTRING TEST COMES BACK, which is what shipped until "
+        "2026-09-12. A checkout or a declared root named `my..project` or "
+        "`v1..v2` has EVERY file in it refused — not one file in it — and the "
+        "row PLAT-11 shows the user says \"'src/a.nim' is not in this "
+        "checkout\", which is false. It fails in the SAFE direction and every "
+        "security assertion in both campaigns is MORE satisfied by it "
+        "(Verification-Harness-Traps §15), which is why it survived review in "
+        "two campaigns and was found by a third.",
+        control_name="the two segment tests are hoisted into one named binding",
+        control_find="  if hasParentSegment(path) or hasParentSegment(root): return false",
+        control_replace="  let escapes = hasParentSegment(path) or hasParentSegment(root)\n"
+                        "  if escapes: return false",
     ),
 
     # -- the SOURCE-ADMISSION arms (2026-09-09) ----------------------------

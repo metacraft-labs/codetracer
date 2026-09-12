@@ -56,7 +56,12 @@ import std/[os, sets, strutils, unittest]
 
 import ./project_definitions_dir
 
-const ExpectedAssertions = 99
+const ExpectedAssertions = 103
+  ## Verification-Harness-Traps §4c: written from a run, because a suite that
+  ## stops asserting is a suite whose count moves. 99 from 2026-09-11's
+  ## containment repair; 103 with 2026-09-12's segment-vs-substring case, which
+  ## turned one refusal that was asserting a defect into five assertions that
+  ## assert the repair and the containment it did not loosen.
 
 var countedAssertions = 0
 
@@ -678,18 +683,41 @@ suite "PLAT-11: a collection re-resolved against a really edited file":
     ck viaInside.present
     ckEq firstLine(viaInside), "line one"
 
-    # WHAT SHARING PLAT-8's PREDICATE COSTS, measured rather than assumed —
-    # the same treatment the non-ASCII limitation gets in
-    # `project_definitions_test`. `capabilities.pathIsUnder` refuses outright
-    # if the two characters `..` appear ANYWHERE in either argument, which is
-    # a SUBSTRING test rather than a segment test, so a file whose NAME
-    # contains `..` is now unreadable here although the grammar accepts it.
-    # The alternative was a second copy of the containment predicate, which is
-    # §14's defect in a security check; the repair belongs in PLAT-8's file
-    # and is recorded in PLAT-11's residues.
+    # WHAT SHARING PLAT-8's PREDICATE COSTS — AND THE COST IS NOW ZERO,
+    # CORRECTED 2026-09-12. This assertion read `ck not readSourceFile(real,
+    # "src/a..b.nim").present` from 2026-09-11 to 2026-09-12, and it was
+    # asserting a DEFECT rather than a limitation. `capabilities.pathIsUnder`
+    # tested for the two characters `..` as a SUBSTRING and tested BOTH of its
+    # arguments — the second being the resolved CHECKOUT — so the narrowing was
+    # never "one file whose name contains `..`": a checkout at `my..project` or
+    # `v1..v2` had EVERY file in it refused, with a row saying the file was not
+    # inside it. PLAT-11 residue 9 carries the measurement.
+    #
+    # `pathIsUnder` now tests for a `..` SEGMENT, so the line below is the
+    # positive it should always have been, and it is kept rather than deleted
+    # because it is the case that would notice the substring test coming back.
+    # The refusal of a real `..` SEGMENT is unchanged and is asserted in the
+    # read-guard case above (`src/../src/a.nim`) and, at the predicate, in
+    # `plugin_capabilities_test`.
     writeFile(real / "src/a..b.nim", "dotted\n")
     ckEq pathProblem("src/a..b.nim"), ppOk
-    ck not readSourceFile(real, "src/a..b.nim").present
+    let dotted = readSourceFile(real, "src/a..b.nim")
+    ck dotted.present
+    ckEq firstLine(dotted), "dotted"
+
+    # AND THE SHAPE THAT WAS ACTUALLY BROKEN: the `..` in the CHECKOUT's own
+    # path rather than in the file's. Every file of this checkout was refused
+    # before the repair — this is a whole-checkout outage asserted as such,
+    # not a one-file curiosity.
+    let dottedRoot = base / "my..project"
+    createDir(dottedRoot / "src")
+    writeFile(dottedRoot / "src/a.nim", "line one\n")
+    let inDottedRoot = readSourceFile(dottedRoot, "src/a.nim")
+    ck inDottedRoot.present
+    ckEq firstLine(inDottedRoot), "line one"
+    # The containment still holds in that checkout: a `..` segment does not
+    # become spellable just because the checkout's name contains two dots.
+    ck not readSourceFile(dottedRoot, "src/../../etc/passwd").present
 
 # ---------------------------------------------------------------------------
 

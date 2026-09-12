@@ -119,12 +119,22 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 # dead entry points while this line still said 1228, so FIVE new unreached
 # exports could have landed without reddening anything.
 #
-# `--max` is now an equality. Fewer findings than the number fails as "lower it
-# to what you measured", the same rule and very nearly the same sentence the
-# shell-gate inventory uses for its own ceiling.
+# `--max` was an equality from 2026-09-04 to 2026-09-12: fewer findings than the
+# number failed as "lower it to what you measured", the same rule and very
+# nearly the same sentence the shell-gate inventory uses for its own ceiling.
 #
-# BECAUSE IT IS AN EQUALITY, THIS NUMBER TRACKS THE TREE IN BOTH DIRECTIONS.
-# The protection is not the value; it is that the value cannot move without a
+# IT IS A CEILING AGAIN SINCE 2026-09-12, AND THE EQUALITY IS WHAT MEASURED
+# ITSELF OUT. `f274fa68` and `ab7ce4c1` (2026-09-05) carry 1225 findings against
+# a ceiling of 1226 and BOTH EXIT 1 — CI was red for five hours because the tree
+# had got BETTER, and went green only when an unrelated commit put the count
+# back up to exactly 1226. A gate whose failure asks a developer to undo an
+# improvement, or to go and edit a number in another file, is the
+# guard-that-gets-switched-off this whole block is about. The slack side still
+# REPORTS, loudly and with the value to lower the ceiling to; it no longer sets
+# the exit code. `ci/test/reachability-ratchet-test.sh` arm 2 asserts exactly
+# that, and carries the measurement.
+#
+# The protection was never the value; it is that the value cannot move without a
 # reviewed line in a diff AND the three sentences that describe it moving too.
 # A ceiling held below the tree does not make the guard stricter — it makes it
 # permanently red, and a lane that is always red is a lane nobody reads.
@@ -145,20 +155,40 @@ lint_step "shell-gate coverage: every gate under ci/ and scripts/ is reachable f
 # The allow-list was considered and refused: it names this shape under WHEN AN
 # ENTRY IS WRONG, and it is right to.
 #
-# AND THE FINDING UNDERNEATH, WHICH IS BIGGER THAN THE RAISE AND IS NOT FIXED
-# HERE. Bucket A prints as "tested, no product module reaches it". For 355 of
-# its 650 entries that sentence is FALSE: the declaring module does reach them.
-# `frontend-reachability-guard.py` tests `key in tested` BEFORE `elif readers`,
-# so any symbol its own module uses is relabelled the moment a test mentions
-# its name — the same promotion this file already records for
-# `layout.mountComponentContainer`. Classifying those as bucket C
-# ("only its own module reaches it", deliberately not counted) would take the
-# counted total from 1226 to 871.
+# AND THE FINDING UNDERNEATH, WHICH WAS BIGGER THAN THE RAISE — DONE 2026-09-12.
+# This paragraph used to end "Measured and recorded so the next person has the
+# number; deliberately not acted on." It has now been acted on.
 #
-# That is a 355-finding change to what this lane enforces, and it is a design
-# decision about whether "exported, called only by its own module, and tested"
-# is worth counting — not a thing to slip into a ceiling-raise commit. Measured
-# and recorded so the next person has the number; deliberately not acted on.
+# Bucket A prints as "tested, no product module reaches it", and the sentence
+# was FALSE for a large part of it: the declaring module did reach them.
+# `frontend-reachability-guard.py` tested `key in tested` BEFORE `elif readers`,
+# so any symbol its own module used was relabelled out of bucket C ("only its
+# own module reaches it", deliberately not counted) the moment a test mentioned
+# its name — the same promotion this file already records for
+# `layout.mountComponentContainer`. The two are different defects with different
+# repairs (wire-or-delete vs drop the `*`), so counting the second as the first
+# inflated the enforced number AND printed the wrong triage advice beside most
+# of its rows.
+#
+# The branches are swapped. Measured on this tree, before and after, with
+# nothing else changed:
+#
+#             findings   [A]    [B]    [C]
+#   before      1800     1167    633   1922
+#   after       1078      445    633   2644
+#
+# 722 findings moved, not 355: the number in this paragraph was measured when
+# the total was 1226, and the shape it names is one this repository GENERATES by
+# design — a ViewModel built and tested before any front-end wires it. Bucket B
+# is unchanged at 633, which is the check that the swap moved only the rows it
+# was supposed to.
+#
+# THE CEILING WAS NOT LOWERED TO MATCH, and that is deliberate rather than an
+# oversight: at 1078 against 1226 this step now PASSES with 148 slots of
+# reported slack. Re-fitting the number is the ratchet-policy pass's call — see
+# THE RATCHET POLICY, DECIDED in `ci/test/frontend-reachability-guard.py`'s
+# header, which records (c) "no new findings in files this change touched" as
+# the adopted repair and says why it is not implemented in the same diff.
 
 # THE PROSE GUARD. Three sentences name this threshold and all three drifted off
 # it; the cheapest permanent fix is to make a raise that does not touch them
@@ -234,35 +264,46 @@ lint_step "reachability prose guard: contract suite" \
 # THE THRESHOLD ITSELF, WHICH NOTHING TESTED UNTIL 2026-09-04. The suite above
 # tests the SENTENCES that describe the ceiling; this one tests the ceiling. The
 # gap is how `--max` stayed a `>` while the paragraph below described the slack
-# that produced, in the present tense, for as long as it was true. Four synthetic
-# unreached exports, no Nim toolchain, milliseconds.
-lint_step "reachability ratchet: contract suite (equality, both directions)" \
+# that produced, in the present tense, for as long as it was true — and then, on
+# 2026-09-12, how the equality that replaced it could be reverted to a ceiling
+# with the arms in this suite carrying the measurement that decided it rather
+# than a preference. Four synthetic unreached exports, no Nim toolchain,
+# milliseconds.
+lint_step "reachability ratchet: contract suite (a ceiling, and it still bites above it)" \
 	bash ci/test/reachability-ratchet-test.sh
 
 lint_step "frontend reachability: the ratchet's prose agrees with its threshold" \
 	assert_reachability_prose_agrees
 
-# THIS STEP IS RED, AND HAS BEEN SINCE 2026-09-05. SAID HERE SO THAT NOBODY
-# QUOTES ITS COUNT AGAIN AS THOUGH IT HAD PASSED.
+# THIS STEP WAS RED FROM 2026-09-05 TO 2026-09-12, AND IT PASSES NOW FOR A
+# REASON THAT IS NOT "THE CEILING WAS RAISED". SAID HERE SO THAT NOBODY READS
+# THE GREEN TICK AS THE BACKLOG HAVING BEEN CLEARED.
 #
-# Measured 2026-09-11 at 422647a0: the tree carries 1800 findings against the
-# ceiling of 1226 below, so this step fails by 574 and every other step of this
-# stage is green. Last green commit a9e7f12d (2026-09-05 10:13, exactly 1226);
+# The history: last green commit a9e7f12d (2026-09-05 10:13, exactly 1226);
 # first red a6386614 (2026-09-05 12:40, 1253); every first-parent commit since
-# has been red — 32 of them counting a6386614 itself, sampled across the window
-# and monotonically worse (1253, 1283, 1608, 1684, 1800). The allow-list has
-# never had an entry and has never been the failing arm.
+# was red — 32 of them counting a6386614 itself, sampled across the window and
+# monotonically worse (1253, 1283, 1608, 1684, 1800). The allow-list has never
+# had an entry and has never been the failing arm.
 #
-# THE CEILING IS DELIBERATELY NOT BEING RAISED TO 1800 to make this green. The
-# whole argument above is that a report is not a gate; a ceiling re-fitted to
-# whatever the tree happens to carry is a report wearing a gate's label, and it
-# is the ONE change that would remove the pressure to fix this without fixing
-# anything. Three repairs that would make the number mean something again are
-# costed — per-directory ratchets, a checked-in baseline, and "no new findings
-# in files this change touched" — in PLAT-11's milestone section of
-# codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org. They are
-# proposals: which one this repository adopts is a policy decision for this
-# lane's owner.
+# What changed on 2026-09-12 is the COUNT and not the ceiling. The bucket-A
+# reclassification above stopped labelling a symbol its own module reaches as
+# "no product module reaches it", which took the counted total 1800 -> 1078;
+# and `--max` went back to being a ceiling, so 1078 against 1226 is a report
+# rather than a failure. Nothing was wired, nothing was deleted, and no `*`
+# came off: 1078 is the same tree, counted correctly.
+#
+# SO THE LANE NOW CARRIES 148 SLOTS OF SLACK, which is a real budget and is
+# reported on every run. THE CEILING IS STILL DELIBERATELY NOT BEING MOVED —
+# neither up to 1800, which would convert a broken gate into a silent one, nor
+# down to 1078, which is the ratchet-policy pass's call rather than this one's.
+# Three repairs that would make the number mean something again were costed —
+# per-directory ratchets, a checked-in baseline, and "no new findings in files
+# this change touched" — in PLAT-11's milestone section of
+# codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org.
+# **THE DECISION IS (c)**, recorded with its reasoning in
+# ci/test/frontend-reachability-guard.py's header, beside the instrument it
+# changes. It is not implemented here: it is a repo-wide policy change and
+# needs its own pass, with its own contract suite.
 lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1226 + allow-list hygiene)" \
 	env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh
 

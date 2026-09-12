@@ -36,47 +36,65 @@
 # `env CT_REACHABILITY_MAX=1226 bash ci/test/frontend-reachability.sh`, so 1227
 # findings fail `lint-nim` and 1226 do not.
 #
-# AND IT IS NON-ENFORCING TODAY, WHICH IS THE FIRST THING A READER NEEDS.
+# IT WAS RED FOR SEVEN DAYS, AND WHY IT IS NOT RED NOW IS THE FIRST THING A
+# READER NEEDS.
 # ----------------------------------------------------------------------
-# Measured 2026-09-11 at `422647a0`: this tree carries **1800** findings
-# against a ceiling of **1226**, so the step is RED and has been since
+# Measured 2026-09-11 at `422647a0`: this tree carried **1800** findings
+# against a ceiling of **1226**, so the step was RED, and had been since
 # `a638661447e706d95b9f8bd7e0f07886cc89f3dd` (2026-09-05 12:40, 1253
 # findings). The last commit at which it was green is
 # `a9e7f12d5f74a75281ef6a2f0b1426a5a3703abb` (2026-09-05 10:13), and every
-# first-parent commit since has failed it — 32 of them counting the first red,
-# re-counted 2026-09-12 after this header said 44. Every other step of
-# `ci/lint/nim.sh` is green.
+# first-parent commit in that window failed it — 32 of them counting the first
+# red, re-counted 2026-09-12 after this header said 44.
 #
-# So: **this number is a REPORT and not a gate right now.** Five campaigns
-# have quoted "reachability N, allow-list 0/0" in their evidence tables as
-# though the lane enforcing a ceiling on N had passed. It had not, and it
-# cannot have: an equality against a ceiling 574 below the tree fails for
-# every tree.
+# So for those seven days: **this number was a REPORT and not a gate.** Five
+# campaigns quoted "reachability N, allow-list 0/0" in their evidence tables as
+# though the lane enforcing a ceiling on N had passed. It had not, and it could
+# not have: an equality against a ceiling 574 below the tree fails for every
+# tree.
 #
-# The drift is not one bad merge. It is two campaigns landing large, tested,
+# **ON 2026-09-12 THE COUNT CHANGED AND THE CEILING DID NOT.** Two repairs, in
+# this order, and neither of them wires or deletes a single symbol:
+#
+#   1. The guard stopped labelling a symbol its own module reaches as "no
+#      product module reaches it" — a bucket-order bug this lane's own header
+#      had measured and left. 722 findings moved from bucket A to bucket C
+#      (not counted): **1800 -> 1078**, with bucket B unchanged at 633.
+#   2. `CT_REACHABILITY_MAX` went back to being a CEILING rather than an
+#      equality, so a count BELOW it reports and does not fail.
+#
+# At 1078 against 1226 this step passes, **with 148 slots of slack reported on
+# every run**. That is a real budget and it is stated here rather than left to
+# be discovered: the green tick means the number is now counted correctly, not
+# that the backlog has been cleared.
+#
+# The drift was not one bad merge. It is two campaigns landing large, tested,
 # not-yet-wired subsystems: `src/frontend/tui/` went 3 -> 423 between 09-05
 # and 09-08, and `src/frontend/viewmodel/plugin_host/` went 0 -> 90 between
-# 09-08 and 09-11. 514 of the 574 are bucket A ("tested, and no product module
-# reaches it"), which is the bucket that needs owners rather than deletions.
+# 09-08 and 09-11 — the shape this repository generates by design.
 #
-# **The remedy is deliberately NOT "raise the ceiling to 1800".** That turns a
-# broken gate into a silent one: the count would agree with the tree and the
-# guard would go on not asking anyone anything, which is the exact state the
-# paragraph above says this file exists to leave. Three candidate repairs are
-# costed with real numbers in PLAT-11's milestone section
-# (`codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org`), under
-# "The reachability ratchet is RED, and has been since 2026-09-05". Choosing
-# between them is a repo-wide policy decision and belongs to whoever owns this
-# lane, not to the milestone that measured it.
+# **The remedy was deliberately NOT "raise the ceiling to 1800"**, and it is
+# still not "lower it to 1078". Either re-fits the number to the tree, which
+# turns a broken gate into a silent one. Three candidate repairs are costed
+# with real numbers in PLAT-11's milestone section
+# (`codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org`).
+# **The decision is (c), "no new findings in files this change touched"**,
+# recorded with its reasoning in `frontend-reachability-guard.py`'s own header.
+# It is a repo-wide policy change and needs its own pass; until it lands, the
+# 148 slots are the cost of not failing on an improvement.
 #
-# AND SO DOES 1222, SINCE 2026-09-04: the threshold is an EQUALITY, not a
-# ceiling with room under it. Fewer findings than the number fails as "the
-# ceiling has slack, lower it to what you measured", because slack is a budget —
-# five slots had already accumulated (1223 measured against a ceiling of 1228)
-# and five new unreached exports could have landed unremarked. Only the exact
-# count passes, which means this number TRACKS THE TREE in both directions and
-# every move is a reviewed line in a diff. The sentence above is phrased in the one direction the prose
-# guard parses; both directions are asserted by the contract suite.
+# WHY THE EQUALITY WENT, MEASURED. From 2026-09-04 to 2026-09-12 the threshold
+# was an EQUALITY: fewer findings than the number failed as "the ceiling has
+# slack, lower it to what you measured", because slack is a budget — five slots
+# had already accumulated (1223 measured against a ceiling of 1228). The cost
+# was measured too. `f274fa68` and `ab7ce4c1` (2026-09-05) carry **1225**
+# findings against a ceiling of 1226 and both exit 1: CI was red for five hours
+# because the tree had got better, and went green when an unrelated commit put
+# the count back up. A gate that fires on an improvement, and whose only remedy
+# is to edit a number in another file, teaches people the lane is noise. The
+# slack side still REPORTS, loudly and with the value to lower the ceiling to;
+# it no longer sets the exit code. `ci/test/reachability-ratchet-test.sh` arm 2
+# asserts exactly that and carries the measurement.
 #
 # THAT SENTENCE SAID 1224 AND 1225 WHILE THE INVOCATION SAID 1228, from 04:04
 # to 18:00 on 2026-09-04. The ceiling was raised three times in twenty-nine
@@ -112,30 +130,36 @@
 # names who clears it or in what order. Measured on 2026-09-04, the 1226 counted
 # findings are not one backlog but three, and they want three different answers:
 #
-#   355  BUCKET A, MISLABELLED. The header prints "tested, no product module
-#        reaches it", and for these the DECLARING MODULE DOES reach them —
-#        `frontend-reachability-guard.py` tests `key in tested` before
-#        `elif readers`, so a symbol its own module uses is relabelled the
-#        moment a test mentions its name. These are not a backlog to clear;
-#        they are a classification to correct, and correcting it moves them to
-#        bucket C (not counted) and takes the total to 871. That is a design
-#        decision about whether "exported, called only by its own module, and
-#        tested" is worth counting, and it should be made deliberately rather
-#        than as a side effect of a ceiling move. IT IS STEP ONE, because every
-#        number below is wrong until it is answered.
+#   355  BUCKET A, MISLABELLED. **DONE 2026-09-12 — and it was 722, not 355.**
+#        The header printed "tested, no product module reaches it", and for
+#        these the DECLARING MODULE DID reach them:
+#        `frontend-reachability-guard.py` tested `key in tested` before
+#        `elif readers`, so a symbol its own module uses was relabelled the
+#        moment a test mentioned its name. These were never a backlog to clear;
+#        they were a classification to correct, and correcting it moved them to
+#        bucket C (not counted). The branches are swapped. Measured before and
+#        after with nothing else changed: 1800 -> 1078 counted, bucket A
+#        1167 -> 445, bucket C 1922 -> 2644, bucket B unchanged at 633 — which
+#        is the check that only the intended rows moved. The 355 was measured
+#        when the total was 1226; the shape grows because this repository
+#        generates it, building and testing a ViewModel before any front-end
+#        wires it. IT WAS STEP ONE, because every number below was wrong until
+#        it was answered — so the two below are re-measured rather than quoted.
 #
-#   295  BUCKET A, GENUINE. A test reaches it and no product code does. This is
-#        the shape the guard was written for — a tested capability that is dead
-#        in the product, which is exactly the false confidence its header
-#        describes. These are triage, one owner at a time: wire it, delete it,
-#        or allow-list it with a reason that is not "the test covers it".
+#   445  BUCKET A, GENUINE (was 295 at a total of 1226). A test reaches it and
+#        no product code does. This is the shape the guard was written for — a
+#        tested capability that is dead in the product, which is exactly the
+#        false confidence its header describes. These are triage, one owner at
+#        a time: wire it, delete it, or allow-list it with a reason that is not
+#        "the test covers it".
 #
-#   576  BUCKET B. Nothing reaches it at all, not even a test. Cheapest of the
-#        three to clear, because deleting an unreferenced export breaks nothing
-#        by construction, and it is where the 1228 -> 1223 descent came from.
+#   633  BUCKET B (was 576 at a total of 1226). Nothing reaches it at all, not
+#        even a test. Cheapest of the three to clear, because deleting an
+#        unreferenced export breaks nothing by construction, and it is where
+#        the 1228 -> 1223 descent came from.
 #
-# THE ORDER MATTERS AND IT IS NOT "SMALLEST FIRST": step one is free and makes
-# the other two honest, step three is mechanical, step two needs owners.
+# THE ORDER MATTERED AND IT WAS NOT "SMALLEST FIRST": step one was free and
+# made the other two honest, step three is mechanical, step two needs owners.
 #
 # AND THE INTERIM, WHICH DOES NOT WAIT FOR ANY OF IT. Full `--enforce` over a
 # four-figure backlog is the guard-that-gets-switched-off, so the useful
@@ -148,8 +172,9 @@
 # supply and which nothing here reads today.
 #
 # Until one of those lands, this lane is a RATCHET and not a gate, and the
-# distinction is written on the tin: `--max` fails on any movement away from the
-# recorded number, in either direction, and `--enforce` remains unset.
+# distinction is written on the tin: `--max` fails only ABOVE the recorded
+# number, reports the slack below it (since 2026-09-12 — see "WHY THE EQUALITY
+# WENT" above), and `--enforce` remains unset.
 
 set -euo pipefail
 

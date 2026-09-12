@@ -418,14 +418,59 @@ func declaresHost*(g: GrantSet; host: string; port: int): bool =
       return true
   false
 
+func hasParentSegment(p: string): bool =
+  ## Whether `p` contains a `..` SEGMENT — a whole `/`-delimited component that
+  ## IS `..` — as opposed to the two characters appearing somewhere inside a
+  ## name.
+  ##
+  ## IT IS A SEGMENT WALK AND NOT `".." in p`, AND THE DIFFERENCE IS A BUG THAT
+  ## SHIPPED. Until 2026-09-12 `pathIsUnder` asked `".." in path or ".." in
+  ## root`, which is a substring test, applied to BOTH arguments — and the
+  ## second argument is the resolved ROOT. So a checkout or a declared root
+  ## whose own path merely contains those two characters — `~/src/my..project`,
+  ## `~/work/v1..v2/checkout`, a vendored `src/a..b.nim` — had EVERY file in it
+  ## refused. Measured through `readSourceFile`: an ordinary `src/a.nim`,
+  ## plainly inside a checkout named `my..project`, came back
+  ## `present: false`, and the row the user is shown said "'src/a.nim' is not
+  ## in this checkout", which is false and sends the reader to look in the
+  ## wrong place.
+  ##
+  ## It failed in the safe direction, which is exactly why it survived review
+  ## (Verification-Harness-Traps §15): every security assertion in PLAT-8 and
+  ## PLAT-11 was MORE satisfied by it, and nothing anywhere went red.
+  ##
+  ## `..` is still refused as a SEGMENT, at any depth and in either argument.
+  ## That rule is unchanged and is the one that matters: this function is
+  ## textual, so a surviving `..` component would let `startsWith` call a path
+  ## contained that a resolver would not.
+  var start = 0
+  var i = 0
+  while true:
+    let atEnd = i == p.len
+    if atEnd or p[i] == '/':
+      if i - start == 2 and p[start] == '.' and p[start + 1] == '.':
+        return true
+      if atEnd: break
+      start = i + 1
+    inc i
+  false
+
 func pathIsUnder*(path, root: string): bool =
   ## Textual containment on already-normalised paths. The NORMALISATION is the
-  ## host's (`plugin_io.nim` calls `absolutePath` + `normalizedPath` before it
-  ## asks), because normalising here would need the filesystem this module
-  ## refuses to touch. A `..` surviving into either argument is refused
-  ## outright rather than resolved.
+  ## host's (`plugin_io.nim` calls `canonicalPath` before it asks, and
+  ## `project_definitions_dir.readSourceFile` calls `resolvedRealPath`),
+  ## because normalising here would need the filesystem this module refuses to
+  ## touch. A `..` SEGMENT surviving into either argument is refused outright
+  ## rather than resolved — see `hasParentSegment` for why that is a segment
+  ## and not a substring.
+  ##
+  ## `/` IS THE ONLY SEPARATOR THIS UNDERSTANDS, which is the same bound its
+  ## two callers already carry: both resolve with `realpath(3)` on POSIX and
+  ## with `GetFullPathNameW` — which resolves no link at all — on Windows, so
+  ## the containment is a real containment on POSIX and a normalisation
+  ## elsewhere. Stated here rather than implied.
   if path.len == 0 or root.len == 0: return false
-  if ".." in path or ".." in root: return false
+  if hasParentSegment(path) or hasParentSegment(root): return false
   if path == root: return true
   let r = if root.endsWith("/"): root else: root & "/"
   path.startsWith(r)
