@@ -32,7 +32,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy get.codetracer.com
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: [self-hosted, linux, x64]  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     permissions:
       contents: read
       deployments: write
