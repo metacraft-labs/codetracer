@@ -3151,3 +3151,41 @@ commands.
   file, together with locals that belong to a different translation unit
   (`colontmpD_`, `nimErr_`, `FR_`, `gEnv`). `ExprLoader::get_source_line`
   already warns on the out-of-range row and nothing acts on it.
+- 2026-09-13 (cow namespace indexes): `memwrites.tc` / `linehits.tc` are now
+  built bottom-up in one pass (`CowNamespaceWriter::bulk_load`), not one
+  `insert_and_commit` per key. **The failure mode here is NOT the one the Nim
+  writer has**, and the difference is worth knowing before you go looking for
+  it: Nim's `cow_btree` holds superseded pages "pending free" and never
+  reclaims during a build, so a per-key Nim build blows the IMAGE up (1.18 GB
+  at 100k keys) and bytes/key climbs. The Rust writer reclaims eagerly into the
+  free list at every commit (see its module doc), so the Rust images stayed
+  modest and bytes/key stayed FLAT — 89 bytes/key at every cardinality from
+  10k to 200k. What grew instead was encode TIME, because
+  `insert_and_commit` calls `collect_reachable` on the old AND new root and
+  then does an O(pages) `contains` per page: 0.13 s at 10k keys, 2.1 s at 50k,
+  10.6 s at 100k, 72.5 s at 200k. So an image-size check alone would have
+  called the Rust side healthy. Measure the encode, not just the artefact.
+- 2026-09-13: both encoders used to run a whole THROWAWAY per-key build over
+  every key purely to learn how long the finished index would be, because
+  descriptors carry `(payload_offset, len)` into a payload appended after the
+  page-aligned index. That doubled the cost. A one-pass index's length is a
+  pure function of the key count — `CowNamespaceWriter::bulk_load_image_len`.
+  If you add another namespace with an appended payload, use that rather than
+  building the tree twice. `bulk_load` refuses to return an image whose length
+  disagrees with it, because an under-estimate misplaces every payload offset
+  while still producing a structurally valid `NSB1` image.
+- 2026-09-13: the same sizing-pass-plus-per-key shape survives in THREE test
+  fixture helpers (`linehits_namespace.rs` `image_with_entries`,
+  `mod.rs` `cow_linehits_image`, and the deliberate reference builders in the
+  two encoders' test modules). Those are kept on purpose — they mean the
+  readers are still exercised against a per-key-packed image, which is a real
+  second packing, not dead weight. Do not "fix" them to `bulk_load` without
+  leaving something that reads a per-key build.
+- 2026-09-13: a bulk-built and a per-key-built namespace of the same keys are
+  reader- and value-equivalent but **never byte-identical** (different commit
+  id, the other root slot, and the per-key one keeps the pages its spine
+  copies left behind). Any equivalence check between the two must be on decoded
+  content. `codetracer-trace-format-nim/tests/check_nsb1_namespace.nim` is the
+  canonical adjudicator for "a foreign writer emitted a real namespace" — it
+  takes an image plus a `<key> <descriptor-hex>` / `!<absent-key>` manifest and
+  judges it with the production Nim `loadCowBTree`/`lookup`.
