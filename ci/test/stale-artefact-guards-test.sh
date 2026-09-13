@@ -800,7 +800,33 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"${DESK}/src/build-debug/bin/ct"
 chmod +x "${DESK}/src/build-debug/bin/ct"
 
 run_desktop() {
-	CODETRACER_COMPONENT_OUT_ROOT="${DESK}/out" \
+	# `env -u`, for the same reason `nimcache_for` below uses it: the script
+	# under test reads THREE environment overrides that name a core binary, and
+	# every one of them points OUT OF THIS FIXTURE when it is set.
+	#
+	# MEASURED, and it is why this block is here rather than being tidy. Inside
+	# the codetracer dev shell `CODETRACER_BUILD_DIR` is an absolute path to the
+	# real checkout's `src/build-debug`, so it is the FIRST candidate
+	# build-desktop-component.sh tries — ahead of `$ROOT_DIR/src/build-debug`,
+	# which is the fixture's. The script then correctly observes that the core
+	# it was handed lives outside `${DESK}`, says "was supplied from outside",
+	# skips the staleness question it cannot ask about a foreign binary, and
+	# publishes. Three contracts below went red with "the command unexpectedly
+	# succeeded" — and the one above them went GREEN VACUOUSLY, having graded
+	# the real repository's `ct` instead of the stale fixture core it built.
+	#
+	# So the suite passed outside the dev shell and failed inside it, which is
+	# the instrument reporting on its own environment rather than on the guard.
+	# `CODETRACER_CORE_BIN` and `CODETRACER_E2E_CT_PATH` are unset alongside it
+	# because build-desktop-component.sh consults both as `CORE_BIN` defaults;
+	# neither is exported by the dev shell today, but a fixture that is hermetic
+	# only against the variable that happened to bite is not hermetic.
+	#
+	# Unset rather than overridden: pointing `CODETRACER_BUILD_DIR` at the
+	# fixture would exercise the override path, whereas what these contracts
+	# grade is the DEFAULT candidate walk.
+	env -u CODETRACER_BUILD_DIR -u CODETRACER_CORE_BIN -u CODETRACER_E2E_CT_PATH \
+		CODETRACER_COMPONENT_OUT_ROOT="${DESK}/out" \
 		bash "${DESK}/scripts/build-desktop-component.sh" "$@" 2>&1
 }
 
@@ -1329,7 +1355,29 @@ printf '.x{color:red}\n' >"${CSSTREE}/src/build-debug/frontend/styles/theme.css"
 printf '.x{color:red}\n' >"${CSSTREE}/src/build-debug-repro/frontend/styles/theme.css"
 
 resolve_css() {
-	node -e '
+	# `env -u CODETRACER_BUILD_DIR` for the same reason `run_desktop` above does
+	# it: `resolveBuiltThemeCss` pushes `$CODETRACER_BUILD_DIR/frontend/styles`
+	# as its FIRST candidate directory, and inside the codetracer dev shell that
+	# variable is an absolute path to the REAL checkout — not to `${CSSTREE}`.
+	# The resolver then picks the NEWEST candidate, so a real built stylesheet
+	# would outrank every file this fixture stages and these contracts would be
+	# grading the developer's build tree.
+	#
+	# It does not bite TODAY only by luck: the fixture stages `theme.css`, and
+	# the real build tree emits `default_dark_theme.css` and friends under that
+	# name instead, so the candidate never resolves. That is a filename
+	# coincidence, not isolation — rename the fixture's stylesheet to a real
+	# theme name and four contracts below start measuring the wrong tree. Unset
+	# it and the coincidence stops being load-bearing.
+	#
+	# `CODETRACER_E2E_CT_PATH` goes with it because `candidateStyleDirs` reads
+	# BOTH: it derives a fourth candidate from the ct binary's grandparent
+	# directory, which for any ct outside this fixture is again the wrong tree.
+	# Unsetting only the variable that happened to bite would be the exact
+	# half-measure `run_desktop` above refuses — see its note. Neither is
+	# exported by the dev shell today; hermeticity that depends on that staying
+	# true is not hermeticity.
+	env -u CODETRACER_BUILD_DIR -u CODETRACER_E2E_CT_PATH node -e '
 		const { resolveBuiltThemeCss } = require(process.argv[1]);
 		try {
 			process.stdout.write(resolveBuiltThemeCss(process.argv[2], process.argv[3]));
@@ -1371,7 +1419,7 @@ assert_contains "$(resolve_css)" "build-debug-repro/frontend/styles/theme.css" \
 # would reach `page.addStyleTag({ path: "" })`, which does not obviously fail —
 # and a contrast assertion against an unstyled page measures browser defaults
 # and can PASS.
-MISSING_CSS="$(node -e '
+MISSING_CSS="$(env -u CODETRACER_BUILD_DIR -u CODETRACER_E2E_CT_PATH node -e '
 	const { resolveBuiltThemeCss } = require(process.argv[1]);
 	try {
 		process.stdout.write(resolveBuiltThemeCss(process.argv[2], process.argv[3]));
