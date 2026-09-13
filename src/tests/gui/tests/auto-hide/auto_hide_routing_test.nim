@@ -36,7 +36,7 @@ import ../../../../common/types as ct_types
 suite "openLayoutTab: revealing a pinned auto-hide panel":
 
   test "a singleton panel is revealed by any request for its content":
-    # BUILD / PROBLEMS / SEARCH RESULTS / REQUESTS and the ordinary sidebar
+    # BUILD / PROBLEMS / FIND IN FILES / REQUESTS and the ordinary sidebar
     # panes have exactly one instance, so the pinned one *is* the panel asked
     # for.  They carry no document path.
     check revealsPinnedPanel(

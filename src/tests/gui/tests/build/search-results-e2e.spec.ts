@@ -16,11 +16,11 @@
 
 import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
 import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
-import { retry } from "../../lib/retry-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 import {
   DOCKED_BOTTOM_CONTENT_SELECTOR,
+  FIND_IN_FILES_TAB_TITLE,
   openBottomPanel,
   waitForDefaultBottomTabs,
 } from "../../page-objects/auto-hide-strip";
@@ -42,43 +42,42 @@ test.describe("Search Results Panel", () => {
     // Wait for auto-hide bottom tabs to appear.
     await waitForDefaultBottomTabs(ctPage);
 
-    // Click the SEARCH RESULTS auto-hide tab to dock the panel.
-    await openBottomPanel(ctPage, "SEARCH RESULTS");
+    // Click the Find in Files auto-hide tab to dock the panel. The title
+    // comes from the page object, not a literal: `layout.nim` renamed this
+    // pane's tab and the old string went on compiling here as a dead
+    // locator. See FIND_IN_FILES_TAB_TITLE.
+    await openBottomPanel(ctPage, FIND_IN_FILES_TAB_TITLE);
 
-    // The search results panel renders `.search-results` inside
-    // `#searchResultsComponent-0`. Check the container element
-    // visibility first, which proves the auto-hide tab was activated and
-    // the panel was docked, and fall back to the panel itself.
+    // TWO ASSERTIONS, BOTH UNCONDITIONAL, AND THE SECOND IS THE POINT.
     //
-    // (The container-first order dates from when `.search-results`
-    // carried a `.search-results-non-active` `display: none` modifier
-    // before a search. The Find in Files redesign retired that modifier
-    // — the panel owns the query input, so hiding it would hide the only
-    // way to start a search — so the panel is visible from the start
-    // now. The order is kept because the container is still the thing
-    // that proves the DOCKING, which is what this case is about.)
+    // `#searchResultsComponent-0` is the auto-hide container: its visibility
+    // proves the tab was activated and the panel was DOCKED. `.search-results`
+    // is the pane itself, rendered inside it by
+    // `viewmodel/views/isonim_search_results_view.nim`.
+    //
+    // These used to be one `retry` closure that returned the container's
+    // visibility when the container existed and only "fell back" to the panel
+    // otherwise. The container always exists once docked, so the fallback was
+    // UNREACHABLE — the panel was never looked at, and a rename of
+    // `.search-results` left both cases in this file green while asserting
+    // nothing about the pane. Measured: renaming that class alone kept this
+    // file at "2 passed". That is the same defect class this spec was repaired
+    // for (a renamed identifier surviving as a dead locator), in the spec doing
+    // the repairing, and this lane is the only behavioural coverage the
+    // Find-in-Files Web renderer arm has.
+    //
+    // `expect(...).toBeVisible()` rather than a hand-rolled poll: it retries
+    // natively AND names the locator that failed. The old form collapsed both
+    // locators into one boolean, so the failure read "expected true, received
+    // false" and said nothing about which element was missing.
     const searchContainer = ctPage.locator(
       `${DOCKED_BOTTOM_CONTENT_SELECTOR} #searchResultsComponent-0`,
     );
     const searchPanel = ctPage.locator(
       `${DOCKED_BOTTOM_CONTENT_SELECTOR} .search-results`,
     );
-    const visible = await retry(
-      async () => {
-        // Check the outer container first — it is always visible when
-        // the overlay is shown, even if .search-results has display:none.
-        if ((await searchContainer.count()) > 0) {
-          return searchContainer.first().isVisible();
-        }
-        if ((await searchPanel.count()) > 0) {
-          return searchPanel.first().isVisible();
-        }
-        return false;
-      },
-      { maxAttempts: 20, delayMs: 500 },
-    ).then(() => true as const).catch(() => false);
-
-    expect(visible).toBe(true);
+    await expect(searchContainer.first()).toBeVisible({ timeout: 10_000 });
+    await expect(searchPanel.first()).toBeVisible({ timeout: 10_000 });
   });
 
   test("Empty state when no search performed", async ({ ctPage }) => {
@@ -89,40 +88,38 @@ test.describe("Search Results Panel", () => {
     // Wait for auto-hide bottom tabs to appear.
     await waitForDefaultBottomTabs(ctPage);
 
-    // Click the SEARCH RESULTS auto-hide tab to dock the panel.
-    await openBottomPanel(ctPage, "SEARCH RESULTS");
+    // Click the Find in Files auto-hide tab to dock the panel. The title
+    // comes from the page object, not a literal: `layout.nim` renamed this
+    // pane's tab and the old string went on compiling here as a dead
+    // locator. See FIND_IN_FILES_TAB_TITLE.
+    await openBottomPanel(ctPage, FIND_IN_FILES_TAB_TITLE);
 
-    // Wait for the panel container to be visible inside the docked panel.
-    // The container is checked first because it is what proves the
-    // docking; see the note in the case above for why the panel itself
-    // is no longer hidden before a search.
+    // The docking and the pane, asserted the same way as the case above and
+    // for the same reason — see the long note there.
     const searchContainer = ctPage.locator(
       `${DOCKED_BOTTOM_CONTENT_SELECTOR} #searchResultsComponent-0`,
     );
     const searchPanel = ctPage.locator(
       `${DOCKED_BOTTOM_CONTENT_SELECTOR} .search-results`,
     );
-    const containerVisible = await retry(
-      async () => {
-        if ((await searchContainer.count()) > 0) {
-          return searchContainer.first().isVisible();
-        }
-        if ((await searchPanel.count()) > 0) {
-          return searchPanel.first().isVisible();
-        }
-        return false;
-      },
-      { maxAttempts: 20, delayMs: 500 },
-    ).then(() => true as const).catch(() => false);
+    await expect(searchContainer.first()).toBeVisible({ timeout: 10_000 });
+    await expect(searchPanel.first()).toBeVisible({ timeout: 10_000 });
 
-    expect(containerVisible).toBe(true);
-
-    // Verify empty state: no match rows should be present since
-    // no search has been performed.
-    if ((await searchPanel.count()) > 0) {
-      const matchRows = searchPanel.locator(".search-results-match-row");
-      const matchCount = await matchRows.count();
-      expect(matchCount).toBe(0);
-    }
+    // THE EMPTY STATE: no match rows, because no search has been performed.
+    //
+    // THIS IS THE ONLY ASSERTION THAT DISTINGUISHES THIS CASE FROM THE ONE
+    // ABOVE, and it used to sit inside `if ((await searchPanel.count()) > 0)`.
+    // A guard like that cannot fail — it can only decline to ask — so a rename
+    // of `.search-results` did not redden this case, it silently reduced it to
+    // a duplicate of "Search results panel renders".
+    //
+    // The `toBeVisible` on `searchPanel` above is what keeps the count below
+    // honest, and the ORDER is load-bearing: `toHaveCount(0)` on rows scoped to
+    // a panel that does not exist is also 0, so this line ALONE would pass
+    // vacuously against a renamed panel exactly as the old `if` did. The
+    // visibility assertion fails first and names the panel.
+    await expect(
+      searchPanel.first().locator(".search-results-match-row"),
+    ).toHaveCount(0);
   });
 });

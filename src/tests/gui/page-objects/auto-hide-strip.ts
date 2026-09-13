@@ -89,12 +89,57 @@ export const RETIRED_BOTTOM_TABS_SELECTOR = ".auto-hide-bottom-tabs";
  * that changing the pane set is a deliberate two-file edit instead of eight
  * specs failing on an arithmetic mismatch.  It is not evidence that four is
  * the right number.
+ *
+ * THE TITLES ARE MATCHED AGAINST, not merely counted, so a stale one here is
+ * a dead locator rather than a cosmetic error.  `bottomStripTab(page, label)`
+ * filters by `hasText`, so a title that no longer exists yields an empty
+ * locator, and the click that follows times out blaming the panel rather than
+ * the name.
+ *
+ * That is not hypothetical.  Commit 529c8dd1 ("feat: Add find in files
+ * component") renamed `Content.SearchResults`' title in `layout.nim` from
+ * `SEARCH RESULTS` to `FIND IN FILES`, and the literal survived here and
+ * across several specs.  Both cases of `tests/build/search-results-e2e.spec.ts`
+ * went red — which is the whole of the Find-in-Files Web renderer arm's
+ * behavioural coverage — and `status-bar-render-stability.spec.ts`'s
+ * per-title loop asserted `toHaveCount(1)` for a tab that no longer exists.
+ * The count stayed 4 throughout, so the one constant that WAS checked went on
+ * agreeing with the app while the names it held did not.
+ *
+ * Each title is therefore also exported on its own below, so a spec names the
+ * pane through this file instead of retyping the string — the same reason the
+ * selectors live here.
+ *
+ * DO NOT WRITE A COUNT OR A SPEC LIST INTO THIS NOTE.  The first version of it
+ * said the literal survived "in three specs", having fixed three — and two more
+ * call sites were still live, one of them NINE LINES below a call site the same
+ * commit had just fixed (`visual-audit/comprehensive-v2.spec.ts` closed the
+ * panel by the old name after opening it by the new one).  An enumeration that
+ * reads as complete is worse than no enumeration, because it is exactly what
+ * stops the next reader grepping.  The check is:
+ *
+ *     grep -rn "SEARCH RESULTS" src/tests/gui --include=*.ts
+ *
+ * and every surviving hit must be prose, a test title, or a self-contained
+ * fixture that builds its own DOM — never an argument to a locator helper.
  */
+export const BUILD_TAB_TITLE = "BUILD";
+export const PROBLEMS_TAB_TITLE = "PROBLEMS";
+/**
+ * `Content.SearchResults`, whose pane the product calls **Find in Files**.
+ * The component id is still `searchResultsComponent-0` and the CSS class is
+ * still `.search-results`; only the user-facing tab title moved.  Keep the
+ * two apart when reading a spec: a DOM id that says `searchResults` is not
+ * evidence that the tab does.
+ */
+export const FIND_IN_FILES_TAB_TITLE = "FIND IN FILES";
+export const REQUESTS_TAB_TITLE = "REQUESTS";
+
 export const DEFAULT_BOTTOM_TAB_TITLES = [
-  "BUILD",
-  "PROBLEMS",
-  "SEARCH RESULTS",
-  "REQUESTS",
+  BUILD_TAB_TITLE,
+  PROBLEMS_TAB_TITLE,
+  FIND_IN_FILES_TAB_TITLE,
+  REQUESTS_TAB_TITLE,
 ] as const;
 
 /** Number of tabs the strip holds before a test pins anything. */
@@ -123,7 +168,7 @@ export function allStripTabs(page: Page): Locator {
 /**
  * Wait until the bottom strip has finished mounting its standalone panes.
  *
- * `layout.nim` registers BUILD / PROBLEMS / SEARCH RESULTS from a
+ * `layout.nim` registers BUILD / PROBLEMS / FIND IN FILES from a
  * `setTimeout` that runs after GoldenLayout has created its component
  * containers, so the strip is briefly empty after the trace opens.  Waiting
  * for the full default set — rather than for "at least one tab" — means a

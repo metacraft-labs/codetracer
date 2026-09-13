@@ -1,7 +1,7 @@
 /**
  * Helpers for ensuring the bundled default layout is used during tests.
  *
- * Some tests rely on specific tabs (BUILD, PROBLEMS, SEARCH RESULTS) being
+ * Some tests rely on specific tabs (BUILD, PROBLEMS, FIND IN FILES) being
  * present in the layout.  If the user has a saved custom layout that removed
  * these tabs, the tests would fail.  These helpers backup the user layout,
  * replace it with the bundled default from the source tree, and restore the

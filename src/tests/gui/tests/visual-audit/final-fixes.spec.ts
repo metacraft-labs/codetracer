@@ -8,7 +8,7 @@
  *   03-build-success.png       — BUILD auto-hide overlay with success output
  *   04-build-failure.png       — BUILD auto-hide overlay with error output
  *   05-problems.png            — PROBLEMS auto-hide overlay with severity filter
- *   06-search-results.png      — SEARCH RESULTS auto-hide overlay grouped by file
+ *   06-search-results.png      — FIND IN FILES auto-hide overlay grouped by file
  *   07-left-strip.png          — Left auto-hide strip with vertical text labels
  *   08-left-overlay.png        — Left overlay open showing FILESYSTEM content
  *   09-multi-tab.png           — Session tabs in caption bar (2 tabs)
@@ -27,6 +27,7 @@ import {
   ensureDefaultLayout,
   restoreUserLayout,
 } from "../../lib/layout-reset";
+import { FIND_IN_FILES_TAB_TITLE } from "../../page-objects/auto-hide-strip";
 
 const DIR = "/tmp/visual-review";
 
@@ -261,7 +262,7 @@ test.describe("Visual Review — All Components", () => {
     await dismissOverlay(ctPage);
   });
 
-  test("06 SEARCH RESULTS", async ({ ctPage }) => {
+  test("06 FIND IN FILES", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
@@ -311,7 +312,7 @@ test.describe("Visual Review — All Components", () => {
     });
     await wait(300);
 
-    await clickBottomTab(ctPage, "SEARCH RESULTS");
+    await clickBottomTab(ctPage, FIND_IN_FILES_TAB_TITLE);
     await waitForOverlay(ctPage);
 
     await ctPage.evaluate(() => {

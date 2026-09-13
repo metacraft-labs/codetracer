@@ -3189,3 +3189,49 @@ commands.
   canonical adjudicator for "a foreign writer emitted a real namespace" — it
   takes an image plus a `<key> <descriptor-hex>` / `!<absent-key>` manifest and
   judges it with the production Nim `loadCowBTree`/`lookup`.
+- 2026-09-14: the bottom auto-hide pane for `Content.SearchResults` is titled
+  **FIND IN FILES**, not "SEARCH RESULTS" — renamed in `ui/layout.nim`'s
+  `standaloneAutoHidePanels` by 529c8dd1 ("feat: Add find in files component").
+  The DOM did NOT follow: the component id is still `searchResultsComponent-0`
+  and the CSS class is still `.search-results`, so a spec can hold a correct
+  id-based locator and a dead title-based one at the same time. That is what
+  happened — `bottomStripTab(page, "SEARCH RESULTS")` matched nothing, both
+  cases of `tests/build/search-results-e2e.spec.ts` failed on a timed-out
+  `toBeVisible` after the click, and the Find-in-Files Web renderer arm was left
+  with zero behavioural coverage. `status-bar-render-stability.spec.ts` was
+  asserting `toHaveCount(1)` for the same missing tab. The titles now live as
+  named exports in `src/tests/gui/page-objects/auto-hide-strip.ts`
+  (`FIND_IN_FILES_TAB_TITLE` and siblings); name a bottom pane through those,
+  never with a literal. Note the tab COUNT stayed 4 the whole time, so
+  `DEFAULT_BOTTOM_TAB_COUNT` went on agreeing with the app while the titles
+  beside it did not — a count is not evidence that the names are alive.
+- 2026-09-14: `scripts/build-siblings.sh` decides "already built" by
+  `[ -e "$artifact_path" ]` (existence), never freshness — the very
+  "existence-checked-as-freshness" defect `ci/test/stale-artefact-guards-test.sh`
+  exists to grade, in the script that feeds the e2e lane. Measured: a
+  `codetracer-js-recorder` built against an older `codetracer-trace-format`
+  sibling kept emitting `meta.dat` **version 3**, current `ct` accepts only 4/5,
+  and every `recordChromeTraceFixture` spec died in `importTraceFolder` with
+  "unsupported version 3 ... re-record the trace" while `build-siblings` happily
+  reported `SKIP ... already built`. The failure names the TRACE, not the stale
+  recorder, so it reads as a corrupt fixture. Remedy until this is fixed:
+  `bash scripts/build-siblings.sh --force --only <sibling>`.
+- 2026-09-14: A STALE RENDERER BUNDLE CAN SURVIVE A "SUCCESSFUL" SOURCE REVERT,
+  and it looks exactly like a product bug. `just build-once` runs tup, and tup
+  ABORTS ON THE FIRST FAILED JOB — so when the `db-backend` step dies (e.g. the
+  `cargo build --locked` failure a stale `src/db-backend/Cargo.lock` produces),
+  webpack never re-runs and `src/public/dist/frontend_bundle.js` keeps whatever
+  the LAST complete build baked in. The Nim source can be clean, `git diff`
+  empty, and the running Electron app still render the previous contents.
+  Measured the hard way: a `.search-results` → `.search-results-MUTANT` class
+  edit stayed live in the app across a source revert and two `build-once`
+  invocations, and the resulting spec failures read convincingly as an
+  order-dependent mount defect ("passes alone, fails when not first in the
+  worker") because the passing runs predated the poisoned bundle.
+  DO NOT verify bundle freshness by grepping the bundle for a class or id: the
+  isonim DSL does not emit them as contiguous literals, so `grep -c` returns 0
+  for a class that is demonstrably rendered. Both `fif-panel search-results`
+  and the mutated form return 0. The only reliable check is to read the LIVE
+  DOM (`ctPage.evaluate(() => el.outerHTML)`); the `#auto-hide-docked-bottom-content`
+  dump is what finally showed the mutant class still present. Confirm
+  `build-once` exited 0 before trusting any GUI e2e result.

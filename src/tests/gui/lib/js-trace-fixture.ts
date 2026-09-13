@@ -109,7 +109,7 @@ const CHROME_FIXTURE_PROGRAM =
  * Record the standard "any real trace will do" fixture.
  *
  * Specs about the app's *chrome* — the auto-hide strips, the docked panels
- * and the slide-in overlay, the BUILD / PROBLEMS / SEARCH RESULTS panes, the
+ * and the slide-in overlay, the BUILD / PROBLEMS / FIND IN FILES panes, the
  * status bar — assert on DOM that `ui/layout.nim` and `ui/auto_hide.nim`
  * build identically for every recorded language.  Pinning them to a Python
  * program made them silently unrunnable wherever the Python recorder is not

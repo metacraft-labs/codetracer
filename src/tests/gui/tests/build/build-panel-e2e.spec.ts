@@ -2,7 +2,7 @@
  * E2E tests for the build-related tabs in the bottom panel row.
  *
  * Verifies:
- * - BUILD, PROBLEMS, and SEARCH RESULTS tabs are present as auto-hide bottom tabs
+ * - BUILD, PROBLEMS, and FIND IN FILES tabs are present as auto-hide bottom tabs
  * - Clicking the BUILD tab docks the build panel and renders its header
  * - Clicking the PROBLEMS tab shows the problems panel (empty state)
  *
@@ -23,6 +23,7 @@ import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 import {
   BOTTOM_STRIP_TAB_SELECTOR,
   DOCKED_BOTTOM_CONTENT_SELECTOR,
+  FIND_IN_FILES_TAB_TITLE,
   openBottomPanel,
   waitForDefaultBottomTabs,
 } from "../../page-objects/auto-hide-strip";
@@ -55,7 +56,7 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
       hasText: "PROBLEMS",
     });
     const searchTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
-      hasText: "SEARCH RESULTS",
+      hasText: FIND_IN_FILES_TAB_TITLE,
     });
     await expect(problemsTab).toHaveCount(1);
     await expect(searchTab).toHaveCount(1);
@@ -74,7 +75,7 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     await expect(problemsTab).toHaveCount(1);
   });
 
-  test("SEARCH RESULTS tab present", async ({ ctPage }) => {
+  test("FIND IN FILES tab present", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForBaseComponentsLoaded();
     await layout.waitForTraceLoaded();
@@ -82,7 +83,7 @@ test.describe("Build panel tabs as auto-hide bottom tabs", () => {
     await waitForDefaultBottomTabs(ctPage);
 
     const searchTab = ctPage.locator(BOTTOM_STRIP_TAB_SELECTOR, {
-      hasText: "SEARCH RESULTS",
+      hasText: FIND_IN_FILES_TAB_TITLE,
     });
     await expect(searchTab).toHaveCount(1);
   });
