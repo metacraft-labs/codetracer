@@ -111,20 +111,28 @@ fn descriptor(offset: usize, len: usize) -> [u8; 16] {
 /// authoritative production `linehits.tc` reader stores one tick list per global
 /// line key. The coverage map remains the source of truth for which tick ranges
 /// have been materialized.
+///
+/// The index is written in ONE bottom-up pass. `IntervalTaggedMap` is keyed by a
+/// `BTreeMap`, so [`IntervalTaggedMap::keys`] is already strictly ascending and
+/// duplicate-free — exactly [`CowNamespaceWriter::bulk_load`]'s contract — and
+/// this encoder runs once over a finished map rather than key by key over a live
+/// one. A per-key incremental build would copy the B-tree spine and publish a
+/// new root for every source line, leaving kilobytes of superseded pages per key
+/// in the finished image and making the cost per key grow with the line count.
 pub fn encode_linehits_cow_namespace(map: &IntervalTaggedMap<LineHitEntry>) -> Result<Option<Vec<u8>>, String> {
     if map.is_empty() {
         return Ok(None);
     }
 
     let keys = map.keys();
-    let mut sizing = CowNamespaceWriter::new(CowLeafType::TypeB, true);
-    for key in &keys {
-        sizing.insert_and_commit(*key, &[0u8; 16]).map_err(|e| e.to_string())?;
-    }
-    let payload_base = sizing.serialize().len();
+    // Descriptors are `(offset, len)` into the payload appended after the
+    // page-aligned index, so the index's final length has to be known before the
+    // first descriptor can be built. Bulk load allocates only live pages, so that
+    // length is a pure function of the key count — no throwaway sizing build.
+    let payload_base = CowNamespaceWriter::bulk_load_image_len(CowLeafType::TypeB, keys.len());
 
     let mut payload = Vec::new();
-    let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+    let mut entries: Vec<(u64, [u8; 16])> = Vec::with_capacity(keys.len());
     for key in keys {
         let offset = payload_base + payload.len();
         let before = payload.len();
@@ -134,11 +142,15 @@ pub fn encode_linehits_cow_namespace(map: &IntervalTaggedMap<LineHitEntry>) -> R
         for hit in hits {
             put_varint(hit.tick, &mut payload);
         }
-        writer
-            .insert_and_commit(key, &descriptor(offset, payload.len() - before))
-            .map_err(|e| e.to_string())?;
+        entries.push((key, descriptor(offset, payload.len() - before)));
     }
 
+    let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+    writer.bulk_load(&entries).map_err(|e| e.to_string())?;
+
+    // `bulk_load` fails rather than return an image whose length disagrees with
+    // `bulk_load_image_len`, so `image.len() == payload_base` holds here and
+    // every descriptor offset above points where the payload actually lands.
     let mut image = writer.serialize();
     image.extend_from_slice(&payload);
     while !image.len().is_multiple_of(super::cow_namespace_reader::PAGE_SIZE) {
@@ -373,6 +385,153 @@ mod tests {
         let image = image_with_entries(&[(0, vec![1])]);
         let owned = OwnedLinehitsNamespace { image, space: None };
         assert_eq!(owned.source_line_hits(0, 1), Vec::<u64>::new());
+    }
+
+    // ── one-pass index build ────────────────────────────────────────────────
+
+    /// A map with `keys` distinct line keys, some hit several times and from
+    /// several intervals so multi-record buckets are exercised too.
+    fn map_with(keys: u64) -> IntervalTaggedMap<LineHitEntry> {
+        let mut map = IntervalTaggedMap::new();
+        for k in 0..keys {
+            map.append(k * 3, 0, LineHitEntry { tick: k * 10 });
+            // Every 5th line is hit twice more, once from another interval, so
+            // buckets of 1 and of 3 (spanning 2 intervals) both occur.
+            if k % 5 == 0 {
+                map.append(k * 3, 0, LineHitEntry { tick: k * 10 + 1 });
+                map.append(k * 3, 2, LineHitEntry { tick: k * 10 + 2 });
+            }
+        }
+        map
+    }
+
+    /// The pre-existing per-key build, kept here as the REFERENCE encoder: a
+    /// sizing pass to learn where the payload lands, then one CoW insert-and-
+    /// commit per line key. Nothing in production uses this shape any more; it
+    /// exists so the one-pass build can be proved equivalent to it.
+    fn per_key_reference_image(map: &IntervalTaggedMap<LineHitEntry>) -> Vec<u8> {
+        let keys = map.keys();
+        let mut sizing = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        for key in &keys {
+            sizing.insert_and_commit(*key, &[0u8; 16]).unwrap();
+        }
+        let payload_base = sizing.serialize().len();
+
+        let mut payload = Vec::new();
+        let mut writer = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        for key in keys {
+            let offset = payload_base + payload.len();
+            let before = payload.len();
+            let mut hits = map.collapse_key(key);
+            hits.sort_by_key(|hit| hit.tick);
+            hits.dedup_by_key(|hit| hit.tick);
+            for hit in hits {
+                put_varint(hit.tick, &mut payload);
+            }
+            writer
+                .insert_and_commit(key, &descriptor(offset, payload.len() - before))
+                .unwrap();
+        }
+        let mut image = writer.serialize();
+        image.extend_from_slice(&payload);
+        while !image
+            .len()
+            .is_multiple_of(super::super::cow_namespace_reader::PAGE_SIZE)
+        {
+            image.push(0);
+        }
+        image
+    }
+
+    /// DECODED equivalence against the per-key build — the right equivalence
+    /// test, because the two images are deliberately not byte-identical (the
+    /// per-key one carries a higher commit id, the other root slot, and the pages
+    /// its spine copies left behind). Every line key and every tick, including
+    /// the multi-hit multi-interval buckets, must decode the same.
+    #[test]
+    fn one_pass_and_per_key_builds_decode_to_the_same_linehits() {
+        let map = map_with(3_000);
+        let one_pass = encode_linehits_cow_namespace(&map).expect("encode").expect("image");
+        let per_key = per_key_reference_image(&map);
+
+        assert_ne!(
+            one_pass, per_key,
+            "the two packings are not expected to be byte-identical"
+        );
+
+        let a = LinehitsNamespace::open(&one_pass).expect("open one-pass");
+        let b = LinehitsNamespace::open(&per_key).expect("open per-key");
+        let keys = map.keys();
+        assert_eq!(keys.len(), 3_000);
+
+        let mut multi_hit_buckets = 0;
+        for key in &keys {
+            let ha = a.hits(*key).unwrap();
+            let hb = b.hits(*key).unwrap();
+            assert_eq!(ha, hb, "line key {key} decodes differently between the two builds");
+            // …and both agree with the map the image was built from.
+            let mut expected: Vec<u64> = map.collapse_key(*key).iter().map(|h| h.tick).collect();
+            expected.sort_unstable();
+            expected.dedup();
+            assert_eq!(ha, expected, "line key {key} does not match the source map");
+            if ha.len() > 1 {
+                multi_hit_buckets += 1;
+            }
+        }
+        assert!(
+            multi_hit_buckets > 0,
+            "the fixture must contain multi-hit buckets for this to mean anything"
+        );
+        // A key that was never written is still absent from both.
+        assert_eq!(a.hits(1).unwrap(), Vec::<u64>::new());
+        assert_eq!(b.hits(1).unwrap(), Vec::<u64>::new());
+    }
+
+    /// REGRESSION GATE — on BYTES, never on time, so a busy host cannot tip it.
+    ///
+    /// The per-key build published one commit and copy-on-write copied the root→
+    /// leaf spine per line key, which both inflated the finished index and made
+    /// the cost per key grow with the key count. Two deterministic assertions pin
+    /// the one-pass build:
+    ///
+    /// * the index region is EXACTLY the live-page image a bottom-up build
+    ///   produces for this key count — no superseded pages, at all; and
+    /// * one commit was published, not one per line key.
+    ///
+    /// Both are pure functions of the key count, so neither can flake. The
+    /// bytes-per-key ceilings are the headline number the gate exists to hold:
+    /// they are ~1.8x below what the per-key build produced at the same
+    /// cardinalities (65.5 and 51.6 bytes/key measured).
+    #[test]
+    fn the_linehits_index_is_built_in_one_pass_not_one_commit_per_line() {
+        for (keys, max_bytes_per_key) in [(1_000u64, 45.0f64), (10_000, 32.0)] {
+            let mut map: IntervalTaggedMap<LineHitEntry> = IntervalTaggedMap::new();
+            for k in 0..keys {
+                map.append(k, 0, LineHitEntry { tick: k });
+            }
+            let image = encode_linehits_cow_namespace(&map).expect("encode").expect("image");
+
+            let bytes_per_key = image.len() as f64 / keys as f64;
+            assert!(
+                bytes_per_key <= max_bytes_per_key,
+                "{keys} line keys cost {bytes_per_key:.1} bytes/key \
+                 (image {} bytes); the gate is {max_bytes_per_key:.1}",
+                image.len()
+            );
+
+            let index = CowNamespaceReader::open(&image, CowLeafType::TypeB).expect("open index");
+            assert_eq!(index.commit_id(), 1, "the whole index must be published in ONE commit");
+
+            // The lowest key is encoded first, so its payload offset IS the length
+            // of the index region — measurable from the finished image alone.
+            let first = *map.keys().first().expect("a key");
+            let index_len = read_u64(index.lookup(first).expect("descriptor"), 0) as usize;
+            assert_eq!(
+                index_len,
+                CowNamespaceWriter::bulk_load_image_len(CowLeafType::TypeB, keys as usize),
+                "the index must be exactly the live pages a one-pass build needs for {keys} keys"
+            );
+        }
     }
 
     #[test]

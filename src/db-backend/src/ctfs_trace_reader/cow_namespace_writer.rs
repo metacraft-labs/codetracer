@@ -74,6 +74,26 @@ pub enum CowWriteError {
         /// The descriptor width the leaf type requires.
         expected: usize,
     },
+    /// [`CowNamespaceWriter::bulk_load`] was called on a writer that is not a
+    /// pristine, never-committed tree. Bulk load is a constructor, not a merge.
+    BulkLoadNotPristine,
+    /// [`CowNamespaceWriter::bulk_load`]'s batch was not strictly ascending by
+    /// key (unsorted, or carrying a duplicate) at this entry index.
+    BulkLoadNotAscending(usize),
+    /// Internal invariant violated: the bottom-up build did not land exactly in
+    /// the page budget [`CowNamespaceWriter::bulk_load_image_len`] predicted.
+    ///
+    /// Surfaced as an error rather than ignored because callers size payload
+    /// offsets against that prediction before the index is built — an image
+    /// whose length disagrees with it would place every payload offset wrong
+    /// while still being a structurally valid `NSB1` image, i.e. it would
+    /// corrupt silently.
+    BulkLoadPageBudget {
+        /// The image length [`CowNamespaceWriter::bulk_load_image_len`] predicted.
+        predicted: usize,
+        /// The image length the build actually produced.
+        actual: usize,
+    },
     /// The image to reload is shorter than the fixed header.
     TooShort,
     /// The reload image magic did not match `NSB1`.
@@ -88,6 +108,16 @@ impl std::fmt::Display for CowWriteError {
             CowWriteError::DescriptorSize { got, expected } => {
                 write!(f, "cow-namespace descriptor size {got} != expected {expected}")
             }
+            CowWriteError::BulkLoadNotPristine => {
+                write!(f, "cow-namespace bulk load requires a fresh, never-committed tree")
+            }
+            CowWriteError::BulkLoadNotAscending(i) => {
+                write!(f, "cow-namespace bulk load batch not strictly ascending at entry {i}")
+            }
+            CowWriteError::BulkLoadPageBudget { predicted, actual } => write!(
+                f,
+                "cow-namespace bulk load produced {actual} bytes, predicted {predicted}"
+            ),
             CowWriteError::TooShort => write!(f, "cow-namespace reload image shorter than header"),
             CowWriteError::BadMagic(m) => write!(f, "cow-namespace reload bad magic {m:02X?}"),
             CowWriteError::Unaligned(n) => {
@@ -167,7 +197,7 @@ impl CowNamespaceWriter {
     /// commit.
     pub fn new(leaf_type: CowLeafType, skip_sub_blocks: bool) -> Self {
         let descriptor_size = leaf_type.descriptor_size();
-        let order = (PAGE_SIZE - NODE_HEADER_BYTES) / (8 + descriptor_size);
+        let order = Self::order_for(leaf_type);
         let mut w = CowNamespaceWriter {
             descriptor_size,
             leaf_type,
@@ -202,7 +232,7 @@ impl CowNamespaceWriter {
             return Err(CowWriteError::Unaligned(image.len()));
         }
         let descriptor_size = leaf_type.descriptor_size();
-        let order = (PAGE_SIZE - NODE_HEADER_BYTES) / (8 + descriptor_size);
+        let order = Self::order_for(leaf_type);
         let flags = image[OFF_FLAGS];
         let commit0 = read_u64(image, OFF_COMMIT0);
         let commit1 = read_u64(image, OFF_COMMIT1);
@@ -333,6 +363,192 @@ impl CowNamespaceWriter {
 
         self.write_header();
         Ok(new_commit)
+    }
+
+    // ── bulk load — bottom-up single-pass constructor ───────────────────────
+    //
+    // [`Self::insert_and_commit`] is the incremental path: each call copy-on-write
+    // copies the spine from root to the touched leaf and atomically publishes a
+    // NEW root, so building a tree of N keys does N spine-copies + N atomic
+    // commits — O(N log N) page writes and N commit-id increments, with every
+    // superseded intermediate spine page accumulating in the buffer. It is the
+    // right shape when keys arrive one at a time over the life of a session; it
+    // is the wrong shape for writing out a finished map.
+    //
+    // [`Self::bulk_load`] builds the SAME logical tree from a PRE-SORTED batch in
+    // one bottom-up pass: pack the leaves left-to-right, build each internal level
+    // over the level below, then publish the single final root in ONE commit. It
+    // allocates only the LIVE pages (no abandoned spine copies), so the image is
+    // both produced in O(N) and is markedly smaller.
+    //
+    // WIRE-FORMAT NOTE: the produced image is the SAME `NSB1` wire format every
+    // other path emits — a valid namespace header (page 0) selecting a committed
+    // root in slot 0 with `commit_id == 1`, plus a well-formed immutable page
+    // graph in the documented leaf/internal node layout
+    // (`ctfs-container.md` §8, and [`super::cow_namespace_reader`]'s header doc).
+    // It is therefore read identically by [`super::cow_namespace_reader::CowNamespaceReader`]
+    // and the Nim `loadCowBTree`; only the page PACKING differs from a per-key
+    // build (denser, no superseded pages), NOT the format. A bulk-built and a
+    // per-key-built tree of the same keys are value- and reader-equivalent but
+    // NOT byte-identical — the per-key image carries abandoned CoW pages, a
+    // higher commit id, and an alternating root slot. Equivalence between the two
+    // must therefore be checked on DECODED content, never on bytes.
+    //
+    // The B-tree separator invariant the lookup relies on: for an internal node
+    // with keys `[s0, s1, …]` and children `[c0, c1, …, cn]`, `lookup(key)` takes
+    // the `lower_bound(key)` index `i` and descends into `c_{i+1}` when
+    // `key == s_i`, else `c_i`. Splits promote the FIRST key of a right leaf
+    // (B+-tree-style copy-up), so the separator before child `c` is the SMALLEST
+    // key in `c`'s subtree — which is exactly what is used here.
+    //
+    // Mirrors the Nim `bulkLoad` in
+    // `codetracer-trace-format-nim/src/codetracer_ctfs/cow_btree.nim`.
+
+    /// Max keys per node for a given leaf type — the node fan-out both the
+    /// incremental and the bulk build honour.
+    fn order_for(leaf_type: CowLeafType) -> usize {
+        (PAGE_SIZE - NODE_HEADER_BYTES) / (8 + leaf_type.descriptor_size())
+    }
+
+    /// The exact byte length of the page image [`Self::bulk_load`] produces for
+    /// `key_count` keys, without building it.
+    ///
+    /// Bulk load allocates only live pages, bump-allocated from page 1, so the
+    /// image length is a pure function of the key count and the leaf type. A
+    /// caller that has to know where the B-tree image ends *before* it can fill
+    /// in descriptors — e.g. one appending a variable-size payload after the
+    /// page-aligned index and storing `(offset, len)` in each descriptor — can
+    /// use this instead of building a throwaway tree just to measure it.
+    ///
+    /// An empty batch yields the header page alone.
+    pub fn bulk_load_image_len(leaf_type: CowLeafType, key_count: usize) -> usize {
+        if key_count == 0 {
+            return PAGE_SIZE;
+        }
+        let order = Self::order_for(leaf_type);
+        // The leaf level: consecutive runs of at most `order` keys.
+        let mut level = key_count.div_ceil(order);
+        let mut nodes = level;
+        // Each internal level groups up to `order + 1` children from the level
+        // below, until a single root remains.
+        while level > 1 {
+            level = level.div_ceil(order + 1);
+            nodes += level;
+        }
+        // Page 0 is the header; nodes occupy pages 1..=nodes.
+        (1 + nodes) * PAGE_SIZE
+    }
+
+    /// Build a committed tree from a PRE-SORTED, duplicate-free batch of
+    /// `(key, descriptor)` entries in a single bottom-up pass, publishing ONE
+    /// commit (id 1, slot 0). `self` MUST be a fresh, never-committed writer (as
+    /// from [`Self::new`]) — bulk load is a constructor, not a merge.
+    ///
+    /// Requirements, all validated up front so a violation is an error and never
+    /// a silent mis-build: the writer has no prior commit or allocation;
+    /// `entries` is strictly ascending by key (sorted, no duplicates); every
+    /// descriptor is exactly the leaf type's descriptor width. An empty batch
+    /// leaves the namespace empty ([`Self::committed_root`] `== 0`), matching a
+    /// per-key build of zero keys, and returns commit id 0.
+    ///
+    /// Returns the new commit id (always 1 for a non-empty batch).
+    pub fn bulk_load<D: AsRef<[u8]>>(&mut self, entries: &[(u64, D)]) -> Result<u64, CowWriteError> {
+        if self.committed_slot().is_some()
+            || self.count != 0
+            || self.next_free_page != 1
+            || self.pages.len() != PAGE_SIZE
+        {
+            return Err(CowWriteError::BulkLoadNotPristine);
+        }
+
+        // Validate the batch up front (correct descriptor width; ascending, unique).
+        for (i, (key, desc)) in entries.iter().enumerate() {
+            let got = desc.as_ref().len();
+            if got != self.descriptor_size {
+                return Err(CowWriteError::DescriptorSize {
+                    got,
+                    expected: self.descriptor_size,
+                });
+            }
+            if i > 0 && *key <= entries[i - 1].0 {
+                return Err(CowWriteError::BulkLoadNotAscending(i));
+            }
+        }
+
+        if entries.is_empty() {
+            // Nothing to commit: leave the empty namespace as-is (no root published).
+            self.write_header();
+            return Ok(0);
+        }
+
+        // Pre-size the page buffer so the bottom-up pass does no incremental
+        // growth at all (the incremental path's `ensure_capacity` reallocations
+        // are exactly the copying this constructor exists to avoid).
+        let predicted = Self::bulk_load_image_len(self.leaf_type, entries.len());
+        self.pages.resize(predicted, 0);
+
+        // ---- pack the leaf level ------------------------------------------
+        // Split the sorted entries into consecutive runs of at most `order` keys,
+        // each written into a freshly allocated leaf page. Remember each leaf's
+        // FIRST key (its subtree minimum) — the separator material for the level
+        // above.
+        //
+        // `(page, min_key)` per node of the level being built.
+        let mut level: Vec<(u64, u64)> = Vec::with_capacity(entries.len().div_ceil(self.order));
+        for run in entries.chunks(self.order) {
+            let page = self.alloc_page();
+            self.write_leaf_entries(page, run);
+            level.push((page, run[0].0));
+        }
+
+        // ---- build internal levels until a single root remains ------------
+        // Each internal node groups up to `order + 1` children from the level
+        // below (so up to `order` separator keys). The separator before child `c`
+        // is `c`'s subtree minimum — the smallest key reachable through it.
+        let mut keys: Vec<u64> = Vec::with_capacity(self.order);
+        let mut children: Vec<u64> = Vec::with_capacity(self.order + 1);
+        while level.len() > 1 {
+            let mut parent: Vec<(u64, u64)> = Vec::with_capacity(level.len().div_ceil(self.order + 1));
+            for group in level.chunks(self.order + 1) {
+                keys.clear();
+                children.clear();
+                for (g, &(page, min_key)) in group.iter().enumerate() {
+                    children.push(page);
+                    if g > 0 {
+                        // Separator before this child == the child's subtree minimum.
+                        keys.push(min_key);
+                    }
+                }
+                let page = self.alloc_page();
+                self.write_internal(page, &keys, &children);
+                // The group's subtree minimum is the leftmost child's minimum.
+                parent.push((page, group[0].1));
+            }
+            level = parent;
+        }
+
+        // ---- publish the single root in one commit (slot 0, id 1) ---------
+        // `level` is non-empty here: the leaf level had at least one page and the
+        // loop above only ever replaces a level with a strictly smaller non-empty
+        // one, stopping at length 1.
+        let root = level[0].0;
+        self.root0 = root;
+        self.commit0 = 1;
+        self.last_commit = 1;
+        self.count = entries.len() as u64;
+        self.write_header();
+
+        // The pre-size above means the buffer can only have grown past
+        // `predicted` if the page-count formula UNDER-counted, which is the one
+        // direction that silently invalidates a caller's payload offsets. Report
+        // it instead of handing back a plausible-looking image.
+        if self.pages.len() != predicted {
+            return Err(CowWriteError::BulkLoadPageBudget {
+                predicted,
+                actual: self.pages.len(),
+            });
+        }
+        Ok(1)
     }
 
     // ── committed-root selection ────────────────────────────────────────────
@@ -495,6 +711,24 @@ impl CowNamespaceWriter {
             for b in 0..self.descriptor_size {
                 self.pages[off + b] = if b < d.len() { d[b] } else { 0 };
             }
+        }
+    }
+
+    /// Write a leaf straight out of a `(key, descriptor)` run, without first
+    /// splitting it into parallel key / descriptor vectors. Same on-page layout
+    /// as [`Self::write_leaf`]; this is the shape [`Self::bulk_load`] has its
+    /// data in, and going through it avoids a per-entry copy of every
+    /// descriptor.
+    fn write_leaf_entries<D: AsRef<[u8]>>(&mut self, page: u64, entries: &[(u64, D)]) {
+        self.set_node_header(page, true, entries.len());
+        let base = Self::page_base(page);
+        let desc_base = base + NODE_HEADER_BYTES + entries.len() * 8;
+        for (i, (key, desc)) in entries.iter().enumerate() {
+            write_u64(&mut self.pages, base + NODE_HEADER_BYTES + i * 8, *key);
+            // The batch is validated to carry exactly `descriptor_size` bytes per
+            // entry before any page is written, so this is a straight copy.
+            let off = desc_base + i * self.descriptor_size;
+            self.pages[off..off + self.descriptor_size].copy_from_slice(desc.as_ref());
         }
     }
 
@@ -737,5 +971,291 @@ mod tests {
             w.insert_and_commit(1, &[0u8; 4]),
             Err(CowWriteError::DescriptorSize { got: 4, expected: 8 })
         );
+    }
+
+    // ── bulk load ───────────────────────────────────────────────────────────
+
+    /// Build `n` keys through `bulk_load` and read every one of them back out
+    /// through the production reader.
+    fn bulk_build(leaf_type: CowLeafType, n: u64) -> Vec<u8> {
+        let width = leaf_type.descriptor_size();
+        let entries: Vec<(u64, Vec<u8>)> = (0..n).map(|k| (k * 3, desc_for(k, width))).collect();
+        let mut w = CowNamespaceWriter::new(leaf_type, false);
+        assert_eq!(w.bulk_load(&entries).expect("bulk load"), if n == 0 { 0 } else { 1 });
+        assert_eq!(w.count(), n);
+        w.serialize()
+    }
+
+    /// A deterministic descriptor of the leaf type's width, derived from the key.
+    fn desc_for(k: u64, width: usize) -> Vec<u8> {
+        let mut d = vec![0u8; width];
+        d[0..8].copy_from_slice(&(k * 7 + 1).to_le_bytes());
+        if width >= 16 {
+            d[8..16].copy_from_slice(&(k + 1_000_000).to_le_bytes());
+        }
+        d
+    }
+
+    /// Every key of a bulk-built tree resolves to its own descriptor, across
+    /// cardinalities spanning a single leaf, a two-level and a three-level tree,
+    /// for both descriptor widths. A missing key still reports as missing.
+    #[test]
+    fn bulk_load_round_trips_every_key_through_the_reader() {
+        for leaf_type in [CowLeafType::TypeA, CowLeafType::TypeB] {
+            let order = CowNamespaceWriter::order_for(leaf_type) as u64;
+            let width = leaf_type.descriptor_size();
+            // 1 leaf; exactly one full leaf; two leaves; a full second level; and
+            // past it, which forces a third level.
+            for n in [
+                1,
+                2,
+                order,
+                order + 1,
+                2 * order,
+                order * (order + 1),
+                order * (order + 1) + 1,
+            ] {
+                let image = bulk_build(leaf_type, n);
+                let r = CowNamespaceReader::open(&image, leaf_type).expect("open");
+                assert_eq!(r.key_count().expect("count"), n as usize, "n={n} {leaf_type:?}");
+                assert_eq!(r.commit_id(), 1, "bulk load publishes exactly one commit");
+                assert_eq!(
+                    r.keys().expect("keys"),
+                    (0..n).map(|k| k * 3).collect::<Vec<_>>(),
+                    "n={n} {leaf_type:?}"
+                );
+                for k in 0..n {
+                    assert_eq!(
+                        r.lookup(k * 3).expect("lookup"),
+                        desc_for(k, width).as_slice(),
+                        "key {k} of n={n} {leaf_type:?}"
+                    );
+                }
+                // A key between two present keys (the stride is 3) is absent.
+                assert_eq!(r.lookup(1), Err(CowNsError::KeyNotFound(1)), "n={n} {leaf_type:?}");
+                assert_eq!(
+                    r.lookup(n * 3 + 100),
+                    Err(CowNsError::KeyNotFound(n * 3 + 100)),
+                    "n={n} {leaf_type:?}"
+                );
+            }
+        }
+    }
+
+    /// THE SEPARATOR INVARIANT, pinned directly. The bottom-up build uses each
+    /// child's subtree MINIMUM as the separator in front of it, and the reader
+    /// descends right on an exact separator match. A separator key is therefore
+    /// the one class of key a wrong convention (e.g. promoting the left child's
+    /// maximum) still stores in a leaf but can no longer reach — the lookup would
+    /// silently miss rather than error. So: harvest the actual separators out of
+    /// the built internal nodes and assert each one resolves.
+    #[test]
+    fn bulk_load_lookup_reaches_every_separator_key() {
+        let leaf_type = CowLeafType::TypeB;
+        let order = CowNamespaceWriter::order_for(leaf_type) as u64;
+        // Big enough for three levels, so both internal levels carry separators.
+        let n = order * (order + 1) + 5;
+        let image = bulk_build(leaf_type, n);
+        let r = CowNamespaceReader::open(&image, leaf_type).expect("open");
+
+        // Walk every internal node of the image and collect its separator keys.
+        let mut separators: Vec<u64> = Vec::new();
+        let mut stack = vec![r.root_page()];
+        while let Some(page) = stack.pop() {
+            let base = page as usize * PAGE_SIZE;
+            let node = &image[base..base + PAGE_SIZE];
+            let count = read_u16(node, 2) as usize;
+            if node[0] == KIND_LEAF {
+                continue;
+            }
+            for i in 0..count {
+                separators.push(read_u64(node, NODE_HEADER_BYTES + i * 8));
+            }
+            for c in 0..=count {
+                stack.push(read_u64(node, NODE_HEADER_BYTES + count * 8 + c * 8));
+            }
+        }
+        assert!(
+            separators.len() > order as usize,
+            "a three-level tree must carry separators on both internal levels, found {}",
+            separators.len()
+        );
+        for s in separators {
+            assert_eq!(
+                r.lookup(s).expect("a separator key must still resolve"),
+                desc_for(s / 3, leaf_type.descriptor_size()).as_slice(),
+                "separator {s} resolved to the wrong descriptor"
+            );
+        }
+    }
+
+    /// DECODED equivalence, not byte equivalence. A bulk-built and a per-key-built
+    /// tree over the same batch are value- and reader-equivalent, but the per-key
+    /// image is deliberately NOT byte-identical: it carries a higher commit id,
+    /// an alternating root slot, and the pages its spine copies left behind. This
+    /// test asserts both halves of that — identical decoded content, and a
+    /// genuinely different (and larger) image — so neither claim can rot.
+    #[test]
+    fn bulk_load_and_per_key_build_are_reader_equivalent_but_not_byte_identical() {
+        let leaf_type = CowLeafType::TypeB;
+        let width = leaf_type.descriptor_size();
+        let n = 5_000u64;
+        let entries: Vec<(u64, Vec<u8>)> = (0..n).map(|k| (k * 3, desc_for(k, width))).collect();
+
+        let bulk = {
+            let mut w = CowNamespaceWriter::new(leaf_type, true);
+            w.bulk_load(&entries).expect("bulk load");
+            w.serialize()
+        };
+        let per_key = {
+            let mut w = CowNamespaceWriter::new(leaf_type, true);
+            for (key, desc) in &entries {
+                w.insert_and_commit(*key, desc).expect("insert");
+            }
+            w.serialize()
+        };
+
+        let rb = CowNamespaceReader::open(&bulk, leaf_type).expect("open bulk");
+        let rp = CowNamespaceReader::open(&per_key, leaf_type).expect("open per-key");
+
+        // Decoded content is identical, key for key and byte for byte per descriptor.
+        assert_eq!(rb.keys().expect("bulk keys"), rp.keys().expect("per-key keys"));
+        assert_eq!(rb.key_count().expect("bulk count"), n as usize);
+        assert_eq!(rp.key_count().expect("per-key count"), n as usize);
+        for (key, desc) in &entries {
+            assert_eq!(rb.lookup(*key).expect("bulk lookup"), desc.as_slice());
+            assert_eq!(rp.lookup(*key).expect("per-key lookup"), desc.as_slice());
+        }
+
+        // The images are NOT the same bytes, and the difference is the documented
+        // one: one commit vs one per key, and a smaller image.
+        assert_ne!(bulk, per_key, "the two packings must not be byte-identical");
+        assert_eq!(rb.commit_id(), 1, "bulk load publishes exactly one commit");
+        assert_eq!(rp.commit_id(), n, "the per-key build publishes one commit per key");
+        assert!(
+            bulk.len() < per_key.len(),
+            "bulk image {} must be smaller than the per-key image {}",
+            bulk.len(),
+            per_key.len()
+        );
+    }
+
+    /// `bulk_load_image_len` is what callers size payload offsets against BEFORE
+    /// the index exists, so it has to predict the built image exactly — an
+    /// over- or under-estimate silently misplaces every payload offset while
+    /// still producing a structurally valid `NSB1` image. Swept over the awkward
+    /// cardinalities: the level boundaries, and one either side of each.
+    #[test]
+    fn bulk_load_image_len_predicts_the_built_image_exactly() {
+        for leaf_type in [CowLeafType::TypeA, CowLeafType::TypeB] {
+            let order = CowNamespaceWriter::order_for(leaf_type) as u64;
+            let mut cardinalities: Vec<u64> = vec![0, 1, 2, 3];
+            for boundary in [order, 2 * order, order * (order + 1), order * (order + 1) + order] {
+                cardinalities.extend([boundary - 1, boundary, boundary + 1]);
+            }
+            for n in cardinalities {
+                let image = bulk_build(leaf_type, n);
+                assert_eq!(
+                    image.len(),
+                    CowNamespaceWriter::bulk_load_image_len(leaf_type, n as usize),
+                    "predicted length disagrees with the built image at n={n} {leaf_type:?}"
+                );
+            }
+        }
+    }
+
+    /// An empty batch commits nothing, matching a per-key build of zero keys.
+    #[test]
+    fn bulk_load_of_an_empty_batch_leaves_the_namespace_empty() {
+        let mut w = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        let empty: [(u64, [u8; 16]); 0] = [];
+        assert_eq!(w.bulk_load(&empty).expect("bulk load"), 0);
+        assert_eq!(w.committed_root(), 0);
+        assert_eq!(w.committed_commit_id(), 0);
+        assert_eq!(w.count(), 0);
+        let image = w.serialize();
+        assert_eq!(&image[0..4], b"NSB1");
+        assert_eq!(image.len(), PAGE_SIZE);
+        assert_eq!(
+            CowNamespaceReader::open(&image, CowLeafType::TypeB).err(),
+            Some(CowNsError::Empty)
+        );
+    }
+
+    /// Every precondition bulk load cannot build correctly is rejected up front,
+    /// so a violation can never become a silently mis-built tree.
+    #[test]
+    fn bulk_load_rejects_a_batch_it_cannot_build_correctly() {
+        let d = |k: u64| {
+            let mut b = [0u8; 16];
+            b[0..8].copy_from_slice(&k.to_le_bytes());
+            b
+        };
+
+        // Descending / unsorted.
+        let mut w = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        assert_eq!(
+            w.bulk_load(&[(5, d(5)), (3, d(3))]),
+            Err(CowWriteError::BulkLoadNotAscending(1))
+        );
+        // A duplicate key is not strictly ascending either.
+        let mut w = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        assert_eq!(
+            w.bulk_load(&[(1, d(1)), (4, d(4)), (4, d(4))]),
+            Err(CowWriteError::BulkLoadNotAscending(2))
+        );
+        // Wrong descriptor width.
+        let mut w = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        assert_eq!(
+            w.bulk_load(&[(1, [0u8; 8])]),
+            Err(CowWriteError::DescriptorSize { got: 8, expected: 16 })
+        );
+        // Not a pristine tree: bulk load is a constructor, not a merge.
+        let mut w = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        w.insert_and_commit(1, &d(1)).expect("insert");
+        assert_eq!(w.bulk_load(&[(9, d(9))]), Err(CowWriteError::BulkLoadNotPristine));
+        // Nor after a previous bulk load.
+        let mut w = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        w.bulk_load(&[(1, d(1))]).expect("first bulk load");
+        assert_eq!(w.bulk_load(&[(9, d(9))]), Err(CowWriteError::BulkLoadNotPristine));
+
+        // A rejected batch must not have published anything.
+        let mut w = CowNamespaceWriter::new(CowLeafType::TypeB, true);
+        assert!(w.bulk_load(&[(5, d(5)), (3, d(3))]).is_err());
+        assert_eq!(w.committed_root(), 0);
+    }
+
+    /// The incremental path still works on a tree, and still works after a bulk
+    /// load hands it a starting image: bulk load ADDS a batch constructor, it
+    /// does not replace the per-key path. A reloaded bulk image accepts further
+    /// incremental commits and both key sets read back.
+    #[test]
+    fn incremental_commits_resume_on_top_of_a_bulk_loaded_image() {
+        let leaf_type = CowLeafType::TypeB;
+        let width = leaf_type.descriptor_size();
+        let entries: Vec<(u64, Vec<u8>)> = (0..2_000u64).map(|k| (k * 3, desc_for(k, width))).collect();
+        let mut w = CowNamespaceWriter::new(leaf_type, true);
+        w.bulk_load(&entries).expect("bulk load");
+        let image = w.serialize();
+
+        let mut w2 = CowNamespaceWriter::load(&image, leaf_type).expect("load");
+        assert_eq!(w2.committed_commit_id(), 1);
+        for k in 0..50u64 {
+            // Keys interleaved between the bulk-loaded ones (stride 3).
+            w2.insert_and_commit(k * 3 + 1, &desc_for(k + 9_000, width))
+                .expect("insert");
+        }
+        let image2 = w2.serialize();
+        let r = CowNamespaceReader::open(&image2, leaf_type).expect("open");
+        assert_eq!(r.key_count().expect("count"), 2_050);
+        for (key, d) in &entries {
+            assert_eq!(r.lookup(*key).expect("bulk key"), d.as_slice(), "bulk key {key}");
+        }
+        for k in 0..50u64 {
+            assert_eq!(
+                r.lookup(k * 3 + 1).expect("incremental key"),
+                desc_for(k + 9_000, width).as_slice()
+            );
+        }
     }
 }
