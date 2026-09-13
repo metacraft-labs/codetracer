@@ -52,7 +52,7 @@ permissions:
 
 jobs:
   sidecar-retirement:
-    runs-on: eph-linux-x64  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
+    runs-on: [self-hosted, linux, x64]  # CIP-5: nix job (self-hosted nixos) -> eph-linux-x64
     name: No recorder writes sidecar manifests (6 recorders, 6 live servers)
     steps:
       - name: Generate CI token
