@@ -1,0 +1,19 @@
+# Control digests for run-plat13-executable-mutations.py.
+#
+# ABSOLUTE, and that is the point. A baseline taken at start-up
+# cannot tell a clean tree from one a killed run left a mutation
+# in: it reads the mutation as the baseline, every restore then
+# verifies against the mutated bytes, and the only symptom is
+# `CONTROL IS NOT GREEN` — which describes a red suite without
+# naming the cause.
+#
+# Rewrite with --record-control-hashes, deliberately, when one of
+# these files changes on purpose. The needle scan gates that step
+# (Verification-Harness-Traps §16), and §16a is why re-recording
+# is not the last step: RE-RUN THE ARMS afterwards.
+
+90893c64fe9172f376698e77cf9a630d2457542ad4399c3a41e07ce557810a9e  src/common/project_trust.nim
+ab39ffc0cdf2eb220adfaa24ead520bfc99e9266202dd29156362f0f9126f345  src/common/project_wasm.nim
+54a067d952acfd5f1cc3b52d4d0ccd23c95b09ded9ec501c1b7715702ecff57a  src/common/project_executables.nim
+a2b31ea13228abe98eea5d760bc3eaae7f0aa6cc59e4d20a0022e5865fa1d5bc  src/ct/launch/project_trust_store.nim
+5f729109140e04bd8f531b3bc41d7838fe97a30f38b2c0c96281da947af33354  src/ct/launch/project_executable_tier.nim

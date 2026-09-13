@@ -482,3 +482,19 @@ src/frontend/viewmodel/tests/unit/.plat11-definitions-mutation.lock
 # `common/project_definitions/` — PLAT-11's subject — which is the same hazard
 # in the other direction.
 src/frontend/viewmodel/tests/unit/.plat12-visualiser-mutation.lock
+
+# PLAT-13's mutation run lock — the exclusive `flock` taken by
+# `run-plat13-executable-mutations.py`, held for the whole run. A SEVENTH lock,
+# and the rule PLAT-12's note settled on applies to it unchanged: NEVER TWO
+# HARNESSES AT ONCE, whatever their subject sets say.
+#
+# PLAT-13's own subjects are `common/project_trust.nim`,
+# `common/project_wasm.nim`, `common/project_executables.nim`,
+# `ct/launch/project_trust_store.nim` and
+# `ct/launch/project_executable_tier.nim` — disjoint from every sibling's. Its
+# SUITES are not: they compile `plugin_model/capabilities.nim` (PLAT-8's
+# subject), `common/project_definitions/` (PLAT-11's) and
+# `ct/launch/grant_store.nim` (PLAT-10's), so an arm in any of those three
+# harnesses reddens this one's unmutated control and it would abort at
+# `CONTROL IS NOT GREEN` — or score a kill it did not earn.
+src/frontend/viewmodel/tests/unit/.plat13-executable-mutation.lock
