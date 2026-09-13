@@ -223,7 +223,7 @@ suite "PLAT-10: a granted capability survives a restart":
   test "accepting the manifest grants it, and THEN the child runs":
     var w = boot(full, loadGrantLedger().ledger)
     ckRefusedSpawn(w, tmp / "before-accept")
-    ckEq w.host.acceptDeclaredGrants(ProbeId, GrantedAt, "accepted at install"), 2
+    ckEq w.host.acceptDeclaredGrants(ProbeId, GrantedAt, "accepted at install").rows, 2
     ckEq w.host.grantStateOf(ProbeId, capProcess), gsGranted
     ck capProcess in w.host.effectiveCapabilitiesOf(ProbeId)
     ckSpawned(w, tmp / "after-accept")
@@ -231,7 +231,7 @@ suite "PLAT-10: a granted capability survives a restart":
   test "the grant is on disk, and a RESTART finds it there":
     # First process: accept and save.
     var first = boot(full, loadGrantLedger().ledger)
-    ckEq first.host.acceptDeclaredGrants(ProbeId, GrantedAt, "accepted"), 2
+    ckEq first.host.acceptDeclaredGrants(ProbeId, GrantedAt, "accepted").rows, 2
     ckEq saveGrantLedger(first.host.ledger), ""
     ck fileExists(grantLedgerPath())
     ckSpawned(first, tmp / "first-process")
@@ -281,7 +281,8 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
     # fails if `applyLedgerTo` narrows only `resolution.manifests`.
     var w = boot(full, loadGrantLedger().ledger)
     ckSpawned(w, tmp / "while-granted")
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back")
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back"),
+         groRecorded
     ckEq w.host.grantStateOf(ProbeId, capProcess), gsRevoked
     ckRefusedSpawn(w, tmp / "after-revoke-same-session")
 
@@ -311,7 +312,8 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
     # and `ckSpawned` in the cases above is the positive twin over the same
     # probe (Verification-Harness-Traps §4a).
     var w = boot(full, loadGrantLedger().ledger)
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back")
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back"),
+         groRecorded
     ckRefusedSpawn(w, tmp / "before-rediscovery")
     w.host.resolveAll()                  # <- the only call the attack adds
     ckEq w.host.grantStateOf(ProbeId, capProcess), gsRevoked
@@ -339,7 +341,8 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
     ckEq w.host.effectiveCapabilitiesOf(ProbeId),
          grantsOf(w.probe.ctx).capabilities
     ck capProcess in grantsOf(w.probe.ctx).capabilities
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back")
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back"),
+         groRecorded
     ckEq w.host.effectiveCapabilitiesOf(ProbeId),
          grantsOf(w.probe.ctx).capabilities
     ck capProcess notin grantsOf(w.probe.ctx).capabilities
@@ -351,7 +354,8 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
 
   test "and it is still refused after a restart":
     var w = boot(full, loadGrantLedger().ledger)
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back")
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back"),
+         groRecorded
     ckEq saveGrantLedger(w.host.ledger), ""
     let reopened = loadGrantLedger()
     ckEq reopened.problems.len, 0
@@ -364,7 +368,7 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
     # is reachable without any host at all — which is how this case shows
     # there is one predicate rather than two.
     var w = boot(full, loadGrantLedger().ledger)
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt)
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt), groRecorded
     let outcome = spawnTouch(w, tmp / "policy-text")
     ckEq outcome.status, ioRefused
     let narrowed = w.host.resolution.manifests[ProbeId].grants
@@ -394,7 +398,7 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
     let before = waitFor w.probe.attemptRead(io, readable)
     ckEq before.status, ioOk
     ckEq before.data, "hello from the host"
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt)
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt), groRecorded
     ckRefusedSpawn(w, tmp / "process-gone")
     let after = waitFor w.probe.attemptRead(io, readable)
     ckEq after.status, ioOk
@@ -406,7 +410,7 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
     let readable = tmp / "readable.txt"
     writeFile(readable, "hello from the host")
     var w = boot(full, loadGrantLedger().ledger)
-    ck w.host.revokeCapability(ProbeId, capFsRead, RevokedAt)
+    ckEq w.host.revokeCapability(ProbeId, capFsRead, RevokedAt), groRecorded
     let outcome = waitFor w.probe.attemptRead(PluginIoContext(), readable)
     ckEq outcome.status, ioRefused
     ck outcome.message.contains("'fs:read'")
@@ -419,9 +423,10 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
     # §4a). A `revokeCapability` that had simply broken the plugin would pass
     # every refusal assertion above and fail this one.
     var w = boot(full, loadGrantLedger().ledger)
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt)
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt), groRecorded
     ckRefusedSpawn(w, tmp / "revoked-once")
-    ck w.host.grantCapability(ProbeId, capProcess, RegrantedAt, "changed my mind")
+    ckEq w.host.grantCapability(ProbeId, capProcess, RegrantedAt,
+                                "changed my mind"), groRecorded
     ckEq w.host.grantStateOf(ProbeId, capProcess), gsGranted
     ckSpawned(w, tmp / "regranted")
 
@@ -430,8 +435,8 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
     # start-up that re-accepts the manifest, which is the cheapest way for a
     # revocation to stop meaning anything.
     var w = boot(full, loadGrantLedger().ledger)
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt)
-    ckEq w.host.acceptDeclaredGrants(ProbeId, RegrantedAt, "reinstalled"), 0
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt), groRecorded
+    ckEq w.host.acceptDeclaredGrants(ProbeId, RegrantedAt, "reinstalled").rows, 0
     ckEq w.host.grantStateOf(ProbeId, capProcess), gsRevoked
     ckRefusedSpawn(w, tmp / "after-reaccept")
 
@@ -447,7 +452,7 @@ suite "PLAT-10: a revoked capability is refused, not merely recorded":
     ckEq v2.host.grantStateOf(ProbeId, capProcess), gsUndecided
     ckRefusedSpawn(v2, tmp / "widened-manifest")
     # And accepting the UPGRADE grants exactly the one that was added.
-    ckEq v2.host.acceptDeclaredGrants(ProbeId, RegrantedAt, "accepted v2"), 1
+    ckEq v2.host.acceptDeclaredGrants(ProbeId, RegrantedAt, "accepted v2").rows, 1
     ckSpawned(v2, tmp / "after-accepting-v2")
 
   test "a ledger entry cannot grant a power the manifest never declared":
@@ -480,8 +485,9 @@ suite "PLAT-10: the grant is inspectable":
 
   test "the report says what was granted, when, and what is in force now":
     var w = boot(full, loadGrantLedger().ledger)
-    ckEq w.host.acceptDeclaredGrants(ProbeId, GrantedAt, "accepted at install"), 2
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back")
+    ckEq w.host.acceptDeclaredGrants(ProbeId, GrantedAt, "accepted at install").rows, 2
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt, "taken back"),
+         groRecorded
     let text = w.host.grantLedgerReport()
     checkpoint(text)
     ck text.contains(ProbeId)
@@ -495,8 +501,8 @@ suite "PLAT-10: the grant is inspectable":
 
   test "and the host's own report names the revocation beside the load errors":
     var w = boot(full, loadGrantLedger().ledger)
-    ckEq w.host.acceptDeclaredGrants(ProbeId, GrantedAt), 2
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt)
+    ckEq w.host.acceptDeclaredGrants(ProbeId, GrantedAt).rows, 2
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt), groRecorded
     let text = w.host.report()
     checkpoint(text)
     ck text.contains("'process' was REVOKED on " & RevokedAt)
@@ -515,11 +521,11 @@ suite "PLAT-10: the grant is inspectable":
     # `describeGrants` walks the capabilities the plugin holds, so a revoked
     # `process` must stop appearing in the disclosure a user reads.
     var w = boot(full, loadGrantLedger().ledger)
-    ckEq w.host.acceptDeclaredGrants(ProbeId, GrantedAt), 2
+    ckEq w.host.acceptDeclaredGrants(ProbeId, GrantedAt).rows, 2
     let before = w.host.grantsReport()
     ck before.contains("process")
     ck before.contains("may spawn: " & Tool)
-    ck w.host.revokeCapability(ProbeId, capProcess, RevokedAt)
+    ckEq w.host.revokeCapability(ProbeId, capProcess, RevokedAt), groRecorded
     let after = w.host.grantsReport()
     checkpoint(after)
     ck not after.contains("may spawn: " & Tool)

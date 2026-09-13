@@ -48,6 +48,64 @@
 ## a date in it. So `revoke` appends rather than deleting, `stateOf` reads the
 ## last entry for the pair, and `describe` prints the whole history in order.
 ##
+## ## THE ROW GRAMMAR IS CLOSED, BECAUSE THE PLUGIN FIELD IS A PLUGIN'S OWN TEXT
+##
+## The ledger is one row per line with a TAB between fields, and until
+## 2026-09-13 nothing checked that a field could be written in it. `plugin` is a
+## `PluginId`, and a `PluginId` is `plugin.json`'s `id` — a string a third party
+## writes. Measured on 2026-09-13, before this existed:
+##
+##     id: "evil-plugin\ngrant\t<victim>\tprocess\t<when>\t<note>"
+##     ONE `grant` call for `fs:read`  -> 1 row emitted
+##     `parseLedger` reads it back     -> 1 row, 1 problem
+##       the VICTIM, declaring {process}: granted {process}
+##       the EVIL plugin, declaring {fs:read}: granted {}
+##       `decide(spawn)` for the victim: PERMITTED
+##
+## The attacker TRADES AWAY its own grant to do it, and the single problem reads
+## like an ordinary corrupt line. `process` is the capability PLAT-8 models as
+## subsuming every other, held by a plugin nobody granted anything.
+##
+## The answer is a closed grammar and not an encoder, which is
+## `project_trust.representableField`'s decision taken again for the reason it
+## was taken there: an encoder is a second grammar with a second parser that
+## must agree with the first for ever over rows written by older builds, while a
+## refusal has one rule and no version. So `representableGrantField` refuses a
+## TAB, a NEWLINE or a CARRIAGE RETURN in `plugin`, `at` or `note`; `record` is
+## the one constructor and enforces it, so a `GrantEntry` literal built
+## elsewhere cannot get in through `grant`; `parseLedger` goes through the same
+## `record`; and a row with more fields than the grammar declares is a PROBLEM
+## rather than a rejoined note.
+##
+## THE PRODUCER REFUSES FIRST, AND THE TWO REFUSALS HAVE DISJOINT EVIDENCE
+## (Verification-Harness-Traps §16a). `manifest.parseManifest` refuses an `id`
+## outside `contributed_pane_id.segmentProblem`'s closed charset, so a hostile
+## id never becomes a loaded plugin at all; this refusal is what stands between
+## the ledger and a `record` reached any other way — a suite, a future call
+## site, a `GrantLedger` built by hand. Each has a case only it can satisfy:
+## `acme tool` is a legal ledger field and an illegal plugin id, and an `at` or
+## a `note` carrying a newline is nothing the manifest has an opinion about.
+##
+## AND THE PREDICATE IS THIS PACKAGE'S OWN COPY, DELIBERATELY. `project_trust`
+## has the same three characters in `representableField`, and there are exactly
+## TWO copies in the tree (§14b: count them, rather than believing an extraction
+## is done). Sharing one would mean moving that function out of
+## `project_trust.nim` — `project_trust` imports `plugin_model/capabilities`, so
+## the dependency can only run that way — and PLAT-13's arms T13 and T13b quote
+## its literal lines, which §16 is precisely about. The two are graded
+## separately, by an arm each, in the harness that owns each ledger.
+##
+## ## AND A REFUSAL THAT NOBODY CAN TELL FROM A NO-OP IS A REFUSAL NOBODY HEARS
+##
+## Closing the grammar makes `record` refuse a row, and `grant`/`revoke`
+## answered `false` for that — where `false` already meant "the decision you
+## asked for is already the one in force", which is benign and which every
+## caller correctly ignored. That is Verification-Harness-Traps §5a, and PLAT-13
+## paid for it: a revocation reported success, wrote nothing, and the code the
+## user withdrew consent from went on running. So `grant` and `revoke` answer a
+## `GrantRecordOutcome`, `decisionStands` is the ONE function saying which
+## non-records are benign, and neither is `{.discardable.}`.
+##
 ## ## PURE
 ##
 ## No filesystem, no clock. The timestamp is a string the caller supplies, for
@@ -85,6 +143,57 @@ type
     gsUndecided
     gsGranted
     gsRevoked
+
+  GrantRecordOutcome* = enum
+    ## WHAT HAPPENED TO ONE DECISION, AS A CLOSED ENUM WITH ONE MEANING PER
+    ## VALUE.
+    ##
+    ## `grant` and `revoke` returned a `bool {.discardable.}` until 2026-09-13.
+    ## It meant "this changed the state in force", so `false` meant "the
+    ## decision you asked for is already the one in force" — benign, common, and
+    ## correctly ignored. Closing the row grammar gave that same `false` a second
+    ## meaning — "nothing was written at all" — and the two have opposite
+    ## consequences. Verification-Harness-Traps §5a is that collision, and it is
+    ## recorded there from PLAT-13's landing pass, where the merged value was
+    ## read as the benign one at both call sites and a revocation reported
+    ## success while the code went on running.
+    ##
+    ## THE DIRECTION IS WHY THIS IS NOT A TIDY-UP. A grant that is not recorded
+    ## fails CLOSED: nothing runs that was not going to run. A REVOCATION that is
+    ## not recorded fails OPEN — the user asked for a capability to stop and was
+    ## told it had. `grant_store.updateGrantLedger`'s own comment already names
+    ## that as the one direction this record must never fail in.
+    ##
+    ## THE ZERO VALUE IS A NON-RECORD, like `GrantState`'s: a producer that
+    ## forgets to set the field reports "nothing was written" rather than "it is
+    ## recorded and in force".
+    groNoPlugin
+      ## THE DEFAULT, and the zero value. There is no plugin to record against.
+      ## An empty id is also what `parseLedger` refuses in a row, so writing one
+      ## would be writing a row this module cannot read back.
+    groUnchanged
+      ## THE DECISION ASKED FOR IS ALREADY THE ONE IN FORCE. Nothing was
+      ## appended and nothing needed to be — a success for a caller, and why
+      ## `decisionStands` exists rather than `recorded` alone.
+    groUnwritableField
+      ## A field carries a tab, a newline or a carriage return, so NOTHING WAS
+      ## APPENDED and what is in force is NOT what the caller asked for. This is
+      ## the value that must never be confused with `groUnchanged`.
+    groRecorded
+      ## One row was appended and it is in force.
+
+  GrantDeclaredOutcome* = object
+    ## The acceptance step's answer. It was a bare `int` — "how many rows were
+    ## recorded" — and `0` already meant "every declared capability was already
+    ## decided", which is §5a's collision one type along: a refused field would
+    ## have been a second reason for the same `0`.
+    ##
+    ## Every capability in one call shares one `plugin`, one `at` and one `note`,
+    ## so the grammar's verdict is the same for all of them: the call records
+    ## every undecided capability or it records none.
+    outcome*: GrantRecordOutcome
+    rows*: int
+      ## How many were appended.
 
   LedgerParse* = object
     ledger*: GrantLedger
@@ -177,23 +286,98 @@ func describe*(ledger: GrantLedger; plugin: PluginId): string =
 # Writing the ledger
 # ---------------------------------------------------------------------------
 
-proc record*(ledger: var GrantLedger; plugin: PluginId; cap: Capability;
-             decision: GrantDecision; at, note: string) =
-  ledger.entries.add GrantEntry(plugin: plugin, capability: cap,
-                                decision: decision, at: at, note: note)
-
-proc grant*(ledger: var GrantLedger; plugin: PluginId; cap: Capability;
-            at: string; note = ""): bool {.discardable.} =
-  ## `true` when this changed the state in force. A second `grant` of a
-  ## capability already granted appends nothing, so an acceptance step that
-  ## runs on every start does not grow the file without bound.
-  if ledger.stateOf(plugin, cap) == gsGranted: return false
-  ledger.record(plugin, cap, gdGranted, at, note)
+func representableGrantField*(s: string): bool =
+  ## MAY THIS STRING BE A FIELD OF A LEDGER ROW?
+  ##
+  ## THE GRAMMAR IS CLOSED AND THE ANSWER IS A REFUSAL, NOT AN ENCODER — see the
+  ## module header for the measurement and for why escaping was refused. The
+  ## format is one row per line with one TAB between fields, so a field carrying
+  ## a TAB becomes two fields and a field carrying a NEWLINE becomes a ROW.
+  ##
+  ## `\r` is refused with the other two because `parseLedger` strips a trailing
+  ## `\r` for CRLF files, so a `\r` INSIDE a field would survive a round trip on
+  ## one platform and not on another.
+  for c in s:
+    if c == LedgerFieldSeparator or c == '\n' or c == '\r': return false
   true
 
+func unrepresentableGrantFieldText*(): string =
+  ## What a refusal says, in one place so the message cannot acquire two
+  ## spellings (`codeText`'s rule).
+  "a tab, a newline or a carriage return, which a ledger row cannot carry"
+
+func recorded*(o: GrantRecordOutcome): bool =
+  ## Did this append a row? A FUNCTION and not `o == groRecorded` at each call
+  ## site (§14): a new outcome cannot become "recorded" by accident at the site
+  ## somebody forgot.
+  o == groRecorded
+
+func decisionStands*(o: GrantRecordOutcome): bool =
+  ## IS WHAT THE CALLER ASKED FOR WHAT IS IN FORCE NOW? — which is the question
+  ## a user action has, and it is NOT `recorded`. Re-granting a decision already
+  ## recorded appends nothing and is a success; a field that could not be
+  ## written appends nothing and is a failure. ONE function, so the grant's
+  ## reporting and the revocation's cannot come to disagree about which
+  ## non-records are benign (§14).
+  o in {groRecorded, groUnchanged}
+
+func outcomeText*(o: GrantRecordOutcome): string =
+  ## What a caller reports, in one place so one outcome cannot acquire two
+  ## spellings. TOTAL over the enum, so a new outcome is a compile error here
+  ## rather than an unreportable answer.
+  case o
+  of groRecorded: "recorded"
+  of groUnchanged: "that decision was already the one in force"
+  of groNoPlugin: "there is no plugin id to record it against"
+  of groUnwritableField: "a field carries " & unrepresentableGrantFieldText()
+
+proc record*(ledger: var GrantLedger; plugin: PluginId; cap: Capability;
+             decision: GrantDecision; at, note: string): bool
+             {.discardable.} =
+  ## Append one row. `false`, AND NOTHING APPENDED, when any field is not
+  ## representable — see `representableGrantField`.
+  ##
+  ## THIS ONE STAYS A `bool` BECAUSE IT HAS ONE FAILURE MODE. `grant` and
+  ## `revoke` answer a `GrantRecordOutcome` because their `false` meant two
+  ## different things; this function's does not — a row is appended or a field
+  ## could not be written.
+  ##
+  ## THIS IS THE ONE PLACE THIS MODULE CONSTRUCTS A `GrantEntry`, which is what
+  ## makes `render` total over what it can be handed: `grant`, `revoke`,
+  ## `grantDeclared` and the suites all come through here, and `parseLedger` —
+  ## the only other producer — splits on exactly the characters this refuses, so
+  ## no field it yields can contain one. A third party constructing a
+  ## `GrantEntry` literal and pushing it onto `entries` is outside that closure;
+  ## the fields are exported because `describe` and the suites read them, and Nim
+  ## has no read-only export.
+  if not representableGrantField(plugin) or not representableGrantField(at) or
+     not representableGrantField(note):
+    return false
+  ledger.entries.add GrantEntry(plugin: plugin, capability: cap,
+                                decision: decision, at: at, note: note)
+  true
+
+proc grant*(ledger: var GrantLedger; plugin: PluginId; cap: Capability;
+            at: string; note = ""): GrantRecordOutcome =
+  ## Record a grant for ONE plugin and ONE capability, and say WHICH of the four
+  ## things happened.
+  ##
+  ## A second `grant` of a capability already granted appends nothing, so an
+  ## acceptance step that runs on every start does not grow the file without
+  ## bound — and that is `groUnchanged`, which `decisionStands` calls a success.
+  ##
+  ## NOT `{.discardable.}`, AND `record` STILL IS. Dropping this answer is how a
+  ## decision goes unrecorded in silence, so a caller that does not want it has
+  ## to write `discard` and be seen doing it. `record` keeps the pragma because
+  ## the suites build ledgers with it and its answer has one meaning.
+  if plugin.len == 0: return groNoPlugin
+  if ledger.stateOf(plugin, cap) == gsGranted: return groUnchanged
+  if ledger.record(plugin, cap, gdGranted, at, note): groRecorded
+  else: groUnwritableField
+
 proc revoke*(ledger: var GrantLedger; plugin: PluginId; cap: Capability;
-             at: string; note = ""): bool {.discardable.} =
-  ## `true` when this changed the state in force.
+             at: string; note = ""): GrantRecordOutcome =
+  ## `grant`'s twin, with the same four answers and the same reason for them.
   ##
   ## REVOKING AN UNDECIDED CAPABILITY IS RECORDED, not ignored, and the
   ## asymmetry with `grant` is deliberate. An undecided capability is already
@@ -201,23 +385,39 @@ proc revoke*(ledger: var GrantLedger; plugin: PluginId; cap: Capability;
   ## TOMORROW: `grantDeclared` grants what is undecided, so without the entry a
   ## user who pre-emptively revoked a capability would find the next
   ## acceptance step granting it.
-  if ledger.stateOf(plugin, cap) == gsRevoked: return false
-  ledger.record(plugin, cap, gdRevoked, at, note)
-  true
+  ##
+  ## AND THE OUTCOME MATTERS MOST ON THIS SIDE. A grant that is not recorded
+  ## fails closed. A REVOCATION that is not recorded fails OPEN: the user asked
+  ## for the capability to stop, and it does not. Everything other than
+  ## `groRecorded` here has to reach the caller.
+  if plugin.len == 0: return groNoPlugin
+  if ledger.stateOf(plugin, cap) == gsRevoked: return groUnchanged
+  if ledger.record(plugin, cap, gdRevoked, at, note): groRecorded
+  else: groUnwritableField
 
 proc grantDeclared*(ledger: var GrantLedger; plugin: PluginId;
-                    declared: set[Capability]; at: string; note = ""): int
-                    {.discardable.} =
+                    declared: set[Capability]; at: string;
+                    note = ""): GrantDeclaredOutcome =
   ## The acceptance step: record a grant for every capability this manifest
-  ## declares that has NO decision yet. Returns how many were recorded.
+  ## declares that has NO decision yet, and say how many and what happened.
   ##
   ## It leaves `gsRevoked` alone. See the module header — an acceptance that
   ## overwrote a revocation would make revocation last until the next install.
+  ##
+  ## IT IS ALL OR NOTHING ON THE GRAMMAR, and that is a property rather than a
+  ## choice: every row this call writes carries the same `plugin`, `at` and
+  ## `note`, so the first refusal is every refusal. `rows` is therefore 0
+  ## whenever `outcome` is `groUnwritableField`, and a caller never has to
+  ## reason about a half-written acceptance.
+  if plugin.len == 0: return GrantDeclaredOutcome(outcome: groNoPlugin)
+  result.outcome = groUnchanged
   for c in Capability:
     if c notin declared: continue
     if ledger.stateOf(plugin, c) != gsUndecided: continue
-    ledger.record(plugin, c, gdGranted, at, note)
-    inc result
+    if not ledger.record(plugin, c, gdGranted, at, note):
+      return GrantDeclaredOutcome(outcome: groUnwritableField, rows: 0)
+    inc result.rows
+    result.outcome = groRecorded
 
 proc forget*(ledger: var GrantLedger; plugin: PluginId): int {.discardable.} =
   ## Drop every entry for a plugin. This is what `ct uninstall` means for the
@@ -236,6 +436,14 @@ proc forget*(ledger: var GrantLedger; plugin: PluginId): int {.discardable.} =
 
 func render*(ledger: GrantLedger): string =
   ## `<decision>\t<plugin>\t<capability>\t<at>\t<note>` per entry, in order.
+  ##
+  ## IT DOES NOT ESCAPE AND IT DOES NOT NEED TO: every entry this module
+  ## produces came through `record`, which refuses a field carrying a tab, a
+  ## newline or a carriage return. `<decision>` is `$GrantDecision` and
+  ## `<capability>` is `$Capability`, so those two are closed by their types.
+  ## That is the whole argument for there being no encoder here, and it is only
+  ## sound while `record` is the one constructor — which is what its own comment
+  ## records.
   var lines: seq[string] = @[LedgerHeader]
   for e in ledger.entries:
     lines.add [$e.decision, e.plugin, $e.capability, e.at, e.note].join(
@@ -254,10 +462,16 @@ func parseLedger*(text: string): LedgerParse =
     if line.len == 0: continue
     if line[0] == '#': continue
     let parts = line.split(LedgerFieldSeparator)
-    if parts.len < 4:
-      result.problems.add "line " & $lineNo & ": expected at least four " &
-        "tab-separated fields (decision, plugin, capability, when), got " &
-        $parts.len
+    if parts.len < 4 or parts.len > 5:
+      # THE ROW HAS FOUR FIELDS OR FIVE, AND NEVER MORE. The note used to be
+      # `parts[4 .. ^1].join(tab)`, which is a decoder for an encoding the
+      # writer no longer emits — `record` refuses a field carrying a tab
+      # (`representableGrantField`). Rejoining is how a reader and a writer come
+      # to disagree about how many fields a row has, and a six-field row can now
+      # only be a hand edit or an injection attempt: both are worth naming.
+      result.problems.add "line " & $lineNo & ": expected four or five " &
+        "tab-separated fields (decision, plugin, capability, when, and an " &
+        "optional note), got " & $parts.len
       continue
     var decision: GrantDecision
     var decisionOk = false
@@ -284,7 +498,11 @@ func parseLedger*(text: string): LedgerParse =
       result.problems.add "line " & $lineNo & ": '" & parts[2] &
         "' is not a capability — §8.1.2's set is " & known.join(", ")
       continue
-    result.ledger.entries.add GrantEntry(
-      plugin: parts[1], capability: cap, decision: decision, at: parts[3],
-      note: (if parts.len > 4: parts[4 .. ^1].join($LedgerFieldSeparator)
-             else: ""))
+    # THROUGH `record`, so the reader cannot admit a row the writer would
+    # refuse (§14: one predicate, one function). It cannot fail here — the
+    # split removed every tab and `splitLines` every newline — and going
+    # through it anyway is what keeps that true if either rule changes.
+    if not result.ledger.record(parts[1], cap, decision, parts[3],
+                                (if parts.len > 4: parts[4] else: "")):
+      result.problems.add "line " & $lineNo & ": a field carries " &
+        unrepresentableGrantFieldText()

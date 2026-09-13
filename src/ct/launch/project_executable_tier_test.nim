@@ -63,7 +63,7 @@ import ../../common/project_definitions
 import ./project_definitions_dir
 import ./grant_store
 
-const ExpectedAssertions = 184
+const ExpectedAssertions = 199
   ## Written from a run, and asserted against the tally at the end of the file.
 
 var countedAssertions = 0
@@ -352,6 +352,59 @@ suite "PLAT-13: the grant is recorded by IDENTITY, not by path":
       let alias = w.root.parentDir / "alias"
       createSymlink(w.root, alias)
       ckEq checkoutIdentity(alias), checkoutIdentity(w.root)
+
+  test "and a SCAN of a root that is not a checkout says so, rather than being silent":
+    # THE PREDICATE ABOVE IS NOT THE REPORT, AND NOTHING ASSERTED THE REPORT.
+    # `readExecutableDefinition` returned in silence for two different events —
+    # "this repository ships no executable definitions", which is what almost
+    # every repository is and is correct to be silent about, and "this is not a
+    # checkout I can read at all", which is a failure. Both got the sentence a
+    # healthy checkout gets. Measured on 2026-09-13, before the repair:
+    #
+    #   a path that does not exist:  identity=""  definitions=0  problems=0
+    #   an empty root:               identity=""  definitions=0  problems=0
+    #   a FILE, not a directory:     identity=""  definitions=0  problems=0
+    #     describeScan: checkout '': no executable-tier definitions
+    #
+    # It failed CLOSED, which is why no refusal assertion anywhere could see it
+    # (Verification-Harness-Traps §15, from the other end) and why only a case
+    # about the REPORT can.
+    var w = newWorld("noscan")
+    var led: ProjectTrustLedger
+
+    let absent = scanExecutableTier(w.root.parentDir / "no-such-checkout", led)
+    ckEq absent.identity, ""
+    ckEq absent.definitions.len, 0
+    ck absent.problems.len > 0
+    ckRefusedWith absent, ".codetracer/visualisers.wasm", etcNoIdentity
+    ck describeScan(absent).contains("is not a directory this machine can")
+    ck describeScan(absent).contains("no-such-checkout")
+
+    let empty = scanExecutableTier("", led)
+    ck empty.problems.len > 0
+    ckRefusedWith empty, ".codetracer/visualisers.wasm", etcNoIdentity
+
+    # A FILE, not a directory. This one RESOLVES — `realpath(3)` is perfectly
+    # happy with it — so it is the case that separates "the root did not
+    # resolve" from "the root is not a checkout", and a repair that had tested
+    # only the first would leave it silent.
+    let aFile = w.root.parentDir / "a-file-not-a-checkout"
+    writeFile(aFile, "not a directory")
+    let notDir = scanExecutableTier(aFile, led)
+    ck notDir.problems.len > 0
+    ckRefusedWith notDir, ".codetracer/visualisers.wasm", etcNoIdentity
+
+    # THE TWIN, AND IT IS THE WHOLE POINT OF THE REPAIR (§4a, §15). A REAL
+    # checkout that simply ships no executable definition is still SILENT —
+    # almost every repository is in that state, and reporting it would be noise
+    # on every launch. A repair that reported both would have been the same
+    # defect with the sentences swapped.
+    let healthy = scanExecutableTier(w.root, led)
+    ck healthy.identity.len > 0
+    ckEq healthy.definitions.len, 0
+    ckEq healthy.problems.len, 0
+    ck describeScan(healthy).contains("no executable-tier definitions")
+    ck not describeScan(healthy).contains("is not a directory this machine can")
 
 # ---------------------------------------------------------------------------
 # 3. Revocation, through the path that runs things

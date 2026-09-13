@@ -157,6 +157,20 @@ type
       ## The launcher `continue`s past every other version in that case, so the
       ## plugin does not load — and a user who checked a pin into their
       ## repository is owed the sentence rather than an absence.
+    pecBadPluginId
+      ## PLAT-10, 2026-09-13. The `id` in `plugin.json` outside the closed
+      ## charset `contributed_pane_id.segmentProblem` already enforces on the
+      ## plugin half of every contributed pane id.
+      ##
+      ## THE ID IS A LEDGER FIELD, AND IT IS THE MOST ATTACKER-REACHABLE STRING
+      ## IN THE RECORD. `grant_ledger` writes one row per line with a TAB
+      ## between fields and `plugin` is this string, so an id carrying a newline
+      ## and four tab-separated fields made ONE `grant` call append a row that
+      ## reads back as a decision about a DIFFERENT plugin. The ledger refuses
+      ## the field (`grant_ledger.representableGrantField`); this refuses the id
+      ## before it is ever a plugin, which is the half that also catches the ids
+      ## that are merely wrong — a space, a quote, a path separator, Unicode
+      ## that makes two plugins look like one in a list.
 
   PluginError* = object
     plugin*: PluginId
@@ -167,10 +181,16 @@ type
       ## cycle. Never a restatement of `code`.
 
   PluginId* = string
-    ## A plugin's stable identity. Namespaced by convention (`publisher.name`)
-    ## and validated as such by `manifest.validateId`, because §10's open
-    ## decision 2 recommends "a namespaced string for contributed ones" and an
-    ## id that is not namespaced cannot be one.
+    ## A plugin's stable identity. Namespaced by convention (`publisher.name`),
+    ## because §10's open decision 2 recommends "a namespaced string for
+    ## contributed ones" and an id that is not namespaced cannot be one.
+    ##
+    ## THE CHARSET IS CLOSED AND IS CHECKED WHERE THE ID ENTERS. `parseManifest`
+    ## puts `id` through `contributed_pane_id.segmentProblem` — ASCII letters,
+    ## digits, `.`, `_` and `-`, bounded, no edge punctuation — and refuses the
+    ## manifest with `pecBadPluginId` otherwise. That sentence used to name a
+    ## `manifest.validateId` that did not exist, and the absence was not
+    ## academic: see `pecBadPluginId`.
 
 func codeText*(c: PluginErrorCode): string =
   ## The human half of the code. Written here rather than at each raise site
@@ -224,6 +244,8 @@ func codeText*(c: PluginErrorCode): string =
     "a plugin outside the '<name>@<version>' component layout"
   of pecPinnedVersionMissing:
     "a .ctrc pin names a version that is not installed"
+  of pecBadPluginId:
+    "malformed plugin id"
 
 func pluginError*(plugin: PluginId; code: PluginErrorCode;
                   detail: string): PluginError =

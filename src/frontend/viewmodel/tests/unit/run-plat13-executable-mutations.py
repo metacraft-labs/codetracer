@@ -278,6 +278,8 @@ C_HELD = "a HELD handle stops running, asserted through the handle itself"
 C_INJECT = "a newline in a real directory name records ONE decision, not two"
 C_UNRECORDED = ("a decision that could not be recorded is reported, and the "
                 "code says so")
+C_NOTACHECKOUT = ("and a SCAN of a root that is not a checkout says so, rather "
+                  "than being silent")
 
 
 @dataclass
@@ -326,6 +328,28 @@ MUTATIONS: list[Mutation] = [
         control_name="the permission is tested through a named boolean",
         control_find="  if not permission.permitted:",
         control_replace="  let mayOpen = permission.permitted\n  if not mayOpen:",
+    ),
+    # -- F2, 2026-09-13: the reader's own §5a --------------------------------
+    Mutation(
+        "V8", TIER,
+        "  if not dirExists(resolvedRoot):",
+        "  if false:",
+        C_NOTACHECKOUT, NIM_CLI,
+        "Check failed: describeScan(absent).contains(\"is not a directory this machine can\")",
+        "THE READER GOES BACK TO SILENCE. `readExecutableDefinition` returned "
+        "with no problem for two different events — 'this repository ships no "
+        "executable definitions', which almost every repository is and which is "
+        "correct to be silent about, and 'this is not a checkout I can read at "
+        "all', which is a failure — and `describeScan` gave both the sentence a "
+        "healthy checkout gets. Verification-Harness-Traps §5a on the READER's "
+        "side. It fails CLOSED, so no refusal assertion in this campaign could "
+        "ever have seen it, and the `because` therefore quotes the REPORT a "
+        "scan gives rather than any status: nothing else in this suite "
+        "produces that sentence",
+        control_name="the root's directory-ness is read into a named binding",
+        control_find="  if not dirExists(resolvedRoot):",
+        control_replace="  let rootIsDir = dirExists(resolvedRoot)\n"
+                        "  if not rootIsDir:",
     ),
     Mutation(
         "D2", TIER,

@@ -503,8 +503,10 @@ suite "PLAT-10: the grant ledger on disk":
 
   test "a grant written here is a grant read back there":
     var l: GrantLedger
-    ck l.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z", "at install")
-    ck l.grant("demo-plugin", capTrace, "2026-08-14T09:00:00Z", "")
+    ckEq l.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z",
+                 "at install"), groRecorded
+    ckEq l.grant("demo-plugin", capTrace, "2026-08-14T09:00:00Z", ""),
+         groRecorded
     ckEq saveGrantLedger(l), ""
     ck fileExists(grantLedgerPath())
     let back = loadGrantLedger()
@@ -516,11 +518,12 @@ suite "PLAT-10: the grant ledger on disk":
 
   test "a revocation written here is a revocation read back there":
     var l: GrantLedger
-    ck l.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z")
+    ckEq l.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z"),
+         groRecorded
     ckEq saveGrantLedger(l), ""
     var reopened = loadGrantLedger().ledger
-    ck reopened.revoke("demo-plugin", capProcess, "2026-09-11T14:30:00Z",
-                       "taken back")
+    ckEq reopened.revoke("demo-plugin", capProcess, "2026-09-11T14:30:00Z",
+                         "taken back"), groRecorded
     ckEq saveGrantLedger(reopened), ""
     let final = loadGrantLedger()
     ckEq final.problems.len, 0
@@ -535,7 +538,8 @@ suite "PLAT-10: the grant ledger on disk":
     # outlives the write by design, and a case asserting "nothing is left
     # behind" has to name it rather than be surprised by it.
     var l: GrantLedger
-    ck l.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z")
+    ckEq l.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z"),
+         groRecorded
     ckEq saveGrantLedger(l), ""
     ck not fileExists(grantLedgerPath() & ".tmp")
     ck not fileExists(grantLedgerStagingPath(grantLedgerPath()))
@@ -570,7 +574,8 @@ suite "PLAT-10: the grant ledger on disk":
     let foreign = path & ".tmp." & $(getCurrentProcessId() + 1)
     writeFile(foreign, "grant\tsomebody-else\tprocess\ttorn-half-a-line")
     var l: GrantLedger
-    ck l.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z")
+    ckEq l.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z"),
+         groRecorded
     ckEq saveGrantLedger(l), ""
     ck fileExists(foreign)
     let back = loadGrantLedger()
@@ -631,7 +636,8 @@ suite "PLAT-10: the grant ledger on disk":
     # `updateGrantLedger` hands the edit the CURRENT file, which is why it takes
     # a callback rather than a value.
     var first: GrantLedger
-    ck first.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z")
+    ckEq first.grant("demo-plugin", capProcess, "2026-08-14T09:00:00Z"),
+         groRecorded
     ckEq saveGrantLedger(first), ""
     # Somebody else revokes, on disk, while `first` is still in hand.
     ckEq updateGrantLedger("", proc(l: var GrantLedger) =

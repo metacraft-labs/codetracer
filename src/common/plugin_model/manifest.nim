@@ -460,6 +460,49 @@ proc parseManifest*(text, source: string): ParsedManifest =
     result.errors.add pluginError(named, pecMissingField,
       source & ": 'id' is required and must be a string")
 
+  # PLAT-10, 2026-09-13. THE ID IS A LEDGER FIELD AND A THIRD PARTY WRITES IT.
+  #
+  # `grant_ledger` records one decision per line with a TAB between fields and
+  # `plugin` is this string, so an id carrying a newline and four tab-separated
+  # fields made ONE `grant` call append a row that reads back as a decision
+  # about a DIFFERENT plugin — measured, with the victim holding `process`, the
+  # capability PLAT-8 models as subsuming every other. The ledger refuses the
+  # field; this refuses the ID, which is the producer, and the two have disjoint
+  # evidence (Verification-Harness-Traps §16a): only this one refuses `acme
+  # tool`, which a ledger row would carry perfectly well, and only the ledger's
+  # refuses an `at` or a `note` no manifest ever saw.
+  #
+  # THE PREDICATE IS `segmentProblem` AND NOT A SECOND COPY OF ONE (§14). The
+  # plugin half of every contributed pane id already goes through it — a
+  # qualified id is `<plugin>/<surface>` and both segments are checked below —
+  # so an id that fails here was already refused for any plugin that contributes
+  # a pane, and was accepted for every plugin that does not. That gap is what is
+  # being closed; the grammar is not new.
+  #
+  # IT DOES NOT `return`. A hostile id is a refusal and not a reason to stop
+  # reading: every other problem in the manifest is still reported, which is
+  # this module's rule ("EVERY problem is reported, not the first") and is also
+  # what keeps the pane-id refusals below reachable for an id like `acme/tool`.
+  if m.id.len > 0:
+    let idProblem = segmentProblem(m.id)
+    if idProblem != pipOk:
+      # `describe` is written for a WHOLE pane id, and its separator arm says
+      # "more than one '/'" — which is false about an id that may hold none at
+      # all. Saying it anyway would be a message that is wrong about the input
+      # it names, so that one arm is spelled here and every other is delegated.
+      let why =
+        if idProblem == pipTooManySeparators:
+          "'" & m.id & "' contains '" & $PaneIdSeparator & "', which is what " &
+          "separates a plugin id from a surface id and can therefore never be " &
+          "inside one"
+        else: describe(idProblem, m.id)
+      result.errors.add pluginError(named, pecBadPluginId,
+        source & ": " & why &
+        ". A plugin id is written into the capability grant ledger as a " &
+        "tab-separated field, composed into every contributed pane id, and " &
+        "shown to a user in a list, so the charset is closed rather than " &
+        "escaped at each of the three")
+
   m.displayName = jstr(root, "displayName")
 
   let versionText = jstr(root, "version")

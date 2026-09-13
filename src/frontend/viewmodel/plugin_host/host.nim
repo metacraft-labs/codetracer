@@ -404,8 +404,17 @@ proc effectiveCapabilitiesOf*(host: PluginHost; id: PluginId): set[Capability] =
   {}
 
 proc revokeCapability*(host: PluginHost; id: PluginId; cap: Capability;
-                       at: string; note = ""): bool {.discardable.} =
-  ## Take a capability back. `true` when this changed the state in force.
+                       at: string; note = ""): GrantRecordOutcome =
+  ## Take a capability back, and say WHICH of the four things happened.
+  ##
+  ## IT WAS A `bool {.discardable.}` UNTIL 2026-09-13, meaning "this changed the
+  ## state in force" — so `false` was the benign "already revoked", and closing
+  ## the ledger's row grammar gave the same `false` a second, opposite meaning:
+  ## "nothing was written at all". Verification-Harness-Traps §5a is that
+  ## collision, and its worked example is this side of the pair: a revocation
+  ## that reports success and does not happen leaves the capability in force.
+  ## `decisionStands` is the one function that separates the two, and the
+  ## pragma is gone so a caller that drops the answer has to be seen doing it.
   ##
   ## It does NOT deactivate the plugin, and that is the point: §8.1.1's
   ## "resources are reclaimable without restarting CodeTracer" has the same
@@ -420,11 +429,16 @@ proc revokeCapability*(host: PluginHost; id: PluginId; cap: Capability;
   host.applyLedgerTo(id)
 
 proc grantCapability*(host: PluginHost; id: PluginId; cap: Capability;
-                      at: string; note = ""): bool {.discardable.} =
+                      at: string; note = ""): GrantRecordOutcome =
   ## Give one back, or give one for the first time. A capability the MANIFEST
   ## does not declare cannot be granted into existence — `effectiveGrants`
   ## intersects with the declared set — so this widens only as far as the
   ## plugin asked for.
+  ##
+  ## `revokeCapability`'s answer and its reason, on the side that fails closed.
+  ## The twins are written to look alike on purpose (§5a's second bullet: a
+  ## repair that is safe at one call site can be unsafe at its twin), so they
+  ## report through the same enum and the same `decisionStands`.
   if not host.ledgerAttached:
     raise newException(PluginHostError,
       "grantCapability('" & id & "', '" & $cap & "') with no grant ledger " &
@@ -433,10 +447,12 @@ proc grantCapability*(host: PluginHost; id: PluginId; cap: Capability;
   host.applyLedgerTo(id)
 
 proc acceptDeclaredGrants*(host: PluginHost; id: PluginId; at: string;
-                           note = ""): int {.discardable.} =
+                           note = ""): GrantDeclaredOutcome =
   ## The acceptance step for a plugin the user has just installed: grant every
-  ## capability its manifest declares that has no decision yet. Returns how
-  ## many were recorded.
+  ## capability its manifest declares that has no decision yet. Says how many
+  ## were recorded AND what happened, for `grant_ledger.GrantDeclaredOutcome`'s
+  ## reason: `0` already meant "everything was already decided", so a refused
+  ## field would have been a second reason for the same number (§5a).
   ##
   ## A REVOKED CAPABILITY IS LEFT REVOKED — see `grant_ledger.grantDeclared`.
   ## Re-running this after an upgrade grants only what the upgrade ADDED and
@@ -444,7 +460,10 @@ proc acceptDeclaredGrants*(host: PluginHost; id: PluginId; at: string;
   if not host.ledgerAttached:
     raise newException(PluginHostError,
       "acceptDeclaredGrants('" & id & "') with no grant ledger attached")
-  if not host.declaredGrants.hasKey(id): return 0
+  if not host.declaredGrants.hasKey(id):
+    # Not a plugin this host has a declared set for, so there is nothing to
+    # accept and nothing to record it against.
+    return GrantDeclaredOutcome(outcome: groNoPlugin)
   result = host.ledger.grantDeclared(
     id, host.declaredGrants[id].capabilities, at, note)
   host.applyLedgerTo(id)

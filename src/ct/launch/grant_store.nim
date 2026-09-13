@@ -278,6 +278,28 @@ proc updateGrantLedgerAt*(path: string;
   ## lines is still edited and still saved: `parseLedger` keeps what parsed, and
   ## refusing to record a revocation because an unrelated line was malformed
   ## would be the store failing open.
+  ##
+  ## ## "" IS THE STORE'S ANSWER AND NOT THE LEDGER'S — CARRY THE OUTCOME OUT
+  ##
+  ## `edit` returns nothing, so `grant_ledger.grant` / `.revoke`'s answer cannot
+  ## come back through it, and this function's "" means only *the file was
+  ## written*. A closure that drops the ledger's outcome reports SUCCESS for a
+  ## decision the ledger refused — Verification-Harness-Traps §5a, which PLAT-13
+  ## paid for at exactly this seam: a revocation answered "", wrote nothing, and
+  ## the code the user withdrew consent from went on running. Neither `grant`
+  ## nor `revoke` is `{.discardable.}` any more, so the compiler asks; the
+  ## pattern that answers it is `project_trust_store.grantExecutableTier`'s:
+  ##
+  ##     var outcome = groNoPlugin
+  ##     let failure = updateGrantLedger(root, proc(l: var GrantLedger) =
+  ##       outcome = l.revoke(plugin, cap, at, note))
+  ##     if failure.len > 0: return failure
+  ##     if decisionStands(outcome): return ""
+  ##     return "the decision was NOT recorded: " & outcomeText(outcome)
+  ##
+  ## `decisionStands` and not `recorded`: re-revoking what is already revoked
+  ## appends nothing and is a success, and a field that cannot be written
+  ## appends nothing and is a failure.
   if path.len == 0:
     return "no user root: neither " & userRootEnvVar & " nor HOME is set, " &
       "so there is nowhere to record a capability grant"

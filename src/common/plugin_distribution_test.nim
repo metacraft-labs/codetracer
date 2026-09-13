@@ -51,7 +51,7 @@ import std/[algorithm, strutils, unittest]
 
 import ./plugin_model
 
-const ExpectedAssertions = 642
+const ExpectedAssertions = 716
   ## Written from a run, and asserted against the tally at the end of the file.
   ## `ci/lib/run-nim-test-lane.sh` reads this name.
 
@@ -313,10 +313,11 @@ suite "PLAT-10: the capability grant is recorded per plugin":
 
   test "grant, then revoke: the last entry in force, the history kept":
     var l: GrantLedger
-    ck l.grant("demo-plugin", capProcess, At1, "installed")
+    ckEq l.grant("demo-plugin", capProcess, At1, "installed"), groRecorded
     ckEq l.stateOf("demo-plugin", capProcess), gsGranted
     ckEq l.decidedAt("demo-plugin", capProcess), At1
-    ck l.revoke("demo-plugin", capProcess, At2, "the user took it back")
+    ckEq l.revoke("demo-plugin", capProcess, At2, "the user took it back"),
+         groRecorded
     ckEq l.stateOf("demo-plugin", capProcess), gsRevoked
     ckEq l.decidedAt("demo-plugin", capProcess), At2
     # THE HISTORY IS THE INSPECTABLE HALF: "you granted this last month" is a
@@ -332,38 +333,38 @@ suite "PLAT-10: the capability grant is recorded per plugin":
 
   test "a repeated decision changes nothing and appends nothing":
     var l: GrantLedger
-    ck l.grant("demo-plugin", capTrace, At1)
-    ck not l.grant("demo-plugin", capTrace, At2)
+    ckEq l.grant("demo-plugin", capTrace, At1), groRecorded
+    ckEq l.grant("demo-plugin", capTrace, At2), groUnchanged
     ckEq l.entries.len, 1
-    ck l.revoke("demo-plugin", capTrace, At2)
-    ck not l.revoke("demo-plugin", capTrace, At2)
+    ckEq l.revoke("demo-plugin", capTrace, At2), groRecorded
+    ckEq l.revoke("demo-plugin", capTrace, At2), groUnchanged
     ckEq l.entries.len, 2
 
   test "revoking an UNDECIDED capability is recorded, and that matters later":
     # It changes nothing today — undecided is already refused. What it changes
     # is the next acceptance step, which grants what is undecided.
     var l: GrantLedger
-    ck l.revoke("demo-plugin", capFsWrite, At1, "pre-emptive")
+    ckEq l.revoke("demo-plugin", capFsWrite, At1, "pre-emptive"), groRecorded
     ckEq l.stateOf("demo-plugin", capFsWrite), gsRevoked
-    ckEq l.grantDeclared("demo-plugin", {capFsWrite, capFsRead}, At2), 1
+    ckEq l.grantDeclared("demo-plugin", {capFsWrite, capFsRead}, At2).rows, 1
     ckEq l.stateOf("demo-plugin", capFsWrite), gsRevoked
     ckEq l.stateOf("demo-plugin", capFsRead), gsGranted
 
   test "two plugins do not share a decision":
     var l: GrantLedger
-    ck l.grant("a", capProcess, At1)
+    ckEq l.grant("a", capProcess, At1), groRecorded
     ckEq l.stateOf("b", capProcess), gsUndecided
-    ck l.revoke("a", capProcess, At2)
-    ck l.grant("b", capProcess, At2)
+    ckEq l.revoke("a", capProcess, At2), groRecorded
+    ckEq l.grant("b", capProcess, At2), groRecorded
     ckEq l.stateOf("a", capProcess), gsRevoked
     ckEq l.stateOf("b", capProcess), gsGranted
     ckEq l.plugins(), @["a", "b"]
 
   test "forgetting a plugin removes its entries and nobody else's":
     var l: GrantLedger
-    ck l.grant("a", capProcess, At1)
-    ck l.revoke("a", capTrace, At1)
-    ck l.grant("b", capProcess, At1)
+    ckEq l.grant("a", capProcess, At1), groRecorded
+    ckEq l.revoke("a", capTrace, At1), groRecorded
+    ckEq l.grant("b", capProcess, At1), groRecorded
     ckEq l.forget("a"), 2
     ckEq l.stateOf("a", capProcess), gsUndecided
     ckEq l.stateOf("a", capTrace), gsUndecided
@@ -381,10 +382,10 @@ suite "PLAT-10: a revocation is a smaller GrantSet, not a flag":
     declared.executables = @["env"]
     declared.readPaths = @["/tmp"]
     var l: GrantLedger
-    ckEq l.grantDeclared("demo", declared.capabilities, At1), 3
+    ckEq l.grantDeclared("demo", declared.capabilities, At1).rows, 3
     ckEq effectiveGrants(declared, l, "demo").capabilities,
          {capProcess, capFsRead, capTrace}
-    ck l.revoke("demo", capProcess, At2)
+    ckEq l.revoke("demo", capProcess, At2), groRecorded
     let after = effectiveGrants(declared, l, "demo")
     ckEq after.capabilities, {capFsRead, capTrace}
     # The DECLARED sets travel unchanged: `decide` tests the capability first
@@ -401,21 +402,21 @@ suite "PLAT-10: a revocation is a smaller GrantSet, not a flag":
     var v1: GrantSet
     v1.capabilities = {capFsRead}
     var l: GrantLedger
-    ckEq l.grantDeclared("demo", v1.capabilities, At1), 1
+    ckEq l.grantDeclared("demo", v1.capabilities, At1).rows, 1
     var v2: GrantSet
     v2.capabilities = {capFsRead, capProcess}
     ckEq effectiveGrants(v2, l, "demo").capabilities, {capFsRead}
     ckEq l.stateOf("demo", capProcess), gsUndecided
     # And the acceptance step grants only what the upgrade ADDED.
-    ckEq l.grantDeclared("demo", v2.capabilities, At2), 1
+    ckEq l.grantDeclared("demo", v2.capabilities, At2).rows, 1
     ckEq effectiveGrants(v2, l, "demo").capabilities, {capFsRead, capProcess}
 
   test "a ledger entry cannot grant a capability the manifest never declared":
     var declared: GrantSet
     declared.capabilities = {capFsRead}
     var l: GrantLedger
-    ck l.grant("demo", capFsRead, At1)
-    ck l.grant("demo", capProcess, At1)
+    ckEq l.grant("demo", capFsRead, At1), groRecorded
+    ckEq l.grant("demo", capProcess, At1), groRecorded
     ckEq l.stateOf("demo", capProcess), gsGranted
     ckEq effectiveGrants(declared, l, "demo").capabilities, {capFsRead}
 
@@ -451,11 +452,12 @@ suite "PLAT-10: the ledger round-trips through its own text":
 
   test "render then parse is the identity, fields and order":
     var l: GrantLedger
-    ck l.grant("acme.metrics", capProcess, At1, "accepted at install")
-    ck l.grant("acme.metrics", capTrace, At1, "")
-    ck l.revoke("acme.metrics", capProcess, At2,
-                "a note with spaces and a comma, too")
-    ck l.grant("other", capSocketLocal, At2)
+    ckEq l.grant("acme.metrics", capProcess, At1, "accepted at install"),
+         groRecorded
+    ckEq l.grant("acme.metrics", capTrace, At1, ""), groRecorded
+    ckEq l.revoke("acme.metrics", capProcess, At2,
+                  "a note with spaces and a comma, too"), groRecorded
+    ckEq l.grant("other", capSocketLocal, At2), groRecorded
     let parsed = parseLedger(l.render())
     ckEq parsed.problems.len, 0
     ckEq parsed.ledger.entries.len, l.entries.len
@@ -477,7 +479,7 @@ suite "PLAT-10: the ledger round-trips through its own text":
     var l: GrantLedger
     var n = 0
     for c in Capability:
-      ck l.grant("demo", c, At1, "cap " & $c)
+      ckEq l.grant("demo", c, At1, "cap " & $c), groRecorded
       inc n
     ckEq n, 6
     let parsed = parseLedger(l.render())
@@ -511,6 +513,220 @@ suite "PLAT-10: the ledger round-trips through its own text":
     let parsed = parseLedger(l.render())
     ckEq parsed.problems.len, 0
     ckEq parsed.ledger.entries.len, 0
+
+# ---------------------------------------------------------------------------
+# 5a. The row grammar is CLOSED, because the plugin field is a plugin's own text
+# ---------------------------------------------------------------------------
+
+const
+  Victim = "trusted-plugin"
+    ## The plugin the forged row grants `process` to. It decided nothing, it
+    ## asked for nothing, and nobody granted it anything.
+
+func victimCanSpawn(led: GrantLedger; plugin: PluginId): bool =
+  ## THE EFFECT, ASKED THROUGH PLAT-8'S OWN POLICY. `stateOf` is what the ledger
+  ## SAYS; this is what the product then DOES with it — `effectiveGrants` hands
+  ## `decide` the narrowed set and `decide` answers about one spawn.
+  ##
+  ## It is a `func` and not a `template` because it asserts nothing:
+  ## Verification-Harness-Traps §13 is about `check` inside a `proc`, and there
+  ## is none here. Every assertion over it is at the call site, in a test body.
+  ##
+  ## The declared set is the smallest one that can reach a permit: `process`,
+  ## one bare executable name, and the trace-egress acknowledgement `process`
+  ## requires on its own since 2026-09-09. Without the last of those the refusal
+  ## would come from the egress gate rather than from the grant, and the case
+  ## would pass over a ledger that HAD been forged.
+  let declared = GrantSet(
+    capabilities: {capProcess}, executables: @["git"],
+    traceEgress: TraceEgressGrant(acknowledged: true,
+      statement: "the plugin declared this and the user acknowledged it"))
+  decide(effectiveGrants(declared, led, plugin), plugin,
+         IoRequest(kind: irSpawnProcess, target: "git")).permitted
+
+suite "PLAT-10: a plugin id cannot forge a row in the grant ledger":
+
+  test "a NEWLINE in the plugin id is refused, and the forged row is a real one":
+    # THE PLANT IS PROVED FIRST (§4, §7). Pasted into a ledger FILE, the second
+    # line is an ordinary, well-formed row and the VICTIM plugin — which nobody
+    # decided anything about — holds `process`, the capability PLAT-8 models as
+    # subsuming every other. No reader can fix that: a file with two rows has
+    # two rows. That is why the refusal has to be the WRITER's, and it is what
+    # makes the assertions below non-vacuous.
+    #
+    # THE ID CARRIES TWO FIELDS AND NOT FIVE, and that is a measurement rather
+    # than a style: the three real fields after it (`capability`, `at`, `note`)
+    # COMPLETE the forged line, so the row the reader sees is exactly five
+    # fields and is well-formed under the tightened grammar below as well. An id
+    # carrying a whole row would leave an eight-field line, which `parseLedger`
+    # now refuses — so this is the shape that survives every repair except the
+    # writer's own, which is the shape a case should carry.
+    let forgedId = "evil-plugin\n" &
+      ["grant", Victim].join($LedgerFieldSeparator)
+    let asFile = LedgerHeader & "\n" &
+      ["grant", forgedId, $capProcess, At1, "installed"].join(
+        $LedgerFieldSeparator) & "\n"
+    let pasted = parseLedger(asFile)
+    ckEq pasted.ledger.entries.len, 1
+    ckEq pasted.problems.len, 1
+    ckEq pasted.ledger.stateOf(Victim, capProcess), gsGranted
+    ckEq grantedCapabilities({capProcess}, pasted.ledger, Victim), {capProcess}
+    # AND THE EFFECT, WHICH IS THE POINT: the victim spawns.
+    ck victimCanSpawn(pasted.ledger, Victim)
+    # THE ATTACKER PAYS ITS OWN GRANT FOR IT, which is why the single problem
+    # reads like an ordinary corrupt line rather than like an attack.
+    ckEq grantedCapabilities({capProcess}, pasted.ledger, "evil-plugin"), {}
+
+    # AND THE WRITER REFUSES IT. One call, zero rows, and the victim untouched.
+    var l: GrantLedger
+    ckEq l.grant(forgedId, capProcess, At1, "installed"), groUnwritableField
+    ckEq l.entries.len, 0
+    ckEq l.stateOf(Victim, capProcess), gsUndecided
+    ckEq grantedCapabilities({capProcess}, l, Victim), {}
+    # THE EFFECT AGAIN, ON THE REPAIRED SIDE — AND IT IS ASSERTED THROUGH THE
+    # ROUND TRIP, NOT ON THE LEDGER IN HAND. A `GrantLedger` in memory holds the
+    # whole hostile id in ONE `plugin` field, so `stateOf(Victim, …)` answers
+    # `gsUndecided` for it even when the row WAS appended: the forgery exists
+    # only once the ledger has been rendered and read back, which is what every
+    # start-up does. An assertion on `l` alone therefore passes whether or not
+    # the writer refused — §7's green fixture, in the one place this case cannot
+    # afford one. Measured on 2026-09-13: arm L7 scored MIS-ATTRIBUTED against
+    # exactly that assertion before it was moved here (§17).
+    let round = parseLedger(l.render())
+    ckEq round.ledger.entries.len, 0
+    ckEq round.problems.len, 0
+    ckEq round.ledger.stateOf(Victim, capProcess), gsUndecided
+    ck not victimCanSpawn(round.ledger, Victim)
+    # THE TWIN, IN THE SAME CASE: the same call with an id that IS a field
+    # records exactly one decision and round-trips (§4a — a refusal assertion
+    # with no positive twin over the same code is satisfied by a writer that
+    # refuses everything).
+    ckEq l.grant("evil-plugin", capProcess, At1, "installed"), groRecorded
+    ckEq l.entries.len, 1
+    ckEq parseLedger(l.render()).ledger.entries.len, 1
+    ckEq parseLedger(l.render()).problems.len, 0
+
+  test "every field is closed, not only the plugin id":
+    var l: GrantLedger
+    ckEq l.grant("demo\tplugin", capProcess, At1), groUnwritableField
+    ckEq l.grant("demo", capProcess, At1 & "\nx"), groUnwritableField
+    ckEq l.grant("demo", capProcess, At1, "a note\rwith a return"),
+         groUnwritableField
+    ckEq l.revoke("demo", capProcess, "at\nnow"), groUnwritableField
+    ckEq l.revoke("demo", capProcess, At1, "note\twith\ttabs"),
+         groUnwritableField
+    ckEq l.grantDeclared("demo", {capProcess, capFsRead}, At1 & "\ty").rows, 0
+    ckEq l.grantDeclared("demo", {capProcess, capFsRead}, At1 & "\ty").outcome,
+         groUnwritableField
+    ckEq l.entries.len, 0
+    # `record` is the one constructor and enforces it THERE, so `grant`,
+    # `revoke` and `grantDeclared` cannot come to disagree with each other, and
+    # a `GrantEntry` built by a future call site cannot get in behind them (§14).
+    ck not l.record("demo", capProcess, gdGranted, At1, "a\nb")
+    ckEq l.entries.len, 0
+    # The predicate itself, with its positive twin.
+    ck representableGrantField("acme.metrics — a note with spaces and a dash")
+    ck representableGrantField("")
+    ck not representableGrantField("a\tb")
+    ck not representableGrantField("a\nb")
+    ck not representableGrantField("a\rb")
+    ck unrepresentableGrantFieldText().len > 0
+    # AND THE TWO NON-RECORDS ARE DIFFERENT ANSWERS, which is the half a `bool`
+    # could not carry: "nothing needed writing" and "nothing COULD be written"
+    # both appended no row, and both were `false` until 2026-09-13
+    # (Verification-Harness-Traps §5a). `decisionStands` is where they part, and
+    # it is ONE function so the grant's caller and the revocation's cannot part
+    # differently (§14).
+    ck decisionStands(groUnchanged)
+    ck not recorded(groUnchanged)
+    ck not decisionStands(groUnwritableField)
+    ck not recorded(groUnwritableField)
+    ck decisionStands(groRecorded)
+    ck outcomeText(groUnwritableField) != outcomeText(groUnchanged)
+    ck outcomeText(groUnwritableField).contains(unrepresentableGrantFieldText())
+    # THE TWIN: every field representable records one row.
+    ckEq l.grant("demo", capProcess, At1, "ordinary"), groRecorded
+    ckEq l.entries.len, 1
+
+  test "an empty plugin id is refused rather than written unreadably":
+    # `parseLedger` refuses a row whose plugin field is empty, so writing one
+    # would be writing a row this module cannot read back — a decision that
+    # disappears at the next start-up.
+    var l: GrantLedger
+    ckEq l.grant("", capProcess, At1), groNoPlugin
+    ckEq l.revoke("", capProcess, At1), groNoPlugin
+    ckEq l.grantDeclared("", {capProcess}, At1).outcome, groNoPlugin
+    ckEq l.grantDeclared("", {capProcess}, At1).rows, 0
+    ckEq l.entries.len, 0
+    ck not decisionStands(groNoPlugin)
+
+  test "a row with more than five fields is a PROBLEM, not a rejoined note":
+    # The reader used to rejoin `parts[4 .. ^1]`, which is a decoder for an
+    # encoding the writer can no longer emit. A six-field row is now a hand edit
+    # or an injection attempt, and both are worth naming.
+    let six = LedgerHeader & "\n" &
+      ["grant", "demo", $capProcess, At1, "a", "b"].join(
+        $LedgerFieldSeparator) & "\n"
+    let parsed = parseLedger(six)
+    ckEq parsed.ledger.entries.len, 0
+    ckEq parsed.problems.len, 1
+    ck parsed.problems[0].contains("got 6")
+    ckEq parsed.ledger.stateOf("demo", capProcess), gsUndecided
+    # THE TWIN: five fields is a note and four is a row without one.
+    let ok = parseLedger(LedgerHeader & "\n" &
+      ["grant", "demo", $capProcess, At1, "a note"].join(
+        $LedgerFieldSeparator) & "\n" &
+      ["revoke", "other", $capTrace, At2].join($LedgerFieldSeparator) & "\n")
+    ckEq ok.problems.len, 0
+    ckEq ok.ledger.entries.len, 2
+    ckEq ok.ledger.entries[0].note, "a note"
+    ckEq ok.ledger.entries[1].note, ""
+
+  test "a hostile id never becomes a plugin, which is the OTHER refusal":
+    # THE PRODUCER, AND IT IS A SECOND MECHANISM WITH ITS OWN EVIDENCE
+    # (Verification-Harness-Traps §16a). `parseManifest` refuses an `id` outside
+    # the closed charset, so the hostile plugin above never loads at all and
+    # never reaches the acceptance step that would call `grant`. Each mechanism
+    # has a case only it can satisfy, and both are in this test:
+    #
+    #   * `acme tool` is a perfectly writable LEDGER FIELD and an illegal plugin
+    #     id — only the manifest refuses it;
+    #   * an `at` or a `note` carrying a newline is nothing a manifest has an
+    #     opinion about — only `record` refuses those, above.
+    func codes(p: ParsedManifest): seq[PluginErrorCode] =
+      for e in p.errors: result.add e.code
+    proc manifestWithId(id: string): ParsedManifest =
+      parseManifest("{\"id\": \"" & id & "\", \"version\": \"1.0.0\"}",
+                    "plugin_distribution_test")
+
+    let hostile = manifestWithId("evil-plugin\\ngrant\\t" & Victim)
+    ck not hostile.isOk
+    ck pecBadPluginId in hostile.codes()
+    # THE POSITIVE TWIN, through the same parser: an ordinary namespaced id
+    # loads, so the refusal above is about the id rather than about the parser
+    # having stopped accepting manifests (§4a).
+    let ordinary = manifestWithId("acme.metrics")
+    ck ordinary.isOk
+    ckEq ordinary.manifest.id, "acme.metrics"
+    # THE HALF ONLY THIS MECHANISM CLOSES.
+    ck representableGrantField("acme tool")
+    ck pecBadPluginId in manifestWithId("acme tool").codes()
+    ck pecBadPluginId in manifestWithId("acme/tool").codes()
+    ck pecBadPluginId in manifestWithId(".acme").codes()
+    ck codeText(pecBadPluginId).len > 0
+
+  test "the ZERO VALUE of every decision type here is a non-record":
+    # PLAT-12's `Visualiser.tier` lesson, swept over this module's enums. A
+    # producer that forgets to set the field reports "nothing was written"
+    # rather than "it is recorded and in force".
+    ckEq low(GrantState), gsUndecided
+    ckEq default(GrantState), gsUndecided
+    ckEq low(GrantRecordOutcome), groNoPlugin
+    ckEq default(GrantRecordOutcome), groNoPlugin
+    ck not recorded(default(GrantRecordOutcome))
+    ck not decisionStands(default(GrantRecordOutcome))
+    ckEq default(GrantDeclaredOutcome).outcome, groNoPlugin
+    ckEq default(GrantDeclaredOutcome).rows, 0
 
 # ---------------------------------------------------------------------------
 # 6. The gate: no second package mechanism, asserted over this module's SOURCE

@@ -18,6 +18,10 @@
 ##
 ## ## THE ORDER IS THE DELIVERABLE
 ##
+##   0. is there a checkout here at all? A root that does not resolve to a
+##      directory is a FAILURE and is reported; a checkout that simply ships no
+##      definition is SILENT. Both returned in silence until 2026-09-13
+##      (Verification-Harness-Traps §5a)
 ##   1. does the file exist? (a `stat`, never an `open`)
 ##   2. `project_trust.mayReadBytes` — **before any open**
 ##   3. the path is exactly where a definition file must be — no symlink, in
@@ -89,6 +93,12 @@ type
     ## is not a problem, because almost every repository has none and reporting
     ## its absence would be noise on every launch (PLAT-11's `DiscoveryOutcome`,
     ## same rule).
+    ##
+    ## A ROOT THAT IS NOT A CHECKOUT IS A PROBLEM, THOUGH, and it is the one
+    ## case that sentence above must not swallow: `identity` is "" for it AND
+    ## for nothing else, and the two states were indistinguishable in everything
+    ## this record reports until 2026-09-13. See `readExecutableDefinition`
+    ## step 0.
     identity*: RepositoryIdentity
     definitions*: seq[ExecutableDefinition]
     problems*: seq[ExecutableTierProblem]
@@ -165,9 +175,40 @@ proc readExecutableDefinition*(root: string; scope: string;
   ## order, which is the deliverable.
   let reported = definitionPath(scope, kind)
 
-  # 1. A `stat`. An absent definition is not a problem and not a decision.
+  # 0. IS THERE A CHECKOUT HERE AT ALL? "This repository ships no executable
+  #    definitions" and "this is not a checkout I can read" are two different
+  #    facts and only one of them is ordinary. Until 2026-09-13 both returned in
+  #    silence and `describeScan` gave them the sentence a healthy checkout
+  #    gets — Verification-Harness-Traps §5a, one value with two meanings, on
+  #    the reader's side rather than on the writer's. Measured that day:
+  #
+  #      a path that does not exist:  identity=""  definitions=0  problems=0
+  #      an empty root:               identity=""  definitions=0  problems=0
+  #      a FILE, not a directory:     identity=""  definitions=0  problems=0
+  #        describeScan: checkout '': no executable-tier definitions
+  #
+  #    It fails CLOSED — nothing is admitted — which is why nothing anywhere
+  #    went red, and is exactly §15's "a repair that fails in the safe direction
+  #    looks like nothing from outside" seen from the other end: the DEFECT was
+  #    in the safe direction, so no security assertion could see it either. The
+  #    store's own entry points already report this ('…' is not a checkout this
+  #    machine can identify); only the scan was silent.
+  #
+  #    ONE TEST, NOT TWO. `dirExists("")` is false, so a separate
+  #    `resolvedRoot.len == 0` arm would be a second mechanism with no case only
+  #    it can satisfy — which is the redundancy `checkoutIdentity` had three of
+  #    and deleted two of, for §16a's reason.
   let resolvedRoot = resolvedRealPath(root)
-  if resolvedRoot.len == 0: return
+  if not dirExists(resolvedRoot):
+    scan.problems.add ExecutableTierProblem(
+      file: reported, code: etcNoIdentity,
+      detail: "the checkout root '" & root & "' is not a directory this " &
+        "machine can resolve, so nothing under it was stat'd, opened or " &
+        "read. A repository that simply ships no '" & reported &
+        "' is silent; this is not that")
+    return
+
+  # 1. A `stat`. An absent definition is not a problem and not a decision.
   let expected = resolvedRoot / reported
   if not fileExists(expected): return
 

@@ -33,6 +33,17 @@ EVERY ARM'S `because` IS CHECKED AGAINST THE CONTROL RUN, BEFORE ANY MUTATION.
 ONLY ONE INSTANCE MAY RUN IN A WORKTREE, enforced with an exclusive `flock`
 taken BEFORE the control-hash check.
 
+AND NEVER BESIDE A SIBLING HARNESS. A run lock serialises this harness's own
+writers and does nothing for READERS, and two of this harness's subjects are
+other campaigns' subjects too: `manifest.nim` is PLAT-8's and PLAT-9's, and
+`host.nim` is PLAT-8's and PLAT-9's. A sibling harness holding its own lock
+still has a mutation on disk in one of those files, and every gate, sweep and
+contract suite taken in that window grades it. PLAT-11's residue 12 and
+PLAT-12's residue 9 record the rule; this is the file where it bites hardest,
+because the overlap is with the digests rather than only with the compile
+closure. `manifest.nim` joined this list on 2026-09-13 with arm L9, which is
+PLAT-10's because the id it refuses is a LEDGER FIELD.
+
 THE NEEDLE SCAN GATES `--record-control-hashes` (Verification-Harness-Traps
 §16).
 
@@ -94,8 +105,15 @@ LEDGER = "src/common/plugin_model/grant_ledger.nim"
 HOST = "src/frontend/viewmodel/plugin_host/host.nim"
 PCOMP = "src/ct/launch/plugin_components.nim"
 GSTORE = "src/ct/launch/grant_store.nim"
+MANIFEST = "src/common/plugin_model/manifest.nim"
+# PLAT-9's subject too (`run-plat9-surface-mutations.py`'s MANIFEST), exactly as
+# HOST already is. Two harnesses recording a digest over one file is not a
+# conflict — neither may RUN beside the other, which is the rule anyway — and
+# the arm belongs with the repair that needed it: PLAT-10's F1 closed the plugin
+# id's charset because the id is a LEDGER FIELD, which is this campaign's
+# subject and not PLAT-9's.
 
-TOUCHED = [DIST, LEDGER, HOST, PCOMP, GSTORE]
+TOUCHED = [DIST, LEDGER, HOST, PCOMP, GSTORE, MANIFEST]
 
 PURE_SUITE = "src/common/plugin_distribution_test.nim"
 CLI_SUITE = "src/ct/launch/plugin_components_test.nim"
@@ -151,6 +169,11 @@ P_UNDECIDED = "revoking an UNDECIDED capability is recorded, and that matters la
 P_FORGET = "forgetting a plugin removes its entries and nobody else's"
 P_BADLINE = "an unusable line is reported by number and the rest is kept"
 P_SPELLINGS = "every capability spelling survives the round trip"
+P_FORGED = ("a NEWLINE in the plugin id is refused, and the forged row is a "
+            "real one")
+P_ANYFIELD = "every field is closed, not only the plugin id"
+P_FIVEFIELDS = "a row with more than five fields is a PROBLEM, not a rejoined note"
+P_HOSTILEID = "a hostile id never becomes a plugin, which is the OTHER refusal"
 
 # `src/ct/launch/plugin_components_test.nim`
 C_BOTHFILES = "a component carrying BOTH files is refused as a plugin, naming both"
@@ -388,13 +411,73 @@ MUTATIONS: list[Mutation] = [
         "L6", LEDGER,
         "  LedgerFieldSeparator* = '\\t'",
         "  LedgerFieldSeparator* = ':'",
-        P_SPELLINGS, NIM_PURE, "parsed.problems.len == 0",
+        P_SPELLINGS, NIM_PURE, "parsed.ledger.stateOf(\"demo\", c) == gsGranted",
         "the field separator collides with §8.1.2's own spellings: "
         "`socket:local` splits into two fields, so the two socket grants stop "
-        "round-tripping and a saved ledger loses them",
+        "round-tripping and a saved ledger loses them. ITS EVIDENCE MOVED ON "
+        "2026-09-13 AND THE ARM SAID SO (Verification-Harness-Traps §16a, "
+        "§17b): once `record` refuses a field carrying the separator, the "
+        "mutated build writes NO rows at all, so `parsed.problems.len == 0` — "
+        "this arm's `because` until that day — went GREEN and the arm scored "
+        "MIS-ATTRIBUTED over a mutation that had killed its case exactly as "
+        "intended. The `because` is now the EFFECT (§17a) and is re-derived "
+        "from the transcript",
         control_name="the same byte written as an escape",
         control_find="  LedgerFieldSeparator* = '\\t'",
         control_replace="  LedgerFieldSeparator* = '\\x09'",
+    ),
+    # -- F1, 2026-09-13: the ledger's row grammar, and the id that is a field -
+    Mutation(
+        "L7", LEDGER,
+        "    if c == LedgerFieldSeparator or c == '\\n' or c == '\\r': return false",
+        "    if false: return false",
+        P_FORGED, NIM_PURE, "not victimCanSpawn(round.ledger, Victim)",
+        "ONE `grant` CALL RECORDS TWO DECISIONS. The ledger is one row per line "
+        "with a tab between fields and `plugin` is a `PluginId` read straight "
+        "out of `plugin.json`, so an id carrying a newline and two "
+        "tab-separated fields appends a second, perfectly well-formed row — "
+        "against a plugin the user decided nothing about, for the capability "
+        "the attacker was itself granted. Measured: the victim holds `process`, "
+        "which PLAT-8 models as subsuming every other capability, and `decide` "
+        "PERMITS its spawn. THE `because` QUOTES THE EFFECT AND NOT THE REPORT "
+        "(Verification-Harness-Traps §17a): a host that reported a refusal "
+        "politely and granted anyway cannot satisfy it",
+        control_name="the forbidden characters are tested through a named set",
+        control_find="    if c == LedgerFieldSeparator or c == '\\n' or c == '\\r': return false",
+        control_replace="    const Forbidden = {'\\n', '\\r'}\n"
+                        "    if c == LedgerFieldSeparator or c in Forbidden: return false",
+    ),
+    Mutation(
+        "L8", LEDGER,
+        "    if parts.len < 4 or parts.len > 5:",
+        "    if parts.len < 4:",
+        P_FIVEFIELDS, NIM_PURE, "parsed.ledger.entries.len was 1",
+        "the reader goes back to rejoining `parts[4 .. ^1]`, which is a decoder "
+        "for an encoding the writer can no longer emit — so a six-field row "
+        "becomes a note instead of a refusal, and the writer's grammar and the "
+        "reader's stop being the same grammar",
+        control_name="the field count is bounded through a named range test",
+        control_find="    if parts.len < 4 or parts.len > 5:",
+        control_replace="    let fields = parts.len\n"
+                        "    if fields < 4 or fields > 5:",
+    ),
+    Mutation(
+        "L9", MANIFEST,
+        "    let idProblem = segmentProblem(m.id)",
+        "    let idProblem = pipOk",
+        P_HOSTILEID, NIM_PURE, "pecBadPluginId in hostile.codes()",
+        "THE PRODUCER STOPS REFUSING. A `plugin.json` whose `id` carries a "
+        "newline, a tab, a space or a path separator loads as a plugin, so the "
+        "hostile id reaches the acceptance step and `grant` is called with it. "
+        "`record` still refuses the ROW — which is why this arm needs its own "
+        "case rather than borrowing L7's (§16a: two mechanisms guarding one "
+        "property silently halve the coverage unless each has evidence only it "
+        "can satisfy). The evidence only this one has is `acme tool`: a "
+        "perfectly writable ledger field, and not a plugin id",
+        control_name="the id's verdict is read through a differently named binding",
+        control_find="    let idProblem = segmentProblem(m.id)",
+        control_replace="    let idVerdict = segmentProblem(m.id)\n"
+                        "    let idProblem = idVerdict",
     ),
     # -- discovery, over the tree the launcher wrote ------------------------
     Mutation(
