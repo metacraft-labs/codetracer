@@ -304,6 +304,32 @@ suite "AA-3 a Windows command line is not a POSIX one":
     check recognised("ct.exe.bak agent evidence review.json") == ""
     check recognised("ctexe agent evidence review.json") == ""
 
+  test "an upper-case CT.EXE is still ct":
+    # Executable names are case-insensitive on Windows (and on a default macOS
+    # volume), so every spelling below names one binary.  The defect this
+    # pins was *half* a fold: `commandBaseName`'s `.exe` test already lowered
+    # case while the name comparison did not, so `ct.EXE` was accepted and
+    # `CT.EXE` — the spelling a `cmd.exe` transcript actually shows — was
+    # refused, and that agent's handoff silently never became clickable.
+    # Asserted on `namesCtBinary` directly as well as through the recogniser,
+    # because a failure should name the predicate rather than the command.
+    for token in ["CT.EXE", "ct.EXE", "Ct.Exe", "CT", "Ct",
+                  "C:\\Tools\\CT.EXE", "/usr/local/bin/CT"]:
+      check token.namesCtBinary
+    check recognised("CT.EXE review collect -o review.json") ==
+      "collect:review.json"
+    check recognised(
+        "C:\\Tools\\CT.EXE agent evidence C:\\Users\\dev\\review.json") ==
+      "handoff:C:\\Users\\dev\\review.json"
+
+    # Folding case widens the *spelling*, never the *name*: this is still a
+    # whole-name test, so everything the "merely contains 'ct'" case rejects
+    # stays rejected in upper case too.
+    for token in ["MyCT.exe", "CTX", "CT-wrapper", "CT.EXE.BAK", "CTEXE"]:
+      check not token.namesCtBinary
+    check recognised("CT.EXE.BAK review collect -o review.json") == ""
+    check recognised("/opt/MyCT agent evidence review.json") == ""
+
 suite "AA-3 POSIX escaping still escapes":
 
   test "all four ways of writing a path with a space agree":
@@ -342,6 +368,274 @@ suite "AA-3 POSIX escaping still escapes":
         "env CT_LOG=/home/a\\ b/log ct review collect " &
         "-o C:\\out\\review.json") ==
       "collect:C:\\out\\review.json"
+
+suite "AA-3 which shell wrote this command line":
+
+  ## The residual class the per-character rule left behind.  `C:\out\` and a
+  ## bash-escaped `C:\\out\\` are each unambiguous **given their producer** and
+  ## contradictory without one, so no context-free rule parses both: the
+  ## function has to be told, and `CommandLineDialect` is how.  Every case here
+  ## runs on Linux and exercises *both* sides, which a `when defined(windows)`
+  ## could not — that is the point of making the dialect a runtime parameter.
+  ##
+  ## `cldAuto` is what production passes, because nothing in a transcript
+  ## records the agent's OS.  Its claim is stated below as an assertion rather
+  ## than a comment: for each line, `cldAuto` must return what the dialect that
+  ## *actually wrote* that line returns.
+
+  test "a bash-escaped Windows path collapses its doubled separators":
+    # A command line can arrive bash-escaped or Windows-literal and both are
+    # legitimate, so fixing one must not trade away the other.  Every
+    # backslash run here is even, which is the signature of POSIX doubling —
+    # and the wrong-but-plausible answer the doubled path would otherwise name
+    # is asserted against by name.
+    check splitCommandLine("ct review collect -o C:\\\\out\\\\review.json") ==
+      @["ct", "review", "collect", "-o", "C:\\out\\review.json"]
+    check recognised("ct review collect -o C:\\\\out\\\\review.json") ==
+      "collect:C:\\out\\review.json"
+    check recognised("ct review collect -o C:\\\\out\\\\review.json") !=
+      "collect:C:\\\\out\\\\review.json"
+    check recognised("ct agent evidence C:\\\\Users\\\\dev\\\\review.json") ==
+      "handoff:C:\\Users\\dev\\review.json"
+    # A bash-escaped UNC path leads with FOUR backslashes; halving takes it
+    # back to the two a UNC path has.  The literal spelling (runs 2, 1, 1) is
+    # not all-even and is left alone — that case is in the Windows suite, and
+    # the pair is what shows the rule distinguishes them rather than picking
+    # one and hoping.
+    check splitCommandLine(
+        "\\\\\\\\build-server\\\\artifacts\\\\review.json") ==
+      @["\\\\build-server\\artifacts\\review.json"]
+
+  test "a trailing separator does not swallow the next argument":
+    # `--output` names a directory, and a Windows one is commonly written with
+    # its separator — but with an argument after it, the backslash was read as
+    # an escaped space and the two arguments were glued into one, yielding
+    # `C:\out --diff`: a string that looks like a path, is not one, and is not
+    # what the agent wrote.
+    check splitCommandLine(
+        "ct review collect -o C:\\out\\ --diff main..HEAD") ==
+      @["ct", "review", "collect", "-o", "C:\\out\\", "--diff", "main..HEAD"]
+    check recognised("ct review collect -o C:\\out\\ --diff main..HEAD") ==
+      "collect:C:\\out\\"
+    check recognised("ct review collect -o C:\\out\\ --diff main..HEAD") !=
+      "collect:C:\\out --diff"
+    # The same line bash-escaped: the two fixes have to compose, because a
+    # doubled separator immediately before an argument boundary is both cases
+    # at once.
+    check splitCommandLine(
+        "ct review collect -o C:\\\\out\\\\ --diff main..HEAD") ==
+      @["ct", "review", "collect", "-o", "C:\\out\\", "--diff", "main..HEAD"]
+
+  test "a quoted Windows path ending in a separator still closes its quote":
+    # `\"` was read as an escaped quote, so the quoted region never closed and
+    # the token ran to end of line carrying a `"` — a character no Windows
+    # path may contain, which is how you know that reading cannot be the
+    # intended one.
+    check splitCommandLine(
+        "ct review collect -o \"C:\\Program Files\\out\\\"") ==
+      @["ct", "review", "collect", "-o", "C:\\Program Files\\out\\"]
+    check recognised("ct review collect -o \"C:\\Program Files\\out\\\"") ==
+      "collect:C:\\Program Files\\out\\"
+    check recognised("ct review collect -o \"C:\\Program Files\\out\\\"") !=
+      "collect:C:\\Program Files\\out\""
+    # And the quote really closed, rather than the line merely having ended:
+    # an argument after it is a separate argument.
+    check splitCommandLine(
+        "ct review collect -o \"C:\\Program Files\\out\\\" --diff main") ==
+      @["ct", "review", "collect", "-o", "C:\\Program Files\\out\\",
+        "--diff", "main"]
+
+  test "a Windows path with a shell-escaped space keeps both halves":
+    # THE HYBRID, and the case a first attempt at this rule regressed.  This
+    # is a Windows path — single `\` separators, left alone — with only the
+    # *space* escaped, which is what git-bash, WSL or any shell-quoting agent
+    # harness emits for the two commonest spaced Windows paths there are.
+    #
+    # Locally it is indistinguishable from `C:\out\ --diff`: both carry a
+    # literal backslash before the escaped whitespace.  So a rule that
+    # withdraws the escape on that evidence alone truncates this path to
+    # `C:\Program\` and orphans the rest — a wrong-but-plausible dataset, the
+    # failure this module exists to prevent.  What separates them is only what
+    # FOLLOWS: more path here, a flag there.
+    check splitCommandLine(
+        "ct review collect -o C:\\Program\\ Files\\out\\r.json") ==
+      @["ct", "review", "collect", "-o", "C:\\Program Files\\out\\r.json"]
+    check recognised(
+        "ct review collect -o C:\\Program\\ Files\\out\\r.json") ==
+      "collect:C:\\Program Files\\out\\r.json"
+    check recognised(
+        "ct review collect -o C:\\Program\\ Files\\out\\r.json") !=
+      "collect:C:\\Program\\"
+    check recognised(
+        "ct agent evidence C:\\Users\\John\\ Doe\\review.json") ==
+      "handoff:C:\\Users\\John Doe\\review.json"
+    check recognised(
+        "ct agent evidence C:\\Users\\John\\ Doe\\review.json") !=
+      "handoff:C:\\Users\\John\\"
+    # A spaced directory with no further separator after it — the escape has
+    # to survive here too, and the lookahead sees an ordinary word rather than
+    # a flag.
+    check splitCommandLine("ct agent evidence C:\\Users\\John\\ Doe") ==
+      @["ct", "agent", "evidence", "C:\\Users\\John Doe"]
+
+  test "the hybrid spelling belongs to neither pure dialect, by design":
+    # Stated as an assertion so nobody can later "simplify" auto into a vote
+    # between the two dialects: for this line BOTH pure readings are wrong,
+    # and auto is deliberately a third answer.  That is not the defect the
+    # `agrees with whichever dialect` case guards against — that case is about
+    # lines which HAVE a dialect; this one has none.
+    const Hybrid = "ct review collect -o C:\\Program\\ Files\\out\\r.json"
+    check splitCommandLine(Hybrid) != splitCommandLine(Hybrid, cldPosix)
+    check splitCommandLine(Hybrid) != splitCommandLine(Hybrid, cldWindows)
+    # And neither pure reading names the path that was written, which is why
+    # picking one of them wholesale is not an option.
+    check splitCommandLine(Hybrid, cldPosix) ==
+      @["ct", "review", "collect", "-o", "C:Program Filesoutr.json"]
+    check splitCommandLine(Hybrid, cldWindows) ==
+      @["ct", "review", "collect", "-o", "C:\\Program\\", "Files\\out\\r.json"]
+
+  test "the escaped space survives being written with doubled separators":
+    # Rules 2 and 3 composing: a fully shell-quoted Windows path doubles its
+    # separators AND escapes its space.  Here the answer IS `cldPosix`'s, and
+    # auto must reach it — an earlier form of rule 2 produced
+    # `C:\\Program\` + `Files\out\r.json`, which agreed with neither dialect.
+    const Escaped = "ct review collect -o C:\\\\Program\\ Files\\\\out\\\\r.json"
+    check splitCommandLine(Escaped) ==
+      @["ct", "review", "collect", "-o", "C:\\Program Files\\out\\r.json"]
+    check splitCommandLine(Escaped) == splitCommandLine(Escaped, cldPosix)
+    check recognised(Escaped) == "collect:C:\\Program Files\\out\\r.json"
+
+  test "a trailing separator before a positional argument is the stated loss":
+    # THE ADMITTED COST of the lookahead, pinned so it is a decision rather
+    # than a surprise.  `-o C:\out\ report.json` is locally identical to
+    # `C:\Users\John\ Doe\review.json` and differs only in what follows, so
+    # one of the two must lose; the rarer one does.  `-o`/`--output` is
+    # followed by another flag or by end of line in every spelling this
+    # recogniser accepts, while `C:\Program Files` and `C:\Users\John Doe` are
+    # the commonest spaced Windows paths in existence.
+    #
+    # If this case is ever made to win, `a Windows path with a shell-escaped
+    # space keeps both halves` is what must be re-checked first.
+    check splitCommandLine("ct review collect -o C:\\out\\ report.json") ==
+      @["ct", "review", "collect", "-o", "C:\\out report.json"]
+    # The two shapes the loss does NOT cover, because the lookahead sees
+    # something that cannot continue a path: a flag, and end of line.
+    check splitCommandLine("ct review collect -o C:\\out\\ --diff main") ==
+      @["ct", "review", "collect", "-o", "C:\\out\\", "--diff", "main"]
+    check splitCommandLine("ct review collect -o C:\\out\\ ") ==
+      @["ct", "review", "collect", "-o", "C:\\out\\"]
+
+  test "each dialect parses its own spelling, and they genuinely disagree":
+    # The disambiguation argument, made executable.  These two lines are each
+    # unambiguous to the shell that wrote them and each *mis*-parsed by the
+    # other's rules, so no single context-free reading can serve both — which
+    # is why the dialect is a parameter at all.
+    const WindowsLine = "ct review collect -o C:\\out\\ --diff main..HEAD"
+    const PosixLine = "ct review collect -o /home/a\\ b/out --diff main..HEAD"
+
+    check splitCommandLine(WindowsLine, cldWindows) ==
+      @["ct", "review", "collect", "-o", "C:\\out\\", "--diff", "main..HEAD"]
+    # What bash would really have done with the very same bytes: `\o` is `o`,
+    # `\ ` is a space, and the two arguments become one.
+    check splitCommandLine(WindowsLine, cldPosix) ==
+      @["ct", "review", "collect", "-o", "C:out --diff", "main..HEAD"]
+
+    check splitCommandLine(PosixLine, cldPosix) ==
+      @["ct", "review", "collect", "-o", "/home/a b/out", "--diff",
+        "main..HEAD"]
+    # And what cmd.exe would have done with those: `\` is a separator, so the
+    # space delimits and one argument becomes two.
+    check splitCommandLine(PosixLine, cldWindows) ==
+      @["ct", "review", "collect", "-o", "/home/a\\", "b/out", "--diff",
+        "main..HEAD"]
+
+    # `cldWindows` is the *shell* reading, not MSVCRT's.  MSVCRT's
+    # backslash-run rule makes `"C:\out\"` into `C:\out"`; that is a known CRT
+    # trap rather than an intent, and `"` is not a legal Windows path
+    # character, so reproducing it would name a wrong-but-plausible dataset.
+    # POSIX reaches the same wrong-looking place by its own route (`\"` is an
+    # escaped quote, so the region never closes), which is the contrast.
+    check splitCommandLine("\"C:\\out\\\"", cldWindows) == @["C:\\out\\"]
+    check splitCommandLine("\"C:\\out\\\"", cldWindows) != @["C:\\out\""]
+    check splitCommandLine("\"C:\\out\\\"", cldPosix) == @["C:\\out\""]
+
+  test "the auto reading agrees with whichever dialect wrote the line":
+    # `cldAuto`'s claim FOR LINES THAT HAVE A DIALECT, and the only thing
+    # production relies on for them.  Stated as an equality against the
+    # explicit dialects so that a change to the heuristic cannot quietly land
+    # on a *third* answer that belongs to neither shell — which is what the
+    # previous per-character rule was.
+    #
+    # Lines written in BOTH at once are not in scope here and are not a defect
+    # — they have no dialect to agree with.  They are covered by `the hybrid
+    # spelling belongs to neither pure dialect, by design` and by `a dialect is
+    # per call…`, which assert the *inequality* on purpose.
+    for line in [
+        "ct review collect -o C:\\out\\ --diff main..HEAD",
+        "ct review collect -o C:\\out\\review.json",
+        "ct agent evidence C:\\Users\\dev\\review.json",
+        "ct review collect -o \"C:\\Program Files\\out\\\" --diff main",
+        "ct agent evidence \\\\build-server\\artifacts\\review.json",
+        "ct review collect -o out\\"]:
+      check splitCommandLine(line) == splitCommandLine(line, cldWindows)
+    for line in [
+        "ct review collect -o C:\\\\out\\\\review.json",
+        "ct agent evidence /home/a\\ b/review.json",
+        "ct agent evidence a\\\"b/review.json",
+        "ct review collect -o \\\\\\\\build\\\\artifacts\\\\r.json",
+        # The fully shell-quoted Windows path: doubled separators AND an
+        # escaped space.  `cldPosix` gets this one exactly right, so auto has
+        # a dialect to agree with and must.
+        "ct review collect -o C:\\\\Program\\ Files\\\\out\\\\r.json",
+        "ct agent evidence C:\\\\Users\\\\John\\ Doe\\\\review.json"]:
+      check splitCommandLine(line) == splitCommandLine(line, cldPosix)
+
+  test "a dialect is per call, so one line still carries both readings":
+    # The parameter does not replace the per-token rule, it backs it: a line
+    # whose provenance is unknown may legitimately mix an escaped space with a
+    # Windows path, and `cldAuto` must keep getting that right.  Asserted here
+    # as well as in the POSIX suite because this is the case that rules out
+    # "sniff the line once and pick a dialect" as an implementation of auto.
+    const Mixed =
+      "env CT_LOG=/home/a\\ b/log ct review collect -o C:\\out\\ --diff main"
+    check splitCommandLine(Mixed) ==
+      @["env", "CT_LOG=/home/a b/log", "ct", "review", "collect", "-o",
+        "C:\\out\\", "--diff", "main"]
+    check recognised(Mixed) == "collect:C:\\out\\"
+    # Neither whole-line dialect gets this line right, which is the proof that
+    # auto is not secretly one of them.
+    check splitCommandLine(Mixed, cldPosix) != splitCommandLine(Mixed)
+    check splitCommandLine(Mixed, cldWindows) != splitCommandLine(Mixed)
+
+  test "rule 2's evidence is per token, not per line":
+    # "Per token, never per line" is claimed three times in the module and was
+    # NOT proven by the case above: that line puts the POSIX-escaped token
+    # FIRST, before any literal backslash has been seen, so a splitter that
+    # kept the evidence for the whole line would pass it unchanged.
+    #
+    # Reversing the order is what separates them.  Here the Windows token
+    # comes first and sets the evidence; the POSIX token that follows must be
+    # judged on its own, with the flag reset.  Under a per-LINE flag the `\'`
+    # in the last token is withdrawn instead of escaping, the `'` opens a
+    # quoted region that never closes, and the token becomes
+    # `/home/u/it\s/log`.
+    const Reversed =
+      "ct review collect -o C:\\out\\ --log /home/u/it\\'s/log"
+    check splitCommandLine(Reversed) ==
+      @["ct", "review", "collect", "-o", "C:\\out\\", "--log",
+        "/home/u/it's/log"]
+    check splitCommandLine(Reversed) !=
+      @["ct", "review", "collect", "-o", "C:\\out\\", "--log",
+        "/home/u/it\\s/log"]
+    # The same shape for the whitespace half of rule 2: a fresh token's
+    # escaped space must survive a Windows token earlier on the line, even
+    # when a flag follows it — the exact combination a per-line flag gets
+    # wrong, because the lookahead alone would then withdraw the escape.
+    const ReversedSpace =
+      "ct review collect -o C:\\out\\ --log a\\ -b --diff main"
+    check splitCommandLine(ReversedSpace) ==
+      @["ct", "review", "collect", "-o", "C:\\out\\", "--log", "a -b",
+        "--diff", "main"]
 
 suite "AA-3 only a tool call counts as evidence":
 

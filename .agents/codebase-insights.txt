@@ -3235,3 +3235,82 @@ commands.
   DOM (`ctPage.evaluate(() => el.outerHTML)`); the `#auto-hide-docked-bottom-content`
   dump is what finally showed the mutant class still present. Confirm
   `build-once` exited 0 before trusting any GUI e2e result.
+- 2026-09-14: A COMMAND LINE CANNOT BE SPLIT WITHOUT KNOWING WHICH SHELL WROTE
+  IT, and `viewmodels/evidence_call_vm.nim`'s `splitCommandLine` now says so in
+  its signature (`dialect: CommandLineDialect = cldAuto`). `\` ESCAPES on a
+  POSIX shell and SEPARATES on cmd.exe/PowerShell, and the two readings are
+  mutually exclusive, not merely different — the proof is a pair of inputs each
+  unambiguous on its own: `-o C:\out\ --diff` needs `\ ` to be a separator plus
+  a delimiter or the two arguments glue into one, while `CT_LOG=/home/a\ b/log`
+  needs `\ ` to be an escaped space or one argument splits into two. Any single
+  context-free per-character rule trades one of these for the other, which is
+  how the previous "escape only before a delimiter" rule was reached and why it
+  left four residuals behind.
+  The dialect is a RUNTIME parameter, deliberately not `when defined(windows)`:
+  the producer is an agent session and the reader is whoever opens it later, so
+  they need not be the same machine (the reported case is a Windows agent's
+  dataset opened in a Linux CodeTracer), and both CI lanes being Linux means a
+  `defined(windows)` arm would execute zero assertions while looking covered.
+  `cldAuto` is what production passes because NOTHING RECORDS THE AGENT'S OS —
+  not `AgentActivityMessageEntry`, not ACP's `tool_call.title`, not Agent
+  Harbor's shell events. Giving the splitter a real dialect is therefore a
+  change to the PRODUCERS, not to the recogniser. Auto decides per TOKEN, never
+  per line, because one line legitimately carries both readings.
+  THE TRAP INSIDE AUTO, worth the space because the obvious rule is wrong and
+  its wrongness is silent. It is tempting to say a token carrying a literal
+  backslash cannot be POSIX-escaped, since the POSIX reading would have to call
+  it a pointless escape (`\o` in `C:\out`). That holds for QUOTES — `'` and `"`
+  are not legal Windows path characters, so `\"` in such a token is a trailing
+  separator meeting a closing quote. IT DOES NOT HOLD FOR WHITESPACE. A token
+  can be Windows-shaped AND POSIX-escaped at once:
+      C:\Program\ Files\out\r.json
+  is what git-bash/WSL/any shell-quoting harness emits for the commonest spaced
+  Windows path there is — single separators, only the space escaped — and its
+  `\ ` is a genuine, necessary escape. Withdrawing the escape on the
+  literal-backslash evidence alone truncates it to `C:\Program\` and orphans
+  the rest: a wrong-but-plausible dataset path, the exact failure this module
+  exists to prevent. It is locally IDENTICAL to `-o C:\out\ --diff`, which
+  needs the opposite reading, so only LOOKAHEAD separates them: what follows
+  the escaped whitespace is more path in one case and a flag in the other.
+  `continuesTheSamePath` is that lookahead — a flag is the one argv token that
+  can never be a path continuation. STATED LOSS: a trailing separator followed
+  by a POSITIONAL argument (`-o C:\out\ report.json`) reads as one token. The
+  two classes cannot both win; the rarer one loses, and `-o`/`--output` is
+  followed by a flag or by end of line in every spelling this recogniser
+  accepts.
+  `cldWindows` is the SHELL reading, not MSVCRT's `CommandLineToArgvW`
+  backslash-run rule. That rule turns `"C:\dir\"` into `C:\dir"` — a string no
+  Windows path may contain, since `"` is not a legal path character. It is a
+  known CRT trap rather than an intent, and reproducing it would name a
+  wrong-but-plausible dataset, which is the whole failure class this module
+  exists to prevent. cmd.exe and PowerShell both read it as `C:\dir\`.
+  Also: `commandBaseName`'s `.exe` test folded case while the name comparison
+  did not, so `ct.EXE` was accepted and `CT.EXE` refused. Half a fold is not a
+  rule. The name test now lives in `namesCtBinary` and folds case there.
+- 2026-09-14: A path containing an apostrophe (`C:\Users\O'Brien\review.json`)
+  is mis-split by `splitCommandLine` in ALL THREE dialects: the `'` opens a
+  single-quote region, and because nothing closes it the apostrophe is
+  SWALLOWED and the remainder appended — `C:\Users\OBrien\review.json`, not a
+  truncation. Pre-existing at HEAD and unchanged; fixing it needs a "`'` quotes
+  only at a token boundary" rule that no reported case asks for.
+- 2026-09-14: `src/tests/gui/tests/views/isonim_views_test.nim` DOES NOT report
+  "465 OK, 0 FAILED" any more, contrary to the note above about the raising
+  mock-DOM lookups. Measured at 9aad6671 with the tree otherwise pristine, on
+  the JS backend: 465 OK and 3 FAILED — `loadStepLinesFor emits
+  ct/load-step-lines with location + count` and `loadStepLinesFor falls back to
+  default panel height when unset` (both `InvalidDapCommandDefect`: the engine
+  has no `ct/load-step-lines`) plus `diff previews and terminals preserve legacy
+  ids` (`MockNodeNotFoundError` for class `agent-editor`). They are unrelated to
+  anything in the AA-3 evidence chain; do not read them as a regression from an
+  evidence/agent-activity change.
+- 2026-09-14: To compile ANY test that reaches
+  `views/isonim_agent_activity_view.nim` by hand, you need BOTH `nim js` and
+  `-d:nimNoLentIterators`. Without the JS target it dies on an `importjs`
+  pragma; with the JS target but no define it dies on `'seg' is of type <lent
+  MsgSegment> which cannot be captured`. The define is in
+  `appimage-scripts/build_with_nim.sh`'s NIM_COMMON_FLAGS, so the real builds
+  have it and only a hand-typed `nim js` does not. Affects
+  `agent_activity_evidence_view_test.nim`, `agent_activity_test_run_view_test.nim`
+  AND `views/isonim_views_test.nim` — the `vm-js` lane is red today on all three,
+  because `ci/lib/test-lane-files.sh` passes only `--path:src/frontend/viewmodel`
+  for that lane. Tracked separately; not fixed here.
