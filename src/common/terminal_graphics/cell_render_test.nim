@@ -53,7 +53,7 @@ template ckEq(a, b: untyped) =
   inc countedAssertions
   check a == b
 
-const ExpectedAssertions = 787
+const ExpectedAssertions = 798
   ## Written from a run. See the final case.
 
 # ---------------------------------------------------------------------------
@@ -455,6 +455,31 @@ suite "PLAT-14 deliverables 1 and 2: the rendering":
     # THE POSITIVE TWIN: the same raster at a drawable tier and a real fit
     # produces a grid, so the two refusals are about their arguments.
     ckEq renderCells(solid(4, 4, Red), itHalfBlock, SquareFit).cells.len, 8
+    # THE SET THE REFUSAL ASKS, BY ENUMERATION — `CellRenderableTiers` is
+    # written as `DrawableTiers - {itProtocol}`, and a derived set is ONE
+    # EXPRESSION, which is the thing that can be wrong while its name goes on
+    # reading correctly. PLAT-15's landing pass added this: the same predicate
+    # is what `app/views/frame_viewer.resolveGap` asks BEFORE it paints, so a
+    # member here is a member there and the renderer's refusal and the pane's
+    # pre-check cannot come apart (Verification-Harness-Traps §14).
+    ckEq CellRenderableTiers, {itHalfBlock, itQuadrant, itSextant, itBraille,
+                               itAscii}
+    # AND THE TWO SETS DIFFER IN EXACTLY ONE TIER, in the direction that
+    # matters: tier 0 DRAWS (it emits an escape payload) and is NOT renderable
+    # as cells. Asserted both ways round, because "drawable" reading as
+    # "renderable" is the whole of the defect this case was extended for.
+    ck itProtocol in DrawableTiers
+    ck itProtocol notin CellRenderableTiers
+    ck itOctant notin DrawableTiers
+    ck itOctant notin CellRenderableTiers
+    # …AND EVERY MEMBER ACTUALLY RENDERS, through the same function, so the set
+    # is a claim about the renderer rather than a literal agreeing with a
+    # comment (§4d).
+    var rendered = 0
+    for tier in CellRenderableTiers:
+      ck renderCells(solid(4, 4, Red), tier, SquareFit).cells.len > 0
+      inc rendered
+    ckEq rendered, 5
 
   test "a raster whose buffer does not match its extent is refused":
     var refused = false

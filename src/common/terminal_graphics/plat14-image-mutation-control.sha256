@@ -16,8 +16,8 @@
 # arms aimed at it re-run — §16a: a repair that tightens can
 # disarm an arm whose needle still resolves.
 
-bee9a5d0a54147f350edbabfe6504772c6f6d5026ed68ffb1aeeb0438c56c36c  src/common/terminal_graphics/tiers.nim
-fcbdfcd31739faa1b8a685128f111a42b45af39fb6dc3597ac50cc16e3fd6736  src/common/terminal_graphics/cell_render.nim
+864c50b73580ec40c76d148b8ce30150252da5c7f17f62083514c411734f572f  src/common/terminal_graphics/tiers.nim
+a500b01f40ac681c6d737ef7303c1959f254874e31e15f05ab0d3aaabf807c03  src/common/terminal_graphics/cell_render.nim
 5d83217c45ebac3847ee74e0779411af02fc14eec579fc8dead23478552771be  src/common/terminal_graphics/aspect.nim
 1f987222073b2cc5144b68c6b9aba2b0f91709a1104faf4ca65d7b7e4c116325  src/common/terminal_graphics/oklab.nim
 445e6ec5613470dfbc0e8e1060823b2959cad201b2fc710cf07e28ad5aaf1417  src/common/terminal_graphics/emit.nim

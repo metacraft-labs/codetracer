@@ -47,6 +47,17 @@
 ## See `tiers.nim`'s header. `glyphFor` raises `CellRenderError` naming the
 ## reason; it does not fall back to a neighbouring tier, because a silent
 ## substitution would make "the pane declares its tier in its title" (§4) a lie.
+##
+## ## SO DOES `itProtocol`, AND `renderCells` ASKS ONE SET ABOUT BOTH
+##
+## `renderCells` accepts exactly `tiers.CellRenderableTiers` and refuses
+## everything else through `glyphFor`, which carries a message per reason.
+## **That set is also what a caller asks BEFORE it paints** — one predicate, two
+## callers, so a pane cannot be told "yes" by one spelling and refused by the
+## other. PLAT-15's landing pass is why this is written down: the pane asked
+## `DrawableTiers`, which CONTAINS `itProtocol`, and the refusal below reached a
+## user as an exception out of the shell's paint rather than as the report §2.6
+## asks for.
 
 import std/[math, unicode]
 
@@ -184,26 +195,44 @@ type
     rgbs: seq[Rgb]
     labs: seq[Oklab]
 
+func sourceRectOfSubCell*(sourceWidth, sourceHeight: int; fit: CellFit;
+                          tier: ImageTier; gx, gy: int): PixelRect =
+  ## The SOURCE-PIXEL rectangle one SUB-CELL covers, where `(gx, gy)` indexes
+  ## the SUB-CELL grid — `fit.cols * subCell(tier).cols` wide by
+  ## `fit.rows * subCell(tier).rows` tall.
+  ##
+  ## Computed from the SUB-CELL grid rather than from the cell grid, so the
+  ## division happens once and the last cell's overhang is the clamp in
+  ## `raster.pixelAt` rather than a rounding that would drop a column of
+  ## pixels.
+  ##
+  ## EXPORTED BY PLAT-15, and the export is the point rather than a
+  ## convenience. `magnifier.coarsePixelRect` has to say which source pixels a
+  ## CELL covers — which is §5's entire argument for why a magnifier is needed
+  ## at all — and a second copy of this arithmetic would be a second thing that
+  ## can be wrong while its twin goes on agreeing with itself
+  ## (Verification-Harness-Traps §14). There is one copy, `sampleCell` below
+  ## calls it, and the magnifier calls the same function.
+  let geom = subCell(tier)
+  let subCols = max(1, fit.cols * geom.cols)
+  let subRows = max(1, fit.rows * geom.rows)
+  let x0 = gx * sourceWidth div subCols
+  let x1 = max(x0 + 1, (gx + 1) * sourceWidth div subCols)
+  let y0 = gy * sourceHeight div subRows
+  let y1 = max(y0 + 1, (gy + 1) * sourceHeight div subRows)
+  PixelRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+
 func sampleCell(img: RgbaImage; fit: CellFit; tier: ImageTier;
                 col, row: int): CellSamples =
   let geom = subCell(tier)
-  let subCols = fit.cols * geom.cols
-  let subRows = fit.rows * geom.rows
   result.rgbs = newSeq[Rgb](geom.cols * geom.rows)
   result.labs = newSeq[Oklab](geom.cols * geom.rows)
   for sy in 0 ..< geom.rows:
     for sx in 0 ..< geom.cols:
       let gx = col * geom.cols + sx
       let gy = row * geom.rows + sy
-      # The source rectangle this sub-cell covers, computed from the SUB-CELL
-      # grid rather than from the cell grid, so the division happens once and
-      # the last cell's overhang is the clamp in `raster.pixelAt` rather than a
-      # rounding that would drop a column of pixels.
-      let x0 = gx * img.width div subCols
-      let x1 = max(x0 + 1, (gx + 1) * img.width div subCols)
-      let y0 = gy * img.height div subRows
-      let y1 = max(y0 + 1, (gy + 1) * img.height div subRows)
-      let c = img.boxSample(x0, y0, x1, y1)
+      let r = sourceRectOfSubCell(img.width, img.height, fit, tier, gx, gy)
+      let c = img.boxSample(r.x, r.y, r.x + r.width, r.y + r.height)
       let index = sy * geom.cols + sx
       result.rgbs[index] = c
       result.labs[index] = toOklab(c)
@@ -269,14 +298,17 @@ func renderCells*(img: RgbaImage; tier: ImageTier; fit: CellFit;
   ## function never recomputes it: the correction is a property of the
   ## RENDERING and is on the model so a test can assert it, and a second
   ## derivation here would be a second answer to the same question.
-  if tier notin DrawableTiers:
-    # Reaching `glyphFor` for the diagnosis rather than writing a second one:
-    # one message, one place.
+  if tier notin CellRenderableTiers:
+    # ONE PREDICATE AND ONE MESSAGE. `CellRenderableTiers` is the set a CALLER
+    # asks before it paints (`app/views/frame_viewer.resolveGap`), so the
+    # refusal here and the pre-check there are the same question asked through
+    # the same function (Verification-Harness-Traps §14); and the diagnosis is
+    # `glyphFor`'s, which already has an arm naming the reason for each of the
+    # two non-members — the octant's missing table and tier 0's
+    # `emit.emitProtocolImage`. This used to be two guards, the second of which
+    # wrote a second protocol message beside the first; the pane that met it
+    # could report neither.
     discard glyphFor(tier, 0)
-  if tier == itProtocol:
-    raise newException(CellRenderError,
-      "terminal_graphics.renderCells was called with tier 'protocol'; a " &
-      "graphics-protocol emission is emit.emitProtocolImage")
   if fit.cols <= 0 or fit.rows <= 0:
     raise newException(CellRenderError,
       "cell fit is empty (" & $fit.cols & "x" & $fit.rows & "); " &

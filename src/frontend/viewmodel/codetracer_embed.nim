@@ -246,6 +246,37 @@ import viewmodels/request_panel_vm
 export request_panel_vm
 
 # ---------------------------------------------------------------------------
+# Visual replay (PLAT-15)
+#
+# `CodeTracer-TUI-Graphics.md` §1: "the hard part is already done elsewhere …
+# `frame_viewer_vm.nim`, `pixel_history_vm.nim` and `visual_replay_client.nim`
+# already exist in the ViewModel layer. **The terminal needs a view, not an
+# engine.**" A view in `src/frontend/tui/app/` may reach exactly one door, and
+# these three were not behind it — so PLAT-15's binding could not have been
+# written without either widening the facade or breaking the layer rule.
+#
+# EXPORTING THEM ADDS NOTHING TO THE FACADE'S IMPORT GRAPH, and that is
+# measured rather than assumed: all three import only `std/*`,
+# `isonim/core/*`, `isonim/viewmodel` and `store/replay_data_store`, every one
+# of which the facade already carries. `ci/test/sdk-facade-boundary.sh`'s
+# inward check is what holds that claim — none of the three reaches a
+# renderer, a layout engine, a DOM, a chain concept or `std/osproc`.
+#
+# `visual_replay_client` is exported BESIDE the two ViewModels rather than
+# left private, for `flow_layout`'s reason: without
+# `VisualReplayPixelHistoryEntry` and `VisualReplayDrawCall` in scope, a
+# consumer holding a `PixelHistoryVM` cannot read one entry out of it, and a
+# ViewModel whose value type is private is not a usable export.
+import viewmodels/visual_replay_client
+export visual_replay_client
+
+import viewmodels/frame_viewer_vm
+export frame_viewer_vm
+
+import viewmodels/pixel_history_vm
+export pixel_history_vm
+
+# ---------------------------------------------------------------------------
 # Source access (CTUI-4)
 #
 # `SourceVM` is a windowed, revision-identified view of the active file, and

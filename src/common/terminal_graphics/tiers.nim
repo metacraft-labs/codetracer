@@ -53,6 +53,17 @@
 ##     the enum because §2.1's table has seven rows and a model that silently
 ##     had six would disagree with the document it implements.
 ##
+## ## AND "DRAWABLE" IS NOT "RENDERABLE AS CELLS" — TWO SETS, NOT ONE
+##
+## `DrawableTiers` says a tier produces bytes for a terminal; `itProtocol` does,
+## and they are an escape payload rather than a grid of cells.
+## `CellRenderableTiers` is the set `cell_render.renderCells` will actually
+## render, and it is the one a CELL painter must ask. PLAT-15's landing pass is
+## why both exist: a pane asked the first before painting and met the second's
+## refusal at draw time, on a Kitty terminal, as an exception that escaped the
+## whole shell paint. Each set is now named for exactly what it admits, and the
+## second is derived from the first so they cannot drift.
+##
 ## ## A DEVIATION FROM §2.1'S "Needs" COLUMN, IN THE SAFE DIRECTION
 ##
 ## §2.1 lists quadrants as needing "Unicode 1.1". They are U+2596-U+259F, added
@@ -124,7 +135,32 @@ const
 
   DrawableTiers* = {itProtocol, itHalfBlock, itQuadrant, itSextant,
                     itBraille, itAscii}
-    ## The tiers that produce bytes. `itOctant` is absent — see the header.
+    ## The tiers that produce BYTES FOR A TERMINAL, one way or another.
+    ## `itOctant` is absent — see the header.
+    ##
+    ## **`itProtocol` IS A MEMBER AND `cell_render.renderCells` REFUSES IT.**
+    ## That is not a contradiction — tier 0 produces bytes, they are simply an
+    ## escape payload rather than a grid of cells — but it is a trap for a
+    ## caller that reads the name as "I may render this", and PLAT-15's landing
+    ## pass paid for it: a pane asked THIS set before painting, was told yes for
+    ## a Kitty terminal, and met a `CellRenderError` from `renderCells` that
+    ## escaped the whole shell paint. **A caller that draws CELLS must ask
+    ## `CellRenderableTiers` below.**
+
+  CellRenderableTiers* = DrawableTiers - {itProtocol}
+    ## The tiers `cell_render.renderCells` will render: every drawable tier
+    ## except tier 0, whose emission is `emit.emitProtocolImage`'s escape
+    ## payload and has no cells at all.
+    ##
+    ## DERIVED FROM `DrawableTiers` rather than written out, and asked by BOTH
+    ## `renderCells`'s own guard and by every caller that has to decide before
+    ## it paints (`app/views/frame_viewer.resolveGap`,
+    ## `magnifier.magnifiedRaster`). Verification-Harness-Traps §14: one
+    ## predicate, one definition, the rule and its pre-check both calling it —
+    ## so "may I render this?" and "will the renderer accept this?" cannot come
+    ## to differ. The members are `{itHalfBlock, itQuadrant, itSextant,
+    ## itBraille, itAscii}`; `cell_render_test.nim` asserts that set by
+    ## enumeration rather than trusting the subtraction.
 
 func subCell*(tier: ImageTier): SubCell =
   ## §2.1's geometry column.

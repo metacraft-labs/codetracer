@@ -95,6 +95,14 @@ type
       ## frame to put one in. Their zero values are the EMPTY models
       ## `app/views/shell.nim` already documents as its default, so a `TuiApp`
       ## that never fills them paints exactly the screen it painted before.
+    frameViewer*: FrameViewerModel
+      ## PLAT-15's frame viewer, magnifier and pixel history, as a value, on
+      ## exactly the rule `source` above states.
+      ##
+      ## CLOSED BY DEFAULT (`FrameViewerModel.open` is false), so a host that
+      ## never fills it paints exactly the screen it painted before — which is
+      ## what keeps every golden in this repository byte-identical. A host sets
+      ## it once per frame from what `app/frame_viewer_binding.nim` produced.
     notification*: string
       ## §3.3.6's message line. Owned here rather than recomputed per frame so
       ## the answer to the last command survives until the next one.
@@ -214,7 +222,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     callStack: app.callStack,
     variables: app.variables,
     timeline: app.timeline,
-    eventLog: app.eventLog)
+    eventLog: app.eventLog,
+    frameViewer: app.frameViewer)
 
 proc enableLayoutBinding*(app: TuiApp; width, height: int): LayoutBinding =
   ## Give this application a layout the user can rearrange (PLAT-6).

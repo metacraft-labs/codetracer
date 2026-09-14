@@ -12,6 +12,10 @@
 ##   * `oklab` — §2.3's perceptual space.
 ##   * `aspect` — §2.4's correction, visible in the model.
 ##   * `cell_render` — the per-cell argmin over (glyph, fg, bg).
+##   * `magnifier` — PLAT-15 §5's two-stage pixel picking: which source pixels
+##     one cell shows, and the magnified overlay in which one source pixel is
+##     one or more whole cells so a coordinate can be ADDRESSED rather than
+##     inferred.
 ##   * `media` — which §5.2 media types a resolved terminal can draw, which is
 ##     PLAT-12's `Budget.media` for a terminal surface.
 ##   * `emit` — THE BYTES. The only module that produces a string a terminal
@@ -29,7 +33,8 @@ import ./terminal_graphics/raster
 import ./terminal_graphics/oklab
 import ./terminal_graphics/aspect
 import ./terminal_graphics/cell_render
+import ./terminal_graphics/magnifier
 import ./terminal_graphics/emit
 import ./terminal_graphics/media
 
-export tiers, raster, oklab, aspect, cell_render, emit, media
+export tiers, raster, oklab, aspect, cell_render, magnifier, emit, media

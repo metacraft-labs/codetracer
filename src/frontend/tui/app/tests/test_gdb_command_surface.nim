@@ -156,7 +156,7 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 66
+  ExpectedAppModules = 69
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED five
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -179,6 +179,16 @@ const
     ## `tests/test_image_capability.nim`, because this walk is over `app/`
     ## RECURSIVELY and `app/tests/` is inside it.
     ##
+    ## RE-COUNTED ON 2026-09-14, when PLAT-15's terminal visual debugging added
+    ## THREE — `views/frame_viewer.nim` (the pane: the frame at its tier, §5's
+    ## magnifier overlay and §6.1's pixel-history list, as a pure function of a
+    ## value), `frame_viewer_binding.nim` (the only module in the terminal's
+    ## image path that names a `PaneDegradation`, on `source_binding.nim`'s own
+    ## split) and `tests/test_frame_viewer_pane.nim`. The child app and the
+    ## Tier-2 suite PLAT-15 also added live under `tests/apps/` and
+    ## `tests/real_terminal/`, which are OUTSIDE this walk by the layer rule —
+    ## they spawn a process and open a pty, which `app/` may not.
+    ##
     ## The number is deliberately brittle, and every one of those bumps is the
     ## shape it is meant to have: a new file under `app/` reddens this case on
     ## the spot and is re-counted in the same change, rather than silently
@@ -198,14 +208,24 @@ const
     ## `tests/test_capability_resolution.nim` rather than into a new file. A
     ## removal is re-counted exactly as an addition is.
 
-  ExpectedStyleLiterals = 166
+  ExpectedStyleLiterals = 174
     ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour
     ## a `pcMedia` value is painted in. The rest of that module's 514 lines went
     ## to `common/value_presentation/`, and none of them was a `CellStyle` — the
     ## style table is the part that is genuinely terminal and it stayed. A
     ## number that moved by one for a stated reason is what this constant is
     ## for; see the re-count notes above.
-  ExpectedStyledFiles = 20
+    ##
+    ## RE-COUNTED ON 2026-09-14: PLAT-15 moved it by EIGHT, all of them in the
+    ## one new painting module `views/frame_viewer.nim` — a title style, a
+    ## muted style, a degraded style, a pass style, a fail style, a selected
+    ## style, the magnifier cursor's `reverse`-only overlay and the
+    ## `DefaultCellStyle` an unselected history row carries. The pane paints
+    ## `#RRGGBB` for a RENDERED cell rather than a named colour, and
+    ## `app/theme/degradation.projectStyle` is what puts those on the rung the
+    ## terminal has — so the count above is the pane's own chrome and not its
+    ## picture.
+  ExpectedStyledFiles = 21
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##
     ## CTUI-10 counted 121 literals in 18 files and read them as "every colour

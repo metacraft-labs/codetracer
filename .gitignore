@@ -511,3 +511,22 @@ src/frontend/viewmodel/tests/unit/.plat13-executable-mutation.lock
 # the declarative-visualiser harness, so an arm there reddens this one's
 # unmutated control. Run one harness at a time.
 src/common/terminal_graphics/.plat14-image-mutation.lock
+
+# PLAT-15's mutation run lock — the exclusive `flock` taken by
+# `run-plat15-visual-mutations.py`, held for the whole run. A NINTH lock, for
+# the reason every one before it exists: a different subject set and a
+# different recorded control-digest file, so one lock shared with PLAT-14
+# would serialise two runs that have nothing to say to each other while still
+# leaving each free to corrupt the other's restores.
+#
+# (The two harnesses share TWO subject files — `cell_render.nim`, which
+# PLAT-15 exported `sourceRectOfSubCell` from, and `image_capability.nim`,
+# which PLAT-15's pane suite compiles — so they must not run at the same time.
+# That is a rule in both headers, not something either lock enforces for the
+# other.)
+#
+# IT IS LISTED HERE BECAUSE PLAT-14's WAS NOT, AND `git add -A` STAGED IT. A
+# run lock is a runtime artefact of a developer's own worktree; committing one
+# publishes a pid and a hostname and makes every subsequent run show a dirty
+# tree.
+src/common/terminal_graphics/.plat15-visual-mutation.lock

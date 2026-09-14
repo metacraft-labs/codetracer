@@ -110,6 +110,23 @@ CLI = "src/frontend/tui/app/cli.nim"
 
 TOUCHED = [TIERS, RENDER, ASPECT, OKLAB, EMIT, CAP, MEDIA, CLI]
 
+# TOUCHED IS SHARED WITH OTHER HARNESSES, AND THE OVERLAP IS ENUMERATED RATHER
+# THAN ASSUMED (the landing pass's own correction, 2026-09-14). As of PLAT-15:
+#
+#   * `cell_render.nim` is ALSO a subject of `run-plat15-visual-mutations.py`,
+#     which exported `sourceRectOfSubCell` from it so the magnifier's
+#     "which source pixels does this cell show?" is the RENDERER's own
+#     arithmetic rather than a second copy (§14). When it changes, BOTH
+#     harnesses' digests have to be re-recorded and BOTH harnesses' arms aimed
+#     at it re-run — §16a: a repair that tightens can disarm an arm whose
+#     needle still resolves.
+#   * `image_capability.nim` is ALSO a subject of that harness, for the same
+#     reason in the other direction: PLAT-15's pane is the first caller of
+#     `resolveImageCapability` in the product.
+#
+# Neither harness may run while the other does; the locks are per harness and
+# do not serialise against each other.
+
 RENDER_SUITE = "src/common/terminal_graphics/cell_render_test.nim"
 EMIT_SUITE = "src/common/terminal_graphics/emit_test.nim"
 CAP_SUITE = "src/frontend/tui/app/tests/test_image_capability.nim"
@@ -723,6 +740,38 @@ MUTATIONS: list[Mutation] = [
         control_name="the parse-failure test, written as an equality against false",
         control_find="            if not okTier:",
         control_replace="            if okTier == false:"),
+
+    # -- THE AUTOMATIC PATH'S TWIN OF THE OVERRIDE DEFECT (residue 4) ---------
+    #
+    # ADDED 2026-09-14 BY PLAT-15, which reports it as V1. PLAT-14's landing
+    # pass recorded this as "recorded rather than fixed … but it is the next
+    # thing to add, not the last": the code was RIGHT and no case could tell it
+    # from its opposite, because no row of the automatic table paired an ABSENT
+    # advertisement with a fence-only probe. The two rows are in the table now
+    # and this is the arm they kill.
+    Mutation(
+        "M35", CAP,
+        "    if probe.answered and probe.kitty:\n      protocol = ipKitty",
+        "    if probe.answered:\n      protocol = ipKitty",
+        C_TABLE, NIM_CAP,
+        # DERIVED FROM A TRANSCRIPT (§17a), not typed from the source: the
+        # operand VALUE is what says the mutation is what moved. `prNone`
+        # renders as `none` because `ProtocolRefusal`'s members carry string
+        # values, which is the trap M30 was MIS-ATTRIBUTED by first.
+        "cap.protocol was ipKitty",
+        why="F1 ON THE PATH EVERY USER GETS WITHOUT A FLAG. `probe.answered` "
+            "is the DA1 fence, which `GraphicsProbe.answered`'s own doc says "
+            "every terminal and every multiplexer answers, so dropping "
+            "`probe.kitty` hands `ipKitty` and a TIER-0 EMISSION to a terminal "
+            "that advertised nothing and merely proved it was alive — the same "
+            "garbage the override fix removed, arriving through automatic "
+            "resolution. `measuredProtocol` is the module's single predicate "
+            "for 'a graphics reply came back' and this arm is what keeps this "
+            "site written against the same evidence.",
+        control_name="the absent-advertisement arm, with the conjunction's "
+                     "operands swapped",
+        control_find="    if probe.answered and probe.kitty:\n      protocol = ipKitty",
+        control_replace="    if probe.kitty and probe.answered:\n      protocol = ipKitty"),
 ]
 
 # M10 is deliberately absent from the table above: `fitsLinkBudget`'s body is

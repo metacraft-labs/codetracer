@@ -66,7 +66,7 @@ import ../theme/image_capability
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2110
+const ExpectedAssertions = 2122
 
 var countedAssertions = 0
 
@@ -218,6 +218,23 @@ proc rowsOf(): seq[Row] =
         flags: initCapabilityFlags(), probe: fenceOnlyProbe(), hint: ihPhoto,
         tier: itProtocol, protocol: ipITerm2, refusal: prNone, wrapped: false),
 
+    Row(name: "NOTHING advertised, only the DA1 fence came back",
+        clause: "§3 the fence says the path is alive and says nothing " &
+                "whatever about graphics — PLAT-14 residue 4, which is the " &
+                "AUTOMATIC path's twin of the override defect F1 removed",
+        env: plainEnv(), ienv: initImageEnv(),
+        flags: initCapabilityFlags(), probe: fenceOnlyProbe(), hint: ihPhoto,
+        tier: itHalfBlock, protocol: ipNone,
+        refusal: prNoProtocolAdvertised, wrapped: false),
+
+    Row(name: "NOTHING advertised, the GRAPHICS reply came back",
+        clause: "§3 'the graphics reply -> tier 0': the positive twin of the " &
+                "row above, through the SAME probe field, so the guard's " &
+                "`probe.kitty` half has evidence only it can satisfy",
+        env: plainEnv(), ienv: initImageEnv(),
+        flags: initCapabilityFlags(), probe: kittyProbe(), hint: ihPhoto,
+        tier: itProtocol, protocol: ipKitty, refusal: prNone, wrapped: false),
+
     Row(name: "iTerm2, local",
         clause: "§2.1 tier 0 on the other protocol this build emits",
         env: itermEnv(), ienv: initImageEnv(termProgram = "iTerm.app"),
@@ -307,7 +324,7 @@ proc rowsOf(): seq[Row] =
         refusal: prSixelHasNoEncoder, wrapped: false)]
 
 const
-  ExpectedCaseCount = 23
+  ExpectedCaseCount = 25
     ## Asserted against `rowsOf().len`. A sweep whose size nobody checks can
     ## lose a row in a merge and stay green.
   ChecksPerCase = 4
@@ -353,7 +370,7 @@ suite "PLAT-14 Tier 1: which tier, and why not a better one":
         refusals.add cap.refusal
     checkpoint("rows reaching tier 0: " & $reachedTier0)
     checkpoint("distinct refusals: " & $refusals)
-    ck reachedTier0 == 6
+    ck reachedTier0 == 7
     ck refusals.len == 7
     ck prNotATerminal in refusals
     ck prMultiplexerUnproven in refusals

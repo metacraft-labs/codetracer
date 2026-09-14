@@ -47,7 +47,40 @@ type
     height*: int
     pixels*: seq[byte]
 
+  PixelRect* = object
+    ## A rectangle of SOURCE PIXELS — `[x, x+width) x [y, y+height)` in the
+    ## raster's own coordinates, and in no other unit.
+    ##
+    ## PLAT-15 added this type here, one level below both of its users, for
+    ## Verification-Harness-Traps §14's reason. `cell_render.sampleCell` and
+    ## `magnifier.coarsePixelRect` both have to answer "which source pixels
+    ## does this sub-cell cover?", and the campaign's rule is one predicate in
+    ## one function that the rule and its control both call — so the answer is
+    ## `cell_render.sourceRectOfSubCell` and this is the value it returns.
+    ##
+    ## THE UNIT IS IN THE TYPE, which is the other half of why it exists.
+    ## PLAT-15's magnifier juggles four of them — source pixels, terminal
+    ## cells, sub-cell samples and emitted bytes — and a bare `(int, int,
+    ## int, int)` would let any two be swapped silently.
+    x*: int
+    y*: int
+    width*: int
+    height*: int
+
   RasterError* = object of CatchableError
+
+func pixelCount*(r: PixelRect): int =
+  ## How many SOURCE PIXELS the rectangle holds.
+  ##
+  ## §5's whole argument is a statement about this number: "one cell is one
+  ## pixel *only at tier 0*; at tier 1 it is two, at tier 4 it is eight", so
+  ## `pixelCount(coarsePixelRect(...)) == 1` is the only condition under which
+  ## a cell ADDRESSES a pixel, and the magnifier exists because it normally
+  ## does not hold.
+  max(0, r.width) * max(0, r.height)
+
+func containsPixel*(r: PixelRect; x, y: int): bool =
+  x >= r.x and x < r.x + r.width and y >= r.y and y < r.y + r.height
 
 func rgb*(r, g, b: int): Rgb =
   ## Clamping constructor. The tier renderers average colours in floating

@@ -48,6 +48,7 @@ import ../layout/tab_strip
 import ../syntax/highlighter
 import ./call_stack
 import ./event_log
+import ./frame_viewer
 import ./header
 import ./source_pane
 import ./status_bar
@@ -65,6 +66,10 @@ export tab_strip
 export binding
 export call_stack, variables
 export event_log, timeline_bar, tracepoint_manager
+# PLAT-15's frame viewer, on exactly the rule the four lines above follow: a
+# `ShellModel` field is painted by this module, so every consumer that builds
+# one needs the model type in scope from this one import.
+export frame_viewer
 
 type
   ShellModel* = object
@@ -129,6 +134,21 @@ type
       ## one of `projectLayout`'s rectangles and no profile has to make room for
       ## it. Closed by default, so a shell that never opens it paints exactly
       ## the screen it painted before.
+    frameViewer*: FrameViewerModel
+      ## PLAT-15's frame viewer, magnifier and pixel history. AN OVERLAY, on
+      ## exactly `tracepoints`' rule and for the reason
+      ## `CodeTracer-TUI-Graphics.md` §8 decision 1 gives: *"a pane that is
+      ## available and not placed by default, appearing when a recording
+      ## carries graphics events — which is a `Layout-ViewModel` capability (a
+      ## pane added programmatically) rather than a graphics one."* Making it
+      ## one of `projectLayout`'s rectangles would give every profile a pane
+      ## that is meaningless for the programs that draw nothing, which is most
+      ## of them.
+      ##
+      ## CLOSED BY DEFAULT (`initFrameViewerModel`), so a shell that never
+      ## opens it paints exactly the screen it painted before this milestone
+      ## and every golden written against CTUI-3, CTUI-5, CTUI-6, CTUI-8 and
+      ## PLAT-6 is byte-identical.
     highlighting*: HighlighterCache
       ## CTUI-5's risk mitigation, carried on the model rather than created per
       ## frame: "parse once per (path, generation) and cache the token spans".
@@ -165,6 +185,18 @@ type
       ## Where the tracepoint dialog was painted, or a zero rectangle when it
       ## was closed. Reported rather than recomputed by the caller, for
       ## `frame_item.FrameItem`'s reason.
+    frameViewerOverlay*: CellArea
+      ## PLAT-15. Where the frame viewer was painted, or a zero rectangle when
+      ## it was closed. A SECOND FIELD rather than a reuse of `overlay`,
+      ## because both can be open at once and a single field would report one
+      ## of two rectangles with nothing saying which.
+    frameViewer*: FrameViewerScreen
+      ## PLAT-15. What the frame viewer painted: the tier it drew at, how many
+      ## picture rows, how many pixel-history rows, and the candidate masks the
+      ## per-cell argmin evaluated. Reported for `projection`'s reason — a test
+      ## asserting that the picture degraded while the rest of the pane did not
+      ## reads the counts the paint produced rather than recomputing them and
+      ## agreeing with itself.
     geometry*: LayoutGeometry
       ## PLAT-6. The dock strips, the inner area the tree was projected into,
       ## and the pane->path resolution — reported for the same reason
@@ -188,6 +220,18 @@ const
   TracepointOverlayHeight* = 14
     ## The tracepoint dialog's ceiling. Clamped to the body, so an 80x24
     ## terminal gets a smaller one rather than a clipped one.
+
+  FrameViewerOverlayWidth* = 72
+  FrameViewerOverlayHeight* = 18
+    ## The frame viewer's ceiling, clamped to the body on the same rule.
+    ##
+    ## WIDER AND TALLER THAN THE TRACEPOINT DIALOG because what it holds is a
+    ## PICTURE, and the picture's fidelity is the pane's whole purpose: at the
+    ## default 1:2 cell a square frame occupies twice as many columns as rows
+    ## (`aspect.fitToCells`), so a rectangle as tall as it is wide would waste
+    ## half of itself. 72x18 is 72 columns of picture over 36 source-pixel rows
+    ## at tier 1, which is enough for a magnifier at two cells per pixel to show
+    ## a 36x16-pixel neighbourhood.
 
 proc paneTitle*(kind: PaneKind; fallback: string): string =
   ## What a pane calls itself. The `LayoutNode`'s own title wins — it is what a
@@ -302,6 +346,19 @@ proc timelineScrubber*(tick, totalTicks, width: int): string =
     line.add(if i == pos: TimelineCursorGlyph else: TimelineTrackGlyph)
   line.add "]"
   line
+
+proc frameViewerOverlayArea*(body: CellArea): CellArea =
+  ## The rectangle PLAT-15's frame viewer occupies: centred in the body, at
+  ## most `FrameViewerOverlayWidth` x `FrameViewerOverlayHeight`, never larger
+  ## than the body itself. `tracepointOverlayArea`'s shape, with this pane's
+  ## own ceiling — a second function rather than a parameterised one, because
+  ## the two ceilings are two product decisions and a shared function would
+  ## make changing one look like changing both.
+  let w = min(FrameViewerOverlayWidth, max(0, body.width))
+  let h = min(FrameViewerOverlayHeight, max(0, body.height))
+  CellArea(col: body.col + (body.width - w) div 2,
+           row: body.row + (body.height - h) div 2,
+           width: w, height: h)
 
 proc tracepointOverlayArea*(body: CellArea): CellArea =
   ## The rectangle the tracepoint dialog occupies: centred in the body, at most
@@ -432,6 +489,9 @@ proc shellScreen*(model: ShellModel; width, height: int;
                        overlay: (if model.tracepoints.open:
                                    tracepointOverlayArea(body)
                                  else: CellArea()),
+                       frameViewerOverlay: (if model.frameViewer.open:
+                                              frameViewerOverlayArea(body)
+                                            else: CellArea()),
                        geometry: geometry, decorations: decorations)
   if width <= 0 or height <= 0:
     return
@@ -451,6 +511,14 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # be re-measured to add it. `tracepointOverlayArea` is the rectangle, derived
   # from the body, and it is REPORTED on `ShellScreen` so a test reads the same
   # coordinates the paint used.
+  # PLAT-15's frame viewer, on the same rule and BELOW the tracepoint dialog in
+  # paint order: the dialog is modal and takes text input, so a picture painted
+  # over it would obscure the field a user is typing into. The frame viewer is
+  # painted first and the dialog, when both are open, is on top.
+  if model.frameViewer.open:
+    result.frameViewer = paintFrameViewer(g, frameViewerOverlayArea(body),
+                                          model.frameViewer)
+
   if model.tracepoints.open:
     discard paintTracepointManager(g, tracepointOverlayArea(body),
                                    model.tracepoints)
