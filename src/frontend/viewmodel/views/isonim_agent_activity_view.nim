@@ -96,12 +96,20 @@ type
     onStopPrompt*: proc()
     onNewAgentInstance*: proc()
     onAddFiles*: proc()
+    onAddFolders*: proc()
+      ## Called when the user picks "Files & folders" from the + dropdown.
+    onAddEditorSelection*: proc()
+      ## Called when the user picks "Editor selection" from the + dropdown.
+    onAddTrace*: proc()
+      ## Called when the user picks "Recording / trace" from the + dropdown.
     onModelSelect*: proc()
     onBranchSelect*: proc()
       ## Callback for the branch context button in the agent toolbar.
       ## Allows the host to open a branch/worktree selector.
     onCheckoutBranch*: proc(branch: string)
       ## Called when the user picks a branch from the dropdown.
+    onCreateBranch*: proc()
+      ## Called when the user clicks "Create new branch" in the branch dropdown.
     onSettingsSelect*: proc()
       ## Callback for the settings button in the agent toolbar.
     onPermissionResponse*: proc(kind: string)
@@ -460,6 +468,22 @@ proc invokeAddFiles(callbacks: AgentActivityCallbacks) =
   if callbacks.onAddFiles != nil:
     callbacks.onAddFiles()
 
+proc invokeAddFolders(callbacks: AgentActivityCallbacks) =
+  if callbacks.onAddFolders != nil:
+    callbacks.onAddFolders()
+
+proc invokeAddEditorSelection(callbacks: AgentActivityCallbacks) =
+  if callbacks.onAddEditorSelection != nil:
+    callbacks.onAddEditorSelection()
+
+proc invokeAddTrace(callbacks: AgentActivityCallbacks) =
+  if callbacks.onAddTrace != nil:
+    callbacks.onAddTrace()
+
+proc invokeCreateBranch(callbacks: AgentActivityCallbacks) =
+  if callbacks.onCreateBranch != nil:
+    callbacks.onCreateBranch()
+
 proc invokeModelSelect(callbacks: AgentActivityCallbacks) =
   if callbacks.onModelSelect != nil:
     callbacks.onModelSelect()
@@ -487,6 +511,46 @@ when defined(js):
   proc computeLineStatsJs(original: cstring; modified: cstring): js
     {.importjs: """(function(o,m){var ol=(o||'').split('\n'),ml=(m||'').split('\n');var oc={},mc={};ol.forEach(function(l){oc[l]=(oc[l]||0)+1;});ml.forEach(function(l){mc[l]=(mc[l]||0)+1;});var a=0,d=0;var seen={};ol.concat(ml).forEach(function(l){if(!seen[l]){seen[l]=1;var ov=oc[l]||0,mv=mc[l]||0;a+=Math.max(0,mv-ov);d+=Math.max(0,ov-mv);}});return {added:a,removed:d};})(#,#)""".}
   proc jsQuerySelector(sel: cstring): isonim_dom.Element {.importjs: "document.querySelector(#)".}
+  proc flipDropdownIfNeeded(el: isonim_dom.Element) {.importjs: """
+    (function(el) {
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      if (r.top < 0) { el.classList.add('agent-add-context-dropdown--below'); }
+    })(#)
+  """.}
+  proc flipDropdownIfNeeded(el: MockNode) = discard
+  proc setIconHtml(el: isonim_dom.Element; html: string) =
+    el.innerHTML = cstring(html)
+  proc setIconHtml(el: MockNode; html: string) = discard
+  proc setupClickOutsideHandler(wrapper: isonim_dom.Element; onClose: proc()) {.importjs: """
+    (function(wrapper, onClose) {
+      setTimeout(function() {
+        function handler(e) {
+          if (!wrapper.contains(e.target)) {
+            onClose();
+            document.removeEventListener('click', handler, true);
+          }
+        }
+        document.addEventListener('click', handler, true);
+      }, 0);
+    })(#, #)
+  """.}
+  proc setupClickOutsideHandler(wrapper: MockNode; onClose: proc()) = discard
+  proc setupBranchSearch(searchInput: isonim_dom.Element;
+                          listContainer: isonim_dom.Element) {.importjs: """
+    (function(inp, list) {
+      inp.addEventListener('input', function() {
+        var q = inp.value.toLowerCase();
+        var items = list.querySelectorAll('.agent-branch-item');
+        for (var i = 0; i < items.length; i++) {
+          var match = q === '' || items[i].textContent.toLowerCase().indexOf(q) !== -1;
+          items[i].style.display = match ? '' : 'none';
+        }
+      });
+      inp.focus();
+    })(#, #)
+  """.}
+  proc setupBranchSearch(searchInput: MockNode; listContainer: MockNode) = discard
   proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element)
     {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)""".}
   proc setupInputHighlight(r: WebRenderer; ta: isonim_dom.Element;
@@ -1202,23 +1266,116 @@ proc renderProgressButton[R](r: R): auto =
            `type` = "button",
            disabled = "disabled")
 
-proc renderAddFilesButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
+const BranchSearchIcon = """<svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5.34766 0C8.30112 0.000204603 10.6963 2.39486 10.6963 5.34863C10.6962 6.64537 10.2336 7.8339 9.46582 8.75977L11.8184 11.1133L12.1719 11.4668L11.4648 12.1738L11.1113 11.8203L8.75879 9.4668C7.83288 10.2346 6.64431 10.6972 5.34766 10.6973C2.39429 10.6971 0.000262811 8.30224 0 5.34863C3.60726e-05 2.39483 2.39415 0.000157729 5.34766 0ZM5.34766 1C2.94658 1.00016 1.00004 2.94697 1 5.34863C1.00026 7.75011 2.94672 9.69711 5.34766 9.69727C7.74855 9.69706 9.69603 7.75008 9.69629 5.34863C9.69625 2.947 7.74869 1.0002 5.34766 1Z" fill="#DDDDDD"/></svg>"""
+const BranchCreateIcon = """<svg width="8" height="8" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4.5 3.5H8V4.5H4.5V8H3.5V4.5H0V3.5H3.5V0H4.5V3.5Z" fill="#DDDDDD"/></svg>"""
+
+const AgentAddContextUploadIcon = """<svg width="9" height="14" viewBox="0 0 9 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5.83333 2.8333L5.83333 9.16663C5.83333 9.90301 5.23638 10.5 4.5 10.5C3.76362 10.5 3.16667 9.90301 3.16667 9.16663L3.16667 3.16663C3.16667 1.69387 4.36058 0.499963 5.83333 0.499963C7.30609 0.499963 8.5 1.69387 8.5 3.16663L8.5 9.04352C8.5 10.879 7.25081 12.4789 5.47014 12.9241C4.83318 13.0833 4.16682 13.0833 3.52986 12.9241C1.74919 12.4789 0.500001 10.879 0.500002 9.04352L0.500002 6.49996L0.500002 5.49996" stroke="#DDDDDD" stroke-linecap="round"/></svg>"""
+const AgentAddContextFolderIcon = """<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.910494 12.5192L0.503587 4.89092C0.495126 4.81407 0.501674 4.73612 0.522794 4.66227C0.543914 4.58842 0.579122 4.52036 0.626073 4.46262C0.673024 4.40488 0.73064 4.35879 0.795084 4.32741C0.859529 4.29603 0.929322 4.28009 0.999815 4.28065H5.57503C5.68627 4.28141 5.79418 4.32238 5.88208 4.39723C5.96999 4.47209 6.03298 4.57665 6.06134 4.69476L6.45832 6.46016H12.9093C12.9779 6.45992 13.0459 6.47532 13.1088 6.50539C13.1718 6.53546 13.2283 6.57954 13.275 6.63484C13.3216 6.69015 13.3573 6.75548 13.3798 6.82671C13.4022 6.89793 13.411 6.9735 13.4055 7.04863L13.0184 12.4974C12.9984 12.7711 12.8851 13.0263 12.7011 13.2122C12.5171 13.3981 12.276 13.5009 12.026 13.5H1.90295C1.65606 13.5013 1.41757 13.4016 1.23406 13.2202C1.05054 13.0389 0.93518 12.7889 0.910494 12.5192Z" stroke="#DDDDDD" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.51025 2.25139V0.824332C3.51025 0.738314 3.56205 0.655819 3.65425 0.594995C3.74644 0.534171 3.87149 0.5 4.00187 0.5H12.3594C12.4898 0.5 12.6148 0.534171 12.707 0.594995C12.7992 0.655819 12.851 0.738314 12.851 0.824332V4.28064" stroke="#DDDDDD" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
+const AgentAddContextEditorIcon = """<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.57865 12C1.79213 12 1.16292 11.7722 0.691011 11.3167C0.230337 10.8611 0 10.25 0 9.48333C0 8.67222 0.241573 8.04444 0.724719 7.6C1.2191 7.14444 1.94382 6.91667 2.89888 6.91667H3.89326V5.08333H2.89888C1.94382 5.08333 1.2191 4.86111 0.724719 4.41667C0.241573 3.96111 0 3.32778 0 2.51667C0 1.75 0.230337 1.13889 0.691011 0.683334C1.16292 0.227778 1.79213 0 2.57865 0C3.20787 0 3.70225 0.116667 4.0618 0.35C4.43258 0.583333 4.69101 0.894445 4.83708 1.28333C4.99438 1.67222 5.07303 2.1 5.07303 2.56667V3.95H6.92697V2.56667C6.92697 2.1 7 1.67222 7.14607 1.28333C7.30337 0.894445 7.5618 0.583333 7.92135 0.35C8.29214 0.116667 8.79214 0 9.42135 0C10.2079 0 10.8315 0.227778 11.2921 0.683334C11.764 1.13889 12 1.75 12 2.51667C12 3.32778 11.7584 3.96111 11.2753 4.41667C10.7921 4.86111 10.0674 5.08333 9.10112 5.08333H8.10674V6.91667H9.10112C10.0674 6.91667 10.7921 7.14444 11.2753 7.6C11.7584 8.04444 12 8.67222 12 9.48333C12 10.25 11.764 10.8611 11.2921 11.3167C10.8315 11.7722 10.2079 12 9.42135 12C8.79214 12 8.29214 11.8833 7.92135 11.65C7.5618 11.4167 7.30337 11.1056 7.14607 10.7167C7 10.3278 6.92697 9.9 6.92697 9.43333V8.05H5.07303V9.43333C5.07303 9.9 4.99438 10.3278 4.83708 10.7167C4.69101 11.1056 4.43258 11.4167 4.0618 11.65C3.70225 11.8833 3.20787 12 2.57865 12ZM8.10674 2.53333V3.95H9.10112C9.69663 3.95 10.1292 3.83333 10.3989 3.6C10.6685 3.35556 10.8034 2.99444 10.8034 2.51667C10.8034 2.02778 10.6685 1.67778 10.3989 1.46667C10.1405 1.25556 9.81461 1.15 9.42135 1.15C8.98315 1.15 8.65169 1.27778 8.42697 1.53333C8.21348 1.77778 8.10674 2.11111 8.10674 2.53333ZM2.89888 3.95H3.89326V2.53333C3.89326 2.11111 3.7809 1.77778 3.55618 1.53333C3.3427 1.27778 3.01685 1.15 2.57865 1.15C2.18539 1.15 1.85393 1.25556 1.58427 1.46667C1.32584 1.67778 1.19663 2.02778 1.19663 2.51667C1.19663 2.99444 1.33146 3.35556 1.60112 3.6C1.87079 3.83333 2.30337 3.95 2.89888 3.95ZM5.07303 6.91667H6.92697V5.08333H5.07303V6.91667ZM2.57865 10.85C3.01685 10.85 3.3427 10.7278 3.55618 10.4833C3.7809 10.2278 3.89326 9.88889 3.89326 9.46667V8.05H2.89888C2.30337 8.05 1.87079 8.17222 1.60112 8.41667C1.33146 8.65 1.19663 9.00556 1.19663 9.48333C1.19663 9.97222 1.32584 10.3222 1.58427 10.5333C1.85393 10.7444 2.18539 10.85 2.57865 10.85ZM8.10674 9.46667C8.10674 9.88889 8.21348 10.2278 8.42697 10.4833C8.65169 10.7278 8.98315 10.85 9.42135 10.85C9.81461 10.85 10.1405 10.7444 10.3989 10.5333C10.6685 10.3222 10.8034 9.97222 10.8034 9.48333C10.8034 9.00556 10.6685 8.65 10.3989 8.41667C10.1292 8.17222 9.69663 8.05 9.10112 8.05H8.10674V9.46667Z" fill="#DDDDDD"/></svg>"""
+const AgentAddContextTraceIcon = """<svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5.34766 0C8.30112 0.000204603 10.6963 2.39486 10.6963 5.34863C10.6962 6.64537 10.2336 7.8339 9.46582 8.75977L11.8184 11.1133L12.1719 11.4668L11.4648 12.1738L11.1113 11.8203L8.75879 9.4668C7.83288 10.2346 6.64431 10.6972 5.34766 10.6973C2.39429 10.6971 0.000262811 8.30224 0 5.34863C3.60726e-05 2.39483 2.39415 0.000157729 5.34766 0ZM5.34766 1C2.94658 1.00016 1.00004 2.94697 1 5.34863C1.00026 7.75011 2.94672 9.69711 5.34766 9.69727C7.74855 9.69706 9.69603 7.75008 9.69629 5.34863C9.69625 2.947 7.74869 1.0002 5.34766 1Z" fill="#DDDDDD"/></svg>"""
+
+proc renderAddContextMenuItem[R](r: R; icon: string; label: string;
+                                  action: proc()): auto =
+  var iconRef: typeof(r.createElement("div"))
+  let item = ui(r):
+    tdiv(class = "agent-add-context-menu-item ct-menu-item",
+         onclick = proc() = action()):
+      tdiv(ref = iconRef, class = "agent-add-context-menu-icon")
+      span(class = "ct-menu-item-label"):
+        text label
+  when defined(js):
+    setIconHtml(iconRef, icon)
+  item
+
+proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
+                              callbacks: AgentActivityCallbacks): auto =
+  ## + button with a dropdown (Upload, Files, Editor, Trace).
+  ## Dropdown flips above the button when near the bottom of the screen via CSS.
+  ## Clicking outside the wrapper closes the dropdown via a document-level handler.
+  var wrapperRef: typeof(r.createElement("div"))
+  var menuRef: typeof(r.createElement("div"))
+  let isOpen = vm.addContextDropdownOpen.val
+  let panel = ui(r):
+    tdiv(ref = wrapperRef, class = "agent-add-context-wrapper"):
+      button(class = "ct-button-image-md-tertiary agent-button agent-add-context-button",
+             `type` = "button",
+             onclick = proc() =
+               vm.addContextDropdownOpen.val = not vm.addContextDropdownOpen.val)
+      if isOpen:
+        tdiv(ref = menuRef, class = "agent-add-context-dropdown")
+  if isOpen:
+    r.appendRenderedChild(menuRef,
+      renderAddContextMenuItem(r, AgentAddContextUploadIcon, "Upload attachment",
+        proc() =
+          vm.addContextDropdownOpen.val = false
+          callbacks.invokeAddFiles()))
+    r.appendRenderedChild(menuRef,
+      renderAddContextMenuItem(r, AgentAddContextFolderIcon, "Files & folders",
+        proc() =
+          vm.addContextDropdownOpen.val = false
+          callbacks.invokeAddFolders()))
+    r.appendRenderedChild(menuRef,
+      renderAddContextMenuItem(r, AgentAddContextEditorIcon, "Editor selection",
+        proc() =
+          vm.addContextDropdownOpen.val = false
+          callbacks.invokeAddEditorSelection()))
+    r.appendRenderedChild(menuRef,
+      renderAddContextMenuItem(r, AgentAddContextTraceIcon, "Recording / trace",
+        proc() =
+          vm.addContextDropdownOpen.val = false
+          callbacks.invokeAddTrace()))
+    when defined(js):
+      # After items are in the DOM, check if the menu overflows the viewport
+      # top and flip it below the button if needed.
+      jsSetTimeout(proc() = flipDropdownIfNeeded(menuRef), 0)
+      # Register a document-level click handler that closes the dropdown when
+      # the user clicks outside the wrapper. setTimeout(0) defers registration
+      # past the current click event so the opening click doesn't fire it.
+      setupClickOutsideHandler(wrapperRef,
+        proc() = vm.addContextDropdownOpen.val = false)
+  panel
+
+const AvailableAgentModels = ["Codex GPT5"]
+
+proc renderModelOption[R](r: R; vm: AgentActivityVM; model: string): auto =
+  let name = model
+  let isActive = name == vm.selectedModel.val or
+                 (vm.selectedModel.val.len == 0 and name == AvailableAgentModels[0])
+  let cls = if isActive: "agent-model-item agent-model-item--active"
+            else: "agent-model-item"
   ui(r):
-    button(class = "ct-button-image-md-tertiary agent-button agent-add-context-button",
-           `type` = "button",
-           onclick = proc() = callbacks.invokeAddFiles())
+    tdiv(class = cls,
+         onclick = proc() =
+           vm.modelDropdownOpen.val = false
+           vm.selectedModel.val = name):
+      text name
 
 proc renderModelButton[R](r: R; vm: AgentActivityVM;
                           callbacks: AgentActivityCallbacks): auto =
+  ## Model selector button with an upward-opening dropdown listing available models.
+  var wrapperRef: typeof(r.createElement("div"))
+  var listRef: typeof(r.createElement("div"))
+  let isOpen = vm.modelDropdownOpen.val
   let modelName = if vm.selectedModel.val.len > 0: vm.selectedModel.val
-                  else: "Codex GPT5"
-  ui(r):
-    button(class = "ct-button-md-tertiary agent-button agent-model-select",
-           `type` = "button",
-           onclick = proc() = callbacks.invokeModelSelect()):
-      span(class = "agent-model-text"):
-        text modelName
-      tdiv(class = "agent-model-img")
+                  else: AvailableAgentModels[0]
+  let panel = ui(r):
+    tdiv(ref = wrapperRef, class = "agent-model-wrapper"):
+      button(class = "ct-button-md-tertiary agent-button agent-model-select",
+             `type` = "button",
+             onclick = proc() =
+               vm.modelDropdownOpen.val = not vm.modelDropdownOpen.val):
+        span(class = "agent-model-text"):
+          text modelName
+        tdiv(class = "agent-model-img")
+      if isOpen:
+        tdiv(ref = listRef, class = "agent-model-dropdown")
+  if isOpen:
+    for model in AvailableAgentModels:
+      r.appendRenderedChild(listRef, renderModelOption(r, vm, model))
+    when defined(js):
+      setupClickOutsideHandler(wrapperRef,
+        proc() = vm.modelDropdownOpen.val = false)
+  panel
 
 proc renderSettingsButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
@@ -1256,27 +1413,31 @@ proc renderBranchOption[R](r: R; vm: AgentActivityVM;
                            branch: string): auto =
   let branchName = branch
   let isActive = branchName == vm.currentBranch.val
-  let itemClass = if isActive: "ct-menu-item ct-menu-item--active"
-                  else: "ct-menu-item"
+  let itemClass = if isActive: "agent-branch-item agent-branch-item--active"
+                  else: "agent-branch-item"
   ui(r):
     tdiv(class = itemClass,
          onclick = proc() =
            vm.branchDropdownOpen.val = false
            if callbacks.onCheckoutBranch != nil:
              callbacks.onCheckoutBranch(branchName)):
-      span(class = "ct-menu-item-label"):
-        text branchName
+      text branchName
 
 proc renderBranchButton[R](r: R; vm: AgentActivityVM;
                            callbacks: AgentActivityCallbacks): auto =
-  ## Branch context selector button in the agent toolbar.
-  ## Shows the active branch with an inline dropdown for checkout.
-  var dropdown: typeof(r.createElement("div"))
+  ## Branch context selector with a search-and-pick dropdown.
+  ## Search row at top, scrollable branch list in the middle,
+  ## "Create new branch" footer at the bottom.
+  var wrapperRef: typeof(r.createElement("div"))
+  var searchRef: typeof(r.createElement("div"))
+  var searchIconRef: typeof(r.createElement("div"))
+  var listRef: typeof(r.createElement("div"))
+  var createIconRef: typeof(r.createElement("div"))
   let isOpen = vm.branchDropdownOpen.val
   let branchName = if vm.currentBranch.val.len > 0: vm.currentBranch.val
                    else: "main"
   let panel = ui(r):
-    tdiv(class = "agent-branch-wrapper"):
+    tdiv(ref = wrapperRef, class = "agent-branch-wrapper"):
       button(class = "ct-button-md-tertiary agent-button agent-branch-button",
              `type` = "button",
              onclick = proc() =
@@ -1289,10 +1450,29 @@ proc renderBranchButton[R](r: R; vm: AgentActivityVM;
             text branchName
         tdiv(class = "agent-model-img")
       if isOpen:
-        tdiv(ref = dropdown, class = "agent-branch-dropdown")
+        tdiv(class = "agent-branch-dropdown"):
+          tdiv(class = "agent-branch-search-row"):
+            tdiv(ref = searchIconRef, class = "agent-branch-search-icon")
+            input(ref = searchRef, class = "agent-branch-search-input",
+                  `type` = "text", placeholder = "Search")
+          tdiv(ref = listRef, class = "agent-branch-list")
+          tdiv(class = "agent-branch-create-row",
+               onclick = proc() =
+                 vm.branchDropdownOpen.val = false
+                 callbacks.invokeCreateBranch()):
+            tdiv(ref = createIconRef, class = "agent-branch-create-icon")
+            span:
+              text "Create new branch"
   if isOpen:
+    when defined(js):
+      setIconHtml(searchIconRef, BranchSearchIcon)
+      setIconHtml(createIconRef, BranchCreateIcon)
     for branch in vm.branches.val:
-      r.appendRenderedChild(dropdown, renderBranchOption(r, vm, callbacks, branch))
+      r.appendRenderedChild(listRef, renderBranchOption(r, vm, callbacks, branch))
+    when defined(js):
+      setupBranchSearch(searchRef, listRef)
+      setupClickOutsideHandler(wrapperRef,
+        proc() = vm.branchDropdownOpen.val = false)
   panel
 
 proc renderIdleState[R](r: R; vm: AgentActivityVM;
@@ -1425,7 +1605,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
     #   r.appendRenderedChild(buttons, renderNewAgentButton(r, callbacks))
     # else:
     #   r.appendRenderedChild(buttons, renderProgressButton(r))
-    r.appendRenderedChild(buttons, renderAddFilesButton(r, callbacks))
+    r.appendRenderedChild(buttons, renderAddFilesButton(r, vm, callbacks))
     r.appendRenderedChild(buttons, renderBranchButton(r, vm, callbacks))
     r.appendRenderedChild(buttons, renderModelButton(r, vm, callbacks))
     r.appendRenderedChild(buttons, renderSettingsButton(r, callbacks))

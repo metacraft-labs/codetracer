@@ -112,6 +112,10 @@ type
       ## Available branches for checkout.
     branchDropdownOpen*: Signal[bool]
       ## Whether the branch selector dropdown is open.
+    modelDropdownOpen*: Signal[bool]
+      ## Whether the model selector dropdown is open.
+    addContextDropdownOpen*: Signal[bool]
+      ## Whether the + context dropdown menu is open.
 
     messageCount*: Memo[int]
     terminalCount*: Memo[int]
@@ -459,6 +463,8 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let currentBranch = createSignal("")
     let branches = createSignal(newSeq[string]())
     let branchDropdownOpen = createSignal(false)
+    let modelDropdownOpen = createSignal(false)
+    let addContextDropdownOpen = createSignal(false)
 
     let messageCount = createMemo[int] proc(): int =
       messages.val.len
@@ -494,6 +500,8 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       currentBranch: currentBranch,
       branches: branches,
       branchDropdownOpen: branchDropdownOpen,
+      modelDropdownOpen: modelDropdownOpen,
+      addContextDropdownOpen: addContextDropdownOpen,
       messageCount: messageCount,
       terminalCount: terminalCount,
       hasMessages: hasMessages,

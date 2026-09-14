@@ -39,7 +39,7 @@
   font-size: 0.875em
   flex-direction: column
   gap: 0.5em
-  padding: 0.5em
+  padding: 0.5em 0.5em 0
 
   .agent-input-wrapper
     position: relative
@@ -117,7 +117,7 @@
   flex-wrap: nowrap
   align-items: stretch
   gap: 0.5em
-  overflow: hidden
+  overflow: visible
   min-width: 0
 
   .agent-button
@@ -125,9 +125,10 @@
     gap: 0.375em
     min-width: 0
     white-space: nowrap
-    overflow: hidden
+    overflow: visible
     flex: 0 1 max-content !important
-    padding: 0 0 0 0.5em !important
+    padding: 0 0.5em !important
+    height: 1.75em !important
 
     .add-file-img
       background-image: COMMAND_PALETTE_ADD_FILE_IMG
@@ -154,14 +155,22 @@
   .agent-icon-button
     flex: 0 0 auto !important
 
+  .agent-add-context-wrapper
+    position: relative
+    flex: 0 0 auto
+
   .agent-add-context-button
     background-image: AGENT_ADD_CONTEXT_IMG
     flex: 0 0 auto !important
     padding: 0 !important
 
+  .agent-model-wrapper
+    flex: 0 1 max-content
+    min-width: 2em
+
   .agent-model-select
-    flex: 0 1 max-content !important
-    min-width: 2em !important
+    flex: 1 1 auto !important
+    min-width: 0 !important
 
     .agent-model-img
       margin-left: auto
@@ -1167,12 +1176,50 @@
     background: colors-ui-surface-primary-secondary
     border-color: colors-ui-border-primary
 
+// Model selector button wrapper
+.agent-model-wrapper
+  position: relative
+  flex: 0 1 max-content
+  min-width: 2em
+  display: flex
+  overflow: visible
+
+.agent-model-dropdown
+  position: absolute
+  bottom: calc(100% + 0.375em)
+  left: 0
+  right: 0
+  z-index: 100
+  dropdown-surface-chrome()
+  animation: ct-dropdown-reveal 120ms ease-out
+  @media (prefers-reduced-motion: reduce)
+    animation: none
+  min-width: 10rem
+  overflow: hidden
+
+.agent-model-item
+  padding: 0.625em 0.75em
+  cursor: pointer
+  font-size: 0.875rem
+  color: colors-ui-text-primary-body
+  border-top: 0.0625rem solid colors-ui-border-tertiary
+
+  &:first-child
+    border-top: none
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+
+  &.agent-model-item--active
+    background: colors-ui-surface-primary-secondary
+
 // Branch context button in the agent toolbar
 .agent-branch-wrapper
   position: relative
   flex: 0 1 max-content
   min-width: 2em
   display: flex
+  overflow: visible
 
 .agent-branch-button
   flex: 1 1 auto !important
@@ -1208,13 +1255,128 @@
 
 .agent-branch-dropdown
   position: absolute
-  top: calc(100% + 0.375em)
+  bottom: calc(100% + 0.375em)
   left: 0
   right: 0
   z-index: 100
-  dropdown-surface()
-  padding: 0.25em
-  max-height: 12.5em
+  dropdown-surface-chrome()
+  animation: ct-dropdown-reveal 120ms ease-out
+  @media (prefers-reduced-motion: reduce)
+    animation: none
+  display: flex
+  flex-direction: column
+  min-width: 12rem
+  max-height: 18rem
+  overflow: hidden
+
+.agent-branch-search-row
+  display: flex
+  align-items: center
+  gap: 0.5em
+  padding: 0.5em 0.75em
+  border-bottom: 0.0625rem solid colors-ui-border-tertiary
+  flex-shrink: 0
+
+  .agent-branch-search-icon
+    display: flex
+    align-items: center
+    justify-content: center
+    flex-shrink: 0
+    opacity: 0.7
+
+  .agent-branch-search-input
+    flex: 1
+    border: none
+    background: transparent
+    outline: none
+    color: colors-ui-text-primary-body
+    font-size: 0.875rem
+    min-width: 0
+
+    &::placeholder
+      color: colors-ui-text-primary-subtle
+
+.agent-branch-list
+  flex: 1 1 auto
   overflow-y: auto
+
+.agent-branch-item
+  padding: 0.625em 0.75em
+  cursor: pointer
+  font-family: monospace
+  font-size: 0.875rem
+  color: colors-ui-text-primary-body
+  border-top: 0.0625rem solid colors-ui-border-tertiary
+
+  &:first-child
+    border-top: none
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+
+  &.agent-branch-item--active
+    background: colors-ui-surface-primary-secondary
+
+.agent-branch-create-row
+  display: flex
+  align-items: center
+  gap: 0.625em
+  padding: 0.5em 0.75em
+  cursor: pointer
+  border-top: 0.0625rem solid colors-ui-border-tertiary
+  flex-shrink: 0
+  font-size: 0.875rem
+  color: colors-ui-text-primary-body
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+
+  .agent-branch-create-icon
+    display: flex
+    align-items: center
+    justify-content: center
+    flex-shrink: 0
+
+// Dropdown opened by the + (add context) button.
+// Anchors to the left edge of the wrapper and opens upward by default.
+// Flips below (downward) when there is not enough space above — the
+// .agent-add-context-dropdown--below modifier is applied via JS when the menu
+// would overflow the viewport top.
+.agent-add-context-dropdown
+  position: absolute
+  bottom: calc(100% + 0.375em)
+  left: 0
+  z-index: 100
+  dropdown-surface()
+  min-width: 11rem
+  padding: 0.25em 0
+
+  // Flip downward when there is not enough space above.
+  &.agent-add-context-dropdown--below
+    bottom: auto
+    top: calc(100% + 0.375em)
+
+.agent-add-context-menu-item
+  display: flex
+  align-items: center
+  gap: 0.625em
+  padding: 0.5em 0.75em
+  cursor: pointer
+  white-space: nowrap
+  dropdown-surface-row()
+
+  &:hover
+    background: colors-ui-surface-primary-hover
+
+  .agent-add-context-menu-icon
+    display: flex
+    align-items: center
+    justify-content: center
+    width: 1em
+    flex-shrink: 0
+
+  .ct-menu-item-label
+    font-size: 0.875rem
+    color: colors-ui-text-primary
 
 // Settings button in the agent toolbar
