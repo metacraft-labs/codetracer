@@ -7334,7 +7334,7 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
       - name: Install Nix
-        uses: metacraft-labs/nixos-modules/.github/install-nix@main
+        uses: metacraft-labs/devops-modules/.github/install-nix@dev
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
@@ -7428,7 +7428,7 @@ jobs:
         with:
           token: ${{ steps.ci_token.outputs.token }}
       - name: Install Nix
-        uses: metacraft-labs/nixos-modules/.github/install-nix@main
+        uses: metacraft-labs/devops-modules/.github/install-nix@dev
         with:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}

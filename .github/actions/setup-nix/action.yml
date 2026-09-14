@@ -17,7 +17,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: metacraft-labs/nixos-modules/.github/setup-nix@main
+    - uses: metacraft-labs/devops-modules/.github/setup-nix@dev
       with:
         push-to-cache: false
         nix-github-token: ${{ inputs.gh-token }}
