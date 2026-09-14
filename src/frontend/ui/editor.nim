@@ -2842,17 +2842,51 @@ proc makeTestAction(self: EditorViewComponent, line: int, isPythonTest: bool = f
       return
 
     if not editorTestRunHook.isNil:
-      # A HOST TOOK IT, or said why it could not. Either way the button never
-      # starts animating over a message that went nowhere.
-      let refusal = editorTestRunHook(self.name, selector, line)
-      if refusal.len > 0:
-        self.api.errorMessage($refusal)
-        return
+      # ARM THE SPINNER BEFORE THE DISPATCH, for exactly the reason
+      # `runTestFromGutter` does — see the long note there. This arm carried
+      # the PRE-FIX ordering: it called the hook first and armed afterwards,
+      # so a dispatch refused SYNCHRONOUSLY INSIDE the hook settled while
+      # `spinningTestEditors` was still empty and `activeTestId` still unset,
+      # swept nothing, and then these lines armed an animation no second
+      # settle would ever arrive to clear. `loadAnimation`'s 400-frame cap was
+      # the only thing that ended it: two minutes of "Running..." under a
+      # `"<selector>" started` message, over a run that was declined before
+      # the click finished.
+      #
+      # The gutter was repaired; this widget is still painted whenever an
+      # editor has a `#[test]` or a Python test and no catalog entry for that
+      # line, and `editorTestRunHook` is installed globally, so the defect was
+      # live on the surviving arm.
+      #
+      # WHAT WAS THERE BEFORE IS REMEMBERED so the unwind puts back exactly
+      # what this click displaced: the commonest refusal is `already-running`,
+      # where a real run owns the spinner and a blanket settle would visibly
+      # "finish" it.
+      let wasSpinning = spinningTestEditors.find(self) >= 0
+      let previousTestId = self.activeTestId
       capture testId:
         self.activeTestId = testId
         self.redrawActiveTestButton()
-      if spinningTestEditors.find(self) < 0:
+      if not wasSpinning:
         spinningTestEditors.add(self)
+
+      let refusal = editorTestRunHook(self.name, selector, line)
+      if refusal.len > 0:
+        # UNWIND WHAT THIS CLICK ARMED, and no more.
+        if wasSpinning:
+          self.activeTestId = previousTestId
+          self.redrawActiveTestButton()
+        else:
+          settleEditorTestRun()
+        self.api.errorMessage($refusal)
+        return
+
+      # ALREADY SETTLED, INSIDE THE CALL. The dispatch was refused or answered
+      # synchronously and the settle has already emptied the list. Nothing is
+      # running, so "started" is not claimed and no animation is left behind.
+      if spinningTestEditors.find(self) < 0:
+        return
+
       self.api.infoMessage(&"\"{selector}\" started")
       return
 
