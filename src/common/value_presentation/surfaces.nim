@@ -84,6 +84,21 @@ const
     ## note instead of a seventh copy silently drifting (§14). PLAT-14 is
     ## expected to give `tui-tree` and `tui-row` more than this; the desktop's
     ## own image work is expected to give `state-panel` more.
+    ##
+    ## **PLAT-14 HAS DONE THAT, AND IT IS A FUNCTION AND NOT A WIDER CONSTANT.**
+    ## See `terminal_graphics/media.terminalMediaCapability`, which lives in
+    ## THAT package rather than this one so the dependency points the way the
+    ## layering does: the renderer knows what a media class is, the pipeline
+    ## knows nothing about tiers, and `ci/test/value-presentation-boundary.sh`
+    ## can still compile this package on its own. The constants below are still
+    ## exactly this set, because what a terminal can draw is not a property of
+    ## the surface — it is a property of the terminal, the multiplexer and the
+    ## link, resolved at run time by
+    ## `app/theme/image_capability.resolveImageCapability`. A surface whose
+    ## declared media set said `image/png` unconditionally would be claiming a
+    ## capability on a `TERM=dumb` CI log, and the value would degrade into the
+    ## blank region PLAT-9's model exists to prevent — the same error this
+    ## comment was written to avoid, one milestone later.
 
   StatePanelBudget* = Budget(
     name: "state-panel",
@@ -176,7 +191,18 @@ const
     ## Verification-Harness-Traps §4b asks for. `tuiRowBudget` below is NOT an
     ## eighth surface — it is `tui-tree` narrowed to one row's cells.
 
-func tuiRowBudget*(cells: int; focused: bool): Budget =
+func tuiTreeBudget*(media = MediaCapabilityNote): Budget =
+  ## `TuiTreeBudget` with the media set the RESOLVED terminal can draw.
+  ##
+  ## The zero-argument spelling is `TuiTreeBudget` exactly, which is the
+  ## fail-low default: a caller that has not resolved an image capability gets
+  ## the set that was true before PLAT-14, and the value degrades honestly
+  ## rather than claiming a renderer nobody asked the terminal about.
+  result = TuiTreeBudget
+  result.media = media
+
+func tuiRowBudget*(cells: int; focused: bool;
+                   media = MediaCapabilityNote): Budget =
   ## One row of the TUI's variables pane.
   ##
   ## The cell count is the caller's because it is the PANE's, computed by
@@ -184,9 +210,13 @@ func tuiRowBudget*(cells: int; focused: bool): Budget =
   ## budget in this file that cannot be a constant. `focused` raises
   ## `annotated`, which is §3.3.4's "decimal and hexadecimal simultaneously
   ## upon focus" expressed as a budget rather than as a second code path.
+  ##
+  ## `media` defaults to `MediaCapabilityNote` for `tuiTreeBudget`'s reason: a
+  ## caller that has not resolved an image capability must get the set that was
+  ## true before PLAT-14.
   Budget(name: "tui-row", lines: 1, cells: cells, depth: 1,
          members: 8, expandable: false, annotated: focused,
-         media: MediaCapabilityNote)
+         media: media)
 
 func tuiValueBudget*(): Budget =
   ## The rendering stored on a `store/types.Variable` when a `ct/load-locals`

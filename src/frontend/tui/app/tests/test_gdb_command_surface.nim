@@ -156,8 +156,8 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 64
-    ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED four
+  ExpectedAppModules = 66
+    ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED five
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
     ## suites under `tests/`); after CTUI-12, which added one —
@@ -172,7 +172,12 @@ const
     ## `layout/persistence.nim` — the file NAME, the meaning of an unreadable
     ## document and the decision about whether there is anything to write, all
     ## as values, with `host/layout_store.nim` (outside this walk, by the layer
-    ## rule) doing the reading and writing.
+    ## rule) doing the reading and writing; and on 2026-09-13, when PLAT-14's
+    ## terminal image rendering added TWO — `theme/image_capability.nim` (the
+    ## tier DECISION, pure, with `host/image_probe.nim` outside this walk by
+    ## the same layer rule doing the terminal round trip it consumes) and
+    ## `tests/test_image_capability.nim`, because this walk is over `app/`
+    ## RECURSIVELY and `app/tests/` is inside it.
     ##
     ## The number is deliberately brittle, and every one of those bumps is the
     ## shape it is meant to have: a new file under `app/` reddens this case on

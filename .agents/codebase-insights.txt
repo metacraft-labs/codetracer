@@ -3973,3 +3973,54 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
     containing a BACKTICK PAIR is then SC2016 and shellcheck exits 1. A string
     carrying an apostrophe is immune, because shfmt cannot single-quote it.
     Worth knowing before writing ``"… \`nim dump\`"`` into a `ci/` script.
+
+## Terminal image rendering (PLAT-14, 2026-09-13)
+
+- `src/common/terminal_graphics/` is the tier renderer: `tiers.nim` (§2.1's
+  seven tiers, ordinal == the spec's tier number so `weakerOf` is `max`),
+  `cell_render.nim` (one Oklab argmin for every cell tier), `aspect.nim`,
+  `emit.nim` (THE bytes), `media.nim` (which §5.2 media a resolved terminal
+  can draw). The DECISION lives in `src/frontend/tui/app/theme/
+  image_capability.nim` beside `resolveCapabilities`, and the empirical probe
+  in `src/frontend/tui/host/image_probe.nim`.
+- **`TermAssert.assertImageMatches` cannot fail on its first run.** It writes
+  the golden and returns when the golden file does not exist
+  (`TermAssert/src/term_assert.nim:697-710`), which is exactly the situation a
+  new test is in. Assert `imageData(...)` pixels directly instead. Its sibling
+  `assertSynchronizedRender` has a bare `discard` where its failure should be.
+- **`nim-libvterm` really decodes Kitty PNG payloads** (stb_image is vendored
+  and compiled in), so a Tier-2 suite can assert decoded RGBA from the
+  terminal's side. `sess.images()` also registers the PROBE's own 1x1 query
+  image, so a case that counts images must not run in probe mode.
+- **`nim_termctl.emitSixel` raises** — there is no Sixel encoder in the
+  workspace. Anything that "detects sixel" must refuse to select it.
+- Nim's `unittest.check` prints `<operand> was <value>` for dotted and call
+  expressions too, and an enum with string values prints the STRING
+  (`prScreenNeverPasses` prints as `screen-never-passes`). Mutation-harness
+  `because` needles have to be derived from a transcript, not typed.
+
+## The image capability's OVERRIDE path, and the fence that is not evidence (2026-09-14)
+
+- **`GraphicsProbe.answered` is the DA1 fence and is NOT evidence about
+  graphics.** `host/image_probe.probeGraphics` sends the Kitty query with
+  `CSI c` behind it, and every terminal and every multiplexer answers `CSI c`.
+  The module's single predicate for "a graphics reply came back" is
+  `measuredProtocol`. Three rules in `image_capability.nim` turn on this and
+  each was written independently; two of the three tested the fence, and the
+  verification pass of 2026-09-14 is what found them. If you add a fourth,
+  call `measuredProtocol`.
+- **`--image-tier=protocol` cannot name a protocol**, because there is no
+  spelling of the flag that does. `emittableProtocol(advertised, probe)` is
+  the one question — an advertisement in `EmittableProtocols`, else a
+  measured reply, else `ipNone` and the pin loses. Never synthesise one: the
+  old code ended `else: ipITerm2`, and `probe.iterm2` is documented
+  always-false, so that arm was an unconditional guess.
+- `ImageCapability.protocol` is NEVER `ipSixel` on any path. `emitProtocolImage`
+  raises for it, so selecting it turns a picture into an exception — and the
+  override used to reach past `prSixelHasNoEncoder` and do exactly that.
+- **`unittest` prints the SUBSTITUTED AST and escapes as `\e`, not `\x1b`.**
+  Two `because` needles typed from the source scored `MIS-ATTRIBUTED` over
+  mutations that killed their cases exactly as intended: `cap.refusal was
+  prNone` (the enum prints its STRING value, `none`) and `not
+  asciiBytes.contains("\x1b[48;2;")` (printed with `\e`). Verification-Harness
+  -Traps §17a; derive every needle from a transcript.

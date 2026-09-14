@@ -760,7 +760,16 @@ proc newestSourceTime*(stem: string): float =
   let runtime = tui / "testing" / "test_app_runtime.nim"
   if fileExists(runtime):
     result = max(result, getFileInfo(runtime).lastWriteTime.toUnixFloat())
-  for dir in [tui / "app", tui / "host"]:
+  ## **`src/common/terminal_graphics/` IS IN THE STAMP TOO, AS OF PLAT-14**,
+  ## and for the paragraph above rather than for completeness:
+  ## `apps/app_image_probe.nim` calls `renderCells` and `emitProtocolImage`
+  ## directly, so a mutation arm against the tier renderer or the emitter would
+  ## otherwise be graded by a Tier-2 binary built before it — the exact false
+  ## red CTUI-5 measured, with a different subject. It is a six-file directory
+  ## that changes rarely, so the rebuild cost is nearer to
+  ## `test_app_runtime.nim`'s than to `isonim-tui`'s.
+  for dir in [tui / "app", tui / "host",
+              repoRoot() / "src" / "common" / "terminal_graphics"]:
     if not dirExists(dir):
       continue
     for path in walkDirRec(dir):

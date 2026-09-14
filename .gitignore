@@ -498,3 +498,16 @@ src/frontend/viewmodel/tests/unit/.plat12-visualiser-mutation.lock
 # harnesses reddens this one's unmutated control and it would abort at
 # `CONTROL IS NOT GREEN` — or score a kill it did not earn.
 src/frontend/viewmodel/tests/unit/.plat13-executable-mutation.lock
+
+# The terminal image-rendering harness's run lock
+# (`src/common/terminal_graphics/run-plat14-image-mutations.py`), ignored for
+# the same reason as the six above: it records the holding process's pid, host
+# and working directory, so it is machine-local and would churn on every run.
+#
+# This harness's subjects are the `terminal_graphics/` package plus the TUI's
+# image-capability decision and its CLI flag. Its SUITES are not disjoint from
+# its siblings': `test_terminal_media_capability.nim` compiles
+# `value_presentation/surfaces.nim` and `value_visualisers.nim`, which belong to
+# the declarative-visualiser harness, so an arm there reddens this one's
+# unmutated control. Run one harness at a time.
+src/common/terminal_graphics/.plat14-image-mutation.lock

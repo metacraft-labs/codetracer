@@ -49,6 +49,10 @@
 
 import std/strutils
 
+import ../../../../common/terminal_graphics/tiers
+
+export tiers.ImageTier, tiers.tierName, tiers.parseTierName, tiers.tierNames
+
 type
   ColorDepth* = enum
     ## §6.3's ladder, from the bottom up so `<` orders it by richness — a
@@ -150,6 +154,21 @@ type
     theme*: UiTheme
       ## `-t, --theme=<name>` — CTUI-14. `utDark` when the flag is absent, which
       ## is also what §6.2 publishes as the default.
+    imageTier*: ImageTier
+      ## `--image-tier=<name>` — PLAT-14, CodeTracer-TUI-Graphics.md §2.2: "A
+      ## user override exists (`--image-tier`) and always wins, per the
+      ## campaign's established rule that an explicit flag beats a probe."
+      ##
+      ## MEANINGLESS UNLESS `imageTierPinned`, and the pair is two fields rather
+      ## than an `Option` for `initCapabilityFlags`' reason: `parseTuiCommand`'s
+      ## default is compared with `initCapabilityFlags()` BY EQUALITY in
+      ## `app/tests/test_capability_resolution.nim`, so the unpinned value has
+      ## to be a stated constant rather than whatever an option's zero happens
+      ## to be. It is `itAscii` — the weakest tier — so that a consumer which
+      ## read the tier without checking the flag would get the answer that
+      ## cannot put escape bytes on a screen. See `tiers.parseTierName`, which
+      ## makes the same choice for the same reason.
+    imageTierPinned*: bool
 
   TerminalCapabilities* = object
     ## The resolved set. ONE value, computed once, before the first paint.
@@ -223,9 +242,12 @@ proc initTerminalEnv*(term = ""; colorterm = ""; termProgram = "";
 
 proc initCapabilityFlags*(forceTrueColor = false; noColor = false;
                           asciiBorders = false; noMouse = false;
-                          theme = utDark): CapabilityFlags =
+                          theme = utDark;
+                          imageTier = itAscii;
+                          imageTierPinned = false): CapabilityFlags =
   CapabilityFlags(forceTrueColor: forceTrueColor, noColor: noColor,
-                  asciiBorders: asciiBorders, noMouse: noMouse, theme: theme)
+                  asciiBorders: asciiBorders, noMouse: noMouse, theme: theme,
+                  imageTier: imageTier, imageTierPinned: imageTierPinned)
 
 proc parseTheme*(name: string): (bool, UiTheme) =
   ## `-t, --theme=<name>`'s argument, matched against the enum's own published

@@ -272,6 +272,8 @@ options:
   --ascii-borders    draw + - | instead of the Unicode box-drawing glyphs
   --no-mouse         do not ask the terminal for mouse reporting
   -t, --theme=NAME   dark (default), light, plain, monokai
+  --image-tier=NAME  pin the image rendering tier: protocol, half-block,
+                     quadrant, sextant, octant, braille, ascii (detected)
   --goto=TICK        seek to TICK before the first debugger frame
   --record-keys=FILE write every input token to FILE, one per line
   --replay-keys=FILE read input from FILE instead of the keyboard, then exit
@@ -426,6 +428,22 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                 message: "unknown theme '" & themeName & "'; pick one of " &
                          themeNames())
             flags.theme = theme
+            break options
+          # PLAT-14 / CodeTracer-TUI-Graphics.md §2.2. An explicit tier beats
+          # every probe, including the multiplexer and SSH ones
+          # (`app/theme/image_capability.nim`), which is why it lands in
+          # `CapabilityFlags` beside `--truecolor` rather than in a second
+          # options bag: one precedence rule, stated once, for every axis.
+          let (isImageTier, tierText) = optionValue(arg, "--image-tier")
+          if isImageTier:
+            let (okTier, tier) = parseTierName(tierText)
+            if not okTier:
+              return TuiCommand(
+                kind: tckUsageError,
+                message: "unknown image tier '" & tierText &
+                         "'; pick one of " & tierNames())
+            flags.imageTier = tier
+            flags.imageTierPinned = true
             break options
           let (isGoto, tickText) = optionValue(arg, "--goto")
           if isGoto:

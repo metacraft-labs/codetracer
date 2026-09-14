@@ -1,0 +1,26 @@
+# Control digests for run-plat14-image-mutations.py.
+#
+# ABSOLUTE, and that is the point. A baseline taken at start-up
+# cannot tell a clean tree from one a killed run left a mutation
+# in: it reads the mutation as the baseline, every restore then
+# verifies against the mutated bytes, and the only symptom is
+# `CONTROL IS NOT GREEN` — which describes a red suite without
+# naming the cause.
+#
+# Rewrite with --record-control-hashes, deliberately, when one of
+# these files changes on purpose. The needle scan gates that step
+# (Verification-Harness-Traps §16).
+#
+# `surfaces.nim` is ALSO a PLAT-12 subject. When it changes, both
+# harnesses' digests have to be re-recorded and both harnesses'
+# arms aimed at it re-run — §16a: a repair that tightens can
+# disarm an arm whose needle still resolves.
+
+bee9a5d0a54147f350edbabfe6504772c6f6d5026ed68ffb1aeeb0438c56c36c  src/common/terminal_graphics/tiers.nim
+fcbdfcd31739faa1b8a685128f111a42b45af39fb6dc3597ac50cc16e3fd6736  src/common/terminal_graphics/cell_render.nim
+5d83217c45ebac3847ee74e0779411af02fc14eec579fc8dead23478552771be  src/common/terminal_graphics/aspect.nim
+1f987222073b2cc5144b68c6b9aba2b0f91709a1104faf4ca65d7b7e4c116325  src/common/terminal_graphics/oklab.nim
+445e6ec5613470dfbc0e8e1060823b2959cad201b2fc710cf07e28ad5aaf1417  src/common/terminal_graphics/emit.nim
+b9b16a9d8cb5fee0bedde2a12e02a2c62318f45d005ec05f5da6c66f3fc394a4  src/frontend/tui/app/theme/image_capability.nim
+6214f374408c6ca8e3507aae56ba2b1c5689530f841a22785f3549523dc0ace7  src/common/terminal_graphics/media.nim
+5aa24e192554b04df1e0c3082af406b67a4b734cfbce26e86a72122a51b220d5  src/frontend/tui/app/cli.nim
