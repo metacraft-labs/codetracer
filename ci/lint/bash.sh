@@ -343,6 +343,20 @@ lint_step "contract suite: backend-manager checkPhase exclusion guards" \
 lint_step "contract suite: crates.io download URL (crate sources are fetchable)" \
 	bash ci/test/crates-io-download-url-test.sh
 
+# flake.lock is machine-written and hand-edited anyway, and nix checks every
+# field of a locked input -- not just `rev` and `narHash`. Commit 4d15c1ea moved
+# `codetracer-trace-format-nim`'s revision and hash and left `lastModified` at
+# the OLD revision's commit date; `nix develop` then refused the input outright
+# ("mismatch in field 'lastModified'"), killing all four arms of the LRC desktop
+# edge (run 34815351506) before anything had evaluated. Nothing local could
+# notice, because a workspace `.envrc` overrides that input with a sibling path
+# and never fetches the github node at all. It runs here because it needs no nix
+# and no toolchain -- one GitHub API request per direct input, about thirty --
+# and because the alternative is finding out from a CI job that never got a
+# shell.
+lint_step "contract suite: flake.lock records the commit dates it claims" \
+	bash ci/test/flake-lock-metadata-test.sh
+
 # The Nix lane consumes siblings as flake inputs; every other lane clones them.
 # Nothing made the two agree on a branch until `codetracer-trace-format` was
 # found declared `/main` in flake.nix while the workflow cloned it at `dev`, 55

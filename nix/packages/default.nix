@@ -286,8 +286,73 @@
 
         wazero = inputs.wazero.packages.${system}.default;
 
+        # `.override { inherit pkgs; }`, and NOT the bare attribute, because the
+        # crates.io CDN overlay this flake installs CANNOT REACH A FOREIGN
+        # FLAKE'S PACKAGE SET.
+        #
+        # `nix-blockchain-development` builds its own package set from a bare
+        # `import nixpkgs { config.allowUnfree = true; }` with NO overlays
+        # (its `flake.nix`, `perSystem._module.args.pkgs`). Our
+        # `nixpkgs.follows` makes it the same nixpkgs REVISION, which is why
+        # every stock derivation it produces is byte-identical to ours -- but
+        # `follows` shares the input, not the overlays, so `pkgs.fetchurl`
+        # inside that set is nixpkgs' unpatched one and every crate
+        # `importCargoLock` fetches goes to the crates.io API host that now
+        # answers 403 to `curl/*`. Measured on that set:
+        #
+        #   metacraft-labs.cargo-stylus closure -> 546 crates.io API URLs, 0 CDN
+        #
+        # That is not academic: it is what broke CI. `cargo-stylus` is a
+        # metacraft-labs package, so it is NOT in cache.nixos.org; any runner
+        # that cannot reach the private Attic cache must build it from source,
+        # and then all 546 fetches 403. Runs 34834104633 (js edge,
+        # `alloy-core-1.3.1`) and 34834129051 (ruby edge, `alloy-eip2930-0.2.1`)
+        # both died exactly there, in `nix develop '.?submodules=1#ci'`.
+        #
+        # `ci/test/crates-io-download-url-test.sh` used to record this reach
+        # limit as deliberately-not-asserted, on the ground that the
+        # unreachable fetches "are all substitutable from cache.nixos.org".
+        # For stock nixpkgs build tools that is true; for this repository's
+        # OWN vendor's packages it is false, and the suite now asserts the
+        # `cargo-stylus` vendor directory directly.
+        #
+        # WHY `.override` AND NOT AN OVERLAY. Three narrower mechanisms were
+        # measured and all three are inert here:
+        #   - `legacyPackages.${system}.extend` -- that attrset is a plain
+        #     flake output, not a nixpkgs fix-point: it has neither `extend`
+        #     nor `__unfix__`.
+        #   - `pkgs.appendOverlays [ inputs.nix-blockchain-development.overlays.default ]`
+        #     -- flake-parts' `easyOverlay` does re-evaluate `perSystem` with
+        #     `pkgs = prev`, but that flake's `overlayAttrs` is
+        #     `inherit (self'.legacyPackages) metacraft-labs`, and `self'` is
+        #     bound to the UN-extended per-system outputs. Probed with an
+        #     overlay whose `fetchurl` is `throw`: the throw is visible in the
+        #     extended set and invisible in `metacraft-labs.cargo-stylus`,
+        #     whose `.drv` path is unchanged.
+        #   - overriding the shared nixpkgs pin -- the durable fix, and it
+        #     belongs in `metacraft-labs/nix-codetracer-toolchains`, not here.
+        #
+        # `cargo-stylus/default.nix` in that repo takes `{ pkgs, ... }` and is
+        # instantiated as `callPackage ./cargo-stylus/default.nix { inherit pkgs; }`,
+        # so `makeOverridable`'s `override` re-runs it against ours.
+        #
+        # COST: NONE. `pkgs` and their `pkgs` are the same nixpkgs revision,
+        # and neither the `allowBroken`/`allowUnfree` `config` difference nor
+        # the two overlays this flake installs (crates.io URLs -- fixed-output,
+        # so path-neutral; `nimlangserver` -- not in this closure) can change a
+        # derivation here. The suite asserts the resulting store path is the
+        # one the un-overridden attribute produces, so a future divergence is
+        # a loud failure rather than a silent rebuild of everything downstream.
+        #
+        # `circom` below needs no such treatment and deliberately does not get
+        # it: it is built through `craneLib`, whose registry base already is
+        # `static.crates.io` (measured: 130 CDN URLs, and the 23 remaining
+        # legacy ones are stock nixpkgs build tools, substitutable from
+        # cache.nixos.org). Applying `.override` there would change its store
+        # path for no gain.
         cargo-stylus =
-          inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.cargo-stylus;
+          inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.cargo-stylus.override
+            { inherit pkgs; };
 
         circom = inputs.nix-blockchain-development.outputs.legacyPackages.${system}.metacraft-labs.circom;
 
