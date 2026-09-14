@@ -1116,6 +1116,8 @@ type
     ## Epoch-ms timestamp when the first content arrived (text or tool call).
     ## 0.0 means the agent is still in the "thinking" / waiting phase.
     thinkingEndedAt*: float
+    images*: seq[string]
+      ## Base64 data URLs of images the user attached to this message.
 
   AgentTerminal* = object
     id*: cstring

@@ -1125,6 +1125,8 @@ type
     role*: AgentActivityMessageRole
     canceled*: bool
     isLoading*: bool
+    images*: seq[string]
+      ## Base64 data URLs of images the user attached to this message.
     diffs*: seq[AgentActivityDiffEntry]
     toolCalls*: seq[AgentActivityToolCallEntry]
     segments*: seq[AgentActivitySegment]

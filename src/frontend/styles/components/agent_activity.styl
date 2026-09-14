@@ -42,9 +42,77 @@
   padding: 0.5em 0.5em 0
 
   .agent-input-wrapper
-    position: relative
     background: colors-ui-surface-base-canvas
     border-radius: 0.5em
+    display: flex
+    flex-direction: column
+
+  .agent-input-text-row
+    position: relative
+
+  .agent-paste-strip
+    display: flex
+    flex-wrap: wrap
+    gap: 0.5em
+    padding: 0.5em 0.5em 0
+
+    &--empty
+      display: none
+
+  .agent-paste-thumb
+    position: relative
+    width: 4.5em
+    height: 4.5em
+    border-radius: 0.375em
+    overflow: hidden
+    flex-shrink: 0
+    background: colors-ui-surface-primary-default
+    cursor: zoom-in
+
+    &--loading
+      background: colors-ui-surface-primary-default
+
+    .agent-paste-img
+      width: 100%
+      height: 100%
+      object-fit: cover
+      display: block
+
+    .agent-paste-remove
+      position: absolute
+      top: 0.2em
+      right: 0.2em
+      width: 1.1em
+      height: 1.1em
+      border-radius: 50%
+      background: rgba(0, 0, 0, 0.65)
+      display: flex
+      align-items: center
+      justify-content: center
+      cursor: pointer
+      font-size: 0.7em
+      color: #fff
+      line-height: 1
+      user-select: none
+
+      &:hover
+        background: rgba(0, 0, 0, 0.85)
+
+  .agent-paste-shimmer
+    width: 100%
+    height: 100%
+    background: linear-gradient(90deg,
+      colors-ui-surface-primary-default 25%,
+      colors-ui-surface-base-panel 50%,
+      colors-ui-surface-primary-default 75%)
+    background-size: 200% 100%
+    animation: agent-paste-shimmer-anim 1.4s ease-in-out infinite
+
+  @keyframes agent-paste-shimmer-anim
+    0%
+      background-position: 200% 0
+    100%
+      background-position: -200% 0
 
   .agent-input-highlight
     position: absolute
@@ -694,6 +762,26 @@
 .ai-msg
   padding: 0.5em
   margin-bottom: 0.5em
+
+.agent-msg-images
+  display: flex
+  flex-wrap: wrap
+  gap: 0.375em
+  padding: 0.375em 0.5em 0
+
+.agent-msg-thumb
+  width: 5em
+  height: 5em
+  border-radius: 0.375em
+  overflow: hidden
+  flex-shrink: 0
+  cursor: zoom-in
+
+  .agent-msg-thumb-img
+    width: 100%
+    height: 100%
+    object-fit: cover
+    display: block
 
 .msg-content
   padding: 0.25em 0.5em
