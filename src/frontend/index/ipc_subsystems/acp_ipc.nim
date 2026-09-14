@@ -341,6 +341,28 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
             "id": state.currentMessageId,
             "content": chunk
           })
+        if updateKind == cstring"agent_message_chunk" and state.currentMessageId.len > 0 and
+           jsHasKey(updateObj, cstring"content") and
+           jsHasKey(updateObj[cstring"content"], cstring"type") and
+           updateObj[cstring"content"][cstring"type"].to(cstring) == cstring"image":
+          let contentObj = updateObj[cstring"content"]
+          var dataUri = cstring""
+          if jsHasKey(contentObj, cstring"uri"):
+            let uriVal = contentObj[cstring"uri"].to(cstring)
+            if uriVal.len > 0:
+              dataUri = uriVal
+          if dataUri.len == 0 and jsHasKey(contentObj, cstring"data"):
+            let b64 = contentObj[cstring"data"].to(cstring)
+            if b64.len > 0:
+              let mime = if jsHasKey(contentObj, cstring"mimeType"): contentObj[cstring"mimeType"].to(cstring) else: cstring"image/png"
+              dataUri = cstring("data:" & $mime & ";base64," & $b64)
+          if dataUri.len > 0:
+            mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+              "sessionId": acpSessionId,
+              "clientSessionId": clientSessionId,
+              "id": state.currentMessageId,
+              "image": dataUri
+            })
         if updateKind == cstring"tool_call_update":
           # Forward file/content tool outputs directly to the renderer so the AgentActivity can render them.
           let toolCallId =

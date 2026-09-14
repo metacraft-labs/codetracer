@@ -14,7 +14,8 @@ from ../viewmodel/viewmodels/agent_activity_vm import
   AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
   setPermissionInfo, setSessionKey, setBranchState, traceOpen, reviewOpen,
-  applyEvidenceDataset, retryPendingEvidenceInspections
+  applyEvidenceDataset, retryPendingEvidenceInspections,
+  clearPastedImages, getPastedImages
 from ../viewmodel/viewmodels/trace_open import
   TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
 from ../viewmodel/viewmodels/review_open import ReviewOpenService
@@ -395,6 +396,7 @@ proc legacyMessageToVm(message: AgentMessage): AgentActivityMessageEntry =
     thinkingEndedAt: message.thinkingEndedAt,
     createdAt: message.createdAt,
     duration: message.duration,
+    images: message.images,
   )
 
 proc currentMessagesToVm(self: AgentActivityComponent):
@@ -536,10 +538,13 @@ proc sendAcpPrompt(self: AgentActivityComponent, prompt: cstring) =
     return
   self.flushPendingPrompts()
   console.log cstring(fmt"[agent-activity] sending prompt sessionKey={self.currentSessionKey()} sessionId={self.sessionId} pending={self.pendingSessionId} prompt={prompt}")
+  let vm = ensureAgentActivityVM(self)
+  let images = if not vm.isNil: vm.getPastedImages() else: newSeq[string]()
   data.ipc.send ("CODETRACER::acp-prompt"), js{
     "sessionId": self.sessionId,
     "clientSessionId": self.pendingSessionId,
-    "text": prompt
+    "text": prompt,
+    "images": images.toJs
   }
 
 proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
@@ -548,7 +553,18 @@ proc updateAgentUi*(self: AgentActivityComponent, promptText: cstring) =
     return
   self.inputValue = cstring""
   let userMessageId = cstring(fmt"user-{self.id}-{self.messageOrder.len}{self.commandInputId}")
+  # Capture images before clear() wipes the VM signal
+  let vm = ensureAgentActivityVM(self)
+  let msgImages = if not vm.isNil: vm.getPastedImages() else: newSeq[string]()
   self.updateAgentMessageContent(userMessageId, promptText, false, AgentMessageUser)
+  # Attach images to the user message so renderMessage can display them
+  if msgImages.len > 0 and self.sessionMessageIds.hasKey(self.sessionId):
+    var msgs = self.sessionMessageIds[self.sessionId]
+    for i in 0 ..< msgs.len:
+      if msgs[i].id == userMessageId:
+        msgs[i].images = msgImages
+        self.sessionMessageIds[self.sessionId] = msgs
+        break
   self.updateAgentMessageContent(PLACEHOLDER_MSG, "".cstring, false, AgentMessageAgent)
   # self.addMessageToSession(self.currentSessionKey(), userMessageId)
   # self.addMessageToSession(self.currentSessionKey(), PLACEHOLDER_MSG)
@@ -844,6 +860,9 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
     else:
       cstring""
 
+  let hasImage = jsHasKey(response, cstring"image")
+  let imageSrc = if hasImage: cast[cstring](response[cstring"image"]) else: cstring""
+
   let isFinal = jsHasKey(response, cstring"stopReason")
   let stopReason =
     if isFinal:
@@ -879,6 +898,21 @@ proc onAcpReceiveResponse*(sender: js, response: JsObject) {.async.} =
         if msg.id == messageId:
           msg.isLoading = true
           break
+    return
+
+  if hasImage and imageSrc.len > 0 and not isFinal:
+    if self.sessionMessageIds.hasKey(self.sessionId):
+      self.messageOrder = self.messageOrder.filterIt($it != PLACEHOLDER_MSG)
+      self.sessionMessageIds[self.sessionId] = self.sessionMessageIds[self.sessionId].filterIt(it.id != PLACEHOLDER_MSG)
+    self.activeAgentMessageId = messageId
+    self.addAgentMessage(messageId)
+    if self.sessionMessageIds.hasKey(self.sessionId):
+      for msg in self.sessionMessageIds[self.sessionId]:
+        if msg.id == messageId:
+          msg.images.add($imageSrc)
+          msg.isLoading = true
+          break
+    self.requestAgentActivityPanelRefresh()
     return
 
   let appendFlag = messageId in self.messageOrder and not isFinal and hasContent

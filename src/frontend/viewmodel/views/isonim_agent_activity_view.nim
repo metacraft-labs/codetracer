@@ -522,6 +522,27 @@ when defined(js):
   proc setIconHtml(el: isonim_dom.Element; html: string) =
     el.innerHTML = cstring(html)
   proc setIconHtml(el: MockNode; html: string) = discard
+  proc setImgSrc(el: isonim_dom.Element; src: string) =
+    el.setAttribute(cstring"src", cstring(src))
+  proc setImgSrc(el: MockNode; src: string) = discard
+  proc showImageLightbox(src: cstring) {.importjs: """
+    (function(src) {
+      var ex = document.getElementById('ct-img-lightbox');
+      if (ex) ex.remove();
+      var ov = document.createElement('div');
+      ov.id = 'ct-img-lightbox';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+      var img = document.createElement('img');
+      img.src = src;
+      img.style.cssText = 'max-width:90vw;max-height:90vh;object-fit:contain;border-radius:0.5em;box-shadow:0 0.5em 3em rgba(0,0,0,0.7);cursor:default;';
+      img.onclick = function(e) { e.stopPropagation(); };
+      ov.appendChild(img);
+      ov.onclick = function() { ov.remove(); };
+      function onKey(e) { if (e.key === 'Escape') { ov.remove(); document.removeEventListener('keydown', onKey); } }
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(ov);
+    })(#)
+  """.}
   proc setupClickOutsideHandler(wrapper: isonim_dom.Element; onClose: proc()) {.importjs: """
     (function(wrapper, onClose) {
       setTimeout(function() {
@@ -551,6 +572,29 @@ when defined(js):
     })(#, #)
   """.}
   proc setupBranchSearch(searchInput: MockNode; listContainer: MockNode) = discard
+  proc setupPasteImageHandler(ta: isonim_dom.Element;
+                               onLoading: proc(): int;
+                               onLoaded: proc(idx: int; dataUrl: cstring)) {.importjs: """
+    (function(ta, onLoading, onLoaded) {
+      ta.addEventListener('paste', function(e) {
+        var items = (e.clipboardData || {}).items || [];
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf('image') !== -1) {
+            e.preventDefault();
+            (function(item) {
+              var idx = onLoading();
+              var file = item.getAsFile();
+              var reader = new FileReader();
+              reader.onload = function(ev) { onLoaded(idx, ev.target.result); };
+              reader.readAsDataURL(file);
+            })(items[i]);
+          }
+        }
+      });
+    })(#, #, #)
+  """.}
+  proc setupPasteImageHandler(ta: MockNode; onLoading: proc(): int;
+                               onLoaded: proc(idx: int; dataUrl: cstring)) = discard
   proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element)
     {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)""".}
   proc setupInputHighlight(r: WebRenderer; ta: isonim_dom.Element;
@@ -616,7 +660,11 @@ when defined(js):
           ev.preventDefault()
           if not vm.isLoading.val:
             callbacks.invokeSubmit()
-            vm.setInputValue(""))
+            vm.setInputValue("")
+            vm.clearPastedImages())
+    setupPasteImageHandler(input,
+      proc(): int = vm.addPastedImageLoading(),
+      proc(idx: int; dataUrl: cstring) = vm.updatePastedImage(idx, $dataUrl))
 
 proc makeToolRowClickHandler(rowId: string): proc() =
   ## Captures rowId in a fresh proc scope to avoid Nim JS for-loop closure bug
@@ -658,6 +706,15 @@ proc renderMessage[R](r: R; componentId: int;
                        classListAdd(btn, cstring"copied")
                        jsSetTimeout(proc() = classListRemove(btn, cstring"copied"), 2000),
                  "data-id" = message.id)
+        if message.images.len > 0:
+          tdiv(class = "agent-msg-images"):
+            for imgData in message.images:
+              let capturedSrc = imgData
+              tdiv(class = "agent-msg-thumb",
+                   onclick = proc() =
+                     when defined(js):
+                       showImageLightbox(cstring(capturedSrc))):
+                img(class = "agent-msg-thumb-img", alt = "attachment", src = imgData)
         tdiv(class = AgentActivityMessageContentClass, id = contentId):
           for seg in parseInlineCode(message.content):
             if seg.kind == mskText:
@@ -951,6 +1008,15 @@ proc renderMessage[R](r: R; componentId: int;
                   if mseg.lang.len > 0:
                     span(class = "agent-code-block-lang"): text mseg.lang
                   tdiv(class = "agent-code-block-content"): text mseg.content
+        if message.images.len > 0:
+          tdiv(class = "agent-msg-images"):
+            for imgData in message.images:
+              let capturedSrc = imgData
+              tdiv(class = "agent-msg-thumb",
+                   onclick = proc() =
+                     when defined(js):
+                       showImageLightbox(cstring(capturedSrc))):
+                img(class = "agent-msg-thumb-img", alt = "agent image", src = imgData)
         # "Agent is working" indicator: visible outside the collapsible block while
         # the agent is still producing output after the thinking phase ended.
         if message.isLoading and not stillThinking and not message.canceled:
@@ -1513,6 +1579,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
   var input: typeof(r.createElement("textarea"))
   var highlight: typeof(r.createElement("div"))
   var buttons: typeof(r.createElement("div"))
+  var imagesStrip: typeof(r.createElement("div"))
   let inputIdValue = inputId(componentId, commandInputId)
 
   let panel = ui(r):
@@ -1523,8 +1590,10 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
       tdiv(ref = conversation, class = AgentActivityConversationClass)
       tdiv(class = AgentActivityInteractionClass):
         tdiv(class = "agent-input-wrapper"):
-          tdiv(ref = highlight, class = "agent-input-highlight")
-          textarea(ref = input,
+          tdiv(ref = imagesStrip, class = "agent-paste-strip")
+          tdiv(class = "agent-input-text-row"):
+            tdiv(ref = highlight, class = "agent-input-highlight")
+            textarea(ref = input,
                    `type` = "text",
                    id = inputIdValue,
                    name = "agent-query",
@@ -1539,6 +1608,39 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
 
   r.attachInputEvents(input, vm, callbacks)
   r.setupInputHighlight(input, highlight)
+
+  createRenderEffect proc() =
+    r.clearChildren(imagesStrip)
+    let images = vm.pastedImages.val
+    if images.len == 0:
+      r.setAttribute(imagesStrip, "class", "agent-paste-strip agent-paste-strip--empty")
+    else:
+      r.setAttribute(imagesStrip, "class", "agent-paste-strip")
+    for i, imgData in images:
+      let idx = i
+      let isLoading = imgData == "loading"
+      if isLoading:
+        let thumb = ui(r):
+          tdiv(class = "agent-paste-thumb agent-paste-thumb--loading"):
+            tdiv(class = "agent-paste-shimmer")
+            tdiv(class = "agent-paste-remove",
+                 onclick = proc() = vm.removePastedImage(idx)):
+              text "×"
+        r.appendRenderedChild(imagesStrip, thumb)
+      else:
+        let capturedSrc = imgData
+        var imgEl: typeof(r.createElement("img"))
+        let thumb = ui(r):
+          tdiv(class = "agent-paste-thumb",
+               onclick = proc() =
+                 when defined(js):
+                   showImageLightbox(cstring(capturedSrc))):
+            img(ref = imgEl, class = "agent-paste-img", alt = "attachment")
+            tdiv(class = "agent-paste-remove",
+                 onclick = proc() = vm.removePastedImage(idx)):
+              text "×"
+        setImgSrc(imgEl, imgData)
+        r.appendRenderedChild(imagesStrip, thumb)
 
   createRenderEffect proc() =
     let ph = if vm.messages.val.len > 0 or vm.terminals.val.len > 0:

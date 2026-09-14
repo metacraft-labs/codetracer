@@ -116,6 +116,10 @@ type
       ## Whether the model selector dropdown is open.
     addContextDropdownOpen*: Signal[bool]
       ## Whether the + context dropdown menu is open.
+    pastedImages*: Signal[seq[string]]
+      ## Base64 data URLs of images pasted by the user.  Each entry is either
+      ## "loading" (FileReader not yet done) or a data: URL.  Cleared after
+      ## submission.  Tracked here so the host can read them on submit.
 
     messageCount*: Memo[int]
     terminalCount*: Memo[int]
@@ -413,6 +417,30 @@ proc setSessionNotice*(vm: AgentActivityVM; notice: string) =
     return
   vm.sessionNotice.val = notice
 
+proc addPastedImageLoading*(vm: AgentActivityVM): int =
+  var images = vm.pastedImages.val
+  result = images.len
+  images.add("loading")
+  vm.pastedImages.val = images
+
+proc updatePastedImage*(vm: AgentActivityVM; idx: int; dataUrl: string) =
+  var images = vm.pastedImages.val
+  if idx >= 0 and idx < images.len:
+    images[idx] = dataUrl
+    vm.pastedImages.val = images
+
+proc removePastedImage*(vm: AgentActivityVM; idx: int) =
+  var images = vm.pastedImages.val
+  if idx >= 0 and idx < images.len:
+    images.delete(idx)
+    vm.pastedImages.val = images
+
+proc clearPastedImages*(vm: AgentActivityVM) =
+  vm.pastedImages.val = @[]
+
+proc getPastedImages*(vm: AgentActivityVM): seq[string] =
+  vm.pastedImages.val
+
 proc setSelectedModel*(vm: AgentActivityVM; model: string) =
   vm.selectedModel.val = model
 
@@ -441,6 +469,7 @@ proc clearConversation*(vm: AgentActivityVM) =
   vm.wantsPermission.val = false
   vm.permissionInfo.val = ""
   vm.sessionNotice.val = ""
+  vm.pastedImages.val = @[]
 
 proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
   withViewModel proc(dispose: proc()): AgentActivityVM =
@@ -465,6 +494,7 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let branchDropdownOpen = createSignal(false)
     let modelDropdownOpen = createSignal(false)
     let addContextDropdownOpen = createSignal(false)
+    let pastedImages = createSignal(newSeq[string]())
 
     let messageCount = createMemo[int] proc(): int =
       messages.val.len
@@ -502,6 +532,7 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       branchDropdownOpen: branchDropdownOpen,
       modelDropdownOpen: modelDropdownOpen,
       addContextDropdownOpen: addContextDropdownOpen,
+      pastedImages: pastedImages,
       messageCount: messageCount,
       terminalCount: terminalCount,
       hasMessages: hasMessages,
