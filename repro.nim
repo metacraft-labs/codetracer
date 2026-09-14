@@ -746,14 +746,16 @@ package codeTracer:
                      extraInputsValue: openArray[string] = [];
                      extraOutputsValue: openArray[string] = [];
                      afterValue: openArray[BuildActionDef] = [];
-                     cacheableValue = true): BuildActionDef =
+                     cacheableValue = true;
+                     extraEnvValue: openArray[(string, string)] = []): BuildActionDef =
       shell(
         command = commandValue,
         actionId = actionIdValue,
         extraInputs = extraInputsValue,
         extraOutputs = extraOutputsValue,
         after = afterValue,
-        cacheable = cacheableValue)
+        cacheable = cacheableValue,
+        extraEnv = extraEnvValue)
 
     let generatedConfigHeader = fs.writeText(
       output = "build/generated/ct_config.h",
@@ -1715,6 +1717,52 @@ package codeTracer:
     # list. The declared inputs are the script itself plus the data files
     # it is pointless to rediscover; they make the edge order correctly
     # before any monitored run of it exists.
+    #
+    # PYTHONHASHSEED=0 ON EVERY GATE. NOT A BLESSING -- THE OPPOSITE OF ONE.
+    #
+    # Five of these gates run `python3`, and a bare CPython start reads the
+    # OS entropy pool once to seed `hash()` for `str`/`bytes`. Measured, on
+    # this build graph: `python3 -c 'print(1)'` emits one io-mon
+    # `non-deterministic` record; `PYTHONHASHSEED=0 python3 -c 'print(1)'`
+    # emits NONE. The engine graded the former `unblessed-entropy` and
+    # withheld the capture, so those five gates could never cache.
+    #
+    # The obvious-looking remedy -- adding `python3` to the per-image
+    # entropy blessing table next to `mktemp` and `git` -- WOULD BE
+    # UNSOUND, and this comment exists so the next reader does not reach
+    # for it. A blessing says "this tool's entropy cannot reach its
+    # output". That is true of `mktemp` (the random suffix names a file
+    # nobody's verdict depends on) and of `git` (its entropy seeds
+    # internal hashing, not what it prints). It is FALSE of the hash seed:
+    # the seed decides `set` and `dict` iteration order, which is exactly
+    # the kind of thing a script prints, sorts by, or picks a "first"
+    # element out of. Entropy that genuinely can reach output must not be
+    # waived.
+    #
+    # So the nondeterminism is REMOVED instead of waived. Pinning the seed
+    # makes CPython skip the entropy read altogether -- there is no record
+    # left to grade -- and simultaneously makes the iteration order the
+    # gates observe a function of the recipe rather than of the run. The
+    # cache key improves because the RUN became deterministic, not because
+    # the evidence was silenced. That distinction is the whole rule:
+    # uncacheable is safe, falsely-cacheable is not.
+    #
+    # ON ALL TEN, NOT ONLY THE FIVE THAT RUN PYTHON TODAY. The property
+    # being asserted is about the family -- "no gate's verdict depends on
+    # CPython's hash seed" -- not about today's call sites. A gate that
+    # grows a `python3` line later would otherwise silently stop caching,
+    # and the person who added the line would have no reason to connect
+    # the two. Declaring it costs nothing where python is never spawned:
+    # `shell`'s `extraEnv` folds the (name, value) pair into the action's
+    # weak fingerprint, and a constant pair shifts every key once and then
+    # never again.
+    #
+    # DECLARED, not merely exported, and that matters twice over: a
+    # declared variable REPLACES the inherited one, so a developer with
+    # `PYTHONHASHSEED` set in their shell gets the same gate run as CI;
+    # and because it is declared it is part of the key, so a future change
+    # of this value cannot serve a result computed under the old one.
+    const GateEnv = [("PYTHONHASHSEED", "0")]
     let gateFlakePinAlignment = ctShell(
       actionIdValue = "codetracer.gate.flake-pin-alignment",
       commandValue = "bash ci/test/flake-pin-alignment-test.sh",
@@ -1725,7 +1773,8 @@ package codeTracer:
       extraInputsValue = @[
         "ci/test/flake-pin-alignment-test.sh",
         "scripts/test-flake-pin-alignment.sh"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-flake-pin-alignment", gateFlakePinAlignment)
 
     let gatePythonVersionAlignment = ctShell(
@@ -1734,7 +1783,8 @@ package codeTracer:
       extraInputsValue = @[
         "ci/test/python-version-alignment-test.sh",
         "scripts/test-python-version-alignment.sh"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-python-version-alignment", gatePythonVersionAlignment)
 
     let gateRequireRuntimeAssets = ctShell(
@@ -1743,7 +1793,8 @@ package codeTracer:
       extraInputsValue = @[
         "ci/test/require-runtime-assets-test.sh",
         "scripts/require-runtime-assets.sh"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-require-runtime-assets", gateRequireRuntimeAssets)
 
     let gateTestLaneReport = ctShell(
@@ -1751,7 +1802,8 @@ package codeTracer:
       commandValue = "bash ci/test/test-lane-report-test.sh",
       extraInputsValue = @[
         "ci/test/test-lane-report-test.sh", "ci/lib/test-lane-report.sh"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-test-lane-report", gateTestLaneReport)
 
     let gateTestLaneCoverageContract = ctShell(
@@ -1759,7 +1811,8 @@ package codeTracer:
       commandValue = "bash ci/test/test-lane-coverage-test.sh",
       extraInputsValue = @[
         "ci/test/test-lane-coverage-test.sh", "ci/test/test-lane-coverage.sh"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-test-lane-coverage-contract", gateTestLaneCoverageContract)
 
     let gateSiblingPins = ctShell(
@@ -1767,7 +1820,8 @@ package codeTracer:
       commandValue = "bash ci/test/sibling-pins-test.sh",
       extraInputsValue = @[
         "ci/test/sibling-pins-test.sh", "scripts/sibling-pins.sh"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-sibling-pins", gateSiblingPins)
 
     let gateKnownFailures = ctShell(
@@ -1778,14 +1832,42 @@ package codeTracer:
       # the gate never reads it.
       extraInputsValue = @[
         "ci/test/known-failures-gate.sh", "ci/lib/known_failures.py"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-known-failures", gateKnownFailures)
 
+    # THE ONE GATE THAT STILL CANNOT PUBLISH, AND WHY -- so the next reader
+    # measures something else instead of re-deriving this.
+    #
+    # `run_port_busy_scenario` is a real TCP test: a `python3` holder binds and
+    # listens on 127.0.0.1:<port>, and `scripts/build.sh`'s OWN LiveReload
+    # preflight -- `exec 3<>/dev/tcp/127.0.0.1/$port`, the behaviour the (H)
+    # contracts exist to pin -- connects to it. Measured: three successful
+    # AF_INET connects, one `ipc peer outside monitored tree pid=... peer=0`
+    # event loss, `mcIncomplete`, capture withheld.
+    #
+    # `peer=0` is not a gap io-mon could close by trying harder. `SO_PEERCRED`
+    # returns a pid for AF_UNIX and nothing for INET, and BOTH layers treat
+    # that as final on purpose: io-mon's exemption requires `peer != 0`, and
+    # repro_build_engine's `resolvePeerAttribution` states it as rule 4 -- "a
+    # network peer is therefore unattributable and stays unattributable no
+    # matter what this set contains". Making this gate publish means relaxing
+    # that rule so a connect counts as in-tree on weaker evidence than a
+    # kernel-supplied peer identity. That is the same class of act as blessing
+    # `sh` for entropy, and it is refused here for the same reason:
+    # uncacheable is safe, falsely-cacheable is not.
+    #
+    # The available honest move, if this miss ever costs enough to matter, is
+    # to SPLIT the port-busy scenario into its own `cacheable = false` edge --
+    # which relocates the uncacheable work rather than pretending it is not
+    # there. Not done here; nine of ten is the correct number while the tenth
+    # genuinely talks to a socket.
     let gateBuildAlignment = ctShell(
       actionIdValue = "codetracer.gate.build-alignment",
       commandValue = "bash scripts/test-build-alignment.sh",
       extraInputsValue = @["scripts/test-build-alignment.sh"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-build-alignment", gateBuildAlignment)
 
     let gateRustTestCrateCoverage = ctShell(
@@ -1795,7 +1877,8 @@ package codeTracer:
         "ci/test/rust-test-crate-coverage.sh",
         "ci/test/rust-test-crate-coverage.known-dark.txt",
         "ci/test/rust-test-crate-coverage.fixture.txt"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-rust-test-crate-coverage", gateRustTestCrateCoverage)
 
     let gateTestLaneCoverage = ctShell(
@@ -1803,7 +1886,8 @@ package codeTracer:
       commandValue = "bash ci/test/test-lane-coverage.sh",
       extraInputsValue = @[
         "ci/test/test-lane-coverage.sh", "ci/lib/test-lane-files.sh"],
-      cacheableValue = true)
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
     target("gate-test-lane-coverage", gateTestLaneCoverage)
 
     let ctGateTestActions = @[

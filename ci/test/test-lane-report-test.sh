@@ -459,8 +459,36 @@ if [ -f "${runner_abs}" ] &&
 	runner_classifies=1
 fi
 
+# COMMENT-STRIPPED justfile, MATERIALISED AS A NAMED FILE rather than held in
+# a variable and fed to awk through a here-string.
+#
+# `awk ... <<<"${justfile_code}"` reads identically, and is what this loop used
+# to say. The difference is what the descriptor IS. A here-string larger than
+# one pipe buffer makes bash fall back to an anonymous temp file: it mkstemps,
+# writes, unlinks, and dup2s the still-open fd onto the child's stdin. This
+# justfile is ~215 KB, so every one of the 18 iterations below handed awk a
+# stdin that is a regular file with NO NAME — `/proc/self/fd/0` resolves to a
+# "(deleted)" path.
+#
+# That is a hole in the dependency evidence, not a style nit. The build monitor
+# records what each child reads so the engine can decide whether a cached
+# verdict still describes the tree; an unnameable regular fd is content it
+# cannot account for, so it graded this gate `mcIncomplete` and withheld the
+# capture -- 18 `linux inherited regular fd read unnamed key=localfd:...  fd=0`
+# losses, one per lane, all naming the same recycled inode. The gate could
+# never cache, and the reason had nothing to do with what it asserts.
+#
+# A named file closes it by construction: awk opens a path, the monitor records
+# a path, and the evidence describes the run. The file is written inside this
+# suite's own `tmp_dir`, so it is content this run produced rather than an
+# input it depends on. It is also strictly less work -- one sed and one write,
+# instead of re-serialising 215 KB into a fresh temp file 18 times.
+#
+# DO NOT "SIMPLIFY" THIS BACK TO A HERE-STRING. It would still pass; it would
+# silently stop caching again.
 # shellcheck disable=SC2001 # parameter expansion cannot express this trim
-justfile_code="$(sed 's/[[:space:]]*#.*$//' <"${JUSTFILE}")"
+justfile_code_file="${tmp_dir}/justfile-code"
+sed 's/[[:space:]]*#.*$//' <"${JUSTFILE}" >"${justfile_code_file}"
 
 # Every justfile recipe that compiles and runs Nim test files. The five that
 # delegate, the one that still loops inline, and the lanes added when the file
@@ -483,7 +511,7 @@ for lane in "${lane_names[@]}"; do
 		$0 ~ target { inrec = 1; next }
 		inrec && /^[^[:space:]]/ { exit }
 		inrec { print }
-	' <<<"${justfile_code}")"
+	' "${justfile_code_file}")"
 	if [ -z "${lane_body}" ]; then
 		missing_lanes+=("${lane} (no such recipe)")
 	elif grep -qE 'source "?\$?\{?[a-z_]*\}?/?ci/lib/test-lane-report\.sh"?' <<<"${lane_body}" &&
