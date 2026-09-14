@@ -324,6 +324,60 @@ CHAIN_TOKENS=(
 	"transactionreceipt"
 )
 
+# Style payload. §3.2's FIRST row bans "any rendering, any CSS, any component"
+# from this package, and until now only the first and third of those three
+# were enforced — by the import graph and the `src/frontend/ui/` path ban.
+#
+# "ANY CSS" WAS NOT ENFORCED AT ALL, and the NOTE on `src/frontend/ui/` above
+# already explains why an import-graph rule structurally cannot do it:
+# `ui/flow_line_styles.nim` exports `const FlowLineHitClass* = "line-flow-hit"`
+# and has ZERO imports, so it "presents to the graph exactly as
+# `flow_loop_math` does". That argument was made about a module one `import`
+# away from the graph. It applies with full force to a module ALREADY INSIDE
+# it, and when this rule was first run it found sixteen such lines — see
+# ci/test/sdk-style-payload.baseline.
+#
+# The mechanism that put them there is documented in the SDK's own source.
+# `origin_chain_types.ariaLabelForSummary`'s docstring says it is kept in the
+# ViewModel layer "so the renderer-agnostic IsoNim views can call it without
+# pulling `ui/origin_badge` (which imports `std/dom` on the JS target)". A
+# helper that is renderer-agnostic but visually opinionated has, today, no
+# package to live in: the desktop renderer is unimportable and there is no UI
+# components package yet. So it lands here, and the import rules wave it
+# through because dodging them is exactly what moving it here achieved.
+#
+# Each rule is `ERE;label;reason`. They match against NON-COMMENT lines only,
+# on the same reasoning as the chain scan: a comment has no ABI, and these
+# modules must be able to cite the stylesheet that styles a class without
+# being accused of carrying it.
+#
+# Deliberately NOT rules, because a lint that cries wolf gets switched off:
+#
+#   * bare `style` / `Style`. `FlowLineStyleKind` and `OriginExpressionStyle`
+#     are enumerations of KIND, not of appearance, and a headless layer is
+#     entitled to name a kind.
+#   * lowercase `class`. `classifyBackendFailure` is a taxonomy, not a
+#     stylesheet, and `FilesystemDiffClass` is a classification enum whose
+#     members are not CSS. Only capitalised `Class` — the spelling a CSS class
+#     constant and a class-producing routine both use — is a rule.
+#   * glyphs and display strings. `directionDisplayIcon` returns "↑"/"↓" and
+#     `formatDuration` returns "1.2s"; both are presentation policy, but a
+#     rule wide enough to catch them catches every user-facing string in the
+#     package. They are listed as unresolved in Client-SDK.md instead, which
+#     is the honest place for a judgement this rule cannot make.
+STYLE_RULES=(
+	"[A-Za-z_][A-Za-z0-9_]*Class(es)?\\*?[ 	]*=[ 	]*\";css-class-const;a CSS class name bound to a constant"
+	"^[ 	]*(proc|func)[ 	]+[A-Za-z0-9_]+Class[A-Za-z0-9_]*\\*;css-class-proc;a routine whose job is to produce a CSS class"
+	"\"#[0-9a-fA-F]{3}([0-9a-fA-F]{3}([0-9a-fA-F]{2})?)?\";hex-colour;a colour literal"
+	"\"[0-9]+(\\.[0-9]+)?(px|rem|em|vh|vw|pt|ch)\";css-dimension;a CSS dimension literal"
+	"\"(background-color|font-family|font-size|line-height|z-index|border-radius|box-shadow|flex-direction|text-align|opacity);css-property;a CSS property name"
+	"[A-Za-z0-9_]+(Px|Rem)[^A-Za-z0-9_];unit-identifier;an identifier carrying a CSS unit — a pixel is not a headless quantity"
+	"\"[^\"]*\\.(css|styl|scss)\";stylesheet-ref;a reference to a stylesheet file"
+)
+
+# Where the ratchet ceilings live.
+STYLE_BASELINE_REL="ci/test/sdk-style-payload.baseline"
+
 # ---------------------------------------------------------------------------
 # Argument handling
 # ---------------------------------------------------------------------------
@@ -335,6 +389,7 @@ list_graph=0
 # sibling packages and needs none; the real repo does, and the difference is
 # what keeps `graph-walks-siblings` from being either vacuous or impossible.
 root_is_repo=1
+enforce_style=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--root)
@@ -347,6 +402,13 @@ while [ $# -gt 0 ]; do
 		# WHICH edge dragged a forbidden module in, and for checking this
 		# script's lexical resolution against `nim c --genDeps`.
 		list_graph=1
+		;;
+	--enforce-style)
+		# Ignore the ratchet ceilings and fail on ANY style payload. The mode
+		# this repo switches to once the backlog in
+		# ci/test/sdk-style-payload.baseline is cleared into the UI components
+		# package, at which point the baseline file is deleted with it.
+		enforce_style=1
 		;;
 	*)
 		echo "sdk-facade-boundary.sh: unknown argument '$1'" >&2
@@ -822,6 +884,176 @@ if [ "${facade_ok}" -eq 1 ]; then
 		check_ok "facade-graph-no-chain-concept (spec §3.2, last row)"
 	else
 		check_failed "facade-graph-no-chain-concept: ${chain_violations} chain reference(s) in the SDK graph"
+	fi
+
+	# -------------------------------------------------------------------
+	# Check 3b: no style payload anywhere in the SDK's own graph
+	# (spec §3.2 row 1, the "any CSS" clause)
+	# -------------------------------------------------------------------
+	#
+	# Counted per IN-REPO module. Sibling packages are excluded: isonim is a
+	# peer, §4.1 makes its signals part of the consumption model, and this
+	# repo cannot ratchet a file it does not own.
+	# The whole scan is ONE awk pass over every in-repo module in the graph.
+	#
+	# It was seven greps plus seven awks per module when first written, which
+	# is 500-odd processes and took 16 seconds — enough to push this guard out
+	# of the "cheap, always-runnable" half of the lint stage that its own
+	# header promises it belongs to. The rules are handed over in the
+	# environment rather than with `-v`, because awk expands backslash escapes
+	# in a `-v` value and the patterns contain `\*` and `\.`.
+	style_rules_blob=""
+	for entry in "${STYLE_RULES[@]}"; do
+		style_rules_blob="${style_rules_blob}${entry}"$'\n'
+	done
+
+	style_scanned=0
+	mapfile -t style_modules < <(
+		for item in "${sdk_closure[@]}"; do
+			# In-repo only: a sibling path is absolute. isonim is a peer
+			# package (§4.1) and this repo cannot ratchet a file it does not
+			# own.
+			case "${item}" in /*) continue ;; esac
+			[ -f "${item}" ] && printf '%s\n' "${item}"
+		done
+	)
+	style_scanned="${#style_modules[@]}"
+
+	if [ "${style_scanned}" -gt 0 ]; then
+		mapfile -t style_hits < <(
+			STYLE_RULES_BLOB="${style_rules_blob}" awk '
+				BEGIN {
+					n = split(ENVIRON["STYLE_RULES_BLOB"], lines, "\n")
+					nr = 0
+					for (i = 1; i <= n; i++) {
+						if (lines[i] == "") continue
+						p = index(lines[i], ";")
+						nr++
+						pat[nr] = substr(lines[i], 1, p - 1)
+						rest = substr(lines[i], p + 1)
+						q = index(rest, ";")
+						lbl[nr] = substr(rest, 1, q - 1)
+					}
+				}
+				# A comment has no ABI, and these modules must be able to cite
+				# the stylesheet that styles a class without carrying it.
+				/^[ \t]*#/ { next }
+				{
+					for (i = 1; i <= nr; i++)
+						if ($0 ~ pat[i]) {
+							print FILENAME "\t" lbl[i] "\t" FNR "\t" $0
+							break
+						}
+				}
+			' "${style_modules[@]}"
+		)
+	else
+		style_hits=()
+	fi
+
+	# The ceilings, parsed once. A module absent from the file has a ceiling
+	# of 0 and no grace at all.
+	style_ceilings=""
+	if [ -f "${STYLE_BASELINE_REL}" ]; then
+		style_ceilings="$(awk -F= '
+			/^[ \t]*#/ { next }
+			/=/ {
+				k = $1; v = $2
+				gsub(/[ \t]/, "", k); gsub(/[ \t]/, "", v)
+				if (k != "") print k "=" v
+			}' "${STYLE_BASELINE_REL}")"
+	fi
+
+	style_ceiling_for() {
+		local want="$1" line
+		while IFS= read -r line; do
+			[ "${line%%=*}" = "${want}" ] && { echo "${line##*=}"; return; }
+		done <<<"${style_ceilings}"
+		echo 0
+	}
+
+	style_violations=0
+	# Modules named in the baseline that the walk no longer reaches, or that
+	# no longer carry a payload, would silently keep a ceiling alive for
+	# nothing.
+	style_seen_in_graph=""
+
+	for item in "${style_modules[@]}"; do
+		count=0
+		for h in "${style_hits[@]}"; do
+			[ "${h%%	*}" = "${item}" ] && count=$((count + 1))
+		done
+		[ "${count}" -eq 0 ] && continue
+		style_seen_in_graph="${style_seen_in_graph} ${item}"
+
+		ceiling="$(style_ceiling_for "${item}")"
+		[ "${enforce_style}" -eq 1 ] && ceiling=0
+
+		if [ "${count}" -gt "${ceiling}" ]; then
+			style_violations=$((style_violations + 1))
+			violation_detail "${item}: ${count} style payload line(s), ceiling ${ceiling}"
+			for h in "${style_hits[@]}"; do
+				[ "${h%%	*}" = "${item}" ] || continue
+				# `path \t label \t line \t text` -> `label:line:text`
+				violation_detail "    $(printf '%s' "${h#*	}" | tr '\t' ':')"
+			done
+			if [ "${enforce_style}" -eq 1 ]; then
+				violation_detail "  --enforce-style: the ratchet is ignored; §3.2 row 1 bans CSS outright."
+			else
+				violation_detail "  §3.2 row 1 bans 'any rendering, ANY CSS, any component' from this"
+				violation_detail "  package. A helper that is renderer-agnostic but visually opinionated"
+				violation_detail "  belongs in the CodeTracer UI components package (Client-SDK.md §1.2),"
+				violation_detail "  NOT here and NOT in the desktop renderer."
+				violation_detail "  Raising the ceiling in ${STYLE_BASELINE_REL} is not the remedy: that"
+				violation_detail "  file records a backlog being worked down, and it only turns one way."
+			fi
+		elif [ "${count}" -lt "${ceiling}" ]; then
+			style_violations=$((style_violations + 1))
+			violation_detail "${item}: ${count} style payload line(s), but the ceiling is ${ceiling}"
+			violation_detail "  The ratchet only turns one way. Lower the ceiling to ${count} in"
+			violation_detail "  ${STYLE_BASELINE_REL} (or delete the line if ${count} is 0) so the"
+			violation_detail "  progress cannot slip back."
+		fi
+	done
+
+	# INSTRUMENT. Zero modules scanned means the closure walk or the file
+	# tests broke, and every rule above would report OK while measuring
+	# nothing. That is the failure this repo has collected five instances of.
+	if [ "${style_scanned}" -eq 0 ]; then
+		check_failed "facade-graph-no-style-payload: scanned 0 in-repo modules"
+		violation_detail "The facade graph reported ${#sdk_closure[@]} modules but none was a"
+		violation_detail "readable in-repo file. The scan measured nothing; that is not a pass."
+	elif [ "${style_violations}" -eq 0 ]; then
+		if [ "${enforce_style}" -eq 1 ]; then
+			check_ok "facade-graph-no-style-payload (--enforce-style; ${style_scanned} module(s), no CSS at all)"
+		else
+			check_ok "facade-graph-no-style-payload (spec §3.2 row 1, 'any CSS'; ${style_scanned} module(s) at or under ceiling)"
+		fi
+	else
+		check_failed "facade-graph-no-style-payload: ${style_violations} module(s) off their ceiling"
+	fi
+
+	# A ceiling for a module the graph no longer contains is a dead ceiling.
+	if [ "${enforce_style}" -eq 0 ] && [ -f "${STYLE_BASELINE_REL}" ]; then
+		stale=0
+		while IFS= read -r line; do
+			case "${line}" in '#'* | '') continue ;; esac
+			key="$(printf '%s' "${line%%=*}" | tr -d ' \t')"
+			case " ${style_seen_in_graph} " in
+			*" ${key} "*) ;;
+			*)
+				stale=$((stale + 1))
+				violation_detail "${key} has a ceiling but the facade graph no longer carries a"
+				violation_detail "  style payload for it. Delete the line — a ceiling with nothing"
+				violation_detail "  under it is room for a regression to hide in."
+				;;
+			esac
+		done <"${STYLE_BASELINE_REL}"
+		if [ "${stale}" -eq 0 ]; then
+			check_ok "style-baseline-has-no-dead-ceilings"
+		else
+			check_failed "style-baseline-has-no-dead-ceilings: ${stale} stale entry(s)"
+		fi
 	fi
 fi
 

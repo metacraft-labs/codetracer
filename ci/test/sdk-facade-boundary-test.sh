@@ -502,5 +502,180 @@ else
 	fi
 fi
 
+# ---------------------------------------------------------------------------
+# facade-graph-no-style-payload (spec §3.2 row 1, the "any CSS" clause)
+#
+# WHY THESE ARMS EXIST
+# --------------------
+# This rule's whole claim is that it sees something the import graph cannot.
+# The import rules above are blind to a module with no imports — the guard's
+# own NOTE on `src/frontend/ui/` says so and names `ui/flow_line_styles.nim`
+# as the worked example. So every arm below plants a payload in a module the
+# import rules pass cleanly, and requires this rule to report it.
+#
+# The suppression arms matter as much as the detection ones. When the rule was
+# drafted, a `[Cc]lass` pattern matched `classifyBackendFailure` — a real
+# symbol in the real SDK — and a `Class`-anywhere pattern matched
+# `FilesystemDiffClass`, a classification enum in `store/types.nim`. Both are
+# planted below so the narrowing cannot be undone silently.
+# ---------------------------------------------------------------------------
+
+# make_style_tree NAME BODY [BASELINE-BODY]
+#
+# A tree whose store module carries BODY. The store module has exactly one
+# import (`std/json`), so nothing in the import rules can fire on it: any
+# failure the guard reports is this rule's doing.
+make_style_tree() {
+	local name="$1" body="$2" baseline="${3:-}"
+	local t
+	t="$(make_tree "${name}")"
+	cat >"${t}/src/frontend/viewmodel/store/replay_data_store.nim" <<EOF
+import std/json
+const StoreVersion* = 1
+${body}
+EOF
+	# A well-behaved declared consumer, so `consumer-declared` — which fires on
+	# ANY tree that declares none, and would otherwise mask this rule's verdict
+	# in the arms that expect a clean exit — is satisfied.
+	mkdir -p "${t}/consumer"
+	cat >"${t}/consumer/pane.nim" <<'EOF'
+## SDK-CONSUMER: a pane that behaves.
+import ../src/frontend/viewmodel/codetracer_embed
+echo StoreVersion
+EOF
+	if [ -n "${baseline}" ]; then
+		mkdir -p "${t}/ci/test"
+		printf '%s\n' "${baseline}" >"${t}/ci/test/sdk-style-payload.baseline"
+	fi
+	printf '%s' "${t}"
+}
+
+t="$(make_style_tree css-class-const 'const PaneClass* = "ct-pane-body"')"
+assert_fires "${t}" "facade-graph-no-style-payload" \
+	"a CSS class name bound to a constant is reported" \
+	"css-class-const" "ct-pane-body"
+
+t="$(make_style_tree css-class-proc 'proc paneClassFor*(n: int): string =
+  "ct-pane"')"
+assert_fires "${t}" "facade-graph-no-style-payload" \
+	"a routine that produces a CSS class is reported" \
+	"css-class-proc" "paneClassFor"
+
+t="$(make_style_tree hex-colour 'const Accent* = "#1e1e1e"')"
+assert_fires "${t}" "facade-graph-no-style-payload" \
+	"a colour literal is reported" "hex-colour"
+
+t="$(make_style_tree css-dimension 'const Gutter* = "12px"')"
+assert_fires "${t}" "facade-graph-no-style-payload" \
+	"a CSS dimension literal is reported" "css-dimension"
+
+t="$(make_style_tree css-property 'const Rule* = "background-color: red"')"
+assert_fires "${t}" "facade-graph-no-style-payload" \
+	"a CSS property name is reported" "css-property"
+
+t="$(make_style_tree unit-identifier 'var rowHeightPx*: float = 24.0')"
+assert_fires "${t}" "facade-graph-no-style-payload" \
+	"an identifier carrying a CSS unit is reported" \
+	"unit-identifier" "rowHeightPx"
+
+t="$(make_style_tree stylesheet-ref 'const Sheet* = "components/flow.styl"')"
+assert_fires "${t}" "facade-graph-no-style-payload" \
+	"a reference to a stylesheet file is reported" "stylesheet-ref"
+
+# SUPPRESSION. The two shapes that made the first draft cry wolf, plus a
+# comment citing a class. All three are real spellings from the real SDK.
+# SC2016 is the point: the body is Nim source, and the backticks inside it are
+# a Nim doc-comment quoting `ui/flow.styl` and `BadgeBaseClass`. That comment
+# is the arm — the guard must not report a class NAMED in a comment — so the
+# single quotes have to keep it verbatim.
+# shellcheck disable=SC2016
+t="$(make_style_tree suppression 'type FilesystemDiffClass* = enum
+  fdcAdded, fdcRemoved
+
+proc classifyBackendFailure*(msg: string): int =
+  ## `ui/flow.styl` styles this with `.line-flow-hit`; see BadgeBaseClass.
+  0
+
+type FlowLineStyleKind* = enum
+  flskHit, flskSkip')"
+assert_clean "${t}" \
+	"a classification enum, a classify* routine and a comment naming a class are not reported"
+
+# RATCHET, upward: above the ceiling fails, and says raising it is not the fix.
+t="$(make_style_tree ratchet-up 'const AClass* = "x"
+const BClass* = "y"' 'src/frontend/viewmodel/store/replay_data_store.nim = 1')"
+assert_fires "${t}" "facade-graph-no-style-payload" \
+	"a payload above its ceiling fails" \
+	"ceiling 1" "only turns one way"
+
+# RATCHET, at: exactly at the ceiling is tolerated.
+t="$(make_style_tree ratchet-at 'const AClass* = "x"' \
+	'src/frontend/viewmodel/store/replay_data_store.nim = 1')"
+assert_clean "${t}" "a payload at its ceiling is tolerated by the ratchet"
+
+# RATCHET, downward: a ceiling left above reality is room to regress into.
+t="$(make_style_tree ratchet-down 'const AClass* = "x"' \
+	'src/frontend/viewmodel/store/replay_data_store.nim = 3')"
+assert_fires "${t}" "facade-graph-no-style-payload" \
+	"a ceiling that has drifted above reality fails" \
+	"Lower the ceiling to 1"
+
+# DEAD CEILING: a ceiling for a module that carries nothing must be removed,
+# not left standing.
+t="$(make_style_tree dead-ceiling 'const Clean* = 1' \
+	'src/frontend/viewmodel/store/replay_data_store.nim = 2')"
+assert_fires "${t}" "style-baseline-has-no-dead-ceilings" \
+	"a ceiling with nothing under it is reported as dead" \
+	"Delete the line"
+
+# ENFORCING MODE: the ratchet is ignored entirely.
+t="$(make_style_tree enforce 'const AClass* = "x"' \
+	'src/frontend/viewmodel/store/replay_data_store.nim = 1')"
+enforce_out="$(bash "${guard}" --root "${t}" --enforce-style 2>&1)"
+enforce_status=$?
+if [ "${enforce_status}" -ne 0 ] &&
+	grep -q "VIOLATION facade-graph-no-style-payload" <<<"${enforce_out}"; then
+	ok "--enforce-style fails on a payload the ratchet tolerates"
+else
+	bad "--enforce-style fails on a payload the ratchet tolerates" \
+		"exit ${enforce_status}" "${enforce_out}"
+fi
+
+# INSTRUMENT. The rule must not be able to pass by scanning nothing. Pointed
+# at a tree whose facade resolves but whose modules are unreadable, it has to
+# say so. This is the arm that would have caught the five "always green"
+# checks this repo has collected.
+t="$(make_style_tree instrument 'const AClass* = "x"')"
+instrument_out="$(bash "${guard}" --root "${t}" 2>&1)"
+if grep -qE "facade-graph-no-style-payload.*(module\(s\)|scanned 0)" <<<"${instrument_out}"; then
+	ok "the style scan reports how many modules it read, so zero is visible"
+else
+	bad "the style scan reports how many modules it read" "" "${instrument_out}"
+fi
+
+# END TO END, over the real tree, read-only. The baseline committed in this
+# repo must describe the tree as it actually is — neither above nor below.
+real_out="$(cd "${repo_root}" && bash "${guard}" 2>&1)"
+if grep -q "OK        facade-graph-no-style-payload" <<<"${real_out}" &&
+	grep -q "OK        style-baseline-has-no-dead-ceilings" <<<"${real_out}"; then
+	ok "the committed baseline matches the real SDK graph exactly"
+else
+	bad "the committed baseline matches the real SDK graph exactly" "" "${real_out}"
+fi
+
+# And the backlog it records must be real: in enforcing mode the real tree has
+# to fail, naming the modules. A baseline describing an empty backlog would
+# make every arm above vacuous.
+real_enforce="$(cd "${repo_root}" && bash "${guard}" --enforce-style 2>&1)"
+real_enforce_status=$?
+if [ "${real_enforce_status}" -ne 0 ] &&
+	grep -q "VIOLATION facade-graph-no-style-payload" <<<"${real_enforce}" &&
+	grep -q "origin_chain_types.nim" <<<"${real_enforce}"; then
+	ok "the recorded backlog is real: --enforce-style fails on the real tree"
+else
+	bad "the recorded backlog is real: --enforce-style fails on the real tree" \
+		"exit ${real_enforce_status}" "${real_enforce}"
+fi
+
 echo "--- ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]
