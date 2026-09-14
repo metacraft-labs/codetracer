@@ -1,5 +1,6 @@
 import ../utils, ../communication, ../../common/ct_event, value, ui_imports, shell, editor, times, std/[strformat, jsconsole]
 from unified_diff import registerAgentDiffEntry
+from git_cli import gitWorkingDirectory, gitExec, isGitRepository
 
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -12,8 +13,8 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/agent_activity_vm import
   AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
-  setPermissionInfo, setSessionKey, traceOpen, reviewOpen, applyEvidenceDataset,
-  retryPendingEvidenceInspections
+  setPermissionInfo, setSessionKey, setBranchState, traceOpen, reviewOpen,
+  applyEvidenceDataset, retryPendingEvidenceInspections
 from ../viewmodel/viewmodels/trace_open import
   TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
 from ../viewmodel/viewmodels/review_open import ReviewOpenService
@@ -449,6 +450,25 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   vm.setReRecordInProgress(self.reRecordInProgress)
   vm.setPermissionInfo(safeStr(self.permissionDescription))
   vm.setPromptFlags(self.wantsPassword, self.wantsPermission)
+  # Push branch state into the VM. For worktree sessions, workspaceDir is set
+  # by the ACP session-init response and we run git from there. For all other
+  # sessions, we fall back to the project's working directory (the folder the
+  # user opened). Branch data is only loaded when the VM signals are still at
+  # their defaults, so the ACP backend can push authoritative values later
+  # without them being overwritten on every sync.
+  block branchSync:
+    let cwd = if self.workspaceDir.len > 0: self.workspaceDir
+              else: gitWorkingDirectory(self.data)
+    if not isGitRepository(cwd):
+      break branchSync
+    let current = $gitExec(@[cstring"branch", cstring"--show-current"], cwd)
+    let raw = $gitExec(@[cstring"branch", cstring"--format=%(refname:short)"], cwd)
+    var branchList: seq[string] = @[]
+    for line in raw.splitLines():
+      let t = line.strip()
+      if t.len > 0:
+        branchList.add(t)
+    vm.setBranchState(current, branchList)
   # RV-6 — last, so a review's loaded session survives this sync.
   #
   # The legacy carrier's conversation is the *live* ACP one, which on the
