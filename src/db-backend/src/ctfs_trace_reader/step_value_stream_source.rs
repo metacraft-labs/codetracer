@@ -1749,4 +1749,32 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert!(matches!(&records[0].value, ValueRecord::Raw { r, .. } if r.contains("cbor decode error")));
     }
+
+    /// Under HX-S-5, forward-compatible unknown events (tag >= 10) are ignored
+    /// by `step_values_to_full_records`, cleanly preserving the step's variables.
+    #[test]
+    fn unknown_events_are_ignored_preserving_step_values() {
+        let v0 = cbor4ii::serde::to_vec(
+            Vec::new(),
+            &ValueRecord::Int {
+                i: 42,
+                type_id: TypeId(0),
+            },
+        )
+        .unwrap();
+        let events = vec![
+            ValueStreamEvent::StepValues {
+                values: vec![(1, v0)],
+            },
+            ValueStreamEvent::Unknown {
+                tag: 10,
+                payload: vec![1, 2, 3, 4],
+            },
+        ];
+        let records = step_values_to_full_records(&events);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].variable_id, VariableId(1));
+        assert!(matches!(records[0].value, ValueRecord::Int { i: 42, .. }));
+    }
 }
+
