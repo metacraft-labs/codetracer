@@ -157,7 +157,7 @@
       # reprobuild revision's own flake.lock and mirror its `runquota-src`.
       # `scripts/test-flake-pin-alignment.sh` (in `just test`) enforces the
       # equality so the two pins cannot silently diverge again.
-      url = "github:metacraft-labs/runquota/7a79877992908f64d3c8318bb7b20078ff5d1bf4";
+      url = "github:metacraft-labs/runquota/093f520dbe0177bf760585f1aea5064a986d5467";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
@@ -177,7 +177,29 @@
       # against a different nixpkgs and against its own runquota /
       # native-recorder pins, producing a different `repro` binary than the one
       # this repo's shells are meant to ship.
-      url = "github:metacraft-labs/reprobuild/3a7ef0d7c16ba4d5f2e0e188dcba582847e938a3";
+      #
+      # This pin is also a FLOOR, not only a mirror: `repro.nim` is compiled by
+      # the `repro` this resolves to, so a recipe here cannot use a DSL
+      # parameter the pinned revision has not grown yet. The previous pin
+      # (`3a7ef0d7`) predated `extraEnv` on `sh.nim`'s `shell()`, which the ten
+      # gate actions below declare `PYTHONHASHSEED` through, and the whole file
+      # failed to compile:
+      #
+      #   repro.nim(1766, 40) Error: type mismatch
+      #     [7] extraEnv = GateEnv: ...  unknown named parameter: extraEnv
+      #
+      # Nothing in CI compiles `repro.nim` on a pull request, so a pin that is
+      # merely old is indistinguishable from a pin that is too old until
+      # someone runs `repro build` — and in a WORKSPACE checkout that is not
+      # enough either: `.envrc` sets `NIX_FLAKE_OVERRIDE_AUTO=1`, so a sibling
+      # `../reprobuild` silently overrides this input and a local `repro build`
+      # exercises the sibling's HEAD rather than the pin. To exercise the pin,
+      # drop that one override:
+      #
+      #   nix develop '.?submodules=1' <other overrides> --command repro build
+      #
+      # (`readlink -f "$(command -v repro)"` names which one you actually got.)
+      url = "github:metacraft-labs/reprobuild/69bb0a7dd8d8a0b17b94c4d8f364c4e9e986a6f7";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
