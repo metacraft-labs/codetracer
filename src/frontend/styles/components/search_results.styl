@@ -142,7 +142,9 @@ FIF_BADGE_GAP = 0.5rem
 // which left the text 26.5px after the badge.  padding-right reserves space
 // for ×.
 .fif-input
+  width: -moz-available
   width: -webkit-fill-available
+  width: stretch
   padding-left: "calc(%s + %s + %s - %s)" % (FIF_BADGE_LEFT FIF_BADGE_WIDTH FIF_BADGE_GAP CONTROL_BORDER_WIDTH) !important
   padding-right: 1.75rem !important
 
