@@ -388,6 +388,17 @@ src/frontend/viewmodel/**/*.js
 # `nim js` artefacts -- would silently swallow a required runtime asset, and
 # the bundle would ship without the only thing that can load a wasm module.
 !src/frontend/viewmodel/host/wasm_worker_browser.js
+# ...and so are PLAT-18's slice host files. They are the HOST HALF of the
+# vertical slice — the frame applier, the schedule, the emscripten bridge and
+# the Electron main process — hand-written JavaScript that
+# `ci/test/plat18-electron-slice.sh` copies beside the three compiled arms.
+# Without this exception the `nim js` output rule above swallows all four, and
+# the script is committed pointing at files nobody else has: a harness that
+# runs only on the machine it was written on, which is the shape §14c of
+# Verification-Harness-Traps.md is about one level down. Found by
+# `git add -N` before the pre-commit measurement (§16d), which is the whole
+# reason that step exists.
+!src/frontend/viewmodel/tests/manual/plat18_slice_host/*.js
 src/frontend/renderer.js
 src/frontend/types.js
 
@@ -570,3 +581,4 @@ src/common/terminal_graphics/.plat15-visual-mutation.lock
 # `vm-unit` file set on two backends, which includes every suite every other
 # harness in this directory mutates.
 src/frontend/viewmodel/tests/unit/.plat17-wasm-mutation.lock
+src/frontend/viewmodel/tests/unit/.plat18-marshalling-mutation.lock

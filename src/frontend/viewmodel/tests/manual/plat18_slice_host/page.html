@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  page.html — PLAT-18's vertical slice, hosted in an Electron renderer.
+
+  The three arms are loaded into ONE document so they can be interleaved; see
+  driver.js for why that is the measurement's design rather than a
+  convenience. Script order matters: the applier and the bridge define the
+  host half, the two `nim js` bundles install `p18Direct` / `p18Frame`, the
+  wasm glue installs `ctP18Module`, and the driver runs last.
+
+  The build script substitutes the four @…@ paths.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>PLAT-18 slice — variables pane, 600-member fixture</title>
+    <style>
+      /* Deliberately minimal. The slice measures the boundary and the core,
+         and a stylesheet that forced layout differently for one arm would be
+         a third variable. All three arms draw the same markup into the same
+         container under the same rules. */
+      body { font-family: monospace; font-size: 12px; margin: 0; }
+      #ct-p18-root { height: 600px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="ct-p18-root"></div>
+    <script src="@APPLIER@"></script>
+    <script src="@DRIVER@"></script>
+    <script src="@WASM_BRIDGE@"></script>
+    <script src="@JS_DIRECT@"></script>
+    <script src="@JS_CROSSING@"></script>
+    <script src="@WASM_GLUE@"></script>
+  </body>
+</html>

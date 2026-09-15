@@ -3104,6 +3104,59 @@ test-wasm-fake-timer:
   exec > >(tee test-logs/test-wasm-fake-timer.log) 2>&1
   bash ci/test/wasm-fake-timer-speed.sh
 
+# PLAT-18's rejection criterion, re-measured under BOTH optimisation levels.
+#
+# Separate from `test-wasm-fake-timer` above rather than folded into it: that
+# script is one of the six entries in `run-plat17-wasm-mutations.py`'s
+# `TOUCHED`, so editing it invalidates eighteen recorded control digests and
+# obliges a re-run of every arm graded against it. This is a second consumer
+# of the same probe.
+#
+# Uniform-WASM-Core.md §5 makes "a fake-timer suite runs materially slower
+# under WASM" a reason to REJECT adoption, and PLAT-17's own bound 5 says
+# every figure it published is a DEBUG build. A rejection criterion evaluated
+# only under a build the product does not ship is not evaluated.
+test-plat18-fake-timer:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat18-fake-timer.log) 2>&1
+  bash ci/test/plat18-fake-timer-builds.sh
+
+# PLAT-18 deliverable 2: the vertical slice — the variables pane with the
+# 600-member fixture, driven by PLAT-17's core, in a REAL Electron renderer
+# against a REAL document.
+#
+# Three arms in one process, interleaved: the current `nim js` build with
+# `WebRenderer`, the same core over a serialised boundary, and the wasm core
+# over the same boundary. The middle one is the control that tells "wasm is
+# slower" apart from "a serialised boundary is slower".
+#
+# Needs a display. `xvfb-run` satisfies it and the script uses it when
+# `$DISPLAY` is unset; with neither it FAILS (exit 2) rather than skipping,
+# for the reason `ci/lib/run-nim-test-lane.sh`'s wasm branch gives.
+test-plat18-slice:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat18-slice.log) 2>&1
+  bash ci/test/plat18-electron-slice.sh
+
+# PLAT-18's fifth §5 criterion: the developer loop. One suite, compiled and run
+# on all three backends, interleaved, with the cache cleared per arm — which is
+# what a developer's edit does.
+#
+# TWO NUMBERS COME OUT AND THEY ARE DIFFERENT KINDS OF THING: a loose
+# REGRESSION GATE that fails the step, and §5's criterion, REPORTED. A decision
+# criterion wired into CI reddens every day and trains the next person to
+# re-run it.
+test-plat18-dev-loop:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat18-dev-loop.log) 2>&1
+  bash ci/test/plat18-dev-loop.sh
+
 # NS1's compile-time gate: no module of the ViewModel, view, store or platform
 # layer may reach the host except through the platform facade.
 #

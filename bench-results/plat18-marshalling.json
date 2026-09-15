@@ -1,0 +1,134 @@
+[
+  {
+    "name": "plat18/step-total/js-direct",
+    "unit": "ms",
+    "value": 3.6,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is one locals update with the 600-member node OPEN\" core_ms=3.600 host_ms=0.000 min=3.000 max=10.700 bytes_crossed=0 ops=0 rows=602"
+  },
+  {
+    "name": "plat18/expand-total/js-direct",
+    "unit": "ms",
+    "value": 177.9,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the 600-member node expands: 600 rows appear in one update\" core_ms=177.900 host_ms=0.000 min=126.300 max=280.700 bytes_crossed=0 ops=0 rows=602"
+  },
+  {
+    "name": "plat18/mount-total/js-direct",
+    "unit": "ms",
+    "value": 1.9,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the pane's first render, the node collapsed\" core_ms=1.900 host_ms=0.000 min=1.000 max=9.000 bytes_crossed=0 ops=0 rows=602"
+  },
+  {
+    "name": "plat18/collapse-total/js-direct",
+    "unit": "ms",
+    "value": 1.8,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the 600 rows are removed\" core_ms=1.800 host_ms=0.000 min=1.600 max=5.000 bytes_crossed=0 ops=0 rows=602"
+  },
+  {
+    "name": "plat18/step-total/js-crossing",
+    "unit": "ms",
+    "value": 5.3,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is one locals update with the 600-member node OPEN\" core_ms=5.200 host_ms=0.100 min=3.300 max=12.100 bytes_crossed=429 ops=16 rows=602"
+  },
+  {
+    "name": "plat18/expand-total/js-crossing",
+    "unit": "ms",
+    "value": 190.2,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the 600-member node expands: 600 rows appear in one update\" core_ms=158.800 host_ms=25.300 min=165.600 max=369.000 bytes_crossed=823324 ops=42017 rows=602"
+  },
+  {
+    "name": "plat18/mount-total/js-crossing",
+    "unit": "ms",
+    "value": 1.5,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the pane's first render, the node collapsed\" core_ms=1.200 host_ms=0.300 min=1.200 max=6.500 bytes_crossed=7581 ops=210 rows=602"
+  },
+  {
+    "name": "plat18/collapse-total/js-crossing",
+    "unit": "ms",
+    "value": 2.9,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the 600 rows are removed\" core_ms=1.200 host_ms=1.700 min=1.800 max=4.000 bytes_crossed=9407 ops=617 rows=602"
+  },
+  {
+    "name": "plat18/step-total/wasm-crossing",
+    "unit": "ms",
+    "value": 0.6,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is one locals update with the 600-member node OPEN\" core_ms=0.500 host_ms=0.100 min=0.400 max=1.000 bytes_crossed=429 ops=16 rows=602"
+  },
+  {
+    "name": "plat18/expand-total/wasm-crossing",
+    "unit": "ms",
+    "value": 51.2,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the 600-member node expands: 600 rows appear in one update\" core_ms=13.300 host_ms=40.800 min=24.900 max=72.800 bytes_crossed=823324 ops=42017 rows=602"
+  },
+  {
+    "name": "plat18/mount-total/wasm-crossing",
+    "unit": "ms",
+    "value": 0.4,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the pane's first render, the node collapsed\" core_ms=0.100 host_ms=0.300 min=0.200 max=1.700 bytes_crossed=7581 ops=210 rows=602"
+  },
+  {
+    "name": "plat18/collapse-total/wasm-crossing",
+    "unit": "ms",
+    "value": 2.0,
+    "extra": "load1=40.10 cpus=24 build=release samples=15 shape=\"the MEDIAN of 15 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the 600 rows are removed\" core_ms=0.100 host_ms=1.900 min=1.100 max=2.600 bytes_crossed=9407 ops=617 rows=602"
+  },
+  {
+    "name": "plat18/bytes-per-step",
+    "unit": "bytes",
+    "value": 429,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"a STRUCTURAL count, not a measurement: the flat wire size of the operations one locals update issues with 602 rows on screen. Identical on native, nim js and wasm32 \u2014 that is what makes the three comparable\" ops=16"
+  },
+  {
+    "name": "plat18/bytes-per-expand",
+    "unit": "bytes",
+    "value": 823324,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"the same count for the worst case in the product: the 600-member mapping expanding in one update\" ops=42017"
+  },
+  {
+    "name": "plat18/cold-start/js-direct",
+    "unit": "ms",
+    "value": 53.1,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"ONE load of ONE renderer process \u2014 a cold start is a property of a process's first moments and a second one would not be cold. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/cold-start/js-crossing",
+    "unit": "ms",
+    "value": 81.2,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"ONE load of ONE renderer process \u2014 a cold start is a property of a process's first moments and a second one would not be cold. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/cold-start/wasm-crossing",
+    "unit": "ms",
+    "value": 16.5,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"ONE load of ONE renderer process \u2014 a cold start is a property of a process's first moments and a second one would not be cold. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/steady-rss/js-direct",
+    "unit": "MB",
+    "value": 101.301,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"ONE read of Electron getAppMetrics() for ONE renderer process holding the 602-row pane \u2014 a resident set is a state, not a distribution. performance.memory.usedJSHeapSize was tried and rejected: Chromium coarsens it and all three arms reported the identical 157,000,000 with one of them additionally holding 50 MiB of linear memory\" target<=25%-growth-vs-js-direct"
+  },
+  {
+    "name": "plat18/steady-rss/js-crossing",
+    "unit": "MB",
+    "value": 138.52,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"ONE read of Electron getAppMetrics() for ONE renderer process holding the 602-row pane \u2014 a resident set is a state, not a distribution. performance.memory.usedJSHeapSize was tried and rejected: Chromium coarsens it and all three arms reported the identical 157,000,000 with one of them additionally holding 50 MiB of linear memory\" target<=25%-growth-vs-js-direct"
+  },
+  {
+    "name": "plat18/steady-rss/wasm-crossing",
+    "unit": "MB",
+    "value": 84.703,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"ONE read of Electron getAppMetrics() for ONE renderer process holding the 602-row pane \u2014 a resident set is a state, not a distribution. performance.memory.usedJSHeapSize was tried and rejected: Chromium coarsens it and all three arms reported the identical 157,000,000 with one of them additionally holding 50 MiB of linear memory\" target<=25%-growth-vs-js-direct"
+  },
+  {
+    "name": "plat18/artifact/js-direct",
+    "unit": "bytes",
+    "value": 1259208,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"wc -c of the nim js bundle, UNMINIFIED and unbundled \u2014 the shipped renderer goes through webpack, so this over-states what a user downloads; the gzip figures in the run log are the closer stand-in\""
+  },
+  {
+    "name": "plat18/artifact/wasm",
+    "unit": "bytes",
+    "value": 526282,
+    "extra": "load1=40.10 cpus=24 build=release samples=1 shape=\"wc -c of the .wasm plus its emscripten glue, browser target (-sENVIRONMENT=web, no NODERAWFS). NOT PLAT-17's 1,178,754 B, which is the node build\""
+  }
+]

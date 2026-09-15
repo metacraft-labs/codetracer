@@ -1,0 +1,28 @@
+# Control digests for run-plat18-marshalling-mutations.py.
+#
+# The bytes every arm restores to, and the bytes every arm's verdict
+# was taken against. Both halves of TOUCHED are here — the seven
+# mutation subjects AND the four graders no arm mutates — which is
+# §16c's gap paid rather than inherited.
+#
+# TWO ENTRIES ARE OUTSIDE THIS REPOSITORY:
+# ../isonim/src/isonim/core/boundary_meter.nim and
+# ../isonim/src/isonim/testing/mock_dom.nim, in the sibling checkout
+# config.nims puts on the Nim path. PLAT-18's instrument is in the
+# library whose renderers it measures.
+#
+# Refreshed with --record-control-hashes, which the needle scan GATES
+# (§16): re-recording from a tree whose arms have stopped matching
+# certifies the arms along with the bytes.
+3230eb3e98abf259fa750b0e19772b0fa0ec64fc2d49d3f560a78064d5d15be7  ../isonim/src/isonim/core/boundary_meter.nim
+2e3858c24d44ed29853bd9f71652c2f48c2388f988a14e0f37e1cc1fdd918185  src/frontend/viewmodel/tests/manual/plat18_frame_renderer.nim
+4bbc82ce1ecc5105f117a4a19819b06da3e592ab37524a169d2313681df68b4f  src/frontend/viewmodel/tests/manual/plat18_marshalling_probe.nim
+d16eeebe77e4d22b4296b20b5d422a7881c874338d0973172c9388605ac29175  src/frontend/viewmodel/tests/manual/plat18_slice.nim
+914aabf06a4ccaef9e5a29e4dd048e07d9337aad75134d0c75238a2a93e00ae1  src/frontend/viewmodel/tests/manual/plat18_slice_host/applier.js
+acd95efbb97159d9ced61f50d15a48998167b186f2f8a302f4193628f4c9d0b7  src/frontend/viewmodel/views/isonim_state_view.nim
+e5245968be0aa7b0cabeb5c297979a7cc7541e6bdb65db5dba6829f804b23682  ci/test/plat18-fake-timer-builds.sh
+49cbc3ff48245a981cfbdfda47a5bb890d50022f011cd0ca3a4a6389224b2ece  ci/test/plat18-dev-loop.sh
+20ab34e4cb39777b6f006b3912224366b941a207a1a58eb7ad2d8244576ea9f3  ci/test/plat18-electron-slice.sh
+302c5201be76be1c7d879a39c8942340cfb7c9bc3a15c92f2880112996a45524  ../isonim/src/isonim/testing/mock_dom.nim
+28089c3629a2a42ed74504bac8ccf37049aaaa6966c72f38dbec15b2b47ee9cf  src/frontend/viewmodel/tests/manual/plat18_slice_host/driver.js
+f82d5d9bb1d134cba0df3de54c3d44c78ba0f978c8d884a5bd2dabe9c4ed5a98  src/frontend/viewmodel/tests/manual/wasm_fake_timer_probe.nim

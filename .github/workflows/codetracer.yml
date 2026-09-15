@@ -3088,6 +3088,31 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-wasm-fake-timer
 
+      - name: PLAT-18 — the fake-timer signal under BOTH builds
+        if: ${{ !cancelled() }}
+        # Uniform-WASM-Core.md §5's rejection criterion, re-measured in DEBUG
+        # and RELEASE. PLAT-17's step above is DEBUG only, which its own bound
+        # 5 records; a criterion evaluated under a build the product does not
+        # ship is not evaluated (Verification-Harness-Traps.md §12b).
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-fake-timer
+
+      - name: PLAT-18 — the vertical slice in a real Electron renderer
+        if: ${{ !cancelled() }}
+        # The variables pane with the 600-member fixture, three arms in one
+        # renderer process. Needs a display: the job installs none, so the
+        # script uses `xvfb-run` when `$DISPLAY` is unset and FAILS when
+        # neither is available. It does not skip — a slice that answers
+        # "nothing to measure, exit 0" satisfies this job while measuring
+        # nothing, which is `vm-js`'s defect wearing a display check.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-slice
+
+      - name: PLAT-18 — the developer loop on all three backends
+        if: ${{ !cancelled() }}
+        # §5's fifth adopt condition. The step fails only on a REGRESSION (5x);
+        # the criterion itself is printed as `PLAT18-DEV-CRITERION met|NOT-MET`
+        # and is read by a human deciding the milestone, not by CI.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-dev-loop
+
       - name: Run ct trace-layer unit tests
         # src/ct/trace/*_test.nim (recording-folder shape detection,
         # session-manifest open path, CTFS source materialization, path

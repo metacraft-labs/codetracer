@@ -54,6 +54,25 @@ when defined(js):
 else:
   template BadgeEvent*(r: MockRenderer): typedesc = MockEvent
 
+when defined(ctPlat18Slice):
+  # PLAT-18's third renderer. THE IMPORT AND THIS TEMPLATE HAVE TO BE HERE,
+  # ahead of `renderVariableRowImpl`, and that is a fact about Nim rather than
+  # a preference: a template binds the symbols in its body at its DEFINITION
+  # site, so an overload of `BadgeEvent` declared further down is not in the
+  # set `renderVariableRowImpl` resolves against and the instantiation fails
+  # with `Expected one of: template BadgeEvent(r: MockRenderer)`. Measured on
+  # the C backend; the JS backend accepted it, which is worse, because it
+  # means the two targets disagree about when the overload set closes.
+  #
+  # Everything else PLAT-18 adds is at the END of this file. See the block
+  # there for why the slice is in this module at all and when it must be
+  # removed.
+  import ../tests/manual/plat18_frame_renderer
+  template BadgeEvent*(r: FrameRenderer): typedesc = FrameEvent
+    ## The event object does not cross the boundary either — `FrameEvent`
+    ## carries the two flags the product's own badge handler sets back out to
+    ## the host.
+
 # ---------------------------------------------------------------------------
 # Static label / class helpers
 # ---------------------------------------------------------------------------
@@ -536,7 +555,7 @@ proc onToggleExpand(vm: StateVM; item: proc(): VariableViewState): proc() =
 # on the State panel means every debugger step — destroying focus and
 # expansion state. Position-keyed reuse is what this panel wants.
 
-template renderOriginChainLineImpl(r, line: untyped): untyped =
+template renderOriginChainLineImpl*(r, line: untyped): untyped =
   ## One line of the in-row origin chain (hop or terminator).
   ui(r):
     tdiv(class = chainLineClass(line)):
@@ -545,7 +564,7 @@ template renderOriginChainLineImpl(r, line: untyped): untyped =
       span(class = chainLineTextClass(line)):
         text line().text
 
-template renderHistoryRowImpl(r, row: untyped): untyped =
+template renderHistoryRowImpl*(r, row: untyped): untyped =
   ## One value-history line: "<rrTicks>  <value>".
   ui(r):
     tdiv(class = "ct-history-inline-row ct-flex"):
@@ -596,8 +615,8 @@ when defined(js):
 # compile time — can be expanded once per concrete renderer (Mock,
 # Web) without duplicating the markup.
 
-template renderVariableRowImpl(r, vm, item,
-                               chainContainer, historyContainer: untyped): untyped =
+template renderVariableRowImpl*(r, vm, item,
+                                chainContainer, historyContainer: untyped): untyped =
   ## Build a single variable row using the Karax-compatible markup.
   ##
   ## `chainContainer` / `historyContainer` are OUT parameters: the two
@@ -750,8 +769,20 @@ when defined(js):
 # MockRenderer panel
 # ---------------------------------------------------------------------------
 
-proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
-  ## Render the full State panel for headless tests.
+template renderStatePanelImpl(r, vm, RendererT, NodeT: untyped): untyped =
+  ## THE MOCK/HEADLESS PANEL BODY, ONCE.
+  ##
+  ## Extracted from `renderStatePanel(MockRenderer, …)` below so a SECOND
+  ## concrete renderer can be given the same markup instead of a copy of it.
+  ## That second renderer is PLAT-18's `FrameRenderer` (see the
+  ## `ctPlat18Slice` block at the end of this file), and the evaluation it
+  ## serves is about how many bytes this markup puts on a module boundary —
+  ## a question a copy of the markup could answer only about the copy.
+  ##
+  ## The WebRenderer panel further down is deliberately NOT folded in here:
+  ## it is different markup (`#gdb-evaluate`, an always-visible watch input),
+  ## for reasons its own comments give, and merging two panels that differ
+  ## would be the opposite of this extraction.
   ##
   ## Structure:
   ##   div.state-component
@@ -768,7 +799,15 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
   ##         text "No local variables..."
   ##       div                                         (row container)
   ##         indexEach VariableViewState -> renderVariableRow(...)
-  var rowContainer: MockNode
+  ##
+  ## `mixin` because a template binds the symbols in its body at its
+  ## DEFINITION site, and the renderer-specific `renderVariableRow` overloads
+  ## are declared BELOW this point. Without it the C backend reports
+  ## `Expected one of: proc renderVariableRow(r: MockRenderer, …)` at the
+  ## second instantiation, and the JS backend does not — a disagreement about
+  ## when the overload set closes, which is worse than either answer.
+  mixin renderVariableRow
+  var rowContainer: NodeT
 
   let panel = ui(r):
     tdiv(id = "stateComponent-0",
@@ -805,12 +844,18 @@ proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
         tdiv(ref = rowContainer):
           discard
 
-  indexEach[VariableViewState, MockRenderer, MockNode](r, rowContainer,
+  indexEach[VariableViewState, RendererT, NodeT](r, rowContainer,
     proc(): seq[VariableViewState] = getStateViewState(vm).variables,
-    proc(item: proc(): VariableViewState, index: int): MockNode =
+    proc(item: proc(): VariableViewState, index: int): NodeT =
       renderVariableRow(r, vm, item))
 
   panel
+
+proc renderStatePanel*(r: MockRenderer; vm: StateVM): MockNode =
+  ## Render the full State panel for headless tests. The markup is
+  ## `renderStatePanelImpl` above; this is the MockRenderer instantiation of
+  ## it and behaves exactly as it did when the body was written out here.
+  renderStatePanelImpl(r, vm, MockRenderer, MockNode)
 
 # ---------------------------------------------------------------------------
 # WebRenderer panel
@@ -914,3 +959,57 @@ when defined(js):
     let r = WebRenderer()
     let panel = renderStatePanel(r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+
+# ---------------------------------------------------------------------------
+# PLAT-18's vertical slice: a THIRD renderer, behind a define
+# ---------------------------------------------------------------------------
+#
+# `codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org` PLAT-18
+# asks for "the variables pane with the 600-member fixture … driven by
+# PLAT-17's core in Electron". A WASM core cannot hold a DOM node, so the
+# renderer it runs against emits a HANDLE-and-BYTES command stream that the
+# host applies — `tests/manual/plat18_frame_renderer.nim`.
+#
+# It is here, under `-d:ctPlat18Slice`, and not in its own module, for one
+# reason: the alternative is a COPY of this pane's markup, and a copy would
+# make the slice's byte counts a measurement of the copy. The helpers the row
+# and panel bodies use are private to this file, so a second module would need
+# sixteen of them exported to serve an evaluation. Nothing below is compiled
+# into any shipping build — `ctPlat18Slice` is set by
+# `ci/test/plat18-electron-slice.sh` and by nothing else — and the define
+# adds no branch to any existing proc.
+#
+# It must be REMOVED, not left behind, if PLAT-18 ends in "no" and nothing
+# succeeds it. A define that outlives its evaluation is how an evaluation
+# becomes a migration.
+
+when defined(ctPlat18Slice):
+  proc renderOriginChainLines(r: FrameRenderer; container: FrameNode;
+                              item: proc(): VariableViewState;
+                              vm: StateVM) =
+    indexEach[OriginChainLineView, FrameRenderer, FrameNode](r, container,
+      proc(): seq[OriginChainLineView] = originChainLines(vm, item()),
+      proc(line: proc(): OriginChainLineView, index: int): FrameNode =
+        renderOriginChainLineImpl(r, line))
+
+  proc renderHistoryRows(r: FrameRenderer; container: FrameNode;
+                         item: proc(): VariableViewState) =
+    indexEach[VariableHistoryRowView, FrameRenderer, FrameNode](r, container,
+      proc(): seq[VariableHistoryRowView] = item().history,
+      proc(row: proc(): VariableHistoryRowView, index: int): FrameNode =
+        renderHistoryRowImpl(r, row))
+
+  proc renderVariableRow*(r: FrameRenderer; vm: StateVM;
+                          item: proc(): VariableViewState): FrameNode =
+    var chainContainer, historyContainer: FrameNode
+    let row = renderVariableRowImpl(r, vm, item,
+                                    chainContainer, historyContainer)
+    renderOriginChainLines(r, chainContainer, item, vm)
+    renderHistoryRows(r, historyContainer, item)
+    row
+
+  proc renderStatePanel*(r: FrameRenderer; vm: StateVM): FrameNode =
+    ## The SAME markup the MockRenderer panel draws — `renderStatePanelImpl`,
+    ## instantiated for the handle renderer. If this ever stops being the same
+    ## markup, the slice is measuring a different pane than the product has.
+    renderStatePanelImpl(r, vm, FrameRenderer, FrameNode)

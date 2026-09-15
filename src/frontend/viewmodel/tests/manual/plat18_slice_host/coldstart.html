@@ -1,0 +1,130 @@
+<!doctype html>
+<!--
+  coldstart.html — PLAT-18 §5 criterion 1, and §4 metric 1.
+
+  ONE arm per load, in its own renderer, because a cold start is a property of
+  a process's first moments and a second measurement in a warmed page is not
+  one. The arm's script is named by the query string so the shell script can
+  drive the same page three times.
+
+  What is timed is what a user waits for before the pane can draw anything:
+
+    js-*            parse and evaluate the bundle, to the point where the
+                    arm's entry points exist
+    wasm-crossing   parse and evaluate the emscripten glue, then FETCH,
+                    COMPILE and INSTANTIATE the module and run its `main`,
+                    to the same point
+
+  Both include the module-level work each build does on the way up — for the
+  JS arms, Nim's own module initialisers; for the wasm arm, the same
+  initialisers inside `main`. Neither includes the fixture, which is a
+  property of the recording.
+-->
+<html>
+  <head><meta charset="utf-8" /><title>PLAT-18 cold start</title></head>
+  <body>
+    <div id="ct-p18-root"></div>
+    <script src="applier.js"></script>
+    <script>
+      'use strict';
+      const params = new URLSearchParams(location.search);
+      const arm = params.get('arm');
+      const src = params.get('src');
+      const isWasm = params.get('wasm') === '1';
+
+      function loadScript(url) {
+        return new Promise((resolve, reject) => {
+          const el = document.createElement('script');
+          el.onload = resolve;
+          el.onerror = () => reject(new Error('could not load ' + url));
+          el.src = url;
+          document.head.appendChild(el);
+        });
+      }
+
+      globalThis.ctP18ColdStart = async function () {
+        const t0 = performance.now();
+        await loadScript(src);
+        if (isWasm) {
+          await loadScript('wasm_bridge.js');
+          await globalThis.loadP18Wasm();
+        }
+        const ms = performance.now() - t0;
+        // THE NON-VACUITY FLOOR. A load that produced no entry points is a
+        // very fast load, and without this check it would be published as one.
+        const api = isWasm ? globalThis.ctP18Wasm
+                           : (globalThis.p18Frame || globalThis.p18Direct);
+        if (!api || typeof api.mount !== 'function') {
+          throw new Error(arm + ': loaded in ' + ms.toFixed(3) +
+                          ' ms and registered no entry points');
+        }
+        console.log('PLAT18-SLICE-COLDSTART arm=' + arm +
+                    ' to_entry_points_ms=' + ms.toFixed(3));
+
+        // STEADY-STATE MEMORY, §4 metric 4, measured as the RESIDENT SET of
+        // THIS renderer — one arm per process, which is the only way the
+        // question can be asked at all.
+        //
+        // `performance.memory.usedJSHeapSize` was tried first and is not a
+        // measurement here: Chromium coarsens it, and all three arms reported
+        // the identical 139,000,000 with one of them additionally holding
+        // 50 MiB of linear memory. A number that does not move when the thing
+        // it names moves by 50 MiB is not measuring that thing.
+        //
+        // The pane is mounted and expanded so the process is holding the 602
+        // rows when the parent reads its metrics, and the row count is
+        // asserted, because a resident set taken over a pane that never drew
+        // is a resident set of something else.
+        //
+        // BOTH COUNTS, NOT ONLY THE CORE'S, and the reason is that this page
+        // and `driver.js` publish different figures from the same mounted
+        // pane. `driver.js` compares `api.rows()` against what the DOCUMENT
+        // holds; this page asked only the core. A core that believes it drew
+        // 602 rows into a document that received none is precisely the defect
+        // the slice already found once (the ORC-destroyed-globals arm, and the
+        // dropped root `appendChild` arm), so the cold-start and RSS figures
+        // were resting on the weaker half of a floor the timing figures get in
+        // full. The selector is `driver.js`'s, for the reason recorded there:
+        // the bare `[data-variable-name]` matches two elements per row.
+        const crossing = api.frameBytes !== null && api.frameBytes !== undefined;
+        const rootEl = document.getElementById('ct-p18-root');
+        if (crossing) {
+          const nodes = { 0: rootEl };
+          api.opManifest();
+          const table = globalThis.ctP18Applier.buildOpTable(api.frameBytes());
+          api.reset();
+          const applyNext = (fn) => {
+            api.beginFrame();
+            fn();
+            // Read before applying: a dispatch back into the core during
+            // application would zero the counter under the comparison.
+            const emitted = api.ops();
+            const applied = globalThis.ctP18Applier.applyFrame(
+              api.frameBytes(), table, nodes, (id) => api.dispatch(id));
+            if (emitted !== applied) {
+              throw new Error(arm + ': the core put ' + emitted + ' operation(s) in ' +
+                              'the frame and the host applied ' + applied);
+            }
+          };
+          applyNext(() => api.mount());
+          applyNext(() => api.expand());
+        } else {
+          api.reset();
+          api.mount();
+          api.expand();
+        }
+        const rows = api.rows();
+        const domRows =
+          rootEl.querySelectorAll('.value-expanded-name[data-variable-name]').length;
+        if (rows !== 602 || domRows !== 602) {
+          throw new Error(arm + ': the core says ' + rows + ' row(s) and the document ' +
+                          'holds ' + domRows + ', expected 602 before its resident ' +
+                          'set is read');
+        }
+        const linear = api._module ? api._module.HEAPU8.length : 0;
+        console.log('PLAT18-SLICE-LINEAR arm=' + arm + ' linear_memory_bytes=' + linear);
+        return 'ok';
+      };
+    </script>
+  </body>
+</html>
