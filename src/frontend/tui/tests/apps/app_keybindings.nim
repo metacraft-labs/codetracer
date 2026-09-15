@@ -246,6 +246,18 @@ proc applyToken*(st: var AppState; token: string; cols, rows: int;
   of krPending, krPendingAbandoned, krPendingTimedOut:
     st.lastAction = kaNone
     true
+  of krInertInMode:
+    # PLAT-16. A BOUND chord that has no meaning in the current PRODUCT mode.
+    #
+    # UNREACHABLE IN THIS APP AND HANDLED ANYWAY: `keymap.resolve` defaults
+    # `product` to `pmDebug` and this app never passes anything else, so no
+    # token can produce this kind here. It is an arm rather than an `else`
+    # because the exhaustive `case` is what will tell whoever adds a product
+    # mode to this app that there is a screen decision to make —
+    # Mode-Transitions.md §8.1's "inert AND says so" is a thing to DRAW, and an
+    # `else` would have absorbed it silently.
+    st.lastAction = kaNone
+    true
   of krNone:
     # A key nothing is bound to. Repainted anyway, so the screen SAYS the key
     # arrived and was not bound — which is what makes "nothing happened" and

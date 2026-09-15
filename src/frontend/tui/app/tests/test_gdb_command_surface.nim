@@ -156,7 +156,7 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 69
+  ExpectedAppModules = 78
     ## Every `.nim` under `app/`, counted on 2026-09-06 and RE-COUNTED five
     ## times since: after CTUI-11, which added six (`theme/capabilities.nim`,
     ## `theme/degradation.nim`, `views/borders.nim`, `runtime.nim` and two
@@ -208,7 +208,7 @@ const
     ## `tests/test_capability_resolution.nim` rather than into a new file. A
     ## removal is re-counted exactly as an addition is.
 
-  ExpectedStyleLiterals = 174
+  ExpectedStyleLiterals = 195
     ## PLAT-2 moved it by exactly ONE: `type_formatters.MediaStyle`, the colour
     ## a `pcMedia` value is painted in. The rest of that module's 514 lines went
     ## to `common/value_presentation/`, and none of them was a `CellStyle` — the
@@ -225,7 +225,15 @@ const
     ## `app/theme/degradation.projectStyle` is what puts those on the rung the
     ## terminal has — so the count above is the pane's own chrome and not its
     ## picture.
-  ExpectedStyledFiles = 21
+    ##
+    ## RE-COUNTED ON 2026-09-14 AGAIN: PLAT-16 moved it by TWENTY-ONE across
+    ## THREE new painting modules — `views/edit_pane.nim` (the title, the path,
+    ## the dirty marker, the source statement, the rule, the line-number tint
+    ## and the caret row), `views/file_tree.nim` (the title, the rule, the open
+    ## and plain rows, the truncation note) and `views/build_output.nim` (the
+    ## rule, the output, the truncation note and ONE PER VERDICT, which is
+    ## `verdictStyle`'s no-two-the-same rule spelled as five literals).
+  ExpectedStyledFiles = 24
     ## What `:theme`'s "nothing to switch" report MEANS, as two numbers.
     ##
     ## CTUI-10 counted 121 literals in 18 files and read them as "every colour

@@ -72,6 +72,31 @@ type
     panePointList = "pointList"
     paneScratchpad = "scratchpad"
     paneShell = "shell"
+    paneFileTree = "fileTree"
+      ## PLAT-16. Edit mode's project browser.
+      ##
+      ## Adding these two values is a PERSISTED-FORMAT CHANGE and is what takes
+      ## `LayoutSchemaVersion` to 3 — see that constant's rule, which this is
+      ## the first application of. CodeTracer-TUI-Edit-Mode.md §4 names the
+      ## cost in advance: *"`PaneKind` gains values (`paneFileTree`,
+      ## `paneBuildOutput` or similar), and per Layout-ViewModel §6 that is a
+      ## persisted-format change requiring a version bump. It is listed here so
+      ## the cost is visible before it is paid."*
+      ##
+      ## They are LAST rather than beside the editor, so every existing
+      ## member's ordinal is unchanged. Nothing in the persisted format depends
+      ## on an ordinal — the encoding is the string — but `PaneKind.low` and
+      ## `PaneKind.high` are read by four suites, and moving the ends of an
+      ## enum to make a list read nicely is how an unrelated assertion changes
+      ## meaning.
+    paneBuildOutput = "buildOutput"
+      ## PLAT-16. Where a build's output and its verdict go.
+      ##
+      ## A PANE AND NOT AN OVERLAY, which is a decision rather than a
+      ## convenience — CodeTracer-TUI-Edit-Mode.md §5: *"Failure output belongs
+      ## in a pane, not a modal. A compiler error list is something a user
+      ## navigates while editing, which is the argument for `paneBuildOutput`
+      ## over an overlay."*
 
   PaneRefKind* = enum
     ## PLAT-9 / Extensibility-Model.md §6.1. WHAT KIND OF PANE A SLOT HOLDS.
@@ -539,7 +564,7 @@ type
     detail*: string
 
 const
-  LayoutSchemaVersion* = 2
+  LayoutSchemaVersion* = 3
     ## Bumped when the serialised shape changes incompatibly. A decoder that
     ## meets a version it does not know raises `ldeUnknownVersion` rather than
     ## guessing — the failure mode `savedLayoutConfig` has no way to express,
@@ -577,6 +602,37 @@ const
     ## | 1 | `{version, layout}` — the bare tree. |
     ## | 2 | adds `docked: []` (PLAT-4). The tree encoding is unchanged, so
     ##       the v1→v2 migration only supplies the missing array. |
+    ## | 3 | `PaneKind` gains `fileTree` and `buildOutput` (PLAT-16). |
+    ##
+    ## ### The v2→v3 migration changes nothing, and that is not a reason to
+    ## ### have skipped the bump
+    ##
+    ## Widening a persisted VOCABULARY is a forward-compatible change in the
+    ## reading direction — every v2 document decodes unchanged, because no v2
+    ## document can name a pane that did not exist — and a BREAKING one in the
+    ## writing direction: a layout containing `fileTree` handed to a build
+    ## whose `PaneKind` has no such member decodes `ldeUnknownPane`, one pane
+    ## silently absent from the user's arrangement. The version is what turns
+    ## that into `ldeUnknownVersion` — a whole document refused, loudly, with
+    ## the fallback the shell already has — instead of a blank slot.
+    ##
+    ## So `migrateV2toV3` is the identity on the document and sets the version,
+    ## and the chain is complete rather than skipped. `migrateDocument`'s
+    ## `else` branch is what would have caught the omission.
+    ##
+    ## ### A RESIDUAL, RECORDED RATHER THAN REPAIRED
+    ##
+    ## Because the migration is the identity, **a hand-forged document that
+    ## declares `"version": 2` and names `fileTree` loads without complaint.**
+    ## It is not a document this product can produce — v2 predates the member —
+    ## so the only way to hold one is to have written it by hand, and the
+    ## outcome is the arrangement the file asks for rather than a wrong one.
+    ## Refusing it would mean the v2→v3 step VALIDATING the pane vocabulary of
+    ## the version it is leaving, which is work whose only beneficiary is a
+    ## file nobody has. Found by PLAT-16's landing pass, 2026-09-14; recorded
+    ## here so the next reader of this chain meets it instead of rediscovering
+    ## it, and so nobody reads "the migration is the identity" as "every
+    ## version's documents are validated against that version's vocabulary".
 
   FirstLayoutSchemaVersion* = 1
     ## The oldest document this build can still read. A document below it is
@@ -2098,6 +2154,19 @@ proc migrateV1toV2(doc: JsonNode): JsonNode =
   result["docked"] = newJArray()
   result["version"] = %2
 
+proc migrateV2toV3(doc: JsonNode): JsonNode =
+  ## PLAT-16. `PaneKind` gained `fileTree` and `buildOutput`, and nothing about
+  ## the SHAPE of a document changed — so this step re-stamps the version and
+  ## touches no other field.
+  ##
+  ## It exists rather than being skipped for the reason `LayoutSchemaVersion`'s
+  ## note gives: the bump is there to protect the WRITING direction (an older
+  ## build meeting a layout that names a pane it does not know refuses the
+  ## document instead of dropping a pane), and a chain with a hole in it is
+  ## `migrateDocument`'s `else` branch, which is a decode failure.
+  result = copy(doc)
+  result["version"] = %3
+
 proc migrateDocument(doc: JsonNode): JsonNode =
   ## Walk a document forward, ONE VERSION AT A TIME, to this build's schema
   ## version (§6).
@@ -2116,6 +2185,8 @@ proc migrateDocument(doc: JsonNode): JsonNode =
     case at
     of 1:
       result = migrateV1toV2(result)
+    of 2:
+      result = migrateV2toV3(result)
     else:
       # Unreachable while the chain is complete, and this is what makes
       # "complete" checkable: a bump that forgets its migration lands here

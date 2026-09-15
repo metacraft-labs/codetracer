@@ -102,6 +102,58 @@ def strip_line(raw: str) -> str:
     return "".join(out)
 
 
+def imports_unittest(path: Path) -> bool:
+    """Whether this file is in `std/unittest`'s scope.
+
+    §13a says "the seeds stay global because they are `std/unittest`'s and
+    every suite imports it". THAT ASSUMPTION IS FALSE IN THIS TREE, and the
+    counter-example is `src/frontend/viewmodel/tests/unit/test_opfs_volume.nim`:
+    it imports `std/[asyncjs, jsffi, strutils]`, defines its own local
+    `template expect(...)` for an asyncjs idiom, and calls it from a `proc`.
+    With a global seed the sweep reports that proc as a §13 defect — a finding
+    that is not one, because the `expect` it reaches is the file's own and has
+    nothing to do with `unittest.testStatusIMPL`.
+
+    So the seeds are now scoped exactly as the fixed point already was: a file
+    that does not import `std/unittest` starts from an EMPTY set, and only the
+    templates it defines can make a name asserting. The propagation rule is
+    unchanged; what changed is where it starts.
+
+    A file that imports a `_support`/`_helpers` sibling which itself imports
+    `unittest` is NOT treated as importing it, and that is the conservative
+    direction on purpose: this returns false, the file seeds empty, and the
+    sweep reports less rather than inventing a scope relationship it cannot
+    see. §13a's own argument about the merged namespace is that asserting a
+    scope relationship that does not exist is the expensive error.
+
+    **THAT IS A KNOWN MISS AND IT IS PRICED, NOT ASSUMED AWAY** (PLAT-16's
+    landing pass, 2026-09-14). A suite that reaches `check` only through a
+    sibling it imports — without naming `unittest` itself — seeds empty here,
+    so a §13 defect in it would not be reported. Measured across every tracked
+    `test_*.nim` / `*_test.nim` in `src/`: **no file in the tree today both
+    omits a `unittest` import and imports a `_support`/`_helpers` sibling**, so
+    the miss has no instance. Re-check it the same way — a file with no
+    `unittest` import and a support-module import is the shape to look for —
+    before concluding a clean sweep covers such a suite, because the sweep will
+    not say so itself.
+
+    Closing it properly means following the import graph, which is a different
+    tool (§14c's lesson: at the point where a regex needs a graph, price the
+    parser rather than writing a seventh regex).
+    """
+    text = path.read_text(errors="replace")
+    for raw in text.splitlines():
+        line = strip_line(raw).strip()
+        if not (line.startswith("import ") or line.startswith("from ")):
+            continue
+        # `import std/unittest`, `import unittest`,
+        # `import std/[os, unittest]`, `from std/unittest import ...`
+        for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", line):
+            if tok == "unittest":
+                return True
+    return False
+
+
 def blocks(path: Path):
     """Yield (kind, name, lineno, body_text) for every routine and template."""
     lines = path.read_text(errors="replace").splitlines()
@@ -165,14 +217,16 @@ def sweep(paths: list[Path]):
     one another, so a template in one is not in scope in the next; scoping the
     propagation to the file is both correct and what removes the collision.
 
-    The seeds stay global because they are `std/unittest`'s and every suite
-    imports it.
+    THE SEEDS ARE NO LONGER GLOBAL. §13a said they could be, "because they are
+    `std/unittest`'s and every suite imports it"; measured on this tree that is
+    false — see `imports_unittest`, and the `test_opfs_volume.nim` false
+    finding it removes. A file outside `unittest`'s scope seeds EMPTY.
     """
     findings = []
-    asserting_all = set(SEED)
+    asserting_all = set()
     for p in paths:
         file_blocks = list(blocks(p))
-        asserting = set(SEED)
+        asserting = set(SEED) if imports_unittest(p) else set()
         changed = True
         while changed:
             changed = False
@@ -237,6 +291,38 @@ suite "the control":
     plantedDirect(1, 1)
 '''
 
+OUTSIDE_UNITTEST_CONTROL = '''\
+## A file OUTSIDE `std/unittest`'s scope, with its own `expect`.
+##
+## This is `test_opfs_volume.nim`'s shape, reduced: it imports `asyncjs` and
+## friends, defines a local `expect` for an asyncjs idiom, and calls it from a
+## `proc`. With globally seeded names the sweep reported that proc as a §13
+## defect — a finding that is not one, because the `expect` reached is this
+## file's own and has nothing to do with `unittest.testStatusIMPL`.
+##
+## REQUIRED NOT TO BE FOUND. It is the control for the seeding fix, and it is
+## here rather than in a note because a change to a scanner that is not in the
+## scanner's own control is a change nobody can re-verify.
+import std/[asyncjs, jsffi, strutils]
+
+template expect(body: untyped) =
+  ## Not `unittest.expect`. This file does not import `unittest`.
+  body
+
+proc drivesTheVolume(name: string) =
+  expect:
+    discard name.strip()
+
+proc alsoFine(a, b: int) =
+  ## A DIRECT `check` in a file that does not import unittest. Still not a §13
+  ## defect: the name resolves to nothing unittest owns. THE CONSERVATIVE
+  ## DIRECTION, stated — if such a file ever did reach unittest's `check`
+  ## through a transitive import, this sweep would miss it, and §13a's own
+  ## argument is that inventing a scope relationship is the more expensive
+  ## error.
+  check a == b
+'''
+
 
 def run_control() -> int:
     with tempfile.TemporaryDirectory() as d:
@@ -253,6 +339,22 @@ def run_control() -> int:
                               ("plantedLocalName", "a local variable name")):
             if unwanted in names:
                 problems.append(f"the scan matched {why}: {unwanted}")
+        # ---- THE SECOND CONTROL FILE: seeds are scoped, not global --------
+        q = Path(d) / "trap13_outside_unittest.nim"
+        q.write_text(OUTSIDE_UNITTEST_CONTROL)
+        outside, _ = sweep([q])
+        outside_names = {f[2] for f in outside}
+        if imports_unittest(q):
+            problems.append("imports_unittest() said a file with no unittest "
+                            "import is in its scope")
+        if not imports_unittest(p):
+            problems.append("imports_unittest() did not see `import "
+                            "std/unittest` in the primary control")
+        for unwanted in ("drivesTheVolume", "alsoFine"):
+            if unwanted in outside_names:
+                problems.append(
+                    f"the scan flagged {unwanted} in a file that does not "
+                    "import std/unittest")
         for want in ("ck", "ckTwice"):
             if want not in asserting:
                 problems.append(f"the wrapper {want} was not recognised")

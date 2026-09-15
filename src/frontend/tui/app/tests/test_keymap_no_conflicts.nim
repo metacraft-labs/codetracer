@@ -55,7 +55,7 @@ import ../input/modal_state
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 282
+const ExpectedAssertions = 285
 
 var countedAssertions = 0
 
@@ -80,10 +80,17 @@ const
     ## that a parser which silently stopped at the first odd row — or a table
     ## that lost a row — is red here rather than quietly checking less.
 
-  ExpectedBindingCount = 85
+  ExpectedBindingCount = 86
     ## Every binding in `defaultKeymap()`, across all four modes. The
     ## NON-VACUITY FLOOR: every "for every binding …" sweep below is satisfied
     ## for free by an empty table, and this is the one assertion that is not.
+    ##
+    ## 85 UNTIL PLAT-16, which added ONE: `Ctrl+F5` in NORMAL, bound to
+    ## `kaToggleProductMode`. It comes from `Mode-Transitions.md` §1 rather than
+    ## from §4.2 — `specSectionOf` answers `ssModeTransitions` for it — so the
+    ## §4.2 coverage case above is untouched by it, and
+    ## `app/tests/test_product_mode_dimensions.nim` is what asserts that
+    ## EXACTLY ONE action comes from that third document.
 
   # Real xterm byte sequences, and the canonical name each must decode to.
   # This list is the "reachability" oracle of check 4, and it is written from
@@ -110,6 +117,10 @@ const
     ("\x1b[15;2~", "Shift+F5"), ("\x1b[21;2~", "Shift+F10"),
     ("\x1b[23;2~", "Shift+F11"), ("\x1b[15;3~", "Alt+F5"),
     ("\x1b[21;5~", "Ctrl+F10"),
+    # PLAT-16's mode toggle. `CSI 15 ; 5 ~` is xterm's Ctrl+F5, from the same
+    # ctlseqs document as every row above — the modifier parameter is
+    # `1 + (Shift=1 | Alt=2 | Ctrl=4)`, so Ctrl is 5.
+    ("\x1b[15;5~", "Ctrl+F5"),
   ]
 
 # ---------------------------------------------------------------------------
@@ -411,7 +422,7 @@ suite "CTUI-9: the keymap is §4.2, and it has no conflicts":
       if got notin names:
         names.add got
     ck decoded == KeyBytes.len
-    ck decoded == 62
+    ck decoded == 63
 
     var unreachable: seq[string] = @[]
     var chordsChecked = 0

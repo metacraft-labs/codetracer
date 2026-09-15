@@ -752,6 +752,18 @@ proc dispatchAction*(d: Dispatcher; ctx: CommandContext; action: KeyAction;
      kaCommitPrompt, kaPromptBackspace:
     paneLocal(action)
 
+  of kaToggleProductMode:
+    # PLAT-16. `Ctrl+F5` changes which PRODUCT mode the workspace is in, which
+    # is a property of this front-end's session and not a command to the replay
+    # engine — Mode-Transitions.md §1: the transition "is instant in both
+    # directions, because both modes' state is already in memory".
+    #
+    # `drPaneLocal` rather than a new status, and rather than reaching a
+    # ViewModel from here: `app/runtime.applyLocalAction` owns it, and this
+    # module's whole contract is that it is the ONE path to the engine. An
+    # action that never touches the engine says so here.
+    paneLocal(action)
+
   of kaViewMemoryDump:
     unsupported(action, NoMemorySurfaceNote)
 

@@ -533,9 +533,42 @@ func planUiSelection*(args: openArray[string];
 
   of uiTui:
     if scan.command == "edit":
-      return usageError(gapMessage(scan.command, declared,
-        "the terminal front-end has no edit mode yet (see" &
-        " codetracer-specs/GUI/Layout-And-Navigation/Mode-Transitions.md)"))
+      # PLAT-16. THE REFUSAL IS GONE, and this is what
+      # `codetracer-specs/Front-Ends/CodeTracer-TUI-Edit-Mode.md` §6 says
+      # landing that document does: *"ui-selection.md accepts `--ui` on `edit`
+      # and currently refuses the `tui` combination with a message naming this
+      # gap. Landing this specification is what turns that refusal into a
+      # front-end."*
+      #
+      # `ct edit <project>`'s POSITIONAL survives `translateArgs` untouched —
+      # it claims only the tokens `replay` spells for a trace, by name — so the
+      # whole translation for this command is prepending the flag that tells
+      # `codetracer-tui` the positional is a project rather than a recording.
+      # Without it the front-end would resolve the folder as a trace and refuse
+      # it for having no `trace.json`, which is a true diagnosis of the wrong
+      # question.
+      let translatedEdit = translateArgs(scan.command, scan.strippedArgs, atTui)
+      if not translatedEdit.ok:
+        return usageError(translatedEdit.message)
+      if scan.hasHeadless:
+        # CodeTracer-TUI-Edit-Mode.md §8 open decision 4: Edit mode is not in
+        # scope for `--headless`, *"and it should be an explicit usage error
+        # rather than an untested combination"*. Refused here as well as in
+        # `codetracer-tui`'s own parser, because this is the spelling the user
+        # typed and a message about `--edit` would name a flag they did not
+        # write.
+        return usageError(
+          "ct: 'edit' and '--headless' contradict each other; --headless" &
+          " renders one settled screen and exits, and an editor nobody can" &
+          " type into is not edit mode")
+      var editHandoff = @["--edit"]
+      editHandoff.add translatedEdit.args
+      editHandoff.add translatedEdit.trailing
+      return UiPlan(kind: upkHandoff, frontEnd: uiTui,
+                    source: resolution.source,
+                    componentName: "codetracer-tui",
+                    componentBin: "codetracer-tui",
+                    handoffArgs: editHandoff)
     if scan.command == "review":
       return usageError(gapMessage(scan.command, declared,
         "the terminal front-end has no review mode yet"))

@@ -344,7 +344,20 @@ X_FAILREMOVE = ("FAILED: a remove the filesystem refuses is reported, and the "
                 "document stays")
 X_PLAN = ("the plan table: six cells, four reachable and two a session cannot "
           "present")
-X_KINDS = ("the failure-kind table: thirteen kinds, eleven produced and two "
+# STALE BEFORE PLAT-16 TOUCHED ANYTHING, and repaired here rather than left:
+# `test_layout_persistence_matrix.nim`'s case is titled "fifteen kinds,
+# thirteen produced and two unreachable" and has been since two more
+# `LayoutDecodeErrorKind` members landed. This constant still named the OLD
+# title, so `main`'s "CONTROL DID NOT RUN N NAMED CASES" gate aborted the
+# whole run before a single arm was graded — which is the gate working, and is
+# also why nobody had noticed: the abort happens in the control phase and reads
+# like a broken tree rather than like a stale needle.
+#
+# It is Verification-Harness-Traps §16a arriving at a CASE TITLE rather than at
+# a source needle: the thing the arm aims at moved, the arm still resolved, and
+# only the run refused. Found by PLAT-16's obligation to re-run the arms of
+# every harness whose `TOUCHED` its changed files reach.
+X_KINDS = ("the failure-kind table: fifteen kinds, thirteen produced and two "
            "unreachable")
 X_CELLS = "cell count"
 

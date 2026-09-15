@@ -66,7 +66,7 @@ import plugin_fixtures/desktop_only_plugin
 import plugin_fixtures/tool_surface_plugin
 import plugin_fixtures/throwing_view_plugin
 
-const ExpectedAssertions = 213
+const ExpectedAssertions = 217
   ## Written from a run, and asserted against the tally below.
   ## `ci/lib/run-nim-test-lane.sh` READS this name: a file that declares
   ## it AND fails when its own tally disagrees is a file whose assertion

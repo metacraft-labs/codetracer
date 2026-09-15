@@ -46,7 +46,14 @@ import ../layout/profile
 import ../layout/project
 import ../layout/tab_strip
 import ../syntax/highlighter
+# PLAT-16. `ProductMode` from the core, through the sanctioned facade. The
+# shell needs it for two things and only two: which pane set to project, and
+# which model the `editor` rectangle is painted from.
+import codetracer_embed
+import ./build_output
 import ./call_stack
+import ./edit_pane
+import ./file_tree
 import ./event_log
 import ./frame_viewer
 import ./header
@@ -70,6 +77,9 @@ export event_log, timeline_bar, tracepoint_manager
 # `ShellModel` field is painted by this module, so every consumer that builds
 # one needs the model type in scope from this one import.
 export frame_viewer
+# PLAT-16's two Edit-mode panes, on exactly that rule: both are `ShellModel`
+# fields painted by this module.
+export edit_pane, file_tree, build_output
 
 type
   ShellModel* = object
@@ -170,6 +180,33 @@ type
       ## obligation is that a binding draws transient state from `Interaction`,
       ## and this field is that reading. Its zero value is `ikNone`, so a shell
       ## that never starts a gesture paints the screen it painted before.
+    product*: ProductMode
+      ## PLAT-16. Which PRODUCT mode this screen is of.
+      ##
+      ## `pmDebug` is the zero value, so a shell nobody switched paints exactly
+      ## the screen CTUI-3 painted. It is a field of its own beside
+      ## `status.mode`, which is the INPUT mode: the two indicators are true at
+      ## once and neither is derivable from the other
+      ## (CodeTracer-TUI-Edit-Mode.md §1.2).
+    fileTree*: FileTreeModel
+      ## PLAT-16. Edit mode's `paneFileTree`, as a value. EMPTY BY DEFAULT, on
+      ## the rule every pane above follows.
+    build*: BuildPaneModel
+      ## PLAT-16. Edit mode's `paneBuildOutput`, as a value. Its zero verdict is
+      ## `bvIdle`, which is what a project nobody has built is in.
+    edit*: EditPaneModel
+      ## PLAT-16. Edit mode's Source pane, as a value.
+      ##
+      ## EMPTY BY DEFAULT, on exactly the rule `source`, `callStack`,
+      ## `variables` and `timeline` are built on: `paintPane` delegates the
+      ## `editor` rectangle to `views/edit_pane.nim` only in `pmEdit` AND only
+      ## with a file open, so a Debug shell paints the pane it always painted.
+      ##
+      ## A SECOND FIELD BESIDE `source` RATHER THAN A REPLACEMENT FOR IT, which
+      ## is §2.1 consequence 1 in the model: the two modes show different
+      ## sources through different models, and a screen cannot hold both at
+      ## once but a SESSION can — the Debug pane's window survives a trip
+      ## through Edit mode because nothing overwrote it.
 
   ShellScreen* = object
     ## One painted frame, plus the geometry it was painted from, so a test that
@@ -252,18 +289,31 @@ proc paneTitle*(kind: PaneKind; fallback: string): string =
   of panePointList: "Points"
   of paneScratchpad: "Scratchpad"
   of paneShell: "Shell"
+  of paneFileTree: "Files"
+  of paneBuildOutput: "Build & Run"
 
 proc newShellModel*(width, height: int; hdr = initHeaderModel();
-                    mode = umNormal; notification = ""): ShellModel =
+                    mode = umNormal; notification = "";
+                    product = pmDebug): ShellModel =
   ## A shell sized for this terminal, with a fresh layout for the profile that
-  ## size selects.
+  ## size selects and the product mode it was asked for.
+  ##
+  ## `product` is LAST and defaults to `pmDebug`, so every call site written
+  ## before PLAT-16 builds exactly the shell it built.
   let selected = selectProfile(width, height)
-  ShellModel(
+  result = ShellModel(
     header: hdr,
     status: initStatusBarModel(mode = mode, profile = selected,
-                               notification = notification),
-    layout: profileLayout(selected),
-    profile: selected)
+                               notification = notification,
+                               product = product),
+    layout: layoutForMode(product, selected),
+    profile: selected,
+    product: product)
+
+
+
+
+
 
 proc reprofile*(model: var ShellModel; width, height: int): bool =
   ## Re-select the profile for a new terminal size, replacing the layout tree
@@ -278,8 +328,96 @@ proc reprofile*(model: var ShellModel; width, height: int): bool =
   if selected == model.profile:
     return false
   model.profile = selected
-  model.layout = profileLayout(selected)
+  model.layout = layoutForMode(model.product, selected)
   true
+
+# ---------------------------------------------------------------------------
+# PLAT-16 — the mode register
+# ---------------------------------------------------------------------------
+
+type
+  ModeRegister* = object
+    ## Mode-Transitions.md §4b tier 1: *"the arrangement as the user left this
+    ## mode **in this session**"*, plus which mode the session is in.
+    ##
+    ## ADDRESSED BY THE MODE, and that is the whole design. §4b: *"Not one slot
+    ## per direction — a slot filled on the way out of a mode and consumed on
+    ## the way back is §6's failure, and it is the shape this section exists to
+    ## forbid. A register keyed by the mode makes the nth switch read the cell
+    ## the first one wrote."* An `array[ProductMode, LayoutNode]` is that
+    ## sentence as a type: there is no cell that is not a mode's, and no mode
+    ## without a cell, so the "works once" implementation is not expressible.
+    ##
+    ## `nil` in a cell means "this mode has not been left in this session
+    ## yet", and `switchTo` then falls to §4b's third tier — the mode's own
+    ## default. Distinguishing the two matters for §4c obligation 3: *"Only a
+    ## real loss is announced. A first visit to a mode is not a degradation."*
+    ##
+    ## ## A STORED CELL HOLDS THE NODE, NOT A COPY OF IT
+    ##
+    ## `switchTo` is handed the tree that was on screen and stores that very
+    ## `LayoutNode` ref. For Debug mode that node is the SESSION's own — the
+    ## one `HeadlessApp` created and `saveLayouts` persists — so returning to
+    ## Debug returns the session's tree rather than a snapshot of it, and
+    ## `tui_app.shellModel`'s existing rule and this register cannot become two
+    ## authorities over one arrangement. Copying here is what would have made
+    ## them two, and it is the same hazard PLAT-6 recorded about
+    ## `newLayoutHistory` cloning.
+    product*: ProductMode
+    layouts*: array[ProductMode, LayoutNode]
+
+proc initModeRegister*(product = pmDebug): ModeRegister =
+  ModeRegister(product: product)
+
+proc switchTo*(reg: var ModeRegister; leaving: LayoutNode;
+               target: ProductMode; profile: LayoutProfile): bool =
+  ## Move the register into `target`, preserving the mode it leaves.
+  ##
+  ## `leaving` is the tree currently on screen, whatever produced it. Returns
+  ## whether anything changed.
+  ##
+  ## ## THE FOUR REQUIREMENTS THIS IS, LINE BY LINE
+  ##
+  ##   * §6 — *"Switching to the mode the session is already in changes
+  ##     nothing."* The guard, and it returns BEFORE the save, so an idempotent
+  ##     switch cannot overwrite the other mode's cell either. §6 asks for
+  ##     exactly that: *"In particular it must not overwrite the other mode's
+  ##     saved arrangement with the current one."*
+  ##   * §4 requirement 2 — *"A switch preserves the leaving mode's layout, so
+  ##     that returning restores it."*
+  ##   * §4 requirement 1 — *"A switch restores the entering mode's layout as
+  ##     the user last left it"*: this session's register, then the mode's
+  ##     default. *"It never rebuilds from the default when a user arrangement
+  ##     exists."*
+  ##   * §4 requirement 4 — *"Mode and layout are changed together or not at
+  ##     all."* There is no path through this procedure that writes `product`
+  ##     without also settling `layouts[product]`.
+  ##
+  ## §4b's SECOND tier — the device-level store — is NOT implemented here, and
+  ## that is stated rather than implied: `app/layout/persistence.nim` +
+  ## `host/layout_store.nim` persist ONE arrangement per recording and are not
+  ## keyed by mode, so an Edit arrangement made in one session is a default
+  ## again in the next. See PLAT-16's status note.
+  if target == reg.product:
+    return false
+  reg.layouts[reg.product] = leaving
+  reg.product = target
+  if reg.layouts[target].isNil:
+    reg.layouts[target] = layoutForMode(target, profile)
+  true
+
+proc toggle*(reg: var ModeRegister; leaving: LayoutNode;
+             profile: LayoutProfile): bool =
+  ## `Ctrl+F5`. ONE command in both directions — Mode-Transitions.md §1 — so it
+  ## is `switchTo` applied to `product_mode.toggled`, never a pair of one-way
+  ## commands that can get out of step.
+  reg.switchTo(leaving, toggled(reg.product), profile)
+
+proc activeLayout*(reg: ModeRegister): LayoutNode =
+  ## The tree this register says is on screen, or `nil` when the current mode
+  ## has never been entered through a switch — in which case the caller's own
+  ## rule decides, which for Debug mode is the session's tree.
+  reg.layouts[reg.product]
 
 # ---------------------------------------------------------------------------
 # The cell grid
@@ -384,7 +522,39 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # generic `SOURCE ────` title first and let the pane fill the body would
   # render a verified file and an unverified one identically at the top of the
   # pane — the exact thing the milestone forbids.
-  if region.pane == paneEditor and not model.source.isEmpty and
+  #
+  # PLAT-16: WHICH MODEL THE `editor` RECTANGLE IS PAINTED FROM IS DECIDED BY
+  # THE PRODUCT MODE, AND BY NOTHING ELSE.
+  #
+  # CodeTracer-TUI-Edit-Mode.md §2: Debug shows the recording's source through
+  # `SourceVM`'s window, Edit shows the working tree through a whole mutable
+  # buffer. They are two models and two painters, and the branch is on
+  # `model.product` rather than on "is there an edit buffer" — a branch on the
+  # data would paint the edit pane in Debug mode for any session that had ever
+  # opened a file, which is the silent cross-mode leak §2.1 consequence 2 warns
+  # a user must be able to SEE rather than guess at.
+  if region.pane == paneEditor and model.product == pmEdit and
+     region.activeTab < 0:
+    discard paintEditPane(
+      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
+      model.edit, model.highlighting)
+  elif region.pane == paneFileTree and not model.fileTree.isEmpty and
+       region.activeTab < 0:
+    discard paintFileTree(
+      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
+      model.fileTree)
+  elif region.pane == paneBuildOutput and region.activeTab < 0:
+    # NO EMPTINESS GUARD, and that is the difference between this pane and
+    # every other one. An empty call stack means "no session", which is what
+    # the generic title row says perfectly well; an idle BUILD pane is a
+    # statement — `BUILD [idle] build: not started` — and a user who has just
+    # pressed `:build` needs to see the verdict change from it. A pane that
+    # painted a generic title until the first line of output arrived would show
+    # nothing at all for the whole of a cold compile.
+    discard paintBuildOutput(
+      g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),
+      model.build)
+  elif region.pane == paneEditor and not model.source.isEmpty and
      region.activeTab < 0:
     discard paintSourcePane(
       g, CellArea(col: a.col, row: a.row, width: inner, height: a.height),

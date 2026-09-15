@@ -81,6 +81,17 @@ type
       ## (for CI)") and it is the answer to a real dead end: `codetracer-tui
       ## <trace> | cat` used to exit 3 with "there is nothing to draw on", which
       ## is true and unhelpful.
+    tckEditProject
+      ## PLAT-16. `--edit <project>`. Open the project in EDIT mode rather than
+      ## opening a recording in Debug mode.
+      ##
+      ## A COMMAND KIND RATHER THAN A FLAG ON `tckOpenTrace`, and the reason is
+      ## the one `TuiCommand`'s own comment gives about `--help`: the fields
+      ## differ. A trace folder and a project folder are different arguments
+      ## resolved against different things — `host/native_host.traceFolderProblem`
+      ## refuses a folder with no `trace.json`, which is exactly what a project
+      ## is — and `--goto` is meaningless for one of them. A shared branch with
+      ## a boolean on it would let `--goto 500 --edit .` parse.
     tckUsageError
       ## The arguments do not name a command. Carries the message a user reads.
 
@@ -135,6 +146,14 @@ type
         ## authority. The divergence that would cause is latent today (nothing
         ## calls `headless_app.activatePane`), and the flag is what keeps it
         ## latent while the gesture surface is reachable for anybody who asks.
+    of tckEditProject:
+      projectPath*: string
+        ## The project folder, exactly as it was written. Resolved by `host/`,
+        ## on the same rule `tracePath` states.
+      editFlags*: CapabilityFlags
+        ## §6.2's capability overrides apply to Edit mode too: a terminal's
+        ## colour depth is a property of the terminal and not of the product
+        ## mode.
     of tckUsageError:
       message*: string
     else:
@@ -373,6 +392,8 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var recordKeys = ""
   var replayKeys = ""
   var layoutBinding = false
+  var editProject = ""
+  var editRequested = false
   var i = first
   while i <= high(args):
     let arg = args[i]
@@ -390,6 +411,15 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       flags.asciiBorders = true
     of "--no-mouse":
       flags.noMouse = true
+    of "--edit":
+      # PLAT-16 / ui-selection.md §6. `ct edit --ui=tui <project>` reaches this
+      # binary as `codetracer-tui --edit <project>`.
+      #
+      # THE VALUE IS SEPARATED AND MAY ALSO BE ATTACHED (`--edit=<path>`, in
+      # the `startsWith("-")` block below), because `ct`'s own `edit` takes a
+      # POSITIONAL and `translateArgs` leaves positionals where they are — so
+      # the handoff prepends the flag and the path arrives on its own.
+      editRequested = true
     of "--layout-binding":
       # Idempotent, like `--headless`: asking for the same one thing twice is
       # not a contradiction and there is no second arrangement mode for it to
@@ -419,6 +449,12 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
     else:
       if arg.startsWith("-"):
         block options:
+          let (isEdit, editPath) = optionValue(arg, "--edit")
+          if isEdit:
+            editRequested = true
+            if editPath.len > 0:
+              editProject = editPath
+            break options
           let (isTheme, themeName) = optionValue(arg, "--theme")
           if isTheme:
             let (ok, theme) = parseTheme(themeName)
@@ -492,12 +528,25 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
             message: "unknown option '" & arg & "'; try '" & TuiProgramName &
                      " --help'")
       else:
-        if tracePath.len > 0:
+        # PLAT-16: with `--edit` given, THE POSITIONAL IS THE PROJECT and not a
+        # trace folder. Decided by the flag rather than by looking at what is on
+        # disk, on this layer's own rule: `app/cli.nim` does no filesystem I/O,
+        # and a parser that guessed from the presence of `trace.json` would
+        # make the command line's meaning depend on the machine it runs on.
+        if editRequested:
+          if editProject.len > 0:
+            return TuiCommand(
+              kind: tckUsageError,
+              message: "expected at most one project folder, got '" &
+                       editProject & "' and '" & arg & "'")
+          editProject = arg
+        elif tracePath.len > 0:
           return TuiCommand(
             kind: tckUsageError,
             message: "expected at most one trace folder, got '" & tracePath &
                      "' and '" & arg & "'")
-        tracePath = arg
+        else:
+          tracePath = arg
 
   # CONTRADICTORY FLAGS ARE A USAGE ERROR, not a precedence rule. `--truecolor`
   # says "24-bit whatever the terminal claims" and `--no-color` says "no colour
@@ -527,6 +576,47 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       kind: tckUsageError,
       message: "--record-keys and --replay-keys contradict each other;" &
                " a replay would only record its own input back")
+
+  # PLAT-16's OWN CONTRADICTIONS, refused rather than ordered, on exactly the
+  # rule the three blocks above follow.
+  #
+  # AHEAD OF THE `--headless`-WITH-NO-TRACE CHECK BELOW, AND THAT ORDER IS THE
+  # ASSERTION `tests/real_terminal/test_real_edit_mode.nim` makes. Written
+  # after it, `--edit <project> --headless` answered "'--headless' needs a
+  # trace folder to open" — true of the parse and a diagnosis of the wrong
+  # argument, sending a user to look for a recording they never asked for. The
+  # more specific contradiction has to be reported first.
+  if editRequested:
+    if mode == tckHeadless:
+      # CodeTracer-TUI-Edit-Mode.md §8 open decision 4: "Is Edit mode in scope
+      # for `--headless`? Almost certainly not, and it should be an EXPLICIT
+      # USAGE ERROR rather than an untested combination."
+      return TuiCommand(
+        kind: tckUsageError,
+        message: "'--edit' and '--headless' contradict each other; --headless" &
+                 " renders one settled screen and exits, and an editor nobody" &
+                 " can type into is not edit mode")
+    if tracePath.len > 0:
+      return TuiCommand(
+        kind: tckUsageError,
+        message: "'--edit' opens a project and '" & tracePath & "' is being" &
+                 " offered as a trace folder; pass one or the other")
+    if gotoTick != NoGotoTick:
+      return TuiCommand(
+        kind: tckUsageError,
+        message: "'--goto' seeks inside a recording and '--edit' opens a" &
+                 " project, which has no ticks")
+    if editProject.len == 0:
+      # §8 open decision 1: "Does Edit mode require a project, or does a single
+      # file suffice? … Recommendation: require a project, and refuse a bare
+      # file with a message — an editor that cannot build is not this product."
+      # The same argument refuses NO path at all, and here rather than in
+      # `host/` because it is a statement about the command line.
+      return TuiCommand(
+        kind: tckUsageError,
+        message: "'--edit' needs a project folder to open")
+    return TuiCommand(kind: tckEditProject, projectPath: editProject,
+                      editFlags: flags)
 
   # A DISPLAY MODE WITH NOTHING TO DISPLAY is a usage error rather than a help
   # screen. `codetracer-tui --headless` with no trace reached `tckHeadless` with

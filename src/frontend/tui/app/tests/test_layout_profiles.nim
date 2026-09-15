@@ -325,7 +325,10 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     let standard = demoModel(120, 40).shellRows(120, 40)
     ck compact[^1].contains(keyHints(umNormal, lpCompact))
     ck standard[^1].contains("step-over")
-    ck compact[^1].startsWith("NORMAL |")
+    # PLAT-16: TWO INDICATORS, IN TWO POSITIONS, AND THE INPUT ONE IS STILL
+    # FIRST. `NORMAL` is the input mode and `[DEBUG]` is the product mode; the
+    # brackets are what keep them from reading as one two-word mode name.
+    ck compact[^1].startsWith("NORMAL [DEBUG] |")
 
   test "the header and the status bar are exactly `width` cells at every width":
     # A SWEEP, not three sizes. Both rows are built by fitting several fields
@@ -349,15 +352,25 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
         let line = headerText(model, width)
         if textCells(line) != width:
           wrongHeader.add $width & " -> " & $textCells(line)
+      # PLAT-16: THE SWEEP GAINED A SECOND DIMENSION AND DID NOT GAIN MEMBERS.
+      #
+      # CodeTracer-TUI-Edit-Mode.md §1.2's risk is that Edit and Debug get
+      # folded into `UiMode`, producing "a state machine with fifteen states
+      # that should have two dimensions". This nested loop is that sentence as
+      # a test: the product below is 6 x 2, and a collapse would make it 12 x 1
+      # or 8 x 1 — a DIFFERENT ARITHMETIC, not a bigger number, so the literal
+      # cannot be repaired by bumping it.
       for mode in UiMode:
-        for note in ["", "n", "trace reloaded from disk"]:
-          inc checkedWidths
-          let bar = statusBarText(
-            initStatusBarModel(mode = mode, profile = lpStandard,
-                               notification = note), width)
-          if textCells(bar) != width:
-            wrongStatus.add $mode & " note='" & note & "' " & $width & " -> " &
-              $textCells(bar)
+        for product in ProductMode:
+          for note in ["", "n", "trace reloaded from disk"]:
+            inc checkedWidths
+            let bar = statusBarText(
+              initStatusBarModel(mode = mode, profile = lpStandard,
+                                 notification = note, product = product),
+              width)
+            if textCells(bar) != width:
+              wrongStatus.add $mode & "/" & $product & " note='" & note &
+                "' " & $width & " -> " & $textCells(bar)
     checkpoint("widths checked: " & $checkedWidths)
     if wrongHeader.len > 0:
       checkpoint("header: " & wrongHeader[0 .. min(4, wrongHeader.high)].join(", "))
@@ -367,7 +380,13 @@ suite "CTUI-3: breakpoint profiles and pane geometry":
     # mode, which CTUI-3 had no indicator for. The literal is deliberate — a
     # `len(UiMode)` here would be computed by the same enum the sweep walks and
     # would stop being able to notice that the sweep skipped a member.
-    ck checkedWidths == 240 * (2 + 6 * 3)
+    #
+    # `2` is `ProductMode`'s, on the same rule and for the sharper reason
+    # PLAT-16's risk mitigation gives: the two cardinalities are written as a
+    # PRODUCT of two literals rather than as one number, so the arithmetic
+    # itself records that these are two dimensions. `6 * 2` and `12` are the
+    # same integer and not the same claim.
+    ck checkedWidths == 240 * (2 + 6 * 2 * 3)
     ck wrongHeader.len == 0
     ck wrongStatus.len == 0
     # The positive twin: at a width that fits everything, the fields are all

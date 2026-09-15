@@ -39,6 +39,7 @@
 import std/strutils
 
 import ./commands/interpreter
+import ./edit_binding
 import ./input/keymap
 import ./input/motions
 import ./layout/persistence
@@ -52,6 +53,65 @@ export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
 
 type
+  EditReadResult* = object
+    ## What a host's file reader answered.
+    ##
+    ## AN OBJECT AND NOT A TUPLE, and the reason is measured rather than
+    ## stylistic: Nim 2.2.8 miscompiles a CLOSURE FIELD whose return type is a
+    ## tuple — the generated call passes the first argument where the hidden
+    ## result pointer belongs, and gcc rejects it
+    ## (`expected 'tyTuple…*' but argument is of type 'NimStringV2'`). The
+    ## whole `tui` lane went red on it. A named object also makes the call
+    ## sites read as `answer.message` rather than `answer[2]`.
+    ok*: bool
+    text*: string
+    message*: string
+      ## What the user is shown on failure, so a refusal names the file and the
+      ## reason rather than being a bare false.
+
+  EditWriteResult* = object
+    ok*: bool
+    message*: string
+
+  BuildStartResult* = object
+    ok*: bool
+    message*: string
+
+  EditListResult* = object
+    ## What a host's project walk found. Mirrors
+    ## `host/edit_host.ProjectListing`, spelled here because `app/` may not
+    ## import `host/`.
+    files*: seq[string]
+    truncated*: bool
+      ## Whether the walk hit its cap. REPORTED rather than silent, for
+      ## `edit_host.listProjectFiles`' own reason: a file tree missing files
+      ## without saying so is a file tree a user concludes does not contain
+      ## them.
+
+  EditServices* = object
+    ## PLAT-16's host seam. See `TuiRuntime.editServices`.
+    readFile*: proc(relative: string): EditReadResult {.closure.}
+    writeFile*: proc(relative, text: string): EditWriteResult {.closure.}
+    listFiles*: proc(): EditListResult {.closure.}
+      ## The project's files, for the file tree and for the buffer Edit mode
+      ## opens on arrival.
+      ##
+      ## A CLOSURE AND NOT A VALUE, because the two loops that enter Edit mode
+      ## learn the listing at different times. `main.editInteractive` takes it
+      ## BEFORE the terminal is claimed — an unbounded walk behind a claimed
+      ## alternate screen is what `host/edit_host.nim`'s header is written
+      ## against — and hands back a closure over the value it already has.
+      ## `main.interactive` cannot: a replay session may never press `Ctrl+F5`,
+      ## and walking a project on every `ct replay` would put a filesystem walk
+      ## inside CTUI-11's cold-start budget for a feature the session does not
+      ## use. So its closure walks LAZILY, on the first switch. One consumer
+      ## (`ensureEditWorkspace`), two suppliers, no branch in the consumer.
+    startBuild*: proc(kind: BuildKind; command: string): BuildStartResult
+      {.closure.}
+      ## Starts a build and takes ownership of the process. The SESSION it
+      ## reports into is `TuiApp.build`, which the host fills, because the poll
+      ## loop that advances it is the host's too.
+
   RuntimeOutcome* = object
     ## Everything one token decided, as a value the host acts on.
     ##
@@ -110,6 +170,19 @@ type
       ## and wrote to another would silently keep two arrangements for one
       ## recording. `host/layout_store.nim` is what fills it, and it is the only
       ## thing in this front-end that touches a file for this purpose.
+    editServices*: EditServices
+      ## PLAT-16. The HOST's three filesystem/process capabilities, injected.
+      ##
+      ## THE SAME CATEGORY AS CTUI-8's `EventPages` SEAM AND CTUI-10's
+      ## `CommandServices`, and not a mock: `app/` may not open a file or spawn
+      ## a process, so the only way `:w` can write is for the host to hand in
+      ## the writer. In a shipped binary these are `host/edit_host.nim` and
+      ## `host/build_runner.nim`; in a Tier-1 suite they are the suite, and what
+      ## is asserted is what the runtime ASKED FOR rather than what a fake
+      ## returned.
+      ##
+      ## A nil field is a reportable state and not a crash: `:w` in a session
+      ## with no writer says so, which is the state a Debug-only session is in.
     layoutDocumentQuarantined*: bool
       ## Whether this session started from a document it could NOT read.
       ##
@@ -122,6 +195,13 @@ type
 
 const
   QuitDetail* = "quit"
+
+proc sourcePaneRows*(rt: TuiRuntime): int
+  ## FORWARD-DECLARED. `runPromptLine`'s `:e` arm and `routeTokenToEditor` both
+  ## need the editor rectangle's height — the first to size a new buffer's
+  ## viewport, the second to follow the caret — and the definition sits with
+  ## the other screen readers at the end of this module, where every reader of
+  ## the projection is together.
 
 proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
                     width, height: int): TuiRuntime =
@@ -374,6 +454,109 @@ proc runPromptLine(rt: TuiRuntime; line: string;
       rt.rebuildFocus()
       return
 
+  # PLAT-16's FIVE EDIT VERBS, ROUTED HERE AND ONLY IN EDIT MODE.
+  #
+  # A SEPARATE SURFACE FROM §4.3, on exactly the argument PLAT-6's block above
+  # makes and for exactly the same structural reason: §4.3's sixteen commands
+  # are a published table `app/tests/test_gdb_command_surface.nim` parses out of
+  # `CodeTracer-TUI.md` and compares row by row, so a seventeenth entry there is
+  # a failing test by construction. `:build`, `:run`, `:cancel`, `:w` and `:e`
+  # come from CodeTracer-TUI-Edit-Mode.md §5 instead, and they are a PREFIX on
+  # this path.
+  #
+  # IN DEBUG MODE NOTHING CHANGES: they fall through to `runCommand` and are
+  # reported as the unknown commands they have always been.
+  if rt.app.modes.product == pmEdit:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    let words = text.splitWhitespace()
+    let verb = if words.len > 0: words[0] else: ""
+    let rest = if words.len > 1: text[text.find(words[1]) .. ^1] else: ""
+    case verb
+    of "w", "write":
+      let buf = if rt.app.editSession.isNil: nil
+                else: rt.app.editSession.activeBuffer()
+      if buf.isNil:
+        rt.note(":w needs an open file")
+      elif rt.editServices.writeFile.isNil:
+        rt.note(":w has no writer in this session")
+      else:
+        let written = rt.editServices.writeFile(buf.path, buf.text)
+        if written.ok:
+          # THE BUFFER STOPS BEING DIRTY AND GOES ON OUTRUNNING THE RECORDING,
+          # and those are two predicates rather than one. §2.1's staleness is
+          # about whether the bytes differ from what was RECORDED, not about
+          # whether they are on disk, so saving must not silence the notice —
+          # and saving makes a recording MORE stale, because after it the bytes
+          # the recording was made from are gone from the disk too.
+          #
+          # THIS COMMENT USED TO CLAIM THAT AND BE WRONG, which is why it now
+          # names the mechanism instead of the intention: `markSaved` updates
+          # `loadedText` only, `edit_binding.outrunsRecording` compares against
+          # `recordedText`, and `refreshEditedPaths` reads the second. The
+          # effect is asserted in `test_edit_mode_source.nim` ("a saved edit is
+          # still an edit the recording predates") and through the shipped
+          # binary in `tests/real_terminal/test_real_edit_mode.nim` — not by
+          # reading `editedPaths` here, which was true while the notice was
+          # not.
+          buf.markSaved()
+          rt.note("wrote " & buf.path)
+        else:
+          rt.note(written.message)
+      outcome.detail = rt.app.notification
+      return
+    of "e", "edit":
+      if rest.len == 0:
+        rt.note(":e needs a project-relative path")
+      elif rt.editServices.readFile.isNil:
+        rt.note(":e has no reader in this session")
+      else:
+        let opened = rt.editServices.readFile(rest)
+        if opened.ok:
+          if rt.app.editSession.isNil:
+            rt.app.editSession = newEditSession()
+          discard rt.app.editSession.openFile(
+            rest, opened.text, max(1, rt.sourcePaneRows()))
+          rt.app.fileTree.openPath = rest
+          rt.note("editing " & rest)
+        else:
+          rt.note(opened.message)
+      outcome.detail = rt.app.notification
+      return
+    of "build", "run":
+      if rest.len == 0:
+        rt.note(":" & verb & " needs a command, e.g. ':" & verb &
+                " just build'")
+      elif rt.editServices.startBuild.isNil:
+        rt.note(":" & verb & " has no runner in this session")
+      elif not rt.app.build.isNil and rt.app.build.verdict == bvRunning:
+        # ONE AT A TIME, and refused rather than queued: two compilers writing
+        # into one pane produce interleaved output that belongs to neither, and
+        # the verdict would be whichever finished last.
+        rt.note("a " & $rt.app.build.kind & " is already running; :cancel it" &
+                " first")
+      else:
+        let kind = if verb == "build": bkBuild else: bkRun
+        let started = rt.editServices.startBuild(kind, rest)
+        rt.note(started.message)
+      outcome.detail = rt.app.notification
+      return
+    of "cancel":
+      if rt.app.build.isNil or rt.app.build.verdict != bvRunning:
+        rt.note("nothing is running")
+      else:
+        # THE FLAG, NOT A KILL. `app/` does not own the process; the host's
+        # poll loop reads this on its next tick and terminates it, which is
+        # what keeps the cancellation inside the same loop that reads the
+        # keyboard. See `host/build_runner.pollBuild`.
+        rt.app.build.requestCancel()
+        rt.note("cancelling " & $rt.app.build.kind & " …")
+      outcome.detail = rt.app.notification
+      return
+    else:
+      discard
+
   let result = runCommand(rt.dispatcher, rt.context, line)
   outcome.detail = result.message
   var text = describeOutcome(result)
@@ -480,6 +663,127 @@ proc movesTheDebugger*(action: KeyAction): bool =
      kaValueOrigin, kaReverseOrigin: true
   else: false
 
+const EditorOwnedKeys* = [
+    "Backspace", "Delete", "Enter", "Left", "Right", "Up", "Down",
+    "Home", "End", "Ctrl+z", "Ctrl+y"]
+  ## The NON-PRINTABLE keys the editor takes when it is focused in Edit mode.
+  ##
+  ## `Tab` and `Shift+Tab` are DELIBERATELY ABSENT, and their absence is the
+  ## escape hatch: with every printable key going into the buffer, a user needs
+  ## one chord that is guaranteed to move focus off the editor, and this is it.
+  ## `edit_binding.applyEditKey` still implements indent and dedent for them —
+  ## the buffer can do it, nothing routes it — so the day an INSERT input mode
+  ## exists the behaviour is already there rather than needing to be written.
+
+proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
+  ## Whether this token is text for the open buffer rather than a command.
+  ##
+  ## FOUR CONDITIONS, ALL OF THEM ALREADY-MODELLED STATE: Edit product mode,
+  ## NORMAL input mode, the editor pane focused, and a buffer open. See the
+  ## comment at the call site in `handleToken` for why it is not a fifth input
+  ## mode, and for what that costs.
+  if rt.isNil or rt.app.isNil:
+    return false
+  if rt.app.modes.product != pmEdit or rt.modal.mode != mmNormal:
+    return false
+  if rt.app.editSession.isNil or rt.app.editSession.activeBuffer().isNil:
+    return false
+  let (had, focused) = rt.focus.focusedPane()
+  if not had or focused != paneEditor:
+    return false
+  let name = keyName(token)
+  if name.len == 0:
+    return false
+  name in EditorOwnedKeys or isTextKey(name)
+
+proc routeTokenToEditor*(rt: TuiRuntime; token: string): EditKeyOutcome =
+  ## Apply one token to the open buffer and keep the session's bookkeeping
+  ## honest.
+  ##
+  ## The three things that happen on a CHANGE and not on a move are the point:
+  ## the edited path is recorded (so `assessTrace` sees it), the pane follows
+  ## the caret, and nothing else. A caller that recorded an edit for an arrow
+  ## key would declare a recording stale because somebody scrolled — see
+  ## `edit_binding.EditKeyOutcome` on why the outcome is three-valued.
+  let buf = rt.app.editSession.activeBuffer()
+  let name = keyName(token)
+  result = buf.applyEditKey(name, keyCharacter(name))
+  if result == ekChanged:
+    rt.app.editSession.recordEdit(buf.path)
+    rt.app.editSession.refreshEditedPaths()
+  if result != ekIgnored:
+    buf.followCaret(max(1, rt.sourcePaneRows()))
+
+proc ensureEditWorkspace*(rt: TuiRuntime): string =
+  ## Give this session an Edit-mode workspace if it has not got one: the file
+  ## tree, and the first file open in a buffer. Returns the line to put on the
+  ## status bar, or "" when there was nothing to do.
+  ##
+  ## ## WHY THIS EXISTS, AND WHAT IT CLOSES
+  ##
+  ## PLAT-16's landing pass found that **no shipped route had both a recording
+  ## and an editable buffer**, so §2.1's stale-trace notice could not fire in
+  ## the product at all:
+  ##
+  ##   * `ct edit --ui=tui <project>` (`main.editInteractive`) opens buffers and
+  ##     has **no recording** — `app.traceName` is "" and `assessTrace` answers
+  ##     `stvNoTrace`, correctly, because there is nothing for an edit to be
+  ##     stale against. That is not a defect to fix; it is what `ct edit` IS.
+  ##   * `ct replay --ui=tui <trace>` (`main.interactive`) has the recording and
+  ##     used to reach `Ctrl+F5` with **no `EditServices` at all**, so the Edit
+  ##     mode it switched into held an empty session, `activeBuffer()` was nil
+  ##     and `:e` answered *"`:e` has no reader in this session"*.
+  ##
+  ## CodeTracer-TUI-Edit-Mode.md §6 is unambiguous about which of those two is
+  ## wrong: *"`ct replay --ui=tui <trace>` opens in Debug mode. **The toggle
+  ## moves between them within one session, as on the desktop.**"* So the
+  ## notice belongs to the replay loop, and this is the function that gives
+  ## that loop something to edit.
+  ##
+  ## ## IT IS CALLED FROM BOTH LOOPS, WHICH IS THE POINT (§14)
+  ##
+  ## One function, two callers: the toggle's `pmEdit` arm below, and
+  ## `main.editInteractive` on startup. A second copy of "open the first file
+  ## and fill the tree" in the entrypoint is exactly the duplicated predicate
+  ## §14 is written about — and it is the copy nobody would mutate, because the
+  ## entrypoint is not in any suite's module graph.
+  ##
+  ## ## IT RUNS ONCE PER SESSION
+  ##
+  ## `EditSession.furnished`, not `buffers.len > 0`: see that field. A second
+  ## walk would also be a second chance to REPLACE an unsaved buffer, which
+  ## Mode-Transitions.md §5 calls data loss by name.
+  if rt.isNil or rt.app.isNil:
+    return ""
+  if rt.app.editSession.isNil:
+    rt.app.editSession = newEditSession()
+  if rt.app.editSession.furnished or rt.editServices.listFiles.isNil:
+    return ""
+  rt.app.editSession.furnished = true
+  let listing = rt.editServices.listFiles()
+  rt.app.fileTree = initFileTreeModel(
+    files = listing.files,
+    selected = (if listing.files.len > 0: 0 else: -1),
+    truncated = listing.truncated)
+  let where = if rt.app.projectRoot.len > 0: rt.app.projectRoot else: "."
+  result = "editing " & where & " — " & $listing.files.len & " file(s)" &
+    (if listing.truncated: " (truncated)" else: "")
+  # If the project has a file, open the first one, so arriving in Edit mode
+  # means arriving at something rather than at an empty pane. §7: "The editor
+  # is never empty."
+  if listing.files.len == 0 or rt.editServices.readFile.isNil:
+    return
+  let first = rt.editServices.readFile(listing.files[0])
+  if first.ok:
+    discard rt.app.editSession.openFile(listing.files[0], first.text,
+                                        max(1, rt.sourcePaneRows()))
+    rt.app.fileTree.openPath = listing.files[0]
+  else:
+    # THE REFUSAL WINS THE STATUS LINE. A user who arrived in Edit mode and got
+    # an empty pane must be told why; "editing … — 12 file(s)" over an empty
+    # editor is the message that reads as success.
+    result = first.message
+
 proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
                       outcome: var RuntimeOutcome): bool =
   ## The actions this layer answers WITHOUT the backend: focus, maximize, the
@@ -541,6 +845,62 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
   of kaQuit:
     outcome.quit = true
     outcome.detail = QuitDetail
+    true
+  of kaToggleProductMode:
+    # PLAT-16 / Mode-Transitions.md. `Ctrl+F5`.
+    #
+    # HANDLED LOCALLY AND NOT BY `dispatchAction`, on exactly the rule this
+    # procedure's docstring states: CTUI-10's dispatcher is about the ENGINE,
+    # and a product-mode switch is about this session's workspace. It sends
+    # nothing to a backend — §1 of Mode-Transitions.md: the transition proper
+    # "is instant in both directions, because both modes' state is already in
+    # memory".
+    let profile = selectProfile(rt.width, rt.height)
+    let changed = rt.app.modes.toggle(rt.app.shellModel(rt.width, rt.height).layout,
+                                      profile)
+    if not changed:
+      # Unreachable through `toggled`, which never answers the current mode.
+      # Reported rather than dropped so a future caller of `switchTo` with an
+      # explicit target cannot make an idempotent switch look like a working
+      # one.
+      rt.note("already in " & $rt.app.modes.product & " mode")
+      outcome.repaint = true
+      return true
+    # THE NOTICE IS THE DELIVERABLE, not the switch. §2.1 consequence 3: a user
+    # who edits and then toggles back onto an EXISTING trace is looking at a
+    # recording their own edits have outrun, and must be told once, plainly.
+    # `rt.app.traceName` is what says a recording is open at all — the toggle
+    # onto no trace has nothing to be stale about, which is `stvNoTrace`.
+    var message = "switched to " & $rt.app.modes.product & " mode"
+    if rt.app.modes.product == pmEdit:
+      # ARRIVING IN EDIT MODE MEANS ARRIVING AT SOMETHING. Until PLAT-16's
+      # landing pass this arm only allocated an empty `EditSession`, so a
+      # `ct replay` session that pressed `Ctrl+F5` reached an editor with no
+      # buffer, no file tree and no reader — and therefore no route on which
+      # the notice below could ever be produced. See `ensureEditWorkspace`.
+      let furnished = rt.ensureEditWorkspace()
+      if furnished.len > 0:
+        message = furnished
+    elif not rt.app.editSession.isNil:
+      let notice = rt.app.editSession.noticeForSwitchToDebug(
+        rt.app.traceName.len > 0)
+      if notice.len > 0:
+        message = notice
+    rt.note(message)
+    outcome.detail = message
+    rt.rebuildFocus()
+    # THE EDITOR TAKES THE FOCUS ON ARRIVAL, and it has to: `editorOwnsToken`
+    # requires the editor pane focused before a typed byte is text rather than
+    # a command, so a user who toggled into Edit mode and started typing would
+    # otherwise be issuing keybindings at their own source. `rebuildFocus`
+    # above re-derives the ring from the arrangement the next frame paints —
+    # Edit mode's panes are not Debug's — and this names which of them wins.
+    # Only when there is a buffer to type into: on an empty project the ring's
+    # own answer is the honest one.
+    if rt.app.modes.product == pmEdit and not rt.app.editSession.isNil and
+       not rt.app.editSession.activeBuffer().isNil:
+      discard rt.focus.focusPaneKind(paneEditor)
+    outcome.repaint = true
     true
   else:
     false
@@ -619,9 +979,62 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
         result.repaint = true
       return
 
-  let resolution = rt.keymap.resolve(rt.modal, rt.pending, token, nowMs)
+  # PLAT-16, STEP 1a: THE EDITOR OWNS ITS OWN KEYS, and it owns them by FOCUS
+  # rather than by a fifth input mode.
+  #
+  # The question "is this key text?" is answered by three facts that are all
+  # already modelled: the PRODUCT mode is Edit, the INPUT mode is NORMAL, and
+  # the FOCUSED pane is the editor. None of them is new state, which is why
+  # this is what the milestone shipped.
+  #
+  # **THE REASON IS SCOPE, NOT §1.2, AND THE EARLIER SPELLING OF THIS COMMENT
+  # HAD THAT WRONG.** It said §1.2 "forbids the obvious implementation — an
+  # INSERT mode beside NORMAL/COMMAND/SEARCH/INSPECT". It does not. §1.2
+  # forbids `UiMode` gaining **`EDIT`** — a PRODUCT mode masquerading as an
+  # input mode — and its sentence is precise about which collapse it is
+  # written against: *"`UiMode` … enumerates input modes and its cardinality is
+  # asserted by `test_layout_profiles.nim`"*. `INSERT` is an INPUT mode, the
+  # same family §4.1 enumerates, and adding it would be a fifth member of a
+  # list that already has four; it is not the two-dimensions-into-one collapse
+  # §1.2 exists to prevent. Deferring it is still right — a fifth input mode
+  # moves `modal_state`'s machine, every transition into and out of it, the
+  # cursor policy, the status indicator and the cardinality assertion, which is
+  # a milestone of its own — but it is deferred because it is BIG, not because
+  # it is FORBIDDEN, and a false prohibition in a comment is worse than an
+  # acknowledged gap: it tells the next author the door is locked.
+  #
+  # WHAT THE DEFERRAL COSTS, RECORDED RATHER THAN DISCOVERED LATER: `:` is a
+  # printable key, so while the editor is focused it types a colon instead of
+  # opening the command prompt, and `q` types a `q` instead of quitting. `Tab`
+  # is therefore deliberately NOT routed to the buffer — it stays "focus the
+  # next pane", so there is always a key that gets the user out — and neither
+  # is `Shift+Tab`. The consequence is that `:w`, `:build` and `:run` are
+  # reached by tabbing off the editor first. That is an ergonomic hole and it
+  # is named in PLAT-16's status note.
+  if rt.editorOwnsToken(token):
+    let outcome = rt.routeTokenToEditor(token)
+    if outcome != ekIgnored:
+      result.repaint = true
+      return
+
+  let resolution = rt.keymap.resolve(rt.modal, rt.pending, token, nowMs,
+                                     rt.app.modes.product)
   case resolution.kind
   of krNone:
+    return
+  of krInertInMode:
+    # Mode-Transitions.md §8.1: "A chord whose action has no meaning in the
+    # current mode must be inert AND SAY SO. … A key that silently does nothing
+    # is indistinguishable from a key that is broken."
+    #
+    # The reason goes on the status line, which is "the surface the user is
+    # looking at". `result.action` carries the action that WOULD have fired so
+    # a caller can name it; `result.detail` carries the sentence so a test
+    # asserts what the user was told rather than that something happened.
+    result.action = resolution.action
+    result.detail = resolution.reason
+    rt.note(resolution.reason)
+    result.repaint = true
     return
   of krPending, krPendingAbandoned, krPendingTimedOut:
     # The pending indicator is part of the screen (§4.2: "a visible pending

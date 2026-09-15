@@ -57,9 +57,18 @@
 import std/os
 
 import ./app/cli
+# `./app/edit_binding` IS DELIBERATELY NOT IMPORTED. It was, until the landing
+# pass moved "open the first file and fill the tree" out of `editInteractive`
+# and into `runtime.ensureEditWorkspace` — which is where it belongs, because
+# the toggle out of a REPLAY session needs the same behaviour and a second copy
+# here is §14's duplicated predicate in the one file no suite compiles. With
+# the last call gone the import is unused, and an unused import is a warning on
+# every build of the product.
 import ./app/runtime
 import ./app/tui_app
+import ./host/build_runner
 import ./host/capabilities
+import ./host/edit_host
 import ./host/headless
 import ./host/key_journal
 import ./host/layout_store
@@ -76,6 +85,80 @@ const
     ## long the process sleeps between two events it does not have. It exists so
     ## a partially framed escape sequence — an `ESC` with nothing after it — is
     ## not held forever.
+
+type
+  EditHostState = ref object
+    ## The one piece of Edit-mode state a LOOP owns rather than `app/`: the
+    ## process behind `:build` / `:run`.
+    ##
+    ## A `ref` AND NOT A `var` LOCAL, because `startBuild`'s closure has to
+    ## write it and Nim does not let a closure capture a `var` parameter. It is
+    ## also what lets `wireEditServices` be one function called from two loops
+    ## instead of two copies of the same five closures — §14's construction
+    ## rule, and the copy that would have been forgotten is the entrypoint's,
+    ## because no suite compiles this module.
+    running: RunningBuild
+
+proc wireEditServices(rt: TuiRuntime; root: string;
+                      listFiles: proc(): EditListResult): EditHostState =
+  ## Hand `rt` the four capabilities `app/` may not have: read a file, write a
+  ## file, list the project, start a process.
+  ##
+  ## **BOTH LOOPS CALL THIS**, and that is the whole reason it exists as a
+  ## function. `ct edit --ui=tui` obviously needs them; `ct replay --ui=tui`
+  ## needs them too, because `Ctrl+F5` reaches Edit mode from a replay session
+  ## and CodeTracer-TUI-Edit-Mode.md §6 says it must: *"the toggle moves
+  ## between them within one session, as on the desktop."* Until PLAT-16's
+  ## landing pass the replay loop wired none of them, so that toggle arrived at
+  ## an editor with no reader — and §2.1's stale-trace notice, which needs a
+  ## recording AND an edit at the same time, had no route in the product on
+  ## which it could fire at all.
+  ##
+  ## `listFiles` is the parameter because it is the one that differs: see
+  ## `runtime.EditServices.listFiles` for why one loop can walk the project
+  ## before it claims the terminal and the other must not walk it at all until
+  ## asked.
+  let state = EditHostState()
+  rt.editServices.readFile = proc(relative: string): EditReadResult =
+    try:
+      EditReadResult(ok: true, text: readProjectFile(root, relative))
+    except TuiHostError as e:
+      EditReadResult(ok: false, message: e.msg)
+  rt.editServices.writeFile = proc(relative, text: string): EditWriteResult =
+    try:
+      writeProjectFile(root, relative, text)
+      EditWriteResult(ok: true)
+    except TuiHostError as e:
+      EditWriteResult(ok: false, message: e.msg)
+  rt.editServices.listFiles = listFiles
+  rt.editServices.startBuild = proc(kind: BuildKind;
+                                    cmd: string): BuildStartResult =
+    state.running = startBuild(kind, cmd, root, nowMonoMs())
+    rt.app.build = state.running.session
+    if state.running.session.verdict == bvRunning:
+      BuildStartResult(ok: true, message: $kind & " started: " & cmd)
+    else:
+      BuildStartResult(ok: false, message: describeVerdict(state.running.session))
+  state
+
+proc advanceBuild(rt: TuiRuntime; state: EditHostState;
+                  report: bool): bool =
+  ## Advance a running build by one tick. Returns whether the screen changed.
+  ##
+  ## `report` is what tells the two call sites apart, and they are different on
+  ## purpose: on an IDLE tick nothing else is competing for the status line, so
+  ## a verdict goes there; right after a KEY the line belongs to whatever the
+  ## key just said (`:cancel` says *"cancelling …"*), and overwriting it would
+  ## take the user's own answer away from them one tick later.
+  ##
+  ## `pollBuild` does not block — `host/build_runner.nim`'s header carries the
+  ## measurement that says so, and the suite that keeps it true is
+  ## `tests/test_build_runner_process.nim`.
+  if state.isNil or state.running.isNil:
+    return false
+  result = pollBuild(state.running, nowMonoMs())
+  if result and report:
+    rt.app.notification = describeVerdict(state.running.session)
 
 proc paint(driver: TerminalDriver; rt: TuiRuntime) =
   ## One frame of `rt` onto `driver`.
@@ -151,7 +234,38 @@ proc interactive(command: TuiCommand): int =
   var size = driver.size()
   let app = newTuiApp()
   app.notification = "opening " & folder & " …"
+  # PLAT-16: THE PROJECT A REPLAY SESSION EDITS IS THE WORKING DIRECTORY, and
+  # that is a decision rather than a fallback, so it is written down here.
+  #
+  # `Ctrl+F5` reaches Edit mode from this loop (CodeTracer-TUI-Edit-Mode.md §6),
+  # which means this loop has to answer "edit WHAT". Three candidates, and only
+  # one of them is a fact this front-end has:
+  #
+  #   * the recording's own source tree — the ideal answer, and unavailable:
+  #     a trace carries per-file payloads with their recorded paths, not a
+  #     checkout root, and `host/tui_session.nim` reads no trace metadata at
+  #     all. Inferring a root from `getCurrentFile()`'s directory would be a
+  #     guess presented as knowledge, and the containment check in
+  #     `host/edit_host.nim` would then be a check about a guess.
+  #   * a `--project` flag — a new published option for a question most users
+  #     never ask, on a command line §6.2 already fills.
+  #   * the working directory — where the user typed the command, which for
+  #     `ct replay` is overwhelmingly the checkout the recording came from.
+  #
+  # It is NOT silent: the first `Ctrl+F5` puts `editing <root> — N file(s)` on
+  # the status line (`runtime.ensureEditWorkspace`), so a user who was
+  # somewhere else sees the root they actually got rather than discovering it
+  # from a file tree that looks wrong.
+  #
+  # NOTHING IS WALKED HERE. `listProjectFiles` runs inside the closure below,
+  # on the first switch only — a filesystem walk on every `ct replay` would sit
+  # inside CTUI-11's cold-start budget for a mode most sessions never enter.
+  let projectRoot = getCurrentDir()
+  app.projectRoot = projectRoot
   let rt = newTuiRuntime(app, caps, size.cols, size.rows)
+  let edit = wireEditServices(rt, projectRoot, proc(): EditListResult =
+    let listing = listProjectFiles(projectRoot)
+    EditListResult(files: listing.files, truncated: listing.truncated))
   # PLAT-6's OPT-IN, and it is the only thing that turns the layout binding on
   # in a shipped binary. `app/runtime.enableLayoutBinding` records why it is an
   # opt-in and what would have to be true to flip the default; what matters
@@ -287,7 +401,13 @@ proc interactive(command: TuiCommand): int =
       # is gone, and the only correct thing left is to give the tty back.
       running = false
     of dekIdle:
-      discard
+      # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, on
+      # exactly `editInteractive`'s rule and for §5's reason. A replay session
+      # that switched to Edit mode and typed `:build` owns a process, and a
+      # loop that never polled it would leave that build running with no
+      # verdict, no output and no `:cancel`.
+      if advanceBuild(rt, edit, report = true):
+        paint(driver, rt)
     of dekResize:
       size = ev.size
       rt.resize(size.cols, size.rows)
@@ -311,6 +431,10 @@ proc interactive(command: TuiCommand): int =
         if outcome.awaitsMove:
           session.pumpMove()
           session.refresh(rt)
+        # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
+        # does not wait up to `IdlePollMs` for the process to be signalled.
+        # `report = false`: the line the key just wrote is the user's own.
+        discard advanceBuild(rt, edit, report = false)
         # WRITE COALESCING, CTUI-14. A repaint is skipped only when the user's
         # NEXT key is already waiting to be handled — `driver.holdFrame` asks
         # the input fd, it does not consult a clock — so the frame that answers
@@ -342,6 +466,132 @@ proc interactive(command: TuiCommand): int =
   if saved.outcome == lpoFailed:
     driver.stop()
     stderr.writeLine(TuiProgramName & ": " & saved.message)
+  ExitOk
+
+
+proc editInteractive(command: TuiCommand): int =
+  ## PLAT-16. `ct edit --ui=tui <project>` — open a project in EDIT mode.
+  ##
+  ## ## WHY THIS IS A SECOND LOOP AND NOT A FLAG ON `interactive`
+  ##
+  ## `interactive` opens a REPLAY: it resolves a trace folder, finds
+  ## `replay-server`, spawns it, runs a bounded DAP handshake and pumps
+  ## `ct/complete-move` after every navigation. Edit mode does none of those —
+  ## there is no recording, no engine and no tick — and a shared loop would be
+  ## that loop with five `if editing` branches in it, including inside the
+  ## handshake. The two share everything that matters (`TuiRuntime`,
+  ## `handleToken`, `paint`, the driver), which is the part that must not be
+  ## duplicated and is not.
+  ##
+  ## Mode-Transitions.md §1 is why this is honest rather than a split product:
+  ## the TRANSITION between the modes is instant and in-memory, and `Ctrl+F5`
+  ## reaches it from either loop. What differs is what was open when the process
+  ## started.
+  ##
+  ## ## `ct edit` HAS NO RECORDING, AND THE STALE-TRACE NOTICE IS NOT ITS JOB
+  ##
+  ## Stated plainly because PLAT-16's landing pass found it being assumed.
+  ## Nothing here assigns `app.traceName`, deliberately: this command opens a
+  ## PROJECT, no `replay-server` is spawned, no DAP handshake runs, and there is
+  ## no tick. So `Ctrl+F5` out of this loop calls
+  ## `edit_binding.noticeForSwitchToDebug(hasTrace = false)`, which resolves to
+  ## `stvNoTrace` and says nothing — which is **correct**: a recording that does
+  ## not exist cannot be outrun by an edit. §2.1 consequence 3's notice is about
+  ## *"the toggle onto an EXISTING trace"*, and the loop that has one is
+  ## `interactive` above. Giving this loop a synthetic trace name to make the
+  ## notice reachable would be a fiction arranged to satisfy a test.
+  ##
+  ## `Ctrl+F5` from here still works and still switches: Debug mode without a
+  ## recording is the empty debugger, which is the same thing `codetracer-tui`
+  ## with no argument has always painted.
+  let caps = negotiateCapabilities(command.editFlags)
+  if not stdoutIsTerminal():
+    stderr.writeLine(TuiProgramName & ": standard output is not a terminal," &
+                     " so there is nothing to draw on.")
+    stderr.writeLine("  negotiated: " & describe(caps))
+    stderr.writeLine("  edit mode needs a terminal; --headless renders one" &
+                     " settled screen and is refused with --edit.")
+    return ExitNoTerminal
+
+  # BEFORE THE TERMINAL IS CLAIMED, on exactly `interactive`'s rule and for the
+  # reason recorded there: a diagnosis printed onto a claimed alternate screen
+  # is a diagnosis nobody reads.
+  let root = absolutePath(command.projectPath)
+  let problem = editProjectProblem(root)
+  if problem.len > 0:
+    stderr.writeLine(TuiProgramName & ": " & root & ": " & problem)
+    return ExitUsage
+
+  # AND THE LISTING IS TAKEN BEFORE THE TERMINAL TOO. It is the one unbounded
+  # walk in this path; `edit_host.MaxProjectFiles` bounds it, and doing it here
+  # means a slow filesystem shows as a slow start rather than as a blank
+  # alternate screen.
+  let listing = listProjectFiles(root)
+
+  let driver = newTerminalDriver(caps)
+  driver.start()
+  defer: driver.stop()
+
+  var size = driver.size()
+  let app = newTuiApp()
+  app.projectRoot = root
+  # THE PRODUCT MODE IS SET BEFORE THE FIRST FRAME, which is Mode-Transitions.md
+  # §4 requirement 4 at startup: mode and layout are settled together, so the
+  # first paint is Edit mode's arrangement rather than Debug's with an edit
+  # pane in it.
+  app.modes = initModeRegister(pmEdit)
+  app.projectRoot = root
+
+  let rt = newTuiRuntime(app, caps, size.cols, size.rows)
+
+  # THE HOST'S FOUR CAPABILITIES, INJECTED — one function, shared with
+  # `interactive`. See `wireEditServices`.
+  #
+  # `listFiles` CLOSES OVER THE LISTING ALREADY TAKEN rather than walking
+  # again, which is how the "before the terminal is claimed" ordering above
+  # survives being routed through a function the replay loop also uses. The
+  # walk happened on the ordinary screen; this hands back its answer.
+  let edit = wireEditServices(rt, root, proc(): EditListResult =
+    EditListResult(files: listing.files, truncated: listing.truncated))
+
+  # THE SAME FUNCTION THE TOGGLE CALLS. Opening the first file and filling the
+  # tree used to be written out here as well as in `app/runtime.nim`; two
+  # copies of one behaviour is §14's subject, and this is the copy no suite
+  # would have mutated.
+  let furnished = rt.ensureEditWorkspace()
+  if furnished.len > 0:
+    app.notification = furnished
+  discard rt.focus.focusPaneKind(paneEditor)
+
+  paint(driver, rt)
+
+  var loop = true
+  while loop:
+    let ev = driver.nextEvent(IdlePollMs)
+    case ev.kind
+    of dekEof:
+      loop = false
+    of dekIdle:
+      # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, which
+      # is the whole of §5's cancellability requirement: the key that cancels is
+      # read while the compiler runs, and the clock that bounds an unattended
+      # session is checked on every tick. See `host/build_runner.pollBuild`.
+      if advanceBuild(rt, edit, report = true):
+        paint(driver, rt)
+    of dekResize:
+      size = ev.size
+      rt.resize(size.cols, size.rows)
+      paint(driver, rt)
+    of dekToken:
+      let outcome = rt.handleToken(ev.token, nowMs())
+      if outcome.quit:
+        loop = false
+      else:
+        # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
+        # does not wait up to `IdlePollMs` for the process to be signalled.
+        discard advanceBuild(rt, edit, report = false)
+        if outcome.repaint:
+          paint(driver, rt)
   ExitOk
 
 proc run(args: seq[string]): int =
@@ -384,6 +634,12 @@ proc run(args: seq[string]): int =
     try:
       runHeadless(command.tracePath, command.flags, headlessGeometry(),
                   gotoTick = command.gotoTick)
+    except TuiHostError as e:
+      stderr.writeLine(TuiProgramName & ": " & e.msg)
+      ExitUsage
+  of tckEditProject:
+    try:
+      editInteractive(command)
     except TuiHostError as e:
       stderr.writeLine(TuiProgramName & ": " & e.msg)
       ExitUsage

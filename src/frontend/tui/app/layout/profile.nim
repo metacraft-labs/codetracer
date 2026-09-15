@@ -6,9 +6,10 @@
 ## walks this directory's import graph on every run.
 ##
 ## This module imports LESS than that rule allows, and deliberately: it needs
-## `headless_app/layout_model` and `std/strutils` and nothing more. Profile
-## selection is a pure function of two integers, and a module that could not
-## reach a renderer cannot accidentally make it one.
+## `headless_app/layout_model`, `std/strutils` and — since PLAT-16 —
+## `codetracer_embed` for `ProductMode`, and nothing more. Profile selection is
+## a pure function of two integers, and a module that could not reach a
+## renderer cannot accidentally make it one.
 ##
 ## app/layout/profile.nim — CTUI-3. Which shape the screen takes, decided from
 ## its size alone.
@@ -65,6 +66,16 @@
 import std/strutils
 
 import headless_app/layout_model
+
+# PLAT-16. `ProductMode` from the core, for `layoutForMode` below.
+#
+# THIS IS THE SECOND IMPORT THE MODULE HEADER SAYS IT DOES NOT HAVE, and the
+# header is corrected rather than the import hidden: a mode's default layout is
+# a function OF THE MODE (Mode-Transitions.md §4a), so the module that answers
+# "what does this profile look like" cannot answer it without knowing which
+# mode is asking. Profile selection itself is untouched and is still a pure
+# function of two integers with no renderer in sight.
+import codetracer_embed
 
 type
   LayoutProfile* = enum
@@ -185,6 +196,71 @@ proc profileLayout*(profile: LayoutProfile): LayoutNode =
         pane(paneEventLog, "Event Log", weight = 15.0)],
         weight = 4.0),
       pane(paneTimeline, "Timeline & Tracepoints", weight = 1.0)])
+
+proc editProfileLayout*(profile: LayoutProfile): LayoutNode =
+  ## PLAT-16. EDIT MODE'S arrangement of the same three profiles.
+  ##
+  ## CodeTracer-TUI-Edit-Mode.md §4: *"Debug mode's panes are Call Stack,
+  ## Source, Variables, Timeline, Event Log. Edit mode's are a file tree,
+  ## Source, and a build/run output surface — and of those, **only Source is
+  ## shared**, and even it changes model (§2)."*
+  ##
+  ## ## WHY THIS IS A SECOND FUNCTION AND NOT A SUPPRESSION LIST
+  ##
+  ## Mode-Transitions.md §4a is explicit that a mode's layout is a function of
+  ## the mode rather than a reading of one tree: *"A layout system that derives
+  ## every mode from one bundled tree by removing panes gives every mode the
+  ## same arrangement with different panes missing. When the bundled tree is
+  ## drawn for one mode's needs, every other mode inherits that mode's
+  ## furniture."* Deriving Edit mode from `profileLayout` by dropping the call
+  ## stack would leave Source in a 70%-wide column with the build output in a
+  ## tab stack beside Variables — the debug arrangement with holes in it.
+  ##
+  ## ## THE FILE TREE IS HERE, AND §8 OPEN DECISION 3 RECOMMENDED IT LATER
+  ##
+  ## That recommendation ("palette first, tree later") is about which
+  ## affordance a user OPENS A FILE with, and the palette is CTUI-10's and
+  ## already built. This is about what the mode's default arrangement is, and a
+  ## mode whose only navigation surface is an overlay has nothing on screen
+  ## that says which project is open. The tree is narrow — a quarter of the
+  ## body at most — and the palette still opens over it.
+  case profile
+  of lpCompact:
+    column([
+      row([
+        pane(paneFileTree, "Files", weight = 25.0),
+        pane(paneEditor, "Source", weight = 75.0)],
+        weight = 3.0),
+      pane(paneBuildOutput, "Build", weight = 1.0)])
+  of lpStandard:
+    column([
+      row([
+        pane(paneFileTree, "Files", weight = 20.0),
+        pane(paneEditor, "Source", weight = 80.0)],
+        weight = 4.0),
+      pane(paneBuildOutput, "Build & Run", weight = 1.0)])
+  of lpUltraWide:
+    column([
+      row([
+        pane(paneFileTree, "Files", weight = 15.0),
+        pane(paneEditor, "Source", weight = 60.0),
+        pane(paneBuildOutput, "Build & Run", weight = 25.0)],
+        weight = 1.0)])
+
+proc layoutForMode*(product: ProductMode; profile: LayoutProfile): LayoutNode =
+  ## A mode's DEFAULT arrangement — §4b's third tier, the one that exists
+  ## forever and is the fallback §4c obligation 1 names ("the fallback is the
+  ## entering mode's default, not the bundled tree").
+  ##
+  ## ONE ENTRY POINT FOR BOTH MODES, so a caller cannot reach one mode's
+  ## default while believing it asked for the other's. That is not decoration:
+  ## §4's requirement 4 — *"Mode and layout are changed together or not at
+  ## all"* — is only checkable if there is a single function that answers "what
+  ## does THIS mode look like", and `shell.switchProductMode` is its only
+  ## production caller.
+  case product
+  of pmDebug: profileLayout(profile)
+  of pmEdit: editProfileLayout(profile)
 
 proc profileTabs*(profile: LayoutProfile): seq[PaneKind] =
   ## The panes `Alt+1` / `Alt+2` / `Alt+3` select, in that order, or an empty

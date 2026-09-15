@@ -36,7 +36,7 @@ import ui_selection
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 252
+const ExpectedAssertions = 256
 
 var countedAssertions = 0
 
@@ -376,22 +376,55 @@ suite "PLAT-1 §3: the TUI is reached by handoff":
     # §9.1's recommendation, taken: the flag is accepted on `edit` so it does
     # not have to be added later, and the combination is refused with a message
     # naming the gap rather than omitted from §6.
+    #
+    # PLAT-16 CLOSED ONE OF THE FOUR. `edit --ui=tui` is no longer a gap — the
+    # terminal front-end has an edit mode — so the sweep below is now three
+    # refusals, and `edit --ui=tui` is asserted in the case after this one as a
+    # HANDOFF. The count is written as `3` rather than as `len(...)` for the
+    # reason `test_layout_profiles.nim` gives about `UiMode`'s cardinality: a
+    # computed total cannot notice that a combination stopped being swept.
     var compared = 0
+    for (command, value) in [("edit", "webui"), ("review", "tui"),
+                             ("review", "webui")]:
+      inc compared
+      let plan = planOf([command, "--ui=" & value, "."])
+      checkpoint(command & " " & value & " -> " &
+                 (if plan.kind == upkUsageError: plan.message else: "?"))
+      ck plan.kind == upkUsageError
+      ck plan.message.contains("ct " & command & " --ui=" & value)
+      ck plan.message.contains("--ui=electron")
     for command in ["edit", "review"]:
-      for value in ["tui", "webui"]:
-        inc compared
-        let plan = planOf([command, "--ui=" & value, "."])
-        checkpoint(command & " " & value & " -> " &
-                   (if plan.kind == upkUsageError: plan.message else: "?"))
-        ck plan.kind == upkUsageError
-        ck plan.message.contains("ct " & command & " --ui=" & value)
-        ck plan.message.contains("--ui=electron")
-      # …and the desktop values are accepted on the same command, so the four
+      # …and the desktop values are accepted on the same command, so the
       # refusals above are about the COMBINATION and not about the command.
       let desktop = planOf([command, "--ui=gui", "."])
       ck desktop.kind == upkInProcess
       ck desktop.ctArgs == @[command, "."]
-    ck compared == 4
+    ck compared == 3
+
+  test "PLAT-16: `ct edit --ui=tui <project>` hands off to the terminal":
+    # CodeTracer-TUI-Edit-Mode.md §6: "ui-selection.md accepts `--ui` on `edit`
+    # and currently refuses the `tui` combination with a message naming this
+    # gap. Landing this specification is what turns that refusal into a
+    # front-end."
+    let plan = planOf(["edit", "--ui=tui", "/tmp/proj"])
+    checkpoint("kind=" & $plan.kind & " args=" & $plan.handoffArgs)
+    ck plan.kind == upkHandoff
+    ck plan.frontEnd == uiTui
+    ck plan.componentBin == "codetracer-tui"
+    # THE FLAG IS WHAT MAKES THE POSITIONAL A PROJECT. Without it the front-end
+    # resolves the folder as a trace folder and refuses it for having no
+    # `trace.json` — a true diagnosis of the wrong question.
+    ck plan.handoffArgs == @["--edit", "/tmp/proj"]
+
+  test "PLAT-16: `ct edit --ui=tui --headless` is refused, naming both":
+    # §8 open decision 4: "Is Edit mode in scope for `--headless`? Almost
+    # certainly not, and it should be an EXPLICIT USAGE ERROR rather than an
+    # untested combination."
+    let plan = planOf(["edit", "--ui=tui", "--headless", "/tmp/proj"])
+    checkpoint(plan.message)
+    ck plan.kind == upkUsageError
+    ck plan.message.contains("edit")
+    ck plan.message.contains("--headless")
 
   test "`run` resolves the value and defers the handoff to its own replay":
     # `ct run` has nothing to present until it has recorded, so the prologue

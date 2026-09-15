@@ -47,6 +47,7 @@ import codetracer_embed
 import headless_app/headless_app
 import isonim_tui
 
+import ./edit_binding
 import ./views/shell
 
 export headless_app
@@ -120,6 +121,40 @@ type
       ## With one, the binding's `Layout` is what is drawn AND what gestures
       ## change, so a moved tab survives the next repaint rather than being
       ## re-derived from the profile.
+    modes*: ModeRegister
+      ## PLAT-16. WHICH PRODUCT MODE THIS FRONT-END IS IN, and each mode's
+      ## arrangement as the user last left it in this session.
+      ##
+      ## `pmDebug` with two nil cells is the zero value, so an application
+      ## nobody switched paints exactly the screen it painted before and
+      ## `shellModel`'s layout rule below is untouched by this milestone until
+      ## the first `Ctrl+F5`.
+      ##
+      ## It is a field of the APPLICATION rather than of `ShellModel`, and that
+      ## matters: `shellModel` builds a fresh value every frame, so a register
+      ## living there would be reset by the next repaint and the toggle would
+      ## appear to work once per frame — which is precisely the "works once"
+      ## failure Mode-Transitions.md §6 is written against, arriving through
+      ## the lifetime of a local instead of through a slot.
+    projectRoot*: string
+      ## PLAT-16. The folder `ct edit --ui=tui <project>` opened, or "" in a
+      ## Debug-only session. Every path the edit host reads or writes is
+      ## resolved against it, which is what makes the containment check in
+      ## `host/edit_host.nim` a check about something.
+    fileTree*: FileTreeModel
+      ## PLAT-16. `paneFileTree`'s model, as a value, filled by the host from
+      ## `edit_host.listProjectFiles`.
+    build*: BuildSession
+      ## PLAT-16. The build or run in flight, or the last one's verdict, or
+      ## `nil` for a session that has never built. `nil` is a state the pane
+      ## renders (`build: not started`) rather than one it hides.
+    editSession*: EditSession
+      ## PLAT-16. The open buffers, their carets, their scroll positions and
+      ## the project's points.
+      ##
+      ## `nil` until Edit mode is entered, and it SURVIVES every subsequent
+      ## switch — which is the whole of Mode-Transitions.md §5's preservation
+      ## table met by construction. See `app/edit_binding.EditSession`.
     traceName*: string
     tick*: int
     totalTicks*: int
@@ -139,7 +174,8 @@ proc newTuiApp*(title: string = "CodeTracer TUI"): TuiApp =
   ## and opens nothing: creation is passive, exactly as `newHeadlessApp` and
   ## `newDebuggerSession` are.
   TuiApp(shell: newHeadlessApp(), title: title,
-         highlighting: newHighlighterCache())
+         highlighting: newHighlighterCache(),
+         modes: initModeRegister())
 
 proc openSession*(app: TuiApp; backend: BackendService;
                   title: string = ""): HeadlessSessionSlot =
@@ -206,12 +242,24 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   # repaint, which is the same divergence CTUI-3 refused for `activate`.
   let bound = not app.layoutBinding.isNil
   let boundLayout = if bound: app.layoutBinding.layout else: initLayout(nil)
+  # PLAT-16: THE REGISTER WINS WHEN IT HOLDS A TREE FOR THE CURRENT MODE.
+  #
+  # It holds one only after a `Ctrl+F5` has been made, and what it holds for
+  # Debug mode is the session's own node rather than a copy of it (see
+  # `shell.ModeRegister`), so this is not a second layout authority: in Debug
+  # mode with no switch ever made, and in Debug mode after a round trip, the
+  # tree is the same object either way. In Edit mode the register is the only
+  # authority there is — a session's `LayoutNode` is a REPLAY arrangement and
+  # `HeadlessApp` has no edit slot to hold a second one.
+  let registered = app.modes.activeLayout()
   result = ShellModel(
     header: header,
     status: initStatusBarModel(mode = umNormal, profile = selected,
-                               notification = app.notification),
-    layout: (if bound: boundLayout.tree
-             elif active.isNil: profileLayout(selected)
+                               notification = app.notification,
+                               product = app.modes.product),
+    layout: (if not registered.isNil: registered
+             elif bound: boundLayout.tree
+             elif active.isNil: layoutForMode(app.modes.product, selected)
              else: active.layout),
     docked: (if bound: boundLayout.docked else: @[]),
     interaction: (if bound: app.layoutBinding.interaction
@@ -223,7 +271,13 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     variables: app.variables,
     timeline: app.timeline,
     eventLog: app.eventLog,
-    frameViewer: app.frameViewer)
+    frameViewer: app.frameViewer,
+    fileTree: app.fileTree,
+    build: buildPaneModelFor(app.build),
+    product: app.modes.product,
+    edit: (if app.editSession.isNil: initEditPaneModel()
+           else: editPaneModelFor(app.editSession,
+                                  app.editSession.activeBuffer())))
 
 proc enableLayoutBinding*(app: TuiApp; width, height: int): LayoutBinding =
   ## Give this application a layout the user can rearrange (PLAT-6).

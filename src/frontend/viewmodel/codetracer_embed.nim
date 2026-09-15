@@ -306,6 +306,30 @@ export source_vm
 import sdk/source_provider
 export source_provider
 
+# PLAT-16. WHICH SOURCE A PRODUCT MODE SHOWS — Debug the recording's, Edit the
+# working tree — plus the stale-trace verdict and the sentence a user is told
+# when a recording has been outrun by their own edits.
+#
+# It is in this facade because CodeTracer-TUI-Edit-Mode.md §2 says the question
+# is the CORE's and not a terminal's: "the answer belongs in the core and
+# applies to every front-end equally". A consumer that had to reimplement it
+# would be a front-end with its own opinion about provenance, which is the one
+# thing CTUI-4's whole provenance contract exists to prevent.
+import viewmodels/product_mode
+export product_mode
+
+# PLAT-16. `BuildVM`'s four verdict states — `bsIdle`, `bsRunning`,
+# `bsSucceeded`, `bsFailed` — which are Edit-Mode-Toolbar §9.2's states as the
+# core already spells them.
+#
+# Exported so the terminal front-end's `:build` / `:run` pane reaches the SAME
+# enum the Electron Build panel is driven by rather than declaring a second
+# one. CodeTracer-TUI-Edit-Mode.md §5 is explicit that the verdict states "are
+# not repeated here", and a front-end that repeated them in its own enum would
+# be repeating them.
+import viewmodels/build_vm
+export build_vm
+
 # ---------------------------------------------------------------------------
 # Session lifecycle (§3.1, row 4; §6)
 # ---------------------------------------------------------------------------

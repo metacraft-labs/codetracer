@@ -146,17 +146,45 @@ suite "Headless app — launch":
     check slot.livePanes().len == slot.layout.allPanes().len
     app.dispose()
 
-  test "every PaneKind resolves to a ViewModel on a launched session":
+  test "every REPLAY PaneKind resolves to a ViewModel on a launched session":
     # `paneViewModel`'s `case` is exhaustive, so an unimplemented pane is a
     # compile error. This is the runtime half: the exhaustive case must also
     # be *correct* — a branch wired to a nil field would compile and would
     # make the pane silently unrenderable.
+    #
+    # PLAT-16 NARROWED THIS FROM "every PaneKind" TO "every REPLAY PaneKind",
+    # AND THE EXCLUSION IS NAMED RATHER THAN SUBTRACTED. `paneFileTree` and
+    # `paneBuildOutput` belong to EDIT mode, whose subject is the working tree
+    # rather than a recording (CodeTracer-TUI-Edit-Mode.md §2), and a
+    # `HeadlessSessionSlot` IS a replay session — so "this replay session has
+    # no ViewModel for that pane" is the true answer and `nil` is how
+    # `paneViewModel` says it.
+    #
+    # The exclusion is written as a SET and both halves are asserted, so a
+    # third pane cannot join it silently: the excluded set is exactly two, the
+    # included set is everything else, and both are non-empty.
+    const EditOnlyPanes = {paneFileTree, paneBuildOutput}
     let app = newHeadlessApp()
     let slot = app.openSession(mockBackend().toBackendService())
     slot.session.launch(traceOf("/tmp/trace-b"))
+    var replayPanes = 0
+    var editPanes = 0
     for p in PaneKind:
       checkpoint("pane " & $p)
-      check not slot.paneViewModel(p).isNil
+      if p in EditOnlyPanes:
+        inc editPanes
+        # THE OTHER HALF, asserted rather than skipped: an Edit-mode pane must
+        # answer nil, not a ViewModel that happens to be lying around. A pane
+        # wired to some unrelated VM would compile, would render, and would
+        # show a replay session's data under an editor's title.
+        check slot.paneViewModel(p).isNil
+        check not slot.paneIsLive(p)
+      else:
+        inc replayPanes
+        check not slot.paneViewModel(p).isNil
+    checkpoint("replay panes " & $replayPanes & ", edit-only " & $editPanes)
+    check editPanes == 2
+    check replayPanes > 0
     app.dispose()
 
   test "a failed launch leaves the shell intact and the failure readable":

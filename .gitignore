@@ -530,3 +530,23 @@ src/common/terminal_graphics/.plat14-image-mutation.lock
 # publishes a pid and a hostname and makes every subsequent run show a dirty
 # tree.
 src/common/terminal_graphics/.plat15-visual-mutation.lock
+
+# PLAT-16's mutation run lock — the exclusive `flock` taken by
+# `src/frontend/tui/app/tests/run-plat16-mutations.py`, held for the whole run
+# and acquired BEFORE the baseline digests are read.
+#
+# A TENTH LOCK, for the reason every one before it exists: a different subject
+# set, so one lock shared with PLAT-15 would serialise two runs that have
+# nothing to say to each other while still leaving each free to corrupt the
+# other's restores.
+#
+# THIS HARNESS'S SUBJECTS OVERLAP THE TUI'S OTHER HARNESSES, and the rule is
+# the same one PLAT-14 and PLAT-15 state about each other: `app/runtime.nim`,
+# `app/views/shell.nim` and `app/input/keymap.nim` are also PLAT-6's subjects,
+# so an arm here reddens `run-plat6-mutations.py`'s unmutated control and vice
+# versa. RUN ONE HARNESS AT A TIME.
+#
+# It is at the repository root rather than beside the script because the
+# subjects span `src/frontend/tui/` and `src/frontend/viewmodel/`, and a lock
+# inside one of them would name only half of what it protects.
+.plat16-mutations.lock

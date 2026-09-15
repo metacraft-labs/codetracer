@@ -252,6 +252,27 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
   of panePointList: ViewModel(s.pointListVM)
   of paneScratchpad: ViewModel(s.scratchpadVM)
   of paneShell: ViewModel(s.shellVM)
+  of paneFileTree, paneBuildOutput:
+    # PLAT-16. NIL, AND THE EXHAUSTIVE `case` IS WORKING RATHER THAN BEING
+    # WORKED AROUND.
+    #
+    # The guard above says "a value added to `PaneKind` without a ViewModel
+    # behind it does not compile", and the point of that is that a pane must
+    # not be a name nothing renders. These two are rendered — by
+    # `tui/app/views/edit_pane.nim` and the build pane — but not from a
+    # `ReplaySession`: they belong to EDIT mode, whose subject is the working
+    # tree rather than a recording (CodeTracer-TUI-Edit-Mode.md §2), and a
+    # `HeadlessSessionSlot` is a replay session. There is no
+    # `s.fileTreeVM` to return because there is no replay concept for one.
+    #
+    # Answering `nil` here therefore says exactly what is true — *this replay
+    # session has no ViewModel for that pane* — and `paneIsLive` reports false,
+    # which is the correct answer to "does this session drive that pane".
+    # `FilesystemVM` exists in the ViewModel tree and is NOT wired to
+    # `paneFileTree` here, because wiring it would mean claiming a replay
+    # session owns the working tree, which is the provenance confusion §2's
+    # whole table exists to keep apart.
+    nil
 
 proc paneIsLive*(slot: HeadlessSessionSlot; kind: PaneKind): bool =
   ## Whether the pane has a ViewModel to render. False for every pane of a

@@ -114,9 +114,16 @@
 
 import std/[os, strutils, tables]
 
+# PLAT-16. `ProductMode` from the CORE, through the sanctioned facade. See
+# `resolve`'s `product` parameter and `ActionScope` below: scoping a chord by
+# the PRODUCT mode is Mode-Transitions.md §8's requirement, and doing it with a
+# parameter rather than with a fifth `ModalMode` is §1.2's.
+import codetracer_embed
+
 import ./modal_state
 
 export modal_state
+export ProductMode
 
 type
   KeyAction* = enum
@@ -191,6 +198,23 @@ type
     kaCommitPrompt = "commit-prompt"
     kaPromptBackspace = "prompt-backspace"
 
+    # ---- Mode-Transitions.md, not CodeTracer-TUI.md — PLAT-16 -------------
+    kaToggleProductMode = "toggle-product-mode"
+      ## `Ctrl+F5`. Mode-Transitions.md §1: *"The mode toggle is one command.
+      ## `Ctrl+F5` switches to whichever mode the session is not in. It is the
+      ## same command in both directions, so it cannot get the two out of
+      ## step, and it is bound in both modes."*
+      ##
+      ## It comes from a DIFFERENT PUBLISHED DOCUMENT than every other member
+      ## of this enum, which is why `SpecSection` gained a third value rather
+      ## than this action being quietly filed under §4.2 — where
+      ## `test_keymap_no_conflicts.nim` would then have looked for a row that
+      ## does not exist and found the whole partition inconsistent.
+      ##
+      ## Its scope is `asBoth` and that is load-bearing: §8.4 — *"The mode
+      ## toggle is bound in both modes, or the transition is one-way from the
+      ## keyboard."*
+
   Binding* = object
     ## One row of the table, for one mode.
     mode*: ModalMode
@@ -208,6 +232,31 @@ type
     ## Which published section a binding's action comes from.
     ssSpec42 = "§4.2"
     ssSpec41 = "§4.1"
+    ssModeTransitions = "Mode-Transitions.md"
+      ## PLAT-16. An action whose oracle is the GUI's mode-transition
+      ## specification rather than the terminal front-end's key table. There is
+      ## exactly one today (`kaToggleProductMode`) and
+      ## `test_product_mode_dimensions.nim` asserts that count, on the same
+      ## rule `test_keymap_no_conflicts.nim` applies to the §4.1 three: a
+      ## fourth source of bindings must arrive announced.
+
+  ActionScope* = enum
+    ## WHICH PRODUCT MODES AN ACTION MEANS ANYTHING IN.
+    ##
+    ## Mode-Transitions.md §8.1: *"A chord whose action has no meaning in the
+    ## current mode must be inert **and say so**. … A key that silently does
+    ## nothing is indistinguishable from a key that is broken."*
+    ##
+    ## THIS IS A PROPERTY OF THE ACTION, NOT A FIFTH INPUT MODE, and that is
+    ## the distinction CodeTracer-TUI-Edit-Mode.md §1.2 insists on: *"A
+    ## keybinding may be bound differently per product mode … but that is a
+    ## property of the keymap's scoping, not a fifth input mode."* The scope is
+    ## consulted by `resolve` as a filter over a binding that already matched;
+    ## the binding table itself is keyed by `ModalMode` alone and has not
+    ## doubled in size.
+    asBoth = "both"
+    asDebugOnly = "debug-only"
+    asEditOnly = "edit-only"
 
   KeyResolutionKind* = enum
     krNone = "none"
@@ -228,10 +277,28 @@ type
     krText = "text"
       ## The mode is a text field and this key is a character in it. What to
       ## INSERT is `KeyResolution.character`, never `key` — see `keyCharacter`.
+    krInertInMode = "inert-in-mode"
+      ## PLAT-16. A binding MATCHED and its action has no meaning in the
+      ## current PRODUCT mode. `KeyResolution.reason` carries the sentence the
+      ## user is shown.
+      ##
+      ## A SIXTH KIND RATHER THAN A SECOND REASON FOR `krNone`
+      ## (Verification-Harness-Traps §5a: *"a repair that gives an existing
+      ## return value a new reason merges two events"*). `krNone` means
+      ## "nothing is bound to this key"; this means "something is, and it does
+      ## not apply here". They differ in what the user should be told —
+      ## silence for the first, an explanation for the second — and a caller
+      ## that could not tell them apart would either explain every stray
+      ## keystroke or explain none.
 
   KeyResolution* = object
     kind*: KeyResolutionKind
     action*: KeyAction
+      ## On `krInertInMode` this is the action that WOULD have fired, so a
+      ## caller can name it. It is not dispatched.
+    reason*: string
+      ## Why an inert key was inert, in words, for the status line. Empty for
+      ## every other kind.
     spelling*: string
       ## The binding that fired, for a notification or a failure message.
     key*: string
@@ -465,7 +532,80 @@ proc specSectionOf*(action: KeyAction): SpecSection =
   ## three §4.1 members.
   case action
   of kaEnterInspect, kaCommitPrompt, kaPromptBackspace: ssSpec41
+  of kaToggleProductMode: ssModeTransitions
   else: ssSpec42
+
+proc scopeOf*(action: KeyAction): ActionScope =
+  ## Which product modes `action` means anything in.
+  ##
+  ## ## THE RULE, AND THE TWO EXCEPTIONS MODE-TRANSITIONS.MD MAKES BY NAME
+  ##
+  ## Everything that moves a replay is `asDebugOnly`: §8.1's example is Step
+  ## Over, and "there is no session to step" is true of every stepping, seeking
+  ## and origin-tracking action in Edit mode.
+  ##
+  ## Everything structural is `asBoth`. Pane focus, the command prompt, search,
+  ## the palette, quit and the mode toggle itself all mean the same thing in
+  ## both modes, and scoping them out would make Edit mode a different
+  ## application rather than a different mode of one.
+  ##
+  ## `kaToggleBreakpoint` is `asBoth` DELIBERATELY, and it is the one that
+  ## looks wrong until you read the specification: CodeTracer-TUI-Edit-Mode.md
+  ## §3 — *"Breakpoint markers stay: setting a breakpoint while editing is a
+  ## normal thing to do, and the point list survives the transition per
+  ## Mode-Transitions.md."* Mode-Transitions.md §5 agrees, listing breakpoints
+  ## among what a transition preserves because *"they belong to the project,
+  ## not to the session"*.
+  ##
+  ## `kaCenterOnPointer` is `asDebugOnly` for the same reason
+  ## `views/gutter.nim` drops the pointer glyph in Edit mode: there is no
+  ## execution to centre on.
+  ##
+  ## NOTHING IS `asEditOnly` YET, and the value exists anyway rather than being
+  ## added when the first member arrives. `:run` and `:build` are COMMANDS in
+  ## this milestone and not chords (CodeTracer-TUI-Edit-Mode.md §5: *"There is
+  ## no toolbar. The trigger is a keybinding and a command"* — the command is
+  ## what landed), so the third arm is uninhabited. `test_product_mode_
+  ## dimensions.nim` asserts that emptiness EXPLICITLY, so the day something
+  ## fills it the fact is announced rather than absorbed.
+  case action
+  of kaStepOver, kaReverseStepOver, kaStepInto, kaReverseStepInto,
+     kaStepOut, kaReverseStepOut, kaContinue, kaReverseContinue,
+     kaPrevCall, kaNextCall, kaPrevMutation, kaNextMutation,
+     kaJumpToStart, kaJumpToEnd, kaSeekToTick,
+     kaValueOrigin, kaReverseOrigin,
+     kaCenterOnPointer,
+     kaToggleHexDec, kaViewMemoryDump, kaEnterInspect:
+    asDebugOnly
+  else:
+    asBoth
+
+proc appliesIn*(action: KeyAction; product: ProductMode): bool =
+  ## Whether `action` means anything in `product`.
+  case scopeOf(action)
+  of asBoth: true
+  of asDebugOnly: product == pmDebug
+  of asEditOnly: product == pmEdit
+
+proc inertReason*(action: KeyAction; product: ProductMode): string =
+  ## §8.1's *"the reason, on the surface the user is looking at"*.
+  ##
+  ## It names the action AND the mode, because a message that said only "not
+  ## available" would leave a user who pressed `n` expecting Step Over unable
+  ## to tell whether the key is unbound, the session is gone, or they are in
+  ## the wrong mode — and only the third has a remedy they can act on. The
+  ## remedy is named too.
+  if appliesIn(action, product):
+    return ""
+  case scopeOf(action)
+  of asDebugOnly:
+    "'" & $action & "' needs a replay session; you are in " & $product &
+      " mode. Ctrl+F5 switches."
+  of asEditOnly:
+    "'" & $action & "' needs an editing session; you are in " & $product &
+      " mode. Ctrl+F5 switches."
+  of asBoth:
+    ""
 
 proc specAction*(action: KeyAction): string =
   ## The text of §4.2's "Action" cell for this action, VERBATIM — including the
@@ -513,6 +653,9 @@ proc specAction*(action: KeyAction): string =
   # §4.1, so no §4.2 row exists. The empty string is what the conflict suite
   # keys its "not published in §4.2" partition on.
   of kaEnterInspect, kaCommitPrompt, kaPromptBackspace: ""
+  # Mode-Transitions.md, so no §4.2 row exists either. Same empty string, and
+  # `specSectionOf` is what tells the two apart.
+  of kaToggleProductMode: ""
 
 proc modalEventFor*(action: KeyAction): (bool, ModalEvent) =
   ## Which `modal_state` event an action raises, if any.
@@ -615,6 +758,17 @@ proc defaultKeymap*(): Keymap =
   r.add b(mmNormal, "Ctrl+c", kaQuit)
   # §4.1's INSPECT entry.
   r.add b(mmNormal, "i", kaEnterInspect)
+  # PLAT-16 / Mode-Transitions.md §1. THE MODE TOGGLE, in NORMAL, with
+  # `scopeOf == asBoth` so it is reachable from Debug and from Edit — §8.4:
+  # "The mode toggle is bound in both modes, or the transition is one-way from
+  # the keyboard."
+  #
+  # `Ctrl+F5` is `CSI 15;5~` on the wire; `keyName` already spells it, which is
+  # why this needs no parser change. It collides with nothing: `F5` is
+  # Continue, `Shift+F5` is Step Out and `Alt+F5` is Reverse Continue, and
+  # `test_keymap_no_conflicts.nim`'s duplicate sweep is what proves the fourth
+  # modifier was free rather than this comment.
+  r.add b(mmNormal, "Ctrl+F5", kaToggleProductMode)
 
   # ---- COMMAND -----------------------------------------------------------
   # A text field: every printable key is a character, so only the three
@@ -724,16 +878,31 @@ proc hasPrefix(km: Keymap; mode: ModalMode; chords: seq[string]): bool =
   false
 
 proc resolve*(km: Keymap; state: ModalState; pending: var PendingState;
-              token: string; nowMs: int64): KeyResolution =
+              token: string; nowMs: int64;
+              product = pmDebug): KeyResolution =
   ## Turn one input token into an action, a pending prefix, or a character.
   ##
   ## `nowMs` is passed in rather than read, which is what makes the bounded
   ## timeout assertable without a sleep: `app/tests/test_modal_transitions.nim`
   ## drives it at `PendingTimeoutMs` and at `PendingTimeoutMs + 1` and asserts
   ## the two different answers.
+  ##
+  ## ## THE TWO MODES ARE TWO PARAMETERS, AND THAT IS THE MITIGATION
+  ##
+  ## `state.mode` is the INPUT mode and `product` is the PRODUCT mode. They are
+  ## two arguments of one function rather than one argument of a fifteen-member
+  ## enum, which is CodeTracer-TUI-Edit-Mode.md §1.2's requirement expressed in
+  ## the signature: the type system cannot represent a "NORMAL-EDIT" mode
+  ## because there is no type that could hold it.
+  ##
+  ## `product` DEFAULTS to `pmDebug` so every call site written before PLAT-16
+  ## resolves exactly as it did. That is not laziness about migration — it is
+  ## what lets `test_modal_transitions.nim`'s whole (context x event) sweep
+  ## stay a statement about the INPUT machine, unperturbed by a dimension it is
+  ## not about.
   let name = keyName(token)
-  result = KeyResolution(kind: krNone, action: kaNone, spelling: "", key: name,
-                         pending: "", character: "")
+  result = KeyResolution(kind: krNone, action: kaNone, reason: "",
+                         spelling: "", key: name, pending: "", character: "")
   if name.len == 0:
     # Not a key at all — a mouse report, or a sequence this module does not
     # name. A pending prefix SURVIVES it: a mouse report arriving between
@@ -761,6 +930,16 @@ proc resolve*(km: Keymap; state: ModalState; pending: var PendingState;
       result.character = keyCharacter(name)
       return
     pending.clear()
+    # PLAT-16 / Mode-Transitions.md §8.1. THE SCOPE IS CHECKED AFTER THE MATCH,
+    # never before it, and that ordering is what makes the key SAY SO: a filter
+    # applied to the table would leave the chord matching nothing and the user
+    # reading `krNone` — "this key is not bound" — about a key that is.
+    if not appliesIn(bnd.action, product):
+      result.kind = krInertInMode
+      result.action = bnd.action
+      result.spelling = bnd.spelling
+      result.reason = inertReason(bnd.action, product)
+      return
     result.kind = krAction
     result.action = bnd.action
     result.spelling = bnd.spelling

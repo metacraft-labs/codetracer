@@ -25,6 +25,21 @@
 
 import ../layout/profile
 
+# PLAT-16. `ProductMode` — Edit and Debug — comes from the CORE
+# (`viewmodel/viewmodels/product_mode.nim`) through the sanctioned facade, and
+# NOT from a second enum declared here.
+#
+# THAT IS THE WHOLE POINT OF THE IMPORT. CodeTracer-TUI-Edit-Mode.md §1.2:
+# "`UiMode` … must not gain `EDIT`. It enumerates input modes and its
+# cardinality is asserted by `test_layout_profiles.nim`. The product mode is a
+# separate indicator in a separate position on the status line." A terminal
+# copy of the product vocabulary would be a front-end with its own opinion about
+# what mode the product is in, which is exactly the collapse this milestone's
+# risk names. `app/tests/test_product_mode_dimensions.nim` asserts that neither
+# enum can name a member of the other and that the state space is the PRODUCT of
+# the two cardinalities rather than their sum.
+import codetracer_embed
+
 # `textCells` / `fitCells` live in `header.nim` rather than in a fourth module
 # nobody's deliverable list names. They are the one width-measurement rule the
 # whole shell shares, and a second copy of it is exactly how a padding bug
@@ -49,6 +64,15 @@ type
   StatusBarModel* = object
     ## Everything the bottom row shows, as a value.
     mode*: UiMode
+      ## The INPUT mode. Six values; see `UiMode`.
+    product*: ProductMode
+      ## The PRODUCT mode. Two values, and a SEPARATE FIELD rather than a
+      ## seventh `UiMode` member — §1.2's requirement, and the field that makes
+      ## "a user is in Edit mode *and* in NORMAL input mode, and both
+      ## indicators are true at once" representable at all.
+      ##
+      ## `pmDebug` is the zero value, so every `StatusBarModel` constructed
+      ## before this milestone means what it meant.
     profile*: LayoutProfile
     notification*: string
       ## A transient message. Empty means "nothing to say", and nothing is then
@@ -60,16 +84,58 @@ type
       ## is looking at and the hints are what they no longer need.
 
 proc initStatusBarModel*(mode = umNormal; profile = lpCompact;
-                         notification = ""; prompt = ""): StatusBarModel =
-  StatusBarModel(mode: mode, profile: profile, notification: notification,
-                 prompt: prompt)
+                         notification = ""; prompt = "";
+                         product = pmDebug): StatusBarModel =
+  StatusBarModel(mode: mode, product: product, profile: profile,
+                 notification: notification, prompt: prompt)
 
-proc keyHints*(mode: UiMode; profile: LayoutProfile): string =
-  ## The §3.3.6 hint strip for this mode and this profile.
+proc productIndicator*(product: ProductMode): string =
+  ## §1.2's separate indicator, in its separate position.
+  ##
+  ## BRACKETED, so the two indicators read as two facts rather than as one
+  ## two-word mode name — `NORMAL [EDIT]` is a user in NORMAL input mode and
+  ## Edit product mode, and `NORMAL EDIT` would read as a fifth input mode,
+  ## which is the sentence §1.2 forbids rendered instead of typed.
+  "[" & $product & "]"
+
+proc productStyle*(product: ProductMode): CellStyle =
+  ## The colour the product indicator is painted in.
+  ##
+  ## DISJOINT FROM EVERY `modeStyle` COLOUR, and that is the property rather
+  ## than the palette: a Tier-2 case reads a cell's colour to say which
+  ## indicator it is looking at, and a product indicator sharing a colour with
+  ## an input mode would make the two indistinguishable to exactly the
+  ## assertion that has to tell them apart. `modeStyle` uses green, yellow,
+  ## magenta, cyan, blue and bright_blue; these two use neither.
+  ##
+  ## `bold` is deliberately OFF: the input mode is the primary indicator and
+  ## the product mode qualifies it, so they must not compete.
+  case product
+  of pmDebug: CellStyle(fg: "white", bold: false)
+  of pmEdit: CellStyle(fg: "bright_yellow", bold: false)
+
+proc keyHints*(mode: UiMode; profile: LayoutProfile;
+               product = pmDebug): string =
+  ## The §3.3.6 hint strip for this mode, this profile and this product mode.
   ##
   ## The Compact strip is the function-key set §3.1's 80x24 drawing shows; the
   ## wider profiles get the letter set from its 120x40 drawing, which is longer
   ## and would be truncated at 80 columns.
+  ##
+  ## PLAT-16 ADDS THE THIRD PARAMETER AND ONLY THE `umNormal` ARM READS IT.
+  ## Mode-Transitions.md §8 requires per-mode shortcut scoping, and a hint strip
+  ## that advertised Step Over to somebody in Edit mode would be advertising a
+  ## chord `keymap.resolve` answers `krInertInMode` for — the disabled-button
+  ## failure EMT-D14 names, arriving through the hint strip instead of the
+  ## keyboard. The prompt modes are unchanged because a `:` prompt is the same
+  ## prompt in both product modes.
+  if mode == umNormal and product == pmEdit:
+    return case profile
+      of lpCompact:
+        "Ctrl+F5:debug F9:break | :run :build :w"
+      of lpStandard, lpUltraWide:
+        "Ctrl+F5:debug  F9:breakpoint  Ctrl+z/Ctrl+y:undo/redo | " &
+        ":run :build :w"
   case mode
   of umCommand:
     "Enter:run  Esc:cancel  Tab:complete"
@@ -131,12 +197,18 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
   ## whole row exists to prevent.
   if width <= 0:
     return ""
-  let mode = $m.mode
+  # THE TWO INDICATORS, IN TWO POSITIONS, ALWAYS BOTH DRAWN.
+  #
+  # They are concatenated into one `mode` local so the narrow-terminal rule
+  # below — "the mode indicator is never dropped" — covers the pair rather than
+  # just the input half. A product mode that vanished at 14 columns would leave
+  # a user editing a file on a screen that says NORMAL and nothing else.
+  let mode = $m.mode & " " & productIndicator(m.product)
   let middle =
     if m.prompt.len > 0 or promptSigil(m.mode).len > 0:
       promptSigil(m.mode) & m.prompt
     else:
-      keyHints(m.mode, m.profile)
+      keyHints(m.mode, m.profile, m.product)
   if textCells(mode) >= width:
     return fitCells(mode, width)
 
