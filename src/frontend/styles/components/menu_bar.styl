@@ -385,7 +385,9 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   .menu-search-result
     .menu-node-name
       // width: MENU_ELEMENT_NAME_WIDTH
+      width: -moz-available !important
       width: -webkit-fill-available !important
+      width: stretch !important
       justify-content: space-between
       float: left
       padding-left: 8px
@@ -419,7 +421,9 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   .menu-folder
     .menu-node-name
       // width: MENU_NODE_NAME_WIDTH !important
+      width: -moz-available !important
       width: -webkit-fill-available !important
+      width: stretch !important
       justify-content: space-between
       float: left
       padding-left: 8px

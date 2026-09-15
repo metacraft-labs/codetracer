@@ -1809,11 +1809,11 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         let capturedSrc = imgData
         var imgEl: typeof(r.createElement("img"))
         let thumb = ui(r):
-          tdiv(class = "agent-paste-thumb",
-               onclick = proc() =
-                 when defined(js):
-                   showImageLightbox(cstring(capturedSrc))):
-            img(ref = imgEl, class = "agent-paste-img", alt = "attachment")
+          tdiv(class = "agent-paste-thumb"):
+            img(ref = imgEl, class = "agent-paste-img", alt = "attachment",
+                onclick = proc() =
+                  when defined(js):
+                    showImageLightbox(cstring(capturedSrc)))
             tdiv(class = "agent-paste-remove",
                  onclick = proc() = vm.removePastedImage(idx)):
               text "×"
