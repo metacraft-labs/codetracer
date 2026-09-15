@@ -65,9 +65,14 @@
 #
 # ## What it does NOT cover, stated so nobody reads more into a pass
 #
-#   * Any node with no sibling checkout — 211 of 259 today, all third-party
-#     (nixpkgs, fenix, flake-parts, status-im/*, spectrum-os). Those are the
-#     network check's job. Neither check subsumes the other.
+#   * Any node with no sibling checkout — 211 of 259 today. 208 of those are
+#     third-party (nixpkgs, fenix, flake-parts, status-im/*, spectrum-os) across
+#     56 repositories, and THREE ARE NOT: `ethereum-nix` (twice) and
+#     `nim-results-src`, which are metacraft-labs repositories that no project
+#     in this workspace checks out. They are exactly as hand-editable as the
+#     ones this check does cover, and only the network check sees them. That is
+#     the concrete reason neither check subsumes the other, rather than a
+#     general remark about coverage.
 #   * Any node whose `rev` the sibling has not fetched. Reported by name with
 #     the `git fetch` that fixes it; never counted as verified.
 #   * `narHash`. Only a real fetch proves that, and the first `nix` invocation
