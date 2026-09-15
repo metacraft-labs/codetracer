@@ -63,7 +63,7 @@ template ckEq(a, b: untyped) =
   inc countedAssertions
   check a == b
 
-const ExpectedAssertions = 91
+const ExpectedAssertions = 92
 
 proc i(text: string): PValue =
   PValue(kind: pvkInt, text: text, typeName: "int", sourceKind: "Int")
@@ -145,7 +145,7 @@ suite "PLAT-14: what a resolved terminal can draw":
       inc never
     ckEq never, 5
 
-  test "the seven declared surface budgets are UNCHANGED by this milestone":
+  test "the declared surface budgets are UNCHANGED by this milestone":
     # The constants are the floor, and the floor did not move: a surface whose
     # declared set said `image/png` unconditionally would be claiming a
     # capability on a `TERM=dumb` CI log.
@@ -153,8 +153,13 @@ suite "PLAT-14: what a resolved terminal can draw":
     for budget in SurfaceBudgets:
       ckEq budget.media, MediaCapabilityNote
       inc surfaces
-    ckEq surfaces, 7
-    ckEq SurfaceBudgets.len, 7
+    # EIGHT since 2026-09-15: PLAT-21's `gpui-panel`, which declares the same
+    # `MediaCapabilityNote` floor every other surface does, for the reason
+    # `surfaces.nim` gives — nothing in this repository draws pixels for a GPU
+    # surface either, and a set that claimed otherwise would turn every media
+    # value into the blank region PLAT-9's degradation model exists against.
+    ckEq surfaces, 8
+    ckEq SurfaceBudgets.len, 8
     # …and the zero-argument spellings of the two TUI budgets are the floor
     # too, which is the fail-low default: a caller that has not resolved an
     # image capability gets what was true before PLAT-14.

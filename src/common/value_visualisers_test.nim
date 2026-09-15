@@ -51,7 +51,7 @@ template ckEq(a, b: untyped) =
   inc countedAssertions
   check a == b
 
-const ExpectedAssertions = 903
+const ExpectedAssertions = 952
   ## Written from a run. See the final case.
 
 # ---------------------------------------------------------------------------
@@ -250,10 +250,11 @@ suite "PLAT-12: a declaration reaches the pipeline and renders":
 
   test "a summary template renders on EVERY surface, within each budget":
     # PLAT-12's first integration test, in the form this file can make: one
-    # visualiser, written once, on all seven declared budgets. The corpus suite
-    # makes the same statement over a real recording.
+    # visualiser, written once, on all EIGHT declared budgets (seven until
+    # 2026-09-15, when PLAT-21 added `gpui-panel`). The corpus suite makes the
+    # same statement over a real recording.
     let presenters = presentersFrom(MatrixRule)
-    ckEq SurfaceBudgets.len, 7
+    ckEq SurfaceBudgets.len, 8
     for budget in SurfaceBudgets:
       let p = present(matrix(), budget, presenters = presenters)
       ckEq p.root.text, "3x4"

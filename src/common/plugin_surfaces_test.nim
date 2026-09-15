@@ -38,7 +38,7 @@ import std/[options, strutils, unittest]
 
 import ./plugin_model
 
-const ExpectedAssertions = 205
+const ExpectedAssertions = 207
   ## Written from a run, and asserted against the tally below.
   ## `ci/lib/run-nim-test-lane.sh` READS this name: a file that declares
   ## it AND fails when its own tally disagrees is a file whose assertion
@@ -189,22 +189,39 @@ suite "PLAT-9 §6.2: native where supplied, abstract as the baseline":
       ck chooseView(m.manifest.contributions[0], fe).kind == vcAbstract
 
   test "'abstract' is not automatically 'everywhere', and PLAT-3's table says so":
-    # `Table` maps to `msAbsent` on GPUI — the tag is not in isonim-gpui's
-    # `tagMap` at all. A surface whose only view is a Table is therefore
-    # genuinely absent there, and saying otherwise would be the silent-nothing
-    # §6.3 forbids.
-    ck mappingFor(feGpui, pkTable).status == msAbsent
-    let m = withPane("""{ "id": "rows", "views": ["Table"] }""")
+    # `Modal` maps to `msAbsent` on GPUI. **THIS CASE USED `Table` UNTIL
+    # 2026-09-15**, on PLAT-3's reasoning that a tag outside isonim-gpui's
+    # `tagMap` "reaches a Rust classifier with no case for it" — which PLAT-21
+    # rendered through the real shim and found to be false: an unknown tag
+    # keeps its spelling and classifies as `Div`, exactly as `button` does. So
+    # `Table` and `ProgressIndicator` are `msPartial` now and a plugin surface
+    # built on either is ADMITTED on GPUI. `Modal` is the entry that stayed
+    # absent, and for the reason that was always the real one: there is no
+    # ELEMENT focus in that renderer, so the exclusivity a Modal IS cannot be
+    # built out of anything the medium offers. See `mappings.gpuiMapping`'s
+    # three corrected rows and `gpui_gaps.PLAT21-VG3`.
+    ck mappingFor(feGpui, pkModal).status == msAbsent
+    # …and the two that MOVED, asserted here so this case fails if they move
+    # back without the measurement moving with them.
+    ck mappingFor(feGpui, pkTable).status == msPartial
+    ck mappingFor(feGpui, pkProgressIndicator).status == msPartial
+    let m = withPane("""{ "id": "rows", "views": ["Modal"] }""")
     ck m.isOk
     let c = m.manifest.contributions[0]
     let gpui = chooseView(c, feGpui)
     ck gpui.kind == vcNone
     ck gpui.absence == vaVocabularyAbsentHere
-    ck gpui.absentViews == @[pkTable]
-    # The control, on the same entry: the terminal renders a Table completely,
-    # so the refusal is about the FRONT-END and not about the entry.
-    ck mappingFor(feTerminal, pkTable).status == msComplete
+    ck gpui.absentViews == @[pkModal]
+    # The control, on the same entry: the terminal renders a Modal completely
+    # — the focus trap is isonim-tui's own — so the refusal is about the
+    # FRONT-END and not about the entry.
+    ck mappingFor(feTerminal, pkModal).status == msComplete
     ck chooseView(c, feTerminal).kind == vcAbstract
+    # And the entry that used to stand here now PASSES on GPUI, which is the
+    # behaviour change the correction carries.
+    let tbl = withPane("""{ "id": "rows2", "views": ["Table"] }""")
+    ck tbl.isOk
+    ck chooseView(tbl.manifest.contributions[0], feGpui).kind == vcAbstract
 
   test "the GPUI absent set is read out of the table, and the prose is pinned to it":
     # THE SENTENCE THIS PINS WAS WRONG, IN TWO PLACES, FOR AS LONG AS IT HAD
@@ -220,11 +237,11 @@ suite "PLAT-9 §6.2: native where supplied, abstract as the baseline":
     # non-emptiness (Verification-Harness-Traps §4b): "at least one" is
     # satisfied by one member of three, which is exactly the state the wrong
     # sentence was in.
-    ck derived.len == 3
+    ck derived.len == 1
     # ... and the scan reaches exactly one line, so neither an empty read nor a
     # second marker can satisfy the comparison below (§4).
     ck SurfacesSource.count(AbsentAnchor) == 1
-    ck prosaicAbsentOnGpui().len == 3
+    ck prosaicAbsentOnGpui().len == 1
     ck prosaicAbsentOnGpui() == derived
 
     # Every member of the DERIVED set refuses, through the real `chooseView` —
@@ -328,15 +345,15 @@ suite "PLAT-9 §6.3: a required surface with no view names the front-end AND the
 
   test "the absent-vocabulary refusal names the ENTRIES, not just the surface":
     let m = withPane("""
-      { "id": "rows", "requirement": "required", "views": ["Table", "Text"] }""")
+      { "id": "rows", "requirement": "required", "views": ["Modal", "Text"] }""")
     let refusals = surfaceRefusals(m.manifest, feGpui)
     ck refusals.len == 1
-    ck "Table" in refusals[0].detail
+    ck "Modal" in refusals[0].detail
     ck "rows" in refusals[0].detail
     ck "gpui" in refusals[0].detail
     # `Text` maps completely on GPUI, so it must NOT be blamed.
     ck mappingFor(feGpui, pkText).status != msAbsent
-    ck not refusals[0].detail.contains("Table, Text")
+    ck not refusals[0].detail.contains("Modal, Text")
 
   test "a COMMAND is invoked, not drawn, so §6.3 never refuses one":
     # The partition is data (`RenderingContributionKinds`), and this is the

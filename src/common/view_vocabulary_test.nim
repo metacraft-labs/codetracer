@@ -46,9 +46,15 @@ template ck(condition: untyped) =
   check condition
 
 const
-  ExpectedAssertionsWithGpui = 707
-  ExpectedAssertionsWithoutGpui = 636
+  ExpectedAssertionsWithGpui = 741
+  ExpectedAssertionsWithoutGpui = 670
     ## Both written from a run. See the final case.
+    ##
+    ## **BOTH RE-TAKEN ON 2026-09-15 by PLAT-21** (707 -> 741, 636 -> 670),
+    ## and the second one was MEASURED rather than derived from the delta: the
+    ## binary was run once with `isonim-gpui/src/isonim_gpui/renderer.nim` in
+    ## place and once with it moved aside, which is the only way to reach the
+    ## arm on a host where the sibling IS checked out.
     ##
     ## The difference is 71: the GPUI arm contributes 72 assertions when it
     ## runs (a length check, an equality against the copy, and 35 in each
@@ -524,7 +530,7 @@ suite "PLAT-3: the three front-end mappings":
     ck complete == 15
     ck partial == @["Markdown"]
 
-  test "GPUI is absent on exactly three entries, and they are named":
+  test "GPUI is absent on exactly ONE entry, and it is named":
     var absent: seq[string] = @[]
     var complete: seq[string] = @[]
     for k in ViewKind:
@@ -532,16 +538,23 @@ suite "PLAT-3: the three front-end mappings":
       of msAbsent: absent.add vocabularyName(k)
       of msComplete: complete.add vocabularyName(k)
       of msPartial: discard
-    # PLAT-21's verification gate asks that every entry needing a
-    # GPUI-specific escape be "a named, filed vocabulary defect". These are
-    # the three, named here so the gate has something to read.
-    ck absent == @["Table", "Modal", "ProgressIndicator"]
+    # **THREE UNTIL 2026-09-15.** PLAT-3 read `Table`, `Modal` and
+    # `ProgressIndicator` as absent from `tagMap` MEMBERSHIP, on the reasoning
+    # that a tag outside the map "reaches a Rust classifier with no case for
+    # it". PLAT-21 rendered every one of them through the real shim and read
+    # the plan the Rust side builds: an unknown tag keeps its spelling and
+    # classifies as `Div` — which is what `button`, `input`, `select`, `ul`
+    # and `li` get, and those five are `msPartial`. Two rows moved; `Modal`
+    # stayed, because what it is missing is ELEMENT FOCUS rather than a tag.
+    ck absent == @["Modal"]
     ck complete == @["Text", "Image"]
 
-  test "the GPUI mapping is consistent with the tag table it rests on":
-    # `Table`, `Modal` and `ProgressIndicator` are absent BECAUSE their tags
-    # are not in the map; the rest are present because theirs are. Asserted
-    # from the tag table rather than restated, so the two cannot disagree.
+  test "the GPUI mapping is NO LONGER derived from tag-map membership":
+    # This case used to assert the implication PLAT-21 falsified — *"`Table`,
+    # `Modal` and `ProgressIndicator` are absent BECAUSE their tags are not in
+    # the map"*. The tag facts below are unchanged and still true; what is
+    # asserted about them now is that they DO NOT decide the status, which is
+    # the shape a reader of `gpuiMapping` has to carry.
     ck not gpuiKnowsTag("table")
     ck not gpuiKnowsTag("dialog")
     ck not gpuiKnowsTag("progress")
@@ -555,11 +568,17 @@ suite "PLAT-3: the three front-end mappings":
     ck not gpuiPassesThrough("li")
     ck GpuiTagMap.len == 35
     ck GpuiPassThroughTags.len == 16
+    # THE IMPLICATION, DENIED: three tags outside the map, three different
+    # statuses. Membership cannot be what decides it.
+    ck gpuiMapping(pkTable).status == msPartial
+    ck gpuiMapping(pkProgressIndicator).status == msPartial
+    ck gpuiMapping(pkModal).status == msAbsent
 
   test "the summary reports all sixteen rows":
     let s = mappingSummary()
     ck s.splitLines.len == 17     # a header plus sixteen entries
-    ck s.contains("ProgressIndicator   complete   complete   ABSENT")
+    ck s.contains("ProgressIndicator   complete   complete   partial")
+    ck s.contains("Modal               complete   complete   ABSENT")
     ck s.contains("Menu                partial    complete   partial")
     ck s.contains("Tabs                partial    complete   partial")
     let a = admissionSummary()
@@ -595,6 +614,39 @@ proc parseGpuiTagKeys(source: string): seq[string] =
       result.add line[1 ..< closing]
 
 var gpuiArmRan = false
+
+suite "PLAT-21: the register of GPUI gaps is well formed":
+
+  test "every filed gap names entries and carries its measurement":
+    # PLAT-21's gate is *"the count of vocabulary entries needing a
+    # GPUI-specific escape is zero, or each is a named, filed vocabulary
+    # defect"*. The CENSUS — which entries a real rendering actually needed an
+    # escape for — is taken in
+    # `src/frontend/gpui/tests/test_gpui_vocabulary_binding.nim`, because it
+    # needs the renderer. What is checkable HERE, in a lane that links no
+    # renderer, is that the register a gate reads cannot be satisfied by empty
+    # rows (Verification-Harness-Traps §4).
+    ck FiledGpuiGaps.len == 4
+    var ids: seq[string] = @[]
+    for g in FiledGpuiGaps:
+      ck g.id.startsWith("PLAT21-VG")
+      ck g.id notin ids
+      ids.add g.id
+      ck g.entries.len > 0
+      ck g.what.len > 40
+      ck g.measured.len > 40
+      ck g.remedy.len > 40
+    # Thirteen of the sixteen entries are named by at least one gap, and the
+    # three that are not are named too — an entry list nobody asserts is one
+    # that can shrink silently.
+    ck entriesWithFiledGap().len == 13
+    var clean: seq[ViewKind] = @[]
+    for k in ViewKind:
+      if gapsFor(k).len == 0: clean.add k
+    ck clean == @[pkText, pkProgressIndicator, pkMarkdown]
+    ck gapById("PLAT21-VG3").entries == @[pkModal]
+    ck gapById("PLAT21-VG4").subject == gsVocabulary
+    ck gapById("no-such-gap").id == ""
 
 suite "PLAT-3: the GPUI tag table this repository copied":
 

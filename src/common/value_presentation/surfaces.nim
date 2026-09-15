@@ -8,11 +8,13 @@
 ##
 ## Because the milestone's claim is a claim about the SET of them: *"the same
 ## value renders consistently across every surface, differing only by the
-## budget each declares"* (PLAT-2 named six; there are seven — see
-## `SurfaceBudgets` below). That is checkable only if the budgets are in one
-## place where a test can enumerate them — `SurfaceBudgets` below is that
+## budget each declares"* (PLAT-2 named six; there are EIGHT — see
+## `SurfaceBudgets` below, and its own comment for the two that arrived after
+## the milestone and why each is an addition to its scope rather than a
+## subdivision of one of the six). That is checkable only if the budgets are in
+## one place where a test can enumerate them — `SurfaceBudgets` below is that
 ## enumeration, and `value_presentation_test.nim` iterates it rather than naming
-## budgets one at a time, so a seventh surface added here is asserted about
+## budgets one at a time, so an eighth surface added here is asserted about
 ## without anyone editing the suite (Verification-Harness-Traps §4b: when the
 ## membership is knowable, the control is the COUNT).
 ##
@@ -61,7 +63,10 @@ import vocabulary
 const
   MediaCapabilityNote* = {mcOctetStream}
     ## PLAT-12. What EVERY surface below declares in its `Budget.media`, and
-    ## the reason the seven sets are identical.
+    ## the reason the eight sets are identical. (Seven until 2026-09-15, when
+    ## PLAT-21's `gpui-panel` joined them and declared exactly this floor for
+    ## the same reason: nothing in this repository draws pixels for a GPU
+    ## surface either.)
     ##
     ## §5.2 lets a project declare that a region of a value is an image, a
     ## waveform, a framebuffer, rendered markdown or a chart. Nothing in this
@@ -72,16 +77,16 @@ const
     ## every such value into a blank region, which is the outcome PLAT-9's
     ## degradation model exists to prevent — so the sets say what is true.
     ##
-    ## `application/octet-stream` IS TRUE ON ALL SEVEN, and it is not a
+    ## `application/octet-stream` IS TRUE ON ALL EIGHT, and it is not a
     ## placeholder. Raw bytes are the one medium every surface already honours:
     ## `builtin.byte-buffer` has rendered `01 02 ff … (12 bytes)` since CTUI-7,
     ## on a line, and a media label naming the type and the size is the same
     ## fidelity. So the "this surface draws it" arm of `surfaceDrawsMedia` is
     ## reachable and tested rather than dead code beside a degradation path.
     ##
-    ## NAMED ONCE AND REFERENCED SEVEN TIMES rather than written out seven
+    ## NAMED ONCE AND REFERENCED EIGHT TIMES rather than written out eight
     ## times, so that widening one surface is a visible divergence from the
-    ## note instead of a seventh copy silently drifting (§14). PLAT-14 is
+    ## note instead of an eighth copy silently drifting (§14). PLAT-14 is
     ## expected to give `tui-tree` and `tui-row` more than this; the desktop's
     ## own image work is expected to give `state-panel` more.
     ##
@@ -171,10 +176,53 @@ const
     annotated: false,
     media: MediaCapabilityNote)
 
-  SurfaceBudgets*: array[7, Budget] = [
+  GpuiPanelBudget* = Budget(
+    name: "gpui-panel",
+    lines: 0,          ## a tree; the pane scrolls, so no line bound
+    cells: 0,          ## SEE THE NOTE BELOW — a GPU surface has no cells
+    depth: 7,          ## the state panel's, because it IS the state panel
+    members: 200,      ## the state panel's, for the same reason
+    expandable: true,
+    annotated: false,
+    media: MediaCapabilityNote)
+    ## **PLAT-21 deliverable 2: the GPUI surface declares its own budget.**
+    ##
+    ## The third front-end's state panel. It is the EIGHTH member of
+    ## `SurfaceBudgets` below, and adding it is what that array's count control
+    ## exists to force somebody to think about — see its own comment.
+    ##
+    ## *`cells: 0`, and that is not laziness.* `Budget.cells` is *"maximum
+    ## display cells on ONE line, measured by `measure`"*, which is a terminal's
+    ## unit. A GPU surface's line capacity is a pixel width divided by a font
+    ## metric it resolves at paint time, and a surface that guessed a cell count
+    ## would be truncating a value against a number it made up — which is
+    ## exactly the "each surface truncating" PLAT-2 removed. `0` means unbounded
+    ## and is the honest answer, and it is the SAME answer `state-panel` already
+    ## gives for the DOM (*"the DOM wraps and the tree indents; no cell
+    ## bound"*). Two of three front-ends decline this field, which is worth
+    ## noticing about the field and is recorded in PLAT-21's status rather than
+    ## filed as a gap: the escape hatch the vocabulary already has (`0` =
+    ## unbounded) is sufficient, so nothing had to be added for GPUI.
+    ##
+    ## *The numbers are `state-panel`'s, moved rather than invented*, which is
+    ## the rule the header states for every other constant in this file: the
+    ## GPUI state panel is the same pane on a third medium, so it inherits the
+    ## same depth and the same member cap, and a difference between the two
+    ## columns is then a difference in the RENDERING rather than in the budget.
+
+  SurfaceBudgets*: array[8, Budget] = [
     StatePanelBudget, TracepointBudget, FlowBudget, ScratchpadBudget,
-    EventLogBudget, TuiTreeBudget, CalltraceArgBudget]
-    ## THE SEVEN NAMED SURFACES, and exactly seven.
+    EventLogBudget, TuiTreeBudget, CalltraceArgBudget, GpuiPanelBudget]
+    ## THE EIGHT NAMED SURFACES, and exactly eight.
+    ##
+    ## **SEVEN UNTIL 2026-09-15, when PLAT-21 added `gpui-panel`.** The comment
+    ## below says the length is part of the contract *"so a suite that iterates
+    ## it and asserts `SurfaceBudgets.len == 7` fails when an eighth is added
+    ## without the milestone's scope being revisited"*. PLAT-21 is that
+    ## revisiting: it gives the debugger panes a third front-end, and a front-end
+    ## that rendered values at another medium's budget would be the "each
+    ## surface truncating" defect wearing a borrowed constant. Four suites
+    ## carried the literal `7` and each was moved by hand, from a run.
     ##
     ## PLAT-2's brief named six. `calltrace-arg` is the seventh and it is an
     ## ADDITION to the milestone's stated scope rather than a subdivision of
@@ -188,8 +236,11 @@ const
     ## The array's LENGTH is part of the contract: a suite that iterates it and
     ## asserts `SurfaceBudgets.len == 7` fails when an eighth is added without
     ## the milestone's scope being revisited, which is the count control
-    ## Verification-Harness-Traps §4b asks for. `tuiRowBudget` below is NOT an
-    ## eighth surface — it is `tui-tree` narrowed to one row's cells.
+    ## Verification-Harness-Traps §4b asks for. It fired, as designed, when
+    ## `gpui-panel` arrived; four suites went red and each number was re-taken
+    ## from a run. `tuiRowBudget` below is NOT a member — it is `tui-tree`
+    ## narrowed to one row's cells — and `gpuiRowBudget` is not one either, for
+    ## exactly the same reason.
 
 func tuiTreeBudget*(media = MediaCapabilityNote): Budget =
   ## `TuiTreeBudget` with the media set the RESOLVED terminal can draw.
@@ -217,6 +268,21 @@ func tuiRowBudget*(cells: int; focused: bool;
   Budget(name: "tui-row", lines: 1, cells: cells, depth: 1,
          members: 8, expandable: false, annotated: focused,
          media: media)
+
+func gpuiRowBudget*(media = MediaCapabilityNote): Budget =
+  ## One ROW of the GPUI state panel — `gpui-panel` narrowed to a line, the
+  ## same relationship `tuiRowBudget` has to `tui-tree`.
+  ##
+  ## It takes NO cell count, and that is the one real difference between this
+  ## and its terminal twin. `tuiRowBudget(cells, focused)` needs the number
+  ## because a terminal row's capacity is a column count the pane computed; a
+  ## GPU row's is pixels, which the surface does not know until it paints. So
+  ## the parameter that cannot be answered is absent rather than defaulted to a
+  ## number somebody chose — a defaulted cell count would truncate every GPUI
+  ## row against a constant with no provenance, which is the defect PLAT-2's
+  ## `flow` entry records from the other direction.
+  Budget(name: "gpui-row", lines: 1, cells: 0, depth: 1,
+         members: 8, expandable: false, annotated: false, media: media)
 
 func tuiValueBudget*(): Budget =
   ## The rendering stored on a `store/types.Variable` when a `ct/load-locals`

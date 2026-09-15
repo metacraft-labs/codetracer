@@ -18,15 +18,25 @@
 ##
 ## The tempting reading of §6.2 is that an abstract view runs on every
 ## front-end by definition. PLAT-3 measured otherwise: `mappings.nim` records
-## `msAbsent` on GPUI for exactly these entries, whose tags are not in
-## `GpuiRenderer`'s 35-entry tag map at all, so the tag reaches a Rust
-## classifier with no case for it —
+## `msAbsent` on GPUI for exactly this entry —
 ##
-##   ABSENT-ON-GPUI: Table, Modal, ProgressIndicator
+##   ABSENT-ON-GPUI: Modal
 ##
-## — and a surface whose abstract view is a `Table` is therefore genuinely
+## — and a surface whose abstract view is a `Modal` is therefore genuinely
 ## absent there, so calling it present would be the silent-nothing §6.3
 ## forbids.
+##
+## **THIS LINE NAMED THREE ENTRIES UNTIL 2026-09-15 AND NOW NAMES ONE.**
+## PLAT-21 rendered the vocabulary through the real isonim-gpui shim and read
+## the plan the Rust side builds: a tag that is not in the 35-entry tag map does
+## NOT reach "a classifier with no case for it" — it keeps its spelling and
+## classifies as `Div`, exactly as `button` and `ul` do. So `Table` and
+## `ProgressIndicator` moved to `msPartial` and a plugin surface built on
+## either is ADMITTED on GPUI now, where it used to be refused. `Modal` stayed,
+## for the reason that was always the real one and was stated third: there is
+## no element focus in that renderer, so the exclusivity a `Modal` IS cannot be
+## built out of anything the medium offers. `mappings.gpuiMapping`'s three
+## corrected rows carry the measurement.
 ##
 ## THAT LINE IS CHECKED AGAINST THE TABLE, NOT MAINTAINED BY HAND.
 ## `plugin_surfaces_test` reads it out of this file with `staticRead` and

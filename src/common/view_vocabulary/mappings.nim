@@ -21,8 +21,10 @@
 ##               supplied by the binding rather than by the medium — a
 ##               composition of two widgets, or a generic container that has to
 ##               be taught the behaviour.
-##   msAbsent    the front-end has no construct for it at all. This is a FACT
-##               TO REPORT, and three entries have it on GPUI.
+##   msAbsent    the front-end has no construct for it at all, AND the binding
+##               cannot build one out of what the medium offers. This is a FACT
+##               TO REPORT. **Three entries had it on GPUI until 2026-09-15;
+##               ONE does now** — see the correction below the third bullet.
 ##
 ## ## THE THREE FRONT-ENDS, AS SURVEYED ON 2026-09-07
 ##
@@ -61,10 +63,23 @@
 ##     `ul`, `ol`, `li`, `details`, `summary`, `nav`, …) renders, but arrives at
 ##     the renderer indistinguishable from a container, so every semantic the
 ##     entry specifies has to be supplied by the binding. That is `msPartial`;
-##   - a tag that is NOT IN `tagMap` AT ALL passes through `mapTag` unchanged
-##     and reaches a Rust classifier with no case for it. `table`, `tr`, `td`,
-##     `th`, `dialog`, `progress` and `option` are all in this group. That is
-##     `msAbsent`.
+##   - a tag that is NOT IN `tagMap` AT ALL passes through `mapTag` unchanged.
+##     `table`, `tr`, `td`, `th`, `dialog`, `progress`, `option` and `a` are in
+##     this group.
+##
+## **THE THIRD BULLET USED TO END *"…and reaches a Rust classifier with no case
+## for it. That is `msAbsent`"*, AND THAT WAS FALSE. Corrected 2026-09-15 by
+## PLAT-21, which rendered every one of those tags through the real shim and
+## read the plan the Rust side builds.** An unknown tag keeps its spelling and
+## classifies as `Div` — the same classification `button`, `input`, `select`,
+## `ul` and `li` get, and those five are `msPartial`. `verifyRenderPlan`
+## answers true for all of them. Two rows below moved as a consequence
+## (`Table` and `ProgressIndicator`, msAbsent -> msPartial) and one did not
+## (`Modal`, still msAbsent, for a reason that is about FOCUS rather than about
+## the tag). The measurement is in
+## `src/frontend/gpui/tests/test_gpui_vocabulary_binding.nim`, and the lesson
+## is the campaign's usual one: a status derived from a table's KEYS is a claim
+## about the table, not about the renderer.
 ##
 ## `GpuiTagMap` below is a copy of that table's KEYS, and
 ## `view_vocabulary_test` verifies the copy against isonim-gpui's own source
@@ -297,27 +312,61 @@ func gpuiMapping*(k: ViewKind): Mapping =
     "the rows survive as containers; the highlight is the binding's")
   of pkTree: m(msPartial, "ul -> div, li -> div",
     "as List, plus per-node expansion the binding tracks")
-  of pkTable: m(msAbsent, "table / tr / td — NONE of them is in tagMap",
-    "mapTag passes an unknown tag through unchanged, so `table` reaches a " &
-    "Rust classifier with no case for it. A binding must re-encode the table " &
-    "as nested divs, which drops the row/column relationship the entry's " &
-    "two-dimensional cursor is defined over. THIS IS A NAMED VOCABULARY/" &
-    "RENDERER GAP for PLAT-21's gate, not a workaround to be applied quietly")
+  of pkTable: m(msPartial, "table / tr / td — none is in tagMap, and each " &
+    "KEEPS ITS OWN SPELLING and classifies as a container",
+    "**CORRECTED 2026-09-15 BY PLAT-21, FROM msAbsent, AND THE REASON IT GAVE " &
+    "WAS FALSE.** This row used to read: *\"mapTag passes an unknown tag " &
+    "through unchanged, so `table` reaches a Rust classifier with no case for " &
+    "it.\"* PLAT-21 rendered it through the real shim and read the plan the " &
+    "Rust side builds: `table`, `tr`, `td`, `th`, `dialog`, `progress` and " &
+    "`option` all classify as `Div` and keep their tag string — which is " &
+    "EXACTLY what `button`, `input`, `select`, `ul` and `li` get, and those " &
+    "five are msPartial. There is no classifier failure and no refused plan " &
+    "(`verifyRenderPlan` answers true). So the msAbsent/msPartial distinction " &
+    "PLAT-3 drew from tagMap MEMBERSHIP does not survive to the renderer, and " &
+    "a table is nested containers here exactly as it is nested elements on " &
+    "the web. The row/column relationship is the NESTING and it survives; the " &
+    "cursor is the binding's on every medium. Measured by " &
+    "`src/frontend/gpui/tests/test_gpui_vocabulary_binding.nim`, case *\"an " &
+    "unknown tag does NOT reach a classifier with no case for it\"*")
   of pkTabs: m(msPartial, "nav -> div, button -> div",
     "the tablist and the tabs are all containers")
   of pkCollapsible: m(msPartial, "details -> div, summary -> div",
     "BOTH tags are in tagMap and BOTH collapse to div, so the disclosure " &
     "relationship — which is the entry's whole content — is lost in the tag " &
     "and must be rebuilt by the binding")
-  of pkModal: m(msAbsent, "dialog — not in tagMap",
-    "there is no modality, no focus trap and no layer at the renderer level. " &
-    "A binding must build the exclusivity itself, and exclusivity is what " &
-    "the entry IS. Named for PLAT-21")
+  of pkModal: m(msAbsent, "dialog — renders as a container; the MODALITY is " &
+    "what is missing, not the tag",
+    "STILL msAbsent AFTER PLAT-21's RE-MEASUREMENT, and the reason is now the " &
+    "right one. `dialog` is not in tagMap and that turns out not to matter: " &
+    "it keeps its spelling and classifies as `Div`, exactly as `table` does " &
+    "(see that row). What IS missing is ELEMENT FOCUS. isonim-gpui has focus " &
+    "at the WINDOW level only (`window.onFocus`, per window id); no element " &
+    "can hold, trap or refuse it, and the render plan's node shape — kind, " &
+    "tag, text, has_click_handler, has_input_handler, event_names, styles, " &
+    "children — carries no layer and no z-order. Exclusivity is what the " &
+    "entry IS, and a binding cannot supply it out of anything the renderer " &
+    "offers, which is the difference between this row and the Table row. " &
+    "Filed as `gpui_gaps.PLAT21-VG3`; measured by " &
+    "`test_gpui_vocabulary_binding.nim`, case *\"there is no element focus in " &
+    "this renderer\"*")
   of pkMenu: m(msPartial, "nav -> div",
     "as Modal for the overlay, minus the exclusivity requirement")
-  of pkProgressIndicator: m(msAbsent, "progress — not in tagMap",
-    "expressible only as a div whose width the binding computes, which is " &
-    "geometry the vocabulary deliberately does not carry. Named for PLAT-21")
+  of pkProgressIndicator: m(msPartial, "progress — not in tagMap; keeps its " &
+    "spelling and classifies as a container",
+    "**CORRECTED 2026-09-15 BY PLAT-21, FROM msAbsent.** The old row said the " &
+    "entry was *\"expressible only as a div whose width the binding computes, " &
+    "which is geometry the vocabulary deliberately does not carry\"* — and " &
+    "the second half of that sentence is the answer to the first. The entry's " &
+    "WHOLE specified state is a number in 0..100 or `ProgressIndeterminate`, " &
+    "and a container carrying that number has rendered everything the entry " &
+    "specifies. How wide the bar is drawn is geometry, and `vocabulary.nim`'s " &
+    "second structural consequence says the vocabulary has none — in any " &
+    "medium, including the terminal, where `ProgressBarWidget` computes the " &
+    "same width from the same absent field. An entry cannot be short of a " &
+    "thing it does not specify. It is msPartial rather than msComplete " &
+    "because the tag says `progress` and the renderer treats it as a plain " &
+    "container, so what tells a reader it is progress is the binding's")
   of pkImage: m(msComplete, "img",
     "one of two tags that reach a dedicated Rust element kind " &
     "(GpuiElementKind::Img); svg is the other")

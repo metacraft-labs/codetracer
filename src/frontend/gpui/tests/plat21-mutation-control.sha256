@@ -1,0 +1,22 @@
+# Control digests for run-plat21-mutations.py.
+#
+# The bytes every arm restores to, and the bytes every arm's verdict was taken
+# against. BOTH HALVES OF `TOUCHED` are here — the seven mutation subjects AND
+# the three suites the arms are graded by — which is
+# Verification-Harness-Traps §16c's gap paid rather than inherited.
+#
+# Recorded AFTER running the pre-commit hooks over every file (§16e): a
+# formatter that rewrites a file invalidates any digest recorded over it, so
+# reading the files proves nothing and running the hooks is the evidence.
+#
+# Refreshed with --record-control-hashes, which the needle scan GATES (§16).
+06cd5b622e6ff34f114e5cf50b9cf66019f2cfa1ead9661d02ce30a107d5ad9a  src/frontend/view_vocabulary/gpui_binding.nim
+307b80ab93480368cd2ae3b124c99681460fd3b6ac119f9598bed86548361407  src/frontend/view_vocabulary/fact_reader.nim
+9513430ca2189ce4a68ff51c11699f490eee485c5b21a55187a05b59dabcd702  src/frontend/view_vocabulary/pane_views.nim
+d9eb900b543683b3ee0453ebcb091ed0d70f714acb4edf1ee6c1a533b18229b1  src/common/view_vocabulary/gpui_gaps.nim
+3c721a3b2a0c7e00082ef480fd099d9d50721c7838673879ce8e9738653c69bc  src/common/view_vocabulary/mappings.nim
+4469367e1543f8cdc4923b86d9a46dd0561c0f7c65c23701141b4ecdde9368ac  src/common/value_presentation/surfaces.nim
+07b716e5098bbf540488001aa129412a30ee830d7541eeaffe5dba0501e42c65  src/frontend/view_vocabulary/terminal_binding.nim
+44abbaf38fda6f50db972e89fc4955c1aaf855c02bfcdf879b13afd0144b771a  src/frontend/gpui/tests/test_gpui_vocabulary_binding.nim
+e8619398094caa81e84d9c8b5de9d06d32529bd20a25ce6b0e60485ef22bd3a5  src/frontend/tui/tests/test_cross_renderer_panes.nim
+b0c5b0e028247bb5953bddcc547fbe01f34e28f7ec2c93eeb56d7fa75ab2922a  src/common/view_vocabulary_test.nim

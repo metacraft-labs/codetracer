@@ -1,0 +1,19 @@
+{
+  "G1": "Check failed: differing == 3",
+  "G10": "Check failed: terminalFacts(t).getOrDefault(\"pointList.highlight\", \"<absent>\") == \"2\"",
+  "G11": "Check failed: srcReport.violations.len == 1",
+  "G12": "Check failed: g.entries.len > 0",
+  "G13": "Check failed: absent == @[\"Modal\"]",
+  "G14": "Check failed: GpuiPanelBudget.cells == 0",
+  "G2": "Check failed: b.escapeKinds() ==",
+  "G3": "Check failed: b.says(\"apply.disabled\") == \"false\"",
+  "G4": "Check failed: b.says(\"recent.highlight\") == \"2\"",
+  "G5": "Check failed: planEvents == expected",
+  "G6": "Check failed: b.dispatchCount == 1",
+  "G7": "Check failed: b.says(\"recent.highlight\") == \"0\"",
+  "G8": "Check failed: facts.len == 29",
+  "G9": "Check failed: terminalLabel == expected",
+  "U1": "Check failed: webLabel == gpuiLabel",
+  "U2": "Check failed: divergencesAfter(t, \"the state pane as opened\").len == 0",
+  "U3": "Check failed: terminalFacts(t).getOrDefault(\"state.root.cursor\", \"<absent>\") == \"3\""
+}

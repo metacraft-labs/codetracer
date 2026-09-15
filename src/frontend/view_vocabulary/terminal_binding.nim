@@ -436,6 +436,26 @@ proc widgetFacts(bw: BoundWidget): seq[StateFact] =
     # thing it claims to cover.
     @[fact(bw.id, "text", "")]
 
+proc treeLabelOf*(b: TerminalBinding; treeId, nodeId: string): string =
+  ## **The LABEL isonim-tui's own `TreeNodeRef` holds** for one node of one
+  ## bound `Tree`. Added by PLAT-21.
+  ##
+  ## `readTerminalFacts` compares STATE, which is what PLAT-3's suite needed;
+  ## PLAT-21 also has to compare a value's RENDERING, because PLAT-2's purity
+  ## requirement is a claim about bytes. A variables pane carries the rendering
+  ## in the row's label (there is no tree-with-columns entry in the vocabulary
+  ## — see `pane_views.nim`'s header), so this is where the terminal column's
+  ## copy of those bytes lives.
+  ##
+  ## It reads the LIBRARY's object and not the model, for the same reason every
+  ## other reader in this file does: a reader that answered out of the
+  ## `ViewNode` would agree with the other two media by construction.
+  if treeId notin b.byId: return ""
+  let bw = b.bound[b.byId[treeId]]
+  if bw.kind != pkTree: return ""
+  if nodeId notin bw.treeNodes: return ""
+  bw.treeNodes[nodeId].label
+
 proc readTerminalFacts*(b: TerminalBinding): seq[StateFact] =
   ## Every VISIBLE bound widget's state.
   ##

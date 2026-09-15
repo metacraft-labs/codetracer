@@ -162,8 +162,11 @@ const
   ChecksSummaryCase = 5
 
   BudgetCount = SurfaceBudgets.len
-    ## Seven today. Named so the per-variable arithmetic below is readable and
-    ## so an eighth surface moves the expectation rather than the tally alone.
+    ## **EIGHT since 2026-09-15**, when PLAT-21 added `gpui-panel`; seven
+    ## before it. Named so the per-variable arithmetic below is readable and so
+    ## an eighth surface moves the expectation rather than the tally alone —
+    ## which is exactly what it did, and the derivation carried it with no edit
+    ## here.
 
   ChecksPerVariable = 3 * BudgetCount + 5
     ## What ONE recorded value costs this suite, in assertions:
@@ -206,7 +209,12 @@ const
     ## itself the expected rendering. `scalarValuesSeen` below is its
     ## multiplier.
 
-  ChecksOracleSuite = 47
+  ChecksOracleSuite = 48
+    ## **47 UNTIL 2026-09-15**: PLAT-21's `gpui-panel` adds one iteration to the
+    ## budget case's loop, and the constant is FIXED on purpose, so it had to be
+    ## moved by hand and from a run. That is the control working rather than a
+    ## chore — a derived constant would have absorbed the change silently.
+    ##
     ## The written-down oracle's assertions. A FIXED number, not a derived one:
     ## the oracle's whole purpose is to be independent of what the run happens
     ## to contain, so a table row that stopped being asserted must move the
@@ -658,7 +666,7 @@ suite "PLAT-2: the renderings, written down":
     ck present(oMap(), TracepointBudget).root.class == pcMap
     ck present(nil, TracepointBudget).root.class == pcNone
 
-  test "the seven surface budgets render this value the seven declared ways":
+  test "the eight surface budgets render this value the eight declared ways":
     # THE MILESTONE'S CENTRAL CLAIM, with the answers written out instead of
     # compared to each other. `flow` is the only budget that declares a cells
     # bound (30), so it is the only one whose answer differs — which is what
@@ -675,8 +683,11 @@ suite "PLAT-2: the renderings, written down":
         ck present(v, budget).root.text == Unbounded
     # The SET of names, so a renamed or dropped budget is a failure here and
     # not a smaller loop.
+    # SEVEN NAMES UNTIL 2026-09-15, when PLAT-21 added `gpui-panel` — the
+    # third front-end's state panel, which declares `cells: 0` for the same
+    # reason `state-panel` does and therefore renders the unbounded answer.
     ck byName == @["state-panel", "tracepoint", "flow", "scratchpad",
-                   "event-log", "tui-tree", "calltrace-arg"]
+                   "event-log", "tui-tree", "calltrace-arg", "gpui-panel"]
 
 suite "PLAT-2: the corpus run measured itself":
 

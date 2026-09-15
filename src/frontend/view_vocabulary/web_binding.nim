@@ -46,6 +46,7 @@ import std/[strutils, tables]
 import isonim/testing/mock_dom
 
 import ../../common/view_vocabulary
+import ./fact_reader
 
 when defined(js):
   import isonim/web/web_renderer
@@ -144,13 +145,18 @@ func keyFromDom*(name: string): KeyPress =
 proc applyFacts[R, N](r: R; el: N; v: ViewNode) =
   ## Stamp the node's observable state onto the element as `data-*`
   ## attributes, using the same field names `vocabulary.nodeFacts` uses.
+  ##
+  ## The attribute SPELLING comes from `fact_reader.factAttributeName` — one
+  ## function shared with the reader below and with the GPUI binding, so a
+  ## writer and a reader cannot disagree about the prefix
+  ## (Verification-Harness-Traps §14).
   for f in nodeFacts(v):
-    r.setAttribute(el, "data-" & f.field, f.value)
+    r.setAttribute(el, factAttributeName(f.field), f.value)
 
 proc renderNode[R, N](r: R; v: ViewNode): N =
   let el = r.createElement(tagFor(v.kind))
-  r.setAttribute(el, "data-view-kind", vocabularyName(v.kind))
-  r.setAttribute(el, "data-view-id", v.id)
+  r.setAttribute(el, ViewKindAttribute, vocabularyName(v.kind))
+  r.setAttribute(el, ViewIdAttribute, v.id)
   let role = roleFor(v.kind)
   if role.len > 0:
     r.setAttribute(el, "role", role)
@@ -299,20 +305,12 @@ proc readWebFacts*[R, N](b: WebBinding[R, N]): seq[StateFact] =
   ## `b.model`: a projection that read the model would be comparing the model
   ## with itself, and the cross-medium suite would pass on a binding that
   ## rendered nothing.
-  proc visit(r: R; el: N; acc: var seq[StateFact]) =
-    if not el.isNil:
-      let id = r.getAttribute(el, "data-view-id")
-      if id.len > 0:
-        let kindName = r.getAttribute(el, "data-view-kind")
-        for k in ViewKind:
-          if vocabularyName(k) == kindName:
-            # The FIELD NAMES come from the vocabulary, not from a list here,
-            # so a field added to `nodeFacts` is read back without an edit.
-            for f in nodeFacts(ViewNode(kind: k)):
-              acc.add fact(id, f.field, r.getAttribute(el, "data-" & f.field))
-            break
-      var child = r.firstChild(el)
-      while not child.isNil:
-        visit(r, child, acc)
-        child = r.nextSibling(child)
-  visit(b.renderer, b.root, result)
+  ##
+  ## **THE WALK MOVED to `fact_reader.readAttributeFacts` on 2026-09-15**, and
+  ## this is now the naming of it this binding's callers use. PLAT-21's GPUI
+  ## binding renders onto a second attribute-carrying element tree; a second
+  ## copy of this walk is Verification-Harness-Traps §14, and that module's
+  ## header records what the sharing costs as well as what it buys. Nothing
+  ## about this function's answer changed — the field names still come from
+  ## `vocabulary.nodeFacts` and the model is still never consulted.
+  readAttributeFacts[R, N](b.renderer, b.root)

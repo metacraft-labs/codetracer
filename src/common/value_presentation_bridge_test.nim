@@ -49,7 +49,7 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 438
+const ExpectedAssertions = 483
 
 # ---------------------------------------------------------------------------
 # One value, two ways
@@ -214,13 +214,14 @@ suite "PLAT-2: one value, two front-ends, the same bytes":
         ck a.root.class == b.root.class
         ck a.attribution.presenter == b.attribution.presenter
         inc compared
-    # 15 pairs x 7 budgets. Written out so a pair that stopped being built, or
+    # 15 pairs x 8 budgets. Written out so a pair that stopped being built, or
     # a budget that vanished from `SurfaceBudgets`, is a failure rather than a
-    # smaller run. SEVEN because `calltrace-arg` joined `SurfaceBudgets` — see
-    # `surfaces.nim`.
+    # smaller run. SEVEN until 2026-09-15, when PLAT-21 added `gpui-panel` —
+    # see `surfaces.nim`, whose own comment says this count control exists to
+    # make an eighth surface a decision rather than a diff.
     ck pairs.len == 15
     ck compared == 15 * SurfaceBudgets.len
-    ck SurfaceBudgets.len == 7
+    ck SurfaceBudgets.len == 8
 
   test "the desktop bridge maps every TypeKind onto a PValue kind":
     # Total, and asserted over the whole enum rather than over the kinds a
