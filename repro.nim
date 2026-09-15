@@ -1720,12 +1720,12 @@ package codeTracer:
     #
     # PYTHONHASHSEED=0 ON EVERY GATE. NOT A BLESSING -- THE OPPOSITE OF ONE.
     #
-    # Six of these gates run `python3`, and a bare CPython start reads the
+    # Five of these gates run `python3`, and a bare CPython start reads the
     # OS entropy pool once to seed `hash()` for `str`/`bytes`. Measured, on
     # this build graph: `python3 -c 'print(1)'` emits one io-mon
     # `non-deterministic` record; `PYTHONHASHSEED=0 python3 -c 'print(1)'`
     # emits NONE. The engine graded the former `unblessed-entropy` and
-    # withheld the capture, so those six gates could never cache.
+    # withheld the capture, so those five gates could never cache.
     #
     # The obvious-looking remedy -- adding `python3` to the per-image
     # entropy blessing table next to `mktemp` and `git` -- WOULD BE
@@ -1747,7 +1747,7 @@ package codeTracer:
     # the evidence was silenced. That distinction is the whole rule:
     # uncacheable is safe, falsely-cacheable is not.
     #
-    # ON ALL ELEVEN, NOT ONLY THE SIX THAT RUN PYTHON TODAY. The property
+    # ON ALL TEN, NOT ONLY THE FIVE THAT RUN PYTHON TODAY. The property
     # being asserted is about the family -- "no gate's verdict depends on
     # CPython's hash seed" -- not about today's call sites. A gate that
     # grows a `python3` line later would otherwise silently stop caching,
@@ -1776,22 +1776,6 @@ package codeTracer:
       cacheableValue = true,
       extraEnvValue = GateEnv)
     target("gate-flake-pin-alignment", gateFlakePinAlignment)
-
-    let gateFlakeLockNodeDates = ctShell(
-      actionIdValue = "codetracer.gate.flake-lock-node-dates",
-      commandValue = "bash ci/test/flake-lock-node-dates-test.sh",
-      # A CONTRACT SUITE, for the same reason as the one above: it builds its
-      # own throwaway git checkouts and locks and never reads this repo's
-      # `flake.lock`. The GUARD it drives does read the lock and the sibling
-      # checkouts beside this repo, which is exactly why the guard is not
-      # declared here -- its verdict depends on repositories outside this tree
-      # and outside any fingerprint repro can take. It runs from `just test`.
-      extraInputsValue = @[
-        "ci/test/flake-lock-node-dates-test.sh",
-        "scripts/test-flake-lock-node-dates.sh"],
-      cacheableValue = true,
-      extraEnvValue = GateEnv)
-    target("gate-flake-lock-node-dates", gateFlakeLockNodeDates)
 
     let gatePythonVersionAlignment = ctShell(
       actionIdValue = "codetracer.gate.python-version-alignment",
@@ -1908,7 +1892,6 @@ package codeTracer:
 
     let ctGateTestActions = @[
       gateFlakePinAlignment,
-      gateFlakeLockNodeDates,
       gatePythonVersionAlignment,
       gateRequireRuntimeAssets,
       gateTestLaneReport,

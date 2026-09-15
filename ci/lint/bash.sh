@@ -273,7 +273,7 @@ lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
 
 # The same argument for the lock-node-dates guard, and it needed making twice
-# over: that guard has SIX failure paths that could accuse the wrong thing,
+# over: that guard has SEVEN failure paths that could accuse the wrong thing,
 # including reading a commit date out of a fork that merely shares a directory
 # name with the repository a node pins, and telling the reader to hand-edit
 # this lock about a node a sibling flake wrote. The suite drives real git
@@ -374,6 +374,30 @@ lint_step "contract suite: crates.io download URL (crate sources are fetchable)"
 # and no toolchain -- one GitHub API request per direct input, about thirty --
 # and because the alternative is finding out from a CI job that never got a
 # shell.
+# THIS STEP HAS NEVER ONCE COMPARED ANYTHING, AND THAT IS A WIRING DEFECT IN
+# THIS JOB, NOT IN THE SUITE. `lint-bash` mints an installation token
+# (`steps.ci_token.outputs.token`) and hands it to setup-nix and to
+# actions/checkout, but the `- run:` step that invokes THIS file carries no
+# `env:`. So inside the lint shell `gh auth status` fails and neither
+# GITHUB_TOKEN nor GH_TOKEN is set, the suite's own `bail_or_skip` fires, and
+# because it is correctly a HARD failure in CI it exits 1 having made zero
+# requests. Verified on dev@dd971ae36, run 34934002629 / job 104187522246:
+#
+#     ERROR: ci/test/flake-lock-metadata-test.sh cannot run.
+#     Reason: no authenticated GitHub access (need 'gh auth status' to pass, ...)
+#     --> FAILED (contract suite: flake.lock records the commit dates it claims, exit 1, 0s)
+#
+# Zero seconds. A guard that exists and has never run is WORSE than no guard,
+# because the registration below reads as coverage. The remedy is an `env:` with
+# GH_TOKEN on that step in .github/workflows/codetracer.yml -- deliberately not
+# done here, because it puts a credential in the environment of every script
+# this file runs and several of them branch on exactly that, so it wants its own
+# change and its own verification.
+#
+# Until then the network half of this invariant is unenforced, and the only
+# thing actually checking it in CI is the sibling-based guard two steps above,
+# which needs no credential and runs in `just test` (test-non-gui), where it
+# compared 14 real nodes on its first run.
 lint_step "contract suite: flake.lock records the commit dates it claims" \
 	bash ci/test/flake-lock-metadata-test.sh
 

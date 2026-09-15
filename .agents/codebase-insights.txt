@@ -3339,3 +3339,24 @@ commands.
   hand — that is precisely how 4d15c1ea introduced the incoherence above. If a
   pin has to move without a full re-lock, dropping `lastModified`/`narHash` is
   the SAFE hand-edit; leaving a stale `lastModified` behind is the unsafe one.
+- 2026-09-15: `repro.nim` DOES NOT COMPILE on `dev`, and has not for at least as
+  long as dd971ae36. Measured two ways: in CI, `test-ui-tests (macos,
+  aarch64-darwin)` -- which is the ONLY pull-request job that compiles this
+  repo's own provider -- dies with `repro.nim(1247, 31) Error: type mismatch`,
+  byte-identically on PR 754 and on dev@dd971ae36 (runs 34934002629 and
+  34907519270); locally, `repro build --list-targets` dies at `repro.nim(1766,
+  40) Error: type mismatch`, again byte-identically on a pristine dev worktree,
+  because the `repro` on PATH is 0.1.3 while flake.nix pins reprobuild
+  3a7ef0d7. Consequences worth knowing before you edit that file:
+    * The compile ABORTS at 1247, so anything below it is never type-checked by
+      anything, anywhere. An edit near the gate registrations (~1780) cannot be
+      validated by CI or locally; do not believe a green PR about it.
+    * `reprobuild-linux-smoke` / `-macos-smoke` do NOT read this repo's
+      repro.nim -- `ci/reprobuild/linux-smoke.sh` builds in a `mktemp -d`
+      scratch project. Their passing says nothing about it.
+    * `windows-installer-build`, which runs `repro build windows-installer` in
+      the repo root, is gated to `main`. So the first thing that would compile a
+      repro.nim edit end-to-end is a RELEASE build.
+  A gate added to `ci/lint/bash.sh` + the `just test` aggregate is fully
+  verifiable today; the matching `repro.nim` test-gate registration is not, and
+  was deliberately left out of the lock-node-dates gate for that reason.
