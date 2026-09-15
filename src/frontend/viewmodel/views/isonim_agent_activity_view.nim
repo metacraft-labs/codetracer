@@ -189,12 +189,12 @@ type
   MsgSegKind = enum
     mskText, mskCode, mskCodeBlock,
     mskBold, mskItalic, mskBoldItalic, mskStrike,
-    mskTable
+    mskTable, mskImage
 
   MsgSegment = object
     kind: MsgSegKind
     content: string
-    lang: string
+    lang: string          # code block language; image alt text
     rows: seq[seq[string]]
 
 proc isSeparatorLine(line: string): bool =
@@ -260,8 +260,25 @@ proc parseInlineCode*(s: string): seq[MsgSegment] =
             continue
       else: discard
 
+    # Markdown image: ![alt](src) — only for data: URIs to avoid false positives
+    if s[i] == '!' and i + 1 < s.len and s[i+1] == '[':
+      let altStart = i + 2
+      let altEnd = s.find(']', altStart)
+      if altEnd >= altStart and altEnd + 1 < s.len and s[altEnd + 1] == '(':
+        let srcStart = altEnd + 2
+        let srcEnd = s.find(')', srcStart)
+        if srcEnd > srcStart:
+          let src = s[srcStart ..< srcEnd]
+          if src.startsWith("data:image/") or src.startsWith("data:"):
+            flushText()
+            result.add(MsgSegment(kind: mskImage, content: src, lang: s[altStart ..< altEnd]))
+            i = srcEnd + 1
+            continue
+      cur.add(s[i])
+      inc i
+
     # Triple backtick code block
-    if i + 2 < s.len and s[i] == '`' and s[i+1] == '`' and s[i+2] == '`':
+    elif i + 2 < s.len and s[i] == '`' and s[i+1] == '`' and s[i+2] == '`':
       flushText()
       inc i, 3
       var lang = ""
@@ -889,6 +906,13 @@ proc renderMessage[R](r: R; componentId: int;
                                       span(class = "agent-strike"): text cellSeg.content
                                     else:
                                       text cellSeg.content
+                  elif seg.kind == mskImage:
+                    let capturedImgSrc = seg.content
+                    tdiv(class = "agent-msg-thumb",
+                         onclick = proc() =
+                           when defined(js):
+                             showImageLightbox(cstring(capturedImgSrc))):
+                      img(class = "agent-msg-thumb-img", alt = seg.lang, src = capturedImgSrc)
                   else:
                     tdiv(class = "agent-code-block"):
                       if seg.lang.len > 0:
@@ -1003,6 +1027,13 @@ proc renderMessage[R](r: R; componentId: int;
                 span(class = "agent-bold-italic"): text mseg.content
               elif mseg.kind == mskStrike:
                 span(class = "agent-strike"): text mseg.content
+              elif mseg.kind == mskImage:
+                let capturedMsegSrc = mseg.content
+                tdiv(class = "agent-msg-thumb",
+                     onclick = proc() =
+                       when defined(js):
+                         showImageLightbox(cstring(capturedMsegSrc))):
+                  img(class = "agent-msg-thumb-img", alt = mseg.lang, src = capturedMsegSrc)
               else:
                 tdiv(class = "agent-code-block"):
                   if mseg.lang.len > 0:
@@ -1443,6 +1474,151 @@ proc renderModelButton[R](r: R; vm: AgentActivityVM;
         proc() = vm.modelDropdownOpen.val = false)
   panel
 
+const SettingsRuntimeOptions = ["devcontainer", "Local shell", "Micro-VM (Firecracker)", "GPT·o-series", "Docker image"]
+const SettingsCpuOptions = ["1 core", "2 cores", "4 cores", "8 cores"]
+const SettingsMemoryOptions = ["2 GB", "4 GB", "8 GB", "16 GB"]
+const SettingsDeliveryModeOptions = ["New branch", "Existing branch", "Current branch"]
+const SettingsPermissionsOptions = ["Ask before commands", "Allow all", "Deny all"]
+
+proc renderSettingsDropdown[R](r: R; vm: AgentActivityVM; dropdownId: string;
+                               currentValue: string;
+                               options: openArray[string];
+                               onSelect: proc(v: string)): auto =
+  var wrapperRef: typeof(r.createElement("div"))
+  var listRef: typeof(r.createElement("div"))
+  let isOpen = vm.settingsActiveDropdown.val == dropdownId
+  let panel = ui(r):
+    tdiv(ref = wrapperRef, class = "agent-settings-select-wrapper"):
+      tdiv(class = "agent-settings-select-trigger",
+           onclick = proc() =
+             if vm.settingsActiveDropdown.val == dropdownId:
+               vm.settingsActiveDropdown.val = ""
+             else:
+               vm.settingsActiveDropdown.val = dropdownId):
+        span(class = "agent-settings-select-text"): text currentValue
+        span(class = "agent-settings-select-chevron")
+      if isOpen:
+        tdiv(ref = listRef, class = "agent-settings-dropdown-list")
+  if isOpen:
+    for opt in options:
+      let optVal = opt
+      let isActive = optVal == currentValue
+      let cls = if isActive: "agent-settings-dropdown-item agent-settings-dropdown-item--active"
+                else: "agent-settings-dropdown-item"
+      let item = ui(r):
+        tdiv(class = cls,
+             onclick = proc() =
+               vm.settingsActiveDropdown.val = ""
+               onSelect(optVal)):
+          text optVal
+          if isActive:
+            span(class = "agent-settings-check-icon")
+      r.appendRenderedChild(listRef, item)
+    when defined(js):
+      setupClickOutsideHandler(wrapperRef, proc() =
+        if vm.settingsActiveDropdown.val == dropdownId:
+          vm.settingsActiveDropdown.val = "")
+  panel
+
+proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
+                            callbacks: AgentActivityCallbacks): auto =
+  let runtime = vm.settingsRuntime.val
+  let cpu = vm.settingsCpu.val
+  let memory = vm.settingsMemory.val
+  let networkOn = vm.settingsNetworkAccess.val
+  let deliveryMode = vm.settingsDeliveryMode.val
+  let deliveryBranch = if vm.settingsDeliveryBranch.val.len > 0: vm.settingsDeliveryBranch.val
+                       else: vm.currentBranch.val
+  let permissions = vm.settingsPermissions.val
+  let agentName = if vm.selectedModel.val.len > 0: vm.selectedModel.val else: "Claude·Sonnet"
+  let toggleClass = if networkOn: "agent-settings-toggle agent-settings-toggle--on"
+                    else: "agent-settings-toggle"
+
+  var branchOptions: seq[string] = @[]
+  for b in vm.branches.val:
+    branchOptions.add(b)
+  if deliveryBranch.len > 0 and deliveryBranch notin branchOptions:
+    branchOptions.add(deliveryBranch)
+
+  # Ref vars for containers into which we append dynamic children
+  var sEnvRef: typeof(r.createElement("div"))
+  var sDelRef: typeof(r.createElement("div"))
+  var sPermRef: typeof(r.createElement("div"))
+  var twocolRef: typeof(r.createElement("div"))
+
+  let fullPanel = ui(r):
+    tdiv(class = "agent-settings-panel"):
+      tdiv(ref = sEnvRef, class = "agent-settings-section"):
+        span(class = "agent-settings-section-header"): text "ENVIRONMENT"
+        span(class = "agent-settings-label"): text "Runtime"
+        tdiv(ref = twocolRef, class = "agent-settings-two-col")
+        tdiv(class = "agent-settings-toggle-row"):
+          span(class = "agent-settings-label"): text "Network access"
+          tdiv(class = toggleClass,
+               onclick = proc() =
+                 vm.settingsNetworkAccess.val = not vm.settingsNetworkAccess.val):
+            tdiv(class = "agent-settings-toggle-thumb")
+      tdiv(ref = sDelRef, class = "agent-settings-section"):
+        span(class = "agent-settings-section-header"): text "DELIVERY"
+        span(class = "agent-settings-label"): text "Mode"
+        span(class = "agent-settings-label"): text "Target branch"
+      tdiv(class = "agent-settings-section"):
+        span(class = "agent-settings-section-header"): text "AGENTS"
+        tdiv(class = "agent-settings-agents-row"):
+          tdiv(class = "agent-settings-agent-chip"): text agentName & " ×1"
+          tdiv(class = "agent-settings-add-chip"): text "+ add"
+      tdiv(ref = sPermRef, class = "agent-settings-section agent-settings-section--last"):
+        span(class = "agent-settings-section-header"): text "PERMISSIONS"
+        span(class = "agent-settings-label"): text "Permission level"
+      tdiv(class = "agent-settings-footer"):
+        button(class = "agent-settings-reset", `type` = "button",
+               onclick = proc() = vm.resetSettingsToDefaults()):
+          text "Reset to defaults"
+        button(class = "ct-button-md-primary agent-settings-done", `type` = "button",
+               onclick = proc() =
+                 vm.settingsActiveDropdown.val = ""
+                 vm.settingsOpen.val = false):
+          text "Done"
+
+  # Build the CPU/Memory two-column wrapper and append into twocolRef
+  var cpuColRef: typeof(r.createElement("div"))
+  var memColRef: typeof(r.createElement("div"))
+  let twoCols = ui(r):
+    tdiv(ref = cpuColRef, class = "agent-settings-half-col"):
+      span(class = "agent-settings-label"): text "CPU"
+    tdiv(ref = memColRef, class = "agent-settings-half-col"):
+      span(class = "agent-settings-label"): text "Memory"
+  discard twoCols
+  r.appendRenderedChild(cpuColRef,
+    renderSettingsDropdown(r, vm, "cpu", cpu, SettingsCpuOptions,
+      proc(v: string) = vm.settingsCpu.val = v))
+  r.appendRenderedChild(memColRef,
+    renderSettingsDropdown(r, vm, "memory", memory, SettingsMemoryOptions,
+      proc(v: string) = vm.settingsMemory.val = v))
+  r.appendRenderedChild(twocolRef, cpuColRef)
+  r.appendRenderedChild(twocolRef, memColRef)
+
+  # Runtime dropdown appended after the "Runtime" label in env section
+  r.appendRenderedChild(sEnvRef,
+    renderSettingsDropdown(r, vm, "runtime", runtime, SettingsRuntimeOptions,
+      proc(v: string) = vm.settingsRuntime.val = v))
+
+  # Delivery section dropdowns
+  r.appendRenderedChild(sDelRef,
+    renderSettingsDropdown(r, vm, "deliveryMode", deliveryMode, SettingsDeliveryModeOptions,
+      proc(v: string) = vm.settingsDeliveryMode.val = v))
+  let capturedBranches = branchOptions
+  r.appendRenderedChild(sDelRef,
+    renderSettingsDropdown(r, vm, "deliveryBranch", deliveryBranch, capturedBranches,
+      proc(v: string) = vm.settingsDeliveryBranch.val = v))
+
+  # Permissions dropdown
+  r.appendRenderedChild(sPermRef,
+    renderSettingsDropdown(r, vm, "permissions", permissions, SettingsPermissionsOptions,
+      proc(v: string) = vm.settingsPermissions.val = v))
+
+  fullPanel
+
 proc renderSettingsButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
     button(class = "ct-button-image-md-tertiary agent-button agent-settings-button",
@@ -1580,6 +1756,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
   var highlight: typeof(r.createElement("div"))
   var buttons: typeof(r.createElement("div"))
   var imagesStrip: typeof(r.createElement("div"))
+  var settingsPanelHost: typeof(r.createElement("div"))
   let inputIdValue = inputId(componentId, commandInputId)
 
   let panel = ui(r):
@@ -1605,6 +1782,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
                    rows = "1",
                    spellcheck = "false")
         tdiv(ref = buttons, class = "agent-buttons-container")
+      tdiv(ref = settingsPanelHost, class = "agent-settings-host")
 
   r.attachInputEvents(input, vm, callbacks)
   r.setupInputHighlight(input, highlight)
@@ -1715,6 +1893,11 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
       r.appendRenderedChild(buttons, renderSubmitButton(r, vm, callbacks))
     else:
       r.appendRenderedChild(buttons, renderStopButton(r, callbacks))
+
+  createRenderEffect proc() =
+    r.clearChildren(settingsPanelHost)
+    if vm.settingsOpen.val:
+      r.appendRenderedChild(settingsPanelHost, renderSettingsPanel(r, vm, callbacks))
 
   panel
 

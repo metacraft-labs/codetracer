@@ -15,7 +15,7 @@ from ../viewmodel/viewmodels/agent_activity_vm import
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
   setPermissionInfo, setSessionKey, setBranchState, traceOpen, reviewOpen,
   applyEvidenceDataset, retryPendingEvidenceInspections,
-  clearPastedImages, getPastedImages
+  clearPastedImages, getPastedImages, toggleSettingsOpen
 from ../viewmodel/viewmodels/trace_open import
   TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
 from ../viewmodel/viewmodels/review_open import ReviewOpenService
@@ -713,6 +713,10 @@ when defined(js):
       echo "#TODO: add a file"
     result.onModelSelect = proc() =
       echo "#TODO: Open the model table"
+    result.onSettingsSelect = proc() =
+      let vm = ensureAgentActivityVM(self)
+      if not vm.isNil:
+        vm.toggleSettingsOpen()
     result.onPermissionResponse = proc(kind: string) =
       self.wantsPermission = false
       self.permissionDescription = cstring""
