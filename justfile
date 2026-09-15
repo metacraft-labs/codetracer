@@ -26,6 +26,22 @@ test-build-alignment:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert that every `flake.lock` node whose repository is checked out beside
+# this one records the `lastModified` that its own `rev` actually carries. A
+# node whose timestamp names one commit and whose `rev` names another is
+# refused outright by nix ("mismatch in field 'lastModified'") — but only when
+# nix FETCHES the input, which a warm store and a sibling-path override both
+# avoid. So a hand-edited pin passes locally, passes on warm runners, and kills
+# a cold one before anything has evaluated. Reads the lock and runs `git show`
+# against the siblings already on disk: no network, no nix, half a second.
+# Skips LOUDLY (never silently passes) when no sibling holds any locked
+# revision; CT_FLAKE_LOCK_NODE_DATES_STRICT=1 makes that a failure. It does NOT
+# cover the nodes with no sibling checkout — that is
+# ci/test/flake-lock-metadata-test.sh, which needs the network and runs in CI.
+# See the header of scripts/test-flake-lock-node-dates.sh.
+test-flake-lock-node-dates:
+  bash scripts/test-flake-lock-node-dates.sh
+
 # Assert that every place a Python version can be observed still agrees with
 # the one place it is CHOSEN (nix/python.nix): the dev shell's exports and its
 # first `python3` on PATH, `.python-recorder-venv`'s interpreter, the ABI tag
@@ -810,6 +826,7 @@ test:
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
     test-flake-pin-alignment \
+    test-flake-lock-node-dates \
     test-python-version-alignment \
     test-sibling-backend-path \
     test-agent-api-contract \

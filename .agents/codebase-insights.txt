@@ -3314,3 +3314,28 @@ commands.
   AND `views/isonim_views_test.nim` — the `vm-js` lane is red today on all three,
   because `ci/lib/test-lane-files.sh` passes only `--path:src/frontend/viewmodel`
   for that lane. Tracked separately; not fixed here.
+- 2026-09-15: A `flake.lock` node can be INTERNALLY INCOHERENT — `lastModified`
+  carrying one commit's date while `rev` names another — and nix rejects such an
+  input outright ("mismatch in field 'lastModified'"), but ONLY when it actually
+  FETCHES it. Two things stop that happening: a warm store reuses the cached
+  entry without re-resolving, and a workspace `.envrc` overrides the
+  metacraft-labs inputs with sibling paths so the github node is never fetched
+  at all. Consequence: a hand-edited pin is green locally, green on warm
+  runners, and fatal on a cold one — which reads as flake and sends the
+  investigation at whatever the PR happened to touch. Two guards now exist and
+  NEITHER subsumes the other: `ci/test/flake-lock-metadata-test.sh` asks GitHub
+  about the 31 direct `github` inputs (needs a token, CI only, ~18 s), and
+  `scripts/test-flake-lock-node-dates.sh` reads `git show -s --format=%ct` out
+  of the sibling checkouts already on disk (42 nodes including the `type: git`
+  ones and the transitive metacraft-labs ones, no network, ~0.5 s, in
+  `just test`). A commit sha commits to its committer date, so where both can
+  answer they cannot disagree.
+- 2026-09-15: Three nodes in `flake.lock` carry a `rev` and NO `lastModified`
+  and NO `narHash` — `codetracer-src`, `nim-shm-gset-src`,
+  `reprobuild-test-adapters-src`, all `"flake": false` source inputs from
+  reprobuild's closure, in that shape since cb3fff2e6. This is NOT rot: a node
+  with no timestamp has nothing for its rev to disagree with, and nix verifies
+  it by narHash at fetch time. Do not "repair" them by filling the fields in by
+  hand — that is precisely how 4d15c1ea introduced the incoherence above. If a
+  pin has to move without a full re-lock, dropping `lastModified`/`narHash` is
+  the SAFE hand-edit; leaving a stale `lastModified` behind is the unsafe one.

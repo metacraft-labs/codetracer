@@ -241,6 +241,15 @@ lint_step "contract suite: existence is not freshness" \
 lint_step "shellcheck: flake pin alignment guard" \
 	shellcheck scripts/test-flake-pin-alignment.sh
 
+# scripts/test-flake-lock-node-dates.sh is the network-free half of the
+# flake.lock metadata question: it reads the true commit date of a locked `rev`
+# out of the workspace sibling that already has the object, so it can run in
+# `just test` and in the pre-push gate instead of waiting for the lane below
+# that has to ask GitHub. Not under ci/, so the glob at the top does not reach
+# it either.
+lint_step "shellcheck: flake lock node dates guard" \
+	shellcheck scripts/test-flake-lock-node-dates.sh
+
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
 # rather than as a lint one.
@@ -262,6 +271,17 @@ lint_step "shellcheck: toolchain resolver" \
 # that defect is invisible to shellcheck and to every happy-path run.
 lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
+
+# The same argument for the lock-node-dates guard, and it needed making twice
+# over: that guard has SIX failure paths that could accuse the wrong thing,
+# including reading a commit date out of a fork that merely shares a directory
+# name with the repository a node pins, and telling the reader to hand-edit
+# this lock about a node a sibling flake wrote. The suite drives real git
+# checkouts with controlled committer dates in throwaway trees, asserts both
+# the right diagnostic and the absence of the wrong one for every case, and
+# records the nine mutations it was proven live against.
+lint_step "contract suite: flake lock node dates guard" \
+	bash ci/test/flake-lock-node-dates-test.sh
 
 # scripts/test-python-version-alignment.sh is the static+artifact guard on the
 # ONE place this repo chooses a Python version (nix/python.nix). It sits here
