@@ -395,9 +395,12 @@ lint_step "contract suite: crates.io download URL (crate sources are fetchable)"
 # change and its own verification.
 #
 # Until then the network half of this invariant is unenforced, and the only
-# thing actually checking it in CI is the sibling-based guard two steps above,
+# thing actually checking it in CI is scripts/test-flake-lock-node-dates.sh,
 # which needs no credential and runs in `just test` (test-non-gui), where it
-# compared 14 real nodes on its first run.
+# compared 14 real nodes on its first run. That guard covers the nodes with a
+# sibling checkout and says on every pass which ones it did NOT reach -- 211
+# locally, and the three metacraft-labs repositories among them
+# (`ethereum-nix` twice, `nim-results-src`) are visible to THIS step alone.
 lint_step "contract suite: flake.lock records the commit dates it claims" \
 	bash ci/test/flake-lock-metadata-test.sh
 
