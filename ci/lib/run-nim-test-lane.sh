@@ -121,6 +121,31 @@ if [ "${backend}" = "js-browser" ]; then
 	compile_only=1
 fi
 
+# A WASM lane needs `emcc` ON THE PATH, and its absence must be a FAILURE
+# rather than a skip.
+#
+# The temptation is the other way round: emscripten is a big toolchain, it is
+# not on a stock runner, and "skip when absent" reads like politeness. It is
+# not. This lane exists because PLAT-17's gate is a COUNT EQUALITY against the
+# native lane, and a lane that answers "0 files, nothing to do, exit 0" on the
+# one machine where the toolchain quietly stopped resolving satisfies every
+# aggregate that runs it while measuring nothing — which is the exact shape
+# (`vm-js` behind an aggregate that never reached it) this milestone was
+# written to stop reproducing. So it dies here, by name, with the remedy.
+if [ "${backend}" = "wasm" ] && [ "${compile_only}" -eq 0 ]; then
+	if ! command -v emcc >/dev/null 2>&1; then
+		echo "ERROR: lane '${lane}' needs the Emscripten toolchain and 'emcc' is not on PATH." >&2
+		echo "       Run it inside this repo's dev shell (direnv exec . just test-${lane})," >&2
+		echo "       which provides emscripten; see ci/lib/test-lane-files.sh for why this" >&2
+		echo "       lane is Emscripten rather than wasi-sdk." >&2
+		exit 1
+	fi
+	if ! command -v node >/dev/null 2>&1; then
+		echo "ERROR: lane '${lane}' runs its wasm32 output under node and 'node' is not on PATH." >&2
+		exit 1
+	fi
+fi
+
 mkdir -p test-logs "${cache_root}"
 
 echo "=== ${lane}: $(test_lane_description "${lane}") ==="
@@ -160,6 +185,92 @@ while read -r f; do
 		compile_cmd=(nim js --hints:off --warnings:off
 			"${extra_flags[@]}" --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
 		artifact="${cache}/${name}.js"
+	elif [ "${backend}" = "wasm" ]; then
+		# THE THIRD BACKEND (PLAT-17). `nim c` to a wasm32 linear-memory
+		# target through Emscripten, run under node. Every flag is
+		# load-bearing; none is decoration.
+		#
+		#   --cpu:wasm32 --os:linux
+		#       Nim's own target selection. `--cpu:wasm32` is also what
+		#       defines the `wasm32` symbol that `nim_everywhere/
+		#       async_compat.platformIsWasm` reads, so the WASM arm of
+		#       `drainPlatformCallbacks` is selected by the TARGET rather
+		#       than by a define somebody has to remember. `--os:linux`
+		#       because emscripten's libc is the POSIX one; `--os:standalone`
+		#       would take away `std/os` and shrink the file set, which is
+		#       what the gate forbids.
+		#
+		#   -d:emscripten
+		#       The explicit spelling of the same thing, for anything that
+		#       branches on the toolchain rather than the cpu.
+		#
+		#   --cc:clang --clang.exe:emcc --clang.linkerexe:emcc
+		#       Route Nim's C compile and link through the Emscripten
+		#       wrappers. `emcc` IS clang, so `--cc:clang`'s flag vocabulary
+		#       is the right one.
+		#
+		#   --mm:orc
+		#       PLAT-17's deliverable, and not a default: Nim 2.x's default
+		#       IS orc, but a lane that relies on a default cannot say which
+		#       memory manager its numbers were taken under, and every timing
+		#       or footprint claim in this area has to (Verification-Harness
+		#       -Traps.md §12b).
+		#
+		#   --threads:off
+		#       Emscripten's pthreads need SharedArrayBuffer and
+		#       COOP/COEP headers in a browser, and Nim's default
+		#       `--threads:on` links the `-mt` variants of emscripten's
+		#       system libraries. The reactive core is single-threaded by
+		#       construction, so this costs nothing and keeps the artifact
+		#       loadable from an ordinary page.
+		#
+		#   -sSTACK_SIZE=8388608
+		#       THE ONE FLAG FOUND BY A FAILURE RATHER THAN BY READING.
+		#       Emscripten's default stack is 64 KB; a native thread's is
+		#       8 MiB. Two suites here recurse deep enough to sit between
+		#       the two — `test_verification_payload` reported
+		#       `RuntimeError: memory access out of bounds` after 42 of its
+		#       56 cases, with a stack trace of one wasm function calling
+		#       itself. A stack overflow on this target is NOT a Nim
+		#       `StackOverflowDefect`; it is an out-of-bounds linear-memory
+		#       access with no Nim frame in it, so it reads as a miscompile
+		#       until you count the repeats. Matching the native stack is
+		#       what makes "the same suites, the same counts" a statement
+		#       about the PROGRAM rather than about two different stack
+		#       budgets.
+		#
+		#   -sNODERAWFS=1
+		#       Use node's real filesystem instead of emscripten's in-memory
+		#       MEMFS. This is the flag that decides the FILE SET: without
+		#       it every suite that reads a fixture, writes a temporary
+		#       directory or walks `src/frontend/ui/*.nim` would have to be
+		#       excluded, and the lane would be `vm-unit` minus a dozen
+		#       files for a reason that is about the harness rather than
+		#       about the platform.
+		#
+		#   -sALLOW_MEMORY_GROWTH=1
+		#       Linear memory starts small and grows. The reactive core's
+		#       allocation shape is many small short-lived `ref`s with a
+		#       per-mount peak far above its steady state; a fixed
+		#       INITIAL_MEMORY large enough for the peak would make every
+		#       module pay the peak.
+		#
+		#   -sEXIT_RUNTIME=1
+		#       Run `exit()`'s handlers and PROPAGATE the status. Without
+		#       it a failing suite can exit 0 — the same defect class as the
+		#       missing `-d:nodejs` on the JS lane above, and the reason
+		#       ci/test/vm-unit-wasm-lane-test.sh proves this one against
+		#       the real toolchain instead of grepping for it.
+		compile_cmd=(nim c --hints:off --warnings:off
+			--cpu:wasm32 --os:linux -d:emscripten
+			--cc:clang --clang.exe:emcc --clang.linkerexe:emcc
+			--mm:orc --threads:off
+			--passL:-sSTACK_SIZE=8388608
+			--passL:-sNODERAWFS=1
+			--passL:-sALLOW_MEMORY_GROWTH=1
+			--passL:-sEXIT_RUNTIME=1
+			"${extra_flags[@]}" --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
+		artifact="${cache}/${name}.js"
 	else
 		compile_cmd=(nim c --hints:off --warnings:off
 			"${extra_flags[@]}" --nimcache:"${cache}" -o:"${cache}/${name}" "${f}")
@@ -181,6 +292,22 @@ while read -r f; do
 
 	ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
 	if [ "${backend}" = "js" ]; then
+		output="$(timeout "${lane_timeout}" node "${artifact}" 2>&1)" && rc=0 || rc=$?
+	elif [ "${backend}" = "wasm" ]; then
+		# `emcc -o <name>.js` emits a JS loader beside the `.wasm`; node runs
+		# the loader, which instantiates the module and calls `main`.
+		#
+		# No `LD_LIBRARY_PATH`: a wasm32 module links no host shared object,
+		# which is one of the two reasons this lane is cheaper to run than
+		# the native one (the other is that `emcc`'s output needs no
+		# `CT_LD_LIBRARY_PATH` sqlite/pcre/glib set to START, so a missing
+		# library cannot be mistaken here for a failing assertion).
+		#
+		# `2>&1` matters more than usual: emscripten writes its
+		# `warning: unsupported syscall: …` diagnostics to stderr, and those
+		# are the lines that say a suite reached for something the shipping
+		# host has not got. Discarding them would leave the lane green over
+		# a module that only works by emulation.
 		output="$(timeout "${lane_timeout}" node "${artifact}" 2>&1)" && rc=0 || rc=$?
 	else
 		output="$(LD_LIBRARY_PATH="${ct_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \

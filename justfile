@@ -3018,6 +3018,92 @@ test-vm-unit-js: vm-test-prereqs
   exec > >(tee test-logs/test-vm-unit-js.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh vm-unit-js
 
+# THE THIRD BACKEND (PLAT-17).  The same Tier-1 ViewModel suites compiled to
+# wasm32 through Emscripten and run under node.
+#
+# Architecture/Uniform-WASM-Core.md §2.1.3: the ViewModel suites are
+# backend-agnostic — `MockBackendService` and `withFakeTime` — so the
+# verification for a WASM core is not new test-writing, it is running the
+# EXISTING suites on a third backend and requiring the same results.  §2.1.4
+# says what "the same" means, and it is not "green": the same case count and
+# the same assertion count as native, with every suite that cannot run named
+# with a platform reason.
+#
+# `just test-vm-unit-wasm-parity` is what ENFORCES that, by running this lane
+# and `test-vm-unit` and comparing them file by file.  This recipe on its own
+# only says the lane is green, and green is the weaker claim.
+#
+# Needs the dev shell: `emcc` and `node`.  The runner FAILS rather than skips
+# when either is missing — see the note there for why a skippable wasm lane is
+# the `vm-js` defect wearing a toolchain check.
+test-vm-unit-wasm: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-unit-wasm.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh vm-unit-wasm
+
+# PLAT-17's verification gate, made mechanical.
+#
+# Runs `vm-unit` and `vm-unit-wasm` and asserts THREE things the individual
+# lanes cannot:
+#
+#   1. every file both lanes run reports the SAME case count and the SAME
+#      declared assertion count.  An EQUALITY, never "at least" and never
+#      "both green" — a count that quietly shrinks is this milestone's
+#      characteristic defect and an inequality cannot see it;
+#   2. the set of files native runs and wasm does not is EXACTLY the six
+#      documented in ci/lib/test-lane-files.sh.  A seventh file that stops
+#      building reddens by name; a listed file that starts building reddens
+#      too, so the list cannot outlive its reason;
+#   3. neither lane ran zero files, which is the vacuous-pass guard one level
+#      up from the runner's own.
+test-vm-unit-wasm-parity: vm-test-prereqs
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-vm-unit-wasm-parity.log) 2>&1
+  bash ci/test/vm-unit-wasm-parity.sh
+
+# The contract suite for the two recipes above, in the shape
+# ci/test/vm-js-lane-test.sh established for the JS lane and for the same
+# reason: a lane that reports results it cannot observe is worse than no lane.
+test-vm-unit-wasm-lane-contract:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  bash ci/test/vm-unit-wasm-lane-test.sh
+
+# PLAT-17 deliverable 2: the ViewModel core's footprint under `--mm:orc` on a
+# linear-memory target, measured BEFORE any UI is attached, beside the same
+# graph's footprint on native.
+#
+# The numbers are for a reader; what is GRADED is a property — after every
+# session is released and ORC has collected, live bytes must be below the
+# peak.  On a graph that is cyclic by construction, that is the statement
+# that ORC's cycle collector runs at all under wasm32, and a build succeeding
+# does not establish it.
+test-wasm-footprint:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-wasm-footprint.log) 2>&1
+  bash ci/test/wasm-footprint.sh
+
+# PLAT-17's fourth verification signal: a fake-timer chain runs at native
+# speed under WASM, which is what says the clock and the dispatcher are inside
+# the module rather than deferring to a host loop.
+#
+# The instrument is a RATIO — simulated ms per wall ms — because the failure
+# it exists to catch is a change of MECHANISM and not of speed: a chain that
+# reaches a host timer scores about 1, a chain that does not scores four
+# orders of magnitude more.
+test-wasm-fake-timer:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-wasm-fake-timer.log) 2>&1
+  bash ci/test/wasm-fake-timer-speed.sh
+
 # NS1's compile-time gate: no module of the ViewModel, view, store or platform
 # layer may reach the host except through the platform facade.
 #

@@ -550,3 +550,23 @@ src/common/terminal_graphics/.plat15-visual-mutation.lock
 # subjects span `src/frontend/tui/` and `src/frontend/viewmodel/`, and a lock
 # inside one of them would name only half of what it protects.
 .plat16-mutations.lock
+
+# PLAT-17's mutation run lock — the exclusive `flock` taken by
+# `src/frontend/viewmodel/tests/unit/run-plat17-wasm-mutations.py`, held for
+# the whole run and acquired BEFORE the baseline digests are read.
+#
+# AN ELEVENTH LOCK, and the first whose protected set leaves this repository:
+# arms W1-W4 mutate `../nim-everywhere/src/nim_everywhere/async_compat.nim`,
+# the sibling checkout `config.nims` puts on the Nim path. A second run
+# starting between this one's digest read and its first mutation would record
+# a mutated sibling-repo file as the control bytes, in a repo whose own git
+# hooks know nothing about this harness.
+#
+# The rule PLAT-12's note settled on applies unchanged and matters more here:
+# NEVER TWO HARNESSES AT ONCE, whatever their subject sets say. PLAT-17's own
+# subjects (`ci/lib/`, `justfile`, `src/common/paths.nim`, the two manual
+# probes, `async_compat.nim`) are disjoint from every sibling harness's, but
+# its GRADERS are not: `ci/test/vm-unit-wasm-parity.sh` compiles the whole
+# `vm-unit` file set on two backends, which includes every suite every other
+# harness in this directory mutates.
+src/frontend/viewmodel/tests/unit/.plat17-wasm-mutation.lock

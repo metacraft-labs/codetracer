@@ -9,8 +9,34 @@ when not defined(js):
     import std / posix
 
     # copied and adapted from https://stackoverflow.com/a/8953445/438099
+    #
+    # `getpwuid` RETURNS NULL when the effective uid has no passwd entry, and
+    # `pwd.pw_name` on a nil `Passwd` is a read through a null pointer rather
+    # than an empty name.  POSIX says so outright — getpwuid(3) returns NULL
+    # both on error and when no matching record exists:
+    # https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpwuid.html
+    #
+    # This is not hypothetical.  Under a wasm32 linear-memory target
+    # (PLAT-17's Emscripten lane) `geteuid()` answers 0 and `getpwuid(0)`
+    # answers NULL, so THIS MODULE'S INITIALISER crashed with
+    # `RuntimeError: memory access out of bounds` inside
+    # `common/paths.nim_Init000` — before a single line of any suite ran, and
+    # with no Nim traceback, because the fault is in `system.add(string,
+    # cstring)` walking a null `y`.  A container started with
+    # `--user $(id -u)` and no matching /etc/passwd row is the same state on
+    # ordinary Linux.
+    #
+    # `$USER` is the fallback rather than a second name-service call because
+    # the ONLY consumer is `localShellPreloadInstallPath` below, which wants a
+    # per-user *filename component* and not an identity — and because a
+    # fallback that can itself fail would leave the same crash one branch
+    # further down.  The result is a `string`, which also makes this branch
+    # agree with the Windows branch above instead of being a `cstring` that
+    # only `strformat` happened to accept.
     let pwd = getpwuid(geteuid())
-    let username = pwd.pw_name
+    let username =
+      if not pwd.isNil and not pwd.pw_name.isNil: $pwd.pw_name
+      else: env.get("USER", "unknown")
 
   var inUiTest = false
 else:

@@ -3024,6 +3024,70 @@ jobs:
       - name: Run ViewModel headless tests (native + JS backends)
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm
 
+      # ----------------------------------------------------------------
+      # PLAT-17: the THIRD backend.
+      #
+      # EVERY STEP BELOW CARRIES `if: ${{ !cancelled() }}`, AND THAT IS THE
+      # DELIVERABLE, not a convenience.
+      #
+      # PLAT-17's fifth deliverable is "a lane, so the build cannot rot the
+      # way `vm-js` did behind an aggregate that never reaches it".  The rot
+      # it names is concrete and is directly above: `just test-vm` is
+      # `test-vm-native test-vm-js`, `test-vm-native` exits 1 at its
+      # documented baseline, and `just` stops there — so the JS half has
+      # been unobserved for as long as the native half has been red.
+      # Architecture/Uniform-WASM-Core.md §7 calls that a defect in its own
+      # right.
+      #
+      # A separate step is NOT sufficient on its own, because GitHub Actions
+      # short-circuits a job on the first failing step in exactly the same
+      # shape.  `!cancelled()` is what breaks it: these run whether or not
+      # `test-vm` above (or each other) passed, so the wasm backend's status
+      # is always observed and always reported.  A genuine cancellation
+      # still stops them, which is why it is `!cancelled()` rather than
+      # `always()`.
+      #
+      # Ordered cheapest-first so a wiring break is named in seconds rather
+      # than after two full lane compiles.
+      - name: Assert the WASM ViewModel lane can observe its own failures
+        if: ${{ !cancelled() }}
+        # Twelve contracts.  Nine are pure bash over the justfile and
+        # ci/lib; three compile purpose-built programs with emscripten and
+        # PROVE the two flags whose absence is silent — that `-sEXIT_RUNTIME`
+        # is what makes a failing suite exit non-zero, and that
+        # `-sSTACK_SIZE` is load-bearing against emscripten's 64 KB default.
+        # Without the dynamic three this would be a suite that greps for
+        # flags it cannot justify.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-unit-wasm-lane-contract
+
+      - name: Run the ViewModel unit suites on the WASM backend
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-unit-wasm
+
+      - name: PLAT-17 gate — the WASM lane's counts EQUAL native's
+        if: ${{ !cancelled() }}
+        # The step above only says the wasm lane is green, and
+        # Uniform-WASM-Core.md §2.1.4 is explicit that green is the weaker
+        # claim: the same case count and the same assertion count as native,
+        # per file, as an EQUALITY.  This runs both lanes and compares them,
+        # and also asserts that the six files the wasm lane does not run are
+        # EXACTLY the six documented in ci/lib/test-lane-files.sh — so a
+        # seventh that stops building reddens by name rather than shrinking
+        # the set quietly.
+        #
+        # It is slow by construction (two compiles of ~70 ViewModel suites).
+        # That is the price of the claim; a cheaper check would be a check
+        # of something else.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-unit-wasm-parity
+
+      - name: PLAT-17 — ViewModel-core footprint under --mm:orc on wasm32
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wasm-footprint
+
+      - name: PLAT-17 — a fake-timer chain runs at native speed under WASM
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wasm-fake-timer
+
       - name: Run ct trace-layer unit tests
         # src/ct/trace/*_test.nim (recording-folder shape detection,
         # session-manifest open path, CTFS source materialization, path

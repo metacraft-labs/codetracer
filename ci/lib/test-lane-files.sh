@@ -150,6 +150,7 @@ frontend-native-units
 frontend-js
 vm-unit
 vm-unit-js
+vm-unit-wasm
 vm-collab-units
 vm-collab-integration
 vm-native
@@ -188,6 +189,7 @@ test_lane_description() {
 	frontend-js) echo "src/frontend/tests suites that must run under node" ;;
 	vm-unit) echo "ViewModel unit suites under src/frontend/viewmodel/tests/unit" ;;
 	vm-unit-js) echo "the same ViewModel unit suites, JS backend via node" ;;
+	vm-unit-wasm) echo "the same ViewModel unit suites, WASM backend (nim c --cpu:wasm32 via Emscripten) under node" ;;
 	vm-collab-units) echo "collaboration ViewModel unit suites" ;;
 	vm-collab-integration) echo "collaboration integration + soak suites" ;;
 	vm-native) echo "GUI ViewModel headless suites, native (C) backend" ;;
@@ -217,7 +219,7 @@ test_lane_description() {
 }
 
 # test_lane_backend ID — "c" (compile a binary and run it), "js" (compile with
-# `nim js -d:nodejs` and run under node), or "js-browser".
+# `nim js -d:nodejs` and run under node), "js-browser", or "wasm".
 #
 # `js-browser` EXISTS BECAUSE `-d:nodejs` IS NOT A NEUTRAL FLAG. The `js`
 # backend above passes it, and must: without it `std/exitprocs
@@ -238,10 +240,26 @@ test_lane_description() {
 # pass `--compile-only`. There is nothing to run: a browser bundle needs a
 # browser, and running it under node would either crash on `document` or, worse,
 # appear to pass while executing none of it.
+#
+# `wasm` (PLAT-17) IS THE C BACKEND AIMED AT A DIFFERENT MACHINE, and that is
+# the sentence to keep: `nim c --cpu:wasm32 --os:linux` with `emcc` as the C
+# compiler and linker. It is a separate backend id rather than a `c` lane with
+# extra flags for one reason and it is the same reason `js-browser` is separate
+# — the RUN differs. A `c` lane executes its artifact; this one hands a `.js`
+# loader to node, which instantiates the `.wasm` beside it. Folding that into
+# the `c` branch would mean the runner deciding how to execute a lane by
+# inspecting its flags, and the flags are data.
+#
+# It is deliberately NOT compile-only. §2.1.3 of
+# codetracer-specs/Architecture/Uniform-WASM-Core.md says the verification for
+# a WASM core is "run the existing suites on the third backend and require the
+# same results"; a compile-only wasm lane would establish that the core BUILDS,
+# which is the half that was never in doubt.
 test_lane_backend() {
 	case "$1" in
 	frontend-js | vm-js | vm-unit-js | host-instantiations) echo "js" ;;
 	renderer-electron | renderer-web) echo "js-browser" ;;
+	vm-unit-wasm) echo "wasm" ;;
 	*) echo "c" ;;
 	esac
 }
@@ -269,8 +287,14 @@ test_lane_extra_flags() {
 		# process seam).
 		echo "--path:src"
 		;;
-	vm-unit | vm-unit-js | vm-collab-units | vm-collab-integration | vm-native | vm-js | vm-gui-headless | vm-recorder-gated | host-instantiations)
+	vm-unit | vm-unit-js | vm-unit-wasm | vm-collab-units | vm-collab-integration | vm-native | vm-js | vm-gui-headless | vm-recorder-gated | host-instantiations)
 		# The ViewModel suites import their subjects by bare module name.
+		#
+		# `vm-unit-wasm` is here and NOT carrying its emscripten flags: those
+		# describe the TARGET rather than the lane, so they live in
+		# run-nim-test-lane.sh's `wasm` branch beside `-d:nodejs`, which is
+		# the same kind of flag for the same kind of reason. A second wasm
+		# lane must inherit them by construction rather than by copying.
 		echo "--path:src/frontend/viewmodel"
 		;;
 	renderer-electron)
@@ -898,6 +922,125 @@ test_lane_files() {
 		# and the only place in the tree where the WEB instantiation's
 		# browser-facing half is exercised at all.
 		printf '%s\n' src/frontend/viewmodel/tests/unit/test_opfs_volume.nim
+		;;
+
+	vm-unit-wasm)
+		# THE THIRD BACKEND (PLAT-17). The same Tier-1 ViewModel suites,
+		# compiled to wasm32 through Emscripten and run under node.
+		#
+		# WHY THIS LANE EXISTS.
+		# codetracer-specs/Architecture/Uniform-WASM-Core.md §2.1.3 makes the
+		# whole case in one sentence: the ViewModel suites are
+		# backend-agnostic — `MockBackendService` and `withFakeTime`, no
+		# platform dependency — and already run on TWO backends, so the
+		# verification for a WASM core is not new test-writing. It is
+		# running the existing suites on a third backend and requiring the
+		# SAME RESULTS. §2.1.4 then says what "the same" has to mean: the
+		# same case count and the same assertion count as native, not merely
+		# green, and every suite that cannot run named with a reason that is
+		# a platform fact.
+		#
+		# THE EXCLUSION LIST BELOW IS THE SECOND HALF OF THAT, and it is the
+		# part with a history. `vm-unit-js` is 65 files against `vm-unit`'s
+		# 76, and every one of those eleven is explained above — but the
+		# shape the milestone warns about is a lane whose file set quietly
+		# shrinks until "it passes" is true of a subset nobody counted. So
+		# this list is SIX entries, each naming the symbol that does not
+		# exist on a wasm32 target, and `ci/test/vm-unit-wasm-parity.sh`
+		# asserts that the list is EXACTLY the set that fails to build —
+		# a seventh file that stops compiling reddens by name, and a file
+		# listed here that starts compiling reddens too.
+		#
+		# WHY THIS LIST IS SHORTER THAN `vm-unit-js`'s, which is the most
+		# useful thing on this page for anyone sizing a future wasm lane:
+		# Emscripten is built with `-sNODERAWFS=1`, so the module has node's
+		# REAL filesystem. Six suites that `nim js` cannot run — the two
+		# `getCurrentProcessId` fixture suites, the two CTFS source-provider
+		# suites, the `walkFiles` structural scan and `test_plugin_surfaces`
+		# — all read and write files, and all of them run here. A browser
+		# has no filesystem either, so a browser-hosted build of this same
+		# module would exclude more; the lane runs under node BECAUSE that
+		# is what makes the count comparison against native meaningful, and
+		# that bound is recorded rather than hidden.
+		#
+		# WHAT REMAINS is exactly one platform fact with two spellings:
+		# a wasm32 module cannot create a process.
+		test_lane_files vm-unit |
+			_tlf_reject \
+				'/test_sdk_facade_boundary\.nim$' \
+				'/test_plugin_io_sdk\.nim$' \
+				'/test_plugin_grant_lifecycle\.nim$' \
+				'/test_plugin_source_admission\.nim$' \
+				'/test_platform_desktop_native\.nim$' \
+				'/test_project_action_runner\.nim$'
+		# Five of the six fail at the LINK step with the same one line:
+		#
+		#     wasm-ld: error: undefined symbol: posix_spawnp
+		#
+		# `std/osproc`'s `startProcess` is `posix_spawnp` on this platform,
+		# emscripten's libc declares it and provides no definition, and that
+		# is the honest form of "a wasm32 module cannot fork": not a
+		# refusal at run time, a symbol that was never there.
+		#
+		#   `test_sdk_facade_boundary` runs `ci/test/sdk-facade-boundary.sh`
+		#       through `std/osproc` — the gate is a BUILD property asserted
+		#       by shelling out to a script, so there is nothing here for it
+		#       to assert without a shell.
+		#   `test_plugin_io_sdk` (PLAT-8) drives real child processes over
+		#       the kernel's pipes and a real Unix domain socket against a
+		#       real `python3` peer, and measures teardown against `/proc`.
+		#   `test_plugin_grant_lifecycle` (PLAT-10) measures a REVOKED
+		#       capability as an effect: it spawns `touch` and asserts the
+		#       sentinel file is or is not there.
+		#   `test_plugin_source_admission` (PLAT-8) COMPILES AND RUNS a real
+		#       exploit — `nim c` on a probe that reaches `/bin/sh` with
+		#       `fork`/`execv` — and asserts the shell was not reached.
+		#   `test_platform_desktop_native` (NS1) exercises the platform
+		#       facade's native desktop instantiation against the real host.
+		#
+		# THE REJECTION IS THE FIX RATHER THAN A `when` GUARD, and the four
+		# plugin/sandbox suites are the sharp version of why: each one's
+		# central claim is *the child never ran*, and that claim is GREEN,
+		# for free, on a target that could not have run a child under any
+		# grant at all. The backend-independent halves are deliberately in
+		# other files and DO run here — `src/common/plugin_capabilities_test
+		# .nim`, `plugin_source_admission_test.nim`, `plugin_distribution_test
+		# .nim` in `common-units`, and `test_platform_facade.nim` in this
+		# very lane, which covers the capability model and the path
+		# arithmetic with no host at all.
+		#
+		# The sixth fails EARLIER, at the C compile, and for a different
+		# reason worth keeping separate:
+		#
+		#   `test_project_action_runner` (VN-M3) launches child processes
+		#       through `runquota_process`, whose directory walk issues a
+		#       RAW LINUX SYSCALL — `syscall(SYS_getdents64, …)`. emscripten
+		#       answers with `error: call to undeclared function 'syscall'`
+		#       and `use of undeclared identifier '__syscall_getdents64'`.
+		#       A syscall number is an ABI of a kernel, and a wasm32 module
+		#       has no kernel; this is the one exclusion that would survive
+		#       even if processes were somehow granted. Its pure half — the
+		#       classifier, the six-outcome vocabulary, the marker builder,
+		#       the render plan — is in `test_verification_vm.nim` and
+		#       `test_project_actions.nim`, both of which run here.
+		#
+		# NOT EXCLUDED, and each was checked rather than assumed:
+		#   `test_opfs_volume` is already absent, inherited from `vm-unit`:
+		#       its subject is a hard `{.error.}` on the C target and wasm
+		#       IS the C target, so no edit here can be forgotten.
+		#   `test_plugin_surfaces` (PLAT-9) writes a real executable, puts
+		#       its directory on the real `PATH` and asserts a contributed
+		#       surface stops being degraded. It needs a FILESYSTEM and a
+		#       PATH lookup, not a spawn, and NODERAWFS gives it both — it
+		#       runs here and it is the one place the two exclusion lists
+		#       most visibly disagree.
+		#   `test_pane_mount_markers_are_released` walks `src/frontend/ui/
+		#       *.nim` with `walkFiles`, which is an `{.error.}` under
+		#       `nim js` and ordinary code here. It runs, and it reproduces
+		#       native's pre-existing red with the identical tally, which is
+		#       a better outcome than an exclusion: a lane that reproduces a
+		#       known failure exactly is a lane that is measuring the same
+		#       program.
 		;;
 
 	vm-collab-units)

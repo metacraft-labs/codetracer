@@ -1,0 +1,29 @@
+# Control digests for run-plat17-wasm-mutations.py.
+#
+# The bytes every arm restores to, and the bytes every arm's verdict
+# was taken against. Both halves of TOUCHED are here — the eight
+# mutation subjects AND the six suites/scripts the arms are graded by
+# — which is §16c's gap paid rather than inherited.
+#
+# One entry is OUTSIDE THIS REPOSITORY:
+# ../nim-everywhere/src/nim_everywhere/async_compat.nim, the sibling
+# checkout config.nims puts on the Nim path. PLAT-17's diff spans
+# three repos and the arms that matter most are in the other one.
+#
+# Refreshed with --record-control-hashes, which the needle scan GATES
+# (§16): re-recording from a tree whose arms have stopped matching
+# certifies the arms along with the bytes.
+ba2695508f6456f9a154474d8f7c44cddecf9289568cdb1884503be12501dee5  ../nim-everywhere/src/nim_everywhere/async_compat.nim
+d762b2f5813872d5bf5dce6d735753ef8c7d0e1f78f468481f26769fb8672d82  src/common/paths.nim
+bcb8a718c51bdff7d9388939a4f00ea667e0a587163ada0f6372afbadfda764c  ci/lib/run-nim-test-lane.sh
+47a6be96d1c3424fc95b79019924398f15efae1016f1c59ea790c18d51b87537  ci/lib/test-lane-files.sh
+ea42830c108d6059d483b79ee662fdf643d3370701b3006b90ef4d55b79c9b70  justfile
+f82d5d9bb1d134cba0df3de54c3d44c78ba0f978c8d884a5bd2dabe9c4ed5a98  src/frontend/viewmodel/tests/manual/wasm_fake_timer_probe.nim
+94a3f0aca01cbb9251c9ac993a8aa31500a8d38f03147d843e00f2a750771cb5  src/frontend/viewmodel/tests/manual/wasm_footprint_probe.nim
+938b658f452638cffee02b706c077ae915b97ac18050fb13eb2eb5c458be929e  src/frontend/viewmodel/tests/unit/test_async_compat_wasm_arm.nim
+75fbd04df1627d6e1ab8155bd792e815db13ac75003be427446fc80b2d0e307b  src/frontend/viewmodel/tests/unit/test_sdk_facade.nim
+707b5650849ae2372752b5aac59b620abadad722fb37292a79d943d4e79f3e3f  src/frontend/viewmodel/tests/unit/test_verification_panel_registration.nim
+153f96d3746d15a06cd24df4d46b5b2eb59d925b404438177dffa59273e6dc18  ci/test/vm-unit-wasm-parity.sh
+25e02f5edd71b89864b5f771a585bff1f1c6f26e8053d728c5722d1dda5442ee  ci/test/vm-unit-wasm-lane-test.sh
+b163d6fbaa2032b654df420162333e71971c2d7d14463ff7e1a206d2ecc4918d  ci/test/wasm-footprint.sh
+2e234c6f9ab882967ee437f783933e167ef01f54ff24c9fa3d71557293854967  ci/test/wasm-fake-timer-speed.sh
