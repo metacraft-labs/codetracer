@@ -42,6 +42,25 @@ inputs:
     description: Optional Nix trusted-public-keys forwarded to setup-dev-env.
     required: false
     default: ""
+  attic-token:
+    description: >
+      Optional Attic token for the private cache named in ``substituters``,
+      forwarded to setup-dev-env.
+
+      A composite action cannot read ``secrets.*`` or ``vars.*``, so this has
+      to arrive as an input: the caller passes
+      ``attic-token: ${{ secrets.ATTIC_TOKEN }}``. Without it nix is handed a
+      private substituter it has no credential for, answers its own
+      ``nix-cache-info`` probe with 401, disables the cache and builds
+      everything not on cache.nixos.org from source.
+    required: false
+    default: ""
+  attic-cache:
+    description: >
+      Optional Attic cache name, forwarded to setup-dev-env, which starts
+      ``attic watch-store`` for it when a token is also supplied.
+    required: false
+    default: ""
   extra-siblings:
     description: >
       Additional `siblings:` entries, in `clone-siblings` syntax
@@ -87,6 +106,8 @@ runs:
         gh-token: ${{ inputs.gh-token }}
         substituters: ${{ inputs.substituters }}
         trusted-public-keys: ${{ inputs.trusted-public-keys }}
+        attic-token: ${{ inputs.attic-token }}
+        attic-cache: ${{ inputs.attic-cache }}
         # `clone-siblings` tokenises this value on whitespace after stripping
         # `#` comments, so an empty `extra-siblings` contributes nothing and a
         # multi-line one needs no particular indentation.

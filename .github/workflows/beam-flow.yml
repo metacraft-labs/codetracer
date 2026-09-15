@@ -109,6 +109,8 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
           # codetracer-trace-format-nim is the second half of a MATCHED FFI PAIR
           # and must be provisioned wherever codetracer-trace-format is built.
           # codetracer-beam-recorder's Cargo.toml path-depends on

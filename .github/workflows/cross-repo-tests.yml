@@ -96,6 +96,8 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
             codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || 'dev' }}
             codetracer-trace-format=dev
@@ -297,6 +299,8 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
           extra-siblings: |
             codetracer-shell-recorders=${{ github.event.inputs.shell_recorders_ref || 'dev' }}
 

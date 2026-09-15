@@ -323,6 +323,15 @@ lint_step "contract suite: direnv comes from a dev shell we define" \
 lint_step "contract suite: a job that runs nix installs Nix first" \
 	bash ci/test/nix-provisioning-test.sh
 
+# Naming a private substituter and supplying a credential for it are two edits
+# in two files, and doing only the first costs a 401 from `nix-cache-info`, a
+# disabled cache, and a full source build of everything not on cache.nixos.org.
+# That is what six launcher- and recorder-triggered runs died of, as crates.io
+# 403s inside a vendor derivation nobody expected to be built at all. Static,
+# python3 + PyYAML over `.github/` as committed.
+lint_step "contract suite: a private substituter comes with a credential" \
+	bash ci/test/private-substituter-credential-test.sh
+
 # The guard for this whole shape: no ci/lint script may let one failing step
 # hide another. It drives every ci/lint/*.sh with a PATH in which every
 # external command fails, and asserts each still reports every step it declares.
