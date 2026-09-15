@@ -23,7 +23,9 @@ TRACEPOINT_COLOR=#6366F1
 TRACEPOINT_LINE_NUMBER_COLOR=#c6c6c6
 
 CT_PRIMARY_DEFAULT=#6366F1
-CT_PRIMARY_DEFAULT_FOCUSED=#4F46E5
+// brand/500 — the dark theme no longer uses brand/600 (#4F46E5) anywhere.
+// The tokens are not imported yet at this point, hence the hex.
+CT_PRIMARY_DEFAULT_FOCUSED=#6366F1
 CT_SECONDARY_BLUE=#818CF8
 
 COMMAND_PALETTE_START_MSG_IMG=url("../../public/resources/shared/send_msg.svg")
@@ -113,6 +115,10 @@ LAYOUT_DROPDOWN_ICON_COLOR = #1e1f26
 SHARED_OPEN_FA_ICON = url('../../public/resources/shared/filesystem/filesystem_open_toggle_dark.svg')
 SHARED_CLOSE_FA_ICON = url('../../public/resources/shared/filesystem/filesystem_close_toggle_dark.svg')
 HIGHLIGHT_LINE_ARROW = url('../../public/resources/shared/highlight_line_arrow.svg')
+// The editor's band behind the line execution is stopped on — the Monaco
+// theme's `editor.lineHighlightBackground`, #3A3A3AB3 (codetracerDark.json) —
+// for places outside Monaco that draw that same line (the State panel).
+CURRENT_LINE_BG = rgba(#3A3A3A, 0.7)
 
 TRACEPOINT_HAMBURGER_ICON = url('../../public/resources/tracepoints/trace_hamburger_dark.svg')
 

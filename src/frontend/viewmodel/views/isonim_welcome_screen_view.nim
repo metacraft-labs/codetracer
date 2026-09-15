@@ -19,6 +19,9 @@
 import std/[options, os, sequtils, strutils, tables, times]
 
 import isonim/core/[signals, computation]
+# `untrack` keeps the Start Debugger form's typing from rebuilding the whole
+# screen — see the `setChecked` call in `renderNewRecordModeWeb`.
+from isonim/core/batch import untrack
 import isonim/dsl/ui
 import isonim/testing/mock_dom
 
@@ -495,7 +498,9 @@ proc renderOnlineTraceModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                       placeholder = "Download URL or key",
                       value = vm.onlineTraceInput.val)
             tdiv(class = "new-record-form-row"):
-              button(class = "ct-button-sm-tertiary ct-mr-4",
+              # `mr-2` (8px), the same class as the Start Debugger form's Back
+              # button, so both screens space their button pair alike.
+              button(class = "ct-button-sm-tertiary mr-2",
                      onclick = proc() =
                        backToWelcome(vm, callbacks)):
                 text "Back"
@@ -771,7 +776,16 @@ when defined(js):
     let workDirNode = isonim_dom.Node(workDirInput)
     let outputNode = isonim_dom.Node(outputInput)
     let checkboxNode = isonim_dom.Node(checkbox)
-    checkboxNode.setChecked(vm.newRecord.val.defaultOutputFolder)
+    # Read untracked.  This proc runs inside `renderWelcomeScreenPanel`'s
+    # `createRenderEffect`, which re-runs — clearing and rebuilding the whole
+    # screen — whenever a signal read directly in its body changes.  A plain
+    # `vm.newRecord.val` here subscribed it to the entire form state, so every
+    # keystroke in any field (each one calls `vm.setRecord…`) rebuilt the form:
+    # the field lost focus after one character, and the Record button was
+    # replaced instead of changing state.  The checkbox only needs the value it
+    # has when the form opens; toggling it goes through its own handler below.
+    untrack proc() =
+      checkboxNode.setChecked(vm.newRecord.val.defaultOutputFolder)
     isonim_dom.addEventListener(execNode, cstring"input",
       proc(ev: isonim_dom.Event) =
         let v = readInputValue(execNode)
@@ -836,7 +850,9 @@ when defined(js):
                         placeholder = "Download URL or key",
                         value = vm.onlineTraceInput.val)
               tdiv(class = "new-record-form-row"):
-                button(class = "ct-button-sm-tertiary ct-mr-4",
+                # `mr-2` (8px), the same class as the Start Debugger form's
+                # Back button, so both screens space their button pair alike.
+                button(class = "ct-button-sm-tertiary mr-2",
                        onclick = proc() =
                          backToWelcome(vm, callbacks)):
                   text "Back"

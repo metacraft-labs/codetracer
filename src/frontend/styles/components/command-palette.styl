@@ -1,10 +1,9 @@
 // Command field geometry.  The results menu is absolutely positioned and has to
-// start where the field ends, so its height and its half-pixel optical nudge are
-// named here rather than repeated as literals — that is exactly how the menu's
-// offset came to be stale when the field was resized.
-COMMAND_INPUT_HEIGHT = 1.625rem
-COMMAND_INPUT_NUDGE = 0.03125rem
-COMMAND_INPUT_BOTTOM = "calc(%s + %s)" % (COMMAND_INPUT_HEIGHT COMMAND_INPUT_NUDGE)
+// start where the field ends, so the field's height is named here rather than
+// repeated as a literal — that is exactly how the menu's offset came to be stale
+// when the field was resized.
+COMMAND_INPUT_HEIGHT = INPUT_HEIGHT_LG
+COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
 
 #command-data
   height: 28px
@@ -35,10 +34,27 @@ COMMAND_INPUT_BOTTOM = "calc(%s + %s)" % (COMMAND_INPUT_HEIGHT COMMAND_INPUT_NUD
     height: 2.875em
     display: flex
     align-items: center
-    background: #151515
-    border: 0.0625em solid #4f4f4f
+    background: colors-ui-surface-primary-default
+    border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
     border-radius: 0.75em 0.75em 0 0
     box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.35)
+
+    // The same hover as every other field (components/input.styl): the border
+    // steps up to `border/primary/hover` and the placeholder to full body text.
+    // On the row rather than the field, because the row is what draws this
+    // control's edge — the field inside it has no border of its own.
+    &:hover
+      border-color: colors-ui-border-primary-hover
+
+      .command-input-placeholder
+        opacity: 1
+
+    // Active while the field inside has focus: the same `border/action` border
+    // as every input field (input.styl) and the Event Log filter button's open
+    // state.  On the row for the same reason as the hover.  After `:hover`, at
+    // equal specificity, so an active prompt stays indigo under the pointer.
+    &:focus-within
+      border-color: colors-ui-border-action
 
   .command-input-field
     width: 100%
@@ -50,6 +66,14 @@ COMMAND_INPUT_BOTTOM = "calc(%s + %s)" % (COMMAND_INPUT_HEIGHT COMMAND_INPUT_NUD
     padding: 0 1em
     font-size: 1em
     font-family: "SpaceGrotesk", sans-serif
+
+    // Stays transparent once it holds text.  The generic filled-field rule in
+    // components/input.styl paints `surface-input-secondary` on any input with a
+    // value, and outranks the plain `background` above on specificity — so
+    // typing turned the whole prompt from its row's fill to the lighter one.
+    // The row carries this control's surface; the field only holds the text.
+    &:not(:placeholder-shown):not(:disabled)
+      background: transparent
 
   .command-input-placeholder
     position: absolute
@@ -285,17 +309,17 @@ COMMAND_INPUT_BOTTOM = "calc(%s + %s)" % (COMMAND_INPUT_HEIGHT COMMAND_INPUT_NUD
     position: relative  // anchor the absolutely-positioned dropdown to this element
 
     .command-input-row
-      // 1.625rem = 26px at the 16px root.  With the 2.125em (34px) caption bar
-      // that leaves exactly 4px above and below — whole pixels on both sides, so
-      // neither gap rounds away.
+      // The large input size (INPUT_HEIGHT_LG, input.styl): 28px at the 16px
+      // root, the same height as the toolbar buttons and new-tab button beside
+      // it.
+      //
+      // Centred on the caption bar's row, with no offset of its own, so its
+      // edges line up with theirs.  The row itself sits where the space above
+      // and below comes out even (5px / 5px to the panel tabs) — see
+      // CAPTION_BAR_PADDING_TOP in menu_bar.styl.  A half-pixel "optical" nudge
+      // down used to live here; it left the field half a pixel lower than every
+      // other control on the same row.
       height: COMMAND_INPUT_HEIGHT
-      // Optical nudge: half a pixel down, making the gaps 4.5px above and 3.5px
-      // below.  They were already 4px each, but the two are bounded by different
-      // things — nothing above, the tab strip below — so equal measurements read
-      // as unequal.  A half pixel is a real step on this display: at 2x it is one
-      // device pixel.  `top` rather than a margin so the shift is painted only
-      // and the flex centring above is left alone.
-      top: COMMAND_INPUT_NUDGE
       border-radius: 0.375rem
       // The field needs edges of its own.  Painted as the caption bar's own
       // colour it had none, so the eye took its top edge from nothing and its
@@ -303,13 +327,21 @@ COMMAND_INPUT_BOTTOM = "calc(%s + %s)" % (COMMAND_INPUT_HEIGHT COMMAND_INPUT_NUD
       // unequal, the lower one looking larger.
       //
       // Fill alone cannot fix that here: the palette's near-black steps are only
-      // a few levels apart, and `surface-input-default` lands within 4 levels of
+      // a few levels apart, and a fill like `surface-input-default` lands within 4 levels of
       // the tab surface, so the field simply traded one neighbour for another.
       // The border is the strong signal — around 50 levels above the bar — so it
       // carries the definition, at a full pixel rather than a hairline.
-      background: colors-ui-surface-input-default
-      border: 1px solid colors-ui-border-primary
+      background: colors-ui-surface-primary-default
+      border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
       box-shadow: none
+
+      // Restated here because the border above outranks the shared row's
+      // `:hover` on specificity (this block is scoped by two ids).
+      &:hover
+        border-color: colors-ui-border-primary-hover
+
+      &:focus-within
+        border-color: colors-ui-border-action
 
     .command-input-field
       font-size: 0.75rem
@@ -318,12 +350,13 @@ COMMAND_INPUT_BOTTOM = "calc(%s + %s)" % (COMMAND_INPUT_HEIGHT COMMAND_INPUT_NUD
     .command-input-placeholder
       // Must match .ct-input-search-image padding-left (1.875em !important) so
       // the ghost-text starts at the same x-position as the real input text.
-      // line-height matches .command-input-row height in this context (1.75rem)
-      // so text centers exactly as the native <input> element does.
+      // line-height matches .command-input-row height in this context
+      // (COMMAND_INPUT_HEIGHT) so text centers exactly as the native <input>
+      // element does.
       left: 1.875em
       right: 0.75rem
       top: 0
-      line-height: 1.75rem
+      line-height: COMMAND_INPUT_HEIGHT
 
     .command-results,
     .command-empty-overlay

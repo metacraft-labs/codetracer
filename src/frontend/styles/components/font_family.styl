@@ -1,3 +1,23 @@
 // Font declarations are generated from design system tokens.
 // See scripts/tokens-to-styl.sh and src/frontend/styles/generated/fonts.styl.
 @import "../generated/fonts"
+
+// FONT USAGE RULE
+//
+// Space Mono ("SpaceMono") is for CODE only:
+//   - source code and code snippets
+//   - program data: variable names, values, types, expressions, stack frames
+//     and function names
+//   - program output: stdout, terminal, REPL, shell, trace-log content
+//   - line and column numbers, gutters, command lines, hex and addresses
+//   - any other text a comment explicitly marks as needing monospace
+//
+// Space Grotesk ("SpaceGrotesk") is for EVERYTHING ELSE: titles, headings, body
+// text, messages, notes, buttons, tabs, labels, subtext, captions, empty
+// states, table column headers, badges, counts, tooltips, menus, form labels,
+// status text and version strings.
+//
+// Default a surface to Space Grotesk and opt the code inside it into Space Mono
+// — not the other way round.  A broad Space Mono rule on a panel or on `button`
+// makes every label, header and message inside it inherit the code face, which
+// is how interface text drifted into mono before this rule was written down.

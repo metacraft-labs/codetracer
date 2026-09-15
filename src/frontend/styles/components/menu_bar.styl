@@ -18,12 +18,37 @@ FULLSCREEN_EDGE_GAP = 8px
 // Command prompt: floor, viewport-tracking middle, ceiling.
 COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
 
+// The caption bar's vertical padding: 6px above its row; below it, 2px in the
+// working area and 6px while a welcome / new-trace screen is showing — the
+// `--caption-bar-padding-bottom` switch in shared_widgets.styl, beside
+// CAPTION_BAR_HEIGHT (34px / 38px).  Nikolay asked for the 6px on the welcome
+// screens only (2026-09-14): they paint their own ground straight under the
+// bar, and the 2px left the tab row tight against the screen's edge.
+//
+// The notes below describe the working area, where the 2px is kept.  There
+// the bar's bottom edge (34px) is not visible: below it, the layout root
+// leaves 4px above the panel tabs (`.lm_tab` margin-top, golden_layout.styl) in
+// the same colour as the bar, so the eye measures the space under the command
+// prompt all the way down to the tab tops, at 38px.  The bar's 28px controls
+// centred in that 38px band get 5px above and 5px below.  Centred in the bar
+// alone, they got 3px above and, to the eye, 7px below.
+//
+// It also puts the row's centre at 19px, the centre of the macOS traffic-light
+// buttons (`trafficLightPosition` y: 12 in src/frontend/index/window.nim, 14px
+// buttons: 12px–26px), which the bar-centred row missed by 2px.
+//
+// Tied to the 4px gap above the tabs: change one, recheck the other.
+CAPTION_BAR_PADDING_TOP = 0.375rem
+CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
+
 // The top bar
 #menu
   display: flex
   flex-direction: row
   top: 0
   padding: 0.25em
+  padding-top: CAPTION_BAR_PADDING_TOP
+  padding-bottom: CAPTION_BAR_PADDING_BOTTOM
   box-sizing: border-box
   -webkit-app-region: drag
   user-select: none
@@ -38,14 +63,16 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
   // as this bar, it reads as part of the bar and pushes its contents visually
   // off-centre.  The auto-hide overlays assume the same value.
   //
-  // 2.125em is exactly 34px at the 16px root, and the 1.625rem (26px) command
-  // prompt then leaves 8px to split — 4px above and 4px below, both whole
-  // pixels.  The value has to stay pixel-representable: an earlier 2.27em made
+  // CAPTION_BAR_HEIGHT (shared_widgets.styl): 34px in the working area, where
+  // the 28px command prompt (INPUT_HEIGHT_LG, input.styl) sits 5px from the
+  // top and, to the eye, 5px from the panel tabs; 38px on a welcome screen,
+  // 5px above and 5px below.  Both whole pixels — the value has to stay
+  // pixel-representable: an earlier 2.27em made
   // the bar 36.31px and the halves 4.155px, which cannot render evenly, so one
   // side rounded down and the field sat 3px from the top and 4px from the
   // bottom.
-  height: 2.125em
-  max-height: 2.125em
+  height: CAPTION_BAR_HEIGHT
+  max-height: CAPTION_BAR_HEIGHT
   min-width: 0
 
   #debug
@@ -154,11 +181,15 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
   display: flex
   position: absolute
   right: 0.3125em
-  top: 0
+  // The same box as the bar's own row, so these buttons centre on the row's
+  // line (19px) rather than on the bar's middle (17px) — see
+  // CAPTION_BAR_PADDING_TOP.  Absolutely positioned against the bar, so they
+  // do not get its padding by themselves.
+  top: CAPTION_BAR_PADDING_TOP
+  bottom: CAPTION_BAR_PADDING_BOTTOM
   margin-right: 0
   -webkit-app-region: no-drag
   z-index: 50
-  height: 100%
   align-items: center
   cursor: pointer
 
@@ -286,7 +317,7 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
       padding-right: 10px
 
   #menu-main
-    font-family: "SpaceMono"
+    font-family: "SpaceGrotesk"
     font-size: MENU_FONT_SIZE
     width: fit-content
     min-width: 12em
@@ -295,10 +326,10 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
     // Below the caption bar, by the gap every other menu leaves below its
     // trigger (DROPDOWN_TRIGGER_GAP, components/shared_widgets.styl).  This
     // menu is positioned against `#menu` itself, so the offset has to carry the
-    // bar's own height: 2.125rem + 0.375rem = 2.5rem.  It was 2.1rem — 33.6px
-    // against a 34px bar — so the menu overlapped the bar's bottom edge by a
-    // fraction of a pixel instead of clearing it.
-    top: 2.5rem
+    // bar's own height: CAPTION_BAR_HEIGHT + DROPDOWN_TRIGGER_GAP (38px + 6px).
+    // It was once 2.1rem — 33.6px against a 34px bar — so the menu overlapped
+    // the bar's bottom edge by a fraction of a pixel instead of clearing it.
+    top: "calc(%s + %s)" % (CAPTION_BAR_HEIGHT DROPDOWN_TRIGGER_GAP)
     margin-left: 6px
     // CHROME ONLY — see `dropdown-surface()` in components/shared_widgets.styl
     // for the two preconditions this element does not meet.  In short: the
@@ -573,6 +604,10 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
     color: colors-ui-text-primary-body
     background-color: colors-ui-surface-input-default
 
+    // The list hover (LIST_HOVER_BG, button.styl); these rows had none.
+    &:hover
+      background-color: LIST_HOVER_BG
+
   .menu-sub-group-separator
     display: none
 
@@ -588,3 +623,26 @@ COMMAND_PROMPT_WIDTH = unquote("clamp(24em, 24vw, 40em)")
     color: colors-ui-text-primary-body
     font-style: italic
     padding-left: 20px
+
+// Caption-bar controls are the LARGE control size (CONTROL_HEIGHT_LG,
+// button.styl), the same 28px as the command prompt they share the bar with.
+// Their markup says `md` — the size a panel toolbar uses, now 26px — so the bar
+// raises them here instead of the toolbar views carrying a class of their own.
+#menu [class*="ct-button-image-"]
+  width: CONTROL_HEIGHT_LG
+  max-width: CONTROL_HEIGHT_LG
+  height: CONTROL_HEIGHT_LG
+  max-height: CONTROL_HEIGHT_LG
+
+// The logo keeps no outline: it reads as part of the caption bar, not as a
+// button (see its hover rule above), so it opts out of the icon-button outline
+// every other icon button carries (button.styl).
+#menu #menu-root [class*="ct-button-image-"]
+  border: none !important
+
+// The debugger toolbar's navigation buttons are a category of their own: they
+// keep the behaviour they had before the shared button changes in button.styl.
+// The icon-button outline already skips them there; this takes them out of the
+// shared button transition (BUTTON_TRANSITION), so their hover is instant again.
+#menu #isonim-debug-controls button
+  transition: none

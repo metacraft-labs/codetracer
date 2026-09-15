@@ -56,9 +56,9 @@
  * today" is exactly the reasoning that missed 4.
  *
  * Arms S3-S5 are the bounded negative.  S3 pins the WHOLE `innerHTML`
- * population — 48 writes, 14 of them non-clearing, every one triaged — so a
- * forty-ninth is a red run.  It pins them as a TABLE of files and a TRANSCRIPT
- * of the fourteen live writes, not as the number 48, so the red run names the
+ * population — 47 writes, 13 of them non-clearing, every one triaged — so a
+ * forty-eighth is a red run.  It pins them as a TABLE of files and a TRANSCRIPT
+ * of the thirteen live writes, not as the number 47, so the red run names the
  * file that grew and quotes the line that did it: a budget whose failure
  * cannot say what it found is a budget the next reader bumps.  S4 sweeps the
  * other ways in (`outerHTML`,
@@ -717,7 +717,7 @@ describe('S3. The whole innerHTML population, pinned');
 // failure prints the file that grew and the line of source that did it, and
 // triage starts from a diff instead of a hunt.
 //
-// The 48 in this file's header is DERIVED from the table rather than written
+// The 47 in this file's header is DERIVED from the table rather than written
 // twice, so the prose and the pin cannot drift apart.
 
 /** Every shipped front-end file that writes innerHTML: `[file, clears, live]`. */
@@ -726,7 +726,7 @@ const INNER_HTML_BY_FILE = [
   ['src/frontend/storybook_components.nim', 7, 2],
   ['src/frontend/subwindow.nim', 1, 0],
   ['src/frontend/ui/auto_hide_overlay.nim', 1, 0],
-  ['src/frontend/ui/auto_hide.nim', 3, 1],
+  ['src/frontend/ui/auto_hide.nim', 3, 0],
   ['src/frontend/ui/calltrace.nim', 2, 0],
   ['src/frontend/ui/datatable.nim', 0, 2],
   ['src/frontend/ui/editor.nim', 0, 1],
@@ -751,13 +751,14 @@ const INNER_HTML_BY_FILE = [
  * The source text of every NON-CLEARING write, verbatim.
  *
  * The clears are counted but not transcribed: `x.innerHTML = cstring""` cannot
- * carry a payload, and `isClear` is what says so.  These fourteen are the
+ * carry a payload, and `isClear` is what says so.  These thirteen are the
  * actual sinks, and each one is triaged by name in arm S or S2 above.
+ * (There were fourteen: `ui/auto_hide.nim`'s floating unpin button wrote a
+ * literal `&#x2715;`.  Its icon is now drawn by CSS, so the write is gone.)
  */
 const INNER_HTML_LIVE_WRITES = [
   'src/frontend/storybook_components.nim: denseHost.innerHTML = `denseHtml`;',
   'src/frontend/storybook_components.nim: if (detailedHost) detailedHost.innerHTML = `detailedHtml`;',
-  'src/frontend/ui/auto_hide.nim: pinBtn.innerHTML = cstring"&#x2715;"  # X close/dismiss icon',
   'src/frontend/ui/datatable.nim: endRowField.innerHTML = cstring($(self.endRow))',
   'src/frontend/ui/datatable.nim: rowsCountField.innerHTML = cstring($(self.rowsCount))',
   'src/frontend/ui/editor.nim: el.innerHTML = frames[i]',
@@ -810,7 +811,7 @@ assertEqual(
   [...INNER_HTML_LIVE_WRITES].sort().join('\n'),
   `and the ${INNER_HTML_LIVE_WRITES.length} non-clearing ones are written exactly this way`);
 
-// The four that arm S/S2 do not already name, so all fourteen are accounted
+// The three that arm S/S2 do not already name, so all thirteen are accounted
 // for rather than merely counted.
 {
   const traceNim = sources.get('src/frontend/ui/trace.nim');
@@ -819,9 +820,12 @@ assertEqual(
     'trace.nim\'s two overlay messages are markup-free string constants');
   assert(/innerHTML =\s*\n?\s*\(\$self\.chart\.viewKind\)\[4\.\.\^1\]/.test(traceNim),
     'and its third write is an enum name, which the type keeps markup-free');
-  assert(/innerHTML = cstring"&#x2715;"/.test(
+  // Kept as an assertion (not deleted) so the suite's assertion count holds,
+  // and so the ✕ cannot quietly come back: that glyph also means "close" on
+  // the overlay header, and the icon is now `.overlay-floating-pin::before`.
+  assert(!/pinBtn\.innerHTML/.test(
     sources.get('src/frontend/ui/auto_hide.nim')),
-    'auto_hide\'s remaining write is a literal HTML entity — markup on purpose');
+    'auto_hide\'s floating unpin button writes no markup — CSS draws its icon');
   assert(/htmlEscape\(/.test(sources.get('src/frontend/storybook_components.nim')),
     'the storybook table builder escapes the values it interpolates');
 }

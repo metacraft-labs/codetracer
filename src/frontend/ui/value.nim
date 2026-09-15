@@ -1150,9 +1150,12 @@ proc renderValueRowDom(
       self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: value))
       self.redraw()
     )
-    let tooltip = newElement(cstring"div", cstring"custom-tooltip")
-    tooltip.appendText(cstring"Add to scratchpad")
-    scratchpadButton.appendChild(tooltip)
+    # A plain `title`, not a `.custom-tooltip` child. This button only exists
+    # inside the Flow value popup, whose content box scrolls, so a styled
+    # tooltip positioned outside it is cropped (see the note on
+    # `.add-to-scratchpad-button` in flow.styl). The browser draws a `title`
+    # above everything, so it is the one tooltip that can show here.
+    scratchpadButton.setAttribute(cstring"title", cstring"Add to scratchpad")
     nameContainer.appendChild(scratchpadButton)
 
   if compoundOrPointsToCompound(value):

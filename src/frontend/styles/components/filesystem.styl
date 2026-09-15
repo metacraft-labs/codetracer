@@ -27,6 +27,13 @@
   &:focus
     outline: 0px
 
+// The panel inset (PANEL_INSET, 8px, button.styl) on the left: the top level's
+// expand arrows start 8px from the panel edge.  jstree already sets them 4px
+// in, so the list takes the other 4px.  The `.jstree-wholerow` hover strips are
+// positioned against the tree, not this list, so they still run edge to edge.
+.filesystem .jstree-container-ul
+  padding-left: 0.25rem
+
 .filesystem-tree
   min-width: max-content
   padding: 0
@@ -91,6 +98,15 @@
 
 .jstree-anchor
   color: colors-ui-text-primary-body !important
+
+// File tree rows: the list hover (LIST_HOVER_BG, button.styl).  The tree had
+// none — jstree's own hover classes come from a plugin this app never runs.
+// A row is the full-width `.jstree-wholerow` behind its `.jstree-anchor`, so it
+// lights up whether the pointer is on the label or on the empty space beside
+// it; `> .jstree-anchor` keeps a hovered child from lighting its ancestors.
+.jstree-wholerow:hover,
+.jstree-node:has(> .jstree-anchor:hover) > .jstree-wholerow
+  background-color: LIST_HOVER_BG
 
 .diff-file-added
   color: green !important

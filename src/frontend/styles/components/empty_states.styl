@@ -23,6 +23,7 @@
 .filesystem-loading-overlay,
 .problems-empty,
 .search-results-empty,
+.fif-empty-prompt,
 .unified-diff-empty,
 .dt-empty,
 .dataTables_empty,
@@ -36,9 +37,15 @@
 .shader-debug-empty,
 .shader-debug-values-empty,
 .video-player-empty,
-.agent-workspace-empty
+.agent-workspace-empty,
+.ct-counterexample-closed,
+.ct-counterexample:has(> .ct-counterexample-closed) > .ct-counterexample-provenance
   font-family: "SpaceGrotesk"
   font-size: 0.875rem
+  // Upright, always.  A panel's own stylesheet set the Problems message in
+  // italic, the only one of these that was; stating it here keeps any one
+  // panel from drifting off the shared treatment the same way.
+  font-style: normal
   opacity: 0.6
   line-height: 1.25rem
   text-align: center
@@ -68,6 +75,7 @@
 .filesystem-loading-overlay,
 .problems-empty,
 .search-results-empty,
+.fif-empty-prompt,
 .event-log-marker-empty,
 .trace-log-empty,
 .point-list-empty,
@@ -84,6 +92,29 @@
   height: 100%
   justify-content: center
   align-items: center
+
+// The Verification panel's counterexample view always opens with its provenance
+// note — "the panel says what it is before it says anything it contains"
+// (viewmodel/views/isonim_counterexample_view.nim).  While nothing is open, that
+// note and "No counterexample is open." are together the panel's message, so
+// both take the treatment above and are centred in the panel as one block, the
+// way every other empty panel shows a single message.
+//
+// Scoped with `:has()` to the empty state: once a counterexample is open the
+// note heads the values below it, and the view keeps its natural layout.
+.ct-counterexample:has(> .ct-counterexample-closed)
+  display: flex
+  flex-direction: column
+  justify-content: center
+  height: 100%
+
+// Find in Files keeps its prompt inside `.fif-empty`, which also holds the
+// recent searches when there are any.  With none, the prompt is the panel's
+// whole message, so the container fills the panel body and the prompt centres
+// in it; with recents, the list keeps its own top-down layout.
+.fif-empty:not(:has(> .fif-recent-label))
+  height: 100%
+  box-sizing: border-box
 
 // The event log renders its empty message as a DataTables cell.  `data_tables.styl`
 // restyles the whole table — `table`/`tbody` become blocks, `tr` a flex row and

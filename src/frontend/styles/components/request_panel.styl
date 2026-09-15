@@ -19,18 +19,22 @@
   display: flex
   align-items: center
   gap: 0.667em
-  padding: 0.5em 1em
+  // The panel inset (PANEL_INSET, 8px, button.styl) at the sides; no top of
+  // its own — the dock's 8px (auto_hide.styl) is the whole gap above it.
+  padding: 0 PANEL_INSET 0.5em
   flex-shrink: 0
   background: colors-ui-surface-base-panel
   border-bottom: 1px solid colors-ui-border-secondary
 
 // URL search input — uses design-system input tokens via ct-input-panel + ct-input-search-image
-// Override height to match filter bar; font-family stays monospace for URL readability.
+// A panel field, so the medium input size (input.styl).  This was 1.75em, which
+// followed the field's 14px text to 24.5px — off the pixel grid and off every
+// other panel field's height.
 .request-filter-search
   flex: 1
   font-family: "SpaceGrotesk" !important
-  height: 1.75em
-  max-height: 1.75em
+  height: INPUT_HEIGHT_MD
+  max-height: INPUT_HEIGHT_MD
 
 
 // ---------------------------------------------------------------------------
@@ -40,7 +44,7 @@
 .request-table-header
   display: flex
   align-items: center
-  padding: 0.4167em 1em
+  padding: 0.4167em PANEL_INSET
   font-size: 0.9167em
   font-weight: 500
   letter-spacing: 0.06em
@@ -68,7 +72,7 @@
 .request-row
   display: flex
   align-items: center
-  padding: 0.5em 1em
+  padding: 0.5em PANEL_INSET
   cursor: pointer
   border-bottom: 1px solid colors-ui-border-secondary
   color: colors-ui-text-primary-body-subtle
@@ -332,7 +336,7 @@ button.request-detail-handler-btn
 
 .request-detail-key
   color: colors-ui-text-information-primary
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   min-width: 10em
 
 .request-detail-value

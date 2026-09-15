@@ -18,31 +18,17 @@
   box-sizing: border-box
   overflow: hidden
   color: colors-ui-text-primary-body
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   font-size: 13px
   line-height: 20px
 
+  // Call / Line / Function: the shared segmented tabs (`segmented-tabs()`,
+  // shared_widgets.styl), like the State panel's.  The margin is the 6px / 8px
+  // inset this row used to have as padding.
   .flow-mode-selector
-    display: flex
-    align-items: center
-    gap: 4px
-    padding: 6px 8px
     flex: 0 0 auto
-
-    button
-      height: 24px
-      min-width: 64px
-      padding: 0 10px
-      border: 0
-      border-radius: 4px
-      background: colors-ui-surface-primary-tertiary
-      color: colors-ui-text-primary-body
-      cursor: pointer
-      font: inherit
-
-      &.active
-        background: colors-ui-surface-input-default
-        color: colors-ui-text-primary-body
+    segmented-tabs()
+    margin: 0.375rem 0.5rem
 
   .flow-loading
     padding: 0 8px 6px
@@ -671,19 +657,18 @@
     &:active
       opacity: 0.5
 
-    .custom-tooltip
-      left: -8.75em
-      top: -0.375em
+    // No `.custom-tooltip` here: this button's name is a plain `title`
+    // (ui/value.nim).  A styled tooltip cannot escape this popup —
+    // `.tippy-content` below scrolls (`overflow: auto`), so anything placed
+    // outside it is cropped — and the one that used to be here had no hover
+    // rule, so it never showed at all.
 
-      &:after
-        border-color: transparent transparent transparent colors-ui-surface-base-canvas
-        left: 98%
-        bottom: 0%
-        border-width: 0.75em
-        top: 0%
-
+  // The same colour as the box, so the arrow reads as part of it.  It used to
+  // be a hard-coded near-white, which on the dark theme would be a white arrow
+  // on a dark box.  (Today the arrow is not drawn at all: its shape comes from
+  // tippy.js's own stylesheet, which the app does not load.)
   &[data-placement^="top"] > .tippy-arrow::before {
-    border-top-color: #FEFEFE
+    border-top-color: colors-editor-surface-primary
   }
 
   .tippy-content {

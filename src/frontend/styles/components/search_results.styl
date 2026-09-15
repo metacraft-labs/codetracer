@@ -37,7 +37,7 @@
   display: flex
   align-items: center
   justify-content: space-between
-  padding: 8px 10px 6px
+  padding: 8px PANEL_INSET 6px
   flex-shrink: 0
   border-bottom: 1px solid colors-ui-border-secondary
 
@@ -88,7 +88,9 @@
 // carries ct-input-panel + ct-input-search-image exactly like the event log.
 .fif-search-bar
   position: relative
-  margin: 8px 10px
+  // The panel inset (PANEL_INSET, 8px, button.styl) at the sides; no top of
+  // its own — the dock's 8px (auto_hide.styl) is the whole gap above it.
+  margin: 0 PANEL_INSET 8px
   flex-shrink: 0
 
 // "Find in Files" badge — compact pill between the search icon and the
@@ -96,17 +98,28 @@
 // affecting flow; the input's padding-left is widened to push the cursor
 // past the badge.
 //
-// left: 2em      — clears the magnifying-glass icon (icon at 0.5em, 1em wide
+// left           — clears the magnifying-glass icon (icon at 0.5em, 1em wide
 //                  inside 1.875em padding-left region) with a small gap.
+// width          — fixed, so the field can place its text a known distance
+//                  after the badge (FIF_BADGE_GAP, below).  Sized to hold the
+//                  label (74.5px as it drew by its own width) on a whole pixel.
 // height: 1em    — compact, does NOT fill the full input height.
 // top/transform  — vertically centred inside the input row.
+FIF_BADGE_LEFT = 2rem
+FIF_BADGE_WIDTH = 4.75rem
+// Between the badge and the field's text ("Search in files…" or the query).
+FIF_BADGE_GAP = 0.5rem
+
 .fif-badge
   position: absolute
-  left: 2rem
+  left: FIF_BADGE_LEFT
   top: 50%
   transform: translateY(-50%)
   display: inline-flex
   align-items: center
+  justify-content: center
+  box-sizing: border-box
+  width: FIF_BADGE_WIDTH
   height: 1rem
   padding: 0 0.4em
   border-radius: 0.2em
@@ -123,11 +136,14 @@
 // Inner <input> — identical treatment to the event-log search input:
 // ct-input-panel provides the background/border/height tokens and
 // ct-input-search-image adds the magnifying-glass icon on the left.
-// padding-left is extended past the icon + badge so the cursor/placeholder
-// start cleanly after the badge.  padding-right reserves space for ×.
+// padding-left puts the cursor/placeholder FIF_BADGE_GAP (8px) after the
+// badge: the badge's left and width, plus the gap, less the field's own border
+// (the padding starts inside it).  It was a flat `calc(2em + 6.5rem)`, 132px,
+// which left the text 26.5px after the badge.  padding-right reserves space
+// for ×.
 .fif-input
   width: -webkit-fill-available
-  padding-left: calc(2em + 6.5rem) !important
+  padding-left: "calc(%s + %s + %s - %s)" % (FIF_BADGE_LEFT FIF_BADGE_WIDTH FIF_BADGE_GAP CONTROL_BORDER_WIDTH) !important
   padding-right: 1.75rem !important
 
   &::placeholder
@@ -171,17 +187,19 @@
 // ---------------------------------------------------------------------------
 
 .fif-empty
-  padding: 12px 10px
+  // No side padding: the recent searches inside are rows that run edge to
+  // edge, with their text at PANEL_INSET.
+  padding: 12px 0
   display: flex
   flex-direction: column
   gap: 2px
 
+// Face, size, strength and colour come from the shared empty-state treatment
+// (components/empty_states.styl); the colour is inherited from `.fif-panel`,
+// as every other panel's message inherits its panel's body text.
 .fif-empty-prompt
-  color: colors-ui-text-primary-body-subtle
-  font-size: 12px
   text-align: center
   padding: 24px 0
-  opacity: 0.7
 
 .fif-recent-label
   font-size: 11px
@@ -189,20 +207,20 @@
   letter-spacing: 0.05em
   text-transform: uppercase
   color: colors-ui-text-primary-body-subtle
-  padding: 4px 2px 8px
+  padding: 4px PANEL_INSET 8px
   opacity: 0.7
 
 .fif-recent-item
   display: flex
   align-items: center
   justify-content: space-between
-  padding: 5px 8px
-  border-radius: 5px
+  padding: 5px PANEL_INSET
   cursor: pointer
   gap: 8px
 
+  // The list hover (LIST_HOVER_BG, button.styl): square, across the row.
   &:hover
-    background-color: colors-ui-surface-primary-secondary-hover
+    background-color: LIST_HOVER_BG
 
 .fif-recent-query
   font-size: 12px
@@ -246,7 +264,7 @@
   display: flex
   align-items: center
   justify-content: space-between
-  padding: 4px 10px
+  padding: 4px PANEL_INSET
   background-color: colors-ui-surface-primary-tertiary
   position: sticky
   top: 0
@@ -275,7 +293,8 @@
 .fif-match-row
   display: flex
   align-items: baseline
-  padding: 3px 10px 3px 20px
+  // Indented 10px past the file header's PANEL_INSET: 8px + 10px.
+  padding: 3px PANEL_INSET 3px 1.125rem
   cursor: pointer
   font-family: monospace
   font-size: 12px

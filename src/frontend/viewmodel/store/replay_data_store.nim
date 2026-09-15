@@ -949,7 +949,7 @@ proc updateCodeStateLine*(store: ReplayDataStore;
   ## populated ``code-state-line`` markup and the ``no-code`` fallback.
   let formatted =
     if sourceCode.len == 0: ""
-    else: $line & " | " & sourceCode
+    else: $line & CodeStateLineSeparator & sourceCode
   when defined(js):
     vmDebug "[PIPELINE] updateCodeStateLine: storeId=" &
       $store.storeId & " line=" & $line & " has_source=" &

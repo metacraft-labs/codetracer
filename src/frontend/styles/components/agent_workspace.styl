@@ -10,7 +10,7 @@
   height 100%
   width 100%
   overflow hidden
-  font-family "SpaceMono", monospace
+  font-family "SpaceGrotesk"
 
 // --- Header ---
 
@@ -105,8 +105,9 @@
   border-bottom 1px solid var(--border-color, #2a2b34)
   transition background-color 0.15s ease
 
+  // The list hover (LIST_HOVER_BG, button.styl).
   &:hover
-    background-color var(--bg-hover, #2a2b34)
+    background-color LIST_HOVER_BG
 
   &.selected
     background-color var(--bg-selected, #333444)

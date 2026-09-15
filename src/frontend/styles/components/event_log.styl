@@ -60,7 +60,7 @@
   z-index: 2
 
 .eventLog-category-dropdown-button //TODO: think of a way to combine all dropdowns in one style class
-  font-family: "SpaceMono" !important
+  font-family: "SpaceGrotesk" !important
   display: flex
   justify-content: start
   align-items: center
@@ -206,6 +206,15 @@
       min-width: 0
       white-space: nowrap
 
+// Event Log rows (and every other DataTables table): the list hover
+// (LIST_HOVER_BG, button.styl).  The shared table hovers in data_tables.styl
+// never matched these rows — they expect `.data-table tr.odd.past`, and the
+// real rows are a bare `tr.past` / `tr.future` in a DataTables `table.dataTable`
+// — so the log had no row hover at all.  The current position's row
+// (`tr.active`) keeps its own look.
+table.dataTable tbody tr:not(.active):hover
+  background-color: LIST_HOVER_BG
+
 .dropdown-list-row
   display: grid
   grid-template-columns: 9em minmax(0, 1fr)
@@ -216,6 +225,12 @@
 
   &:first-child
     border-top: none
+
+  // The list hover (LIST_HOVER_BG, button.styl), across the whole row —
+  // including the tag cell, which paints its own fill at rest.
+  &:hover,
+  &:hover > .ct-checkmark-field
+    background: LIST_HOVER_BG
 
   // Left column — tag label checkbox
   > .ct-checkmark-field
@@ -255,58 +270,80 @@
       --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
       --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
 
+// The filter menu's header row: the "Trace events" / "Recorded events" tabs on
+// the left and the On/Off switch on the right.
+//
+// The tabs take the same mode-switcher look as the State panel's
+// Locals / Globals / Watches (components/state.styl — CodeTracer Design System,
+// "I2 · Mode switcher"): one outlined track, the selected tab raised inside it.
+//
+// The markup has no element around just the two tabs — they share this row
+// with the switch — so the track is drawn by `::before`.  The row is a grid,
+// and the pseudo-element is a grid item spanning the tabs' two columns, placed
+// before them so they paint on top.  This assumes two tabs, which is what
+// `renderFilterDropdownPanel` renders.
 .toggle-buttons
-  display: flex
-  justify-content: start
-  gap: 0.25em
+  display: grid
+  grid-template-columns: max-content max-content 1fr max-content
+  column-gap: 0.125rem
   padding: 0 0.5rem
   background: colors-ui-surface-base-canvas
   align-items: center
-  min-height: 2.4em
-  border-bottom: 0.0625em solid colors-ui-border-tertiary
+  // Whole pixels, so the 26px track sits exactly 5px from the top and bottom.
+  // This was 2.4em (33.6px at the row's 14px) with a 0.875px border, which put
+  // the track's outline on a fractional row and softened it.  37px because the
+  // row is border-box: 36px of room plus the 1px border below it.
+  min-height: 2.3125rem
+  border-bottom: 0.0625rem solid colors-ui-border-tertiary
+
+  // The track: the MEDIUM control size, 26px — 1px border, 2px inset, a 20px
+  // (extra small) tab, 2px, 1px — with the same surface, border and 6px
+  // corners as the State panel's.
+  &::before
+    content: ""
+    grid-row: 1
+    grid-column: 1 / 3
+    height: CONTROL_HEIGHT_MD
+    box-sizing: border-box
+    background-color: colors-ui-surface-base-raised
+    border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
+    border-radius: CONTROL_RADIUS
 
   // Enable/disable toggle — pushed to the far right
   .toggle-enabled-wrapper
+    grid-row: 1
+    grid-column: 4
     display: flex
     align-items: center
     gap: 0.375em
-    margin-left: auto
     padding-right: 0.25em
 
   .ct-tab
-    flex: 0 0 auto
-    height: 100%
-    padding: 0.4em 0.25em 0.375em
-    border-radius: 0
-    border-bottom: none
-    background: colors-ui-surface-base-canvas
-    color: colors-ui-text-primary-body-subtle
-    font-size: 1.05em
-    font-weight: 500
-    line-height: 1.1
-    position: relative
-    white-space: nowrap
-    transition: background-color 0.12s ease, color 0.12s ease
+    grid-row: 1
+    // The shared segmented tab (shared_widgets.styl), selected by
+    // `data-selected` here rather than `.active`.
+    segmented-tab()
+    transition: none
 
+    // 3px in from the track's outer edge on the outside of each tab (1px
+    // border + 2px inset); the 2px between them is the column gap.
+    &:nth-of-type(1)
+      grid-column: 1
+      margin-left: 0.1875rem
+
+    &:nth-of-type(2)
+      grid-column: 2
+      margin-right: 0.1875rem
+
+    // No hover, as on the State tabs: the shared `.ct-tab` hover wash and
+    // underline would give these a state the State tabs do not have.
     &:hover:not([data-disabled="true"]):not([data-selected="true"])
-      color: colors-ui-text-primary-body
-      background: colors-ui-surface-primary-default-hover
-      border-bottom: none
+      background: transparent
+      color: colors-ui-text-primary-body-subtle
 
     &[data-selected="true"]
-      color: colors-ui-border-action
-      background: colors-ui-surface-primary-default-hover
-      border-bottom: none
-
-      &::after
-        content: ""
-        position: absolute
-        left: 0
-        right: 0
-        bottom: -0.25em
-        height: 0.125em
-        border-radius: 999em
-        background: colors-ui-border-action
+      background: colors-ui-surface-base-card
+      color: colors-ui-text-primary-headings
 
 .eventLog
   font-family: Arial, Helvetica, sans-serif
@@ -314,11 +351,23 @@
   display: flex
   flex-direction: column
 
+  // The panel inset (PANEL_INSET, 8px — button.styl) on both sides: the toolbar
+  // and the footer start 8px from the left edge, on the same line as the tab
+  // title and the event rows, and end 8px from the right.  The shared
+  // `.ct-flex` toolbar and `.data-tables-footer` both default to 4px; they are
+  // overridden here, not at the source, because other panels use them too.
+  // The toolbar's top is the panel body's own 8px (`.lm_content`).
+  > .ct-flex
+    padding-left: PANEL_INSET
+    padding-right: PANEL_INSET
+
   > .data-tables-footer
+    padding-left: PANEL_INSET
+    padding-right: PANEL_INSET
     flex: 0 0 auto
     min-height: 2.75em
     align-items: center
-    font-family: "SpaceMono"
+    font-family: "SpaceGrotesk"
     font-size: 0.75rem
     line-height: 1.1
     color: colors-ui-text-primary-body
@@ -338,32 +387,34 @@
       width: 4.5em
       min-width: 4.5em
       max-width: 4.5em
-      height: 1.75em
-      max-height: 1.75em
+      // The extra-small input size (input.styl): a compact inline field in the
+      // footer.  This was 1.75em, which followed the footer's 12px text to 21px.
+      height: INPUT_HEIGHT_XS
+      max-height: INPUT_HEIGHT_XS
       margin: 0em 0em !important
       padding: 0 0.75em
       border-radius: 0.5em
       // Matches the 0.0625rem (1px) field border in input.styl. This rule wins
       // over `.ct-input-small` on specificity, so leaving it at the old 0.03125em
       // kept this one field a hairline while every other field went to 1px.
-      border: 0.0625rem solid transparent
-      background: colors-editor-surface-select
+      border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
+      background: colors-ui-surface-input-secondary
       color: colors-ui-text-primary-body !important
-      font-family: "SpaceMono"
+      font-family: "SpaceGrotesk"
       font-size: 1em !important
       line-height: 1
       text-align: left
       box-sizing: border-box
 
       &:hover
-        border-color: colors-ui-surface-primary-tertiary
-        background: colors-editor-surface-select
+        border-color: colors-ui-border-primary-hover
+        background: colors-ui-surface-input-secondary
 
+      // Border and ring come from the shared active state (input.styl);
+      // the surface stays the field's own, as it does for every other field.
       &:focus-visible
         outline: none !important
-        border-color: colors-ui-surface-primary-tertiary
-        background: colors-editor-surface-select
-        box-shadow: 0 0 0 0.0625em colors-ui-surface-primary-tertiary
+        background: colors-ui-surface-input-secondary
 
   .eventLog-detailed-table
     display: none // TODO: show

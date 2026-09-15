@@ -7,6 +7,14 @@
 ## They represent the "clean" domain model that panels and view-models
 ## consume via reactive signals.
 
+const
+  CodeStateLineSeparator* = " | "
+    ## Joins the line number and the source in the State panel's
+    ## "<line> | <source>" string (``ReplayDataStore.updateCodeStateLine``).
+    ## The view splits on it again to style the two halves separately, and
+    ## the GUI tests look for it in the element's text, so it is declared
+    ## once here rather than spelled at each site.
+
 type
   LoadingState* = enum
     ## Tracks the status of an async data-fetch operation.

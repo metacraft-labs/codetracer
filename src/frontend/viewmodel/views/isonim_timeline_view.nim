@@ -84,7 +84,12 @@ proc timelineRootStyle(): string =
     "min-height: 112px; box-sizing: border-box;"
 
 proc timelineTrackStyle(): string =
-  "position: relative; height: 42px; margin: 0 10px; " &
+  # No side margin here: the track's inset is the panel inset, set by
+  # `.timeline-track` in styles/components/timeline.styl (PANEL_INSET, 8px).
+  # An inline `margin: 0 10px` outranked that rule and left the track 2px off
+  # every other panel's edge.  The playhead and markers are placed in
+  # percentages of the track, so its width is free to change.
+  "position: relative; height: 42px; " &
     "flex: 0 0 auto; cursor: pointer;"
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,7 @@
     align-items: center
     border-bottom: 1px solid colors-ui-surface-input-default
     color: colors-ui-text-primary-body
-    font-family: "SpaceMono", monospace
+    font-family: "SpaceGrotesk"
     font-size: 13px
     line-height: 20px
     padding: 0 8px
@@ -90,7 +90,7 @@
   .trace-log-empty
     padding: 12px 8px
     color: colors-ui-text-primary-body
-    font-family: "SpaceMono", monospace
+    font-family: "SpaceGrotesk"
     font-size: 13px
 
     &.hidden
@@ -697,7 +697,7 @@ RESIZING_BORDER_SIZE = 4px
   overflow: hidden !important
 
 .trace-overlay
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
   position: relative
   // top: calc(50% - 0.5ex)
   font-size: 14px
@@ -725,3 +725,12 @@ RESIZING_BORDER_SIZE = 4px
 .error-trace
   color: colors-ui-text-error-primary
   padding-right: 8px
+
+// The tracepoint view-kind menu (table / line / pie) is Bootstrap markup, and
+// Bootstrap's `.dropdown-item:hover` paints a LIGHT #f8f9fa row with dark text —
+// on the dark theme.  The list hover instead (LIST_HOVER_BG, button.styl), with
+// the text left as it is.  One class deeper than Bootstrap's rule, to win.
+.dropdown-menu .dropdown-item:hover,
+.dropdown-menu .dropdown-item:focus
+  background-color: LIST_HOVER_BG
+  color: inherit
