@@ -472,7 +472,7 @@
       "locked": {
         "owner": "metacraft-labs",
         "repo": "codetracer",
-        "rev": "632fdceed037c52b0fd26b2195934bc32e82a0ed",
+        "rev": "4b8e5945b4e42d513fdf0a084e6d563adfc1b531",
         "type": "github"
       },
       "original": {
@@ -2631,17 +2631,17 @@
     "io-mon-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1788876344,
-        "narHash": "sha256-BtMWgvvEg+jONDnQIY8osCHshjwAbonB5ArZpqzmYDA=",
+        "lastModified": 1789207091,
+        "narHash": "sha256-+dOkJin8iRVVTSzcHr1P/uJ0fCLFtI5CZlLRIqIyWQY=",
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "65b190ba5704454dd33138a2dc82fac8fbc188d6",
+        "rev": "ac3e5b9714e6c2fd3c501a69ec2be8ff2abe6fc4",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "io-mon",
-        "rev": "65b190ba5704454dd33138a2dc82fac8fbc188d6",
+        "rev": "ac3e5b9714e6c2fd3c501a69ec2be8ff2abe6fc4",
         "type": "github"
       }
     },
@@ -3014,6 +3014,8 @@
     "nim-shm-gset-src": {
       "flake": false,
       "locked": {
+        "lastModified": 1787444592,
+        "narHash": "sha256-nO7XSWxBWrLgL8d9q1zhTcGMMjGokZKjYtX9byb9/Vk=",
         "owner": "metacraft-labs",
         "repo": "nim-shm-gset",
         "rev": "c646982b354cb5b1fa8734f94b951a660419d75c",
@@ -3022,7 +3024,7 @@
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-shm-gset",
-        "rev": "360bfc15cadab1ff583e6d1cbc20b389d5d6825f",
+        "rev": "c646982b354cb5b1fa8734f94b951a660419d75c",
         "type": "github"
       }
     },
@@ -3079,11 +3081,9 @@
     "nim-stackable-hooks-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1787764409,
-        "narHash": "sha256-Lv0i9MBGkwPFfEaOxB7y9ixwt7dOvJIKj3W4R/BpyOY=",
         "owner": "metacraft-labs",
         "repo": "nim-stackable-hooks",
-        "rev": "41ab1b987aba67e8bcc34a5945ac33e17b6418ed",
+        "rev": "37234e9f353dd88fcb89e05b69e58d1fce89b6bb",
         "type": "github"
       },
       "original": {
@@ -5052,28 +5052,26 @@
         ]
       },
       "locked": {
-        "lastModified": 1789060393,
-        "narHash": "sha256-KlzN+G3rzl5LijC6Cegf3XqvCwWxXVQua+j4m9jZtSc=",
+        "lastModified": 1789419014,
+        "narHash": "sha256-oHecjtjTFyCK2eqILwXW0na+EHaAQReql9WhBqzLhPk=",
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "3a7ef0d7c16ba4d5f2e0e188dcba582847e938a3",
+        "rev": "69bb0a7dd8d8a0b17b94c4d8f364c4e9e986a6f7",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "reprobuild",
-        "rev": "3a7ef0d7c16ba4d5f2e0e188dcba582847e938a3",
+        "rev": "69bb0a7dd8d8a0b17b94c4d8f364c4e9e986a6f7",
         "type": "github"
       }
     },
     "reprobuild-ct-test-runner-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1782389086,
-        "narHash": "sha256-k3h/f3u/5/QiH88bRDVmHg7sc+PFricypIBlZ4Jn+Cs=",
         "owner": "metacraft-labs",
         "repo": "reprobuild-ct-test-runner",
-        "rev": "03c1acd3b9b4a7938c291ff74aec8368a5b657ff",
+        "rev": "397fc59ed3e3d8f774523a6723782c535aaabe58",
         "type": "github"
       },
       "original": {
@@ -5157,17 +5155,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1788976244,
-        "narHash": "sha256-7wTdJkutu2VDQFuKIzZgAzJ7X8J3pHXbr3dEcqcVH2Q=",
+        "lastModified": 1789145447,
+        "narHash": "sha256-dGy675XULfAQXFX29htYdNaX52RcnbQx0OX4WVBxORE=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "7a79877992908f64d3c8318bb7b20078ff5d1bf4",
+        "rev": "093f520dbe0177bf760585f1aea5064a986d5467",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "7a79877992908f64d3c8318bb7b20078ff5d1bf4",
+        "rev": "093f520dbe0177bf760585f1aea5064a986d5467",
         "type": "github"
       }
     },

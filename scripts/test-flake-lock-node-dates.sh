@@ -50,7 +50,7 @@
 # ## What it covers, which is more than the direct github inputs
 #
 # Every node in the lock, `github` and `git` alike, whose repository is checked
-# out as a workspace sibling — 42 of the 259 locked nodes as of this writing.
+# out as a workspace sibling — 41 of the 259 locked nodes as of this writing.
 # That is the 31 direct `github` inputs the network check sees, MINUS the
 # third-party ones with no sibling, PLUS two things it does not:
 #
@@ -77,7 +77,9 @@
 #     the `git fetch` that fixes it; never counted as verified.
 #   * `narHash`. Only a real fetch proves that, and the first `nix` invocation
 #     in any lane already does.
-#   * Nodes that record no `lastModified` at all — three do. There is nothing
+#   * Nodes that record no `lastModified` at all — four do, and which four
+#     moves with every bump of a flake input that commits its own lock (they
+#     are inherited from it verbatim). There is nothing
 #     for the `rev` to disagree with, so this is NOT a finding; it is counted
 #     and named, and the count is the honest statement of what was skipped.
 #   * `tarball` nodes. No commit, no commit date.
