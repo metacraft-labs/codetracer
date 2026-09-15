@@ -60,6 +60,10 @@ const
     ## say which one without installing anything. It is checked first, so it
     ## also lets a user pin a build.
 
+  gpuiBinaryEnvVar* = "CODETRACER_GPUI_BIN"
+    ## PLAT-20. The same override for the GPUI front-end's binary, and the same
+    ## reasons hold word for word.
+
 proc configuredUiValue*(): string =
   ## §5's third layer: `ui = "<value>"` in the user's configuration.
   ##
@@ -120,16 +124,28 @@ proc configuredUiValue*(): string =
     return ""
   ""
 
-proc resolveTuiBinary*(componentBin: string): string =
-  ## Where `codetracer-tui` is, in the order a component should look.
+proc resolveComponentBinary*(componentName, componentBin,
+                             overrideEnvVar: string): string =
+  ## Where a front-end component's binary is, in the order a component should
+  ## look.
   ##
   ## Returns "" when nothing is found; the caller reports that by name rather
   ## than exec'ing a bare filename and letting `execv` produce ENOENT.
-  let override = getEnv(tuiBinaryEnvVar, "")
+  ##
+  ## **ONE FUNCTION, TWO FRONT-ENDS.** PLAT-20 added a second component
+  ## (`codetracer-gpui`) and the obvious way to do that was to copy the four
+  ## lookup steps below with one string changed — which is
+  ## Verification-Harness-Traps §14 exactly: a second copy of a predicate that
+  ## goes on agreeing with itself while its twin is broken, and the copy nobody
+  ## mutates is the one that stays wrong. The search ORDER is the thing being
+  ## specified (an explicit override, then an installed bundle, then a sibling
+  ## of this binary, then the developer build tree, then `PATH`), and it must
+  ## be one order rather than two.
+  let override = getEnv(overrideEnvVar, "")
   if override.len > 0:
     return override
 
-  let installed = findComponentBinary("codetracer-tui", componentBin)
+  let installed = findComponentBinary(componentName, componentBin)
   if installed.len > 0:
     return installed
 
@@ -152,6 +168,28 @@ proc resolveTuiBinary*(componentBin: string): string =
     discard
 
   findExe(componentBin)
+
+proc resolveTuiBinary*(componentBin: string): string =
+  ## Where `codetracer-tui` is. A thin naming of `resolveComponentBinary`,
+  ## kept because PLAT-1's suites and `codetracer.nim` call it by this name.
+  resolveComponentBinary("codetracer-tui", componentBin, tuiBinaryEnvVar)
+
+proc resolveGpuiBinary*(componentBin: string): string =
+  ## Where `codetracer-gpui` is. PLAT-20.
+  resolveComponentBinary("codetracer-gpui", componentBin, gpuiBinaryEnvVar)
+
+proc resolveHandoffBinary*(plan: UiPlan): string =
+  ## The binary a `upkHandoff` plan names, resolved.
+  ##
+  ## The dispatch on the front-end lives HERE rather than at the call site, so
+  ## a third component front-end is one arm in one place rather than a second
+  ## `if` in `codetracer.nim`. `componentName` on the plan is what decides,
+  ## because that is the field the plan carries for exactly this purpose.
+  if plan.kind != upkHandoff:
+    return ""
+  case plan.frontEnd
+  of uiGpui: resolveGpuiBinary(plan.componentBin)
+  else: resolveTuiBinary(plan.componentBin)
 
 proc execHandoff*(binary: string; args: seq[string]) {.noreturn.} =
   ## Become `binary`. §3: "for a value naming a different binary, `exec`s it

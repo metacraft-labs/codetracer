@@ -1,0 +1,16 @@
+{
+  "G1": "Check failed: topEdgeProjection.status == dpsRefused",
+  "G10": "Check failed: invalidProjection.status == dpsRefused",
+  "G11": "Check failed: a == 900",
+  "G12": "Check failed: terminal.visible == gpui.visible",
+  "G13": "Check failed: shapeOf(projectedOf(initLayout(pane(paneEditor)))[\"center\"]) == onePaneShape",
+  "G14": "Check failed: arrangement.slots.len == 4",
+  "G2": "Check failed: dock[\"open\"].getBool == false",
+  "G3": "Check failed: rowDoc[\"center\"][\"info\"][\"stack\"][\"axis\"].getInt == 0",
+  "G4": "Check failed: totalSlots == 0",
+  "G5": "Check failed: \"\\\"tree\\\"\" in text or \"\\\"kind\\\"\" in text",
+  "G6": "Check failed: waiting == 5",
+  "G7": "Check failed: named == 1",
+  "G8": "Check failed: \"gpui\" in AcceptedUiValues",
+  "G9": "Check failed: tab[\"info\"][\"tabs\"][\"active_index\"].getInt == 2"
+}

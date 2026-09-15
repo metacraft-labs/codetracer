@@ -100,12 +100,17 @@ try:
         stderr.writeLine(plan.message)
         quit(2)
       of upkHandoff:
-        let binary = resolveTuiBinary(plan.componentBin)
+        # PLAT-20: `resolveHandoffBinary` rather than `resolveTuiBinary`,
+        # because there are two component front-ends now and the dispatch
+        # belongs beside the search order rather than here.
+        let binary = resolveHandoffBinary(plan)
         if binary.len == 0:
+          let envVar = if plan.frontEnd == uiGpui: gpuiBinaryEnvVar
+                       else: tuiBinaryEnvVar
           stderr.writeLine(
             "ct: '--ui=" & $plan.frontEnd & "' needs the '" &
             plan.componentName & "' component and it is not installed; " &
-            "install it, or set " & tuiBinaryEnvVar & " to its binary")
+            "install it, or set " & envVar & " to its binary")
           quit(2)
         execHandoff(binary, plan.handoffArgs)
       of upkRewrite:

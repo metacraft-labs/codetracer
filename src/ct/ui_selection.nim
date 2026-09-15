@@ -26,21 +26,46 @@
 ## configuration only when the answer is "no". `--ui=tui` therefore touches no
 ## file at all, which is the case the gate measures.
 ##
-## ## Values are closed, and `gpui` is closed OUT
+## ## Values are closed, and `gpui` IS NOW IN — PLAT-20
 ##
 ## §4.2: an unrecognised value is a usage error naming the accepted set — never
 ## a component name, never guessed at, never a silent fall back to the default.
-## §4.1 puts `gpui` on the far side of that line *deliberately*: it is a value
-## the vocabulary reserves and this milestone does not accept, so `--ui=gpui`
-## today is a refusal that names the accepted set rather than a value that is
-## taken and then fails later. PLAT-20 adds it to `AcceptedUiValues`, and no
-## earlier milestone does.
+##
+## §4.1 put `gpui` on the far side of that line *deliberately*: *"Until it
+## ships, `--ui=gpui` is a usage error naming the accepted set … It is added to
+## the accepted set by the milestone that makes it work, and by no earlier
+## one."* **PLAT-20 is that milestone**, so `gpui` is in `AcceptedUiValues` and
+## `ReservedUiValues` is now empty.
+##
+## Two things about that emptiness, because an empty set is where a check goes
+## to stop being able to fail (Verification-Harness-Traps §4):
+##
+##   * `ReservedUiValues` is kept rather than deleted, because §4.1's mechanism
+##     — a value that is *in the vocabulary* and *not accepted yet* — is the
+##     right shape for the next front-end and deleting it would mean
+##     rediscovering it. It is now an empty `seq`, and `unknownValueMessage`'s
+##     loop over it is therefore vacuous.
+##   * So `ui_selection_test.nim` asserts the emptiness DIRECTLY and asserts
+##     the reserved-value message through a synthetic set, rather than leaving
+##     a loop nothing can enter standing in for coverage.
+##
+## §4.1's other half is unchanged and is a separate decision: `gui` still
+## resolves to `electron`. *"Whether `gui` stops resolving to `electron` is a
+## separate decision made on evidence, not a consequence of `gpui` becoming
+## available."*
 
 import std/strutils
 
 type
   UiFrontEnd* = enum
-    ## §4's vocabulary. `gpui` is NOT here — see the module header.
+    ## §4's vocabulary, in §4's own table order.
+    ##
+    ## **THE ORDER IS LOAD-BEARING.** `parseUiFrontEnd` answers
+    ## `UiFrontEnd(i)` for the `i`th entry of `AcceptedUiValues`, so the enum
+    ## and that array are one table written twice. `ui_selection_test.nim`
+    ## asserts they agree member by member — the pairing is the control, and
+    ## without it inserting a value in one place and appending it in the other
+    ## would silently resolve `--ui=tui` to a different front-end.
     uiElectron = "electron"
       ## Specifically the Electron desktop application.
     uiGui = "gui"
@@ -48,6 +73,9 @@ type
       ## `electron` today and expected to become GPUI; §4.1 keeps the two
       ## spellings apart precisely so a user who needs Electron's process model
       ## is not moved underneath them.
+    uiGpui = "gpui"
+      ## Specifically the GPUI desktop application — PLAT-20. A separate
+      ## component, reached by handoff, exactly as `tui` is.
     uiTui = "tui"
       ## The terminal front-end — a separate component, reached by handoff.
     uiWebui = "webui"
@@ -99,8 +127,11 @@ type
         ## One line, already prefixed with `ct: `, for stderr.
 
 const
-  AcceptedUiValues*: array[4, string] = ["electron", "gui", "tui", "webui"]
-    ## §4's table, as the closed set §4.2 requires. The ORDER is the table's.
+  AcceptedUiValues*: array[5, string] = ["electron", "gui", "gpui", "tui",
+                                         "webui"]
+    ## §4's table, as the closed set §4.2 requires. The ORDER is the table's,
+    ## and it is the same order `UiFrontEnd` declares — see that enum's note on
+    ## why that is not a coincidence you may rely on without a test.
 
   UiSelectingCommands*: array[4, string] = ["replay", "run", "edit", "review"]
     ## §6: the commands that PRESENT a session.
@@ -108,10 +139,16 @@ const
   UiEnvVar* = "CODETRACER_UI"
   UiConfigKey* = "ui"
 
-  ReservedUiValues*: array[1, string] = ["gpui"]
+  ReservedUiValues*: seq[string] = @[]
     ## §4.1: in the vocabulary, not in the accepted set. Named in the refusal so
     ## a user reading it learns the difference between "that is not a front-end"
     ## and "that one is not shipping yet" — without either being accepted.
+    ##
+    ## **EMPTY SINCE PLAT-20**, which moved its only member (`gpui`) into
+    ## `AcceptedUiValues`. Kept rather than deleted because the next front-end
+    ## will want it and because rediscovering the shape is more expensive than
+    ## carrying four lines; see the module header for why its emptiness is
+    ## asserted directly instead of being left to a loop that cannot run.
 
 func acceptedUiValuesText*(): string =
   AcceptedUiValues.join(", ")
@@ -138,11 +175,24 @@ func effectiveFrontEnd*(frontEnd: UiFrontEnd): UiFrontEnd =
   ## comparisons for exactly that reason.
   if frontEnd == uiGui: uiElectron else: frontEnd
 
-func unknownValueMessage(value, sourceText: string): string =
+func unknownValueMessage*(value, sourceText: string;
+                          reservedValues: openArray[string] =
+                            ReservedUiValues): string =
   ## §4.2's refusal, in one line, naming the accepted set.
+  ##
+  ## `reservedValues` is a PARAMETER with `ReservedUiValues` as its default,
+  ## and that is PLAT-20's doing rather than a generalisation for its own sake.
+  ## PLAT-20 emptied `ReservedUiValues`, so the loop below can no longer run in
+  ## production and a test calling this with the default would be asserting a
+  ## branch nothing can enter — Verification-Harness-Traps §10's
+  ## assertion-that-cannot-fail, arriving through an empty set instead of
+  ## through a `discard`. The parameter is what lets `ui_selection_test.nim`
+  ## drive the reserved arm through THIS function rather than through a second
+  ## copy of it (§14), so the mechanism §4.1 relies on stays graded while it
+  ## has no members.
   result = "ct: unknown " & sourceText & " value '" & value &
            "'; the accepted values are " & acceptedUiValuesText()
-  for reserved in ReservedUiValues:
+  for reserved in reservedValues:
     if value == reserved:
       result.add ". '" & reserved & "' is a reserved front-end name that is" &
                  " not shipping yet, so it is refused rather than silently" &
@@ -327,6 +377,13 @@ type
   ArgTarget = enum
     ## Which front-end's grammar the translated argv is for.
     atTui
+    atGpui
+      ## PLAT-20. Same grammar as `atTui` — a component binary whose trace
+      ## selection is a positional folder — and a SEPARATE value rather than a
+      ## shared one, because the two refusals below name a front-end and
+      ## "the terminal front-end opens a recording folder" is false about GPUI.
+      ## A message that names the wrong front-end is how a user spends an
+      ## afternoon on the wrong binary.
     atHost
 
   ArgTranslation = object
@@ -337,6 +394,20 @@ type
       ## Tokens that must go at the END of the result: a value that changed
       ## from a named option into a positional one has no place to sit where it
       ## was.
+
+func frontEndNoun(target: ArgTarget): string =
+  ## What to call the target in a refusal. ONE function, so the two component
+  ## front-ends cannot drift into describing themselves differently.
+  case target
+  of atTui: "the terminal front-end"
+  of atGpui: "the GPUI front-end"
+  of atHost: "the web front-end"
+
+func frontEndUiValue(target: ArgTarget): string =
+  case target
+  of atTui: "tui"
+  of atGpui: "gpui"
+  of atHost: "webui"
 
 func translateArgs(command: string; args: openArray[string];
                    target: ArgTarget): ArgTranslation =
@@ -397,9 +468,9 @@ func translateArgs(command: string; args: openArray[string];
     if isFolder or isShortFolder:
       # `-t` / `--trace-folder` NAMES A FOLDER in every spelling.
       case target
-      of atTui:
-        # The terminal front-end takes a folder as its positional argument and
-        # has no option for it.
+      of atTui, atGpui:
+        # Both component front-ends take a folder as their positional argument
+        # and have no option for it.
         if folder.len > 0:
           result.args.add folder
       of atHost:
@@ -416,13 +487,14 @@ func translateArgs(command: string; args: openArray[string];
     if isId:
       let id = valueOf(args, i, idAttached, idValue)
       case target
-      of atTui:
+      of atTui, atGpui:
         # NOT resolved here, deliberately. Turning a recording id into a folder
         # means opening the trace index, and §3.1 puts the whole trace layer on
         # the far side of this decision.
         return ArgTranslation(ok: false, message:
-          "ct: '--id' cannot be resolved by the terminal front-end; pass the" &
-          " recording folder instead (ct replay --ui=tui <trace-folder>)")
+          "ct: '--id' cannot be resolved by " & frontEndNoun(target) &
+          "; pass the recording folder instead (ct replay --ui=" &
+          frontEndUiValue(target) & " <trace-folder>)")
       of atHost:
         # `host`'s positional argument IS a recording id.
         if id.len > 0:
@@ -431,14 +503,15 @@ func translateArgs(command: string; args: openArray[string];
       continue
 
     if arg == "-i" or arg == "--interactive":
-      let which = if target == atTui: "the terminal front-end opens a" &
-                    " recording folder, so name one" &
-                    " (ct replay --ui=tui <trace-folder>)"
-                  else: "a server serves one named recording" &
+      let which = if target == atHost: "a server serves one named recording" &
                     " (ct replay --ui=webui <trace>)"
+                  else: frontEndNoun(target) & " opens a" &
+                    " recording folder, so name one" &
+                    " (ct replay --ui=" & frontEndUiValue(target) &
+                    " <trace-folder>)"
       return ArgTranslation(ok: false, message:
         "ct: '--interactive' is not available with '--ui=" &
-        (if target == atTui: "tui" else: "webui") & "'; " & which)
+        frontEndUiValue(target) & "'; " & which)
 
     result.args.add arg
     inc i
@@ -530,6 +603,45 @@ func planUiSelection*(args: openArray[string];
     # to prevent.
     UiPlan(kind: upkInProcess, frontEnd: declared, source: resolution.source,
            ctArgs: scan.strippedArgs)
+
+  of uiGpui:
+    # PLAT-20. §3: "for a value naming a different binary, `exec`s it with the
+    # remaining arguments." The GPUI front-end is a separate component exactly
+    # as the terminal one is, so this branch is `uiTui`'s shape with a
+    # different component name — and NOT a shared branch, because the two
+    # front-ends' gaps are different and a message must name the one the user
+    # asked for.
+    #
+    # THE LAUNCHER IS UNCHANGED BY THIS, which is §2's load-bearing constraint
+    # and is satisfied by doing nothing: the launcher routes on the first token
+    # (`replay`), execs `codetracer`, and this binary resolves `--ui`. No new
+    # command word is declared and no flag reaches the router.
+    if scan.command == "edit":
+      # `ct edit --ui=gpui` is PLAT-22's ("The GPUI editing surface"), not this
+      # milestone's. Refused by name rather than accepted and then failing at
+      # the far end, which is the distinction §4.1 draws for `--ui` values and
+      # which applies to a combination for the same reason.
+      return usageError(gapMessage(scan.command, declared,
+        "the GPUI front-end has no editing surface yet"))
+    if scan.command == "review":
+      return usageError(gapMessage(scan.command, declared,
+        "the GPUI front-end has no review mode yet"))
+    if scan.command == "run":
+      # Same reason as `tui`: `ct run` records first and has nothing to present
+      # in the prologue, so the resolved value is restated on the
+      # `ct replay --ui=gpui` that `trace/run.nim` spawns for itself.
+      return UiPlan(kind: upkInProcess, frontEnd: uiGpui,
+                    source: resolution.source, ctArgs: scan.strippedArgs)
+    let translatedGpui = translateArgs(scan.command, scan.strippedArgs, atGpui)
+    if not translatedGpui.ok:
+      return usageError(translatedGpui.message)
+    var gpuiHandoff = translatedGpui.args
+    gpuiHandoff.add translatedGpui.trailing
+    return UiPlan(kind: upkHandoff, frontEnd: uiGpui,
+                  source: resolution.source,
+                  componentName: "codetracer-gpui",
+                  componentBin: "codetracer-gpui",
+                  handoffArgs: gpuiHandoff)
 
   of uiTui:
     if scan.command == "edit":

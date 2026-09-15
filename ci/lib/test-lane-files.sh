@@ -171,6 +171,7 @@ bpf
 book-isonim
 tui
 tui-real-terminal
+gpui-shell
 ui-selection
 EOF
 }
@@ -210,6 +211,7 @@ test_lane_description() {
 	book-isonim) echo "docs/book-isonim SSG suites" ;;
 	tui) echo "CodeTracer TUI Tier-1 suites (isonim-tui harness, no terminal)" ;;
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
+	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	*)
 		echo "unknown lane '$1'" >&2
@@ -333,6 +335,21 @@ test_lane_extra_flags() {
 		# about the bundle this lane compiles.
 		echo "-d:chronicles_enabled=off -d:ctRenderer -d:ctWeb"
 		;;
+	gpui-shell)
+		# PLAT-20. `--path:src/frontend/viewmodel` for the same reason every
+		# `vm-*` lane carries it: `codetracer_embed` is imported by bare module
+		# name. `src/frontend` itself is already on the path from
+		# `config.nims`, which is what makes `gpui/app/...` resolve.
+		#
+		# NO `isonim_tui` flags, and that is the lane's whole point: the GPUI
+		# front-end links no terminal renderer, so a lane that carried the
+		# grammar archive and the tree-sitter link flags would be hiding a
+		# dependency the split exists to forbid. `test_gpui_shell_split.nim`
+		# asserts the same property from inside; if these two ever disagree,
+		# the lane is the one that is wrong.
+		echo "--path:src/frontend/viewmodel"
+		;;
+
 	tui | tui-real-terminal)
 		# THE TUI LANES. Three groups of flags, and each is load-bearing.
 		#
@@ -1291,6 +1308,19 @@ test_lane_files() {
 		# (it needs no pty). Tier-1 flags are harmless to it: it links no
 		# grammar archive and imports no `isonim_tui`.
 		_tlf_glob src/tests/launcher 'test_*.nim'
+		;;
+
+	gpui-shell)
+		# Discovery. `src/frontend/gpui/tests/` holds only PLAT-20's suites and
+		# the vendored gpui-kit fixtures they read; the glob is the whole rule.
+		#
+		# The two CROSS-front-end suites are NOT here: they need the terminal
+		# projection as well, so they live in `src/frontend/tui/tests/` and run
+		# in the `tui` lane, which is the one that links `isonim_tui`. Putting
+		# them here would mean giving this lane the grammar archive and the
+		# tree-sitter link flags, i.e. giving the GPUI lane a terminal
+		# renderer, which is exactly what the split forbids.
+		_tlf_glob src/frontend/gpui/tests 'test_*.nim'
 		;;
 
 	ui-selection)

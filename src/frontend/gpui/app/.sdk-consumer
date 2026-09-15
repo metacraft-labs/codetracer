@@ -1,0 +1,21 @@
+The GPUI front-end's SDK-CONSUMING half: the renderer-free shell (PLAT-20).
+
+This whole tree is a declared Embed SDK consumer, the same directory-marker
+spelling `src/frontend/tui/app/` and `src/frontend/headless_app/` already use,
+and for the same reason: marking each file would be noise and being a consumer
+is the point rather than an accident of where the code landed.
+
+PLAT-20's shell/leaf decomposition is what this marker enforces. The milestone
+asks for *"the shell is `HeadlessApp` plus the layout model, and only the leaves
+are GPUI"*, and *"a shell that needed changing to host a second GPU front-end
+was not renderer-free"* is its verification gate. Neither sentence is checkable
+by review. This marker makes the outward half checkable: every module beneath
+it may reach `codetracer_embed`, `headless_app` and `isonim`, and a reach past
+the facade is a build-and-gate failure rather than a note.
+
+`src/frontend/gpui/host/` is deliberately NOT covered, exactly as
+`src/frontend/tui/host/` is not: it is the only part of this front-end allowed
+to spawn a `replay-server` and open a local recording. The exemption is the
+absence of a marker, and `ci/test/sdk-facade-boundary.sh` asserts both halves
+for the terminal front-end; the same shape here is why the two front-ends can be
+read against each other.

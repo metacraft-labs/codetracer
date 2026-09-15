@@ -52,6 +52,7 @@ import
   std/[ os, osproc, streams, strutils, tables, algorithm ],
   ../../common/paths,
   ../codetracerconf,
+  ../ui_selection,
   ../version,
   confutils,
   confutils/[ defs, runtime_surface ]
@@ -125,13 +126,20 @@ func uiSelectionFlag(): RuntimeFlag =
   ## `PlannedOptions` in the TUI's own `app/cli.nim` exists to prevent, one
   ## binary over.
   ##
-  ## `gpui` is NOT listed, deliberately: §4.1 keeps it out of the accepted set
-  ## until PLAT-20 makes it work, and a help screen that offered it would be
-  ## advertising a value the binary refuses.
+  ## `gpui` IS listed now — PLAT-20 added it to `AcceptedUiValues`, and the
+  ## rule this comment used to state cuts both ways: a help screen that offered
+  ## a value the binary refuses is advertising a refusal, and one that withheld
+  ## an accepted value would be the "published and undiscoverable" state above.
+  ##
+  ## The list is built from `AcceptedUiValues` rather than typed, so the two
+  ## cannot part: the previous spelling was a literal that had to be edited by
+  ## hand every time the set moved, which is a second copy of the table
+  ## (Verification-Harness-Traps §14) living in the one place nothing compiles
+  ## against.
   newRuntimeFlag(
     name = "ui",
     description = "front-end to present the session in: " &
-                  "electron, gui, tui, webui",
+                  acceptedUiValuesText(),
     typeHint = "FRONT-END",
     default = "electron")
 

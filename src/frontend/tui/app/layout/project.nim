@@ -90,11 +90,12 @@
 ##     dragged their terminal to 30x8 — and degrades in every configuration.
 ##     Panicking on it would turn a small window into a crash.
 
-import std/[algorithm, math, strutils, tables]
+import std/[algorithm, strutils, tables]
 
 import isonim_tui
 
 import headless_app/layout_model
+import headless_app/extent_distribution
 
 import ./profile
 
@@ -352,68 +353,17 @@ proc coveredCells*(regions: seq[PaneRegion]; area: CellArea): int =
 proc distributeCells*(total: int; shares: openArray[float]): seq[int] =
   ## Split `total` cells among `shares.len` siblings in the given proportions.
   ##
-  ## THREE PROPERTIES, all of them relied on by `projectLayout` and all of them
-  ## asserted directly in `app/tests/test_layout_node_projection.nim`:
-  ##
-  ##   1. the result sums to `total` EXACTLY — no slack, no overflow;
-  ##   2. every entry is at least 1 whenever `total >= shares.len`, so no
-  ##      visible pane is ever given an empty rectangle;
-  ##   3. it is deterministic — largest fractional remainder first, ties broken
-  ##      by the lower index — so a resize that returns to a previous width
-  ##      returns to the same columns, which is what `test_resize_reflow.nim`
-  ##      means by "no coordinate drifts".
-  ##
-  ## Returns an empty seq when `total < shares.len`; the caller reports that as
-  ## `prNoSpace` rather than handing back a zero-width pane.
-  let n = shares.len
-  result = @[]
-  if n == 0 or total < n:
-    return
-  var sum = 0.0
-  for s in shares:
-    sum += max(0.0, s)
-  var ideal = newSeq[float](n)
-  if sum <= 0.0:
-    for i in 0 ..< n:
-      ideal[i] = float(total) / float(n)
-  else:
-    for i in 0 ..< n:
-      ideal[i] = float(total) * max(0.0, shares[i]) / sum
-  result = newSeq[int](n)
-  var frac = newSeq[float](n)
-  var assigned = 0
-  for i in 0 ..< n:
-    let f = int(floor(ideal[i]))
-    result[i] = f
-    frac[i] = ideal[i] - float(f)
-    assigned += f
-  var order: seq[int] = @[]
-  for i in 0 ..< n:
-    order.add i
-  sort(order, proc (a, b: int): int =
-    if frac[a] > frac[b] + 1e-9: -1
-    elif frac[a] < frac[b] - 1e-9: 1
-    else: cmp(a, b))
-  var remaining = total - assigned
-  var k = 0
-  while remaining > 0:
-    result[order[k mod n]] += 1
-    dec remaining
-    inc k
-  # Lift every zero to one by taking a cell from the largest sibling. Runs at
-  # most `n` times because `total >= n`, and it is what makes property 2 hold
-  # for a share of 0.0 or for a weight so small that its ideal floors to
-  # nothing — both of which a saved layout can contain.
-  while true:
-    var lowest = 0
-    var highest = 0
-    for i in 1 ..< n:
-      if result[i] < result[lowest]: lowest = i
-      if result[i] > result[highest]: highest = i
-    if result[lowest] >= 1 or result[highest] <= 1:
-      break
-    result[lowest] += 1
-    result[highest] -= 1
+  ## **PLAT-20 MOVED THE BODY, NOT THE CONTRACT.** The three properties this
+  ## routine has had since CTUI-3 — the result sums to `total` exactly, no
+  ## entry is zero while `total >= shares.len`, and the tie-break is
+  ## deterministic — are stated and implemented once, in
+  ## `headless_app/extent_distribution.distributeExtent`, because the GPUI dock
+  ## projection needs the identical arithmetic over PIXELS and a second copy
+  ## would be Verification-Harness-Traps §14 by the letter. This name stays
+  ## because `app/tests/test_layout_node_projection.nim` asserts the three
+  ## properties through it and because "cells" is what this module's callers
+  ## mean; the unit is the caller's, the arithmetic is not.
+  distributeExtent(total, shares)
 
 # ---------------------------------------------------------------------------
 # The projection

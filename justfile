@@ -4376,6 +4376,54 @@ test-tui-real-terminal: build-tui
 # changed it, and a recipe that rebuilt it would be the one thing able to
 # invalidate that claim. The suite names `cd ../codetracer-launcher && just
 # build` when it is missing.
+# PLAT-20: build the GPUI front-end component.
+#
+# NO GRAMMAR PREREQUISITE and no `tui-prereqs`, deliberately: this binary links
+# no terminal renderer and no tree-sitter archive, which is the shell/leaf split
+# being true of the BUILD rather than only of the source. It does need
+# `isonim-gpui`'s Rust shim at RUN time — `isonim_gpui/bindings.nim` dlopens
+# `libgpui_nim_shim.so` and falls back to a bare soname — so the recipe says so
+# rather than producing a binary that dies on its first call.
+#
+# `--mm:orc -d:release` matches `build-tui`, for the same reason CTUI-0 gives
+# there: the shipped configuration is the one that should be built by the
+# build recipe, and the test lane compiles the same code under debug flags, so
+# both arms exist and are exercised by different recipes.
+build-gpui:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p build/bin test-logs
+  shim_dir="$(cd .. 2>/dev/null && pwd)/isonim-gpui/rust/target/debug"
+  if [ ! -e "${shim_dir}/libgpui_nim_shim.so" ] && \
+     [ ! -e "${shim_dir}/libgpui_nim_shim.dylib" ]; then
+    echo "WARNING: isonim-gpui's Rust shim is not built at ${shim_dir}." >&2
+    echo "  codetracer-gpui will compile, and will fail at run time when it" >&2
+    echo "  dlopens the shim. Build it with:" >&2
+    echo "    cd ../isonim-gpui && just rust-build" >&2
+  fi
+  nim c --hints:off \
+    --mm:orc -d:release \
+    --path:src/frontend/viewmodel \
+    --nimcache:build/nimcache/codetracer-gpui \
+    -o:build/bin/codetracer-gpui \
+    src/frontend/gpui/main.nim
+  echo "built build/bin/codetracer-gpui ($(wc -c <build/bin/codetracer-gpui) bytes)"
+
+# PLAT-20: the GPUI shell's own suites — the dock projection against gpui-kit's
+# committed fixtures, and the shell/leaf split through the real isonim-gpui
+# shim.
+#
+# The two CROSS-front-end suites are in the `tui` lane, because comparing the
+# two projections needs both and only that lane links `isonim_tui`. This is
+# noted here rather than only in `ci/lib/test-lane-files.sh` so somebody
+# running `just test-gpui-shell` to check PLAT-20 knows it is half the story.
+test-gpui-shell:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-gpui-shell.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh gpui-shell
+
 test-ui-selection: build-once build-tui
   #!/usr/bin/env bash
   set -euo pipefail

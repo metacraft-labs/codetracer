@@ -36,7 +36,7 @@ import ui_selection
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 256
+const ExpectedAssertions = 289
 
 var countedAssertions = 0
 
@@ -52,18 +52,23 @@ const
     ## §6's own list of commands that do not present a session, verbatim.
 
   BadValues: array[6, string] = [
-    "gpui", "banana", "Electron", "TUI", "web-ui", "electron "]
-    ## Every one of these must be REFUSED naming the accepted set. `gpui` is
-    ## §4.1's reserved-but-not-shipping name; `Electron` and `TUI` are the case
-    ## variants a normaliser would have silently accepted; `electron ` has a
-    ## trailing space, which is what a quoted shell variable produces.
+    "GPUI", "banana", "Electron", "TUI", "web-ui", "electron "]
+    ## Every one of these must be REFUSED naming the accepted set. `GPUI`,
+    ## `Electron` and `TUI` are the case variants a normaliser would have
+    ## silently accepted; `electron ` has a trailing space, which is what a
+    ## quoted shell variable produces.
+    ##
+    ## **`gpui` WAS THE FIRST ENTRY UNTIL PLAT-20**, which added it to the
+    ## accepted set. It is replaced by its own upper-case spelling rather than
+    ## dropped, so the array keeps its length and the case-sensitivity rule
+    ## keeps a witness in the value that changed meaning.
 
 proc planOf(args: openArray[string]; env = ""; config = ""): UiPlan =
   planUiSelection(args, env, config)
 
 suite "PLAT-1 §4: the value set is closed":
 
-  test "every accepted value resolves, and the set has exactly four members":
+  test "every accepted value resolves, and the set has exactly five members":
     var compared = 0
     for value in AcceptedUiValues:
       inc compared
@@ -73,8 +78,19 @@ suite "PLAT-1 §4: the value set is closed":
     # The sweep's own size against its parameter: a loop that ran once would
     # leave three values unasserted and say nothing about them.
     ck compared == AcceptedUiValues.len
-    ck AcceptedUiValues.len == 4
-    ck acceptedUiValuesText() == "electron, gui, tui, webui"
+    ck AcceptedUiValues.len == 5
+    ck acceptedUiValuesText() == "electron, gui, gpui, tui, webui"
+    # THE ENUM AND THE ARRAY ARE ONE TABLE WRITTEN TWICE, and `parseUiFrontEnd`
+    # answers `UiFrontEnd(i)` for the `i`th entry — so a value inserted in one
+    # and appended to the other resolves `--ui=tui` to a different front-end
+    # with nothing to say so. PLAT-20 inserted `gpui` in the middle of both,
+    # which is exactly the edit that would have done it.
+    var pairs = 0
+    for i, name in AcceptedUiValues:
+      inc pairs
+      ck $UiFrontEnd(i) == name
+    ck pairs == AcceptedUiValues.len
+    ck ord(UiFrontEnd.high) == AcceptedUiValues.len - 1
 
   test "every refused value is a usage error NAMING the accepted set":
     var compared = 0
@@ -90,29 +106,89 @@ suite "PLAT-1 §4: the value set is closed":
       ck plan.message.contains("'" & value & "'")
     ck compared == BadValues.len
 
-  test "`gpui` is refused as reserved, and is NOT in the accepted set":
-    # §4.1: "Until it ships, `--ui=gpui` is a usage error naming the accepted
-    # set — **not** a value that is accepted and then fails later, and not one
-    # that quietly falls back to Electron." All three halves, separately.
-    ck "gpui" notin AcceptedUiValues
-    let (ok, _) = parseUiFrontEnd("gpui")
-    ck not ok
+  test "`gpui` is ACCEPTED, and reaches its own component — PLAT-20":
+    # §4.1: "It is added to the accepted set by the milestone that makes it
+    # work, and by no earlier one." PLAT-20 is that milestone, so the three
+    # halves of the old refusal become three halves of an acceptance.
+    ck "gpui" in AcceptedUiValues
+    let (ok, frontEnd) = parseUiFrontEnd("gpui")
+    ck ok
+    ck frontEnd == uiGpui
     let plan = planOf(["replay", "--ui=gpui", Trace])
-    ck plan.kind == upkUsageError
-    ck plan.message.contains("gpui")
-    ck plan.message.contains(acceptedUiValuesText())
-    # NOT quietly Electron. The positive twin: the same line with a value that
-    # IS accepted produces a plan rather than a refusal, so this refusal is
-    # about `gpui` and not about the line.
-    let accepted = planOf(["replay", "--ui=electron", Trace])
-    ck accepted.kind == upkInProcess
-    ck accepted.frontEnd == uiElectron
+    ck plan.kind == upkHandoff
+    ck plan.frontEnd == uiGpui
+    ck plan.componentName == "codetracer-gpui"
+    ck plan.componentBin == "codetracer-gpui"
+    # The trace reaches the component as its POSITIONAL argument, which is the
+    # grammar `codetracer-gpui` parses — the same translation `tui` gets, and
+    # NOT a silent pass-through of `ct`'s own spelling.
+    ck plan.handoffArgs == @[Trace]
+    # And it is a DIFFERENT component from the terminal one, which is the
+    # assertion that would fail if the new branch had been folded into `uiTui`.
+    let tuiPlan = planOf(["replay", "--ui=tui", Trace])
+    ck tuiPlan.componentName == "codetracer-tui"
+
+  test "the RESERVED-value mechanism still works, with an empty live set":
+    # PLAT-20 emptied `ReservedUiValues`, so the loop inside
+    # `unknownValueMessage` can no longer run in production. A test that called
+    # it with the default would be asserting a branch nothing can enter —
+    # Verification-Harness-Traps §10's assertion-that-cannot-fail, wearing an
+    # empty set. So the set is asserted EMPTY directly, and the mechanism is
+    # driven through the same function with a synthetic one (§14: one
+    # predicate, rule and control both calling it).
+    ck ReservedUiValues.len == 0
+    let plain = unknownValueMessage("someday", "--ui", [])
+    ck plain.contains(acceptedUiValuesText())
+    ck not plain.contains("reserved front-end name")
+    let reserved = unknownValueMessage("someday", "--ui", ["someday"])
+    ck reserved.contains("reserved front-end name")
+    ck reserved.contains("not shipping yet")
+    # And the two differ, so the parameter is read rather than ignored.
+    ck plain != reserved
+
+  test "`--ui=gpui` inherits every refusal `--ui=tui` has, and names ITSELF":
+    # §8: `--headless` is a property of the TUI. The refusal must name both
+    # sides.
+    let headless = planOf(["replay", "--ui=gpui", "--headless", Trace])
+    ck headless.kind == upkUsageError
+    ck headless.message.contains("gpui")
+    ck headless.message.contains("--headless")
+    # `--id` is refused because turning a recording id into a folder means
+    # opening the trace index, and §3.1 puts that on the far side of the
+    # decision. The message must name the GPUI front-end, not the terminal one.
+    let byId = planOf(["replay", "--ui=gpui", "--id", "17"])
+    ck byId.kind == upkUsageError
+    ck byId.message.contains("the GPUI front-end")
+    ck not byId.message.contains("the terminal front-end")
+    ck byId.message.contains("--ui=gpui")
+    # And the terminal's own message still names the terminal — the twin that
+    # shows the generalisation did not make both messages the same.
+    let tuiById = planOf(["replay", "--ui=tui", "--id", "17"])
+    ck tuiById.message.contains("the terminal front-end")
+    ck tuiById.message.contains("--ui=tui")
+    # `edit` and `review` are PLAT-22's and later; refused by name.
+    let edit = planOf(["edit", "--ui=gpui", "/tmp/project"])
+    ck edit.kind == upkUsageError
+    ck edit.message.contains("editing surface")
+    let review = planOf(["review", "--ui=gpui", Trace])
+    ck review.kind == upkUsageError
+    ck review.message.contains("review mode")
+    # `ct run --ui=gpui` resolves and DEFERS, like `tui`: there is nothing to
+    # present until the recording exists.
+    let run = planOf(["run", "--ui=gpui", "prog.py"])
+    ck run.kind == upkInProcess
+    ck run.frontEnd == uiGpui
 
   test "`gui` is an alias for electron TODAY and a separate spelling":
     # §4.1: `gui` names a role, `electron` names an implementation, and the
     # difference is a value rather than a comment — `effectiveFrontEnd` is the
-    # one line PLAT-20 changes.
+    # one line PLAT-20 WOULD change — and deliberately did NOT. §4.1: "Whether
+    # `gui` stops resolving to `electron` is a separate decision made on
+    # evidence, not a consequence of `gpui` becoming available." PLAT-20 made
+    # `gpui` available and left this alone, so the assertion is unchanged and
+    # this comment records that the omission is a decision.
     ck effectiveFrontEnd(uiGui) == uiElectron
+    ck effectiveFrontEnd(uiGpui) == uiGpui
     ck effectiveFrontEnd(uiElectron) == uiElectron
     ck effectiveFrontEnd(uiTui) == uiTui
     ck effectiveFrontEnd(uiWebui) == uiWebui
