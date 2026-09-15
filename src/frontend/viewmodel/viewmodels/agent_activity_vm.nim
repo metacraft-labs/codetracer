@@ -120,6 +120,15 @@ type
       ## Base64 data URLs of images pasted by the user.  Each entry is either
       ## "loading" (FileReader not yet done) or a data: URL.  Cleared after
       ## submission.  Tracked here so the host can read them on submit.
+    settingsOpen*: Signal[bool]
+    settingsRuntime*: Signal[string]
+    settingsCpu*: Signal[string]
+    settingsMemory*: Signal[string]
+    settingsNetworkAccess*: Signal[bool]
+    settingsDeliveryMode*: Signal[string]
+    settingsDeliveryBranch*: Signal[string]
+    settingsPermissions*: Signal[string]
+    settingsActiveDropdown*: Signal[string]
 
     messageCount*: Memo[int]
     terminalCount*: Memo[int]
@@ -452,6 +461,20 @@ proc setBranchState*(vm: AgentActivityVM; current: string;
 proc toggleBranchDropdown*(vm: AgentActivityVM) =
   vm.branchDropdownOpen.val = not vm.branchDropdownOpen.val
 
+proc toggleSettingsOpen*(vm: AgentActivityVM) =
+  vm.settingsActiveDropdown.val = ""
+  vm.settingsOpen.val = not vm.settingsOpen.val
+
+proc resetSettingsToDefaults*(vm: AgentActivityVM) =
+  vm.settingsRuntime.val = "devcontainer"
+  vm.settingsCpu.val = "2 cores"
+  vm.settingsMemory.val = "4 GB"
+  vm.settingsNetworkAccess.val = false
+  vm.settingsDeliveryMode.val = "New branch"
+  vm.settingsDeliveryBranch.val = ""
+  vm.settingsPermissions.val = "Ask before commands"
+  vm.settingsActiveDropdown.val = ""
+
 proc clearConversation*(vm: AgentActivityVM) =
   vm.messages.val = @[]
   vm.testRuns.val = @[]
@@ -495,6 +518,15 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let modelDropdownOpen = createSignal(false)
     let addContextDropdownOpen = createSignal(false)
     let pastedImages = createSignal(newSeq[string]())
+    let settingsOpen = createSignal(false)
+    let settingsRuntime = createSignal("devcontainer")
+    let settingsCpu = createSignal("2 cores")
+    let settingsMemory = createSignal("4 GB")
+    let settingsNetworkAccess = createSignal(false)
+    let settingsDeliveryMode = createSignal("New branch")
+    let settingsDeliveryBranch = createSignal("")
+    let settingsPermissions = createSignal("Ask before commands")
+    let settingsActiveDropdown = createSignal("")
 
     let messageCount = createMemo[int] proc(): int =
       messages.val.len
@@ -533,6 +565,15 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       modelDropdownOpen: modelDropdownOpen,
       addContextDropdownOpen: addContextDropdownOpen,
       pastedImages: pastedImages,
+      settingsOpen: settingsOpen,
+      settingsRuntime: settingsRuntime,
+      settingsCpu: settingsCpu,
+      settingsMemory: settingsMemory,
+      settingsNetworkAccess: settingsNetworkAccess,
+      settingsDeliveryMode: settingsDeliveryMode,
+      settingsDeliveryBranch: settingsDeliveryBranch,
+      settingsPermissions: settingsPermissions,
+      settingsActiveDropdown: settingsActiveDropdown,
       messageCount: messageCount,
       terminalCount: terminalCount,
       hasMessages: hasMessages,
