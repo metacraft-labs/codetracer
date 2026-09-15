@@ -1,5 +1,25 @@
 @import "../generated/index"
 
+// Input heights — the shared control scale (CONTROL_HEIGHT_*, button.styl), so a
+// field and the button beside it are the same height, and a field's height
+// says what kind of field it is:
+//
+//   extra large  34px  form fields on the welcome screens
+//   large        28px  the command prompt, the app's primary field
+//   medium       26px  every field inside a panel: search, filter, watch
+//   small        24px  `.ct-input-small`
+//   extra small  20px  compact inline fields, e.g. the event log's Rows
+//
+// Use these names rather than a literal: a field sized in `em` follows its own
+// text size and lands wherever that puts it (the Requests search was 24.5px),
+// and a literal repeated in several files drifts one file at a time.  `rem`
+// keeps each a whole pixel at the 16px root, wherever the field sits.
+INPUT_HEIGHT_XL = CONTROL_HEIGHT_XL
+INPUT_HEIGHT_LG = CONTROL_HEIGHT_LG
+INPUT_HEIGHT_MD = CONTROL_HEIGHT_MD
+INPUT_HEIGHT_SM = CONTROL_HEIGHT_SM
+INPUT_HEIGHT_XS = CONTROL_HEIGHT_XS
+
 input
   font-family: "SpaceGrotesk" !important
   font-size: 0.875rem !important
@@ -10,17 +30,23 @@ input
   &:hover
     color: colors-ui-text-primary-body !important
 
-  &:focus
-    outline: none !important
-
+  // Active — the field has focus.  The same state as the Event Log filter
+  // button while its menu is open (`#category-image.open`, button.styl): a
+  // 1px `border/action` border and nothing else, so the 2px inset ring this
+  // used to draw is gone.  `:focus` as well as `:focus-visible`, because a
+  // field is active however it was entered.  `!important` so hovering an
+  // active field keeps it indigo, as the button does: every field variant sets
+  // its hover grey at a higher specificity than this.
+  &:focus,
   &:focus-visible
     outline: none !important
-    box-shadow: inset 0 0 0 0.125rem colors-ui-border-focus !important
+    box-shadow: none !important
+    border-color: colors-ui-border-action !important
     color: colors-ui-text-primary-body !important
 
   &:not(:placeholder-shown):not(:disabled)
     border-color: colors-ui-border-action
-    background: colors-ui-surface-input-default
+    background: colors-ui-surface-input-secondary
     color: colors-ui-text-primary-body !important
 
   // `colors-ui-text-primary-disabled` AND NOT `colors-ui-text-disabled-default`,
@@ -77,24 +103,26 @@ input
     background-image: ct-images-disabled-search-icon !important
 
 
+// Welcome-screen form fields: the extra-large input size (34px; was 36px, off
+// the scale).
 .ct-input-form
-  height: 2.25rem
-  max-height: 2.25rem
+  height: INPUT_HEIGHT_XL
+  max-height: INPUT_HEIGHT_XL
   border-radius: 0.375rem
   background: colors-ui-surface-primary-secondary
-  border: 0.0625rem solid colors-ui-surface-primary-secondary
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
 
   &:hover
     border-color: colors-ui-border-primary-hover
 
 
 .ct-input-com-pal
-  height: 1.75rem
-  max-height: 1.75rem
+  height: INPUT_HEIGHT_LG
+  max-height: INPUT_HEIGHT_LG
   width: -webkit-fill-available
   max-width: -webkit-fill-available
   border-radius: 0.375rem
-  border: 0.0625rem solid colors-ui-border-primary
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
   background: colors-ui-surface-primary-secondary
 
   &:hover
@@ -105,7 +133,7 @@ input
 .ct-input-small
 .ct-input-panel
   border-radius: 0.375rem
-  background: colors-ui-surface-primary-default
+  background: colors-ui-surface-input-secondary
 
   &:hover
     border: 0.0625rem solid colors-ui-surface-primary-default
@@ -124,12 +152,12 @@ input
 // across two device pixels at partial opacity and read as thinner on that side
 // alone. `SELECTED_PANEL_BORDER` in golden_layout.styl carries the same note.
 .ct-input-small
-  height: 1.5rem
-  max-height: 1.75rem
-  border: 0.0625rem solid transparent
+  height: INPUT_HEIGHT_SM
+  max-height: INPUT_HEIGHT_SM
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
 
 .ct-input-panel
   width: -webkit-fill-available
-  height: 1.75rem
-  max-height: 1.75rem
-  border: 0.0625rem solid transparent
+  height: INPUT_HEIGHT_MD
+  max-height: INPUT_HEIGHT_MD
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR

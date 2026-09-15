@@ -81,7 +81,7 @@ LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
   // margin-top: 2px !important
   // padding-top: 2px !important
   // padding-bottom: 2px !important
-  padding: 0.38em 0.5em !important
+  padding: 0 0.5em !important
   box-shadow: none !important
   line-height: normal !important
   // max-width: min(200px, 30%)
@@ -115,13 +115,19 @@ LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
   background-color: colors-ui-surface-base-panel !important
   // box-shadow: inset 2px 0px 0px 0px colors-ui-border-primary
   border: 0 !important
-  // padding-top: 8px
   border-radius: 0.36em
   font-size: inherit
-  padding: 0.25em 0em 0em 0em
-  // padding-right: 2px
-  // margin-left: 2px
-  // padding-right: 10px
+  // Every panel's first row starts PANEL_INSET (8px) below the panel's top
+  // edge — the top third of the panel inset (button.styl).  It was 4px.  The
+  // panels' own first rows carry no top padding of their own, so this is the
+  // whole gap.  `box-sizing: border-box` is already in effect here, so the
+  // padding comes out of the height GoldenLayout sets rather than adding to it.
+  padding: PANEL_INSET 0 0 0
+
+// The code editor is not a panel: it keeps the 4px it had, and its gutter and
+// first line sit where they did.
+.lm_content:has(> .code-editor)
+  padding-top: 0.25rem
 
 .lm_items
   background-color: transparent
@@ -147,11 +153,20 @@ LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
 .lm_title
   color: colors-ui-text-primary-disabled !important
   // font-family: sans-serif !important
+  // 14px.  Set here and not on `.lm_tab`: the tab's padding, its pin and close
+  // icons and the active tab's connector curves are all sized in `em` off the
+  // tab's font size, so shrinking the tab would shrink all of them with the
+  // text.  `rem` so the title does not depend on what the tab inherits.
+  font-size: 0.875rem !important
   font-weight: 400 !important
   overflow: hidden
   white-space: nowrap
   text-overflow: ellipsis
   width: 100%
+  // At least 8px between the title and the tab's pin / close icons.  The title
+  // stretches to the icons (`width: 100%`), so a long title was cut off right
+  // against the pin; with the margin it shrinks to stop 8px short of it.
+  margin-right: 0.5rem
   padding-top: 0em !important
   text-align: start !important
 // direction: rtl
@@ -274,8 +289,36 @@ LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
   margin-right: 0.3em
   flex-shrink: 0
 
+// On a tab at the BACK of its group, both icons rest at 40% and come up to full
+// strength under the pointer; on the active tab they stay at full strength.
+//
+// This is the close icon's existing behaviour, but it was never ours: it comes
+// from GoldenLayout's bundled theme (goldenlayout-light-theme.css), which dims
+// `.lm_close_tab` only.  The pin was left at full strength beside a dimmed
+// close, so the two icons of one tab looked unrelated.  Stated here for both,
+// so they cannot drift and neither depends on that sheet loading after ours.
+.lm_header .lm_tab:not(.lm_active)
+  .lm_close_tab,
+  .lm_pin_tab
+    opacity: 0.4
+
+    &:hover
+      opacity: 1
+
+// 24px tab, centred in the 32px header: 4px + 24px + 4px.
+//
+// `height` is the whole tab: vertical padding is 0 (see `.lm_tab`), and the
+// title is centred by the tab's own flexbox, so padding would only push the
+// total off 1.5rem.  The header's 32px is set from JavaScript (`headerHeight`,
+// ui/layout.nim), not here.
+//
+// The gap UNDER the tab matters as much as the height.  The active tab's
+// `box-shadow` bridge and its `::before`/`::after` connectors are tuned to meet
+// the panel body about 4px below the tab; a top-aligned 24px tab would have
+// left 8px, floating the connectors above the panel's edge.
 .lm_header .lm_tab
-  height: 1.01em !important
+  height: 1.5rem !important
+  margin-top: 0.25rem !important
 
 // ---------------------------------------------------------------------------
 // Busy tab

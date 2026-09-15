@@ -53,7 +53,11 @@
   cursor pointer
   color #b0b0b0
   opacity 0.7
-  border-radius 0.25em
+  // The design system's control radius (`border/radius/control`, 6px) — the
+  // same corners as the command prompt beside these tabs (command-palette.styl,
+  // 0.375rem).  Was 0.25em (4px).  The token is unitless px, hence the rem
+  // conversion against the 16px root.
+  border-radius unit(border-border-radius-control / 16, 'rem')
   margin-right 0.25em
   white-space nowrap
   user-select none
@@ -104,20 +108,72 @@
   align-items center
   justify-content center
   flex 0 0 auto
-  width 1.75em !important
-  max-width 1.75em !important
-  height 1.75em !important
-  max-height 1.75em !important
+  // The trace tabs' height, 26px (`.session-tab`, 1.625em at 16px) — the
+  // MEDIUM control size (button.styl) — so the circle sits level with the tab
+  // it opens, top and bottom.  Not the caption bar's large size: it belongs to
+  // the tab strip, not to the toolbar.
+  width CONTROL_HEIGHT_MD !important
+  max-width CONTROL_HEIGHT_MD !important
+  height CONTROL_HEIGHT_MD !important
+  max-height CONTROL_HEIGHT_MD !important
   cursor pointer
   user-select none
-  border-radius 50% !important
-  border none !important
-  background-image url('../../public/resources/shared/session_tab_add.svg')
-  background-position center
-  background-repeat no-repeat
-  background-size 0.75em 0.75em !important
   font-size 1em
   -webkit-app-region no-drag
+
+// The "+" that opens a new trace tab.  NOT an ordinary icon button: a filled
+// circle with no outline, and it behaves like the trace tabs beside it
+// (`.session-tab` above) — its mark rests dim at 70% in the tab's #b0b0b0,
+// comes up to full strength under the pointer, and goes white while pressed.
+// Timing: the shared button transition (BUTTON_TRANSITION, button.styl), like
+// every other button — the fill, the mark's colour and its opacity together.
+//
+// Fill: `surface/primary/tertiary` at rest, `surface/primary/tertiary-hover`
+// under the pointer, and the active trace tab's #3c3c3c while pressed.
+//
+// The mark is drawn as a mask filled with `currentColor` rather than as a
+// background image: the SVG bakes its colour in (#dddddd), so as an image it
+// could not follow the tab's states.
+//
+// `#menu` in the selector only for weight — the icon-button outline and the
+// secondary-button fill (button.styl) both outrank a single class.
+#menu .session-tab-add
+  border none !important
+  border-radius 50% !important
+  background-color colors-ui-surface-primary-tertiary
+  background-image none !important
+  color #b0b0b0
+  transition BUTTON_TRANSITION
+
+  &::before
+    content ""
+    width 0.75em
+    height 0.75em
+    background-color currentColor
+    -webkit-mask-image url('../../public/resources/shared/session_tab_add.svg')
+    mask-image url('../../public/resources/shared/session_tab_add.svg')
+    -webkit-mask-repeat no-repeat
+    mask-repeat no-repeat
+    -webkit-mask-position center
+    mask-position center
+    -webkit-mask-size contain
+    mask-size contain
+    opacity 0.7
+    transition opacity BUTTON_TRANSITION_TIMING
+
+  &:hover
+    background-color colors-ui-surface-primary-tertiary-hover
+    color colors-ui-text-primary-body
+
+    &::before
+      opacity 1
+
+  &:active
+    background-color #3c3c3c
+    color #ffffff
+
+    &::before
+      opacity 1
 
 .session-tab-overflow
   display none
@@ -148,12 +204,16 @@
   // side of the bar.
   //
   // Measured from THIS element's containing block, which is `.session-tab-bar`
-  // — and the tab bar starts 0.25em down, inside `#menu`'s padding.  So the
-  // offset is the bar's height less that inset, plus the gap:
-  // 2.125em - 0.25em + 0.375em = 2.25em.  The old 2.125em was the caption bar
-  // height used as if the tab bar began at the top of the bar, which left 4px
-  // rather than 6.
-  top 2.25em
+  // — and the tab bar starts 0.375rem (6px) down, inside `#menu`'s top padding
+  // (CAPTION_BAR_PADDING_TOP, menu_bar.styl).  So the offset is the bar's
+  // height less that inset, plus the gap: 38px - 6px + 6px = 38px (it was
+  // 34px while the bar's bottom padding was 2px).
+  // It was 2.25em while the bar's top padding was 4px; left there, the menu
+  // would open 8px below the bar rather than 6.
+  // 6px below the caption bar, like every menu (DROPDOWN_TRIGGER_GAP): the
+  // bar's height less the 6px the tab bar starts below the bar's top, plus
+  // the gap — measured from the tab bar, which is what this menu hangs from.
+  top "calc(%s - %s + %s)" % (CAPTION_BAR_HEIGHT CAPTION_BAR_PADDING_TOP DROPDOWN_TRIGGER_GAP)
   min-width 13.75em
   max-width 22.5em
   max-height 70vh
@@ -177,10 +237,9 @@
   white-space nowrap
   overflow hidden
   text-overflow ellipsis
-  border-radius 0.25em
   &.active
     background-color #3c3c3c
     color #ffffff
+  // The list hover (LIST_HOVER_BG, button.styl): background only, square.
   &:hover
-    color colors-ui-text-primary-body
-    background-color colors-ui-surface-primary-secondary-hover
+    background-color LIST_HOVER_BG

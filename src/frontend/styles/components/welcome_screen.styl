@@ -1,7 +1,17 @@
 // Welcome screen widget styles
+
+// How far the "Welcome to CodeTracer" title and the version number sit above
+// the logo's bottom edge (see `.welcome-title`).  4px.
+WELCOME_TITLE_RAISE = 0.25rem
+
+// Where text starts in the Recent traces / Recent folders cards, measured from
+// the rows' edge: the card titles, the empty messages and each row's first text
+// all sit this far in.  8px.
+RECENT_LIST_TEXT_INSET = 0.5rem
+
 #welcomeScreen
   position: fixed
-  top: 2.125em  // keep flush with the caption bar height (menu_bar.styl)
+  top: CAPTION_BAR_HEIGHT  // flush below the caption bar (shared_widgets.styl)
   left: 0
   right: 0
   bottom: 2em
@@ -17,6 +27,33 @@
 #welcomeScreen .welcome-screen-root
   height: 100%
   min-height: 100%
+
+// While a welcome screen is up (welcome, Start Debugger, online trace), there
+// is no trace for the rest of the window to act on:
+//   * the footer (`#status-base`, status_bar.styl) is hidden, and the welcome
+//     screen runs down to the window's bottom edge in its place;
+//   * the caption bar's controls — the debugger toolbar, the command prompt and
+//     (Windows/Linux) the navigation menu — look disabled and ignore the
+//     pointer, the way a disabled button does (`button:disabled`,
+//     button.styl: 50% and no pointer events).  The trace tabs and their "+"
+//     stay live: they are how you get back to a trace.
+//
+// "Up" is read from the DOM: the welcome view renders into `#welcomeScreen`
+// and empties it when a trace takes over, so the condition cannot outlive the
+// screen.
+body:has(> #welcomeScreen .welcome-screen-wrapper)
+  #status-base
+    display: none
+
+  #welcomeScreen
+    bottom: 0
+
+  #menu
+    #isonim-debug-controls,
+    #debug,
+    #navigation-menu
+      opacity: 0.5
+      pointer-events: none
 
 .welcome-screen-loading-overlay
   position: absolute
@@ -57,6 +94,24 @@
   margin-right: 0.75em
   background-repeat: no-repeat
 
+// The welcome screens' title type — "Welcome to CodeTracer", and the heading
+// of every screen behind it ("Start Debugger", "Download and open online
+// trace").  One definition so the screens read as one flow; the other two were
+// Space Mono at 32px on a 64px line, a different voice from the screen they
+// open from.
+//
+// 32px on a 40px line: the design system's Title / md size
+// (`titles-title-md` — fontsize-6, lineheights-1), both whole pixels.  It was
+// 2.3em (36.8px) on a 1.2em (44.16px) line, which landed between pixels.  In
+// rem so it no longer depends on what the title's parent inherits.
+welcome-heading-type()
+  font-family: "SpaceGrotesk"
+  font-weight: BOLD_WEIGHT
+  font-size: 2rem
+  letter-spacing: -0.02em
+  line-height: 2.5rem
+  color: colors-ui-text-primary-body
+
 .welcome-screen-wrapper
   color: colors-ui-text-primary-body;
   background-color: colors-ui-surface-input-default;
@@ -88,41 +143,67 @@
     &.welcome-screen-loading
       cursor: wait !important
 
+    // One line: the logo, "Welcome to CodeTracer" and the version.  The title
+    // and the version share one baseline, 4px above the logo's bottom edge
+    // (WELCOME_TITLE_RAISE below).
+    //
+    // `baseline` at both levels lines them up.  The logo is an empty box, so it has
+    // no text baseline of its own; flexbox then uses its bottom edge
+    // (https://www.w3.org/TR/css-align-3/#synthesize-baseline), which puts the
+    // logo's bottom on the title's baseline.  `.welcome-text` in turn exposes
+    // that shared baseline to this row, where the version text sits on it too.
+    // `flex-end` aligned boxes instead, and the text's line boxes end below
+    // the letters, so the version's letters ended 3px above the logo's bottom
+    // and the title's last line 8.5px above it.
     .welcome-title
       position: relative
       font-family: "SpaceGrotesk"
       text-align: start
       display: flex
-      align-items: flex-end
+      align-items: baseline
       justify-content: space-between
       color: colors-ui-text-primary-body
       width: -webkit-fill-available
 
       .welcome-text
-        word-break: break-word
         display: flex
-        align-items: center
-        font-weight: BOLD_WEIGHT
-        width: 19em
-        font-size: 2.3em
-        letter-spacing: -0.02em
-        // Both ems here are deliberate and resolve against different bases:
-        // `font-size` against `.welcome-title`'s 16px (36.8px), `line-height`
-        // against this element's own resolved size (1.2 * 36.8 == 44.16px).
-        line-height: 1.2em
+        align-items: baseline
+        welcome-heading-type()
+        // As wide as the one-line title needs.  It was a fixed 19em that
+        // wrapped the title onto two lines.
+        white-space: nowrap
+        flex-shrink: 0
+
+        // The markup has "Welcome to" and the product name as two block
+        // elements, one per line.  Inline, they run on as one line; the
+        // space after the first is a real word space in the title's font.
+        > div:not(.welcome-logo)
+          > div
+            display: inline
+
+          > div:first-child::after
+            content: " "
 
       .welcome-version
         color: colors-ui-text-primary-disabled
         font-size: 0.75em
-        font-family: "SpaceMono"
+        font-family: "SpaceGrotesk"
         font-weight: 400
         line-height: normal
         text-align: center
-        // Keep the version on one line. As a flex item it would otherwise be
-        // squeezed below its own text width by `.welcome-text`'s `width: 19em`,
-        // which scales with the title's font-size, and wrap onto a second row.
+        // Keep the version on one line, whatever room the title leaves.
         white-space: nowrap
         flex-shrink: 0
+
+      // The title and the version sit 4px higher than the shared baseline
+      // above puts them, so their letters end 4px above the logo's bottom
+      // edge rather than on it.  One value for both, so they stay on one line.
+      // `top` on a relative element moves only where it is painted: the logo
+      // and the layout below stay where they are.
+      .welcome-text > div:not(.welcome-logo),
+      .welcome-version
+        position: relative
+        top: -(WELCOME_TITLE_RAISE)
 
     .welcome-content
       display: flex
@@ -214,6 +295,9 @@
       margin-bottom: 3em
       overflow: visible
 
+    // The title, the empty message and every row's text start on one line:
+    // 8px inside the rows (RECENT_LIST_TEXT_INSET).  The rows themselves stay
+    // flush with the card's padding so their hover fill keeps its width.
     .recent-traces-title
       text-align: start
       font-size: 1.125em
@@ -222,6 +306,7 @@
       letter-spacing: -0.01125em
       font-family: "SpaceGrotesk"
       margin-bottom: 0.375em
+      padding-left: RECENT_LIST_TEXT_INSET
 
     .recent-traces-list
       max-height: 10.75em
@@ -229,11 +314,15 @@
       overflow-x: visible
       // Allow tooltips to overflow - they use position: absolute and high z-index
       clip-path: none
+      // No space between the rows and the scrollbar: the rows run right up to
+      // it (Nikolay, 2026-09-15).  An 8px gap here was tried and removed.
+      padding-right: 0
 
       .empty-state-message
         display: flex
         flex-direction: column
         gap: 0.5em
+        padding-left: RECENT_LIST_TEXT_INSET
 
         .empty-state-welcome
           font-size: 1em
@@ -252,9 +341,12 @@
         align-items: center
         justify-content: space-between
 
+      // No fill at rest; under the pointer, the VCS panel's row hover
+      // (`.vcs-commit-header:hover`, vcs.styl): `surface/primary/secondary-hover`.
+      // The same for the Recent folders rows below, so the two lists match.
       .recent-trace
         color: colors-ui-text-warning-on-color
-        background-color: colors-ui-surface-primary-secondary-hover
+        background-color: transparent
         height: 1.75em
         margin-top: 0.125em
         margin-bottom: 0.375em
@@ -266,7 +358,7 @@
 
         &:hover
           cursor: pointer
-          background-color: colors-ui-surface-primary-tertiary
+          background-color: LIST_HOVER_BG
 
           .recent-trace-tooltip
             opacity: 1
@@ -280,22 +372,29 @@
           flex: 1
           min-width: 0
 
+          // No divider between the time and the name: the fixed time column
+          // below already separates them.
           .separate-bar
-            border-color: colors-ui-border-secondary
+            display: none
 
+          // A fixed column, so every trace name starts on the same line
+          // whatever the time reads.  90px holds the widest label
+          // `formatWelcomeTimeAgo` can produce, "59 minutes ago" (89.2px in
+          // this 12px face); "4 days ago" and "2 weeks ago" were 8.4px apart.
           .recent-trace-title-time
-            margin-left: 0.5em
-            margin-right: 0.5em
+            flex: 0 0 5.625rem
+            margin-left: RECENT_LIST_TEXT_INSET
+            margin-right: 0
             font-size: 0.75em
             font-family: "SpaceGrotesk"
             line-height: 1.125em
             color: #888888
             white-space: nowrap
-            // min-width: 90px
 
+          // 8px after the time column.
           .recent-trace-title-content
-            margin-left: 0.5em
-            margin-right: 0.5em
+            margin-left: 0.5rem
+            margin-right: RECENT_LIST_TEXT_INSET
             font-size: 0.875em
             font-weight: BOLD_WEIGHT
             font-family: "SpaceGrotesk"
@@ -313,7 +412,7 @@
           color: #f3f3f3
           padding: 0.5em 0.75em
           font-size: 0.75em
-          font-family: "SpaceMono"
+          font-family: "SpaceGrotesk"
           border-radius: 0.25em
           white-space: pre-line
           box-shadow: 0 0.25em 0.75em rgba(0, 0, 0, 0.4)
@@ -342,6 +441,7 @@
       margin-top: 3em
       margin-bottom: 3em
 
+    // The same text inset as Recent traces, so the two cards match.
     .recent-folders-title
       text-align: start
       font-size: 1.125em
@@ -350,16 +450,20 @@
       letter-spacing: -0.01125em
       font-family: "SpaceGrotesk"
       margin-bottom: 0.375em
+      padding-left: RECENT_LIST_TEXT_INSET
 
     .recent-folders-list
       max-height: 10.75em
       overflow-y: scroll
       overflow-x: visible
+      // No space between the rows and the scrollbar, as in Recent traces.
+      padding-right: 0
 
       .empty-state-message
         display: flex
         flex-direction: column
         gap: 0.5em
+        padding-left: RECENT_LIST_TEXT_INSET
 
         .empty-state-welcome
           font-size: 1em
@@ -378,9 +482,10 @@
         align-items: center
         justify-content: space-between
 
+      // Same rows as Recent traces: no fill at rest, the VCS row hover.
       .recent-folder
         color: colors-ui-text-warning-on-color
-        background-color: colors-ui-surface-primary-secondary-hover
+        background-color: transparent
         height: 1.75em
         margin-top: 0.125em
         margin-bottom: 0.375em
@@ -392,14 +497,14 @@
 
         &:hover
           cursor: pointer
-          background-color: colors-ui-surface-primary-tertiary
+          background-color: LIST_HOVER_BG
 
         .recent-folder-name
-          margin-left: 0.5em
-          margin-right: 0.5em
+          margin-left: RECENT_LIST_TEXT_INSET
+          margin-right: RECENT_LIST_TEXT_INSET
           font-size: 0.875em
           font-weight: BOLD_WEIGHT
-          font-family: "SpaceMono"
+          font-family: "SpaceGrotesk"
           line-height: 1.125em
           letter-spacing: -0.00875em
           position: relative
@@ -436,15 +541,17 @@
 
     .new-record-title
       position: relative
-      font-size: 2em
-      font-family: "SpaceMono"
-      font-weight: BOLD_WEIGHT
+      welcome-heading-type()
       text-align: start
       width: 100%
-      letter-spacing: -0.02em
-      line-height: 2em
-      margin-bottom: 2em
-      margin-top: 2em
+      // 42px above, between the logo and the title ("Start Debugger",
+      // "Download and open online trace"), and 32px below, down to the first
+      // input field — both measured from the title's 40px line box.  The first
+      // form row's own 5px top margin collapses into the 32px, so the field
+      // starts exactly 32px under the title.  rem: in em these would follow
+      // the heading's own 32px font size.
+      margin-bottom: 2rem
+      margin-top: 2.625rem
 
     .new-record-form
 
@@ -468,6 +575,10 @@
           width: 100%
           display: flex
           align-items: center
+          // 6px between a field and its "Choose" button — the same gap as the
+          // State panel's tabs and watch field.  The field gives up the width;
+          // the button keeps its own.
+          gap: 0.375rem
           margin-bottom: 1em
 
         .checkmark
@@ -479,9 +590,13 @@
           margin-bottom: 0 !important
           position: relative
           width: fit-content
+          // Left-aligned with the fields above and below it ("Use default
+          // output folder").  The row is a centred column, so on its own the
+          // label sat in the middle of the form.
+          align-self: flex-start
           text-align: left
           color: colors-ui-text-primary-label
-          font-family: "SpaceMono"
+          font-family: "SpaceGrotesk"
           font-weight: bold
           font-size: 0.875em
           font-weight: 400
@@ -552,6 +667,30 @@
         flex-direction: row !important
         justify-content: flex-start !important
 
+      // Record / Download turn indigo only once there is something to submit.
+      // Until then they look exactly like the Back button beside them: the
+      // tertiary fill and text, and the tertiary hover (button.styl).
+      //
+      // "Something to submit" is the field the form cannot go without —
+      // Record's "Local project path" (`isNewRecordValid` in
+      // viewmodel/viewmodels/welcome_screen_vm.nim requires only it) and
+      // Download's URL field.  A field reads `:placeholder-shown` while it is
+      // empty, including after the "Choose" picker fills or clears it.
+      //
+      // The change fades with every button's transition (BUTTON_TRANSITION,
+      // button.styl): 250ms after a 100ms beat, both ways.
+
+    .new-record-form:not(.new-online-trace-form):not(:has(#new-record-executable:not(:placeholder-shown))),
+    .new-online-trace-form:not(:has(input.ct-input-form:not(:placeholder-shown)))
+      .ct-button-sm-primary
+        background-color: colors-ui-surface-primary-tertiary
+        color: colors-ui-text-primary-body-subtle
+
+        // `!important` only to beat the primary hover, which is itself
+        // `!important` (button.styl).
+        &:hover
+          background-color: colors-ui-surface-primary-tertiary-hover !important
+
     .new-record-result-wrapper
       display: flex
       align-items: center
@@ -576,7 +715,7 @@
         position: relative
         width: 100%
         text-align: center
-        font-family: "SpaceMono"
+        font-family: "SpaceGrotesk"
         display: flex
         align-items: center
 
@@ -608,7 +747,7 @@
           position: relative
           width: 100%
           height: 1.875em
-          font-family: "SpaceMono"
+          font-family: "SpaceGrotesk"
           font-size: 1.25em
 
 .online-functionality-buttons
@@ -716,7 +855,7 @@
   justify-content: space-between
   font-size: 0.875em
   font-weight: 400
-  font-family: "SpaceMono"
+  font-family: "SpaceGrotesk"
 
   #tx-hash
     width: 7.375em
@@ -781,3 +920,19 @@
 
 .stylus-content
   width: 53.125em !important
+
+// Every button on the welcome screens is the extra-large control size
+// (CONTROL_HEIGHT_XL, button.styl) — the same 34px as the form fields, so a
+// "Choose" button is exactly the height of the field it sits beside, and the
+// start options, Back and Record share one height with them.  The markup says
+// `sm`, the size those buttons use elsewhere; the welcome screens raise them
+// here, as the caption bar raises its own controls to large (menu_bar.styl).
+//
+// Corners are the fields' 6px (`.ct-input-form`), so a button and the field it
+// sits beside have matching corners.  `!important` only to beat the app-wide
+// `button` radius (0.5em, itself `!important`), which gave these 8px.
+.welcome-screen-wrapper [class*="ct-button-"]:not([class*="ct-button-image-"])
+  height: CONTROL_HEIGHT_XL
+  padding: 0 0.875em
+  align-items: center
+  border-radius: 0.375rem !important

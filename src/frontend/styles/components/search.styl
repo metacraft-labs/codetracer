@@ -8,29 +8,14 @@
   font-family: "SpaceGrotesk", sans-serif
   font-size: 13px
 
+// Command / File / Find in Files / Find Symbol: the shared segmented tabs
+// (`segmented-tabs()`, shared_widgets.styl), like the State panel's.  8px in
+// from the panel's top and left edges; the input row below keeps its own
+// padding, so no margin underneath.
 .search-mode-selector
   flex: 0 0 auto
-  display: flex
-  gap: 0.375em
-  padding: 0.5em
-  border-bottom: 1px solid colors-ui-surface-input-default
-  background: colors-ui-surface-primary-tertiary
-
-  button
-    height: 24px
-    padding: 0 0.75em
-    border: 1px solid transparent
-    border-radius: 0.25em
-    background: colors-ui-surface-input-default
-    color: colors-ui-text-primary-body
-    font: inherit
-    cursor: pointer
-
-    &:hover,
-    &.active
-      background: colors-ui-surface-primary-secondary-hover
-      color: colors-ui-text-primary-body
-      border-color: colors-ui-border-secondary
+  segmented-tabs()
+  margin: 0.5rem 0.5rem 0
 
 .search-input-row
   flex: 0 0 auto
@@ -39,11 +24,13 @@
 
 .search-query-input
   width: 100%
-  height: 30px
+  // A panel field, so the medium input size (INPUT_HEIGHT_MD, input.styl);
+  // this was 30px, off the scale.
+  height: INPUT_HEIGHT_MD
   box-sizing: border-box
-  border: 1px solid #4f4f4f
-  border-radius: 0.25em
-  background: #151515
+  border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
+  border-radius: CONTROL_RADIUS
+  background: colors-ui-surface-input-secondary
   color: colors-ui-text-primary-body
   padding: 0 0.75em
   font: inherit
@@ -87,7 +74,7 @@
 .search-selected-indicator
   display: block
   padding: 0.5em 0.75em
-  font-family: "SpaceMono", monospace
+  font-family: "SpaceGrotesk"
   font-size: 12px
 
   &.active

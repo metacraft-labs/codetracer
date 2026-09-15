@@ -195,8 +195,9 @@
     float: left
     // background-color: colors-ui-surface-base-panel
 
+    // The list hover (LIST_HOVER_BG, button.styl); was a literal #2e2e2e.
     &:hover
-      background-color: #2e2e2e
+      background-color: LIST_HOVER_BG
 
   .call-text
     padding-left: 0.125em
@@ -823,6 +824,11 @@
   text-decoration: none
   padding-left: 0.5em
   line-height: 1.45em
+
+// Search results are a clickable list with no hover of their own before; the
+// list hover (LIST_HOVER_BG, button.styl).
+.call-search-results .search-result:hover
+  background-color: LIST_HOVER_BG
 
 .empty-search-result
   color: red

@@ -26,7 +26,7 @@
   gap 8px
   padding 2px 12px
   font-size 12px
-  font-family "SpaceMono", monospace
+  font-family "SpaceGrotesk"
   min-height 24px
   border-radius 4px
   transition background-color 0.15s ease
@@ -161,7 +161,9 @@
     background-color var(--bg-hover, #2a2b34)
 
 .caption-progress-milestone-icon
-  font-family monospace
+  // Space Mono deliberately (font rule, font_family.styl): the "[x]" / "[>]" /
+  // "[ ]" marks are ASCII boxes that only line up in a fixed-width face.
+  font-family "SpaceMono", monospace
   flex-shrink 0
   min-width 24px
 

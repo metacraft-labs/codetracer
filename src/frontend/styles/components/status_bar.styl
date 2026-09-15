@@ -31,6 +31,12 @@ NOTIFICATION_STACK_GAP = 0.5rem
 
 STATUS_BAR_CONTENT_HEIGHT = 2rem
 STATUS_BAR_VERTICAL_PADDING = 0.25rem
+
+// Status bar text: 14px (Nikolay, 2026-09-15; it inherited the bar's 16px).
+// Set on the text rather than by lowering `#status-base`'s own `font-size`:
+// several spacings in the bar and in the bottom tab strip are sized in `em`
+// off that base, and would shrink along with the text.
+STATUS_BAR_TEXT_SIZE = 0.875rem
   // Breathing room so the tab curve pseudo-elements are visible above the
   // tabs; mirrored by the side strip's padding-left/right.
 
@@ -137,8 +143,10 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   // in a fixture that contains nothing else and would not have in the app.
   color: colors-ui-text-primary-body
 
+  // The panel inset (PANEL_INSET, 8px, button.styl) at the sides; no top of
+  // its own — the dock's 8px (auto_hide.styl) is the whole gap above it.
   .build-header
-    padding: 4px 8px
+    padding: 0 PANEL_INSET 4px
     font-size: 13px
     flex-shrink: 0
     display: flex
@@ -159,8 +167,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     flex-shrink: 0
 
   .build-ctrl-btn
-    width: 22px
-    height: 22px
+    // The small control size (button.styl), square; was 22px, off the scale.
+    width: CONTROL_HEIGHT_SM
+    height: CONTROL_HEIGHT_SM
     display: flex
     align-items: center
     justify-content: center
@@ -233,7 +242,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
     .build-stdout, .build-stderr, .build-output-line
       min-height: 24px
-      padding-left: 0.5em
+      // The panel inset (PANEL_INSET, button.styl) on both sides.
+      padding-left: PANEL_INSET
+      padding-right: PANEL_INSET
       font-family: "SpaceMono", monospace !important
       font-size: 14px
       line-height: 24px
@@ -279,7 +290,10 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
   .build-stdout, .build-stderr, .build-error, .build-output-line
     min-height: 24px
-    padding-left: 0.5em
+    // The panel inset (PANEL_INSET, button.styl) on both sides — this block
+    // outranks the one above, so it is the one that reaches the lines.
+    padding-left: PANEL_INSET
+    padding-right: PANEL_INSET
     font-family: "SpaceMono", monospace !important
     font-size: 14px
     line-height: 24px
@@ -772,7 +786,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       // margin-left: 2vw
       white-space: nowrap
       color: colors-ui-text-success-primary
-      font-family: "SpaceMono"
+      font-family: "SpaceGrotesk"
 
     #version-control-status
       margin-left:10px
@@ -970,10 +984,20 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     position: absolute
     z-index: 100
 
+    // The same type as a panel's tab title (`.lm_tab` / `.lm_title`,
+    // golden_layout.styl): Space Grotesk 14px Regular, -0.14px tracking, in
+    // the active title's colour.  Panel names are written in capitals ("FILES",
+    // "EVENT LOG"); this one comes from the status view as "Notifications",
+    // so the capitals are applied here rather than by changing the string.
+    // The indent is layout, not type — it lines the title up with the cards.
     .status-notification-header
-      color: #5885ac !important;
-      text-indent: 10px;
-      font-weight: bold;
+      font-family: "SpaceGrotesk"
+      font-size: 0.875rem
+      font-weight: 400
+      letter-spacing: -0.14px
+      text-transform: uppercase
+      color: colors-ui-text-primary-label !important
+      text-indent: 10px
 
   #bug-report-container
     width: 50%
@@ -1169,3 +1193,49 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
 .debug-skip-toggle
   margin-left: 10px
+
+
+// Every text in the status bar at STATUS_BAR_TEXT_SIZE (top of this file):
+// language, encoding and the location path (`.status-inline`), the ready /
+// disconnected status, the certificate label, "Finished", operation messages,
+// and the bottom strip's panel-tab labels.
+#status #status-base
+  .status-inline,
+  .ready-status,
+  .test-certificate-label,
+  .finished,
+  #operation-status,
+  .auto-hide-strip-tab-label
+    font-size: STATUS_BAR_TEXT_SIZE
+
+// The copy-path button behaves like the debugger toolbar's buttons in the
+// caption bar (`#isonim-debug-controls`, menu_bar.styl): no outline, the
+// secondary button's fill and hover (button.styl), the icon brightening from
+// the resting #b4b4b4 to body text under the pointer and while pressed, and no
+// fade.  It keeps the status bar's medium size (26px) inside the 32px bar.
+//
+// The icon is drawn as a mask filled with `currentColor` — as a background
+// image its colour was baked into the SVG and could not follow those states.
+// 15x14 is the SVG's own size, so the mark renders on whole pixels.
+//
+// 8px from the path it copies (`.location-path`), which it used to touch.
+#status #status-base #copy-path-image
+  border: none !important
+  transition: none
+  margin-left: 0.5rem
+  background-image: none !important
+
+  &::before
+    content: ""
+    width: 0.9375rem
+    height: 0.875rem
+    background-color: currentColor
+    -webkit-mask-image: ct-images-copy-path
+    mask-image: ct-images-copy-path
+    -webkit-mask-repeat: no-repeat
+    mask-repeat: no-repeat
+    -webkit-mask-position: center
+    mask-position: center
+    -webkit-mask-size: contain
+    mask-size: contain
+

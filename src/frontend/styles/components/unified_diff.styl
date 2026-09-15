@@ -270,8 +270,10 @@
   display flex
   align-items baseline
   gap 0.6em
-  padding 0.25em 0.9em
-  font-family monospace
+  // Sides at the panel inset (PANEL_INSET, 8px, button.styl); the row runs
+  // edge to edge.  0.9em here came to 13.68px at this 0.95em font size.
+  padding 0.25em PANEL_INSET
+  font-family "SpaceGrotesk"
   font-size 0.95em
   // Neutral. A blue tint here measured as `#2C3339` against a `#282828`
   // editor and a `#1b1b1b` panel, and two reviewers inventoried it as
@@ -288,7 +290,7 @@
   opacity 0.75
 
 .unified-diff-file-header-path
-  font-weight 600
+  font-weight 400
   overflow hidden
   text-overflow ellipsis
 
@@ -642,9 +644,11 @@
   text-align left
   cursor pointer
 
+  // A popup menu, not the editor: the list hover (LIST_HOVER_BG, button.styl)
+  // for the pointer and for keyboard focus alike.
   &:hover,
   &:focus
-    background-color rgba(86, 156, 214, 0.30)
+    background-color LIST_HOVER_BG
     outline none
 
 // --- The gutter reads as ONE rail (UD-4) ---------------------------------

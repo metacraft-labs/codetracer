@@ -1,17 +1,19 @@
 .state-component
-  font-family: "SpaceMono" !important
+  font-family: "SpaceGrotesk" !important
 
 .isonim-state
-  // Add 0.5em horizontal breathing room to all non-value elements.
-  // The .value-components-container is excluded so its scrollbar
+  // The panel inset (PANEL_INSET, 8px — button.styl) on both sides of every
+  // row: the sub-tabs, the source line, the watch field and the values start
+  // on the same line as the tab title above them and end 8px from the right.
+  // The .value-components-container drops its right padding so its scrollbar
   // remains flush with the right edge of the panel.
   .code-state-line,
   #gdb-evaluate,
   .state-tabs,
   .loading-indicator,
   .value-components-container
-    padding-left: 0.25em
-    padding-right: 0.25em
+    padding-left: PANEL_INSET
+    padding-right: PANEL_INSET
 
   .value-components-container
     padding-right: 0
@@ -21,6 +23,158 @@
   // the container scrolls horizontally instead.
   .value-view
     flex-wrap: nowrap
+
+  // The watch field sits on the tabs' row, to their right, 6px from them —
+  // one control bar instead of two stacked rows.
+  //
+  // The panel is otherwise a single column, and the code line renders between
+  // the tabs and the field, so this is a grid rather than a markup change:
+  // row 1 is the tabs (as wide as they need) and the field (the rest), and
+  // everything else spans the full width below.  A `display: none` child
+  // (the loading line, or a hidden code line) simply leaves its row empty.
+  //
+  // `&`: `isonim-state` and `state-component` are classes of the SAME element.
+  &.state-component
+    display: grid
+    grid-template-columns: max-content minmax(0, 1fr)
+    grid-template-rows: auto auto auto minmax(0, 1fr)
+    grid-template-areas: "tabs field" "code code" "loading loading" "values values"
+    column-gap: 0.375rem
+    align-items: center
+
+    > .state-tabs
+      grid-area: tabs
+
+    // No left inset of its own here: the 6px gap is the only space between
+    // it and the tabs.  Its right inset matches the rows below.
+    > #gdb-evaluate
+      grid-area: field
+      padding-left: 0
+
+    // The source line of the stopped position, 8px below the tabs/field bar
+    // (it sat flush against it).
+    > .code-state-line
+      grid-area: code
+      margin-top: PANEL_INSET
+
+    > .loading-indicator
+      grid-area: loading
+
+    // Fills the rest of the panel and scrolls, as it did in the column.
+    // `height: auto` undoes the shared `height: 100%` (calltrace.styl): in a
+    // grid that is 100% of the row, and the 4px top margin then pushed the
+    // bottom 4px out of the panel.  Stretched, it fits the row exactly.
+    > .value-components-container
+      grid-area: values
+      align-self: stretch
+      height: auto
+      min-height: 0
+      // Anchors the empty message below.
+      position: relative
+
+      // The empty message ("No local variables…", "No watch expressions
+      // yet…") centred in the values area, the way every other panel centres
+      // its message (components/empty_states.styl) — the same fill Scratchpad
+      // uses (scratchpad.styl).
+      //
+      // The shared `.empty-overlay` rule sizes the message with
+      // `height: inherit`, and this container's height is `auto` since the
+      // grid above, so the message collapsed to one line at the top of the
+      // area.  Pinned to all four edges instead, it fills the area whatever
+      // the container's height says.  `left: 0` also puts it outside the
+      // container's 8px left padding, so it centres on the panel's own middle
+      // rather than 4px right of it.
+      > .empty-overlay
+        position: absolute
+        top: 0
+        left: 0
+        right: 0
+        bottom: 0
+
+  // Locals / Globals / Watches — the design system's mode-switcher
+  // (CodeTracer Design System, "I2 · Mode switcher", node 4342:744): one
+  // outlined track with the selected view raised inside it.  These are three
+  // ways to look at the same stopped state, which is what that component is
+  // for; the filter chips on the same page are for narrowing one list.
+  //
+  // Until now the buttons carried no styles at all, so they drew as the
+  // browser's default light-grey buttons, and the active one was identical to
+  // the other two — nothing said which view was showing.
+  //
+  // The shared segmented tabs (`segmented-tabs()`, shared_widgets.styl): a
+  // 26px track, the same height as the watch field beside it, with 20px tabs.
+  .state-tabs
+    segmented-tabs()
+    // Keeps the 8px inset from the rule at the top of this block, as a margin:
+    // the track's own padding is the 2px around the tabs.
+    margin-left: PANEL_INSET
+
+  // The line execution is stopped on, drawn the way the editor draws it —
+  // the yellow arrow, the line number in the gutter's type, the code in the
+  // editor's type, on the editor's current-line band — so it is plainly the
+  // same line and not a caption.  Markup: isonim_state_view.nim,
+  // `codeStateLineParts`.
+  //
+  // The band runs the full width of the panel (it covers the 8px side
+  // insets), as the editor's band runs the full width of the code area; the
+  // arrow then starts on the panel inset, under the tabs.
+  .code-state-line
+    display: flex
+    // Number and code share a baseline although their sizes differ, as in
+    // the editor; the arrow centres itself on the row.
+    align-items: baseline
+    // One editor line, 24px.  A fixed height, because sitting on the code's
+    // baseline drops the smaller number 1px, and its line box would otherwise
+    // stretch the row to 25px (only empty line-box space falls outside).
+    height: 1.5rem
+    line-height: 1.5rem
+    background-color: CURRENT_LINE_BG
+    // The ellipsis moves to the code (below): on a flex row it applies to
+    // the children, not to the row.
+    text-overflow: clip
+
+  // The editor's current-line arrow (text_editor.styl,
+  // `.gutter-highlight-active:before`), at the width it paints there: 7px.
+  // 10px tall (the 8×11 icon fits at 7×9.6), an even height so, centred on
+  // the 24px row, it starts on a whole pixel.
+  .code-state-arrow
+    flex: none
+    align-self: center
+    width: 0.4375rem
+    height: 0.625rem
+    margin-right: 0.375rem
+    background-image: HIGHLIGHT_LINE_ARROW
+    background-repeat: no-repeat
+    background-position: center
+    background-size: contain
+
+  // The active line number in the editor's gutter: Space Mono Light at 14px
+  // (`line-number-type()`, text_editor.styl), in the bright label colour
+  // `.line-numbers.active-line-number` gives the current line.
+  .code-state-number
+    flex: none
+    line-number-type()
+    // The mixin's 1px nudge settles the number on Monaco's line box; here the
+    // shared baseline places it.
+    padding-top: 0 !important
+    color: colors-ui-text-primary-label
+
+  // Only the gap stands between number and code, as in the editor.  Kept in
+  // the DOM so the element's text still reads "7 | …" (the tests match it).
+  .code-state-separator
+    display: none
+
+  .code-state-source
+    flex: 1 1 auto
+    min-width: 0
+    margin-left: 0.75rem
+    font-family: "SpaceMono", monospace
+    font-size: 1rem
+    font-weight: 400
+    color: colors-ui-text-primary-body
+    overflow: hidden
+    white-space: nowrap
+    text-overflow: ellipsis
 
 .events-bottom
   height: 12.5em
@@ -74,6 +228,7 @@
 .value-selected
   opacity: 0.5
 
+// A variable's name ("x:") in the State, Scratchpad and value-popup rows.
 .value-name
   color: colors-ui-text-primary-active
   white-space: nowrap

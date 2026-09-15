@@ -1,0 +1,96 @@
+// CODE TEXT — every element that must use Space Mono (the font rule is written
+// down in components/font_family.styl).
+//
+// Panels, buttons and the State panel used to default to Space Mono, so every
+// label, header and message inside them inherited the code face.  They now
+// default to Space Grotesk, and the code inside them opts back in HERE — one
+// list, so "what counts as code" is answered in one place.
+//
+// Imported near the end (codetracer.styl), after the component stylesheets, so
+// these win over a panel's own default; only the shared empty-state treatment
+// (empty_states.styl) comes later.  Elements that already set Space Mono in
+// their own stylesheet (the code line, trace-log body, terminal, build output,
+// find-in-files matches, scratchpad, gutters, value history…) are not repeated.
+
+// Program data: variable names, values, types, expressions — State, calltrace
+// arguments and the origin chain.
+.value-components-container
+.call-name
+.call-text
+.call-args
+.call-arg
+.call-arg-name
+.call-arg-text
+.return-text
+.ct-origin-hop
+.ct-origin-terminator-row
+.ct-origin-badge-text
+.ct-origin-badge-fn
+  font-family: "SpaceMono"
+
+// Event log and table cells: ticks, indexes and program output.  Header cells
+// and the empty-table message stay on the interface face.
+.eventLog-cell
+.rr-ticks-time
+.direct-location-rr-ticks
+.data-table td:not(.dt-empty):not(.dataTables_empty)
+  font-family: "SpaceMono"
+
+// Flow steps, low-level instructions and addresses.
+.flow-step-index
+.flow-step-location
+.flow-step-expression
+.flow-step-value
+.flow-value-text
+.low-level-code-instruction-offset
+.low-level-code-instruction-name
+.low-level-code-instruction-args
+.low-level-code-instruction-other
+.low-level-code-instruction-source
+.low-level-code-address
+  font-family: "SpaceMono"
+
+// Terminals: REPL, shell, build command, agent test and evidence output.
+[id^="replComponent-"] .repl-input-history
+[id^="replComponent-"] .repl-output-history
+.shell-output
+.shell-prompt
+.shell-event
+.recording-command
+.build-command-label
+.agent-test-row-output
+.agent-test-run-output
+.agent-evidence-command
+.agent-evidence-output
+  font-family: "SpaceMono"
+
+// Code typed into a terminal.  `!important`, and a class-qualified selector,
+// only to beat `input { font-family: "SpaceGrotesk" !important }` (input.styl),
+// which is right for every other field.
+.shell-component .shell-input
+#repl-input
+  font-family: "SpaceMono" !important
+
+// Locations, URLs and graphics data.
+.request-row .request-col-url
+.problems-location
+.problems-path
+.point-list-label
+.point-list-location
+.ct-process-tree-name
+.frame-viewer-selected-pixel
+.frame-viewer-draw-call-name
+.frame-viewer-draw-call-pipeline
+.pixel-history-pixel
+.pixel-history-color-label
+.shader-debug-line-number
+.shader-debug-line-code
+.shader-debug-instruction-value
+.shader-debug-value-name
+.shader-debug-value-type
+.shader-debug-value-current
+.shader-debug-stage
+.video-player-loupe-readout
+.video-player-loupe-rgba
+.video-player-selected-pixel
+  font-family: "SpaceMono"

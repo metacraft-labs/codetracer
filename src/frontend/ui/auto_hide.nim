@@ -1114,7 +1114,10 @@ proc doShowOverlayImpl(panel: AutoHidePanel) =
         pinBtn.id = cstring"overlay-floating-pin-btn"
         pinBtn.class = cstring"overlay-floating-pin"
         pinBtn.setAttribute(cstring"title", cstring"Unpin (restore to layout)")
-        pinBtn.innerHTML = cstring"&#x2715;"  # X close/dismiss icon
+        # No content: `.overlay-floating-pin` (auto_hide.styl) draws the same
+        # crossed-out pin as the strip tabs' unpin button. This used to be an
+        # `innerHTML` ✕, which the overlay header's own close button also uses —
+        # one icon for "close" there and "unpin" here, two different outcomes.
         pinBtn.addEventListener(cstring"click", proc(ev: Event) =
           # Trigger the same unpin logic as the header button.
           let unpinTarget = if not autoHideState.isNil and not autoHideState.activeOverlay.isNil:
