@@ -20,6 +20,144 @@ proc jsEmptyArray: JsObject {.importjs: "([])".}
   ## and the copy crashes with "Cannot read properties of undefined
   ## (reading 'length')``.
 
+proc nodeEnv(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
+
+proc execFileJson(
+    command: cstring, args: JsObject,
+    callback: proc(err: JsObject, stdout: cstring, stderr: cstring)) {.
+  importjs: "require('child_process').execFile(#, #, {maxBuffer: 8 * 1024 * 1024}, #)".}
+
+proc applyEditArgs(edit: cstring, socketPath: cstring, driver: cstring,
+                   reportPath: cstring, waitFor: cstring, marker: cstring,
+                   markerTimeoutMs: cstring): JsObject {.importjs: """
+  ((function(edit, sock, drv, report, waitFor, marker, timeout) {
+    var a = ["--edit", edit, "--socket", sock, "--driver", drv,
+             "--json-out", report];
+    if (waitFor && marker) {
+      a.push("--wait-for", waitFor, "--marker", marker);
+      if (timeout) { a.push("--marker-timeout-ms", timeout); }
+    }
+    return a;
+  })(#, #, #, #, #, #, #))
+""".}
+  ## The command line handed to the apply-edit command.
+  ##
+  ## `--wait-for`/`--marker` are the command's own sequencing arguments: they
+  ## make it publish once the target has *printed* a chosen line, rather than
+  ## the instant the target connects. They are forwarded only when both are
+  ## configured, because the command refuses the pair half-given — which is the
+  ## right behaviour and not one to work around here.
+
+proc readJsonReport(path: cstring): JsObject {.importjs: """
+  ((function(p){
+    try { return JSON.parse(require('fs').readFileSync(p, 'utf8')); }
+    catch (e) { return null; }
+  })(#))
+""".}
+  ## Read the apply-edit command's JSON report, or `null` if it is absent or
+  ## unreadable. The two failures are deliberately one answer here: either way
+  ## the command produced no verdict, and the caller reports that as its own
+  ## named outcome rather than guessing at one.
+
+proc isJsNull(value: JsObject): bool {.importjs: "(# == null)".}
+
+proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
+  ## `CODETRACER::hcr-apply-edit` — run the project's apply-edit command and
+  ## hand the renderer back exactly what it reported.
+  ##
+  ## THIS PROCESS DECIDES NOTHING ABOUT THE EDIT. It resolves where the command
+  ## lives and which running process to talk to, runs it, and forwards its JSON
+  ## report unchanged. Whether an edit is inside the supported edit surface, and
+  ## which documented row a refusal maps onto, are the command's answers — a
+  ## second opinion formed here would be a second vocabulary to keep in sync
+  ## with the first, and the one that reached the user would be the wrong one.
+  ##
+  ## Configuration is by environment, which is the honest shape for a command
+  ## whose target is a process this application did not start:
+  ##
+  ##   CODETRACER_HCR_APPLY_EDIT_CMD  the apply-edit command to run
+  ##   CODETRACER_HCR_SOCKET          the running target's HCR agent socket
+  ##   CODETRACER_HCR_DRIVER          the coordinator driver the command uses
+  ##   CODETRACER_HCR_EDIT            the edit to apply, when the caller gave none
+  ##   CODETRACER_HCR_WAIT_FOR        a file the command polls before publishing
+  ##   CODETRACER_HCR_MARKER          the line it waits to see in that file
+  ##   CODETRACER_HCR_MARKER_TIMEOUT_MS  how long it may wait
+  ##   CODETRACER_HCR_REPORT          where to write the command's JSON report
+  ##
+  ## Every one of those being absent is REPORTED, with the name of the variable
+  ## that is missing. A command that silently did nothing when it was not
+  ## configured would be indistinguishable, from the screen, from one that ran
+  ## and changed nothing — which is the exact confusion the whole HCR beat is
+  ## built to avoid.
+  let command = nodeEnv(cstring"CODETRACER_HCR_APPLY_EDIT_CMD")
+  let socketPath = nodeEnv(cstring"CODETRACER_HCR_SOCKET")
+  let driver = nodeEnv(cstring"CODETRACER_HCR_DRIVER")
+  var edit = cstring""
+  if not response.isNil and not response.edit.isNil:
+    edit = cast[cstring](response.edit)
+  if edit.len == 0:
+    edit = nodeEnv(cstring"CODETRACER_HCR_EDIT")
+
+  proc refuse(status: cstring, message: cstring) =
+    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", js{
+      status: status, surfaceRow: cstring"", message: message, remedy: cstring""}
+
+  if command.len == 0:
+    refuse(cstring"not-configured",
+      cstring"no apply-edit command is configured for this project; set CODETRACER_HCR_APPLY_EDIT_CMD")
+    return
+  if socketPath.len == 0:
+    refuse(cstring"not-configured",
+      cstring"no running HCR target is configured; set CODETRACER_HCR_SOCKET to the agent socket of the process to patch")
+    return
+  if driver.len == 0:
+    refuse(cstring"not-configured",
+      cstring"no HCR coordinator driver is configured; set CODETRACER_HCR_DRIVER")
+    return
+  if edit.len == 0:
+    refuse(cstring"no-edit-given",
+      cstring"no edit was given; pass one as the action's `edit` field or set CODETRACER_HCR_EDIT")
+    return
+
+  # Where the command's JSON report is written. `CODETRACER_HCR_REPORT` exists
+  # so the report SURVIVES the run: the default lands in `TMPDIR`, which a nix
+  # dev shell recreates per invocation and removes on exit, and a measurement
+  # whose artifact is gone by the time anyone looks is one nobody can check.
+  var reportPath = $nodeEnv(cstring"CODETRACER_HCR_REPORT")
+  if reportPath.len == 0:
+    var tmpDir = $nodeEnv(cstring"TMPDIR")
+    if tmpDir.len == 0:
+      tmpDir = "/tmp"
+    reportPath = tmpDir & "/ct-hcr-apply-edit-report.json"
+  let args = applyEditArgs(
+    edit, socketPath, driver, cstring(reportPath),
+    nodeEnv(cstring"CODETRACER_HCR_WAIT_FOR"),
+    nodeEnv(cstring"CODETRACER_HCR_MARKER"),
+    nodeEnv(cstring"CODETRACER_HCR_MARKER_TIMEOUT_MS"))
+  infoPrint "index: running the apply-edit command for edit " & $edit
+  execFileJson(command, args) do (err: JsObject, stdout: cstring, stderr: cstring):
+    # The command's EXIT CODE is not the answer and is not read here: 0 is
+    # applied, 2 is a refusal and 1 is the command itself failing, and all three
+    # arrive in `err` as "non-zero" with no way to tell them apart. The JSON
+    # report is the answer, and its absence is its own named outcome rather than
+    # being folded into whichever of the three happened to be true.
+    let report = readJsonReport(reportPath)
+    if isJsNull(report):
+      var detail = $stderr
+      if detail.len == 0:
+        detail = $stdout
+      mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", js{
+        status: cstring"command-failed",
+        surfaceRow: cstring"",
+        message: cstring("the apply-edit command produced no report: " & detail),
+        remedy: cstring""}
+      return
+    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", js{
+      status: report.status,
+      surfaceRow: report.surfaceRow,
+      message: report.message,
+      remedy: report.remedy}
+
 proc onSearchProgram*(sender: js, response: cstring) {.async.} =
   ## Handle ``CODETRACER::search-program`` from the renderer.
   ##
@@ -212,6 +350,9 @@ proc configureIpcMain* =
     "download-trace-file"
     "delete-online-trace-file"
     "lsp-get-url"
+
+    # H4 — the in-app apply-edit -> HCR reload command.
+    "hcr-apply-edit"
 
 
   when defined(ctmacos):

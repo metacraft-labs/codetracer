@@ -273,7 +273,20 @@ type
     #
     # Appended, per the note above: `actions` in `ui_js.nim` is a positional
     # literal, so an insertion anywhere else re-points every handler after it.
-    aToggleReadOnly               # CTRL+E — toggle Monaco read-only + mode
+    aToggleReadOnly,              # CTRL+E — toggle Monaco read-only + mode
+    # APPLY EDIT & HOT-RELOAD — the in-app command that pushes a source or
+    # parameter edit into a running process through the HCR path, with no
+    # restart, and reports what the provider said. It is an action rather than
+    # a button wired straight to an IPC send for the reason every note above
+    # gives: an action gets a menu entry, a command-palette entry and a
+    # rebindable chord for free, and a refusal it cannot show the user is a
+    # refusal nobody learns from.
+    #
+    # Appended at the end, per the notes above: `actions` in `ui_js.nim` is a
+    # positional `array[ClientAction, ClientActionHandler]` written as a
+    # literal, so inserting anywhere else silently re-points every handler
+    # after the insertion.
+    aApplyEditAndReload           # Build > Apply Edit & Hot-Reload
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

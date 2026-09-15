@@ -889,6 +889,13 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
         folder "Build":
           element "Rebuild/Re-record file", aReRecord, true
           element "Rebuild/Re-record project", aReRecordProject, true
+          # The in-app apply-edit -> HCR reload command. It sits beside the two
+          # rebuild entries because it is the same verb one step further in:
+          # those re-record the program, this one changes the program that is
+          # already running. Being a menu element is also what puts it in the
+          # command palette — `getCommands` walks this very tree — so the one
+          # declaration buys both surfaces.
+          element "Apply Edit & Hot-Reload", aApplyEditAndReload, true
           --sub
           # The chord beside each label comes for free: `menu.nim:424` fills
           # `MenuNodeRecord.shortcut` from `loadShortcut`, which reads
@@ -4436,8 +4443,68 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
     result.add(messageCode)
   # echo result.repr
 
+# ---------------------------------------------------------------------------
+# APPLY EDIT & HOT-RELOAD (`ClientAction.aApplyEditAndReload`)
+#
+# The in-app half of the apply-edit -> HCR reload path. The renderer's whole job
+# here is to ASK and to SURFACE: it does not compile anything, does not talk to
+# the coordinator, and does not decide whether an edit is acceptable. The main
+# process runs the project's apply-edit command and hands back exactly what that
+# command reported, and every answer it can give — applied, refused by name,
+# refused with a remedy, or "this command is not configured here" — ends up in
+# front of the user.
+#
+# That last clause is the point of routing a refusal through the UI at all. A
+# hot-reload tool that declines an edit and says so only in a log leaves whoever
+# is standing at the screen with a flame that did not change and no reason why.
+# ---------------------------------------------------------------------------
+
+proc applyEditAndReload*(actionData: JsObject) =
+  ## Ask the main process to apply a source/parameter edit to the running
+  ## process through the HCR path, with no restart.
+  ##
+  ## The edit comes from `actionData.edit` when a caller supplies one. There is
+  ## deliberately no default here: resolving one belongs to the main process,
+  ## which is the side that can read the environment, and an empty edit is
+  ## reported back as a named refusal rather than being turned into some edit
+  ## nobody asked for.
+  var edit = cstring""
+  if not actionData.isNil and not actionData.toJs.edit.isNil:
+    edit = cast[cstring](actionData.toJs.edit)
+  data.viewsApi.infoMessage(cstring"Apply Edit & Hot-Reload: asking the HCR provider…")
+  data.ipc.send "CODETRACER::hcr-apply-edit", js{edit: edit}
+
+proc onHcrApplyEditResult(sender: js, response: js) =
+  ## Surface what the apply-edit command reported.
+  ##
+  ## `status` is the command's own named outcome and is shown verbatim, because
+  ## the names are the vocabulary the edit-surface documentation uses and an
+  ## operator who is shown "failed" has not been told which mistake they made.
+  ## `surfaceRow` names the documented edit-surface row when the refusal maps
+  ## onto one, and `remedy` is shown as its own notification when the provider
+  ## supplied one — the Mesa quiescence refusal is the case that matters, since
+  ## its remedy is a change to how the target was launched and nothing about the
+  ## edit can fix it.
+  let status = if response.status.isNil: cstring"" else: cast[cstring](response.status)
+  let surfaceRow = if response.surfaceRow.isNil: cstring"" else: cast[cstring](response.surfaceRow)
+  let message = if response.message.isNil: cstring"" else: cast[cstring](response.message)
+  let remedy = if response.remedy.isNil: cstring"" else: cast[cstring](response.remedy)
+  var text = cstring""
+  if status == cstring"applied":
+    text = cstring("Apply Edit & Hot-Reload: applied — " & $message)
+    data.viewsApi.successMessage(text)
+  else:
+    var head = "Apply Edit & Hot-Reload refused: " & $status
+    if surfaceRow.len > 0:
+      head.add(" (" & $surfaceRow & ")")
+    text = cstring(head & " — " & $message)
+    data.viewsApi.errorMessage(text)
+  if remedy.len > 0:
+    data.viewsApi.warnMessage(cstring("Apply Edit & Hot-Reload remedy: " & $remedy))
+
 proc configureIPC(data: Data) =
   uiIpcHandlers("CODETRACER::"):
+    "hcr-apply-edit-result"
     # "new-record-window"
     "record-path"
     "path-validated"
@@ -5542,6 +5609,22 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     ## `delegateShortcuts` calls this slot and with the caret outside
     ## `configureShortcuts`' Mousetrap bind does.
     data.toggleReadOnly(),
+  proc(actionData: JsObject) = # aApplyEditAndReload
+    ## Apply a source/parameter edit to the running process through the HCR
+    ## path, with no restart.
+    ##
+    ## The edit itself comes from `actionData.edit` when a caller supplies one
+    ## and from the `CODETRACER_HCR_EDIT` environment variable otherwise. There
+    ## is deliberately NO silent default: an apply-edit command that pushed some
+    ## edit nobody named would be a worse thing than one that refuses, so the
+    ## no-edit case is surfaced in the UI as a refusal with a sentence saying
+    ## how to supply one.
+    ##
+    ## An input widget for typing the edit is NOT part of this action; that is
+    ## the Scene-1 live-edit UX and belongs with the milestone that owns it.
+    ## What is here is the command, its place in the menu and the palette, and
+    ## the surfacing of every answer the provider can give.
+    applyEditAndReload(actionData),
 ]
 
 data.actions = actions
