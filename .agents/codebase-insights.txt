@@ -4024,3 +4024,36 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   prNone` (the enum prints its STRING value, `none`) and `not
   asciiBytes.contains("\x1b[48;2;")` (printed with `\e`). Verification-Harness
   -Traps §17a; derive every needle from a transcript.
+- **The `tui` lane's "cannot compile here" is a missing `-I`, not a missing
+  toolchain.** `fatal error: tree_sitter/api.h: No such file or directory` is
+  what three milestones (PLAT-21, PLAT-22) priced decisions against. The header
+  is in the SAME store path `build/grammars/tui-link-flags.txt` already names —
+  those flags carry `-L` and `-rpath` and no `-I`, by design, because the nix
+  dev shell supplies it. Outside the dev shell:
+  `export CPATH="$(sed 's/.*-L\([^ ]*\)\/lib.*/\1/' build/grammars/tui-link-flags.txt)/include"`
+  — or just read the store path out of that file and append `/include`. With it,
+  `just build-tui` succeeds (rc 0, 14,430,672 bytes). Measured 2026-09-16.
+  **TWO VARIABLES, AND THEY ARE FOR DIFFERENT THINGS — do not conflate them.**
+  `CPATH` is for anything that COMPILES `isonim_tui/syntax/treesitter_ffi.nim`
+  (the TUI binary; `nim check` never needed it). The tui SUITES do not pull that
+  module in and compile with `CPATH` unset — what they need is
+  `LD_LIBRARY_PATH` (see the next entry), because they open a real recording.
+  Run `test_cross_renderer_panes.nim` with `CPATH` and without
+  `LD_LIBRARY_PATH` and you get 10 `[FAILED]` cases and a SIGSEGV, not 240
+  checks. With `LD_LIBRARY_PATH`: `test_cross_renderer_panes.nim` 240 checks,
+  `test_inline_annotations.nim` 32 checks, both rc 0.
+- **`src/build-debug/bin/replay-server` cannot resolve `libmcr_emulator.so`**
+  through an rpath or `CT_LD_LIBRARY_PATH` — `ldd` says `not found`. Anything
+  that spawns it needs the emulator's build directory on `LD_LIBRARY_PATH`:
+  `src/db-backend/target/debug/build/replay-server-*/out`. Without it the
+  SHIPPED `codetracer-gpui` exits 1 with
+  `DapStdioBackend: the debug adapter closed its output stream mid-header`, and
+  `run-plat22-mutations.py` used to score 5 of 15 on a clean tree; it now
+  refuses with that reason instead (PLAT-22 residue 13, closed by PLAT-23).
+- **`codetracer-gpui` has NO EVENT LOOP, and its default invocation is a silent
+  success.** `main.runOpen` calls `createWindow` → `show()` → `requestRepaint()`
+  → `destroy()` with nothing between them, and the shim built without
+  `--features gpui-backend` documents `show` as "just updates the internal
+  state". So `codetracer-gpui <trace>` with no flags prints nothing, opens
+  nothing and exits **0** in ~0.13 s. Use `--report-plan` to see anything at
+  all. Do not read a green exit as a rendered window. (PLAT-23, 2026-09-16.)

@@ -41,11 +41,27 @@
 ##   * the session's breakpoints and tracepoints, as `SourcePoint` values,
 ##     filtered to the file on screen. **Not `PointListVM`, and that is a
 ##     finding rather than a shortcut.** `PointListVM.points` is a
-##     `Signal[seq[PointListEntry]]` that NOTHING in this repository fills
-##     from a backend response — `setPoints` has exactly two call sites, its
-##     own declaration and `storybook_components.nim:1379` (grep over
-##     `src/frontend`, 2026-09-05). So a gutter bound to it would render
-##     nothing on every real session while looking correctly wired. This
+##     `Signal[seq[PointListEntry]]` that nothing a USER runs fills from a
+##     backend response.
+##
+##     **The count in this paragraph was wrong and is corrected in place,
+##     2026-09-16 (PLAT-23).** It said *"`setPoints` has exactly two call
+##     sites, its own declaration and `storybook_components.nim:1379` (grep
+##     over `src/frontend`, 2026-09-05)"*. That was true on 2026-09-05 and
+##     there are now **three**: the declaration, the storybook fixture, and
+##     `viewmodel/viewmodels/point_collection_source.applyCollections`, which
+##     PLAT-11 wrote as its verification gate and whose own header calls itself
+##     *"the first producer"*. PLAT-22's verification found the same stale
+##     figure re-asserted in `editor_rows.EditorPoint` and corrected it there.
+##
+##     *The conclusion survives and the reason is what makes it still worth
+##     saying:* `applyCollections` has **no production caller** — all **twelve**
+##     of its call sites are tests (re-counted 2026-09-16 with
+##     `grep -rn 'applyCollections(' src/`; PLAT-22's verification said thirteen)
+##     — so a gutter bound to `PointListVM` would
+##     render nothing on every real session while looking correctly wired.
+##     "There is no producer" and "the producer is reached by nothing a user
+##     runs" point at different work, and it is the second. This
 ##     binding therefore takes the points as a value, and
 ##     `test_source_stepping_forward_backward.nim` builds them from the
 ##     ENGINE's own `setBreakpoints` acknowledgement — the line the replay
@@ -85,12 +101,29 @@ import ./views/source_pane
 # refuses. `editor_rows.markFor`'s header records the one mark combination on
 # which the two spellings already DISAGREE.
 #
-# AND ONE COPY THIS IMPORT CREATED: `degradedMessageFor` is declared below AND
-# in `editor_surface.nim`, byte-identical in body and signature, and this
-# module now re-exports both. It compiles because the local declaration wins
-# inside this module and no other module calls the unqualified name — but it is
-# §14's two-copies shape, created rather than inherited, and collapsing it is a
-# `tui`-lane change for the same reason as the five above.
+# AND ONE COPY THIS IMPORT CREATED, COLLAPSED BY PLAT-23 ON 2026-09-16:
+# `degradedMessageFor` was declared HERE as well as in `editor_surface.nim` —
+# identical in body and in parameter list, one spelled `proc` and one `func`
+# (PLAT-22's residue said "signature", which glossed that), with this module
+# re-exporting both. It compiled because the local declaration won inside
+# the module and no other module called the unqualified name, which is precisely
+# why nothing went red: §14's two-copies shape, created by the extraction that
+# was meant to remove one, and invisible to the compiler.
+#
+# PLAT-22 recorded it as residue 14 rather than collapsing it, on the ground
+# that *"its only graders are the `tui` lane's, and the `tui` lane cannot be run
+# here"*. **That ground was narrower than it looked.** The lane's compile
+# failure is `fatal error: tree_sitter/api.h: No such file or directory`, and
+# the header sits in the SAME store path the lane's own `--passL` flags already
+# name (`build/grammars/tui-link-flags.txt`) — it is `-L` and `-rpath` with no
+# `-I`. With that one directory on `CPATH`,
+# `src/frontend/tui/tests/test_cross_renderer_panes.nim` compiles and runs here:
+# 240 checks, rc 0, before and after this deletion. So the copy is gone and the
+# removal is GRADED rather than argued.
+#
+# The one-argument `degradedMessageFor` now resolves through the `export` below
+# to `editor_surface`'s. `frame_viewer_binding.degradedMessageFor` is a
+# two-argument OVERLOAD and is untouched.
 import ../../view_vocabulary/editor_surface
 
 export source_pane
@@ -143,18 +176,6 @@ proc revisionLabel*(vm: SourceVM): string =
   result = "@" & $rev.sourceGeneration
   if rev.sourceDigest.len > 0:
     result.add "#" & rev.sourceDigest
-
-proc degradedMessageFor*(state: PaneDegradation): string =
-  ## §14's row, as the one line the pane prints.
-  ##
-  ## Only `pdNoVerifiedSource` produces text here. The other degradations are
-  ## other panes' — a source pane that printed "no calltrace" would be
-  ## reinventing §14's canonical treatment, which is the thing §14 exists to
-  ## prevent.
-  if state == pdNoVerifiedSource:
-    "No verified source for this revision — showing what is available."
-  else:
-    ""
 
 proc marksForFile*(points: openArray[SourcePoint];
                    path: string): seq[(int, GutterMark)] =

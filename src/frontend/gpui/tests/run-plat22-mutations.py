@@ -468,6 +468,62 @@ def take_lock():
     return fh
 
 
+def check_replay_server_runnable() -> bool:
+    """Refuse to grade when the suite's `replay-server` cannot be executed.
+
+    **PLAT-22 residue 13, closed by PLAT-23.** Every case in
+    `test_gpui_editing_surface.nim` spawns a real `replay-server`, and the
+    binary `native_host.findReplayServer` picks first —
+    `src/build-debug/bin/replay-server` — resolves `libmcr_emulator.so` through
+    neither an rpath nor `CT_LD_LIBRARY_PATH`. Without the emulator's build
+    directory on `LD_LIBRARY_PATH` the suite is RED on an UNMUTATED tree, and
+    the harness scored **5 of 15** with eight `MIS-ATTRIBUTED` and two
+    `CONTROL-HARNESS-FAILURE` — a clean tree reported as broken, and nothing in
+    the output naming the reason.
+
+    That is §12b applied to a tally rather than to a timing: *a harness whose
+    verdict depends on an input it does not name can be believed when it is
+    wrong.* The dangerous direction is not the red — it is that a CI
+    configuration without the variable would report a number, and the number
+    would look like a measurement.
+
+    The remedy is the one the residue named: **refuse to start rather than
+    grade**. It is a refusal and not an `os.environ` fix-up, because a harness
+    that silently repairs its own environment is a harness whose result is
+    again about something it has not stated: the suite must be run in the
+    environment the operator chose, and told so when that environment cannot
+    run it.
+
+    PLAT-23 also measured that this is NOT only a harness problem. The SHIPPED
+    `codetracer-gpui` fails the same way on this host — `rc=1`,
+    `DapStdioBackend: the debug adapter closed its output stream mid-header` —
+    so the product carries the dependency too. The product at least FAILS,
+    which is why the residue is a harness residue; this check gives the harness
+    the same property.
+    """
+    binary = REPO / "src" / "build-debug" / "bin" / "replay-server"
+    if not binary.exists():
+        print("REFUSED: %s does not exist, so every case that spawns a "
+              "replay-server would fail on an UNMUTATED tree and every arm "
+              "would score MIS-ATTRIBUTED. Nothing was mutated." % binary)
+        return False
+    p = subprocess.run(["ldd", str(binary)], capture_output=True, text=True)
+    missing = [ln.strip() for ln in p.stdout.splitlines() if "not found" in ln]
+    if missing:
+        print("REFUSED: %s cannot resolve %d shared librar%s:"
+              % (binary, len(missing), "y" if len(missing) == 1 else "ies"))
+        for ln in missing:
+            print("    " + ln)
+        print("  The suite spawns this binary, so it would be RED on an "
+              "UNMUTATED tree and every arm would score MIS-ATTRIBUTED "
+              "against a control that never passed. Put the directory holding "
+              "the missing librar%s on LD_LIBRARY_PATH and re-run."
+              % ("y" if len(missing) == 1 else "ies"))
+        print("  Nothing was mutated. (PLAT-22 residue 13.)")
+        return False
+    return True
+
+
 def _ends_at_line_end(text: str, needle: str) -> tuple[bool, str]:
     """Does `needle` end where its line ends in `text`?
 
@@ -796,6 +852,10 @@ def main() -> int:
     if rc:
         return rc
     if not check_control_hashes():
+        return 3
+    # PLAT-22 residue 13. AFTER the digest gate and BEFORE any mutation, so a
+    # refusal here leaves the tree exactly as it was found.
+    if not check_replay_server_runnable():
         return 3
 
     selected = ARMS
