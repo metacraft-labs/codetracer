@@ -216,6 +216,19 @@ fn build_windows(private_build: &PrivateEmulatorBuild) {
             object_files.push(obj);
         }
     }
+    // Nim records hand-written `{.compile.}` units as cache markers rather
+    // than copying their C sources into native_c_files. Compile the private
+    // contract's authoritative list explicitly, just as the POSIX build does;
+    // otherwise the DLL is missing xxh64, scalar-FP, and x87 symbols.
+    for source in &private_build.extra_sources {
+        assert!(
+            source.is_file(),
+            "emulator extra source is missing: {}",
+            source.display()
+        );
+        let obj = compile_c_to_obj_windows(source, &obj_dir, &nim_lib, private_build);
+        object_files.push(obj);
+    }
     assert!(
         !object_files.is_empty(),
         "no .c files found in {} — did Nim regeneration succeed?",
@@ -774,8 +787,16 @@ fn load_private_emulator_build(emulator_dir: &Path) -> PrivateEmulatorBuild {
     println!("cargo:rerun-if-changed={}", env_script.display());
 
     if env_script.exists() {
+        // `resolve_recorder_root` canonicalizes the sibling checkout. On
+        // Windows that gives us a `\\?\\D:\\...` path, which Git Bash treats
+        // as a literal shell path and cannot open. Use the same conversion as
+        // the C-regeneration path below at every Rust -> bash boundary.
+        #[cfg(target_os = "windows")]
+        let env_script_arg = to_bash_posix_path(&env_script);
+        #[cfg(not(target_os = "windows"))]
+        let env_script_arg = env_script.to_string_lossy().into_owned();
         let output = Command::new("bash")
-            .arg(&env_script)
+            .arg(&env_script_arg)
             .arg("print-env")
             .output()
             .unwrap_or_else(|e| panic!("failed to run {} print-env: {e}", env_script.display()));
@@ -797,14 +818,14 @@ fn load_private_emulator_build(emulator_dir: &Path) -> PrivateEmulatorBuild {
         env_map
             .get(key)
             .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
+            .map(|v| private_env_path(v))
             .unwrap_or(default)
     };
     let path_list = |key: &str, default: Vec<PathBuf>| {
         env_map
             .get(key)
             .filter(|v| !v.is_empty())
-            .map(|v| env::split_paths(v).collect())
+            .map(|v| private_env_path_list(v))
             .unwrap_or(default)
     };
     let flags = |key: &str, default: &[&str]| {
@@ -1013,6 +1034,42 @@ fn to_bash_posix_path(p: &Path) -> String {
     trimmed.to_string()
 }
 
+/// Decode a path printed by `export_build_env.sh` back into the host's path
+/// syntax. Git Bash prints `M:\foo` as `/m/foo`; passing that spelling to a
+/// native Windows process resolves it relative to the current drive instead
+/// of naming `M:`. Keep this conversion paired with `to_bash_posix_path`.
+#[cfg(target_os = "windows")]
+fn private_env_path(value: &str) -> PathBuf {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b'/' {
+        let drive = (bytes[1] as char).to_ascii_uppercase();
+        return PathBuf::from(format!("{drive}:\\{}", value[3..].replace('/', "\\")));
+    }
+    PathBuf::from(value)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn private_env_path(value: &str) -> PathBuf {
+    PathBuf::from(value)
+}
+
+#[cfg(target_os = "windows")]
+fn private_env_path_list(value: &str) -> Vec<PathBuf> {
+    // The producer is Bash, so its list separator is `:` even though the
+    // consumer is a native Windows build script whose `env::split_paths`
+    // expects `;`.
+    value
+        .split(':')
+        .filter(|item| !item.is_empty())
+        .map(private_env_path)
+        .collect()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn private_env_path_list(value: &str) -> Vec<PathBuf> {
+    env::split_paths(value).collect()
+}
+
 /// Read the Nim stdlib include path written by build_*_api.sh, with a
 /// best-effort fallback to `nim dump` if the marker file is missing.
 /// Returns `true` when `dir` is a usable Nim stdlib include directory,
@@ -1036,7 +1093,11 @@ fn nim_lib_from_executable() -> Option<PathBuf> {
     let bin_dir = nim_exe.parent()?;
     let nim_root = bin_dir.parent()?;
     let lib = nim_root.join("lib");
-    if nim_lib_dir_is_valid(&lib) { Some(lib) } else { None }
+    if nim_lib_dir_is_valid(&lib) {
+        Some(lib)
+    } else {
+        None
+    }
 }
 
 /// Locate the `nim` executable on PATH (cross-platform: tries `nim` and,

@@ -252,7 +252,6 @@ const electronExePath: string | null = (() => {
 // ---------------------------------------------------------------------------
 
 const OK_EXIT_CODE = 0;
-const EDITOR_WINDOW_INDEX = 1;
 const MAX_CONNECT_ATTEMPTS = 20;
 const RETRY_DELAY_MS = 1_500;
 const GOTO_TIMEOUT_MS = 3_000;
@@ -641,16 +640,36 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Finds the editor window from an Electron app.
- * When DevTools is open, the first window may be DevTools (index 0)
- * and the editor is at index 1.
+ * When DevTools is open, the first window may be DevTools. On Windows the
+ * editor's initial about:blank document can also be replaced immediately
+ * after firstWindow() resolves, so reading its title races that navigation
+ * and can fail with "Execution context was destroyed". URLs are available
+ * without evaluating in the page and let us wait for the real editor window.
  */
 async function getEditorWindow(app: ElectronApplication): Promise<Page> {
-  const firstWindow = await app.firstWindow({ timeout: 45_000 });
-  const title = await firstWindow.title();
-  if (title === "DevTools") {
-    return app.windows()[EDITOR_WINDOW_INDEX];
+  await app.firstWindow({ timeout: 45_000 });
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    const editor = app.windows().find((window) => {
+      const url = window.url();
+      return url !== "about:blank" && !url.startsWith("devtools://");
+    });
+    if (editor) {
+      const url = editor.url();
+      try {
+        await editor.waitForLoadState("domcontentloaded", { timeout: 1_000 });
+        await sleep(250);
+        if (!editor.isClosed() && editor.url() === url) {
+          await editor.evaluate(() => document.readyState);
+          return editor;
+        }
+      } catch (_error) {
+        // The provisional document was replaced; retry with the new context.
+      }
+    }
+    await sleep(50);
   }
-  return firstWindow;
+  throw new Error("timed out waiting for Electron's editor window to navigate");
 }
 
 /**
@@ -1159,12 +1178,17 @@ async function launchTraceElectron(
   const consoleErrors: string[] = [];
   const mainProcessOutput: string[] = [];
   attachMainProcessCapture(app, mainProcessOutput);
+  for (const window of app.windows())
+    attachErrorCollectors(window, consoleErrors);
+  app.on("window", (window) => attachErrorCollectors(window, consoleErrors));
   const { result: page, durationMs: windowMs } = await timed(
     "first window",
     LIMIT_FIRST_WINDOW_MS,
     async () => getEditorWindow(app),
   );
-  attachErrorCollectors(page, consoleErrors);
+  if (pageConsoleErrors.get(page) !== consoleErrors) {
+    attachErrorCollectors(page, consoleErrors);
+  }
 
   const totalMs = Date.now() - t0;
   console.log(`#   electron: ${launchMs}ms  window: ${windowMs}ms  total setup: ${totalMs}ms`);

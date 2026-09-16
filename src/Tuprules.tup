@@ -177,6 +177,12 @@ endif
 # transient compiler temp. Pattern matches `C:/Users/<user>/AppData/Local/Temp/rustc<random>/...`.
 WINDOWS_RUSTC_TMP_IGNORE = ([A-Za-z]:)?[/\\][Uu]sers[/\\][^/\\]+[/\\]AppData[/\\]Local[/\\]Temp[/\\]rustc[^/\\]*[/\\].*
 
+# rustc's Windows parallel frontend creates short-lived file-backed pipe
+# endpoints in Cargo's working directory. They are named
+# `<hash>-<pid>-pipe-nt-0x<handle>` and are removed as soon as the compiler
+# exits; they are transport scratch, not build products.
+WINDOWS_RUSTC_PIPE_IGNORE = ([A-Fa-f0-9]+)-[0-9]+-pipe-nt-0x[A-Fa-f0-9]+
+
 # The `codetracer_trace_writer_nim` crate's build.rs compiles a Nim static
 # library. Two kinds of side writes happen outside the cargo target dir:
 #
@@ -209,7 +215,7 @@ NIM_SIDE_OUTPUTS_IGNORE = ^(([A-Za-z]:)?[/\\]tmp[/\\]ct-nim-cache[/\\].*|([A-Za-
 # below intentionally allow either `target/...` (final layout) or
 # `target<6-char-suffix>/...` (cargo's atomic-prep layout).
 BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]backend_manager_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
-DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE)|$(NIM_FFI_CACHE_IGNORE))$
+DB_BACKEND_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]db_backend_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_RUSTC_PIPE_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE)|$(NIM_FFI_CACHE_IGNORE))$
 VIRTUALIZATION_LAYERS_CARGO_IGNORE_OUTPUTS = ^(([A-Za-z]:)?[/\\]tmp[/\\]codetracer[/\\]virtualization_layers_target[A-Za-z0-9]*[/\\].*|$(WINDOWS_RUSTC_TMP_IGNORE)|$(WINDOWS_CARGO_HOME_IGNORE))$
 
 ifeq (@(TUP_PLATFORM),win32)
@@ -483,9 +489,16 @@ DB_BACKEND_CARGO_FEATURES =
 !rust_cargo_backend_manager = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) --release --target-dir $(CARGO_TARGET_BASE)/backend_manager_target && \
     cp $(CARGO_TARGET_BASE)/backend_manager_target/release/session-manager$(EXE_SUFFIX) %o |> %o | $(BACKEND_MANAGER_CARGO_IGNORE_OUTPUTS)
+ifeq (@(TUP_PLATFORM),win32)
+!debug_rust_cargo_db_backend = |> \
+    cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %1o && \
+    cp $(CARGO_TARGET_BASE)/db_backend_target/debug/mcr_emulator.dll %2o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+else
 !debug_rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/debug/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)
+endif
 !rust_cargo_db_backend = |> \
     cargo build --locked $(RUST_WINDOWS_LINKER_CONFIG) $(DB_BACKEND_CARGO_FEATURES) --release --target-dir $(CARGO_TARGET_BASE)/db_backend_target && \
     cp $(CARGO_TARGET_BASE)/db_backend_target/release/replay-server$(EXE_SUFFIX) %o |> %o | $(DB_BACKEND_CARGO_IGNORE_OUTPUTS)

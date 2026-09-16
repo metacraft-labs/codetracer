@@ -21,8 +21,9 @@
  *
  *   2. TYPING PUBLISHES. Three values are typed into the field, one after
  *      another, into ONE running flame. The panel's status line must read
- *      `applied` after each — and that is what the PRODUCT said, never the
- *      verdict.
+ *      `applied` after each. A fourth, invalid value must surface the command's
+ *      named refusal in that same persistent panel without reaching the open
+ *      session — and those are product claims, never the behavioural verdict.
  *
  *   3. THE FLAME RESHAPED THREE TIMES, WITHOUT RESTARTING. The verdict is the
  *      flame demo's own `verify_hcr5_live_edit_loop.py`: three plateaus in
@@ -42,17 +43,23 @@
  *
  * GATED, and it skips LOUDLY, naming the first missing prerequisite.
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawnSync } from "node:child_process";
 import { test, expect } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
-import { resolveFlamePaths, runFlame, waitForFile, type FlamePaths } from "../hcr-apply-edit/flame-hcr-driver";
+import {
+  resolveFlamePaths,
+  waitForFile,
+  type FlamePaths,
+} from "../hcr-apply-edit/flame-hcr-driver";
 
 const CODETRACER_REPO = path.resolve(__dirname, "../../../../..");
+const WORKSPACE = path.dirname(CODETRACER_REPO);
 const PY_PROGRAM = "py_console_logs/main.py";
+const IS_WINDOWS = process.platform === "win32";
+const PYTHON = IS_WINDOWS ? "python" : "python3";
 
 /**
  * The three edits, and the bands they predict.
@@ -85,9 +92,62 @@ const FIRST_EDIT_AT = 120;
 const SETTLE = 60;
 const PLATEAU = 120;
 
-const resolved = resolveFlamePaths(CODETRACER_REPO);
+const windowsFlameRepo =
+  process.env.CODETRACER_FLAME_DEMO_REPO ??
+  path.join(WORKSPACE, "codetracer-flame-demo");
+const windowsWork = path.join(
+  windowsFlameRepo,
+  "build",
+  "hcr-windows-live-edit-loop",
+);
+const WINDOWS_AGENT = path.join(windowsWork, "agent", "repro_hcr_agent.dll");
+const WINDOWS_EXTENSION = path.join(
+  windowsFlameRepo,
+  "bin",
+  "flamefield.windows.template_debug.dll",
+);
+const WINDOWS_EXTENSION_PDB = path.join(
+  windowsFlameRepo,
+  "bin",
+  "flamefield.windows.template_debug.pdb",
+);
+
+const resolved = IS_WINDOWS
+  ? ({
+      workspace: WORKSPACE,
+      flameRepo: windowsFlameRepo,
+      engine: path.join(
+        WORKSPACE,
+        "codetracer-engine-godot",
+        "bin",
+        "godot.windows.template_debug.x86_64.hcrwin.exe",
+      ),
+      driver: path.join(windowsWork, "hcr_patch_driver_windows.exe"),
+      applyEdit: path.join(windowsFlameRepo, "scripts", "ct_hcr_apply_edit.py"),
+      verify: path.join(
+        windowsFlameRepo,
+        "scripts",
+        "verify_hcr2_flame_patch.py",
+      ),
+    } as FlamePaths)
+  : resolveFlamePaths(CODETRACER_REPO);
 let unavailable = typeof resolved === "string" ? resolved : null;
 const flame = typeof resolved === "string" ? null : (resolved as FlamePaths);
+if (IS_WINDOWS && flame !== null) {
+  for (const [what, where] of [
+    ["the patchable Windows Godot engine", flame.engine],
+    ["the patchable Windows FlameField DLL", WINDOWS_EXTENSION],
+    ["the matching Windows FlameField PDB", WINDOWS_EXTENSION_PDB],
+    ["the injected Windows HCR agent", WINDOWS_AGENT],
+    ["the session-capable Windows HCR driver", flame.driver],
+    ["the apply-edit command", flame.applyEdit],
+  ] as const) {
+    if (!fs.existsSync(where)) {
+      unavailable = `${what} is missing: ${where}`;
+      break;
+    }
+  }
+}
 
 /**
  * The session-capable driver, which is NOT the same binary H4 uses.
@@ -100,22 +160,30 @@ const flame = typeof resolved === "string" ? null : (resolved as FlamePaths);
 const SESSION_DRIVER =
   process.env.CODETRACER_HCR_SESSION_DRIVER ??
   (flame !== null
-    ? path.join(flame.flameRepo, "artifacts", "h5-driver", "hcr_patch_driver")
+    ? IS_WINDOWS
+      ? flame.driver
+      : path.join(flame.flameRepo, "artifacts", "h5-driver", "hcr_patch_driver")
     : "");
 if (unavailable === null) {
   if (!fs.existsSync(SESSION_DRIVER)) {
     unavailable = `the session-capable HCR coordinator driver is missing: ${SESSION_DRIVER}`;
   } else {
     const usage = spawnSync(SESSION_DRIVER, ["--help"], { encoding: "utf8" });
-    if (!`${usage.stdout ?? ""}${usage.stderr ?? ""}`.includes("--session-dir")) {
-      unavailable =
-        `${SESSION_DRIVER} does not support --session-dir; it predates the live-edit loop`;
+    if (
+      !`${usage.stdout ?? ""}${usage.stderr ?? ""}`.includes("--session-dir")
+    ) {
+      unavailable = `${SESSION_DRIVER} does not support --session-dir; it predates the live-edit loop`;
     }
   }
 }
 if (unavailable === null && flame !== null) {
-  const verify = path.join(flame.flameRepo, "scripts", "verify_hcr5_live_edit_loop.py");
-  if (!fs.existsSync(verify)) unavailable = `the H5 verdict script is missing: ${verify}`;
+  const verify = path.join(
+    flame.flameRepo,
+    "scripts",
+    "verify_hcr5_live_edit_loop.py",
+  );
+  if (!fs.existsSync(verify))
+    unavailable = `the H5 verdict script is missing: ${verify}`;
 }
 
 const WORK =
@@ -136,6 +204,7 @@ const REPORT = path.join(WORK, "apply-edit-report.json");
 // reaches nothing.
 if (flame !== null) {
   process.env.CODETRACER_HCR_APPLY_EDIT_CMD = flame.applyEdit;
+  if (IS_WINDOWS) process.env.CODETRACER_HCR_APPLY_EDIT_INTERPRETER = "python";
   process.env.CODETRACER_HCR_SESSION_DIR = SESSION_DIR;
   process.env.CODETRACER_HCR_REPORT = REPORT;
   // Deliberately CLEARED. The main process refuses a session configured
@@ -147,6 +216,12 @@ if (flame !== null) {
   delete process.env.CODETRACER_HCR_EDIT;
   delete process.env.CODETRACER_HCR_WAIT_FOR;
   delete process.env.CODETRACER_HCR_MARKER;
+  delete process.env.CODETRACER_HCR_PLATFORM;
+  delete process.env.CODETRACER_HCR_PID;
+  delete process.env.CODETRACER_HCR_PID_FILE;
+  delete process.env.CODETRACER_HCR_TARGET_IMAGE;
+  delete process.env.CODETRACER_HCR_TARGET_PDB;
+  delete process.env.CODETRACER_HCR_FIRST_INSTRUCTION_LENGTH;
 }
 
 const COMMAND_LABEL = "Live Edit (HCR)…";
@@ -158,12 +233,15 @@ async function waitForFrame(want: number, timeoutMs: number): Promise<number> {
     if (fs.existsSync(TICKS)) {
       const text = fs.readFileSync(TICKS, "utf8");
       const matches = [...text.matchAll(/frame=(\d+)/g)];
-      const last = matches.length > 0 ? Number(matches[matches.length - 1][1]) : 0;
+      const last =
+        matches.length > 0 ? Number(matches[matches.length - 1][1]) : 0;
       if (last >= want) return last;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`the flame never reached frame ${want} within ${timeoutMs} ms`);
+  throw new Error(
+    `the flame never reached frame ${want} within ${timeoutMs} ms`,
+  );
 }
 
 function currentFrame(): number {
@@ -179,7 +257,10 @@ test.describe("H5 — the Scene-1 live-edit loop", () => {
   test("typing successive values reshapes ONE running flame, three times, with no restart", async ({
     ctPage,
   }) => {
-    test.skip(unavailable !== null, `the H5 prerequisites are not present: ${unavailable ?? ""}`);
+    test.skip(
+      unavailable !== null,
+      `the H5 prerequisites are not present: ${unavailable ?? ""}`,
+    );
     const paths = flame as FlamePaths;
 
     const layout = new LayoutPage(ctPage);
@@ -190,35 +271,83 @@ test.describe("H5 — the Scene-1 live-edit loop", () => {
     // FlameSim is seeded and fixed-timestep, so this is both the trajectory the
     // patched run must reproduce before the first edit and the denominator of
     // every plateau ratio afterwards.
-    const control = await runFlameFrames(paths, CONTROL_TICKS, null, 300_000);
-    expect(control.code, `the control flame exited ${control.code}: ${control.stderr.slice(-400)}`).toBe(0);
+    const control = await runFlameFrames(paths, CONTROL_TICKS, false, 300_000)
+      .done;
+    expect(
+      control.code,
+      `the control flame exited ${control.code}: ${control.stderr.slice(-400)}`,
+    ).toBe(0);
     expect(control.stdout).toContain("CT_H2_DONE");
 
     // --- the session coordinator, then the flame ----------------------------
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSION_DIR, { recursive: true });
-    fs.rmSync(SOCKET, { force: true });
+    if (!IS_WINDOWS) fs.rmSync(SOCKET, { force: true });
     fs.rmSync(TICKS, { force: true });
     fs.writeFileSync(TICKS, "");
 
     const driverLog = fs.openSync(path.join(WORK, "driver.log"), "w");
-    const coordinator: ChildProcess = spawn(
-      SESSION_DRIVER,
-      [
-        "--socket", SOCKET,
-        "--target-symbol", "_ZN5flame8FlameSim15advanceExistingEv",
-        "--session", "--session-dir", SESSION_DIR,
-        "--session-idle-timeout-ms", "600000",
-      ],
-      { stdio: ["ignore", driverLog, driverLog] },
-    );
-    await waitForFile(SOCKET, 60_000, "the live-edit session's coordinator socket");
-
-    const patchedRun = runFlameFrames(paths, TICKS, SOCKET, 600_000);
+    let coordinator: ChildProcess;
+    let patchedRun: ReturnType<typeof runFlameFrames>;
+    if (IS_WINDOWS) {
+      // The Windows driver derives the named-pipe endpoint from the target PID,
+      // so the process must exist first. The injected agent retries its dial-out
+      // while the coordinator starts; `ready` below proves the handshake, not
+      // merely that both processes were launched.
+      patchedRun = runFlameFrames(paths, TICKS, true, 600_000);
+      expect(patchedRun.pid).toBeGreaterThan(0);
+      coordinator = spawn(
+        SESSION_DRIVER,
+        [
+          "--pid",
+          String(patchedRun.pid),
+          "--target-image",
+          WINDOWS_EXTENSION,
+          "--target-pdb",
+          WINDOWS_EXTENSION_PDB,
+          "--target-symbol",
+          "flame::FlameSim::advanceExisting",
+          "--first-instruction-length",
+          "2",
+          "--session",
+          "--session-dir",
+          SESSION_DIR,
+          "--session-idle-timeout-ms",
+          "600000",
+        ],
+        { stdio: ["ignore", driverLog, driverLog] },
+      );
+    } else {
+      coordinator = spawn(
+        SESSION_DRIVER,
+        [
+          "--socket",
+          SOCKET,
+          "--target-symbol",
+          "_ZN5flame8FlameSim15advanceExistingEv",
+          "--session",
+          "--session-dir",
+          SESSION_DIR,
+          "--session-idle-timeout-ms",
+          "600000",
+        ],
+        { stdio: ["ignore", driverLog, driverLog] },
+      );
+      await waitForFile(
+        SOCKET,
+        60_000,
+        "the live-edit session's coordinator socket",
+      );
+      patchedRun = runFlameFrames(paths, TICKS, true, 600_000);
+    }
     // `ready` is written after the HANDSHAKE, not after the accept. Publishing
     // on the strength of a connected socket would send a patch request into a
     // session that had not negotiated.
-    await waitForFile(path.join(SESSION_DIR, "ready"), 120_000, "the live-edit session becoming ready");
+    await waitForFile(
+      path.join(SESSION_DIR, "ready"),
+      120_000,
+      "the live-edit session becoming ready",
+    );
 
     // --- the widget ---------------------------------------------------------
     await ctPage.keyboard.press("Control+KeyP");
@@ -275,10 +404,24 @@ test.describe("H5 — the Scene-1 live-edit loop", () => {
       appliedAt.push(currentFrame());
     }
 
+    // The same real command must preserve a named refusal through both IPC
+    // hops and the renderer. This value is outside the documented edit surface,
+    // so it is rejected before publication and must not increment the session's
+    // `patchesRequested` count checked below.
+    await input.fill("rise_speed=0");
+    await input.press("Enter");
+    await expect(status).toHaveText("edit-value-out-of-range", {
+      timeout: 300_000,
+    });
+    await expect(detail).toContainText("not positive", { timeout: 10_000 });
+
     // --- close the session and let the flame finish -------------------------
     fs.writeFileSync(path.join(SESSION_DIR, "stop"), "");
-    const patched = await patchedRun;
-    expect(patched.code, `the patched flame exited ${patched.code}: ${patched.stderr.slice(-400)}`).toBe(0);
+    const patched = await patchedRun.done;
+    expect(
+      patched.code,
+      `the patched flame exited ${patched.code}: ${patched.stderr.slice(-400)}`,
+    ).toBe(0);
     await new Promise<void>((resolve) => {
       if (coordinator.exitCode !== null) return resolve();
       coordinator.on("close", () => resolve());
@@ -316,23 +459,35 @@ test.describe("H5 — the Scene-1 live-edit loop", () => {
     // `--json-out` for every edit, so after three edits that file holds only
     // the third verdict and the first two exist nowhere readable.
     const written = spawnSync(
-      "python3",
-      [path.join(paths.flameRepo, "scripts", "hcr5_arms_json.py"), "--out", armsJson, ...armArgs],
+      PYTHON,
+      [
+        path.join(paths.flameRepo, "scripts", "hcr5_arms_json.py"),
+        "--out",
+        armsJson,
+        ...armArgs,
+      ],
       { encoding: "utf8" },
     );
     expect(written.status, `${written.stdout}${written.stderr}`).toBe(0);
 
     const verdict = spawnSync(
-      "python3",
+      PYTHON,
       [
         path.join(paths.flameRepo, "scripts", "verify_hcr5_live_edit_loop.py"),
-        "--control", CONTROL_TICKS,
-        "--patched", TICKS,
-        "--arms", armsJson,
-        "--session", sessionPath,
-        "--frames", String(FRAMES),
-        "--settle", String(SETTLE),
-        "--json-out", path.join(WORK, "verdict.json"),
+        "--control",
+        CONTROL_TICKS,
+        "--patched",
+        TICKS,
+        "--arms",
+        armsJson,
+        "--session",
+        sessionPath,
+        "--frames",
+        String(FRAMES),
+        "--settle",
+        String(SETTLE),
+        "--json-out",
+        path.join(WORK, "verdict.json"),
       ],
       { encoding: "utf8" },
     );
@@ -354,33 +509,56 @@ test.describe("H5 — the Scene-1 live-edit loop", () => {
 function runFlameFrames(
   paths: FlamePaths,
   tickFile: string,
-  agentSocket: string | null,
+  withAgent: boolean,
   timeoutMs: number,
-): Promise<{ code: number | null; stdout: string; stderr: string }> {
+): {
+  pid: number;
+  done: Promise<{ code: number | null; stdout: string; stderr: string }>;
+} {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     CT_H2_FRAMES: String(FRAMES),
+    CT_H2_MAX_FPS: "60",
     CT_H2_TICKFILE: tickFile,
   };
   delete env.CT_H2_CAPTURE;
-  if (agentSocket !== null) {
-    env.REPRO_HCR_AGENT_SOCKET = agentSocket;
+  if (withAgent && IS_WINDOWS) {
+    env.REPRO_HCR_AGENT_DLL = WINDOWS_AGENT;
+    delete env.REPRO_HCR_AGENT_SOCKET;
+  } else if (withAgent) {
+    env.REPRO_HCR_AGENT_SOCKET = SOCKET;
+    delete env.REPRO_HCR_AGENT_DLL;
   } else {
     // The CONTROL run must have no agent at all, or the identity comparison
     // underneath this gate is comparing a run with itself.
     delete env.REPRO_HCR_AGENT_SOCKET;
+    delete env.REPRO_HCR_AGENT_DLL;
   }
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      paths.engine,
-      ["--headless", "--path", paths.flameRepo, "--scene", "res://scenes/hcr2_probe.tscn"],
-      { env, cwd: paths.flameRepo },
-    );
+  const child = spawn(
+    paths.engine,
+    [
+      "--headless",
+      "--path",
+      paths.flameRepo,
+      "--scene",
+      "res://scenes/hcr2_probe.tscn",
+    ],
+    { env, cwd: paths.flameRepo },
+  );
+  const done = new Promise<{
+    code: number | null;
+    stdout: string;
+    stderr: string;
+  }>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      reject(new Error(`the flame did not finish ${FRAMES} frames within ${timeoutMs} ms`));
+      reject(
+        new Error(
+          `the flame did not finish ${FRAMES} frames within ${timeoutMs} ms`,
+        ),
+      );
     }, timeoutMs);
     child.stdout.on("data", (chunk) => (stdout += chunk.toString()));
     child.stderr.on("data", (chunk) => (stderr += chunk.toString()));
@@ -393,4 +571,5 @@ function runFlameFrames(
       resolve({ code, stdout, stderr });
     });
   });
+  return { pid: child.pid ?? 0, done };
 }
