@@ -113,10 +113,20 @@ proc jumpToEvent*(vm: TerminalOutputVM; eventIndex: int) =
   for line in vm.lines.val:
     for fragment in line.fragments:
       if fragment.eventIndex == eventIndex:
+        # EventLogKind uses Deserialize_repr (integer, not string).
+        # Write = 0 (the default and the kind for terminal output events).
+        # content/highLevelPath/highLevelLine/metadata/maxRRTicks have no
+        # #[serde(default)] on the Rust side, so they must be provided even
+        # though event_jump only reads `kind` and `directLocationRRTicks`.
         let args = %*{
-          "eventIndex": eventIndex,
+          "kind": 0,
+          "content": "",
+          "highLevelPath": "",
+          "highLevelLine": 0,
+          "metadata": "",
+          "maxRRTicks": 0,
           "directLocationRRTicks": fragment.rrTicks,
-          "kind": "Write",
+          "eventIndex": eventIndex,
         }
         vm.store.requestHistoricalNavigation("ct/event-jump", args)
         return
