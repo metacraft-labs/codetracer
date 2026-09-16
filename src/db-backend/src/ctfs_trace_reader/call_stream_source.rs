@@ -29,10 +29,10 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use codetracer_trace_types::{CallKey, FullValueRecord, FunctionId, StepId, TypeId, ValueRecord};
+use codetracer_trace_types::{CallKey, FullValueRecord, FunctionId, StepId, TypeId, ValueRecord, VariableId};
 
 use codetracer_trace_reader::call_stream_reader::{CallStreamReader, open_call_stream};
-use codetracer_trace_writer::call_stream::{CallStreamRecord, VOID_RETURN_MARKER};
+use codetracer_trace_writer::call_stream::{CallArg, CallStreamRecord, VOID_RETURN_MARKER};
 
 use crate::db::DbCall;
 
@@ -238,9 +238,10 @@ fn open_call_reader_from_ctfs(ctfs: &mut CtfsReader) -> Result<Option<CallStream
 ///
 /// This mirrors the mapping the fully-materialized new-format reader performs
 /// when it pulls calls out of the Nim seek-based reader (see
-/// `open_new_format_nim`): the structural fields map 1:1, args are decoded from
-/// the record's single synthetic CBOR blob (the `Vec<FullValueRecord>` the
-/// `Call` event carried), and the return value from the `Return` payload.
+/// `open_new_format_nim`): the structural fields map 1:1, each `calls.dat`
+/// argument becomes one [`FullValueRecord`] carrying the argument's interned
+/// `varnames.dat` id and its decoded CBOR value, and the return value comes from
+/// the `Return` payload.
 pub fn call_stream_record_to_db_call(record: &CallStreamRecord) -> DbCall {
     let args = decode_args(&record.args);
     let return_value = decode_return_value(&record.return_value);
@@ -256,21 +257,32 @@ pub fn call_stream_record_to_db_call(record: &CallStreamRecord) -> DbCall {
     }
 }
 
-/// Decode the record's args blob (the whole-`Vec<FullValueRecord>` CBOR the
-/// `Call` event carried) back into `FullValueRecord`s. An empty blob means "no
-/// args"; a decode error degrades to an empty arg list (the structure is what
-/// matters here, never a crash).
-fn decode_args(blob: &[u8]) -> Vec<FullValueRecord> {
-    if blob.is_empty() {
-        return Vec::new();
-    }
-    match cbor4ii::serde::from_reader::<Vec<FullValueRecord>, _>(blob) {
-        Ok(v) => v,
-        Err(e) => {
-            log::warn!("calls.dat: failed to decode call args CBOR ({e}); using empty args");
-            Vec::new()
-        }
-    }
+/// Adapt a `calls.dat` record's arguments into the db-backend's
+/// [`FullValueRecord`]s: ONE output per [`CallArg`], in the record's declaration
+/// order, each keeping its name.
+///
+/// The name is carried by `varname_id`, an index into the container's
+/// `varnames.dat` interning table, and `FullValueRecord::variable_id` is an
+/// index into that SAME table — the db-backend resolves it to text later, via
+/// `Db::variable_name`. So the adaptation is the id, not a string lookup, and it
+/// is the identical construction the fully-materialized readers already perform
+/// on `reader.call_arg(key, i)` (`mod.rs`, `open_new_format_rust` /
+/// `open_new_format_nim`). There is deliberately no second mechanism here.
+///
+/// Every argument survives. `codetracer-trace-format` commit a797cb8 changed
+/// this record precisely because the previous shape — one synthetic blob under a
+/// `varname_id` of 0 — kept only the first argument and threw away every name,
+/// so a consumer that collapses the entries or drops them on a decode failure
+/// reintroduces exactly the data loss that change exists to end. A value that
+/// does not decode becomes a `ValueRecord::Raw` placeholder under its real name
+/// (see [`super::decode_interned_cbor_value`]) rather than vanishing.
+fn decode_args(args: &[CallArg]) -> Vec<FullValueRecord> {
+    args.iter()
+        .map(|arg| FullValueRecord {
+            variable_id: VariableId(arg.varname_id as usize),
+            value: super::decode_interned_cbor_value("calls.dat", &arg.value),
+        })
+        .collect()
 }
 
 /// Decode the record's return-value blob. The void-return marker and an empty
@@ -289,6 +301,11 @@ fn decode_return_value(blob: &[u8]) -> ValueRecord {
 }
 
 #[cfg(test)]
+// Same test-module convention as the sibling stream sources in this directory
+// (`span_stream.rs`, `collapse.rs`, …): a fixture that cannot encode its own
+// CBOR should abort the test loudly, and that is what `unwrap` does here.
+// Nothing outside `mod tests` is exempted.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -340,23 +357,151 @@ mod tests {
         assert!(matches!(call.return_value, ValueRecord::None { .. }));
     }
 
-    /// A corrupt args blob degrades to empty args, never a panic (the call-tree
-    /// STRUCTURE is what the seekable path must serve).
-    #[test]
-    fn corrupt_args_blob_degrades_to_empty() {
-        let record = CallStreamRecord {
+    /// Encode a `ValueRecord` the way `calls.dat` stores an argument value.
+    fn cbor(value: &ValueRecord) -> Vec<u8> {
+        cbor4ii::serde::to_vec(Vec::new(), value).unwrap()
+    }
+
+    /// Build a record whose only interesting content is its argument list.
+    fn record_with_args(args: Vec<CallArg>) -> CallStreamRecord {
+        CallStreamRecord {
             call_key: 1,
             function_id: 2,
             parent_key: 0,
             first_step_id: 1,
             last_step_id: 1,
             depth: 1,
-            args: vec![0xff, 0xfe, 0xfd], // not valid CBOR for Vec<FullValueRecord>
+            args,
             return_value: Vec::new(),
             raised_exception: Vec::new(),
             children: Vec::new(),
-        };
+        }
+    }
+
+    /// **The contract `codetracer-trace-format` a797cb8 exists to establish:
+    /// EVERY argument survives the `calls.dat` → `DbCall` adaptation, in
+    /// declaration order, each still carrying its own name.**
+    ///
+    /// The name is the interned `varnames.dat` id — the db-backend resolves it
+    /// to text downstream (`Db::variable_name`), so preserving the id per
+    /// argument IS preserving the name, and the assertions below are on the ids
+    /// rather than on strings for that reason.
+    ///
+    /// This test is written to FAIL under the three ways the adaptation can
+    /// lose or scramble data while still compiling. Each defect was planted
+    /// separately and measured on its own run (2026-09-17,
+    /// `cargo test --lib ctfs_trace_reader::call_stream_source`, 5 cases in
+    /// this module). The cell names the FIRST assertion to panic in each case,
+    /// because that is what attributes the kill to this arm rather than to an
+    /// unrelated earlier failure:
+    ///
+    /// | planted defect in `decode_args` | cases red | first assertion to panic |
+    /// | --- | --- | --- |
+    /// | collapse: `args.iter().take(1)` (keep only the first, the pre-a797cb8 behaviour) | 2 of 5 | `3 args survive, one per CallArg` (left 1, right 3); `a bad value costs no argument its slot` (left 1, right 3) |
+    /// | drop names: `variable_id: VariableId(0)` for every arg | 3 of 5 | `arg 0 keeps ITS OWN name` (left VariableId(0), right VariableId(7)); `the bad arg keeps its name` (left VariableId(0), right VariableId(11)); (left VariableId(0), right VariableId(5)) |
+    /// | scramble: `args.iter().rev()` (right count, wrong pairing) | 2 of 5 | `arg 0 keeps ITS OWN name` (left VariableId(3), right VariableId(7)) |
+    /// | unmodified | 0 of 5 | — |
+    ///
+    /// The ids are asserted per index by EXACT equality rather than by "the ids
+    /// differ", which is what makes the scramble row above redden: a check that
+    /// only required the ids to differ would pass on any permutation. Three
+    /// distinct ids rather than two so that a defect reusing one id for every
+    /// argument is caught at every index, not just where it happens to collide.
+    #[test]
+    fn every_call_arg_survives_with_its_own_name() {
+        let record = record_with_args(vec![
+            CallArg {
+                varname_id: 7,
+                value: cbor(&ValueRecord::Int {
+                    i: 42,
+                    type_id: TypeId(1),
+                }),
+            },
+            CallArg {
+                varname_id: 11,
+                value: cbor(&ValueRecord::String {
+                    text: "board".to_string(),
+                    type_id: TypeId(2),
+                }),
+            },
+            CallArg {
+                varname_id: 3,
+                value: cbor(&ValueRecord::Bool {
+                    b: true,
+                    type_id: TypeId(3),
+                }),
+            },
+        ]);
+
         let call = call_stream_record_to_db_call(&record);
-        assert!(call.args.is_empty(), "corrupt args degrade to empty, not a crash");
+
+        assert_eq!(call.args.len(), 3, "3 args survive, one per CallArg");
+
+        // Names: each argument keeps ITS OWN interning id, in declaration order.
+        assert_eq!(call.args[0].variable_id, VariableId(7), "arg 0 keeps ITS OWN name");
+        assert_eq!(call.args[1].variable_id, VariableId(11), "arg 1 keeps ITS OWN name");
+        assert_eq!(call.args[2].variable_id, VariableId(3), "arg 2 keeps ITS OWN name");
+
+        // Values: paired with the right name, not shuffled or shared.
+        assert!(matches!(call.args[0].value, ValueRecord::Int { i: 42, .. }));
+        assert!(matches!(&call.args[1].value, ValueRecord::String { text, .. } if text == "board"));
+        assert!(matches!(call.args[2].value, ValueRecord::Bool { b: true, .. }));
+    }
+
+    /// An argument whose CBOR value does not decode is surfaced LOUDLY, under
+    /// its real name, and its siblings are untouched.
+    ///
+    /// The pre-a797cb8 consumer answered a decode failure with an EMPTY arg
+    /// list, which in the Variables view is indistinguishable from a call that
+    /// captured nothing. A `Raw` placeholder is a visible defect instead, and
+    /// losing one argument's value must not cost the other two theirs.
+    #[test]
+    fn undecodable_arg_keeps_its_name_and_spares_its_siblings() {
+        let record = record_with_args(vec![
+            CallArg {
+                varname_id: 7,
+                value: cbor(&ValueRecord::Int {
+                    i: 1,
+                    type_id: TypeId(1),
+                }),
+            },
+            CallArg {
+                varname_id: 11,
+                value: vec![0xff, 0xfe, 0xfd], // not valid CBOR for a ValueRecord
+            },
+            CallArg {
+                varname_id: 3,
+                value: cbor(&ValueRecord::Int {
+                    i: 2,
+                    type_id: TypeId(1),
+                }),
+            },
+        ]);
+
+        let call = call_stream_record_to_db_call(&record);
+
+        assert_eq!(call.args.len(), 3, "a bad value costs no argument its slot");
+        assert_eq!(call.args[1].variable_id, VariableId(11), "the bad arg keeps its name");
+        assert!(
+            matches!(&call.args[1].value, ValueRecord::Raw { r, .. } if r.contains("cbor decode error")),
+            "a bad value is a VISIBLE placeholder, never a silently absent argument: {:?}",
+            call.args[1].value
+        );
+        assert!(matches!(call.args[0].value, ValueRecord::Int { i: 1, .. }));
+        assert!(matches!(call.args[2].value, ValueRecord::Int { i: 2, .. }));
+    }
+
+    /// An argument carrying an EMPTY value payload still occupies its slot under
+    /// its own name — an absent value is not an absent argument.
+    #[test]
+    fn empty_arg_value_still_yields_a_named_argument() {
+        let record = record_with_args(vec![CallArg {
+            varname_id: 5,
+            value: Vec::new(),
+        }]);
+        let call = call_stream_record_to_db_call(&record);
+        assert_eq!(call.args.len(), 1);
+        assert_eq!(call.args[0].variable_id, VariableId(5));
+        assert!(matches!(call.args[0].value, ValueRecord::None { .. }));
     }
 }
