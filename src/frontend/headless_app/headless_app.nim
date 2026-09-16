@@ -141,7 +141,8 @@ proc activeSessionId*(app: HeadlessApp): HeadlessSessionId =
 proc openSession*(app: HeadlessApp; backend: BackendService;
                   title: string = "";
                   layout: LayoutNode = nil;
-                  clock: ClockBase = nil): HeadlessSessionSlot =
+                  clock: ClockBase = nil;
+                  adopt: DebuggerSession = nil): HeadlessSessionSlot =
   ## Add a session over `backend` and make it active.
   ##
   ## `layout` is **deep-copied**: a caller who passes `defaultReplayLayout()`
@@ -151,6 +152,40 @@ proc openSession*(app: HeadlessApp; backend: BackendService;
   ## Nothing is sent to `backend` here — the session is created in
   ## `dspCreated` and the panel ViewModels stay inert until `launch` or
   ## `attach`.
+  ##
+  ## ## `adopt`, AND THE DEFECT IT CLOSES (PLAT-22, 2026-09-16)
+  ##
+  ## A native host that spawns `replay-server` itself — `viewmodel/
+  ## headless_session.nim` — performs the DAP handshake on the raw channel
+  ## (it needs the blocking `waitForEvent` that `BackendService.onEvent` does
+  ## not provide), builds a `DebuggerSession` over the same transport, and
+  ## `attach`es it. That session is `dspReady`, its panel ViewModels are
+  ## constructed, and its store is the one the host pushes every
+  ## `ct/complete-move` into.
+  ##
+  ## A front-end that then called `openSession(backend)` got a **SECOND**
+  ## session over the same transport: `dspCreated`, panel VMs nil, an empty
+  ## store nothing writes to. `paneViewModel` answers nil for every pane of it
+  ## and `paneIsLive` answers false — so the host held a live debugger and the
+  ## shell drew *"waiting for the session to launch"* on every pane, for ever.
+  ## Measured on the shipped `codetracer-gpui` against a real `calc` recording:
+  ## five leaves, five `— waiting for the session to launch`, rc 0.
+  ##
+  ## Nothing went red because nothing read it: PLAT-20's leaves drew a pane's
+  ## TITLE, and PLAT-21's suites drove `pane_views` with ViewModels taken
+  ## straight from a real session rather than through a slot. **The one path
+  ## that joins them is the one no test took.**
+  ##
+  ## `adopt` is how the host hands over the session it already has. It is
+  ## ADDITIVE — a defaulted parameter, no field changes shape, no existing call
+  ## site moves — which is the form PLAT-20's verification gate admits, and the
+  ## alternative (a second `openAdoptedSession`) would be two doors onto one
+  ## concept with the second one's callers free to drift.
+  ##
+  ## `backend` is still REQUIRED beside it, deliberately, and not derived from
+  ## `adopt.backend`: the argument is what says which transport this slot
+  ## belongs to, and a shell that read it off the session would have no way to
+  ## refuse a session belonging to another one.
   app.requireLive()
   if backend.isNil:
     raiseApp("openSession requires a BackendService; the shell never builds one")
@@ -159,8 +194,16 @@ proc openSession*(app: HeadlessApp; backend: BackendService;
   if problems.len > 0:
     raiseApp("openSession was given an invalid layout: " & $problems[0].kind &
              " at '" & problems[0].path & "'")
+  if not adopt.isNil and not clock.isNil:
+    # REFUSED RATHER THAN SILENTLY IGNORED. The clock belongs to the session
+    # and an adopted one already has its own, so honouring both is not
+    # possible and discarding one quietly is how a test's virtual clock ends
+    # up not being the clock the session reads.
+    raiseApp("openSession: `adopt` brings its own clock; passing `clock` too " &
+             "asks for two")
   let session =
-    if clock.isNil: newDebuggerSession(backend)
+    if not adopt.isNil: adopt
+    elif clock.isNil: newDebuggerSession(backend)
     else: newDebuggerSession(backend, clock = clock)
   let slot = HeadlessSessionSlot(
     id: HeadlessSessionId(app.nextId),

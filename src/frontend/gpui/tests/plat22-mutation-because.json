@@ -1,0 +1,19 @@
+{
+  "E1": "Check failed: renderedMark(root, 9) == $emBreakpoint",
+  "E10": "Check failed: edit.handoffArgs.len >= 2",
+  "E11": "Check failed: surfaceOf(h).support[ecLineStatus] == esDegraded",
+  "E12": "Check failed: \"Locals\" in output",
+  "E13": "Check failed: seen[0] != seen[1]",
+  "E14": "Check failed: exactTextNodes(root, contract.statement) == 1",
+  "E2": "Check failed: pointing == 1",
+  "E3": "Check failed: valuesForLine(\"summary = 1\", vals).len == 0",
+  "E4": "Check failed: flowStateOf(loops, 0, 9) == efsUnknown",
+  "E5": "Check failed: not renderEditor(r, parentForeign, sourcePaneView(GpuiMedium).root, foreign)",
+  "E6": "Check failed: not s.mutable",
+  "E7": "Check failed: renderedText(root, row.line) == EditorLoadingText",
+  "E8": "Check failed: found == want",
+  "E9": "Check failed: \"waiting for the session to launch\" notin output",
+  "U1": "Check failed: s.totalLineCount == 4",
+  "U2": "Check failed: \"calc\" in output or \"#!/usr/bin/env python3\" in output",
+  "U3": "Check failed: row.pointer == eptExecution"
+}

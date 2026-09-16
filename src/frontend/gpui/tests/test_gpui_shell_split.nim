@@ -217,14 +217,41 @@ suite "PLAT-20: the leaves are GPUI, through the real shim":
     ck plan.len > 0
     # A SECOND READING, through the shim's own plan builder rather than through
     # the shadow tree the case just wrote.
+    #
+    # **THE NUMBERS MOVED IN PLAT-22 AND THE REASON IS THE MILESTONE**, so they
+    # are corrected here rather than the behaviour being bent back. Until
+    # PLAT-22 every leaf of a session-less window drew ONE text — the pane's
+    # name plus *"waiting for the session to launch"* — and five leaves gave
+    # five texts. The editor is no longer decided by `leaf.live`: its content
+    # comes from the `EditorSurface`, which a caller that passes none reports
+    # by NAME (`leaves.NoSurfaceSuppliedReport`), and this call passes none. So
+    # the editor leaf contributes TWO texts (its heading and that report) and
+    # is not one of the waiting four.
+    #
+    # The distinction is the point rather than an accounting detail: "no
+    # session yet" and "this call site supplied no surface" are different
+    # facts, and §5a is the entry about what happens when one value carries
+    # both.
     let texts = planLeafTexts(plan)
-    ck texts.len == 5
+    ck texts.len == 6
     var waiting = 0
+    var surfaceless = 0
     for t in texts:
       if "waiting for the session to launch" in t:
         inc waiting
-    ck waiting == 5
-    expectCount(5)
+      if NoSurfaceSuppliedReport in t:
+        inc surfaceless
+    ck waiting == 4
+    ck surfaceless == 1
+    # And the editor is the one that is NOT waiting — asserted rather than
+    # inferred from the arithmetic, so a run in which some other pane went
+    # quiet could not satisfy it.
+    var editorWaiting = 0
+    for t in texts:
+      if "Editor" in t and "waiting for the session to launch" in t:
+        inc editorWaiting
+    ck editorWaiting == 0
+    expectCount(7)
 
   test "a REFUSED projection draws the refusal, not an empty window":
     resetCount()
@@ -278,7 +305,7 @@ suite "PLAT-20: the leaves are GPUI, through the real shim":
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 43
+const ExpectedAssertions = 45
 
 suite "PLAT-20: the assertion count":
   test "every case in this file ran":

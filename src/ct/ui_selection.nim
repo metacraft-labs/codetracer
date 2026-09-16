@@ -617,12 +617,44 @@ func planUiSelection*(args: openArray[string];
     # (`replay`), execs `codetracer`, and this binary resolves `--ui`. No new
     # command word is declared and no flag reaches the router.
     if scan.command == "edit":
-      # `ct edit --ui=gpui` is PLAT-22's ("The GPUI editing surface"), not this
-      # milestone's. Refused by name rather than accepted and then failing at
-      # the far end, which is the distinction §4.1 draws for `--ui` values and
-      # which applies to a combination for the same reason.
-      return usageError(gapMessage(scan.command, declared,
-        "the GPUI front-end has no editing surface yet"))
+      # PLAT-22. THE REFUSAL IS GONE, and it went the same way `--ui=tui`'s
+      # did in PLAT-16: edit mode is a PRODUCT mode, so reaching it is not a
+      # front-end feature, and `--edit` is the whole translation. `ct edit
+      # <project>`'s positional survives `translateArgs` untouched — it claims
+      # only the tokens `replay` spells for a trace, by name — so the flag is
+      # what tells `codetracer-gpui` the positional is a project rather than a
+      # recording. Without it the front-end would resolve the folder as a trace
+      # and refuse it for having no `trace.json`, which is a true diagnosis of
+      # the wrong question.
+      #
+      # WHAT THIS FRONT-END CANNOT YET DO IS REPORTED BY THE FRONT-END, NOT
+      # REFUSED HERE. PLAT-16's editing substrate is `isonim-tui`'s
+      # `TextAreaWidget`, a terminal widget the GPUI binary links none of, so
+      # `ct edit --ui=gpui` opens the working tree READ-ONLY and says so on the
+      # surface. Refusing the command instead would be this layer deciding a
+      # front-end's capability from a table, which is exactly the shape PLAT-21
+      # found wrong in `mappings.nim` — a status derived from a table's keys is
+      # a claim about the table.
+      let translatedEdit = translateArgs(scan.command, scan.strippedArgs, atGpui)
+      if not translatedEdit.ok:
+        return usageError(translatedEdit.message)
+      if scan.hasHeadless:
+        # Same refusal `--ui=tui` gives, for the same reason and in the same
+        # words: an editor nobody can type into is not edit mode. It is spelled
+        # here as well as in `codetracer-gpui`'s own parser because this is the
+        # spelling the user typed.
+        return usageError(
+          "ct: 'edit' and '--headless' contradict each other; --headless" &
+          " renders one settled screen and exits, and an editor nobody can" &
+          " type into is not edit mode")
+      var gpuiEditHandoff = @["--edit"]
+      gpuiEditHandoff.add translatedEdit.args
+      gpuiEditHandoff.add translatedEdit.trailing
+      return UiPlan(kind: upkHandoff, frontEnd: uiGpui,
+                    source: resolution.source,
+                    componentName: "codetracer-gpui",
+                    componentBin: "codetracer-gpui",
+                    handoffArgs: gpuiEditHandoff)
     if scan.command == "review":
       return usageError(gapMessage(scan.command, declared,
         "the GPUI front-end has no review mode yet"))

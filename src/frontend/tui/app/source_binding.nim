@@ -67,8 +67,34 @@ import std/strutils
 import codetracer_embed
 
 import ./views/source_pane
+# PLAT-22's shared editor row model and the derivation both front-ends' editors
+# go through.
+#
+# **EXACTLY ONE RULE MOVED, AND AN EARLIER SPELLING OF THIS COMMENT CLAIMED
+# FOUR** — corrected here on 2026-09-16 rather than edited away, because a
+# false completeness claim in a header is worse than a named gap: the header is
+# what the next author reads instead of the code (§14a).
+#
+# MOVED: `followAndRequest`, two calls whose whole content is an ORDERING,
+# which is the worst possible thing to have two copies of.
+#
+# NOT MOVED, and still declared below or beside: `provenanceFor`,
+# `marksForFile`, `annotationsFrom`, `views/source_pane.markFor` and
+# `inline_annotations.mentionsWord`. Those five are graded only by the `tui`
+# lane, and moving code whose graders cannot be run is the trade this campaign
+# refuses. `editor_rows.markFor`'s header records the one mark combination on
+# which the two spellings already DISAGREE.
+#
+# AND ONE COPY THIS IMPORT CREATED: `degradedMessageFor` is declared below AND
+# in `editor_surface.nim`, byte-identical in body and signature, and this
+# module now re-exports both. It compiles because the local declaration wins
+# inside this module and no other module calls the unqualified name — but it is
+# §14's two-copies shape, created rather than inherited, and collapsing it is a
+# `tui`-lane change for the same reason as the five above.
+import ../../view_vocabulary/editor_surface
 
 export source_pane
+export editor_surface
 
 type
   SourcePointKind* = enum
@@ -194,12 +220,11 @@ proc sourcePaneModelFor*(vm: SourceVM;
       if availability == savAbsent: degradedMessageFor(vm.degradedState.val)
       else: ""))
 
-proc followAndRequest*(vm: SourceVM): seq[SourceLineRequest] =
-  ## Scroll to the execution pointer and report what the window now lacks.
-  ##
-  ## The two calls belong together and in this order: `followExecutionPointer`
-  ## moves the window, `requestMissing` trims the held range to the NEW window
-  ## and then asks for the gap. Reversed, the trim would run against the old
-  ## window and the pane would ask for lines it is about to scroll away from.
-  vm.followExecutionPointer()
-  vm.requestMissing()
+# `followAndRequest` IS NO LONGER DECLARED HERE. PLAT-22 moved it to
+# `view_vocabulary/editor_surface.nim` and this module re-exports it (see the
+# import above), so the call sites in `host/tui_session.nim` and in this
+# front-end's suites are unchanged. It moved because a second front-end's host
+# needed the same two calls in the same order, and a two-line function whose
+# entire content is an ORDERING is the worst possible thing to have two copies
+# of: both compile, both run, and only one of them is right
+# (Verification-Harness-Traps §14).

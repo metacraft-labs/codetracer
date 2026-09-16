@@ -36,7 +36,7 @@ import ui_selection
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 289
+const ExpectedAssertions = 298
 
 var countedAssertions = 0
 
@@ -166,10 +166,32 @@ suite "PLAT-1 §4: the value set is closed":
     let tuiById = planOf(["replay", "--ui=tui", "--id", "17"])
     ck tuiById.message.contains("the terminal front-end")
     ck tuiById.message.contains("--ui=tui")
-    # `edit` and `review` are PLAT-22's and later; refused by name.
+    # PLAT-22: `edit` is a HANDOFF now, not a refusal. Edit mode is a PRODUCT
+    # mode, so reaching it is not a front-end feature — and `--edit` is the
+    # whole translation, exactly as `--ui=tui` does it, because `ct edit
+    # <project>`'s positional survives `translateArgs` untouched.
     let edit = planOf(["edit", "--ui=gpui", "/tmp/project"])
-    ck edit.kind == upkUsageError
-    ck edit.message.contains("editing surface")
+    ck edit.kind == upkHandoff
+    ck edit.frontEnd == uiGpui
+    ck edit.componentBin == "codetracer-gpui"
+    ck edit.handoffArgs.len >= 2
+    ck edit.handoffArgs[0] == "--edit"
+    # THE POSITIONAL SURVIVES, and this is the assertion that would catch a
+    # translation that claimed it: without it the front-end opens no project
+    # and the flag is decoration.
+    ck "/tmp/project" in edit.handoffArgs
+    # And the terminal's spelling is UNCHANGED beside it, so a reader can see
+    # that the two front-ends take the same flag rather than that one of them
+    # was made to look like the other.
+    let tuiEdit = planOf(["edit", "--ui=tui", "/tmp/project"])
+    ck tuiEdit.kind == upkHandoff
+    ck tuiEdit.componentBin == "codetracer-tui"
+    ck tuiEdit.handoffArgs[0] == "--edit"
+    # `--headless` still contradicts `edit` on this front-end too, in the same
+    # words, because an editor nobody can type into is not edit mode.
+    let editHeadless = planOf(["edit", "--ui=gpui", "--headless", "/tmp/p"])
+    ck editHeadless.kind == upkUsageError
+    ck editHeadless.message.contains("--headless")
     let review = planOf(["review", "--ui=gpui", Trace])
     ck review.kind == upkUsageError
     ck review.message.contains("review mode")

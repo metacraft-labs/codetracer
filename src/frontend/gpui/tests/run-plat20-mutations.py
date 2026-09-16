@@ -96,10 +96,40 @@ NIMCACHE = REPO / "build" / "plat20mut"
 # How each suite is compiled and run. The flags are the LANE's, not invented
 # here: `gpui-shell` and `ct-cli-units` are in `ci/lib/test-lane-files.sh` and
 # the cross-front-end suite runs in the `tui` lane.
+def _tui_link_flags() -> list[str]:
+    """The `--passL:` flags the `tui` LANE gives a suite that links isonim-tui.
+
+    READ FROM THE FILE THE LANE READS, never copied. `ci/lib/test-lane-files.sh`
+    builds the `tui` lane's flags from `build/grammars/tui-link-flags.txt`,
+    which `scripts/build-tui-grammars.sh` writes after resolving tree-sitter by
+    four routes with no hard-coded store path. A second copy of that answer here
+    would be Verification-Harness-Traps §14 exactly: two spellings of one fact,
+    and the one nobody runs is the one that goes stale when the store path
+    changes.
+
+    **THIS EXISTS BECAUSE ITS ABSENCE COST TWO ARMS, measured on 2026-09-16.**
+    `SUITE_CROSS` links `isonim_tui` (through `tui/app/layout/project`), and
+    `isonim_tui/syntax/treesitter_ffi.nim` ends its `{.passl.}` with
+    `-ltree-sitter`. Without `-L`, the link fails with
+    `ld: cannot find -ltree-sitter` — so arms G5 and G12 both scored
+    `DID-NOT-COMPILE` outside the nix dev shell, which is the verdict that
+    means the run told you nothing. G5 is the LOAD-BEARING arm of this harness:
+    it is the state PLAT-20's own risk note names.
+
+    Absent, the flags are simply omitted rather than raising: inside the dev
+    shell the linker finds the library on its own, and a harness that refused
+    to start there would be worse than one that works in both places.
+    """
+    path = REPO / "build" / "grammars" / "tui-link-flags.txt"
+    if not path.exists():
+        return []
+    return [f"--passL:{flag}" for flag in path.read_text().split()]
+
+
 SUITE_CMD = {
     SUITE_DOCK: ["--path:src/frontend/viewmodel"],
     SUITE_SPLIT: ["--path:src/frontend/viewmodel"],
-    SUITE_CROSS: ["--path:src/frontend/viewmodel"],
+    SUITE_CROSS: ["--path:src/frontend/viewmodel"] + _tui_link_flags(),
     SUITE_UISEL: ["--mm:refc"],
 }
 
